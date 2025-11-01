@@ -12,10 +12,41 @@ let currentBearishData = null;
 // Initialize page
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Scan page loaded');
+    
+    // Check for OAuth success parameter
+    checkOAuthSuccess();
+    
     loadIndexPrices();
     loadLatestData();
     startAutoRefresh();
 });
+
+// Check if returning from successful OAuth
+function checkOAuthSuccess() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const authStatus = urlParams.get('auth');
+    
+    if (authStatus === 'success') {
+        // Show success message
+        alert('✅ Upstox authentication successful! Your access token has been updated. The backend service is restarting...');
+        
+        // Hide any expired token messages
+        hideTokenExpiredMessage();
+        
+        // Clean up URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+        
+        // Reload data after a short delay to allow service restart
+        setTimeout(() => {
+            window.location.reload();
+        }, 3000);
+    } else if (authStatus === 'error') {
+        alert('❌ Upstox authentication failed. Please try again or use manual token entry.');
+        
+        // Clean up URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+    }
+}
 
 // Load index prices (NIFTY and BANKNIFTY)
 async function loadIndexPrices() {
@@ -890,6 +921,24 @@ function openTokenPopup() {
 
 function closeTokenPopup() {
     document.getElementById('tokenExpiredPopup').style.display = 'none';
+}
+
+// Initiate Upstox OAuth login flow
+function initiateUpstoxOAuth() {
+    console.log('Initiating Upstox OAuth login...');
+    
+    // Redirect to backend OAuth endpoint which will redirect to Upstox
+    const oauthUrl = `${API_BASE_URL}/scan/upstox/login`;
+    
+    // Show loading state
+    const button = event.target;
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Redirecting to Upstox...';
+    }
+    
+    // Redirect to Upstox OAuth page
+    window.location.href = oauthUrl;
 }
 
 async function updateTokenFromPopup() {
