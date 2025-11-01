@@ -135,7 +135,7 @@ class LeftMenu {
                 <!-- Left Panel Menu -->
                 <aside class="left-panel">
                     <div class="panel-header">
-                        <img src="./logo.jpg" alt="Trade Manthan Logo" class="logo-image">
+                        <img src="./tm_logo.jpg" alt="Trade Manthan Logo" class="logo-image">
                         <h2 class="logo-title">
                             <span class="title-trade">Trade</span>
                             <span class="title-manthan">Manthan</span>
