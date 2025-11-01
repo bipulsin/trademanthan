@@ -85,5 +85,5 @@ The frontend is served as static files. You can access it by opening the HTML fi
 
 ## License
 
-Private - All rights reserved
+Private - All rights reserved by Bipul Sahay (webnetin@gmail.com) & https://www.trademanthan.in
 
