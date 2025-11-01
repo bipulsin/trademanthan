@@ -7,7 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Chartink Scan Alerts - Trade Manthan</title>
-    <link rel="stylesheet" href="scan.css?v=20251102011906">
+    <link rel="stylesheet" href="scan.css?v=20251102012418">
     <link rel="stylesheet" href="styles.css">
     <style>
         body {
@@ -836,7 +836,7 @@
                 <div style="margin-top: 20px; padding: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px; text-align: center;">
                     <h3 style="margin: 0 0 10px 0; color: white;"><i class="fas fa-shield-alt"></i> Recommended: OAuth Login</h3>
                     <p style="margin: 0 0 15px 0; color: rgba(255,255,255,0.9); font-size: 14px;">Secure and automatic authentication with Upstox</p>
-                    <button class="btn btn-primary" onclick="initiateUpstoxOAuth()" style="width: 100%; background: white; color: #667eea; font-weight: bold;">
+                    <button class="btn btn-primary" onclick="(function(){ const baseUrl = window.location.hostname === 'localhost' ? 'http://localhost:8000' : 'https://trademanthan.in'; window.location.href = baseUrl + '/scan/upstox/login'; })()" style="width: 100%; background: white; color: #667eea; font-weight: bold;">
                         <i class="fas fa-sign-in-alt"></i> Login with Upstox
                     </button>
                 </div>
@@ -861,7 +861,7 @@
         </div>
     </div>
     
-    <script src="scan.js?v=20251102011906"></script>
+    <script src="scan.js?v=20251102012418"></script>
     <script>
         console.log('Page HTML loaded, starting scan.js');
         // Force immediate load for debugging
@@ -876,16 +876,33 @@
         }
         
         // Inline fallback for Upstox OAuth (in case external JS hasn't loaded)
-        if (typeof initiateUpstoxOAuth === 'undefined') {
-            window.initiateUpstoxOAuth = function() {
-                console.log('Using inline fallback: Initiating Upstox OAuth login...');
-                const API_BASE_URL = window.location.hostname === 'localhost' 
-                    ? 'http://localhost:8000' 
-                    : 'https://trademanthan.in';
-                const oauthUrl = API_BASE_URL + '/scan/upstox/login';
-                window.location.href = oauthUrl;
+        // Define the function globally to ensure it's always available
+        window.initiateUpstoxOAuth = function() {
+            console.log('Initiating Upstox OAuth login...');
+            const API_BASE_URL = window.location.hostname === 'localhost' 
+                ? 'http://localhost:8000' 
+                : 'https://trademanthan.in';
+            const oauthUrl = API_BASE_URL + '/scan/upstox/login';
+            
+            // Show loading on button if event is available
+            if (event && event.target) {
+                event.target.disabled = true;
+                event.target.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Redirecting...';
+            }
+            
+            console.log('Redirecting to:', oauthUrl);
+            window.location.href = oauthUrl;
+        };
+        
+        // Also ensure closeTokenPopup is defined
+        if (typeof closeTokenPopup === 'undefined') {
+            window.closeTokenPopup = function() {
+                const popup = document.getElementById('tokenExpiredPopup');
+                if (popup) popup.style.display = 'none';
             };
         }
+        
+        console.log('initiateUpstoxOAuth function defined:', typeof window.initiateUpstoxOAuth);
     </script>
 </body>
 </html>
