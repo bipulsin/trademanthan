@@ -7,7 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Chartink Scan Alerts - Trade Manthan</title>
-    <link rel="stylesheet" href="scan.css?v=20251102012418">
+    <link rel="stylesheet" href="scan.css?v=20251102013045">
     <link rel="stylesheet" href="styles.css">
     <style>
         body {
@@ -836,10 +836,38 @@
                 <div style="margin-top: 20px; padding: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px; text-align: center;">
                     <h3 style="margin: 0 0 10px 0; color: white;"><i class="fas fa-shield-alt"></i> Recommended: OAuth Login</h3>
                     <p style="margin: 0 0 15px 0; color: rgba(255,255,255,0.9); font-size: 14px;">Secure and automatic authentication with Upstox</p>
-                    <button class="btn btn-primary" onclick="(function(){ const baseUrl = window.location.hostname === 'localhost' ? 'http://localhost:8000' : 'https://trademanthan.in'; window.location.href = baseUrl + '/scan/upstox/login'; })()" style="width: 100%; background: white; color: #667eea; font-weight: bold;">
+                    <button 
+                        id="upstoxOAuthBtn"
+                        type="button"
+                        class="btn btn-primary" 
+                        style="width: 100%; background: white; color: #667eea; font-weight: bold; cursor: pointer; pointer-events: auto; position: relative; z-index: 1;">
                         <i class="fas fa-sign-in-alt"></i> Login with Upstox
                     </button>
                 </div>
+                
+                <script>
+                    // Direct event listener for the button
+                    document.addEventListener('DOMContentLoaded', function() {
+                        const btn = document.getElementById('upstoxOAuthBtn');
+                        if (btn) {
+                            btn.addEventListener('click', function(e) {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                console.log('🚀 Upstox OAuth button clicked!');
+                                alert('Button clicked! Redirecting to Upstox...');
+                                const baseUrl = window.location.hostname === 'localhost' 
+                                    ? 'http://localhost:8000' 
+                                    : 'https://trademanthan.in';
+                                const url = baseUrl + '/scan/upstox/login';
+                                console.log('Redirecting to:', url);
+                                window.location.href = url;
+                            });
+                            console.log('✅ Upstox OAuth button listener attached');
+                        } else {
+                            console.error('❌ Could not find upstoxOAuthBtn');
+                        }
+                    });
+                </script>
                 
                 <!-- Manual Token Entry (Alternative) -->
                 <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #3a3a5c;">
@@ -861,7 +889,7 @@
         </div>
     </div>
     
-    <script src="scan.js?v=20251102012418"></script>
+    <script src="scan.js?v=20251102013045"></script>
     <script>
         console.log('Page HTML loaded, starting scan.js');
         // Force immediate load for debugging
