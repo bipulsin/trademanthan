@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Algo Trading - Trade Manthan</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="dashboard.css?v=1.1">
+    <style>
+        /* Specific styles for algo.html */
+        .algo-card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .algo-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .algo-card-header h3 {
+            margin: 0;
+            color: #333;
+        }
+        .algo-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .algo-controls select, .algo-controls button {
+            padding: 8px 12px;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+            background-color: white;
+            color: #333;
+            font-size: 14px;
+        }
+        .api-info {
+            display: flex;
+            align-items: center;
+            padding: 8px 12px;
+            background-color: #e3f2fd;
+            border-radius: 5px;
+            border: 1px solid #2196f3;
+        }
+        .api-label {
+            color: #1976d2;
+            font-weight: 500;
+            font-size: 14px;
+        }
+        .algo-controls button.start-btn {
+            background-color: #28a745;
+            color: white;
+            border-color: #28a745;
+        }
+        .algo-controls button.stop-btn {
+            background-color: #dc3545;
+            color: white;
+            border-color: #dc3545;
+        }
+        .algo-status {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            font-size: 14px;
+            color: #666;
+        }
+        .algo-status p {
+            margin: 5px 0;
+        }
+        .algo-status .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-indicator.running { background-color: #28a745; }
+        .status-indicator.stopped { background-color: #dc3545; }
+        .status-indicator.loading { background-color: #ffc107; }
+
+        .algo-log-output {
+            background-color: #282c34; /* Dark background for logs */
+            color: #abb2bf; /* Light text color */
+            padding: 15px;
+            border-radius: 5px;
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 0.85em;
+            max-height: 400px;
+            overflow-y: scroll;
+            white-space: pre-wrap; /* Preserve whitespace and wrap text */
+            word-break: break-all; /* Break long words */
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Mobile Title Bar -->
+    <div class="mobile-title-bar">
+        <button class="mobile-menu-toggle" id="mobileMenuToggle">
+            <i class="fas fa-bars"></i>
+        </button>
+        <div class="mobile-title-content">
+            <img src="logo.jpeg" alt="Trade Manthan" class="mobile-logo">
+            <h1 class="mobile-title">Trade Manthan</h1>
+        </div>
+    </div>
+
+    <div class="app-container">
+        <!-- Include Left Menu Module -->
+        <div id="left-menu-container"></div>
+
+        <!-- Right Panel Content -->
+        <main class="right-panel">
+            <section id="algo-trading" class="content-section active">
+                <h2><i class="fas fa-brain"></i> Algo Trading Strategies</h2>
+
+                <div class="algo-card">
+                    <div class="algo-card-header">
+                        <h3>SuperTrend Bitcoin Options Selling</h3>
+                        <div class="algo-controls">
+                            <div class="api-info">
+                                <span class="api-label">API: Delta Exchange India</span>
+                            </div>
+                            <button id="startAlgoBtn" class="start-btn">Start</button>
+                            <button id="stopAlgoBtn" class="stop-btn" disabled>Stop</button>
+                        </div>
+                    </div>
+                    <div class="algo-status">
+                        <p>Status: <span id="algoStatusText"><span class="status-indicator stopped"></span>Stopped</span></p>
+                        <p>Current Position: <span id="currentPosition">N/A</span></p>
+                        <p>Last Signal: <span id="lastSignal">N/A</span></p>
+                    </div>
+                    <div class="algo-log-output" id="algoLogOutput">
+                        <!-- Live logs will be displayed here -->
+                        <div style="color: #888; font-style: italic;">
+                            📊 Strategy logs will appear here when the strategy is running...
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Add more strategy cards here if needed -->
+
+            </section>
+        </main>
+    </div>
+
+    <script src="left-menu.js?v=1.6"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            const startAlgoBtn = document.getElementById('startAlgoBtn');
+            const stopAlgoBtn = document.getElementById('stopAlgoBtn');
+            const algoStatusText = document.getElementById('algoStatusText');
+            const currentPosition = document.getElementById('currentPosition');
+            const lastSignal = document.getElementById('lastSignal');
+            const algoLogOutput = document.getElementById('algoLogOutput');
+
+            // Hardcoded Delta Exchange India API configuration
+            const DELTA_EXCHANGE_BROKER_ID = 6; // This will be the hardcoded broker ID
+            let strategyRunning = false;
+            let logPollingInterval = null;
+            let logPollingInterval2 = null;
+            let lastLogId = "0_0";
+
+            // Delta Exchange India API is hardcoded, no need to fetch brokers
+
+            // Function to fetch and display logs
+            async function fetchLogs() {
+                try {
+                    const token = localStorage.getItem('trademanthan_token');
+                    if (!token) return;
+
+                    const response = await fetch(`/algo/logs?since_id=${lastLogId}&limit=50`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    
+                    if (!response.ok) {
+                        if (response.status === 401) {
+                            // Token expired or invalid, redirect to login
+                            alert('Session expired. Please login again.');
+                            window.location.href = '/login.html';
+                            return;
+                        }
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    const logData = await response.json();
+                    
+                    if (logData.logs && logData.logs.length > 0) {
+                        // Format new logs
+                        const newLogs = logData.logs.map(log => 
+                            `[${log.timestamp}] ${log.level}: ${log.message}`
+                        );
+                        
+                        // Append new logs to existing content
+                        const currentContent = algoLogOutput.textContent;
+                        const allLogs = currentContent ? currentContent + '\n' + newLogs.join('\n') : newLogs.join('\n');
+                        algoLogOutput.textContent = allLogs;
+                        
+                        // Scroll to bottom
+                        algoLogOutput.scrollTop = algoLogOutput.scrollHeight;
+                        
+                        // Update last log ID
+                        lastLogId = logData.latest_id;
+                    }
+                    
+                } catch (error) {
+                    console.error('Error fetching logs:', error);
+                }
+            }
+
+            // Function to update algo status
+            async function updateAlgoStatus() {
+                try {
+                    const token = localStorage.getItem('trademanthan_token');
+                    if (!token) return;
+
+                    const response = await fetch('/algo/status', {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (!response.ok) {
+                        if (response.status === 401) {
+                            // Token expired or invalid, redirect to login
+                            alert('Session expired. Please login again.');
+                            window.location.href = '/login.html';
+                            return;
+                        }
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    const statusData = await response.json();
+                    
+        // Handle both old and new response formats
+        const isRunning = statusData.running || (statusData.status === 'Started');
+        let statusText = statusData.status || (statusData.running ? 'Running' : 'Stopped');
+        
+        // Ensure we show "Stopped" when no strategy is running
+        if (!isRunning) {
+            statusText = 'Stopped';
+        }
+        
+        algoStatusText.innerHTML = `<span class="status-indicator ${isRunning ? 'running' : 'stopped'}"></span>${statusText}`;
+        currentPosition.textContent = statusData.position || 'N/A';
+        
+        // Fix Last Signal display - handle both string and object formats
+        let lastSignalText = 'N/A';
+        if (statusData.last_signal) {
+            if (typeof statusData.last_signal === 'string') {
+                lastSignalText = statusData.last_signal;
+            } else if (typeof statusData.last_signal === 'object') {
+                // Handle object format - extract meaningful information
+                if (statusData.last_signal.direction === 1) {
+                    lastSignalText = 'Up/Green';
+                } else if (statusData.last_signal.direction === -1) {
+                    lastSignalText = 'Down/Red';
+                } else {
+                    lastSignalText = 'Hold';
+                }
+                // Add signal info if available
+                if (statusData.last_signal.signal && statusData.last_signal.signal !== 'HOLD') {
+                    lastSignalText += ` (${statusData.last_signal.signal})`;
+                }
+            }
+        }
+        lastSignal.textContent = lastSignalText;
+        
+        // Handle log display based on strategy status
+        if (isRunning) {
+            // Strategy is running - show logs or strategy info
+            if (statusData.logs && statusData.logs.length > 0) {
+                const logContent = statusData.logs.join('\n');
+                algoLogOutput.textContent = logContent;
+                algoLogOutput.scrollTop = algoLogOutput.scrollHeight;
+            } else {
+                // Show strategy information if running but no logs yet
+                let logInfo = [];
+                if (statusData.supertrend_params) {
+                    logInfo.push(`📊 SuperTrend Parameters: length=${statusData.supertrend_params.length}, factor=${statusData.supertrend_params.factor}`);
+                }
+                if (statusData.api_details) {
+                    logInfo.push(`🔗 API URL: ${statusData.api_details.url}`);
+                    logInfo.push(`🔑 API Key: ${statusData.api_details.key}`);
+                }
+                if (statusData.trading_capital) {
+                    logInfo.push(`💰 Trading Capital: ${statusData.trading_capital}`);
+                }
+                if (statusData.next_execution) {
+                    const nextExec = new Date(statusData.next_execution);
+                    logInfo.push(`⏰ Next Execution: ${nextExec.toLocaleString()}`);
+                } else if (statusData.schedule_info) {
+                    logInfo.push(`📅 ${statusData.schedule_info}`);
+                }
+                if (logInfo.length > 0) {
+                    algoLogOutput.textContent = logInfo.join('\n');
+                } else {
+                    algoLogOutput.textContent = '📊 Strategy is running... Logs will appear here...';
+                }
+            }
+        } else {
+            // Strategy is stopped - clear logs and show blank message
+            algoLogOutput.textContent = '📊 Strategy logs will appear here when the strategy is running...';
+            lastLogId = "0_0"; // Reset log ID for fresh start
+        }
+        
+        strategyRunning = isRunning;
+        startAlgoBtn.disabled = strategyRunning;
+        stopAlgoBtn.disabled = !strategyRunning;
+
+                } catch (error) {
+                    console.error('Error updating algo status:', error);
+                    algoStatusText.innerHTML = `<span class="status-indicator stopped"></span>Error`;
+                    strategyRunning = false;
+                    startAlgoBtn.disabled = false;
+                    stopAlgoBtn.disabled = true;
+                }
+            }
+
+            // Event Listeners
+
+            startAlgoBtn.addEventListener('click', async () => {
+                const token = localStorage.getItem('trademanthan_token');
+                if (!token) return;
+
+                startAlgoBtn.disabled = true;
+                algoStatusText.innerHTML = `<span class="status-indicator loading"></span>Starting...`;
+
+                try {
+                    const response = await fetch('/algo/start', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({ 
+                            strategy: 'supertrend_options',
+                            broker_id: DELTA_EXCHANGE_BROKER_ID,
+                            paper_trading: false
+                        })
+                    });
+                    if (!response.ok) {
+                        if (response.status === 401) {
+                            // Token expired or invalid, redirect to login
+                            alert('Session expired. Please login again.');
+                            window.location.href = '/login.html';
+                            return;
+                        }
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    const result = await response.json();
+                    
+                    // Clear logs and reset for fresh start
+                    algoLogOutput.textContent = '🚀 Strategy starting... Logs will appear here...';
+                    lastLogId = "0_0"; // Reset log ID for fresh start
+                    
+                    alert(result.message);
+                    await updateAlgoStatus(); // Refresh status immediately
+                } catch (error) {
+                    console.error('Error starting algo:', error);
+                    alert('Failed to start algo: ' + error.message);
+                    startAlgoBtn.disabled = false; // Re-enable if failed
+                    await updateAlgoStatus(); // Refresh status
+                }
+            });
+
+            stopAlgoBtn.addEventListener('click', async () => {
+                const token = localStorage.getItem('trademanthan_token');
+                if (!token) return;
+
+                stopAlgoBtn.disabled = true;
+                algoStatusText.innerHTML = `<span class="status-indicator loading"></span>Stopping...`;
+
+                try {
+                    const response = await fetch('/algo/stop', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({ strategy: 'supertrend_options' })
+                    });
+                    if (!response.ok) {
+                        if (response.status === 401) {
+                            // Token expired or invalid, redirect to login
+                            alert('Session expired. Please login again.');
+                            window.location.href = '/login.html';
+                            return;
+                        }
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    const result = await response.json();
+                    
+                    // Clear logs immediately when strategy is stopped
+                    algoLogOutput.textContent = '📊 Strategy logs will appear here when the strategy is running...';
+                    lastLogId = "0_0"; // Reset log ID for fresh start
+                    
+                    alert(result.message);
+                    await updateAlgoStatus(); // Refresh status immediately
+                } catch (error) {
+                    console.error('Error stopping algo:', error);
+                    alert('Failed to stop algo: ' + error.message);
+                    stopAlgoBtn.disabled = false; // Re-enable if failed
+                    await updateAlgoStatus(); // Refresh status
+                }
+            });
+
+            // Initial load
+            await updateAlgoStatus();
+            
+            // Poll for status updates every 5 seconds
+            logPollingInterval = setInterval(updateAlgoStatus, 5000);
+            
+            // Poll for logs every 2 seconds (more frequent for real-time feel)
+            logPollingInterval2 = setInterval(fetchLogs, 2000);
+
+            // Clear intervals on page unload
+            window.addEventListener('beforeunload', () => {
+                if (logPollingInterval) {
+                    clearInterval(logPollingInterval);
+                }
+                if (logPollingInterval2) {
+                    clearInterval(logPollingInterval2);
+                }
+            });
+        });
+    </script>
+</body>
+</html>

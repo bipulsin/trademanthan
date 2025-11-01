@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trade Manthan - Professional Algo Trading Platform</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+</head>
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="container">
+                <div class="logo">
+                    <img src="logo.jpg" alt="Trade Manthan Logo" class="logo-image">
+                    <h1>Trade Manthan</h1>
+                </div>
+                <nav class="nav">
+                    <button class="btn btn-primary" onclick="openLoginPopup()">Sign In</button>
+                </nav>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main">
+            <section id="hero" class="section active">
+                <div class="container">
+                    <div class="hero">
+                        <h2>Welcome to Trade Manthan</h2>
+                        <p>Professional Algo Trading Platform</p>
+                        <div class="hero-buttons">
+                            <button class="btn btn-primary btn-large" onclick="openLoginPopup()">
+                                Get Started
+                            </button>
+                            <button class="btn btn-secondary btn-large" onclick="scrollToFeatures()">
+                                Learn More
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="features" class="section">
+                <div class="container">
+                    <h2>Platform Features</h2>
+                    <div class="features-grid">
+                        <div class="feature-card">
+                            <div class="feature-icon">🤖</div>
+                            <h3>Algo Trading</h3>
+                            <p>Automated trading strategies with real-time execution</p>
+                        </div>
+                        <div class="feature-card">
+                            <div class="feature-icon">📊</div>
+                            <h3>Portfolio Management</h3>
+                            <p>Comprehensive portfolio tracking and risk management</p>
+                        </div>
+                        <div class="feature-card">
+                            <div class="feature-icon">⚡</div>
+                            <h3>Real-time Data</h3>
+                            <p>Live market data and instant trade execution</p>
+                        </div>
+                        <div class="feature-card">
+                            <div class="feature-icon">🔒</div>
+                            <h3>Secure Authentication</h3>
+                            <p>Google OAuth integration for secure access</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <div class="container">
+                <p>&copy; 2024 Trade Manthan. All rights reserved.</p>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Login Popup Overlay -->
+    <div class="login-overlay" id="loginOverlay" style="display: none;">
+        <div class="login-popup">
+            <!-- Close Button -->
+            <button class="close-btn" onclick="closeLoginPopup()">&times;</button>
+            
+            <!-- Logo -->
+            <div class="logo-container">
+                <img src="logo.jpg" alt="Trade Manthan Logo" class="logo-image">
+                <h2>Trade Manthan</h2>
+            </div>
+            
+            <!-- Login Form -->
+            <div class="login-form">
+                <h3>Welcome Back</h3>
+                <p>Sign in to access your trading dashboard</p>
+                
+                <!-- Google OAuth Button -->
+                <div id="g_id_onload"
+                     data-client_id="your_google_client_id_here"
+                     data-callback="handleCredentialResponse"
+                     data-auto_prompt="false">
+                </div>
+                
+                <div class="g_id_signin"
+                     data-type="standard"
+                     data-size="large"
+                     data-theme="outline"
+                     data-text="sign_in_with"
+                     data-shape="rectangular"
+                     data-logo_alignment="left">
+                </div>
+                
+                <!-- Alternative Login Options -->
+                <div class="divider">
+                    <span>or</span>
+                </div>
+                
+                <div class="demo-login">
+                    <button class="btn btn-demo" onclick="demoLogin()">
+                        🚀 Demo Login (Development)
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Footer -->
+            <div class="login-footer">
+                <p>By signing in, you agree to our Terms of Service and Privacy Policy</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="app.js"></script>
+</body>
+</html>

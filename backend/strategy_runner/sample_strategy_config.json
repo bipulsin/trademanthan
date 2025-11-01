@@ -1,0 +1,64 @@
+{
+  "strategy": {
+    "id": 123,
+    "name": "RSI + EMA Crossover Strategy",
+    "product": "BTCUSD",
+    "platform": "testnet",
+    "candle_duration": "5m",
+    "indicators": ["rsi", "ema", "supertrend"],
+    "parameters": {
+      "rsi": {"length": 14},
+      "ema": {"length": 20},
+      "supertrend": {
+        "atr_period": 10,
+        "multiplier": 3
+      }
+    },
+    "trade_conditions": {
+      "rsi_14": {"below": 30, "above": 70},
+      "st_direction": {"equals": "UP"}
+    },
+    "logic_operator": "AND",
+    "entry_criteria": {
+      "crossover": {
+        "indicator1": "close",
+        "indicator2": "ema_20",
+        "direction": "above"
+      },
+      "threshold": {
+        "indicator": "rsi_14",
+        "threshold": 30,
+        "operator": "below"
+      }
+    },
+    "exit_criteria": {
+      "crossover": {
+        "indicator1": "close",
+        "indicator2": "ema_20",
+        "direction": "below"
+      },
+      "threshold": {
+        "indicator": "rsi_14",
+        "threshold": 70,
+        "operator": "above"
+      }
+    },
+    "stop_loss": {
+      "type": "supertrend",
+      "distance": "current"
+    },
+    "trailing_stop": {
+      "enabled": true,
+      "type": "price",
+      "distance": 0.02
+    }
+  },
+  "broker": {
+    "id": 1,
+    "name": "Delta Exchange Testnet",
+    "base_url": "https://testnet-api.delta.exchange",
+    "api_key": "your_testnet_api_key_here",
+    "api_secret": "your_testnet_api_secret_here"
+  }
+}
+

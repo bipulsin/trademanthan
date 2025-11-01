@@ -1,0 +1,22 @@
+# SuperTrend Bitcoin Options Strategy Requirements
+
+# Core dependencies
+pandas>=1.3.0
+numpy>=1.21.0
+pyyaml>=6.0
+requests>=2.25.0
+websockets>=10.0
+
+# Technical analysis
+pandas-ta>=0.3.14b0
+ta>=0.10.2
+
+# Logging and utilities
+python-dateutil>=2.8.0
+
+# Optional: For enhanced data analysis
+scipy>=1.7.0
+
+# Development and testing
+pytest>=6.0.0
+pytest-asyncio>=0.15.0

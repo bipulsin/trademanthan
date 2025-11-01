@@ -1,0 +1,95 @@
+# SuperTrend Bitcoin Options Strategy Configuration
+# Delta Exchange India - Bitcoin Options Selling Strategy
+
+# SuperTrend Indicator Settings
+supertrend:
+  length: 16
+  factor: 1.5
+  timeframe: "90m"  # 90-minute chart
+  check_interval: 5400  # Check every 90 minutes (5400 seconds)
+  fixed_schedule: true  # Use fixed 90-minute schedule
+  start_time: "05:30"  # Start time for 90-minute intervals (IST)
+  # Schedule: 05:30, 07:00, 08:30, 10:00, 11:30, 13:00, 14:30, 16:00, 17:30, 19:00, 20:30, 22:00, 23:30
+
+# Trading Parameters
+trading:
+  capital: 50.0  # USD trading capital
+  leverage: 50   # 50X leverage
+  capital_multiplier: 1.0  # User can set multiples of capital
+  balance_check_interval: 5400  # Check balance every 90 minutes (5400 seconds) - same as SuperTrend
+  investment_percentage: 0.7  # Use 70% of wallet balance for investment
+  lot_size: 0.001  # 1 Lot = 0.001 BTC
+  round_to_nearest: 10  # Round investment amount to nearest $10
+  
+# Position Sizing & Risk Management
+position_sizing:
+  max_total_contracts: 10
+  max_margin_utilization: 0.8  # 80% max margin usage
+  max_trade_loss_percent: 0.1  # 10% max loss per trade
+  position_size_method: "fixed_premium"  # or "margin_percentage"
+  target_premium: 500.0  # Target premium per trade
+
+# Premium Filters
+premium_filters:
+  min_premium_threshold: 250.0  # USD minimum premium
+  max_premium_threshold: 300.0  # USD maximum premium for 0DTE
+  prefer_0dte: true
+  fallback_to_1dte: true
+
+# Expiry Preferences
+expiry:
+  prefer_0dte: true
+  fallback_to_1dte: true
+  max_dte: 1  # Maximum days to expiry
+
+# Stop Loss Settings
+stop_loss:
+  enabled: true
+  max_loss_percent: 0.2  # 20% max loss
+  adverse_move_percent: 0.15  # 15% adverse move threshold
+  dynamic_stop: true
+
+# Order Management
+orders:
+  order_type: "limit"
+  retry_attempts: 3
+  retry_delay: 1.0  # seconds
+  partial_fill_handling: true
+  cancel_and_requote: true
+
+# Logging & Persistence
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  log_to_file: true
+  log_to_console: true
+  log_directory: "logs"
+  csv_logging: true
+  database_logging: true
+  database_path: "data/trading_log.db"
+
+# API Settings
+api:
+  rate_limit_delay: 0.1  # seconds between API calls
+  max_retries: 3
+  timeout: 30  # seconds
+  websocket_reconnect_delay: 5  # seconds
+
+# Delta Exchange API credentials for paper trading
+delta_api:
+  url: "https://api.india.delta.exchange"
+  key: "EXm5U5pQ2Uea4Ysys6t0sF2QM0ncfu"
+  secret: "X0uXS8BtqVgkRBs5cpIgNss39mS0dcpx5UjM1HYHFPZ3rClG7KmTVmM8SmY5"
+
+# Safety Settings
+safety:
+  require_risk_confirmation: true
+  max_daily_trades: 5
+  max_daily_loss: 0.3  # 30% of capital
+  emergency_stop_loss: 0.5  # 50% of capital
+
+# Paper Trading
+paper_trading:
+  enabled: false
+  simulate_fills: true
+  simulate_slippage: true
+  slippage_percent: 0.001  # 0.1% slippage simulation

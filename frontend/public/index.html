@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trade Manthan - Professional Algo Trading Platform</title>
+    <link rel="stylesheet" href="styles.css?v=1.5">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Montserrat:wght@700&family=Orbitron:wght@600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+</head>
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="container">
+                <div class="logo">
+                    <h1 class="logo-title">
+                        <span class="title-trade">Trade</span>
+                        <span class="title-manthan">Manthan</span>
+                    </h1>
+                    <p class="logo-tagline">Algo trading platform with AI driven strategy -  by Bipul Sahay</p>
+                </div>
+                <nav class="nav">
+                    <button class="btn btn-primary" onclick="openLoginPopup()">
+                        <i class="fas fa-sign-in-alt"></i>
+                        Sign In
+                    </button>
+                </nav>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main">
+            <section id="features" class="section active">
+                <div class="container">
+                    <!-- Logo Card -->
+                    <div class="logo-card">
+                        <img src="logo.jpg" alt="Trade Manthan Logo" class="logo-card-image">
+                    </div>
+                    
+                    <div class="features-grid">
+                        <div class="feature-card">
+                            <div class="feature-icon">🤖</div>
+                            <h3>Algo Trading</h3>
+                            <p>Automated trading strategies with real-time execution</p>
+                        </div>
+                        <div class="feature-card">
+                            <div class="feature-icon">📊</div>
+                            <h3>Portfolio Management</h3>
+                            <p>Comprehensive portfolio tracking and risk management</p>
+                        </div>
+                        <div class="feature-card">
+                            <div class="feature-icon">⚡</div>
+                            <h3>Real-time Data</h3>
+                            <p>Live market data and instant trade execution</p>
+                        </div>
+                        <div class="feature-card">
+                            <div class="feature-icon">🔒</div>
+                            <h3>Secure Authentication</h3>
+                            <p>Google OAuth integration for secure access</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <div class="container">
+                <p>&copy; 2025 Trade Manthan. All rights reserved.</p>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Login Popup Overlay -->
+    <div class="login-overlay" id="loginOverlay" style="display: none;">
+        <div class="login-popup">
+            <!-- Close Button -->
+            <button class="close-btn" onclick="closeLoginPopup()">&times;</button>
+            
+            <!-- Logo -->
+            <div class="logo-container">
+                <img src="logo.jpg" alt="Trade Manthan Logo" class="logo-image">
+                <h2>Trade Manthan</h2>
+            </div>
+            
+            <!-- Login Form -->
+            <div class="login-form">
+                <h3>Welcome Back</h3>
+                <p>Sign in to access your trading dashboard</p>
+                
+                <!-- Google OAuth Button -->
+                <div id="g_id_onload"
+                     data-client_id="822255471884-ihvqhttvtnqjfqtukq1c9msi4n3qjad5.apps.googleusercontent.com"
+                     data-callback="handleCredentialResponse"
+                     data-auto_prompt="false"
+                     data-ux_mode="popup">
+                </div>
+                
+                <div class="g_id_signin"
+                     data-type="standard"
+                     data-size="large"
+                     data-theme="outline"
+                     data-text="sign_in_with"
+                     data-shape="rectangular"
+                     data-logo_alignment="left"
+                     data-width="400"
+                     data-ux_mode="popup"
+                     data-prompt_parent_id="loginOverlay">
+                </div>
+                
+                <!-- Instagram Login Button -->
+                <button class="btn btn-instagram btn-full" onclick="handleInstagramLogin()">
+                    <i class="fab fa-instagram"></i>
+                    Continue with Instagram
+                </button>
+                
+                <!-- Alternative Login Options -->
+                <div class="divider">
+                    <span>or</span>
+                </div>
+                
+                <!-- Email/Password Login Form -->
+                <form id="emailLoginForm" class="email-login-form">
+                    <div class="form-group">
+                        <input type="email" id="loginEmail" placeholder="Email Address" required>
+                    </div>
+                    <div class="form-group">
+                        <input type="password" id="loginPassword" placeholder="Password" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-full">Sign In</button>
+                </form>
+                
+                <!-- Sign Up Link -->
+                <div class="signup-link">
+                    <p>Don't have an account? <a href="#" onclick="showSignupForm()">Sign Up</a></p>
+                </div>
+                
+                <!-- Forgot Password Link -->
+                <div class="forgot-password">
+                    <a href="#" onclick="showForgotPassword()">Forgot Password?</a>
+                </div>
+            </div>
+            
+            <!-- Footer -->
+            <div class="login-footer">
+                <p>By signing in, you agree to our Terms of Service and Privacy Policy</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="app.js?v=1.3"></script>
+</body>
+</html>

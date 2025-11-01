@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings - Trade Manthan</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+    <!-- Mobile Title Bar -->
+    <div class="mobile-title-bar">
+        <button class="mobile-menu-toggle" id="mobileMenuToggle">
+            <i class="fas fa-bars"></i>
+        </button>
+        <div class="mobile-title-content">
+            <img src="logo.jpeg" alt="Trade Manthan" class="mobile-logo">
+            <h1 class="mobile-title">Trade Manthan</h1>
+        </div>
+    </div>
+    
+    <div class="app-container">
+        <!-- Include Left Menu Module -->
+        <div id="left-menu-container"></div>
+        
+        <!-- Right Panel Content -->
+        <main class="right-panel">
+            <!-- Settings Header Section -->
+            <div class="settings-header">
+                <div class="settings-title-section">
+                    <h1 class="settings-title">
+                        <i class="fas fa-cog"></i>
+                        Settings
+                    </h1>
+                    <p class="settings-subtitle">Configure your notification preferences and application settings</p>
+                </div>
+            </div>
+            
+            <!-- Settings Content -->
+            <div class="settings-content">
+                <!-- Developer Resources Section -->
+                <div class="settings-section">
+                    <div class="section-header">
+                        <h2><i class="fas fa-code"></i> Developer Resources</h2>
+                        <p>Access development tools, API documentation, and technical resources for building trading applications</p>
+                    </div>
+                    
+                    <div class="settings-grid">
+                        <!-- Delta API Guide -->
+                        <div class="setting-card">
+                            <div class="setting-header">
+                                <div class="setting-icon">
+                                    <i class="fas fa-book"></i>
+                                </div>
+                                <div class="setting-info">
+                                    <h3>Delta API Guide</h3>
+                                    <p>Complete guide to using the Delta API module for trading automation</p>
+                                </div>
+                                <div class="setting-action">
+                                    <a href="delta-api-guide.html" class="btn btn-primary" target="_blank">
+                                        <i class="fas fa-external-link-alt"></i> View Guide
+                                    </a>
+                                </div>
+                            </div>
+                            
+                            <div class="setting-config">
+                                <div class="resource-description">
+                                    <p><strong>What you'll learn:</strong></p>
+                                    <ul>
+                                        <li>How to set up and configure the Delta API</li>
+                                        <li>Market data retrieval and trading operations</li>
+                                        <li>Code examples and best practices</li>
+                                        <li>Troubleshooting common issues</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- API Documentation -->
+                        <div class="setting-card">
+                            <div class="setting-header">
+                                <div class="setting-icon">
+                                    <i class="fas fa-file-code"></i>
+                                </div>
+                                <div class="setting-info">
+                                    <h3>Delta Exchange API</h3>
+                                    <p>Official API documentation and technical reference</p>
+                                </div>
+                                <div class="setting-action">
+                                    <a href="https://www.delta.exchange/api-docs/" class="btn btn-secondary" target="_blank">
+                                        <i class="fas fa-external-link-alt"></i> View Docs
+                                    </a>
+                                </div>
+                            </div>
+                            
+                            <div class="setting-config">
+                                <div class="resource-description">
+                                    <p><strong>Includes:</strong></p>
+                                    <ul>
+                                        <li>API endpoints and parameters</li>
+                                        <li>Authentication methods</li>
+                                        <li>Rate limits and best practices</li>
+                                        <li>WebSocket connections</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Quick Start -->
+                        <div class="setting-card">
+                            <div class="setting-header">
+                                <div class="setting-icon">
+                                    <i class="fas fa-rocket"></i>
+                                </div>
+                                <div class="setting-info">
+                                    <h3>Quick Start</h3>
+                                    <p>Get up and running with the Delta API in minutes</p>
+                                </div>
+                                <div class="setting-action">
+                                    <a href="delta-api-guide.html#setup" class="btn btn-success" target="_blank">
+                                        <i class="fas fa-play"></i> Get Started
+                                    </a>
+                                </div>
+                            </div>
+                            
+                            <div class="setting-config">
+                                <div class="resource-description">
+                                    <p><strong>Quick steps:</strong></p>
+                                    <ul>
+                                        <li>Install required dependencies</li>
+                                        <li>Configure API credentials</li>
+                                        <li>Run your first API call</li>
+                                        <li>Start building trading strategies</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- API Token Management Section -->
+                <div class="settings-section">
+                    <div class="section-header">
+                        <h2><i class="fas fa-key"></i> API Token Management</h2>
+                        <p>Authenticate with Upstox for real-time market data</p>
+                    </div>
+                    
+                    <div class="settings-grid">
+                        <!-- Upstox OAuth Login (Recommended) -->
+                        <div class="setting-card" style="border: 2px solid #667eea;">
+                            <div class="setting-header">
+                                <div class="setting-icon" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                                    <i class="fas fa-shield-alt"></i>
+                                </div>
+                                <div class="setting-info">
+                                    <h3>Upstox OAuth Login <span style="background: #667eea; color: white; font-size: 10px; padding: 2px 8px; border-radius: 12px; margin-left: 8px;">RECOMMENDED</span></h3>
+                                    <p>Secure and automatic authentication with Upstox OAuth 2.0</p>
+                                </div>
+                            </div>
+                            
+                            <div class="setting-config">
+                                <p style="color: #aaa; margin-bottom: 15px; font-size: 14px;">
+                                    Click the button below to authenticate with your Upstox account. You'll be redirected to Upstox's secure login page.
+                                </p>
+                                
+                                <button class="btn btn-primary" onclick="initiateUpstoxOAuthSettings()" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; width: 100%;">
+                                    <i class="fas fa-sign-in-alt"></i> Login with Upstox
+                                </button>
+                                
+                                <div id="authStatusMessage" style="margin-top: 10px; padding: 10px; border-radius: 6px; display: none;"></div>
+                            </div>
+                        </div>
+                        
+                        <!-- Upstox Manual Token Update (Alternative) -->
+                        <div class="setting-card">
+                            <div class="setting-header">
+                                <div class="setting-icon">
+                                    <i class="fas fa-exchange-alt"></i>
+                                </div>
+                                <div class="setting-info">
+                                    <h3>Manual Token Entry <span style="color: #888; font-size: 12px;">(Alternative)</span></h3>
+                                    <p>Manually update your Upstox API access token</p>
+                                </div>
+                            </div>
+                            
+                            <div class="setting-config">
+                                <div class="form-group">
+                                    <label for="upstoxToken">New Access Token</label>
+                                    <textarea 
+                                        id="upstoxToken" 
+                                        rows="3" 
+                                        placeholder="Paste your Upstox access token here..."
+                                        style="width: 100%; padding: 10px; border: 1px solid #3a3a5c; border-radius: 8px; background: #1a1a2e; color: #fff; font-family: monospace; font-size: 12px;"
+                                    ></textarea>
+                                    <small style="color: #888; display: block; margin-top: 5px;">
+                                        The token will be updated and the backend service will restart automatically.
+                                    </small>
+                                </div>
+                                
+                                <button class="btn btn-primary" onclick="updateUpstoxToken()" style="margin-top: 10px;">
+                                    <i class="fas fa-sync-alt"></i> Update Token Manually
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Notification Settings Section -->
+                <div class="settings-section">
+                    <div class="section-header">
+                        <h2><i class="fas fa-bell"></i> Notification Settings</h2>
+                        <p>Configure how you want to receive notifications about your strategies, broker connections, and reports</p>
+                    </div>
+                    
+                    <div class="settings-grid">
+                        <!-- Email Notifications -->
+                        <div class="setting-card">
+                            <div class="setting-header">
+                                <div class="setting-icon">
+                                    <i class="fas fa-envelope"></i>
+                                </div>
+                                <div class="setting-info">
+                                    <h3>Email Notifications</h3>
+                                    <p>Receive notifications via email</p>
+                                </div>
+                                <div class="setting-toggle">
+                                    <label class="switch">
+                                        <input type="checkbox" id="emailEnabled" checked>
+                                        <span class="slider round"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            
+                            <div class="setting-config" id="emailConfig">
+                                <div class="form-group">
+                                    <label for="emailAddress">Email Address</label>
+                                    <input type="email" id="emailAddress" placeholder="your@email.com" value="user@example.com">
+                                </div>
+                                
+                                <div class="notification-types">
+                                    <h4>Notification Types</h4>
+                                    <div class="checkbox-group">
+                                        <label class="checkbox-item">
+                                            <input type="checkbox" id="emailStrategy" checked>
+                                            <span class="checkmark"></span>
+                                            Strategy Alerts
+                                        </label>
+                                        <label class="checkbox-item">
+                                            <input type="checkbox" id="emailBroker" checked>
+                                            <span class="checkmark"></span>
+                                            Broker Connection Status
+                                        </label>
+                                        <label class="checkbox-item">
+                                            <input type="checkbox" id="emailReports" checked>
+                                            <span class="checkmark"></span>
+                                            Report Generation
+                                        </label>
+                                        <label class="checkbox-item">
+                                            <input type="checkbox" id="emailTrades" checked>
+                                            <span class="checkmark"></span>
+                                            Trade Executions
+                                        </label>
+                                    </div>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="emailFrequency">Frequency</label>
+                                    <select id="emailFrequency">
+                                        <option value="immediate">Immediate</option>
+                                        <option value="hourly">Hourly Digest</option>
+                                        <option value="daily" selected>Daily Digest</option>
+                                        <option value="weekly">Weekly Summary</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Telegram Notifications -->
+                        <div class="setting-card">
+                            <div class="setting-header">
+                                <div class="setting-icon">
+                                    <i class="fab fa-telegram"></i>
+                                </div>
+                                <div class="setting-info">
+                                    <h3>Telegram Notifications</h3>
+                                    <p>Receive notifications via Telegram bot</p>
+                                </div>
+                                <div class="setting-toggle">
+                                    <label class="switch">
+                                        <input type="checkbox" id="telegramEnabled">
+                                        <span class="slider round"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            
+                            <div class="setting-config" id="telegramConfig" style="display: none;">
+                                <div class="form-group">
+                                    <label for="telegramBotToken">Bot Token</label>
+                                    <input type="text" id="telegramBotToken" placeholder="Enter your Telegram bot token">
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="telegramChatId">Chat ID</label>
+                                    <input type="text" id="telegramChatId" placeholder="Enter your Telegram chat ID">
+                                </div>
+                                
+                                <div class="notification-types">
+                                    <h4>Notification Types</h4>
+                                    <div class="checkbox-group">
+                                        <label class="checkbox-item">
+                                            <input type="checkbox" id="telegramStrategy">
+                                            <span class="checkmark"></span>
+                                            Strategy Alerts
+                                        </label>
+                                        <label class="checkbox-item">
+                                            <input type="checkbox" id="telegramBroker">
+                                            <span class="checkmark"></span>
+                                            Broker Connection Status
+                                        </label>
+                                        <label class="checkbox-item">
+                                            <input type="checkbox" id="telegramReports">
+                                            <span class="checkmark"></span>
+                                            Report Generation
+                                        </label>
+                                        <label class="checkbox-item">
+                                            <input type="checkbox" id="telegramTrades">
+                                            <span class="checkmark"></span>
+                                            Trade Executions
+                                        </label>
+                                    </div>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="telegramFrequency">Frequency</label>
+                                    <select id="telegramFrequency">
+                                        <option value="immediate" selected>Immediate</option>
+                                        <option value="hourly">Hourly Digest</option>
+                                        <option value="daily">Daily Digest</option>
+                                        <option value="weekly">Weekly Summary</option>
+                                    </select>
+                                </div>
+                                
+                                <button class="btn btn-primary" onclick="settingsManager.testTelegram()">
+                                    <i class="fas fa-paper-plane"></i> Test Connection
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- WhatsApp Notifications -->
+                        <div class="setting-card">
+                            <div class="setting-header">
+                                <div class="setting-icon">
+                                    <i class="fab fa-whatsapp"></i>
+                                </div>
+                                <div class="setting-info">
+                                    <h3>WhatsApp Notifications</h3>
+                                    <p>Receive notifications via WhatsApp</p>
+                                </div>
+                                <div class="setting-toggle">
+                                    <label class="switch">
+                                        <input type="checkbox" id="whatsappEnabled">
+                                        <span class="slider round"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            
+                            <div class="setting-config" id="whatsappConfig" style="display: none;">
+                                <div class="form-group">
+                                    <label for="whatsappPhone">Phone Number</label>
+                                    <input type="tel" id="whatsappPhone" placeholder="+1234567890">
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="whatsappApiKey">API Key</label>
+                                    <input type="password" id="whatsappApiKey" placeholder="Enter your WhatsApp API key">
+                                </div>
+                                
+                                <div class="notification-types">
+                                    <h4>Notification Types</h4>
+                                    <div class="checkbox-group">
+                                        <label class="checkbox-item">
+                                            <input type="checkbox" id="whatsappStrategy">
+                                            <span class="checkmark"></span>
+                                            Strategy Alerts
+                                        </label>
+                                        <label class="checkbox-item">
+                                            <input type="checkbox" id="whatsappBroker">
+                                            <span class="checkmark"></span>
+                                            Broker Connection Status
+                                        </label>
+                                        <label class="checkbox-item">
+                                            <input type="checkbox" id="whatsappReports">
+                                            <span class="checkmark"></span>
+                                            Report Generation
+                                        </label>
+                                        <label class="checkbox-item">
+                                            <input type="checkbox" id="whatsappTrades">
+                                            <span class="checkmark"></span>
+                                            Trade Executions
+                                        </label>
+                                    </div>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="whatsappFrequency">Frequency</label>
+                                    <select id="whatsappFrequency">
+                                        <option value="immediate" selected>Immediate</option>
+                                        <option value="hourly">Hourly Digest</option>
+                                        <option value="daily">Daily Digest</option>
+                                        <option value="weekly">Weekly Summary</option>
+                                    </select>
+                                </div>
+                                
+                                <button class="btn btn-primary" onclick="settingsManager.testWhatsApp()">
+                                    <i class="fas fa-paper-plane"></i> Test Connection
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Trading Settings Section -->
+                <div class="settings-section">
+                    <div class="section-header">
+                        <h2><i class="fas fa-chart-line"></i> Trading Settings</h2>
+                        <p>Configure your trading platform preferences and data update intervals</p>
+                    </div>
+                    
+                    <div class="settings-grid">
+                        <!-- Crypto Price Updates -->
+                        <div class="setting-card">
+                            <div class="setting-header">
+                                <div class="setting-icon">
+                                    <i class="fas fa-coins"></i>
+                                </div>
+                                <div class="setting-info">
+                                    <h3>Live Crypto Prices</h3>
+                                    <p>Configure how frequently live crypto prices update</p>
+                                </div>
+                            </div>
+                            
+                            <div class="setting-config">
+                                <div class="form-group">
+                                    <label for="cryptoUpdateInterval">Update Interval</label>
+                                    <select id="cryptoUpdateInterval">
+                                        <option value="30000">Every 30 seconds</option>
+                                        <option value="60000">Every 1 minute</option>
+                                        <option value="300000" selected>Every 5 minutes</option>
+                                        <option value="600000">Every 10 minutes</option>
+                                        <option value="1800000">Every 30 minutes</option>
+                                        <option value="3600000">Every 1 hour</option>
+                                    </select>
+                                    <small class="form-help">Choose how often live crypto prices refresh automatically</small>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="cryptoAutoRefresh">Auto Refresh</label>
+                                    <div class="setting-toggle">
+                                        <label class="switch">
+                                            <input type="checkbox" id="cryptoAutoRefresh" checked>
+                                            <span class="slider round"></span>
+                                        </label>
+                                        <span class="toggle-label">Enable automatic price updates</span>
+                                    </div>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="cryptoShowCountdown">Show Countdown</label>
+                                    <div class="setting-toggle">
+                                        <label class="switch">
+                                            <input type="checkbox" id="cryptoShowCountdown" checked>
+                                            <span class="slider round"></span>
+                                        </label>
+                                        <span class="toggle-label">Display countdown to next update</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Strategy Monitoring -->
+                        <div class="setting-card">
+                            <div class="setting-header">
+                                <div class="setting-icon">
+                                    <i class="fas fa-robot"></i>
+                                </div>
+                                <div class="setting-info">
+                                    <h3>Strategy Monitoring</h3>
+                                    <p>Configure strategy execution monitoring preferences</p>
+                                </div>
+                            </div>
+                            
+                            <div class="setting-config">
+                                <div class="form-group">
+                                    <label for="strategyCheckInterval">Strategy Check Interval</label>
+                                    <select id="strategyCheckInterval">
+                                        <option value="60000">Every 1 minute</option>
+                                        <option value="300000" selected>Every 5 minutes</option>
+                                        <option value="600000">Every 10 minutes</option>
+                                        <option value="1800000">Every 30 minutes</option>
+                                    </select>
+                                    <small class="form-help">How often to check strategy execution status</small>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="strategyNotifications">Strategy Notifications</label>
+                                    <div class="setting-toggle">
+                                        <label class="switch">
+                                            <input type="checkbox" id="strategyNotifications" checked>
+                                            <span class="slider round"></span>
+                                        </label>
+                                        <span class="toggle-label">Enable strategy execution notifications</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Application Settings Section -->
+                <div class="settings-section">
+                    <div class="section-header">
+                        <h2><i class="fas fa-desktop"></i> Application Settings</h2>
+                        <p>Customize your application appearance and behavior</p>
+                    </div>
+                    
+                    <div class="settings-grid">
+                        <!-- Theme Settings -->
+                        <div class="setting-card">
+                            <div class="setting-header">
+                                <div class="setting-icon">
+                                    <i class="fas fa-palette"></i>
+                                </div>
+                                <div class="setting-info">
+                                    <h3>Theme</h3>
+                                    <p>Choose between light and dark themes</p>
+                                </div>
+                            </div>
+                            
+                            <div class="setting-config">
+                                <div class="theme-options">
+                                    <label class="theme-option">
+                                        <input type="radio" name="theme" value="light" checked>
+                                        <div class="theme-preview light-theme">
+                                            <div class="theme-header"></div>
+                                            <div class="theme-content"></div>
+                                        </div>
+                                        <span>Light Theme</span>
+                                    </label>
+                                    
+                                    <label class="theme-option">
+                                        <input type="radio" name="theme" value="dark">
+                                        <div class="theme-preview dark-theme">
+                                            <div class="theme-header"></div>
+                                            <div class="theme-content"></div>
+                                        </div>
+                                        <span>Dark Theme</span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Language Settings -->
+                        <div class="setting-card">
+                            <div class="setting-header">
+                                <div class="setting-icon">
+                                    <i class="fas fa-language"></i>
+                                </div>
+                                <div class="setting-info">
+                                    <h3>Language</h3>
+                                    <p>Select your preferred language</p>
+                                </div>
+                            </div>
+                            
+                            <div class="setting-config">
+                                <div class="form-group">
+                                    <label for="language">Language</label>
+                                    <select id="language">
+                                        <option value="en" selected>English</option>
+                                        <option value="es">Español</option>
+                                        <option value="fr">Français</option>
+                                        <option value="de">Deutsch</option>
+                                        <option value="hi">हिंदी</option>
+                                        <option value="zh">中文</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Timezone Settings -->
+                        <div class="setting-card">
+                            <div class="setting-header">
+                                <div class="setting-icon">
+                                    <i class="fas fa-clock"></i>
+                                </div>
+                                <div class="setting-info">
+                                    <h3>Timezone</h3>
+                                    <p>Set your local timezone for accurate time display</p>
+                                </div>
+                            </div>
+                            
+                            <div class="setting-config">
+                                <div class="form-group">
+                                    <label for="timezone">Timezone</label>
+                                    <select id="timezone">
+                                        <option value="UTC">UTC</option>
+                                        <option value="EST" selected>Eastern Standard Time</option>
+                                        <option value="PST">Pacific Standard Time</option>
+                                        <option value="GMT">Greenwich Mean Time</option>
+                                        <option value="IST">Indian Standard Time</option>
+                                        <option value="JST">Japan Standard Time</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Currency Settings -->
+                        <div class="setting-card">
+                            <div class="setting-header">
+                                <div class="setting-icon">
+                                    <i class="fas fa-dollar-sign"></i>
+                                </div>
+                                <div class="setting-info">
+                                    <h3>Currency</h3>
+                                    <p>Set your preferred currency for financial displays</p>
+                                </div>
+                            </div>
+                            
+                            <div class="setting-config">
+                                <div class="form-group">
+                                    <label for="currency">Currency</label>
+                                    <select id="currency">
+                                        <option value="USD" selected>USD ($)</option>
+                                        <option value="EUR">EUR (€)</option>
+                                        <option value="GBP">GBP (£)</option>
+                                        <option value="INR">INR (₹)</option>
+                                        <option value="JPY">JPY (¥)</option>
+                                        <option value="BTC">BTC (₿)</option>
+                                        <option value="ETH">ETH (Ξ)</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+
+
+                <!-- Save Settings Button -->
+                <div class="settings-actions">
+                    <button class="btn btn-primary" onclick="settingsManager.saveSettings()">
+                        <i class="fas fa-save"></i> Save All Settings
+                    </button>
+                    <button class="btn btn-secondary" onclick="settingsManager.resetToDefaults()">
+                        <i class="fas fa-undo"></i> Reset to Defaults
+                    </button>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Success/Error Notification -->
+    <div id="notification" class="notification"></div>
+
+    <!-- Scripts -->
+    <script src="left-menu.js?v=1.2"></script>
+    <script src="settings.js?v=1.1"></script>
+    <script src="version.js?v=1.0"></script>
+    <script src="cache-manager.js?v=1.0"></script>
+</body>
+</html>

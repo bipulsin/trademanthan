@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>Chartink Scan Alerts - Trade Manthan</title>
+    <link rel="stylesheet" href="scan.css?v=29.0">
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(to bottom, #000000 0%, #1a1a2e 50%, #0f3460 100%);
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+        }
+        
+        /* Title Bar Styles */
+        .title-bar {
+            background: white;
+            border-bottom: 2px solid #1e40af;
+            padding: 0;
+            position: sticky;
+            top: 1px;
+            z-index: 1000;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        
+        .title-bar-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 20px;
+            height: 80px;
+        }
+        
+        .title-bar-logo {
+            flex: 0 0 auto;
+        }
+        
+        .logo-img {
+            height: 60px;
+            width: auto;
+            border-radius: 6px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+        
+        .title-bar-center {
+            flex: 1;
+            text-align: center;
+        }
+        
+        .title-text {
+            color: #1e40af;
+            font-size: 24px;
+            font-weight: 700;
+            margin: 0;
+            text-shadow: none;
+            letter-spacing: 0.5px;
+        }
+        
+        .title-byline {
+            color: #6b7280;
+            font-size: 12px;
+            font-weight: 500;
+            margin: 2px 0 0 0;
+            font-style: italic;
+            letter-spacing: 0.3px;
+        }
+        
+        .title-bar-indices {
+            flex: 0 0 auto;
+            display: flex;
+            gap: 30px;
+            align-items: center;
+        }
+        
+        .index-item {
+            text-align: center;
+            min-width: 120px;
+        }
+        
+        .index-name {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            color: #1e40af;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        
+        .trend-arrow {
+            font-size: 24px;
+            font-weight: 900;
+            transition: all 0.3s ease;
+            display: inline-block;
+            line-height: 1;
+        }
+        
+        .trend-arrow.up {
+            color: #059669;
+            transform: scale(1.4);
+        }
+        
+        .trend-arrow.down {
+            color: #dc2626;
+            transform: scale(1.4);
+        }
+        
+        .trend-arrow.neutral {
+            color: #6b7280;
+            transform: scale(1.2);
+        }
+        
+        .index-price {
+            color: #1e40af;
+            font-size: 16px;
+            font-weight: 700;
+            font-family: monospace;
+            text-shadow: none;
+        }
+        
+        .scan-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .strike-price {
+            font-weight: 600;
+            color: #f59e0b;
+            font-family: monospace;
+            font-size: 16px;
+        }
+        
+        .option-contract {
+            font-weight: 600;
+            color: #2563eb;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            letter-spacing: 0.5px;
+        }
+        
+        .option-ltp {
+            font-weight: 600;
+            color: #10b981;
+            font-family: monospace;
+            font-size: 16px;
+        }
+        
+        .option-vwap {
+            font-weight: 600;
+            color: #8b5cf6;
+            font-family: monospace;
+            font-size: 16px;
+        }
+        
+        .option-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 700;
+            margin-left: 8px;
+            letter-spacing: 0.5px;
+        }
+        
+        .ce-badge {
+            background: #10b981;
+            color: white;
+        }
+        
+        .pe-badge {
+            background: #ef4444;
+            color: white;
+        }
+        
+        .scan-header {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        .scan-header h1 {
+            margin: 0 0 10px 0;
+            color: #2d3748;
+            font-size: 32px;
+            font-weight: 700;
+        }
+        
+        .scan-header .subtitle {
+            color: #718096;
+            font-size: 16px;
+            margin: 0;
+        }
+        
+        .webhook-info {
+            background: #edf2f7;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+        
+        .webhook-info code {
+            background: #2d3748;
+            color: #48bb78;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        
+        .status-bar {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #48bb78;
+            animation: pulse 2s infinite;
+        }
+        
+        .status-indicator.waiting {
+            background: #ed8936;
+        }
+        
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.5;
+            }
+        }
+        
+        .refresh-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+        
+        .refresh-btn:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+        }
+        
+        .alert-section {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            animation: slideIn 0.5s ease-out;
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .alert-header {
+            border-bottom: 3px solid #667eea;
+            padding-bottom: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .alert-header h2 {
+            margin: 0 0 5px 0;
+            color: #667eea;
+            font-size: 24px;
+            font-weight: 700;
+        }
+        
+        .alert-meta {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            color: #718096;
+            font-size: 14px;
+        }
+        
+        .alert-meta span {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        /* Token Expiration Popup Styles */
+        .popup-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+            animation: fadeIn 0.3s ease;
+        }
+        
+        .popup-content {
+            background: #1a1a2e;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 600px;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            animation: slideUp 0.3s ease;
+        }
+        
+        .popup-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            border-bottom: 1px solid #2d3748;
+        }
+        
+        .popup-header h2 {
+            margin: 0;
+            color: #fff;
+            font-size: 20px;
+        }
+        
+        .popup-close {
+            background: none;
+            border: none;
+            color: #fff;
+            font-size: 28px;
+            cursor: pointer;
+            padding: 0;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            transition: background 0.2s;
+        }
+        
+        .popup-close:hover {
+            background: #2d3748;
+        }
+        
+        .popup-body {
+            padding: 20px;
+            color: #fff;
+        }
+        
+        .popup-body p {
+            margin: 0 0 15px 0;
+            line-height: 1.6;
+        }
+        
+        .popup-body .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .popup-body label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #e2e8f0;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .token-expired-message {
+            text-align: center;
+            padding: 40px;
+            background: linear-gradient(135deg, #fc8181 0%, #f56565 100%);
+            color: white;
+            border-radius: 12px;
+            margin: 40px auto;
+            max-width: 600px;
+        }
+        
+        .token-expired-message h3 {
+            margin: 0 0 15px 0;
+            font-size: 24px;
+        }
+        
+        .token-expired-link {
+            display: inline-block;
+            margin-top: 15px;
+            padding: 12px 24px;
+            background: white;
+            color: #f56565;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+        
+        .token-expired-link:hover {
+            background: #f0f0f0;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        
+        .stocks-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        
+        .stocks-table thead {
+            background: #f7fafc;
+        }
+        
+        .stocks-table th {
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+            color: #2d3748;
+            border-bottom: 2px solid #e2e8f0;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .stocks-table tbody tr {
+            border-bottom: 1px solid #e2e8f0;
+            transition: background 0.2s;
+        }
+        
+        .stocks-table tbody tr:hover {
+            background: #f7fafc;
+        }
+        
+        .stocks-table td {
+            padding: 15px;
+            color: #4a5568;
+            font-size: 16px;
+        }
+        
+        .stock-name {
+            font-weight: 600;
+            color: #2d3748;
+        }
+        
+        .trigger-price {
+            font-weight: 600;
+            color: #48bb78;
+            font-family: monospace;
+        }
+        
+        .vwap-current {
+            font-weight: 600;
+            color: #4299e1;
+            font-family: monospace;
+            font-size: 16px;
+        }
+        
+        .vwap-previous {
+            font-weight: 600;
+            color: #9f7aea;
+            font-family: monospace;
+            font-size: 16px;
+        }
+        
+        .no-data {
+            text-align: center;
+            padding: 60px 20px;
+            color: #718096;
+        }
+        
+        .no-data-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+        
+        .no-data h3 {
+            margin: 0 0 10px 0;
+            font-size: 24px;
+            color: #4a5568;
+        }
+        
+        .no-data p {
+            margin: 0;
+            font-size: 16px;
+        }
+        
+        .back-link {
+            display: inline-block;
+            color: white;
+            text-decoration: none;
+            padding: 10px 20px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            margin-bottom: 20px;
+            transition: all 0.3s;
+        }
+        
+        .back-link:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #718096;
+        }
+        
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .error-message {
+            background: #fed7d7;
+            color: #c53030;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #c53030;
+        }
+        
+        .stocks-count {
+            background: #667eea;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            margin-left: 10px;
+        }
+        
+        .download-btn {
+            background: #10b981;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .download-btn:hover {
+            background: #059669;
+            transform: translateY(-2px);
+        }
+        
+        .section-title {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .bullish-section {
+            border-left: 4px solid #10b981;
+        }
+        
+        .bearish-section {
+            border-left: 4px solid #ef4444;
+        }
+        
+        .bullish-badge {
+            background: #10b981;
+            color: white;
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-weight: 700;
+            font-size: 16px;
+        }
+        
+        .bearish-badge {
+            background: #ef4444;
+            color: white;
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-weight: 700;
+            font-size: 16px;
+        }
+        
+        .time-group {
+            margin-bottom: 30px;
+        }
+        
+        .time-header {
+            background: #f7fafc;
+            padding: 10px 15px;
+            border-left: 3px solid #667eea;
+            margin-bottom: 15px;
+            font-weight: 600;
+            color: #2d3748;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        @media (max-width: 768px) {
+            .title-bar-content {
+                padding: 8px 15px;
+                height: 50px;
+            }
+            
+            .logo-img {
+                height: 32px;
+            }
+            
+            .title-text {
+                font-size: 18px;
+            }
+            
+            .title-byline {
+                font-size: 10px;
+            }
+            
+            .title-bar-indices {
+                gap: 15px;
+            }
+            
+            .index-item {
+                min-width: 80px;
+            }
+            
+            .index-name {
+                font-size: 12px;
+                gap: 4px;
+            }
+            
+            .trend-arrow {
+                font-size: 14px;
+            }
+            
+            .index-price {
+                font-size: 14px;
+            }
+            
+            .scan-container {
+                padding: 10px;
+            }
+            
+            .scan-header h1 {
+                font-size: 24px;
+            }
+            
+            .status-bar {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            .stocks-table {
+                font-size: 14px;
+            }
+            
+            .stocks-table th,
+            .stocks-table td {
+                padding: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Title Bar -->
+    <div class="title-bar">
+        <div class="title-bar-content">
+            <!-- Logo -->
+            <div class="title-bar-logo">
+                <img src="logo.jpg" alt="TradeManthan" class="logo-img">
+            </div>
+            
+            <!-- Title -->
+            <div class="title-bar-center">
+                <h1 class="title-text">TradeManthan - Intraday Stock Options Algo</h1>
+                <p class="title-byline">-by Bipul Sahay</p>
+            </div>
+            
+            <!-- Index Prices -->
+            <div class="title-bar-indices">
+                <div class="index-item">
+                    <div class="index-name">
+                        <span>NIFTY 50</span>
+                        <span class="trend-arrow" id="nifty-arrow">↗</span>
+                    </div>
+                    <div class="index-price" id="nifty-price">--</div>
+                </div>
+                <div class="index-item">
+                    <div class="index-name">
+                        <span>BANKNIFTY</span>
+                        <span class="trend-arrow" id="banknifty-arrow">↗</span>
+                    </div>
+                    <div class="index-price" id="banknifty-price">--</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="scan-container">
+        <!-- Token Expired Banner -->
+        <div id="tokenExpiredBanner" style="display: none; background: linear-gradient(135deg, #f56565 0%, #e53e3e 100%); color: white; padding: 15px 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 20px;">⚠️</span>
+                    <div>
+                        <strong style="font-size: 16px;">Access Token Expired</strong>
+                        <p style="margin: 5px 0 0 0; font-size: 14px; opacity: 0.9;">Please update your Upstox API access token to continue receiving market data.</p>
+                    </div>
+                </div>
+                <button onclick="openTokenPopup()" style="background: white; color: #e53e3e; border: none; padding: 10px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 14px;">
+                    Update Token
+                </button>
+            </div>
+        </div>
+        
+        <!-- Opposite Trends Banner -->
+        <div id="oppositeTrendsBanner" style="display: none; background: linear-gradient(135deg, #fc8181 0%, #f56565 100%); color: white; padding: 15px 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 20px;">⚠️</span>
+                    <div>
+                        <strong style="font-size: 16px;" id="oppositeTrendsTitle">No Trade Applicable</strong>
+                        <p style="margin: 5px 0 0 0; font-size: 14px; opacity: 0.9;" id="oppositeTrendsMessage">Both NIFTY 50 & BANKNIFTY are in opposite direction. Wait for indices to align.</p>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 15px; align-items: center; font-size: 14px;">
+                    <span style="background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 4px;">
+                        <strong>NIFTY50:</strong> <span id="niftyTrendDisplay" style="font-weight: 700;"></span>
+                    </span>
+                    <span style="background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 4px;">
+                        <strong>BANKNIFTY:</strong> <span id="bankniftyTrendDisplay" style="font-weight: 700;"></span>
+                    </span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Bullish Section -->
+        <div id="bullishContainer">
+            <div class="alert-section bullish-section">
+                <div class="no-data">
+                    <div class="no-data-icon">📭</div>
+                    <h3>No Bullish Alerts Yet</h3>
+                    <p>Waiting for Bullish webhook data from Chartink...</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Bearish Section -->
+        <div id="bearishContainer">
+            <div class="alert-section bearish-section">
+                <div class="no-data">
+                    <div class="no-data-icon">📭</div>
+                    <h3>No Bearish Alerts Yet</h3>
+                    <p>Waiting for Bearish webhook data from Chartink...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Token Expiration Popup -->
+    <div id="tokenExpiredPopup" class="popup-overlay" style="display: none;">
+        <div class="popup-content">
+            <div class="popup-header">
+                <h2><i class="fas fa-exclamation-triangle" style="color: #f56565;"></i> Upstox Authentication Required</h2>
+                <button class="popup-close" onclick="closeTokenPopup()">&times;</button>
+            </div>
+            <div class="popup-body">
+                <p>The Upstox API access token has expired. Please authenticate to continue receiving market data.</p>
+                
+                <!-- OAuth Login (Recommended) -->
+                <div style="margin-top: 20px; padding: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px; text-align: center;">
+                    <h3 style="margin: 0 0 10px 0; color: white;"><i class="fas fa-shield-alt"></i> Recommended: OAuth Login</h3>
+                    <p style="margin: 0 0 15px 0; color: rgba(255,255,255,0.9); font-size: 14px;">Secure and automatic authentication with Upstox</p>
+                    <button class="btn btn-primary" onclick="initiateUpstoxOAuth()" style="width: 100%; background: white; color: #667eea; font-weight: bold;">
+                        <i class="fas fa-sign-in-alt"></i> Login with Upstox
+                    </button>
+                </div>
+                
+                <!-- Manual Token Entry (Alternative) -->
+                <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #3a3a5c;">
+                    <h4 style="margin: 0 0 10px 0; color: #888;">Alternative: Manual Token Entry</h4>
+                    <div class="form-group">
+                        <label for="popupUpstoxToken">Access Token</label>
+                        <textarea 
+                            id="popupUpstoxToken" 
+                            rows="4" 
+                            placeholder="Paste your Upstox access token here..."
+                            style="width: 100%; padding: 10px; border: 1px solid #3a3a5c; border-radius: 8px; background: #1a1a2e; color: #fff; font-family: monospace; font-size: 12px; resize: vertical;"
+                        ></textarea>
+                    </div>
+                    <button class="btn" onclick="updateTokenFromPopup()" style="width: 100%; margin-top: 10px; background: #3a3a5c; color: white;">
+                        <i class="fas fa-sync-alt"></i> Update Token Manually
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="scan.js?v=44.0"></script>
+    <script>
+        console.log('Page HTML loaded, starting scan.js');
+        // Force immediate load for debugging
+        if (typeof loadLatestData !== 'undefined') {
+            console.log('loadLatestData function exists, calling...');
+            setTimeout(() => {
+                loadLatestData();
+                loadIndexPrices();
+            }, 100);
+        } else {
+            console.error('loadLatestData function NOT found!');
+        }
+    </script>
+</body>
+</html>
+

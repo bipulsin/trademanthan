@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>Strategy Management - Trade Manthan</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="strategy.css">
+</head>
+<body>
+    <!-- Mobile Title Bar -->
+    <div class="mobile-title-bar">
+        <button class="mobile-menu-toggle" id="mobileMenuToggle">
+            <i class="fas fa-bars"></i>
+        </button>
+        <div class="mobile-title-content">
+            <img src="logo.jpeg" alt="Trade Manthan" class="mobile-logo">
+            <h1 class="mobile-title">Trade Manthan</h1>
+        </div>
+    </div>
+    
+    <div class="app-container">
+        <!-- Include Left Menu Module -->
+        <div id="left-menu-container"></div>
+        
+        <!-- Right Panel Content -->
+        <main class="right-panel">
+            <!-- Strategy Header Section -->
+            <div class="strategy-header">
+                <div class="strategy-title-section">
+                    <h1 class="strategy-title">
+                        <i class="fas fa-heart"></i>
+                        Strategy Management
+                    </h1>
+                    <p class="strategy-subtitle">Create and manage your automated trading strategies</p>
+                </div>
+                <button class="add-strategy-btn" onclick="strategyManager.openStrategyForm().catch(console.error)">
+                    <i class="fas fa-plus"></i>
+                </button>
+            </div>
+            
+            <!-- Strategy Grid -->
+            <div class="strategy-grid" id="strategyGrid">
+                <!-- Strategies will be populated by JavaScript -->
+            </div>
+        </main>
+    </div>
+
+    <!-- Strategy Form Modal -->
+    <div class="modal-overlay" id="strategyModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">Add New Strategy</h2>
+                <button class="close-btn" onclick="closeStrategyForm()">&times;</button>
+            </div>
+
+            <form id="strategyForm" class="strategy-form">
+                <!-- Product & Timeframe Selection -->
+                <div class="form-section compact-section">
+                    <h3>Trading Configuration</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="platform">Platform *</label>
+                            <select id="platform" name="platform" required onchange="strategyManager.onPlatformChange()">
+                                <option value="">None</option>
+                                <option value="testnet">Delta Testnet</option>
+                                <option value="live">Delta Live</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="candleDuration">Candle Duration *</label>
+                            <select id="candleDuration" name="candle_duration" required>
+                                <option value="">-- Select duration --</option>
+                                <option value="1m">1 minute</option>
+                                <option value="3m">3 minutes</option>
+                                <option value="5m">5 minutes</option>
+                                <option value="15m">15 minutes</option>
+                                <option value="30m">30 minutes</option>
+                                <option value="1h">1 hour</option>
+                                <option value="2h">2 hours</option>
+                                <option value="4h">4 hours</option>
+                                <option value="1d">1 day</option>
+                                <option value="1w">1 week</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="applicableProduct">Trading Product *</label>
+                            <select id="applicableProduct" name="product" required onchange="strategyManager.onProductChange()">
+                                <option value="">-- Select platform first --</option>
+                            </select>
+                            <input type="hidden" id="productId" name="product_id" value="">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Basic Info -->
+                <div class="form-section compact-section">
+                    <h3>Basic Information</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="strategyName">Strategy Name *</label>
+                            <input type="text" id="strategyName" name="name" required placeholder="e.g., BB Squeeze Momentum Strategy">
+                        </div>
+                        <div class="form-group">
+                            <label for="strategyDescription">Description</label>
+                            <textarea id="strategyDescription" name="description" rows="2" placeholder="Strategy description..."></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Indicator Selection -->
+                <div class="form-section compact-section">
+                    <h3>Indicator Selection</h3>
+                    <div class="indicator-grid">
+                        <label class="indicator-checkbox">
+                            <input type="checkbox" name="indicators" value="supertrend">
+                            <span class="checkmark"></span>
+                            <i class="fas fa-chart-line"></i>
+                            <div class="indicator-info">
+                                <strong>Supertrend</strong>
+                                <small>Trend following signals</small>
+                            </div>
+                        </label>
+                        <label class="indicator-checkbox">
+                            <input type="checkbox" name="indicators" value="bb_squeeze">
+                            <span class="checkmark"></span>
+                            <i class="fas fa-compress-alt"></i>
+                            <div class="indicator-info">
+                                <strong>BB Squeeze</strong>
+                                <small>Volatility breakout</small>
+                            </div>
+                        </label>
+                        <label class="indicator-checkbox">
+                            <input type="checkbox" name="indicators" value="rsi">
+                            <span class="checkmark"></span>
+                            <i class="fas fa-chart-area"></i>
+                            <div class="indicator-info">
+                                <strong>RSI</strong>
+                                <small>Momentum oscillator</small>
+                            </div>
+                        </label>
+                        <label class="indicator-checkbox">
+                            <input type="checkbox" name="indicators" value="triple_ema">
+                            <span class="checkmark"></span>
+                            <i class="fas fa-chart-bar"></i>
+                            <div class="indicator-info">
+                                <strong>Triple EMA</strong>
+                                <small>EMA crossovers</small>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Logic Selector -->
+                <div class="form-section compact-section">
+                    <h3>Logical Condition</h3>
+                    <div class="form-group">
+                        <label for="logicOperator">Logic between indicators</label>
+                        <select id="logicOperator" name="logic_operator">
+                            <option value="AND">AND (All conditions must be met)</option>
+                            <option value="OR">OR (Any condition can be met)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Indicator Parameters -->
+                <div class="form-section" id="indicatorParams">
+                    <!-- Parameters will be dynamically generated based on selected indicators -->
+                </div>
+
+                <!-- Risk Management -->
+                <div class="form-section compact-section">
+                    <h3>Risk Management</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="stopLossType">Stop Loss Type *</label>
+                            <select id="stopLossType" name="stop_loss_type" required>
+                                <option value="">-- Select stop loss type --</option>
+                                <option value="fixed">Fixed Distance (%)</option>
+                                <option value="supertrend">Supertrend Value</option>
+                                <option value="bb_upper">Bollinger Band Upper</option>
+                                <option value="bb_lower">Bollinger Band Lower</option>
+                                <option value="ema1">EMA-1 Value</option>
+                                <option value="ema2">EMA-2 Value</option>
+                                <option value="ema3">EMA-3 Value</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="stopLossConfig" style="display: none;">
+                            <div class="form-group" id="fixedStopLossConfig">
+                                <label for="fixedStopLoss">Stop Loss Distance (%)</label>
+                                <input type="number" id="fixedStopLoss" name="fixed_stop_loss" 
+                                       min="0.1" max="50.0" step="0.1" value="2.0" 
+                                       placeholder="2.0">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="trailingStopEnabled">Enable Trailing Stop</label>
+                            <div class="toggle-group">
+                                <label class="switch">
+                                    <input type="checkbox" id="trailingStopEnabled" name="trailing_stop_enabled">
+                                    <span class="slider round"></span>
+                                </label>
+                                <span class="toggle-label">Use trailing stop loss</span>
+                            </div>
+                        </div>
+                        <div class="form-group" id="trailingStopConfig" style="display: none;">
+                            <label for="profitMultiplier">Profit Multiplier</label>
+                            <input type="number" id="profitMultiplier" name="profit_multiplier" 
+                                   min="1.0" max="10.0" step="0.1" value="1.5" 
+                                   placeholder="1.5">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Entry/Exit Criteria -->
+                <div class="form-section compact-section">
+                    <h3>Trading Criteria</h3>
+                    
+                    <!-- Trade Entry & Exit Conditions -->
+                    <div class="trade-conditions" id="tradeConditions">
+                        <!-- Conditions will be dynamically generated based on selected indicators -->
+                    </div>
+                    
+                    <div class="criteria-grid">
+                        <div class="criteria-group">
+                            <h4>Entry Conditions</h4>
+                            <div class="form-group">
+                                <label for="entryCriteria">Buy Signal Conditions *</label>
+                                <textarea id="entryCriteria" name="entry_criteria" rows="2" placeholder="Define when to enter a long position..." required></textarea>
+                            </div>
+                        </div>
+                        <div class="criteria-group">
+                            <h4>Exit Conditions</h4>
+                            <div class="form-group">
+                                <label for="exitCriteria">Exit Signal Conditions *</label>
+                                <textarea id="exitCriteria" name="exit_criteria" rows="2" placeholder="Define when to close the position..." required></textarea>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Form Actions -->
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeStrategyForm()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Strategy</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Broker Connection Modal -->
+    <div class="modal-overlay" id="brokerModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Connect Broker</h2>
+                <button class="close-btn" onclick="closeBrokerModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="broker-selection">
+                    <h3>Select Broker</h3>
+                    <p>Choose a broker to connect to this strategy. The strategy will use this broker's API to execute trades.</p>
+                    
+                    <!-- Debug info (temporary) -->
+                    <div id="debugInfo" style="background: #f0f0f0; padding: 10px; margin: 10px 0; border-radius: 5px; font-size: 12px;">
+                        <strong>Debug Info:</strong>
+                        <div id="brokerCount">Loading...</div>
+                        <div id="userInfo">Loading...</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="brokerSelect">Select Broker *</label>
+                        <select id="brokerSelect" class="form-control" required>
+                            <option value="">-- Select a broker --</option>
+                        </select>
+                    </div>
+                    
+                    <div class="broker-info" id="brokerInfo" style="display: none;">
+                        <div class="broker-details">
+                            <h4>Broker Details</h4>
+                            <div class="broker-detail-item">
+                                <span class="label">Type:</span>
+                                <span class="value" id="brokerType">-</span>
+                            </div>
+                            <div class="broker-detail-item">
+                                <span class="label">Status:</span>
+                                <span class="value" id="brokerStatus">-</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="modal-actions">
+                        <button type="button" class="btn btn-secondary" onclick="closeBrokerModal()">Cancel</button>
+                        <button type="button" class="btn btn-primary" id="connectBrokerBtn" onclick="strategyManager.connectSelectedBroker()" disabled>
+                            <i class="fas fa-link"></i> Connect Broker
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Strategy Logs Modal -->
+    <div class="modal-overlay" id="logsModal">
+        <div class="modal-content logs-modal">
+            <div class="modal-header">
+                <h2 id="logsModalTitle">Strategy Execution Logs</h2>
+                <button class="close-btn" onclick="closeLogsModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="logs-content">
+                    <div class="logs-header">
+                        <div class="log-filters">
+                            <select id="logLevelFilter" onchange="filterLogs()">
+                                <option value="">All Levels</option>
+                                <option value="INFO">Info</option>
+                                <option value="WARNING">Warning</option>
+                                <option value="ERROR">Error</option>
+                                <option value="DEBUG">Debug</option>
+                            </select>
+                        </div>
+                        <div class="logs-status" id="logsStatus">
+                            <!-- Status will be populated by JavaScript -->
+                        </div>
+                    </div>
+                    <div class="logs-list" id="logsList">
+                        <!-- Logs will be populated by JavaScript -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Strategy Template Viewer Modal -->
+    <div class="modal-overlay" id="templateViewerModal">
+        <div class="modal-content template-modal">
+            <div class="modal-header">
+                <h2>Strategy Template</h2>
+                <button class="close-btn" onclick="closeTemplateViewer()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="template-info">
+                    <div class="strategy-details">
+                        <h3 id="templateStrategyName">Strategy Name</h3>
+                        <div class="strategy-meta">
+                            <span class="meta-item">
+                                <i class="fas fa-code"></i>
+                                <span id="templateStrategyId">ID: -</span>
+                            </span>
+                            <span class="meta-item">
+                                <i class="fas fa-chart-line"></i>
+                                <span id="templateProduct">Product: -</span>
+                            </span>
+                            <span class="meta-item">
+                                <i class="fas fa-clock"></i>
+                                <span id="templateTimeframe">Timeframe: -</span>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="template-actions">
+                    <button class="btn btn-primary" onclick="downloadTemplate()">
+                        <i class="fas fa-download"></i> Download Template
+                    </button>
+                    <button class="btn btn-secondary" onclick="viewRawScript()">
+                        <i class="fas fa-eye"></i> View Raw Script
+                    </button>
+                    <button class="btn btn-success" onclick="deployToRunner()">
+                        <i class="fas fa-rocket"></i> Deploy to Runner
+                    </button>
+                </div>
+                
+                <div class="template-preview">
+                    <h4>Generated Python Code Preview</h4>
+                    <div class="code-viewer">
+                        <pre><code id="templateCodeContent">Loading template...</code></pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Core Application Scripts -->
+    <script src="left-menu.js"></script>
+    <script>
+        // Cache buster for strategy.js
+        document.write('<script src="strategy.js?v=3.0&t=' + Date.now() + '"><\/script>');
+    </script>
+    <script src="version.js?v=1.0"></script>
+    <script src="cache-manager.js?v=1.0"></script>
+</body>
+</html>

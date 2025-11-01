@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Delta API Guide - Trade Manthan</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="delta-api-guide.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Include Left Menu Module -->
+        <div id="left-menu-container">
+            <!-- Basic Left Menu Structure (will be replaced by JavaScript) -->
+            <div class="panel-header">
+                <img src="logo.jpeg" alt="Trade Manthan" class="logo-image">
+                <h2>Trade Manthan</h2>
+            </div>
+            <nav class="panel-nav">
+                <ul class="nav-list">
+                    <li class="nav-item">
+                        <i class="fas fa-tachometer-alt"></i>
+                        <a href="dashboard.html">Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <i class="fas fa-chart-line"></i>
+                        <a href="strategy.html">Strategy</a>
+                    </li>
+                    <li class="nav-item">
+                        <i class="fas fa-exchange-alt"></i>
+                        <a href="broker.html">Broker</a>
+                    </li>
+                    <li class="nav-item">
+                        <i class="fas fa-chart-bar"></i>
+                        <a href="reports.html">Reports</a>
+                    </li>
+                    <li class="nav-item active">
+                        <i class="fas fa-cog"></i>
+                        <a href="settings.html">Settings</a>
+                    </li>
+                </ul>
+            </nav>
+            
+            <!-- User Info and Logout -->
+            <div class="panel-footer">
+                <div class="user-info">
+                    <div class="user-avatar">
+                        <i class="fas fa-user" style="color: white; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; height: 100%;"></i>
+                    </div>
+                    <div class="user-details">
+                        <div class="user-name">User Name</div>
+                        <div class="user-email">user@example.com</div>
+                    </div>
+                </div>
+                <button class="logout-btn" onclick="logout()">
+                    <i class="fas fa-sign-out-alt"></i>
+                    Logout
+                </button>
+            </div>
+        </div>
+        
+        <!-- Right Panel Content -->
+        <main class="right-panel">
+            <!-- Header Section -->
+            <div class="guide-header">
+                <div class="guide-title-section">
+                    <h1 class="guide-title">
+                        <i class="fas fa-code"></i>
+                        Delta API User Guide
+                    </h1>
+                    <p class="guide-subtitle">Simple guide to using the Delta API module for trading automation</p>
+                    <div class="guide-breadcrumb">
+                        <a href="settings.html"><i class="fas fa-cog"></i> Settings</a>
+                        <i class="fas fa-chevron-right"></i>
+                        <span>Delta API Guide</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Guide Content -->
+            <div class="guide-content">
+                <section class="guide-section">
+                    <div class="section-header">
+                        <h2><i class="fas fa-info-circle"></i> What is the Delta API Module?</h2>
+                        <p>The Delta API module is a Python tool that lets you connect to Delta Exchange and perform trading operations automatically. Think of it as a bridge between your Python scripts and the Delta Exchange trading platform.</p>
+                    </div>
+                    
+                    <p>The Delta API module provides a simple way to interact with Delta Exchange. When you create an API client, you only need to provide three basic pieces of information: your API key, API secret, and the API URL. All other details like which cryptocurrency to trade, how much to trade, and when to trade are specified when you call specific methods.</p>
+                </section>
+
+
+
+                <section class="guide-section">
+                    <div class="section-header">
+                        <h2><i class="fas fa-play"></i> How to Use the Delta API in Your Python Scripts</h2>
+                        <p>Learn the basic steps to integrate the Delta API into your trading applications</p>
+                    </div>
+                    
+                    <div class="usage-examples">
+                        <div class="example-card">
+                            <h3>Step 1: Import the Module</h3>
+                            <p>At the top of your Python script, you need to tell Python where to find the Delta API module. You'll add the backend folder to your Python path and then import the DeltaAPI class and TradingParams class.</p>
+                        </div>
+                        
+                        <div class="example-card">
+                            <h3>Step 2: Set Up Your API Credentials</h3>
+                            <p>You only need to provide three basic pieces of information: your API key, API secret, and the API URL. These are the only parameters required when creating the API client.</p>
+                        </div>
+                        
+                        <div class="example-card">
+                            <h3>Step 3: Create the API Client</h3>
+                            <p>Create the API client with just your credentials. This client will handle all communication with Delta Exchange. All other trading details like symbol, quantity, and price are specified when you call specific methods.</p>
+                        </div>
+                        
+                        <div class="example-card">
+                            <h3>Step 4: Call Methods with Specific Parameters</h3>
+                            <p>Now you can use the client to perform specific operations. Each method requires its own parameters. For example, to get a price you need to specify which trading pair, to place an order you need to specify quantity and price.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="guide-section">
+                    <div class="section-header">
+                        <h2><i class="fas fa-list"></i> What You Can Do with the Delta API</h2>
+                        <p>Here are all the different operations you can perform using the Delta API module</p>
+                    </div>
+                    
+                    <div class="methods-grid">
+                        <div class="method-card">
+                            <h3><i class="fas fa-dollar-sign"></i> get_latest_price(symbol_id)</h3>
+                            <p><strong>What it does:</strong> Gets the current price of any cryptocurrency pair like Bitcoin/USD or Ethereum/USD.</p>
+                            <p><strong>Parameters:</strong> symbol_id (integer) - The ID of the trading pair you want to check.</p>
+                            <p><strong>When to use:</strong> Before placing trades, to monitor price movements, or to check if prices have reached your target levels.</p>
+                            <p><strong>Response:</strong> Returns the current price as a number (like 50000.0 for Bitcoin).</p>
+                        </div>
+                        
+                        <div class="method-card">
+                            <h3><i class="fas fa-chart-area"></i> get_candles(symbol_id, interval, limit)</h3>
+                            <p><strong>What it does:</strong> Retrieves historical price data in the form of candlestick charts.</p>
+                            <p><strong>Parameters:</strong> symbol_id (integer), interval (string like '5m', '1h', '1d'), limit (integer for number of candles).</p>
+                            <p><strong>When to use:</strong> To analyze price trends, calculate technical indicators, or backtest your trading strategies.</p>
+                            <p><strong>Response:</strong> A list of price data including open, high, low, close prices and trading volume for each time period.</p>
+                        </div>
+                        
+                        <div class="method-card">
+                            <h3><i class="fas fa-wallet"></i> get_account_state()</h3>
+                            <p><strong>What it does:</strong> Shows your account information including balances and available funds.</p>
+                            <p><strong>Parameters:</strong> None required.</p>
+                            <p><strong>When to use:</strong> Before placing trades to make sure you have enough funds, or to monitor your account status.</p>
+                            <p><strong>Response:</strong> Your account details including available balance, equity, and margin information.</p>
+                        </div>
+                        
+                        <div class="method-card">
+                            <h3><i class="fas fa-plus-circle"></i> place_order(symbol_id, side, order_type, qty, price, stop_loss, take_profit)</h3>
+                            <p><strong>What it does:</strong> Places a new trading order (buy or sell) with optional stop-loss and take-profit levels.</p>
+                            <p><strong>Parameters:</strong> symbol_id (integer), side ('buy' or 'sell'), order_type ('market_order' or 'limit_order'), qty (integer), price (float, optional), stop_loss (float, optional), take_profit (float, optional).</p>
+                            <p><strong>When to use:</strong> When you want to buy or sell cryptocurrency automatically.</p>
+                            <p><strong>Response:</strong> Order confirmation including order ID, status, and details.</p>
+                        </div>
+                        
+                        <div class="method-card">
+                            <h3><i class="fas fa-times-circle"></i> cancel_order(order_id)</h3>
+                            <p><strong>What it does:</strong> Cancels a specific order that you've placed but hasn't been filled yet.</p>
+                            <p><strong>Parameters:</strong> order_id (string) - The unique identifier of the order to cancel.</p>
+                            <p><strong>When to use:</strong> When you change your mind about a trade or when market conditions change.</p>
+                            <p><strong>Response:</strong> Confirmation that the order was cancelled successfully.</p>
+                        </div>
+                        
+                        <div class="method-card">
+                            <h3><i class="fas fa-eye"></i> get_positions()</h3>
+                            <p><strong>What it does:</strong> Shows all your current open positions - trades that are still active.</p>
+                            <p><strong>Parameters:</strong> None required.</p>
+                            <p><strong>When to use:</strong> To monitor your current trades, check your profit/loss, or decide which positions to close.</p>
+                            <p><strong>Response:</strong> A list of your open positions with details like size, entry price, current profit/loss, and position ID.</p>
+                        </div>
+                        
+                        <div class="method-card">
+                            <h3><i class="fas fa-lock"></i> close_position(position_id, qty)</h3>
+                            <p><strong>What it does:</strong> Closes a specific open position by selling what you bought or buying back what you sold.</p>
+                            <p><strong>Parameters:</strong> position_id (string), qty (integer) - The amount to close.</p>
+                            <p><strong>When to use:</strong> When you want to take profits, cut losses, or close specific trades.</p>
+                            <p><strong>Response:</strong> Confirmation that the position was closed, including the final profit/loss.</p>
+                        </div>
+                        
+                        <div class="method-card">
+                            <h3><i class="fas fa-cog"></i> edit_bracket_order(order_id, stop_loss, take_profit)</h3>
+                            <p><strong>What it does:</strong> Changes the stop-loss or take-profit levels of an existing order.</p>
+                            <p><strong>Parameters:</strong> order_id (string), stop_loss (float, optional), take_profit (float, optional).</p>
+                            <p><strong>When to use:</strong> When you want to adjust your risk management levels without cancelling and replacing the order.</p>
+                            <p><strong>Response:</strong> Confirmation that the order was modified successfully.</p>
+                        </div>
+                        
+                        <div class="method-card">
+                            <h3><i class="fas fa-list"></i> get_orders(symbol_id, limit)</h3>
+                            <p><strong>What it does:</strong> Gets a list of your open orders for a specific trading pair.</p>
+                            <p><strong>Parameters:</strong> symbol_id (integer), limit (integer, optional) - Maximum number of orders to return.</p>
+                            <p><strong>When to use:</strong> To see all your pending orders and their current status.</p>
+                            <p><strong>Response:</strong> A list of your open orders with details like order type, quantity, price, and status.</p>
+                        </div>
+                        
+                        <div class="method-card">
+                            <h3><i class="fas fa-history"></i> get_order_history(symbol_id, limit)</h3>
+                            <p><strong>What it does:</strong> Gets a history of your completed orders for a specific trading pair.</p>
+                            <p><strong>Parameters:</strong> symbol_id (integer), limit (integer, optional) - Maximum number of orders to return.</p>
+                            <p><strong>When to use:</strong> To review your trading history, analyze performance, or for accounting purposes.</p>
+                            <p><strong>Response:</strong> A list of your completed orders with details like execution price, quantity, and timestamp.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="guide-section">
+                    <div class="section-header">
+                        <h2><i class="fas fa-lightbulb"></i> Real-World Usage Examples</h2>
+                        <p>Here are some practical examples of how you might use the Delta API in different trading scenarios</p>
+                    </div>
+                    
+                    <div class="examples-grid">
+                        <div class="example-item">
+                            <h3>Price Monitoring Bot</h3>
+                            <p>You could create a simple bot that checks the Bitcoin price every minute and sends you an alert when the price goes above or below certain levels. This is useful for staying informed about market movements without constantly watching the charts.</p>
+                        </div>
+                        
+                        <div class="example-item">
+                            <h3>Automatic Trading Strategy</h3>
+                            <p>You could build a bot that automatically buys Bitcoin when the price drops to a certain level and sells it when the price rises to a target level. This way, you're buying low and selling high automatically, even when you're not at your computer.</p>
+                        </div>
+                        
+                        <div class="example-item">
+                            <h3>Portfolio Rebalancing</h3>
+                            <p>You could create a system that automatically adjusts your cryptocurrency portfolio to maintain certain percentages. For example, if Bitcoin becomes more than 60% of your portfolio, it automatically sells some Bitcoin and buys other cryptocurrencies to bring it back to 60%.</p>
+                        </div>
+                        
+                        <div class="example-item">
+                            <h3>Risk Management System</h3>
+                            <p>You could build a system that automatically sets stop-loss orders for all your positions. This means if any trade goes against you by more than a certain percentage, it automatically closes to limit your losses.</p>
+                        </div>
+                        
+                        <div class="example-item">
+                            <h3>Market Analysis Tool</h3>
+                            <p>You could create a tool that analyzes price patterns and gives you trading signals. For example, it could tell you when the market is trending up or down, or when it's a good time to buy or sell based on technical indicators.</p>
+                        </div>
+                        
+                        <div class="example-item">
+                            <h3>Arbitrage Bot</h3>
+                            <p>You could build a bot that looks for price differences between different exchanges and automatically buys on the cheaper exchange and sells on the more expensive one to make a profit from the price difference.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="guide-section">
+                    <div class="section-header">
+                        <h2><i class="fas fa-star"></i> Tips and Best Practices</h2>
+                        <p>Important advice to help you use the Delta API safely and effectively</p>
+                    </div>
+                    
+                    <div class="tips-grid">
+                        <div class="tip-card">
+                            <div class="tip-icon">
+                                <i class="fas fa-shield-alt"></i>
+                            </div>
+                            <h3>Keep Your API Keys Safe</h3>
+                            <p>Never share your API keys with anyone. Store them in environment variables or secure configuration files. If someone gets your API keys, they could trade with your money.</p>
+                        </div>
+                        
+                        <div class="tip-card">
+                            <div class="tip-icon">
+                                <i class="fas fa-flask"></i>
+                            </div>
+                            <h3>Test with Small Amounts First</h3>
+                            <p>Always start with small trading amounts when testing your bot. This way, if something goes wrong, you won't lose a lot of money. Once you're confident everything works, you can increase the amounts.</p>
+                        </div>
+                        
+                        <div class="tip-card">
+                            <div class="tip-icon">
+                                <i class="fas fa-exclamation-triangle"></i>
+                            </div>
+                            <h3>Always Use Stop-Loss Orders</h3>
+                            <p>Never place a trade without setting a stop-loss order. This automatically closes your position if the price moves against you by a certain amount, limiting your potential losses.</p>
+                        </div>
+                        
+                        <div class="tip-card">
+                            <div class="tip-icon">
+                                <i class="fas fa-clock"></i>
+                            </div>
+                            <h3>Don't Make Too Many API Calls</h3>
+                            <p>Delta Exchange has limits on how many API calls you can make per minute. If you make too many calls too quickly, your account might get temporarily blocked. Add small delays between your API calls.</p>
+                        </div>
+                        
+                        <div class="tip-card">
+                            <div class="tip-icon">
+                                <i class="fas fa-eye"></i>
+                            </div>
+                            <h3>Monitor Your Bot Regularly</h3>
+                            <p>Even though your bot runs automatically, you should check on it regularly to make sure it's working correctly. Look for any error messages or unexpected behavior.</p>
+                        </div>
+                        
+                        <div class="tip-card">
+                            <div class="tip-icon">
+                                <i class="fas fa-save"></i>
+                            </div>
+                            <h3>Keep Logs of All Trades</h3>
+                            <p>Make sure your bot records all the trades it makes, including the reasons for each trade. This helps you understand how your strategy is performing and identify areas for improvement.</p>
+                        </div>
+                        
+                        <div class="tip-card">
+                            <div class="tip-icon">
+                                <i class="fas fa-network-wired"></i>
+                            </div>
+                            <h3>Handle Network Errors Gracefully</h3>
+                            <p>Internet connections can sometimes fail. Make sure your bot can handle these situations by retrying failed operations and not crashing when there are temporary network issues.</p>
+                        </div>
+                        
+                        <div class="tip-card">
+                            <div class="tip-icon">
+                                <i class="fas fa-calculator"></i>
+                            </div>
+                            <h3>Calculate Position Sizes Carefully</h3>
+                            <p>Don't risk more than 1-2% of your total capital on any single trade. This way, even if a trade goes completely wrong, you won't lose a significant portion of your money.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="guide-section">
+                    <div class="section-header">
+                        <h2><i class="fas fa-question-circle"></i> Getting Help and Support</h2>
+                        <p>Where to turn when you need assistance with the Delta API</p>
+                    </div>
+                    
+                    <div class="help-grid">
+                        <div class="help-card">
+                            <h3><i class="fas fa-book"></i> Official Documentation</h3>
+                            <p>Delta Exchange provides comprehensive API documentation that covers all the technical details, including endpoint specifications, authentication methods, and rate limits.</p>
+                            <a href="https://www.delta.exchange/api-docs/" target="_blank" class="help-link">
+                                <i class="fas fa-external-link-alt"></i> View Official Docs
+                            </a>
+                        </div>
+                        
+                        <div class="help-card">
+                            <h3><i class="fas fa-code"></i> Source Code</h3>
+                            <p>You can examine the actual delta_api.py file to see exactly how each method works and understand the implementation details.</p>
+                            <a href="../backend/delta_api.py" target="_blank" class="help-link">
+                                <i class="fas fa-code"></i> View Source Code
+                            </a>
+                        </div>
+                        
+                        <div class="help-card">
+                            <h3><i class="fas fa-envelope"></i> Contact Support</h3>
+                            <p>If you encounter issues that you can't resolve on your own, our support team is here to help you get back on track.</p>
+                            <a href="mailto:support@trademanthan.in" class="help-link">
+                                <i class="fas fa-envelope"></i> Contact Support
+                            </a>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Scripts -->
+    <script src="left-menu.js?v=1.2"></script>
+    <script src="version.js?v=1.0"></script>
+    <script src="cache-manager.js?v=1.0"></script>
+    
+    <script>
+        // Logout function
+        function logout() {
+            // Clear local storage
+            localStorage.removeItem('trademanthan_token');
+            localStorage.removeItem('trademanthan_user');
+            
+            // Redirect to login page
+            window.location.href = 'index.html';
+        }
+        
+        // Update user info when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            const userData = localStorage.getItem('trademanthan_user');
+            if (userData) {
+                try {
+                    const user = JSON.parse(userData);
+                    const userNameElement = document.querySelector('.user-name');
+                    const userEmailElement = document.querySelector('.user-email');
+                    
+                    if (userNameElement && user.name) {
+                        userNameElement.textContent = user.name;
+                    }
+                    if (userEmailElement && user.email) {
+                        userEmailElement.textContent = user.email;
+                    }
+                } catch (e) {
+                    console.log('Error parsing user data:', e);
+                }
+            }
+        });
+    </script>
+</body>
+</html>

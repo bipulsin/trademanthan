@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Broker Management - Trade Manthan</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="broker.css">
+</head>
+<body>
+    <!-- Mobile Title Bar -->
+    <div class="mobile-title-bar">
+        <button class="mobile-menu-toggle" id="mobileMenuToggle">
+            <i class="fas fa-bars"></i>
+        </button>
+        <div class="mobile-title-content">
+            <img src="logo.jpeg" alt="Trade Manthan" class="mobile-logo">
+            <h1 class="mobile-title">Trade Manthan</h1>
+        </div>
+    </div>
+    
+    <div class="app-container">
+        <!-- Include Left Menu Module -->
+        <div id="left-menu-container"></div>
+        
+        <!-- Right Panel Content -->
+        <main class="right-panel">
+            <!-- Broker Header Section -->
+            <div class="broker-header">
+                <div class="broker-title-section">
+                    <h1 class="broker-title">Broker Management</h1>
+                    <p class="broker-subtitle">Connect and manage your trading brokers</p>
+                </div>
+                <button class="add-broker-btn" onclick="showAddBrokerForm()">
+                    <i class="fas fa-plus"></i>
+                </button>
+            </div>
+            
+            <!-- Broker Grid -->
+            <div class="broker-grid" id="brokerGrid">
+                <!-- Brokers will be populated by JavaScript -->
+            </div>
+        </main>
+    </div>
+
+    <!-- Add/Edit Broker Modal -->
+    <div id="brokerModal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modalTitle">Add New Broker</h3>
+                <button class="close-btn" onclick="closeBrokerModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="brokerForm" class="broker-form">
+                <div class="form-group">
+                    <label for="brokerName">Broker Connection Name *</label>
+                    <input type="text" id="brokerName" name="brokerName" required placeholder="e.g., Binance, Coinbase Pro">
+                </div>
+                
+                <div class="form-group">
+                    <label for="brokerType">Broker Type *</label>
+                    <select id="brokerType" name="brokerType" required>
+                        <option value="">Select Broker Type</option>
+                        <option value="crypto">Cryptocurrency</option>
+                        <option value="equity">Stock/Equity</option>
+                        <option value="forex">Forex</option>
+                        <option value="commodity">Commodity</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="apiUrl">API URL *</label>
+                    <input type="url" id="apiUrl" name="apiUrl" required placeholder="https://api.broker.com">
+                </div>
+                
+                <div class="form-group">
+                    <label for="apiKey">API Key *</label>
+                    <div class="input-with-toggle">
+                        <input type="password" id="apiKey" name="apiKey" required placeholder="Enter your API key">
+                        <button type="button" class="toggle-password" onclick="togglePassword('apiKey')">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="apiSecret">API Secret *</label>
+                    <div class="input-with-toggle">
+                        <input type="password" id="apiSecret" name="apiSecret" required placeholder="Enter your API secret">
+                        <button type="button" class="toggle-password" onclick="togglePassword('apiSecret')">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="testMode">
+                        <input type="checkbox" id="testMode" name="testMode">
+                        Use Test/Sandbox Environment
+                    </label>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeBrokerModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Broker</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div id="deleteModal" class="modal-overlay">
+        <div class="modal-content delete-modal">
+            <div class="modal-header">
+                <h3>Delete Broker</h3>
+                <button class="close-btn" onclick="closeDeleteModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete this broker connection?</p>
+                <p class="warning-text">This action cannot be undone and will disconnect any strategies using this broker.</p>
+            </div>
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeDeleteModal()">Cancel</button>
+                <button type="button" class="btn btn-danger" onclick="confirmDeleteBroker()">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="left-menu.js?v=1.2"></script>
+    <script src="broker.js?v=1.3"></script>
+    <script src="version.js?v=1.0"></script>
+    <script src="cache-manager.js?v=1.0"></script>
+</body>
+</html>

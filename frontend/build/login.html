@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Trade Manthan</title>
+    <link rel="stylesheet" href="login.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+    <div class="login-overlay" id="loginOverlay">
+        <div class="login-popup">
+            <!-- Close Button -->
+            <button class="close-btn" onclick="closeLogin()">&times;</button>
+            
+            <!-- Logo -->
+            <div class="logo-container">
+                <img src="logo.jpg" alt="Trade Manthan Logo" class="logo-image">
+                <h2>Trade Manthan</h2>
+            </div>
+            
+            <!-- Login Form -->
+            <div class="login-form">
+                <h3>Welcome Back</h3>
+                <p>Sign in to access your trading dashboard</p>
+                
+                <!-- Google OAuth Button -->
+                <div id="g_id_onload"
+                     data-client_id="your_google_client_id_here"
+                     data-callback="handleCredentialResponse"
+                     data-auto_prompt="false">
+                </div>
+                
+                <div class="g_id_signin"
+                     data-type="standard"
+                     data-size="large"
+                     data-theme="outline"
+                     data-text="sign_in_with"
+                     data-shape="rectangular"
+                     data-logo_alignment="left">
+                </div>
+                
+                <!-- Alternative Login Options -->
+                <div class="divider">
+                    <span>or</span>
+                </div>
+                
+                <div class="demo-login">
+                    <button class="btn btn-demo" onclick="demoLogin()">
+                        🚀 Demo Login (Development)
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Footer -->
+            <div class="login-footer">
+                <p>By signing in, you agree to our Terms of Service and Privacy Policy</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="login.js"></script>
+</body>
+</html>

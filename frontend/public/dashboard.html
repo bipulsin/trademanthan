@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>Dashboard - Trade Manthan</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="dashboard.css?v=1.1">
+</head>
+<body>
+    <!-- Mobile Title Bar -->
+    <div class="mobile-title-bar">
+        <button class="mobile-menu-toggle" id="mobileMenuToggle">
+            <i class="fas fa-bars"></i>
+        </button>
+        <div class="mobile-title-content">
+            <img src="logo.jpeg" alt="Trade Manthan" class="mobile-logo">
+            <h1 class="mobile-title">Trade Manthan</h1>
+        </div>
+    </div>
+    
+    <div class="app-container">
+        <!-- Include Left Menu Module -->
+        <div id="left-menu-container"></div>
+        
+        <!-- Right Panel Content -->
+        <main class="right-panel">
+            <!-- Dashboard Section -->
+            <section id="dashboard" class="content-section active">
+                <!-- Live Crypto Prices Card - Full Width -->
+                <div class="dashboard-card crypto-card full-width">
+                    <div class="card-header compact">
+                        <h3><i class="fas fa-coins"></i> Live Crypto Prices</h3>
+                        <div class="crypto-controls">
+                            <span class="last-updated" id="lastUpdated">Last updated: --</span>
+                            <button class="btn-icon" onclick="refreshCryptoPrices()" title="Refresh prices">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                            <button class="btn-icon force-refresh" onclick="forceRefreshCryptoPrices()" title="Force refresh (clear cache)">
+                                <i class="fas fa-redo"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-content">
+                        <div class="crypto-container">
+                            <!-- Debug Info (temporary) -->
+                            <div id="cryptoDebug" style="background: #f0f0f0; padding: 10px; margin: 10px 0; border-radius: 5px; font-size: 12px; display: none;">
+                                <strong>Crypto Debug Info:</strong>
+                                <div id="cryptoStatus">Initializing...</div>
+                                <div id="cryptoElements">Checking elements...</div>
+                                <div id="cryptoErrors">No errors</div>
+                                <button onclick="toggleCryptoDebug()" style="margin-top: 5px; padding: 5px 10px; font-size: 10px;">Toggle Debug</button>
+                            </div>
+                            
+                            <div class="crypto-grid" id="cryptoGrid">
+                                <div class="crypto-item" data-symbol="BTCUSDT">
+                                    <div class="crypto-symbol">₿</div>
+                                    <div class="crypto-content">
+                                        <div class="crypto-name">Bitcoin</div>
+                                        <div class="crypto-price" id="BTCUSDT-price">Loading...</div>
+                                        <div class="crypto-change" id="BTCUSDT-change">--</div>
+                                    </div>
+                                </div>
+                                <div class="crypto-item" data-symbol="ETHUSDT">
+                                    <div class="crypto-symbol">Ξ</div>
+                                    <div class="crypto-content">
+                                        <div class="crypto-name">Ethereum</div>
+                                        <div class="crypto-price" id="ETHUSDT-price">Loading...</div>
+                                        <div class="crypto-change" id="ETHUSDT-change">--</div>
+                                    </div>
+                                </div>
+                                <div class="crypto-item" data-symbol="BNBUSDT">
+                                    <div class="crypto-symbol">BNB</div>
+                                    <div class="crypto-content">
+                                        <div class="crypto-name">Binance Coin</div>
+                                        <div class="crypto-price" id="BNBUSDT-price">Loading...</div>
+                                        <div class="crypto-change" id="BNBUSDT-change">--</div>
+                                    </div>
+                                </div>
+                                <div class="crypto-item" data-symbol="ADAUSDT">
+                                    <div class="crypto-symbol">ADA</div>
+                                    <div class="crypto-content">
+                                        <div class="crypto-name">Cardano</div>
+                                        <div class="crypto-price" id="ADAUSDT-price">Loading...</div>
+                                        <div class="crypto-change" id="ADAUSDT-change">--</div>
+                                    </div>
+                                </div>
+                                <div class="crypto-item" data-symbol="SOLUSDT">
+                                    <div class="crypto-symbol">SOL</div>
+                                    <div class="crypto-content">
+                                        <div class="crypto-name">Solana</div>
+                                        <div class="crypto-price" id="SOLUSDT-price">Loading...</div>
+                                        <div class="crypto-change" id="SOLUSDT-change">--</div>
+                                    </div>
+                                </div>
+                                <div class="crypto-item" data-symbol="DOTUSDT">
+                                    <div class="crypto-symbol">DOT</div>
+                                    <div class="crypto-content">
+                                        <div class="crypto-name">Polkadot</div>
+                                        <div class="crypto-price" id="DOTUSDT-price">Loading...</div>
+                                        <div class="crypto-change" id="DOTUSDT-change">--</div>
+                                    </div>
+                                </div>
+                                <div class="crypto-item" data-symbol="MATICUSDT">
+                                    <div class="crypto-symbol">MATIC</div>
+                                    <div class="crypto-content">
+                                        <div class="crypto-name">Polygon</div>
+                                        <div class="crypto-price" id="MATICUSDT-price">Loading...</div>
+                                        <div class="crypto-change" id="MATICUSDT-change">--</div>
+                                    </div>
+                                </div>
+                                <div class="crypto-item" data-symbol="LINKUSDT">
+                                    <div class="crypto-symbol">LINK</div>
+                                    <div class="crypto-content">
+                                        <div class="crypto-name">Chainlink</div>
+                                        <div class="crypto-price" id="LINKUSDT-price">Loading...</div>
+                                        <div class="crypto-change" id="LINKUSDT-change">--</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="crypto-scroll-indicator">
+                                <span class="scroll-text">← Scroll for more coins →</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Broker Connection Card - Full Width -->
+                <div class="dashboard-card broker-card full-width">
+                        <div class="card-header">
+                            <h3><i class="fas fa-university"></i> Broker Connection</h3>
+                            <div class="card-actions">
+                                <button class="btn-icon" onclick="dashboard.refreshBrokerBalances()" title="Refresh balances">
+                                    <i class="fas fa-sync-alt"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-content" id="brokerContent">
+                            <div class="broker-cards-container" id="brokerCardsContainer">
+                                <div class="loading-placeholder">
+                                    <i class="fas fa-spinner fa-spin"></i>
+                                    <p>Loading broker connections...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                <!-- Strategy Summary Card - Full Width -->
+                <div class="dashboard-card strategy-card full-width">
+                        <div class="card-header">
+                            <h3><i class="fas fa-robot"></i> Strategy Summary</h3>
+                            <div class="card-actions">
+                                <button class="btn-icon" onclick="dashboard.refreshStrategyData()" title="Refresh strategies">
+                                    <i class="fas fa-sync-alt"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-content" id="strategyContent">
+                            <div class="strategy-cards-container" id="strategyCardsContainer">
+                                <div class="loading-placeholder">
+                                    <i class="fas fa-spinner fa-spin"></i>
+                                    <p>Loading strategies...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+            </section>
+            
+            <!-- Broker Management Section -->
+            <section id="broker" class="content-section">
+                <div class="broker-content">
+                    <div class="add-broker-section">
+                        <button class="btn btn-primary" onclick="showAddBrokerForm()">
+                            <i class="fas fa-plus"></i> Add New Broker
+                        </button>
+                    </div>
+                    
+                    <div class="broker-list" id="brokerList">
+                        <div class="dashboard-placeholder">
+                            <i class="fas fa-university"></i>
+                            <h4>Broker Management</h4>
+                            <p>Loading broker connections...</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Strategy Management Section -->
+            <section id="strategy" class="content-section">
+                <div class="strategy-content">
+                    <div class="add-strategy-section">
+                        <button class="btn btn-primary" onclick="showAddStrategyForm()">
+                            <i class="fas fa-plus"></i> Add New Strategy
+                        </button>
+                    </div>
+                    
+                    <div class="strategy-list" id="strategyList">
+                        <div class="dashboard-placeholder">
+                            <i class="fas fa-robot"></i>
+                            <h4>Strategy Management</h4>
+                            <p>Loading trading strategies...</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Settings Section -->
+            <section id="settings" class="content-section">
+                <div class="settings-content">
+                    <div class="settings-grid">
+                        <div class="setting-card">
+                            <h3><i class="fas fa-bell"></i> Notifications</h3>
+                            <p>Configure your notification preferences</p>
+                            <div class="setting-status">
+                                <span class="status-badge active">Active</span>
+                                <span class="status-text">Email & Telegram enabled</span>
+                            </div>
+                        </div>
+                        <div class="setting-card">
+                            <h3><i class="fas fa-shield-alt"></i> Security</h3>
+                            <p>Manage your account security settings</p>
+                            <div class="setting-status">
+                                <span class="status-badge active">Secure</span>
+                                <span class="status-text">2FA & OAuth enabled</span>
+                            </div>
+                        </div>
+                        <div class="setting-card">
+                            <h3><i class="fas fa-palette"></i> Appearance</h3>
+                            <p>Customize the platform appearance</p>
+                            <div class="setting-status">
+                                <span class="status-badge">Default</span>
+                                <span class="status-text">Light theme active</span>
+                    </div>
+                    </div>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Reports Section -->
+            <section id="reports" class="content-section">
+                <div class="reports-content">
+                    <div class="reports-grid">
+                        <div class="report-card">
+                            <h3><i class="fas fa-chart-line"></i> Performance Report</h3>
+                            <p>View your trading performance metrics</p>
+                            <div class="report-status">
+                                <span class="status-badge">Ready</span>
+                                <span class="status-text">Last updated: Today</span>
+                            </div>
+                        </div>
+                        <div class="report-card">
+                            <h3><i class="fas fa-chart-bar"></i> Risk Analysis</h3>
+                            <p>Analyze your portfolio risk exposure</p>
+                            <div class="report-status">
+                                <span class="status-badge">Ready</span>
+                                <span class="status-text">Last updated: Today</span>
+                    </div>
+                    </div>
+                        <div class="report-card">
+                            <h3><i class="fas fa-file-alt"></i> Trade History</h3>
+                        <p>Review your complete trade history</p>
+                            <div class="report-status">
+                                <span class="status-badge">Ready</span>
+                                <span class="status-text">Last updated: Today</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="left-menu.js?v=1.3"></script>
+    <script src="dashboard.js?v=1.2"></script>
+    <script src="crypto-prices.js?v=1.4"></script>
+    <script src="version.js?v=1.0"></script>
+    <script src="cache-manager.js?v=1.0"></script>
+    
+    <script>
+        // Debug functions
+        function toggleCryptoDebug() {
+            const debugDiv = document.getElementById('cryptoDebug');
+            if (debugDiv) {
+                debugDiv.style.display = debugDiv.style.display === 'none' ? 'block' : 'none';
+            }
+        }
+        
+        // Show debug info by default in development
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+            document.addEventListener('DOMContentLoaded', () => {
+                const debugDiv = document.getElementById('cryptoDebug');
+                if (debugDiv) {
+                    debugDiv.style.display = 'block';
+                }
+            });
+        }
+    </script>
+</body>
+</html>

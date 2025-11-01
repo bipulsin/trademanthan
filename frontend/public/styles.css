@@ -1,0 +1,685 @@
+/* Reset and Base Styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    line-height: 1.6;
+    color: #333;
+    background: linear-gradient(135deg, #1976d2 0%, #000000 100%);
+    min-height: 100vh;
+}
+
+/* Container */
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 0 2rem;
+}
+
+/* Header */
+.header {
+    background: rgba(0, 0, 0, 0.1);
+    backdrop-filter: blur(10px);
+    padding: 1rem 0;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.header .container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* Logo */
+.logo {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.2rem;
+}
+
+.logo-image {
+    width: 100px;
+    height: 100px;
+    border-radius: 12px;
+    object-fit: cover;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+.logo-title {
+    color: #FFD700;
+    font-size: 3rem;
+    font-weight: 700;
+    margin: 0;
+    text-align: center;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.title-trade {
+    font-family: 'Montserrat', sans-serif;
+    font-weight: 700;
+}
+
+.title-manthan {
+    font-family: 'Orbitron', monospace;
+    font-weight: 600;
+}
+
+.logo-tagline {
+    color: #ffffff !important;
+    font-size: 1rem;
+    margin: 0;
+    text-align: center;
+    opacity: 1;
+    font-weight: 400;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+    display: block;
+}
+
+/* Navigation */
+.nav {
+    display: flex;
+    gap: 1rem;
+}
+
+/* Header Sign In Button - Bigger and More Prominent */
+.nav .btn-primary {
+    padding: 1rem 2rem;
+    font-size: 1.1rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
+    color: #000;
+    border-radius: 30px;
+    box-shadow: 0 4px 15px rgba(255, 215, 0, 0.4);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    min-width: 140px;
+    text-align: center;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    animation: buttonPulse 2s ease-in-out infinite;
+}
+
+.nav .btn-primary i {
+    margin-right: 0.5rem;
+    font-size: 1rem;
+}
+
+@keyframes buttonPulse {
+    0%, 100% {
+        box-shadow: 0 4px 15px rgba(255, 215, 0, 0.4);
+    }
+    50% {
+        box-shadow: 0 6px 20px rgba(255, 215, 0, 0.6);
+    }
+}
+
+.nav .btn-primary:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 25px rgba(255, 215, 0, 0.6);
+    background: linear-gradient(135deg, #FFA500 0%, #FFD700 100%);
+    border-color: rgba(255, 255, 255, 0.4);
+}
+
+.nav .btn-primary:active {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 15px rgba(255, 215, 0, 0.4);
+}
+
+/* Buttons */
+.btn {
+    padding: 0.6rem 1.2rem;
+    border: none;
+    border-radius: 25px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-decoration: none;
+    display: inline-block;
+    font-size: 0.9rem;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);
+    color: white;
+}
+
+.btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(25, 118, 210, 0.3);
+}
+
+.btn-secondary {
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: translateY(-2px);
+}
+
+.btn-large {
+    padding: 0.8rem 1.6rem;
+    font-size: 1rem;
+}
+
+/* Main Content */
+.main {
+    margin-top: 80px;
+    min-height: calc(100vh - 80px);
+}
+
+/* Features Section */
+#features {
+    padding: 4rem 0;
+    background: rgba(255, 255, 255, 0.05);
+    overflow: hidden;
+}
+
+/* Logo Card */
+.logo-card {
+    background: transparent !important;
+    border-radius: 20px !important;
+    padding: 2rem !important;
+    text-align: center !important;
+    margin-bottom: 3rem !important;
+    box-shadow: none !important;
+    border: none !important;
+    transition: all 0.3s ease !important;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    position: relative !important;
+    z-index: 10 !important;
+    min-height: 250px !important;
+}
+
+.logo-card:hover {
+    transform: none !important;
+    box-shadow: none !important;
+    border-color: transparent !important;
+}
+
+.logo-card-image {
+    width: 200px !important;
+    height: 200px !important;
+    border-radius: 16px !important;
+    object-fit: cover !important;
+    border: 3px solid rgba(255, 255, 255, 0.3) !important;
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2) !important;
+    transition: all 0.3s ease !important;
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    margin: 0 auto !important;
+}
+
+.logo-card:hover .logo-card-image {
+    transform: scale(1.05) !important;
+    border-color: rgba(255, 255, 255, 0.5) !important;
+    box-shadow: 0 12px 35px rgba(0, 0, 0, 0.3) !important;
+}
+
+.features-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1.5rem;
+    margin-top: 0;
+    width: 100%;
+}
+
+.feature-card {
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 16px;
+    padding: 1.5rem;
+    text-align: center;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    transition: all 0.3s ease;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    min-width: 0;
+}
+
+.feature-card:hover {
+    transform: translateY(-10px) scale(1.02);
+    box-shadow: 0 20px 40px rgba(25, 118, 210, 0.2);
+}
+
+.feature-icon {
+    font-size: 2.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.feature-card h3 {
+    color: #1976d2;
+    font-size: 1.1rem;
+    margin-bottom: 0.75rem;
+    font-weight: 600;
+}
+
+.feature-card p {
+    color: #666;
+    line-height: 1.4;
+    font-size: 0.9rem;
+}
+
+/* Footer */
+.footer {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 2rem 0;
+    text-align: center;
+    margin-top: 4rem;
+}
+
+.footer p {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+/* Login Popup Styles */
+.login-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(10px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.login-popup {
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 20px;
+    padding: 1.5rem;
+    width: 90%;
+    max-width: 400px;
+    position: relative;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+    animation: slideIn 0.3s ease-out;
+    max-height: 90vh;
+    overflow-y: auto;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes slideOut {
+    from {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+}
+
+.close-btn {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: #666;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s ease;
+}
+
+.close-btn:hover {
+    background: rgba(0, 0, 0, 0.1);
+    color: #333;
+}
+
+.logo-container {
+    text-align: center;
+    margin-bottom: 1.5rem;
+}
+
+.logo-container .logo-image {
+    width: 50px;
+    height: 50px;
+    border-radius: 12px;
+    margin-bottom: 0.75rem;
+    border: 2px solid rgba(25, 118, 210, 0.2);
+}
+
+.logo-container h2 {
+    color: #1976d2;
+    font-size: 1.4rem;
+    font-weight: 700;
+}
+
+.login-form {
+    text-align: center;
+}
+
+.login-form h3 {
+    color: #333;
+    font-size: 1.2rem;
+    margin-bottom: 0.4rem;
+    font-weight: 600;
+}
+
+.login-form p {
+    color: #666;
+    margin-bottom: 1.5rem;
+    font-size: 0.9rem;
+}
+
+/* Google OAuth Button Styling */
+.g_id_signin {
+    margin-bottom: 1rem;
+    width: 100% !important;
+    display: block !important;
+    max-width: none !important;
+}
+
+.g_id_signin > div {
+    width: 100% !important;
+    max-width: none !important;
+}
+
+/* Force Google button to be full width - more specific selectors */
+.g_id_signin iframe,
+.g_id_signin div[role="button"],
+.g_id_signin div[data-width],
+.g_id_signin div[style*="width"],
+.g_id_signin div[style*="max-width"],
+.g_id_signin div[style*="min-width"] {
+    width: 100% !important;
+    max-width: none !important;
+    min-width: none !important;
+}
+
+/* Override any inline styles Google might add */
+.g_id_signin * {
+    width: 100% !important;
+    max-width: none !important;
+    min-width: none !important;
+}
+
+/* Ensure the button container takes full width */
+.g_id_signin {
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+}
+
+/* Additional forceful overrides for Google button */
+.g_id_signin,
+.g_id_signin > div,
+.g_id_signin > div > div,
+.g_id_signin iframe,
+.g_id_signin div[role="button"],
+.g_id_signin div[data-width],
+.g_id_signin div[style*="width"],
+.g_id_signin div[style*="max-width"],
+.g_id_signin div[style*="min-width"],
+.g_id_signin div[style*="display"],
+.g_id_signin div[style*="position"] {
+    width: 100% !important;
+    max-width: none !important;
+    min-width: none !important;
+    display: block !important;
+    position: relative !important;
+}
+
+/* Override any Google-specific classes */
+.g_id_signin .g_id_signin_button,
+.g_id_signin .g_id_signin_button > div,
+.g_id_signin .g_id_signin_button iframe {
+    width: 100% !important;
+    max-width: none !important;
+    min-width: none !important;
+}
+
+/* Instagram Button Styling */
+.btn-instagram {
+    background: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%);
+    color: white;
+    border: none;
+    margin-bottom: 1rem;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    font-weight: 500;
+    text-transform: none;
+    letter-spacing: 0.5px;
+}
+
+.btn-instagram:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(220, 39, 67, 0.3);
+}
+
+.btn-instagram i {
+    margin-right: 0.5rem;
+    font-size: 1.1rem;
+}
+
+.divider {
+    position: relative;
+    margin: 1rem 0;
+    text-align: center;
+}
+
+.divider::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: #ddd;
+}
+
+.divider span {
+    background: rgba(255, 255, 255, 0.95);
+    padding: 0 1rem;
+    color: #666;
+    font-size: 0.9rem;
+}
+
+.login-footer {
+    margin-top: 1.5rem;
+    text-align: center;
+    padding-top: 0.75rem;
+    border-top: 1px solid #eee;
+}
+
+.login-footer p {
+    color: #666;
+    font-size: 0.8rem;
+    line-height: 1.3;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .container {
+        padding: 0 1rem;
+    }
+    
+    .logo-title {
+        font-size: 2.5rem;
+        gap: 0.4rem;
+    }
+    
+    .logo-tagline {
+        font-size: 0.9rem;
+    }
+    
+    .logo-card {
+        padding: 1.5rem !important;
+        margin-bottom: 2rem !important;
+        min-height: 200px !important;
+    }
+    
+    .logo-card-image {
+        width: 150px !important;
+        height: 150px !important;
+    }
+    
+    .features-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1.5rem;
+    }
+    
+    .login-popup {
+        padding: 1.5rem;
+        margin: 1rem;
+    }
+    
+    .logo-container .logo-image {
+        width: 50px;
+        height: 50px;
+    }
+    
+    .logo-container h2 {
+        font-size: 1.25rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .logo-title {
+        font-size: 2rem;
+        gap: 0.3rem;
+    }
+    
+    .logo-tagline {
+        font-size: 0.8rem;
+    }
+    
+    .logo-card {
+        padding: 1rem !important;
+        margin-bottom: 1.5rem !important;
+        min-height: 150px !important;
+    }
+    
+    .logo-card-image {
+        width: 120px !important;
+        height: 120px !important;
+    }
+    
+    .features-grid {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+    
+    .btn {
+        padding: 0.6rem 1.2rem;
+        font-size: 0.85rem;
+    }
+    
+    .btn-large {
+        padding: 0.8rem 1.6rem;
+        font-size: 1rem;
+    }
+    
+    /* Mobile Header Sign In Button */
+    .nav .btn-primary {
+        padding: 0.7rem 1.2rem;
+        font-size: 0.9rem;
+        min-width: 100px;
+    }
+}
+
+/* Email Login Form */
+.email-login-form {
+    margin-top: 1rem;
+}
+
+.form-group {
+    margin-bottom: 0.75rem;
+}
+
+.form-group input {
+    width: 100%;
+    padding: 0.6rem 0.8rem;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    transition: border-color 0.3s ease;
+}
+
+.form-group input:focus {
+    outline: none;
+    border-color: #1976d2;
+    box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.1);
+}
+
+.btn-full {
+    width: 100%;
+    margin-top: 0.4rem;
+}
+
+/* Sign Up and Forgot Password Links */
+.signup-link {
+    margin-top: 1rem;
+    text-align: center;
+}
+
+.signup-link p {
+    margin: 0;
+    color: #666;
+    font-size: 0.9rem;
+}
+
+.signup-link a {
+    color: #1976d2;
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.signup-link a:hover {
+    text-decoration: underline;
+}
+
+.forgot-password {
+    margin-top: 0.75rem;
+    text-align: center;
+}
+
+.forgot-password a {
+    color: #666;
+    text-decoration: none;
+    font-size: 0.85rem;
+}
+
+.forgot-password a:hover {
+    color: #1976d2;
+    text-decoration: underline;
+}

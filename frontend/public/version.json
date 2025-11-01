@@ -1,0 +1,30 @@
+{
+    "version": "2025.08.22",
+    "buildDate": "2025-08-22T13:31:56.000Z",
+    "lastUpdated": "2025-08-22T13:31:56.000Z",
+    "changelog": [
+        "Fixed edit button functionality in strategy management",
+        "Added cache-busting mechanism",
+        "Improved error handling and debugging",
+        "Added trading bot integration"
+    ],
+    "files": {
+        "strategy.js": {
+            "version": "2025.08.22",
+            "hash": "sha256-abc123",
+            "lastModified": "2025-08-22T13:31:56.000Z"
+        },
+        "strategy.css": {
+            "version": "2025.08.22",
+            "hash": "sha256-def456",
+            "lastModified": "2025-08-22T13:31:56.000Z"
+        },
+        "left-menu.js": {
+            "version": "2025.08.22",
+            "hash": "sha256-ghi789",
+            "lastModified": "2025-08-22T13:31:56.000Z"
+        }
+    },
+    "cacheBuster": "20250822190156"
+}
+

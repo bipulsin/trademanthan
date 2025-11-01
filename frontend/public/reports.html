@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reports - Trade Manthan</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="reports.css">
+</head>
+<body>
+    <!-- Mobile Title Bar -->
+    <div class="mobile-title-bar">
+        <button class="mobile-menu-toggle" id="mobileMenuToggle">
+            <i class="fas fa-bars"></i>
+        </button>
+        <div class="mobile-title-content">
+            <img src="logo.jpeg" alt="Trade Manthan" class="mobile-logo">
+            <h1 class="mobile-title">Trade Manthan</h1>
+        </div>
+    </div>
+    
+    <div class="app-container">
+        <!-- Include Left Menu Module -->
+        <div id="left-menu-container"></div>
+        
+        <!-- Right Panel Content -->
+        <main class="right-panel">
+            <!-- Reports Header Section -->
+            <div class="reports-header">
+                <div class="reports-title-section">
+                    <h1 class="reports-title">Trading Reports</h1>
+                    <p class="reports-subtitle">View detailed trading reports and analytics</p>
+                </div>
+                <div class="reports-actions">
+                    <button class="btn btn-secondary" onclick="refreshReports()">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                    <button class="btn btn-primary" onclick="exportToCSV()">
+                        <i class="fas fa-download"></i> Export CSV
+                    </button>
+                    <button class="btn btn-primary" onclick="exportToExcel()">
+                        <i class="fas fa-file-excel"></i> Export Excel
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Reports Filters -->
+            <div class="reports-filters">
+                <div class="filter-group">
+                    <label for="dateRange">Date Range:</label>
+                    <select id="dateRange" onchange="filterReports()">
+                        <option value="7">Last 7 Days</option>
+                        <option value="30" selected>Last 30 Days</option>
+                        <option value="90">Last 90 Days</option>
+                        <option value="365">Last Year</option>
+                        <option value="custom">Custom Range</option>
+                    </select>
+                </div>
+                
+                <div class="filter-group">
+                    <label for="symbolFilter">Symbol:</label>
+                    <select id="symbolFilter" onchange="filterReports()">
+                        <option value="">All Symbols</option>
+                        <option value="BTC">BTC</option>
+                        <option value="ETH">ETH</option>
+                        <option value="AAPL">AAPL</option>
+                        <option value="GOOGL">GOOGL</option>
+                    </select>
+                </div>
+                
+                <div class="filter-group">
+                    <label for="pnlFilter">P&L Filter:</label>
+                    <select id="pnlFilter" onchange="filterReports()">
+                        <option value="">All Trades</option>
+                        <option value="profit">Profitable Only</option>
+                        <option value="loss">Loss Only</option>
+                    </select>
+                </div>
+                
+                <div class="filter-group">
+                    <label for="searchTrades">Search:</label>
+                    <input type="text" id="searchTrades" placeholder="Search trades..." onkeyup="filterReports()">
+                </div>
+            </div>
+            
+            <!-- Reports Summary -->
+            <div class="reports-summary">
+                <div class="summary-card">
+                    <div class="summary-icon">
+                        <i class="fas fa-chart-line"></i>
+                    </div>
+                    <div class="summary-content">
+                        <h3>Total Trades</h3>
+                        <p id="totalTrades">0</p>
+                    </div>
+                </div>
+                
+                <div class="summary-card">
+                    <div class="summary-icon">
+                        <i class="fas fa-arrow-up"></i>
+                    </div>
+                    <div class="summary-content">
+                        <h3>Total P&L</h3>
+                        <p id="totalPnL">$0.00</p>
+                    </div>
+                </div>
+                
+                <div class="summary-card">
+                    <div class="summary-icon">
+                        <i class="fas fa-percentage"></i>
+                    </div>
+                    <div class="summary-content">
+                        <h3>Win Rate</h3>
+                        <p id="winRate">0%</p>
+                    </div>
+                </div>
+                
+                <div class="summary-card">
+                    <div class="summary-icon">
+                        <i class="fas fa-dollar-sign"></i>
+                    </div>
+                    <div class="summary-content">
+                        <h3>Total Fees</h3>
+                        <p id="totalFees">$0.00</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Trades Table -->
+            <div class="trades-table-container">
+                <div class="table-header">
+                    <h3>Trades History</h3>
+                    <div class="table-actions">
+                        <span id="tradesCount">0 trades found</span>
+                    </div>
+                </div>
+                
+                <div class="table-wrapper">
+                    <table class="trades-table" id="tradesTable">
+                        <thead>
+                            <tr>
+                                <th>Date/Time</th>
+                                <th>Symbol</th>
+                                <th>Type</th>
+                                <th>Entry Price</th>
+                                <th>Exit Price</th>
+                                <th>Quantity</th>
+                                <th>P&L</th>
+                                <th>Fees</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tradesTableBody">
+                            <!-- Trades will be populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Pagination -->
+                <div class="pagination" id="pagination">
+                    <!-- Pagination will be populated by JavaScript -->
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Scripts -->
+    <script src="left-menu.js?v=1.2"></script>
+    <script src="reports.js?v=1.1"></script>
+    <script src="version.js?v=1.0"></script>
+    <script src="cache-manager.js?v=1.0"></script>
+</body>
+</html>

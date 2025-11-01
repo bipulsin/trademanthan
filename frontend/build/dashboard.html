@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Trade Manthan</title>
+    <link rel="stylesheet" href="dashboard.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Left Panel Menu -->
+        <aside class="left-panel">
+            <div class="panel-header">
+                <img src="logo.jpg" alt="Trade Manthan Logo" class="logo-image">
+                <h2>Trade Manthan</h2>
+            </div>
+            
+            <nav class="panel-nav">
+                <ul class="nav-list">
+                    <li class="nav-item active" data-section="dashboard">
+                        <i class="fas fa-chart-line"></i>
+                        <span>Dashboard</span>
+                    </li>
+                    <li class="nav-item" data-section="broker">
+                        <i class="fas fa-university"></i>
+                        <span>Broker Management</span>
+                    </li>
+                    <li class="nav-item" data-section="strategy">
+                        <i class="fas fa-robot"></i>
+                        <span>Strategy Management</span>
+                    </li>
+                    <li class="nav-item" data-section="settings">
+                        <i class="fas fa-cog"></i>
+                        <span>Settings</span>
+                    </li>
+                    <li class="nav-item" data-section="reports">
+                        <i class="fas fa-chart-bar"></i>
+                        <span>Reports</span>
+                    </li>
+                </ul>
+            </nav>
+            
+            <div class="panel-footer">
+                <div class="user-info">
+                    <img src="https://via.placeholder.com/40" alt="User Avatar" class="user-avatar" id="userAvatar">
+                    <div class="user-details">
+                        <span class="user-name" id="userName">Demo User</span>
+                        <span class="user-email" id="userEmail">demo@trademanthan.com</span>
+                    </div>
+                </div>
+                <button class="logout-btn" onclick="logout()">
+                    <i class="fas fa-sign-out-alt"></i>
+                    <span>Logout</span>
+                </button>
+            </div>
+        </aside>
+        
+        <!-- Right Panel Content -->
+        <main class="right-panel">
+            <!-- Dashboard Section -->
+            <section id="dashboard" class="content-section active">
+                <div class="section-header">
+                    <h1>Dashboard</h1>
+                    <p>Welcome back! Here's your trading overview</p>
+                </div>
+                
+                <div class="dashboard-grid">
+                    <!-- Broker Connection Card -->
+                    <div class="dashboard-card broker-card">
+                        <div class="card-header">
+                            <h3><i class="fas fa-university"></i> Broker Connection</h3>
+                        </div>
+                        <div class="card-content" id="brokerContent">
+                            <!-- Content will be populated by JavaScript -->
+                        </div>
+                    </div>
+                    
+                    <!-- Strategy Summary Card -->
+                    <div class="dashboard-card strategy-card">
+                        <div class="card-header">
+                            <h3><i class="fas fa-robot"></i> Strategy Summary</h3>
+                        </div>
+                        <div class="card-content" id="strategyContent">
+                            <!-- Content will be populated by JavaScript -->
+                        </div>
+                    </div>
+                    
+                    <!-- Live Crypto Prices Card -->
+                    <div class="dashboard-card crypto-card">
+                        <div class="card-header">
+                            <h3><i class="fas fa-coins"></i> Live Crypto Prices</h3>
+                        </div>
+                        <div class="card-content">
+                            <div class="crypto-grid" id="cryptoGrid">
+                                <!-- Crypto prices will be populated by JavaScript -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Broker Management Section -->
+            <section id="broker" class="content-section">
+                <div class="section-header">
+                    <h1>Broker Management</h1>
+                    <p>Connect and manage your trading brokers</p>
+                </div>
+                
+                <div class="broker-content">
+                    <div class="add-broker-section">
+                        <button class="btn btn-primary" onclick="showAddBrokerForm()">
+                            <i class="fas fa-plus"></i> Add New Broker
+                        </button>
+                    </div>
+                    
+                    <div class="broker-list" id="brokerList">
+                        <!-- Broker list will be populated by JavaScript -->
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Strategy Management Section -->
+            <section id="strategy" class="content-section">
+                <div class="section-header">
+                    <h1>Strategy Management</h1>
+                    <p>Create and manage your trading strategies</p>
+                </div>
+                
+                <div class="strategy-content">
+                    <div class="add-strategy-section">
+                        <button class="btn btn-primary" onclick="showAddStrategyForm()">
+                            <i class="fas fa-plus"></i> Create New Strategy
+                        </button>
+                    </div>
+                    
+                    <div class="strategy-list" id="strategyList">
+                        <!-- Strategy list will be populated by JavaScript -->
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Settings Section -->
+            <section id="settings" class="content-section">
+                <div class="section-header">
+                    <h1>Settings</h1>
+                    <p>Configure your trading platform preferences</p>
+                </div>
+                
+                <div class="settings-content">
+                    <div class="settings-card">
+                        <h3>Profile Settings</h3>
+                        <p>Manage your account profile and preferences</p>
+                        <button class="btn btn-secondary">Edit Profile</button>
+                    </div>
+                    
+                    <div class="settings-card">
+                        <h3>Notification Settings</h3>
+                        <p>Configure email and push notifications</p>
+                        <button class="btn btn-secondary">Configure</button>
+                    </div>
+                    
+                    <div class="settings-card">
+                        <h3>Security Settings</h3>
+                        <p>Manage your account security</p>
+                        <button class="btn btn-secondary">Security</button>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Reports Section -->
+            <section id="reports" class="content-section">
+                <div class="section-header">
+                    <h1>Reports</h1>
+                    <p>View detailed trading reports and analytics</p>
+                </div>
+                
+                <div class="reports-content">
+                    <div class="reports-card">
+                        <h3>Performance Report</h3>
+                        <p>View your trading performance over time</p>
+                        <button class="btn btn-secondary">Generate Report</button>
+                    </div>
+                    
+                    <div class="reports-card">
+                        <h3>Risk Analysis</h3>
+                        <p>Analyze your portfolio risk metrics</p>
+                        <button class="btn btn-secondary">View Analysis</button>
+                    </div>
+                    
+                    <div class="reports-card">
+                        <h3>Trade History</h3>
+                        <p>Review your complete trade history</p>
+                        <button class="btn btn-secondary">View History</button>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="dashboard.js"></script>
+</body>
+</html>
