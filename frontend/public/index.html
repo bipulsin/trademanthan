@@ -9,6 +9,33 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="icon" type="image/x-icon" href="favicon.ico">
     <style>
+        /* Override body background for home page */
+        body {
+            background: #ffffff !important;
+            min-height: 100vh;
+        }
+        
+        /* Update header for white background */
+        .header {
+            background: rgba(255, 255, 255, 0.95) !important;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.1) !important;
+        }
+        
+        .logo-title {
+            color: #1976d2 !important;
+        }
+        
+        .logo-tagline {
+            color: #666 !important;
+        }
+        
+        /* Update footer for white background */
+        .footer {
+            background: rgba(0, 0, 0, 0.05) !important;
+            color: #333 !important;
+            border-top: 1px solid rgba(0, 0, 0, 0.1) !important;
+        }
+        
         /* New Home Page Layout */
         .home-container {
             display: flex;
@@ -28,6 +55,7 @@
             align-items: center;
             justify-content: center;
             padding: 20px;
+            background: transparent;
         }
         
         .hero-image {
@@ -35,6 +63,7 @@
             width: 500px;
             height: auto;
             object-fit: contain;
+            background: transparent;
         }
         
         /* Right Side - 2x2 Grid */
@@ -70,20 +99,36 @@
         
         /* Feature Cards in 2x2 Grid */
         .right-content-section .feature-card {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: #f8f9fa;
+            border: 2px solid #e9ecef;
             border-radius: 16px;
             padding: 30px;
             text-align: center;
             transition: all 0.3s ease;
-            backdrop-filter: blur(10px);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
         }
         
         .right-content-section .feature-card:hover {
-            background: rgba(255, 255, 255, 0.08);
-            border-color: rgba(255, 215, 0, 0.3);
+            background: #ffffff;
+            border-color: #1976d2;
             transform: translateY(-5px);
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 8px 20px rgba(25, 118, 210, 0.2);
+        }
+        
+        /* Feature card text colors */
+        .right-content-section .feature-card h3 {
+            color: #1976d2;
+            margin: 15px 0 10px 0;
+        }
+        
+        .right-content-section .feature-card p {
+            color: #666;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        
+        .right-content-section .feature-icon {
+            font-size: 48px;
         }
         
         /* Responsive Design */
