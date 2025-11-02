@@ -87,21 +87,32 @@ Check Response Status
 
 **Backend Logic** (`services/upstox_service.py`):
 
+**IMPORTANT:** Index trends are determined by **candle color** (LTP vs Open Price), NOT VWAP.
+
 ```python
 def check_index_trends():
-    # Get NIFTY and BANKNIFTY data from Upstox
-    nifty_data = get_index_data("NIFTY 50")
-    banknifty_data = get_index_data("BANKNIFTY")
+    # Get NIFTY and BANKNIFTY OHLC data from Upstox
+    nifty_ohlc = get_ohlc_data("NIFTY 50")
+    banknifty_ohlc = get_ohlc_data("BANKNIFTY")
     
-    # Determine trend based on LTP vs VWAP
-    nifty_trend = 'bullish' if nifty_ltp > nifty_vwap else 'bearish'
-    banknifty_trend = 'bullish' if bank_ltp > bank_vwap else 'bearish'
+    # Extract day's open price and current LTP
+    nifty_day_open = nifty_ohlc['open']
+    nifty_ltp = nifty_ohlc['last_price']
+    
+    banknifty_day_open = banknifty_ohlc['open']
+    banknifty_ltp = banknifty_ohlc['last_price']
+    
+    # Determine trend based on CANDLE COLOR (LTP vs Day Open)
+    nifty_trend = 'bullish' if nifty_ltp > nifty_day_open else 'bearish'
+    banknifty_trend = 'bullish' if banknifty_ltp > banknifty_day_open else 'bearish'
 ```
 
-**Trend Indicators:**
-- **Bullish:** LTP > VWAP → ↑ (green arrow)
-- **Bearish:** LTP < VWAP → ↓ (red arrow)
-- **Neutral:** Unknown/Error → → (gray arrow)
+**Candle Color Logic:**
+- **Green Candle (Bullish):** LTP > Day Open Price → ↑ (green arrow)
+- **Red Candle (Bearish):** LTP < Day Open Price → ↓ (red arrow)
+- **Neutral:** LTP = Day Open (rare) → → (gray arrow)
+
+**Note:** This logic applies **ONLY to indices** (NIFTY50 & BANKNIFTY). Individual stocks use VWAP for Hold/Exit signals.
 
 ### 3. Index Display Update
 
@@ -259,6 +270,8 @@ else {
 
 **File:** `scan.js` (Lines 385-389)
 
+**NOTE:** Hold/Exit signals for **individual stocks** use VWAP, NOT Open Price.
+
 ```javascript
 const stock_ltp = stock.last_traded_price;
 const stock_vwap = stock.stock_vwap;
@@ -271,8 +284,12 @@ if (stock_ltp > stock_vwap) {
 ```
 
 **Signal Display:**
-- 🟢 **Hold:** Green badge (LTP > VWAP)
-- 🔴 **Exit:** Red badge (LTP ≤ VWAP)
+- 🟢 **Hold:** Green badge (Stock LTP > Stock VWAP)
+- 🔴 **Exit:** Red badge (Stock LTP ≤ Stock VWAP)
+
+**KEY DISTINCTION:**
+- **Index Trends (NIFTY/BANKNIFTY):** Use LTP vs Day Open (candle color)
+- **Stock Signals (Hold/Exit):** Use LTP vs VWAP (momentum indicator)
 
 ### 3. Section Display Logic
 
@@ -868,20 +885,24 @@ ELSE (network/temporary):
 
 ### 2. Index Trend Check Workflow
 
+**IMPORTANT:** Index trends use **Candle Color** (LTP vs Day Open), not VWAP!
+
 ```
 ┌─────────────────────────────────────────────────┐
-│  GET INDEX DATA (Upstox API)                    │
-│  - NIFTY 50: LTP, VWAP, Volume                  │
-│  - BANKNIFTY: LTP, VWAP, Volume                 │
+│  GET INDEX OHLC DATA (Upstox API)               │
+│  - NIFTY 50: Day Open, LTP, High, Low          │
+│  - BANKNIFTY: Day Open, LTP, High, Low         │
 └─────────────────────────────────────────────────┘
                     ↓
 ┌─────────────────────────────────────────────────┐
-│  CALCULATE TRENDS                               │
-│  nifty_trend = 'bullish' if LTP > VWAP          │
+│  DETERMINE CANDLE COLOR (TREND)                 │
+│  nifty_trend = 'bullish' if LTP > Day Open     │
 │               else 'bearish'                    │
+│  (Green candle if LTP > Open, Red if LTP < Open)│
 │                                                 │
-│  banknifty_trend = 'bullish' if LTP > VWAP      │
+│  banknifty_trend = 'bullish' if LTP > Day Open  │
 │                    else 'bearish'               │
+│  (Green candle if LTP > Open, Red if LTP < Open)│
 └─────────────────────────────────────────────────┘
                     ↓
 ┌─────────────────────────────────────────────────┐
