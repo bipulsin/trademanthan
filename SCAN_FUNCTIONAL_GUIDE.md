@@ -1,22 +1,49 @@
 # TradeManthan Scan Page - Functional Guide
 
+> **📱 For Users:** This guide explains how the scan page works, what it does automatically, and how to use it effectively.  
+> **👨‍💻 For Developers:** Complete technical documentation of algorithms, flows, and integration points.
+
 **URL:** https://trademanthan.in/scan.html  
-**Purpose:** Real-time stock scanning and intraday options trading alerts based on Chartink webhooks
+**Purpose:** Automated stock scanning and smart option trading recommendations
+
+---
+
+## 🎯 Quick Start (For End Users)
+
+**What does this page do?**
+1. ✅ Monitors NIFTY & BANKNIFTY market direction (every hour)
+2. ✅ Receives real-time stock alerts from Chartink.com
+3. ✅ Automatically finds the best option contracts to trade
+4. ✅ Shows you exactly what to buy, how much, and profit targets
+5. ✅ Tells you when to hold or exit based on market conditions
+
+**How to use:**
+1. Open the page - it starts working automatically
+2. Look at index trends (green ↑ = bullish, red ↓ = bearish)
+3. If both indices are same direction, you'll see trading alerts
+4. Each alert shows: Stock name, Option contract, Buy price, Sell target, Expected profit
+5. Green "Hold" = Keep position, Red "Exit" = Book profits
+6. Download CSV for your records
 
 ---
 
 ## Table of Contents
 
-1. [Overview](#overview)
-2. [Page Initialization Flow](#page-initialization-flow)
-3. [Index Price Monitoring](#index-price-monitoring)
-4. [Webhook Processing](#webhook-processing)
-5. [Trading Logic & Conditions](#trading-logic--conditions)
-6. [Authentication Flows](#authentication-flows)
-7. [API Endpoints](#api-endpoints)
-8. [Data Structures](#data-structures)
-9. [UI Components](#ui-components)
-10. [Error Handling](#error-handling)
+### 📱 For End Users
+1. [What Happens Automatically](#what-happens-automatically)
+2. [Understanding the Dashboard](#understanding-the-dashboard)
+3. [Reading Trading Signals](#reading-trading-signals)
+4. [Daily Automated Tasks](#daily-automated-tasks)
+
+### 👨‍💻 For Developers
+5. [Page Initialization Flow](#page-initialization-flow)
+6. [Index Price Monitoring](#index-price-monitoring)
+7. [Webhook Processing](#webhook-processing)
+8. [Trading Logic & Algorithms](#trading-logic--algorithms)
+9. [Authentication Flows](#authentication-flows)
+10. [API Endpoints](#api-endpoints)
+11. [Data Structures](#data-structures)
+12. [Error Handling](#error-handling)
 
 ---
 
@@ -25,10 +52,275 @@
 The scan page is an intelligent trading alert system that:
 - Receives real-time webhook alerts from Chartink.com
 - Monitors NIFTY 50 and BANKNIFTY index trends
-- Calculates optimal option contracts (OTM-1 strikes)
+- Calculates optimal option contracts (best liquidity from OTM-1 to OTM-5)
 - Determines entry/exit signals based on VWAP
 - Manages Upstox API authentication
 - Provides downloadable CSV reports
+
+---
+
+## 📱 FOR END USERS
+
+### What Happens Automatically
+
+When you open https://trademanthan.in/scan.html, the system automatically:
+
+#### ⏰ Every Hour (at 9:15 AM, 10:15 AM, 11:15 AM, etc.)
+
+**1. Checks Market Direction**
+- Fetches NIFTY 50 current price
+- Fetches BANKNIFTY current price
+- Determines if market is bullish (green ↑) or bearish (red ↓)
+- Shows you the trend in the title bar
+
+**How it determines trend:**
+- If index price is **ABOVE** today's opening price = Green candle = Bullish ↑
+- If index price is **BELOW** today's opening price = Red candle = Bearish ↓
+
+**2. Updates Trading Alerts**
+- Refreshes all stock alerts
+- Updates prices and profit calculations
+- Shows latest Hold/Exit signals
+
+#### 🔔 When Chartink Sends Alert (Real-time)
+
+**The system instantly:**
+1. Receives stock name and price from Chartink scanner
+2. Fetches current market price from Upstox
+3. Finds the best option contract (highest liquidity)
+4. Calculates how many to buy (based on lot size)
+5. Sets entry price and profit target (50% gain)
+6. Displays the complete trade recommendation
+
+**You see:**
+- 📈 BULLISH section for CALL options (when market is rising)
+- 📉 BEARISH section for PUT options (when market is falling)
+
+---
+
+### Understanding the Dashboard
+
+#### 🎯 Title Bar (Always Visible)
+
+```
+┌──────────────────────────────────────────────────┐
+│  Logo  |  TradeManthan - Intraday Options Algo  │
+│        |  NIFTY 50: 24,500 ↑  BANKNIFTY: 52,300 ↑│
+└──────────────────────────────────────────────────┘
+```
+
+**What each symbol means:**
+- ↑ Green Arrow = Bullish (price above today's open)
+- ↓ Red Arrow = Bearish (price below today's open)
+- → Gray Arrow = Neutral (no clear trend)
+
+#### ⚠️ Warning Messages
+
+**"Access Token Expired"**
+- **What it means:** Connection to Upstox expired
+- **What to do:** Click "Update Token" → "Login with Upstox"
+- **Why:** You need active Upstox connection for live data
+
+**"No Trade Applicable - Opposite Trends"**
+- **What it means:** NIFTY and BANKNIFTY moving in different directions
+- **What to do:** Wait for both to align in same direction
+- **Why:** Conflicting signals = risky trading conditions
+
+#### 📊 Trading Alert Tables
+
+Each alert shows you:
+
+| Column | What It Means | Example |
+|--------|---------------|---------|
+| **Stock Name** | Company symbol | RELIANCE |
+| **Stock LTP** | Current stock price | ₹2,450 |
+| **Stock VWAP** | Average price (volume-weighted) | ₹2,448 |
+| **Option Contract** | Exact option to trade | RELIANCE 25NOV 2500 CE |
+| **Qty** | How many contracts | 250 (lot size) |
+| **Buy Price** | Entry price per contract | ₹25.50 |
+| **Sell Price** | Target exit price | ₹38.25 (50% profit) |
+| **PnL** | Expected profit if target hit | ₹3,187 |
+
+#### 🟢 Hold / 🔴 Exit Signals
+
+**Green "Hold" Badge:**
+- Stock price is ABOVE average (VWAP)
+- Market has positive momentum
+- **Action:** Continue holding the position
+
+**Red "Exit" Badge:**
+- Stock price is BELOW average (VWAP)
+- Market losing momentum
+- **Action:** Book profits and exit
+
+---
+
+### Reading Trading Signals
+
+#### Example 1: Bullish Market Setup
+
+```
+Title Bar shows:
+NIFTY 50: 24,500 ↑ (Bullish)
+BANKNIFTY: 52,300 ↑ (Bullish)
+```
+
+**What you see:**
+- ✅ Both indices bullish = Trading allowed
+- 📈 BULLISH ALERTS section visible
+- Recommendations for CALL (CE) options
+
+**Sample Alert:**
+```
+RELIANCE | Stock LTP: ₹2,450 | VWAP: ₹2,448 | 🟢 Hold
+Option: RELIANCE 25NOV 2500 CE
+Qty: 250 | Buy: ₹25.50 | Sell: ₹38.25 | Profit: ₹3,187
+```
+
+**How to read this:**
+- RELIANCE stock triggered at ₹2,450
+- System suggests buying RELIANCE 25 November 2500 CALL option
+- Buy at ₹25.50 per contract
+- Quantity: 250 contracts (official lot size)
+- Sell target: ₹38.25 (50% profit)
+- If target hits: You make ₹3,187 profit
+- Signal: HOLD (price above average, keep position)
+
+#### Example 2: Opposite Trends - No Trading
+
+```
+Title Bar shows:
+NIFTY 50: 24,500 ↑ (Bullish)
+BANKNIFTY: 52,300 ↓ (Bearish)
+```
+
+**What you see:**
+- ⚠️ Warning: "No Trade Applicable"
+- Both sections visible (for information only)
+- Recommendation: Wait for alignment
+
+**Why:** When indices move in opposite directions, market signals are unclear and trading is risky.
+
+---
+
+### Daily Automated Tasks
+
+The system runs several automated tasks in the background to keep data fresh:
+
+#### 🌅 Every Morning at 9:00 AM IST
+
+**1. Master Stock Data Download**
+
+**What happens:**
+- Downloads latest instrument data from Dhan API
+- Updates all NSE stock and option details
+- Refreshes lot sizes, strike prices, expiry dates
+- Updates ~50,000+ instrument records
+
+**Why it matters:**
+- Ensures you have latest option contracts
+- Correct lot sizes for quantity calculations
+- Updated expiry dates for current month
+
+**Where:** `backend/services/master_stock_scheduler.py`
+
+**Data includes:**
+- Stock symbols and ISINs
+- Option strike prices
+- Lot sizes (NIFTY: 50, BANKNIFTY: 15, etc.)
+- Expiry dates (last Tuesday of month)
+- Instrument keys for Upstox API
+
+**File location on server:**
+```
+/home/ubuntu/trademanthan/data/instruments/nse_instruments.json
+```
+
+#### 📊 Daily Data Refresh
+
+**What gets updated:**
+- **Option contracts** for current month's expiry
+- **Lot sizes** (official exchange lot sizes)
+- **Strike intervals** (₹5, ₹10, ₹50, ₹100 based on stock price)
+- **Instrument mappings** (for Upstox API calls)
+
+**Automatic expiry month switching:**
+- If today is **1st to 18th** → Uses **current month** options
+- If today is **19th to 31st** → Uses **next month** options
+- Switches automatically after 18th of each month
+
+**Example:**
+- Nov 1-18: Shows November expiry options
+- Nov 19-30: Shows December expiry options
+- Auto-switches on Nov 19th at 9:00 AM
+
+#### 🔄 Continuous Updates (Every Hour at :15)
+
+**Starting 9:15 AM IST, then every hour:**
+
+**What refreshes:**
+1. NIFTY & BANKNIFTY prices and trends
+2. Existing alert data (updates prices)
+3. Hold/Exit signals (based on new VWAP)
+
+**Schedule:**
+- 9:15 AM - First update
+- 10:15 AM - Second update  
+- 11:15 AM - Third update
+- 12:15 PM - Fourth update
+- 1:15 PM - Fifth update
+- 2:15 PM - Sixth update
+- 3:15 PM - Seventh update (market close)
+- And continues if page stays open
+
+---
+
+### 📱 User-Friendly Summary
+
+#### What You Need to Know
+
+**🟢 When to Trade (Both Green ↑):**
+- NIFTY Bullish ↑ + BANKNIFTY Bullish ↑ = Trade CALLS
+- Look at BULLISH alerts section
+- Buy the recommended CALL options
+
+**🔴 When to Trade (Both Red ↓):**
+- NIFTY Bearish ↓ + BANKNIFTY Bearish ↓ = Trade PUTS  
+- Look at BEARISH alerts section
+- Buy the recommended PUT options
+
+**⚠️ When NOT to Trade (Opposite):**
+- One Green ↑, One Red ↓ = Don't trade
+- Market signals conflicting
+- Wait for both to align
+
+**🟢 When to Hold:**
+- Stock price ABOVE average (VWAP)
+- Positive momentum
+- Keep your position
+
+**🔴 When to Exit:**
+- Stock price BELOW average (VWAP)
+- Losing momentum
+- Book profits and exit
+
+#### Quick Actions
+
+**Download Your Alerts:**
+- Click "📥 Download CSV" button
+- Get Excel file with all recommendations
+- Keep records for your trading journal
+
+**Refresh Data Manually:**
+- Page auto-refreshes every hour
+- Or close and reopen browser tab
+- All latest data loads automatically
+
+**Update Upstox Connection:**
+- If you see "Token Expired" warning
+- Click "Login with Upstox" button
+- Authorize and come back
+- Page will refresh automatically
 
 ---
 
