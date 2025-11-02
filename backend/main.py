@@ -41,10 +41,10 @@ app.add_middleware(
 # Create database tables
 try:
     create_tables()
-    print("Database tables created successfully")
+    logger.info("✅ Database tables created successfully")
 except Exception as e:
-    print(f"Warning: Could not create database tables: {e}")
-    print("Database will be initialized when first accessed")
+    logger.warning(f"⚠️ Could not create database tables: {e}")
+    logger.warning("Database will be initialized when first accessed")
 
 # Include routers
 app.include_router(auth.router)
@@ -59,27 +59,36 @@ app.include_router(scan.router)
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on application startup"""
-    logger.info("=" * 60)
-    logger.info("🚀 Starting up Trade Manthan API...")
-    logger.info("=" * 60)
+    import logging
+    startup_logger = logging.getLogger("main.startup")
+    
+    startup_logger.info("=" * 60)
+    startup_logger.info("🚀 Starting up Trade Manthan API...")
+    startup_logger.info("=" * 60)
     
     # Start master stock scheduler (downloads CSV daily at 9:00 AM)
     try:
+        startup_logger.info("Starting master stock scheduler...")
         start_scheduler()
-        logger.info("✅ Master Stock Scheduler: STARTED (Daily at 9:00 AM IST)")
+        startup_logger.info("✅ Master Stock Scheduler: STARTED (Daily at 9:00 AM IST)")
     except Exception as e:
-        logger.error(f"❌ Master Stock Scheduler: FAILED - {e}")
+        startup_logger.error(f"❌ Master Stock Scheduler: FAILED - {e}")
+        import traceback
+        startup_logger.error(traceback.format_exc())
     
     # Start instruments scheduler (downloads JSON daily at 9:05 AM)
     try:
+        startup_logger.info("Starting instruments scheduler...")
         start_instruments_scheduler()
-        logger.info("✅ Instruments Scheduler: STARTED (Daily at 9:05 AM IST)")
+        startup_logger.info("✅ Instruments Scheduler: STARTED (Daily at 9:05 AM IST)")
     except Exception as e:
-        logger.error(f"❌ Instruments Scheduler: FAILED - {e}")
+        startup_logger.error(f"❌ Instruments Scheduler: FAILED - {e}")
+        import traceback
+        startup_logger.error(traceback.format_exc())
     
-    logger.info("=" * 60)
-    logger.info("✅ Application startup complete - All schedulers active")
-    logger.info("=" * 60)
+    startup_logger.info("=" * 60)
+    startup_logger.info("✅ Application startup complete - All schedulers active")
+    startup_logger.info("=" * 60)
 
 @app.on_event("shutdown")
 async def shutdown_event():
