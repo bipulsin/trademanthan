@@ -431,6 +431,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         print(f"Alert name: {processed_data.get('alert_name', '')}")
         
         # Process each stock individually to fetch LTP and find option contract
+        # IMPORTANT: Always save at minimum stock_name and alert_time, even if enrichment fails
         enriched_stocks = []
         for stock in processed_data["stocks"]:
             stock_name = stock.get("stock_name", "")
@@ -438,35 +439,51 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             
             print(f"Processing stock: {stock_name}")
             
-            # Fetch LTP from Upstox API using market-quote/ltp endpoint
-            stock_ltp = vwap_service.get_stock_ltp_from_market_quote(stock_name)
+            # Initialize with defaults (will be saved even if API calls fail)
+            stock_ltp = trigger_price
+            stock_vwap = 0.0
             
-            if not stock_ltp or stock_ltp == 0:
-                print(f"Could not fetch LTP for {stock_name}, using trigger price")
+            # Try to fetch LTP from Upstox API (may fail if token expired)
+            try:
+                fetched_ltp = vwap_service.get_stock_ltp_from_market_quote(stock_name)
+                if fetched_ltp and fetched_ltp > 0:
+                    stock_ltp = fetched_ltp
+                    print(f"Stock LTP for {stock_name}: ₹{stock_ltp}")
+                else:
+                    print(f"Could not fetch LTP for {stock_name}, using trigger price: ₹{trigger_price}")
+            except Exception as e:
+                print(f"⚠️ LTP fetch failed for {stock_name} (token issue?): {str(e)} - Using trigger price")
                 stock_ltp = trigger_price
             
-            print(f"Stock LTP for {stock_name}: ₹{stock_ltp}")
-            
-            # Fetch Stock VWAP using Upstox historical candles
-            stock_vwap = 0.0
+            # Try to fetch Stock VWAP (may fail if token expired)
             try:
-                stock_vwap = vwap_service.get_stock_vwap(stock_name)
-                if stock_vwap > 0:
+                fetched_vwap = vwap_service.get_stock_vwap(stock_name)
+                if fetched_vwap and fetched_vwap > 0:
+                    stock_vwap = fetched_vwap
                     print(f"Stock VWAP for {stock_name}: ₹{stock_vwap}")
                 else:
                     print(f"Could not fetch VWAP for {stock_name}")
             except Exception as e:
-                print(f"Error fetching VWAP for {stock_name}: {str(e)}")
+                print(f"⚠️ VWAP fetch failed for {stock_name} (token issue?): {str(e)}")
             
-            # Find option contract from master_stock table
-            option_contract = find_option_contract_from_master_stock(
-                db, stock_name, forced_option_type, stock_ltp, vwap_service
-            )
-            
-            # Extract option strike from option contract if available
+            # Initialize option-related fields with defaults
+            option_contract = None
             option_strike = 0.0
             qty = 0
             option_ltp = 0.0
+            
+            # Try to find option contract (may fail if token expired)
+            try:
+                option_contract = find_option_contract_from_master_stock(
+                    db, stock_name, forced_option_type, stock_ltp, vwap_service
+                )
+                if not option_contract:
+                    print(f"⚠️ No option contract found for {stock_name}")
+            except Exception as e:
+                print(f"⚠️ Option contract search failed for {stock_name} (token issue?): {str(e)}")
+                option_contract = None
+            
+            # Extract option strike and fetch option LTP if contract found
             if option_contract:
                 import re
                 # Extract strike from format: STOCK-Nov2025-STRIKE-CE/PE
@@ -568,21 +585,30 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     print(f"Error fetching lot_size/option_ltp: {str(e)}")
             
             # Create enriched stock data
+            # GUARANTEED FIELDS (always available from Chartink):
+            # - stock_name, trigger_price, alert_time
+            # OPTIONAL FIELDS (may be missing if Upstox token expired):
+            # - stock_ltp, stock_vwap, option_contract, option_ltp, qty
             enriched_stock = {
                 "stock_name": stock_name,
                 "trigger_price": trigger_price,
-                "last_traded_price": stock_ltp,
-                "stock_vwap": stock_vwap,  # Fetched from Yahoo VWAP service
+                "last_traded_price": stock_ltp,  # May be trigger_price if fetch failed
+                "stock_vwap": stock_vwap,  # May be 0.0 if fetch failed
                 "option_type": forced_option_type,
-                "option_contract": option_contract or "",
-                "otm1_strike": option_strike,  # Extract strike from option contract
-                "option_ltp": option_ltp,  # Fetched from Upstox API
-                "option_vwap": 0.0,  # Not used in new approach
-                "qty": qty  # Add qty from lot_size
+                "option_contract": option_contract or "",  # May be empty if not found
+                "otm1_strike": option_strike,  # May be 0.0 if not found
+                "option_ltp": option_ltp,  # May be 0.0 if fetch failed
+                "option_vwap": 0.0,  # Not used
+                "qty": qty  # May be 0 if not found
             }
             
             enriched_stocks.append(enriched_stock)
-            print(f"Enriched stock: {stock_name} - LTP: ₹{stock_ltp}, Option: {option_contract}")
+            
+            # Log what we got
+            if option_contract:
+                print(f"✅ Enriched stock: {stock_name} - LTP: ₹{stock_ltp}, Option: {option_contract}, Qty: {qty}")
+            else:
+                print(f"⚠️ Partial data for: {stock_name} - LTP: ₹{stock_ltp}, Option: N/A (token issue?)")
         
         processed_data["stocks"] = enriched_stocks
         print(f"Successfully processed {len(enriched_stocks)} stocks")
@@ -616,10 +642,16 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             print(f"⚠️ Index trends opposite (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend}) - Trade entry BLOCKED")
         
         # Save each stock to database
+        # CRITICAL: Always save at minimum stock_name and alert_time, even if enrichment failed
         saved_count = 0
+        failed_count = 0
         SL_LOSS_TARGET = 3100.0  # Target loss for stop loss trigger
         
+        print(f"\n💾 Saving {len(processed_data.get('stocks', []))} stocks to database...")
+        
         for stock in processed_data.get("stocks", []):
+            stock_name = stock.get("stock_name", "UNKNOWN")
+            
             try:
                 # Get option_ltp value and lot_size
                 option_ltp_value = stock.get("option_ltp", 0.0)
@@ -635,7 +667,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     stop_loss_price = max(0.05, option_ltp_value - (SL_LOSS_TARGET / qty))
                     status = 'bought'  # Trade entered
                     pnl = 0.0
-                    print(f"✅ TRADE ENTERED: {stock.get('stock_name')} - Buy: ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price}")
+                    print(f"✅ TRADE ENTERED: {stock_name} - Buy: ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price}")
                 else:
                     # No entry: set qty=0, buy_price=None, buy_time=None
                     qty = 0
@@ -643,22 +675,28 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     buy_time = None
                     sell_price = None
                     stop_loss_price = None
-                    status = 'no_entry'  # Trade not entered due to opposite trends
+                    status = 'no_entry'  # Trade not entered due to opposite trends or missing data
                     pnl = None
-                    print(f"⚠️ NO ENTRY: {stock.get('stock_name')} - Opposite index trends")
+                    
+                    # Log reason for no entry
+                    if not can_enter_trade:
+                        print(f"⚠️ NO ENTRY: {stock_name} - Opposite index trends")
+                    else:
+                        print(f"⚠️ NO ENTRY: {stock_name} - Missing option data (option_ltp={option_ltp_value}, qty={lot_size})")
                 
+                # ALWAYS create database record with whatever data we have
                 db_record = IntradayStockOption(
                     alert_time=triggered_datetime,
                     alert_type=data_type,
                     scan_name=processed_data.get("scan_name", ""),
-                    stock_name=stock.get("stock_name", ""),
-                    stock_ltp=stock.get("last_traded_price") or stock.get("trigger_price"),
+                    stock_name=stock_name,
+                    stock_ltp=stock.get("last_traded_price") or stock.get("trigger_price", 0.0),
                     stock_vwap=stock.get("stock_vwap", 0.0),
                     option_contract=stock.get("option_contract", ""),
                     option_type=stock.get("option_type", ""),
-                    option_strike=stock.get("otm1_strike"),
+                    option_strike=stock.get("otm1_strike", 0.0),
                     option_ltp=option_ltp_value,
-                    option_vwap=stock.get("option_vwap"),
+                    option_vwap=stock.get("option_vwap", 0.0),
                     qty=qty,
                     trade_date=trading_date,
                     status=status,
@@ -671,16 +709,69 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 )
                 db.add(db_record)
                 saved_count += 1
+                print(f"   💾 Saved {stock_name} to database (status: {status})")
+                
             except Exception as db_error:
-                print(f"Error saving stock {stock.get('stock_name')} to database: {str(db_error)}")
+                failed_count += 1
+                print(f"❌ Error saving stock {stock_name} to database: {str(db_error)}")
+                import traceback
+                traceback.print_exc()
+                
+                # Try to save with minimal data as last resort
+                try:
+                    print(f"   🔄 Attempting minimal save for {stock_name}...")
+                    minimal_record = IntradayStockOption(
+                        alert_time=triggered_datetime,
+                        alert_type=data_type,
+                        scan_name=processed_data.get("scan_name", "Unknown"),
+                        stock_name=stock_name,
+                        stock_ltp=stock.get("trigger_price", 0.0),
+                        stock_vwap=0.0,
+                        option_contract="",
+                        option_type=forced_option_type,
+                        option_strike=0.0,
+                        option_ltp=0.0,
+                        option_vwap=0.0,
+                        qty=0,
+                        trade_date=trading_date,
+                        status='alert_received',  # Minimal status
+                        buy_price=None,
+                        stop_loss=None,
+                        sell_price=None,
+                        buy_time=None,
+                        exit_reason=None,
+                        pnl=None
+                    )
+                    db.add(minimal_record)
+                    saved_count += 1
+                    print(f"   ✅ Minimal save successful for {stock_name}")
+                except Exception as minimal_error:
+                    print(f"   ❌ Even minimal save failed for {stock_name}: {str(minimal_error)}")
         
         # Commit all database records
         try:
             db.commit()
-            print(f"Saved {saved_count} stocks to database for {data_type} alert")
+            print(f"\n✅ DATABASE COMMIT SUCCESSFUL")
+            print(f"   • Saved: {saved_count} stocks")
+            if failed_count > 0:
+                print(f"   • Failed: {failed_count} stocks")
+            print(f"   • Alert Type: {data_type}")
+            print(f"   • Alert Time: {triggered_at_str}")
         except Exception as commit_error:
-            print(f"Error committing to database: {str(commit_error)}")
+            print(f"\n❌ DATABASE COMMIT FAILED: {str(commit_error)}")
+            print(f"   • Attempted to save: {saved_count} stocks")
+            print(f"   • Rolling back transaction...")
             db.rollback()
+            
+            # Log all stock names that were in this webhook for recovery
+            print(f"\n⚠️ LOST ALERT - Stock names for manual recovery:")
+            for stock in processed_data.get("stocks", []):
+                print(f"   - {stock.get('stock_name', 'UNKNOWN')}: {stock.get('trigger_price', 0.0)}")
+            
+            raise HTTPException(
+                status_code=500,
+                detail=f"Database commit failed: {str(commit_error)}"
+            )
         
         # Add this alert to the beginning of the list (newest first) - in-memory cache
         target_data["alerts"].insert(0, processed_data)
