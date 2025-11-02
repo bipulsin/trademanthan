@@ -11,6 +11,8 @@ import os
 from datetime import datetime
 import logging
 from pathlib import Path
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 logger = logging.getLogger(__name__)
 
@@ -173,7 +175,7 @@ class InstrumentsDownloader:
 instruments_downloader = InstrumentsDownloader()
 
 
-def download_daily_instruments():
+async def download_daily_instruments():
     """Function to be called by scheduler for daily download"""
     try:
         logger.info("Starting daily instruments download at {}".format(datetime.now()))
@@ -192,7 +194,62 @@ def download_daily_instruments():
         return False
 
 
+class InstrumentsScheduler:
+    """Scheduler for downloading Upstox instruments data"""
+    
+    def __init__(self):
+        self.scheduler = AsyncIOScheduler(timezone='Asia/Kolkata')
+        self.is_running = False
+        
+    def start(self):
+        """Start the scheduler"""
+        if not self.is_running:
+            # Schedule daily download at 9:05 AM IST (5 min after master_stock)
+            self.scheduler.add_job(
+                download_daily_instruments,
+                trigger=CronTrigger(hour=9, minute=5, timezone='Asia/Kolkata'),
+                id='instruments_daily_download',
+                name='Download Upstox Instruments',
+                replace_existing=True
+            )
+            
+            self.scheduler.start()
+            self.is_running = True
+            logger.info("Instruments Scheduler started - Daily download at 9:05 AM IST")
+    
+    def stop(self):
+        """Stop the scheduler"""
+        if self.is_running:
+            self.scheduler.shutdown()
+            self.is_running = False
+            logger.info("Instruments Scheduler stopped")
+    
+    def run_now(self):
+        """Manually trigger the download (for testing)"""
+        logger.info("Manually triggering instruments download...")
+        self.scheduler.add_job(
+            download_daily_instruments,
+            id='instruments_manual_download',
+            replace_existing=True
+        )
+
+
+# Global scheduler instance
+instruments_scheduler = InstrumentsScheduler()
+
+
+def start_instruments_scheduler():
+    """Start the instruments scheduler"""
+    instruments_scheduler.start()
+
+
+def stop_instruments_scheduler():
+    """Stop the instruments scheduler"""
+    instruments_scheduler.stop()
+
+
 if __name__ == "__main__":
     # Test the download
     logging.basicConfig(level=logging.INFO)
-    download_daily_instruments()
+    import asyncio
+    asyncio.run(download_daily_instruments())

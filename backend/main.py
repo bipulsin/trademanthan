@@ -15,6 +15,7 @@ import routers.products as products
 import routers.algo as algo
 import routers.scan as scan
 from services.master_stock_scheduler import start_scheduler, stop_scheduler
+from services.instruments_downloader import start_instruments_scheduler, stop_instruments_scheduler
 
 load_dotenv()
 
@@ -56,12 +57,19 @@ async def startup_event():
     """Initialize services on application startup"""
     print("Starting up Trade Manthan API...")
     
-    # Start master stock scheduler (downloads CSV daily at 9 AM)
+    # Start master stock scheduler (downloads CSV daily at 9:00 AM)
     try:
         start_scheduler()
-        print("Master stock scheduler started successfully")
+        print("✅ Master stock scheduler started successfully")
     except Exception as e:
-        print(f"Warning: Could not start master stock scheduler: {e}")
+        print(f"⚠️ Warning: Could not start master stock scheduler: {e}")
+    
+    # Start instruments scheduler (downloads JSON daily at 9:05 AM)
+    try:
+        start_instruments_scheduler()
+        print("✅ Instruments scheduler started successfully")
+    except Exception as e:
+        print(f"⚠️ Warning: Could not start instruments scheduler: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -71,9 +79,16 @@ async def shutdown_event():
     # Stop master stock scheduler
     try:
         stop_scheduler()
-        print("Master stock scheduler stopped")
+        print("✅ Master stock scheduler stopped")
     except Exception as e:
-        print(f"Warning: Error stopping scheduler: {e}")
+        print(f"⚠️ Warning: Error stopping master stock scheduler: {e}")
+    
+    # Stop instruments scheduler
+    try:
+        stop_instruments_scheduler()
+        print("✅ Instruments scheduler stopped")
+    except Exception as e:
+        print(f"⚠️ Warning: Error stopping instruments scheduler: {e}")
 
 def get_database_info():
     """Get database connection information"""
