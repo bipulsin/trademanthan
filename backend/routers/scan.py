@@ -1460,14 +1460,8 @@ async def upstox_oauth_login():
             f"&state={state}"
         )
         
-        return JSONResponse(
-            status_code=200,
-            content={
-                "status": "success",
-                "auth_url": auth_url,
-                "message": "Redirect user to this URL for authentication"
-            }
-        )
+        # Redirect user to Upstox authorization page
+        return RedirectResponse(url=auth_url, status_code=302)
         
     except Exception as e:
         return JSONResponse(
