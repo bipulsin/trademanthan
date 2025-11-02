@@ -403,18 +403,25 @@ function renderAlertGroup(alert, type) {
                             statusDisplay = '<span class="' + iconClass + '">' + iconText + '</span>';
                         }
                         
+                        // Check if this is a "No Entry" trade
+                        const isNoEntry = !stock.buy_price || stock.buy_price === 0 || stock.qty === 0;
+                        const buyPriceDisplay = isNoEntry ? '<span style="color: #dc2626; font-weight: 700;">No Entry</span>' : '₹' + formatPrice(stock.buy_price);
+                        const stopLossDisplay = isNoEntry ? '-' : '₹' + formatPrice(stock.stop_loss || 0);
+                        const sellPriceDisplay = isNoEntry ? '-' : '₹' + formatPrice(stock.sell_price || 0);
+                        const pnlDisplay = isNoEntry ? '-' : formatPNL(stock.pnl || 0);
+                        
                         return '<tr>' +
                             '<td>' + (index + 1) + '</td>' +
                             '<td class="stock-name">' + escapeHtml(stock.stock_name) + '</td>' +
                             '<td class="trigger-price">₹' + formatPrice(stock_ltp) + '</td>' +
                             '<td class="stock-vwap-col">₹' + formatPrice(stock_vwap) + '</td>' +
                             '<td class="option-contract">' + escapeHtml(stock.option_contract || 'N/A') + '</td>' +
-                            '<td class="qty">' + (stock.qty || 'N/A') + '</td>' +
-                            '<td class="buy-price">₹' + formatPrice(stock.buy_price || 0) + '</td>' +
-                            '<td class="stop-loss" style="color: #dc2626; font-weight: 600;">₹' + formatPrice(stock.stop_loss || 0) + '</td>' +
-                            '<td class="sell-price">₹' + formatPrice(stock.sell_price || 0) + '</td>' +
-                            '<td class="status-col">' + statusDisplay + '</td>' +
-                            '<td class="pnl">' + formatPNL(stock.pnl || 0) + '</td>' +
+                            '<td class="qty">' + (stock.qty || 0) + '</td>' +
+                            '<td class="buy-price">' + buyPriceDisplay + '</td>' +
+                            '<td class="stop-loss" style="color: #dc2626; font-weight: 600;">' + stopLossDisplay + '</td>' +
+                            '<td class="sell-price">' + sellPriceDisplay + '</td>' +
+                            '<td class="status-col">' + (isNoEntry ? '<span style="color: #dc2626; font-weight: 700;">No Entry</span>' : statusDisplay) + '</td>' +
+                            '<td class="pnl">' + pnlDisplay + '</td>' +
                             '</tr>';
                     }).join('')}
                 </tbody>
@@ -429,16 +436,23 @@ function renderAlertGroup(alert, type) {
                     const iconText = shouldHold ? '' : '✖';
                     const iconClass = shouldHold ? 'hold-icon' : 'exit-icon';
                     
+                    // Check if this is a "No Entry" trade
+                    const isNoEntry = !stock.buy_price || stock.buy_price === 0 || stock.qty === 0;
+                    
                     // Parse PnL for color coding
                     let pnlValue = parseFloat(stock.pnl || 0);
                     let pnlColor = pnlValue > 0 ? 'green' : (pnlValue < 0 ? 'red' : '');
                     
                     // Determine exit status display
                     let statusDisplay = '';
-                    if (stock.exit_reason === 'stop_loss') {
+                    if (isNoEntry) {
+                        statusDisplay = '<span style="background: #dc2626; color: white; padding: 3px 6px; border-radius: 4px; font-weight: 700; font-size: 10px;">No Entry</span>';
+                    } else if (stock.exit_reason === 'stop_loss') {
                         statusDisplay = '<span style="background: #dc2626; color: white; padding: 3px 6px; border-radius: 4px; font-weight: 700; font-size: 10px;">🛑 SL HIT</span>';
                     } else if (stock.exit_reason === 'profit_target') {
                         statusDisplay = '<span style="background: #16a34a; color: white; padding: 3px 6px; border-radius: 4px; font-weight: 700; font-size: 10px;">🎯 TARGET</span>';
+                    } else if (stock.exit_reason === 'time_based') {
+                        statusDisplay = '<span style="background: #f59e0b; color: white; padding: 3px 6px; border-radius: 4px; font-weight: 700; font-size: 10px;">⏰ TIME</span>';
                     } else if (stock.exit_reason) {
                         statusDisplay = '<span style="background: #6b7280; color: white; padding: 3px 6px; border-radius: 4px; font-weight: 700; font-size: 10px;">CLOSED</span>';
                     } else {
@@ -469,23 +483,23 @@ function renderAlertGroup(alert, type) {
                                     <div class="stock-card-value" style="font-size: 12px;">${escapeHtml(stock.option_contract || 'N/A')}</div>
                                 </div>
                                 <div style="flex: 1;">
-                                    <div class="stock-card-value">Q:${stock.qty || 'N/A'}</div>
+                                    <div class="stock-card-value">Q:${stock.qty || 0}</div>
                                 </div>
                             </div>
                             
                             <!-- Row 3: Buy Price, SL, Sell Price, PnL -->
                             <div class="stock-card-row">
                                 <div style="flex: 1;">
-                                    <div class="stock-card-value">B:₹${formatPrice(stock.buy_price || 0)}</div>
+                                    <div class="stock-card-value">${isNoEntry ? '<span style="color: #dc2626; font-weight: 700;">No Entry</span>' : 'B:₹' + formatPrice(stock.buy_price)}</div>
                                 </div>
                                 <div style="flex: 1;">
-                                    <div class="stock-card-value" style="color: #dc2626; font-weight: 600;">SL:₹${formatPrice(stock.stop_loss || 0)}</div>
+                                    <div class="stock-card-value" style="color: #dc2626; font-weight: 600;">${isNoEntry ? '-' : 'SL:₹' + formatPrice(stock.stop_loss || 0)}</div>
                                 </div>
                                 <div style="flex: 1;">
-                                    <div class="stock-card-value">S:₹${formatPrice(stock.sell_price || 0)}</div>
+                                    <div class="stock-card-value">${isNoEntry ? '-' : 'S:₹' + formatPrice(stock.sell_price || 0)}</div>
                                 </div>
                                 <div style="flex: 1;">
-                                    <div class="stock-card-value ${pnlColor}" style="font-weight: 700;">${pnlValue > 0 ? '+' : ''}₹${formatPrice(stock.pnl || 0)}</div>
+                                    <div class="stock-card-value ${pnlColor}" style="font-weight: 700;">${isNoEntry ? '-' : (pnlValue > 0 ? '+' : '') + '₹' + formatPrice(stock.pnl || 0)}</div>
                                 </div>
                             </div>
                         </div>
@@ -575,44 +589,30 @@ function displaySectionsBasedOnTrends(indexCheck, bullishData, bearishData) {
     
     console.log('Display sections based on trends:', { niftyTrend, bankniftyTrend });
     
-    // Hide opposite trends banner first
-    hideOppositeTrendsBanner();
+    // NEW LOGIC: ALWAYS display both sections regardless of index trends
+    // Index trends only affect trade ENTRY (buy_price), not alert DISPLAY
     
     // Clear both containers first
     bullishContainer.innerHTML = '';
     bearishContainer.innerHTML = '';
     
-    // Case 1: Both indices are bullish (uptrend) - Show BOTH sections
-    if (niftyTrend === 'bullish' && bankniftyTrend === 'bullish') {
-        console.log('Both bullish - showing both sections');
-        displayBullishData(bullishData);
-        displayBearishData(bearishData);
+    // ALWAYS show both bullish and bearish sections
+    console.log('Showing BOTH sections - alerts displayed regardless of index trends');
+    displayBullishData(bullishData);
+    displayBearishData(bearishData);
+    
+    // Show opposite trends warning banner if indices are not aligned
+    if (niftyTrend !== bankniftyTrend && niftyTrend !== 'unknown' && bankniftyTrend !== 'unknown') {
+        console.log('Opposite trends detected - trades will show "No Entry"');
+        // Note: Backend will handle "No Entry" logic when setting buy_price
+        // Alerts are still displayed, but trades won't be entered
+        // This banner is informational only - we still show all alerts
+        // Commented out showOppositeTrendsBanner() as we're changing the logic
+        // showOppositeTrendsBanner(niftyTrend, bankniftyTrend);
+    } else {
+        hideOppositeTrendsBanner();
     }
-    // Case 2: Both indices are bearish (downtrend) - Show ONLY BEARISH section
-    else if (niftyTrend === 'bearish' && bankniftyTrend === 'bearish') {
-        console.log('Both bearish - showing ONLY BEARISH section');
-        displayBearishData(bearishData);
-        
-        // Show message about no bullish trades available
-        bullishContainer.innerHTML = `
-            <div style="text-align: center; padding: 40px; color: #666;">
-                <p style="font-size: 18px; margin-bottom: 10px;">No Bullish Alerts Available</p>
-                <p style="font-size: 14px; color: #888;">Both NIFTY50 & BANKNIFTY are in Bearish Trend</p>
-        </div>
-    `;
-    }
-    // Case 3: Both indices are in opposite trends - Show NO DATA message
-    else if ((niftyTrend === 'bullish' && bankniftyTrend === 'bearish') || 
-             (niftyTrend === 'bearish' && bankniftyTrend === 'bullish')) {
-        console.log('Opposite trends - showing warning message');
-        displayOppositeTrends(indexCheck);
-    }
-    // Case 4: One or both neutral/unknown - Show both sections
-    else {
-        console.log('Neutral/unknown - showing both sections');
-        displayBullishData(bullishData);
-        displayBearishData(bearishData);
-    }
+    
 }
 
 // Display opposite trends warning

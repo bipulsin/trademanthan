@@ -600,23 +600,52 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             target_data["date"] = current_date
             target_data["alerts"] = []
         
+        # Check index trends at the time of alert
+        # Index trends determine trade entry, not alert display
+        index_trends = vwap_service.check_index_trends()
+        nifty_trend = index_trends.get("nifty", {}).get("trend", "unknown")
+        banknifty_trend = index_trends.get("banknifty", {}).get("trend", "unknown")
+        
+        # Determine if trade entry is allowed (both indices same direction)
+        can_enter_trade = False
+        if (nifty_trend == "bullish" and banknifty_trend == "bullish") or \
+           (nifty_trend == "bearish" and banknifty_trend == "bearish"):
+            can_enter_trade = True
+            print(f"✅ Index trends aligned ({nifty_trend}) - Trade entry ALLOWED")
+        else:
+            print(f"⚠️ Index trends opposite (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend}) - Trade entry BLOCKED")
+        
         # Save each stock to database
         saved_count = 0
         SL_LOSS_TARGET = 3100.0  # Target loss for stop loss trigger
         
         for stock in processed_data.get("stocks", []):
             try:
-                # Get option_ltp value and qty
+                # Get option_ltp value and lot_size
                 option_ltp_value = stock.get("option_ltp", 0.0)
-                qty = stock.get("qty", 0)
+                lot_size = stock.get("qty", 0)
                 
-                # Calculate Stop Loss (SL) price
-                # SL should trigger when loss reaches approximately -₹3,100
-                # Formula: SL_price = buy_price - (SL_LOSS_TARGET / qty)
-                stop_loss_price = None
-                if option_ltp_value > 0 and qty > 0:
+                # Determine trade entry based on index trends
+                if can_enter_trade and option_ltp_value > 0 and lot_size > 0:
+                    # Enter trade: set qty, buy_price, buy_time, stop_loss
+                    qty = lot_size
+                    buy_price = option_ltp_value
+                    buy_time = triggered_datetime
+                    sell_price = option_ltp_value
                     stop_loss_price = max(0.05, option_ltp_value - (SL_LOSS_TARGET / qty))
-                    # Ensure SL is at least ₹0.05 (minimum tick size)
+                    status = 'bought'  # Trade entered
+                    pnl = 0.0
+                    print(f"✅ TRADE ENTERED: {stock.get('stock_name')} - Buy: ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price}")
+                else:
+                    # No entry: set qty=0, buy_price=None, buy_time=None
+                    qty = 0
+                    buy_price = None
+                    buy_time = None
+                    sell_price = None
+                    stop_loss_price = None
+                    status = 'no_entry'  # Trade not entered due to opposite trends
+                    pnl = None
+                    print(f"⚠️ NO ENTRY: {stock.get('stock_name')} - Opposite index trends")
                 
                 db_record = IntradayStockOption(
                     alert_time=triggered_datetime,
@@ -632,15 +661,13 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     option_vwap=stock.get("option_vwap"),
                     qty=qty,
                     trade_date=trading_date,
-                    status='alert_received',
-                    # Set buy_price and sell_price to option_ltp on first webhook
-                    buy_price=option_ltp_value,
-                    stop_loss=stop_loss_price,  # Set calculated SL price
-                    sell_price=option_ltp_value,
-                    buy_time=triggered_datetime,  # Set buy_time to alert_time
-                    exit_reason=None,  # Not exited yet
-                    # PnL is 0 initially (buy_price = sell_price)
-                    pnl=0.0
+                    status=status,
+                    buy_price=buy_price,
+                    stop_loss=stop_loss_price,
+                    sell_price=sell_price,
+                    buy_time=buy_time,
+                    exit_reason=None,
+                    pnl=pnl
                 )
                 db.add(db_record)
                 saved_count += 1
@@ -942,16 +969,30 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
         now = datetime.now(ist)
         today = now.replace(hour=0, minute=0, second=0, microsecond=0)
         
-        # Get all records for today
+        # Check if it's time-based exit time (3:25 PM IST)
+        current_time = now.time()
+        exit_time = datetime.strptime("15:25", "%H:%M").time()
+        is_exit_time = current_time >= exit_time
+        
+        if is_exit_time:
+            print(f"⏰ TIME-BASED EXIT: Current time {current_time.strftime('%H:%M')} >= 15:25 - Exiting all open trades")
+        
+        # Get all records for today that are NOT 'no_entry'
+        # Skip 'no_entry' trades - they will NEVER be entered
         records = db.query(IntradayStockOption).filter(
             IntradayStockOption.trade_date == today,
-            IntradayStockOption.option_contract.isnot(None)
+            IntradayStockOption.option_contract.isnot(None),
+            IntradayStockOption.status != 'no_entry'  # Skip no_entry trades
         ).all()
         
         updated_count = 0
         failed_count = 0
+        skipped_no_entry = db.query(IntradayStockOption).filter(
+            IntradayStockOption.trade_date == today,
+            IntradayStockOption.status == 'no_entry'
+        ).count()
         
-        print(f"Refreshing {len(records)} records...")
+        print(f"Refreshing {len(records)} records (skipped {skipped_no_entry} 'no_entry' trades)...")
         
         for record in records:
             try:
@@ -1016,10 +1057,35 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                             # Always update option_ltp for current price tracking
                             record.option_ltp = new_option_ltp
                             
+                            # Update stock_ltp and stock_vwap (fetch fresh values)
+                            try:
+                                # Fetch fresh stock LTP
+                                stock_name = record.stock_name
+                                stock_quote = vwap_service.get_stock_ltp_and_vwap(stock_name)
+                                if stock_quote:
+                                    if stock_quote.get('ltp'):
+                                        record.stock_ltp = stock_quote.get('ltp')
+                                    if stock_quote.get('vwap'):
+                                        record.stock_vwap = stock_quote.get('vwap')
+                            except Exception as e:
+                                print(f"Could not update stock LTP/VWAP for {record.stock_name}: {str(e)}")
+                            
                             # Only update sell_price if trade is not already closed
                             if not record.exit_reason:
-                                # Check if Stop Loss is hit
-                                if record.stop_loss and new_option_ltp <= record.stop_loss:
+                                # THREE EXIT CONDITIONS:
+                                
+                                # 1. Check if TIME-BASED EXIT (3:25 PM)
+                                if is_exit_time:
+                                    record.sell_price = new_option_ltp
+                                    record.sell_time = now
+                                    record.exit_reason = 'time_based'
+                                    record.status = 'sold'
+                                    if record.buy_price and record.qty:
+                                        record.pnl = (new_option_ltp - record.buy_price) * record.qty
+                                    print(f"⏰ TIME EXIT (3:25 PM) for {record.stock_name}: LTP=₹{new_option_ltp}, PnL=₹{record.pnl}")
+                                
+                                # 2. Check if Stop Loss is hit
+                                elif record.stop_loss and new_option_ltp <= record.stop_loss:
                                     record.sell_price = new_option_ltp
                                     record.sell_time = now
                                     record.exit_reason = 'stop_loss'
@@ -1028,7 +1094,7 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                         record.pnl = (new_option_ltp - record.buy_price) * record.qty
                                     print(f"🛑 STOP LOSS HIT for {record.stock_name}: SL=₹{record.stop_loss}, LTP=₹{new_option_ltp}, Loss=₹{record.pnl}")
                                 
-                                # Check if Profit Target is hit (50% gain)
+                                # 3. Check if Profit Target is hit (50% gain)
                                 elif record.buy_price and new_option_ltp >= (record.buy_price * 1.5):
                                     record.sell_price = new_option_ltp
                                     record.sell_time = now
@@ -1038,7 +1104,7 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                         record.pnl = (new_option_ltp - record.buy_price) * record.qty
                                     print(f"🎯 PROFIT TARGET HIT for {record.stock_name}: Target=₹{record.buy_price * 1.5}, LTP=₹{new_option_ltp}, Profit=₹{record.pnl}")
                                 
-                                # Otherwise, just update current price
+                                # Otherwise, just update current price and PnL
                                 else:
                                     record.sell_price = new_option_ltp
                                     record.sell_time = now
