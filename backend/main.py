@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import sessionmaker
 import os
+import logging
 from dotenv import load_dotenv
 
 from database import engine, SessionLocal, create_tables
@@ -18,6 +19,9 @@ from services.master_stock_scheduler import start_scheduler, stop_scheduler
 from services.instruments_downloader import start_instruments_scheduler, stop_instruments_scheduler
 
 load_dotenv()
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Trade Manthan API",
@@ -55,40 +59,48 @@ app.include_router(scan.router)
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on application startup"""
-    print("Starting up Trade Manthan API...")
+    logger.info("=" * 60)
+    logger.info("🚀 Starting up Trade Manthan API...")
+    logger.info("=" * 60)
     
     # Start master stock scheduler (downloads CSV daily at 9:00 AM)
     try:
         start_scheduler()
-        print("✅ Master stock scheduler started successfully")
+        logger.info("✅ Master Stock Scheduler: STARTED (Daily at 9:00 AM IST)")
     except Exception as e:
-        print(f"⚠️ Warning: Could not start master stock scheduler: {e}")
+        logger.error(f"❌ Master Stock Scheduler: FAILED - {e}")
     
     # Start instruments scheduler (downloads JSON daily at 9:05 AM)
     try:
         start_instruments_scheduler()
-        print("✅ Instruments scheduler started successfully")
+        logger.info("✅ Instruments Scheduler: STARTED (Daily at 9:05 AM IST)")
     except Exception as e:
-        print(f"⚠️ Warning: Could not start instruments scheduler: {e}")
+        logger.error(f"❌ Instruments Scheduler: FAILED - {e}")
+    
+    logger.info("=" * 60)
+    logger.info("✅ Application startup complete - All schedulers active")
+    logger.info("=" * 60)
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on application shutdown"""
-    print("Shutting down Trade Manthan API...")
+    logger.info("🛑 Shutting down Trade Manthan API...")
     
     # Stop master stock scheduler
     try:
         stop_scheduler()
-        print("✅ Master stock scheduler stopped")
+        logger.info("✅ Master stock scheduler stopped")
     except Exception as e:
-        print(f"⚠️ Warning: Error stopping master stock scheduler: {e}")
+        logger.warning(f"⚠️ Error stopping master stock scheduler: {e}")
     
     # Stop instruments scheduler
     try:
         stop_instruments_scheduler()
-        print("✅ Instruments scheduler stopped")
+        logger.info("✅ Instruments scheduler stopped")
     except Exception as e:
-        print(f"⚠️ Warning: Error stopping instruments scheduler: {e}")
+        logger.warning(f"⚠️ Error stopping instruments scheduler: {e}")
+    
+    logger.info("✅ Shutdown complete")
 
 def get_database_info():
     """Get database connection information"""
