@@ -18,18 +18,39 @@
             min-height: 100vh;
         }
         
-        /* Update header for white background */
+        /* Update header with blue to black gradient */
         .header {
-            background: rgba(255, 255, 255, 0.95) !important;
-            border-bottom: 1px solid rgba(0, 0, 0, 0.1) !important;
+            background: linear-gradient(90deg, #1976d2 20%, #000000 80%) !important;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
         }
         
         .logo-title {
-            color: #1976d2 !important;
+            color: #ffffff !important;
+        }
+        
+        .title-trade {
+            color: #FFD700 !important;
+        }
+        
+        .title-manthan {
+            color: #ffffff !important;
         }
         
         .logo-tagline {
-            color: #666 !important;
+            color: rgba(255, 255, 255, 0.8) !important;
+        }
+        
+        /* Update sign in button for dark header */
+        .header .btn-primary {
+            background: #FFD700 !important;
+            color: #000000 !important;
+            border: none !important;
+        }
+        
+        .header .btn-primary:hover {
+            background: #FFC107 !important;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(255, 215, 0, 0.4);
         }
         
         /* Update footer for white background */
