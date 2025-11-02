@@ -721,37 +721,42 @@ function refreshData() {
     refreshCurrentVWAP();
 }
 
-// Auto refresh only at specific hourly times: 09:15, 10:15, 11:15, 12:15, 13:15, 14:15, 15:15 IST
+// Auto refresh every 1 hour starting at 9:15 AM IST
 function startAutoRefresh() {
     // Clear any existing interval
     if (autoRefreshInterval) {
         clearInterval(autoRefreshInterval);
     }
     
-    const targetMinutes = 15; // :15 minute mark
-    const targetHours = new Set([9, 10, 11, 12, 13, 14, 15]);
+    const targetMinutes = 15; // :15 minute mark (9:15, 10:15, 11:15, etc.)
 
-    // Helper to check IST time
+    // Helper to check if it's :15 minute mark in IST
     function isTargetTimeIST(date) {
         try {
             const istDate = new Date(date.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
             const h = istDate.getHours();
             const m = istDate.getMinutes();
             const s = istDate.getSeconds();
-            return targetHours.has(h) && m === targetMinutes && s < 10; // trigger within first 10s of the minute
+            
+            // Trigger at :15 minute mark, starting from 9:15 AM
+            // Trigger within first 10 seconds of the target minute
+            return h >= 9 && m === targetMinutes && s < 10;
         } catch (e) {
             return false;
         }
     }
 
-    // Poll every 5 seconds and fire only at the target times
+    // Poll every 5 seconds and fire only at the hourly :15 mark
     autoRefreshInterval = setInterval(() => {
         const now = new Date();
         if (isTargetTimeIST(now)) {
-            console.log('Hourly index update at :15 IST - refreshing index prices only');
+            console.log('Hourly refresh at :15 IST - refreshing index prices and webhook data');
             loadIndexPrices();
+            loadLatestData();
         }
     }, 5000);
+    
+    console.log('Auto-refresh started: Will refresh every hour at :15 minute mark (9:15 AM onwards)');
 }
 
 // Refresh LTP and option strikes without reloading full data
