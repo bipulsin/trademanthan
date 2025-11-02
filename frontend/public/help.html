@@ -578,31 +578,79 @@
                                 <td>₹25.50</td>
                             </tr>
                             <tr>
+                                <td><strong>Stop Loss</strong></td>
+                                <td>Auto-calculated SL (₹3,100 max loss)</td>
+                                <td>₹13.10 (red color)</td>
+                            </tr>
+                            <tr>
                                 <td><strong>Sell Price</strong></td>
-                                <td>Target exit price</td>
-                                <td>₹38.25 (50% profit)</td>
+                                <td>Current/exit price</td>
+                                <td>₹38.25</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Status</strong></td>
+                                <td>Trade status indicator</td>
+                                <td>🛑 SL HIT / 🎯 TARGET / ✖ EXIT</td>
                             </tr>
                             <tr>
                                 <td><strong>PnL</strong></td>
-                                <td>Expected profit if target hit</td>
-                                <td>₹3,187</td>
+                                <td>Profit or Loss</td>
+                                <td>₹3,187 or -₹3,100</td>
                             </tr>
                         </tbody>
                     </table>
 
-                    <h3>🟢 Hold / 🔴 Exit Signals</h3>
+                    <h3>🛡️ Stop Loss & Risk Management</h3>
+                    <div class="warning-box">
+                        <strong>Automatic Stop Loss:</strong><br>
+                        • Calculated when trade is created<br>
+                        • Formula: <code>SL = buy_price - (₹3,100 / qty)</code><br>
+                        • <strong>Maximum loss per trade: ~₹3,100</strong><br>
+                        • Example: Buy ₹25.50, Qty 250 → SL ₹13.10<br>
+                        • Shown in <strong style="color: #dc2626;">red color</strong> in table
+                    </div>
+
+                    <h3>📊 Status Indicators</h3>
+                    <div class="danger-box">
+                        <strong>🛑 SL HIT (Red Badge):</strong><br>
+                        • Stop loss has been triggered<br>
+                        • Trade exited automatically<br>
+                        • Loss capped at ~₹3,100<br>
+                        • <strong>sell_price is LOCKED</strong> (cannot be changed)
+                    </div>
+
                     <div class="success-box">
-                        <strong>Green "Hold" Badge:</strong><br>
-                        • Stock price is ABOVE average (VWAP)<br>
-                        • Market has positive momentum<br>
-                        • <strong>Action:</strong> Continue holding the position
+                        <strong>🎯 TARGET (Green Badge):</strong><br>
+                        • Profit target reached (50% gain)<br>
+                        • Trade exited automatically<br>
+                        • Profit locked in<br>
+                        • <strong>sell_price is LOCKED</strong> (cannot be changed)
                     </div>
 
                     <div class="danger-box">
-                        <strong>Red "Exit" Badge:</strong><br>
+                        <strong>✖ EXIT (Big Red Cross - Pulsing):</strong><br>
                         • Stock price is BELOW average (VWAP)<br>
                         • Market losing momentum<br>
-                        • <strong>Action:</strong> Book profits and exit
+                        • <strong>Action:</strong> Consider exiting position<br>
+                        • Trade still OPEN (not auto-exited)
+                    </div>
+
+                    <div class="info-box">
+                        <strong>(Empty / Hidden):</strong><br>
+                        • Stock price is ABOVE average (VWAP)<br>
+                        • Market has positive momentum<br>
+                        • <strong>Action:</strong> Continue holding the position<br>
+                        • No indicator shown for clean UI
+                    </div>
+
+                    <h3>⚠️ Important: Trade Closure Protection</h3>
+                    <div class="warning-box">
+                        <strong>Once a trade is closed (SL HIT or TARGET):</strong><br>
+                        • <code>sell_price</code> is permanently locked<br>
+                        • <code>sell_time</code> is permanently locked<br>
+                        • <code>exit_reason</code> records why trade closed<br>
+                        • <strong>NO process can overwrite these values</strong><br>
+                        • Trade history is protected and immutable
                     </div>
                 </div>
 
@@ -866,8 +914,9 @@ document.addEventListener('DOMContentLoaded', function() {
                         <li>Get option chain for stock</li>
                         <li>Find optimal strike (OTM-1 to OTM-5 with highest liquidity)</li>
                         <li>Fetch lot size from master_stock table</li>
+                        <li><strong>Calculate Stop Loss (₹3,100 max loss)</strong></li>
                         <li>Calculate entry/exit prices and P&L</li>
-                        <li>Store in database as IntradayStockOption</li>
+                        <li>Store in database as IntradayStockOption with SL</li>
                     </ol>
 
                     <h3>Expiry Date Logic</h3>
@@ -938,11 +987,99 @@ if master_stock:
 else:
     qty = 1  # Fallback</code></pre>
 
-                    <h3>Hold/Exit Signal Logic</h3>
-                    <pre><code>if stock_ltp >= stock_vwap:
-    signal = "Hold"  # Green badge
+                    <h3>Stop Loss Calculation</h3>
+                    <div class="danger-box">
+                        <strong>RISK MANAGEMENT:</strong> Stop Loss is calculated automatically when a trade is created to limit maximum loss to approximately <strong>₹3,100 per trade</strong>.
+                    </div>
+
+                    <pre><code>SL_LOSS_TARGET = 3100.0  # Target loss for stop loss trigger
+
+# Calculate Stop Loss (SL) price
+# SL should trigger when loss reaches approximately -₹3,100
+# Formula: SL_price = buy_price - (SL_LOSS_TARGET / qty)
+stop_loss_price = None
+if option_ltp_value > 0 and qty > 0:
+    stop_loss_price = max(0.05, option_ltp_value - (SL_LOSS_TARGET / qty))
+    # Ensure SL is at least ₹0.05 (minimum tick size)</code></pre>
+
+                    <p><strong>Example:</strong></p>
+                    <ul>
+                        <li>Buy Price (option_ltp): ₹25.50</li>
+                        <li>Quantity: 250 contracts</li>
+                        <li>SL Loss Target: ₹3,100</li>
+                        <li><strong>Stop Loss = ₹25.50 - (₹3,100 / 250) = ₹25.50 - ₹12.40 = ₹13.10</strong></li>
+                        <li>If option price drops to ₹13.10 → Auto-exit with ~₹3,100 loss</li>
+                    </ul>
+
+                    <h3>Auto-Exit Logic (Hourly Monitoring)</h3>
+                    <div class="warning-box">
+                        <strong>CRITICAL:</strong> Once a trade is closed (exit_reason is set), <code>sell_price</code> and <code>sell_time</code> are <strong>PERMANENTLY LOCKED</strong> and cannot be overwritten by any process.
+                    </div>
+
+                    <pre><code># Only update sell_price if trade is not already closed
+if not record.exit_reason:
+    # Check if Stop Loss is hit
+    if record.stop_loss and new_option_ltp <= record.stop_loss:
+        record.sell_price = new_option_ltp
+        record.sell_time = now
+        record.exit_reason = 'stop_loss'
+        record.status = 'sold'
+        record.pnl = (new_option_ltp - record.buy_price) * record.qty
+        print(f"🛑 STOP LOSS HIT: SL=₹{record.stop_loss}, LTP=₹{new_option_ltp}")
+    
+    # Check if Profit Target is hit (50% gain)
+    elif record.buy_price and new_option_ltp >= (record.buy_price * 1.5):
+        record.sell_price = new_option_ltp
+        record.sell_time = now
+        record.exit_reason = 'profit_target'
+        record.status = 'sold'
+        record.pnl = (new_option_ltp - record.buy_price) * record.qty
+        print(f"🎯 PROFIT TARGET HIT: Target=₹{record.buy_price * 1.5}")
+    
+    # Otherwise, just update current price
+    else:
+        record.sell_price = new_option_ltp
+        record.sell_time = now
+        record.pnl = (new_option_ltp - record.buy_price) * record.qty
 else:
-    signal = "Exit"  # Red badge</code></pre>
+    # Trade already closed - sell_price is LOCKED
+    # Just calculate PnL for display
+    record.pnl = (record.sell_price - record.buy_price) * record.qty</code></pre>
+
+                    <h3>Exit Reasons</h3>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>exit_reason</th>
+                                <th>Trigger Condition</th>
+                                <th>Display</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>stop_loss</code></td>
+                                <td>option_ltp ≤ stop_loss</td>
+                                <td>🛑 SL HIT (red)</td>
+                            </tr>
+                            <tr>
+                                <td><code>profit_target</code></td>
+                                <td>option_ltp ≥ buy_price × 1.5</td>
+                                <td>🎯 TARGET (green)</td>
+                            </tr>
+                            <tr>
+                                <td><code>NULL</code> (open trade)</td>
+                                <td>Trade still active</td>
+                                <td>✖ EXIT or (hidden)</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <h3>Hold/Exit Signal Logic (Open Trades Only)</h3>
+                    <pre><code># For open trades (no exit_reason)
+if stock_ltp >= stock_vwap:
+    signal = "Hold"  # Hidden (no display)
+else:
+    signal = "Exit"  # Big red cross (✖) - pulsing</code></pre>
                 </div>
 
                 <div id="authentication" class="dev-content">
