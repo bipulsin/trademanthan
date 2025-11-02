@@ -1568,10 +1568,11 @@ async def upstox_oauth_callback(code: str = None, state: str = None, error: str 
         with open(service_file, 'w') as f:
             f.write(new_content)
         
-        # Restart the backend service
-        import subprocess
-        subprocess.run(['sudo', 'systemctl', 'restart', 'trademanthan-backend'], 
-                      capture_output=True)
+        # Update the token in memory (so it works immediately without restart)
+        if hasattr(vwap_service, 'access_token'):
+            vwap_service.access_token = access_token
+        if hasattr(vwap_service, 'upstox'):
+            vwap_service.upstox.set_access_token(access_token)
         
         # Redirect to scan page with success message
         return RedirectResponse(
