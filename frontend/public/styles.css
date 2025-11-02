@@ -50,9 +50,8 @@ body {
 .logo-image {
     width: 100px;
     height: 100px;
-    border-radius: 12px;
-    object-fit: cover;
-    border: 2px solid rgba(255, 255, 255, 0.2);
+    object-fit: contain;
+    background: transparent;
 }
 
 .logo-title {
@@ -218,10 +217,8 @@ body {
 .logo-card-image {
     width: 200px !important;
     height: 200px !important;
-    border-radius: 16px !important;
-    object-fit: cover !important;
-    border: 3px solid rgba(255, 255, 255, 0.3) !important;
-    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2) !important;
+    object-fit: contain !important;
+    background: transparent !important;
     transition: all 0.3s ease !important;
     display: block !important;
     visibility: visible !important;
@@ -231,8 +228,6 @@ body {
 
 .logo-card:hover .logo-card-image {
     transform: scale(1.05) !important;
-    border-color: rgba(255, 255, 255, 0.5) !important;
-    box-shadow: 0 12px 35px rgba(0, 0, 0, 0.3) !important;
 }
 
 .features-grid {
@@ -370,9 +365,8 @@ body {
 .logo-container .logo-image {
     width: 50px;
     height: 50px;
-    border-radius: 12px;
     margin-bottom: 0.75rem;
-    border: 2px solid rgba(25, 118, 210, 0.2);
+    background: transparent;
 }
 
 .logo-container h2 {
