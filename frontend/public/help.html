@@ -1,0 +1,1116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Help Guide - TradeManthan Scan Page</title>
+    <link rel="icon" href="favicon.ico" type="image/x-icon">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: #f5f5f5;
+        }
+
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, #1e40af 20%, #000000 80%);
+            color: white;
+            padding: 30px 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        .header-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            font-weight: 600;
+        }
+
+        .header-subtitle {
+            font-size: 14px;
+            opacity: 0.9;
+            margin-top: 5px;
+        }
+
+        .back-btn {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            text-decoration: none;
+            transition: all 0.3s;
+            border: 1px solid rgba(255,255,255,0.3);
+        }
+
+        .back-btn:hover {
+            background: rgba(255,255,255,0.3);
+            transform: translateY(-2px);
+        }
+
+        /* Container */
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            display: grid;
+            grid-template-columns: 280px 1fr;
+            gap: 30px;
+        }
+
+        /* Sidebar TOC */
+        .toc {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            position: sticky;
+            top: 120px;
+            height: fit-content;
+            max-height: calc(100vh - 140px);
+            overflow-y: auto;
+        }
+
+        .toc h2 {
+            font-size: 18px;
+            margin-bottom: 15px;
+            color: #1e40af;
+            border-bottom: 2px solid #1e40af;
+            padding-bottom: 10px;
+        }
+
+        .toc ul {
+            list-style: none;
+        }
+
+        .toc li {
+            margin-bottom: 8px;
+        }
+
+        .toc a {
+            color: #666;
+            text-decoration: none;
+            font-size: 14px;
+            transition: all 0.3s;
+            display: block;
+            padding: 5px 10px;
+            border-radius: 6px;
+        }
+
+        .toc a:hover {
+            background: #f0f4ff;
+            color: #1e40af;
+            padding-left: 15px;
+        }
+
+        .toc .user-section {
+            color: #16a34a;
+            font-weight: 500;
+        }
+
+        .toc .dev-section {
+            color: #dc2626;
+            font-weight: 500;
+        }
+
+        /* Main Content */
+        .content {
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        /* Quick Start Banner */
+        .quick-start {
+            background: linear-gradient(135deg, #16a34a, #15803d);
+            color: white;
+            padding: 30px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+        }
+
+        .quick-start h2 {
+            font-size: 24px;
+            margin-bottom: 15px;
+        }
+
+        .quick-start ul {
+            margin-left: 20px;
+            margin-top: 10px;
+        }
+
+        .quick-start li {
+            margin-bottom: 8px;
+        }
+
+        /* Section Headers */
+        .section-header {
+            font-size: 28px;
+            color: #1e40af;
+            margin: 40px 0 20px 0;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #1e40af;
+        }
+
+        .section-header:first-child {
+            margin-top: 0;
+        }
+
+        h2 {
+            font-size: 24px;
+            color: #333;
+            margin-top: 30px;
+            margin-bottom: 15px;
+        }
+
+        h3 {
+            font-size: 20px;
+            color: #555;
+            margin-top: 25px;
+            margin-bottom: 12px;
+        }
+
+        h4 {
+            font-size: 18px;
+            color: #666;
+            margin-top: 20px;
+            margin-bottom: 10px;
+        }
+
+        /* Paragraphs and Lists */
+        p {
+            margin-bottom: 15px;
+            color: #555;
+        }
+
+        ul, ol {
+            margin-left: 25px;
+            margin-bottom: 15px;
+        }
+
+        li {
+            margin-bottom: 8px;
+            color: #555;
+        }
+
+        /* Code and Pre */
+        code {
+            background: #f1f5f9;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 13px;
+            color: #dc2626;
+        }
+
+        pre {
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 15px 0;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        pre code {
+            background: none;
+            color: inherit;
+            padding: 0;
+        }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        th {
+            background: #1e40af;
+            color: white;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+        }
+
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        tr:nth-child(even) {
+            background: #f9fafb;
+        }
+
+        /* Info Boxes */
+        .info-box {
+            background: #eff6ff;
+            border-left: 4px solid #3b82f6;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 6px;
+        }
+
+        .warning-box {
+            background: #fef3c7;
+            border-left: 4px solid #f59e0b;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 6px;
+        }
+
+        .success-box {
+            background: #d1fae5;
+            border-left: 4px solid #10b981;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 6px;
+        }
+
+        .danger-box {
+            background: #fee2e2;
+            border-left: 4px solid #ef4444;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 6px;
+        }
+
+        /* User vs Developer Sections */
+        .user-content {
+            border-left: 5px solid #16a34a;
+            padding-left: 20px;
+            margin: 20px 0;
+        }
+
+        .dev-content {
+            border-left: 5px solid #dc2626;
+            padding-left: 20px;
+            margin: 20px 0;
+        }
+
+        /* Badges */
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-right: 8px;
+        }
+
+        .badge-user {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .badge-dev {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        /* Responsive */
+        @media (max-width: 968px) {
+            .container {
+                grid-template-columns: 1fr;
+            }
+
+            .toc {
+                position: static;
+                max-height: none;
+            }
+
+            .content {
+                padding: 20px;
+            }
+        }
+
+        /* Scroll to top button */
+        .scroll-top {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background: #1e40af;
+            color: white;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            transition: all 0.3s;
+            opacity: 0;
+            visibility: hidden;
+        }
+
+        .scroll-top.visible {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .scroll-top:hover {
+            background: #1e3a8a;
+            transform: translateY(-5px);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Header -->
+    <div class="header">
+        <div class="header-content">
+            <div>
+                <h1><i class="fas fa-book"></i> TradeManthan - Help Guide</h1>
+                <div class="header-subtitle">Complete guide for Scan Page - For Users & Developers</div>
+            </div>
+            <a href="scan.html" class="back-btn">
+                <i class="fas fa-arrow-left"></i> Back to Scan
+            </a>
+        </div>
+    </div>
+
+    <!-- Main Container -->
+    <div class="container">
+        
+        <!-- Table of Contents -->
+        <aside class="toc">
+            <h2><i class="fas fa-list"></i> Contents</h2>
+            <ul>
+                <li><a href="#quick-start">🎯 Quick Start</a></li>
+                <li class="user-section"><a href="#for-users">📱 FOR END USERS</a></li>
+                <ul>
+                    <li><a href="#what-happens-automatically">What Happens Automatically</a></li>
+                    <li><a href="#understanding-dashboard">Understanding the Dashboard</a></li>
+                    <li><a href="#reading-signals">Reading Trading Signals</a></li>
+                    <li><a href="#daily-tasks">Daily Automated Tasks</a></li>
+                    <li><a href="#user-summary">User-Friendly Summary</a></li>
+                </ul>
+                <li class="dev-section"><a href="#for-developers">👨‍💻 FOR DEVELOPERS</a></li>
+                <ul>
+                    <li><a href="#page-initialization">Page Initialization Flow</a></li>
+                    <li><a href="#index-monitoring">Index Price Monitoring</a></li>
+                    <li><a href="#webhook-processing">Webhook Processing</a></li>
+                    <li><a href="#trading-logic">Trading Logic & Algorithms</a></li>
+                    <li><a href="#authentication">Authentication Flows</a></li>
+                    <li><a href="#api-endpoints">API Endpoints</a></li>
+                </ul>
+            </ul>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="content">
+
+            <!-- Quick Start -->
+            <div id="quick-start" class="quick-start">
+                <h2>🎯 Quick Start (For End Users)</h2>
+                <p><strong>What does this page do?</strong></p>
+                <ul>
+                    <li>✅ Monitors NIFTY & BANKNIFTY market direction (every hour)</li>
+                    <li>✅ Receives real-time stock alerts from Chartink.com</li>
+                    <li>✅ Automatically finds the best option contracts to trade</li>
+                    <li>✅ Shows you exactly what to buy, how much, and profit targets</li>
+                    <li>✅ Tells you when to hold or exit based on market conditions</li>
+                </ul>
+                <p><strong>How to use:</strong></p>
+                <ol>
+                    <li>Open the page - it starts working automatically</li>
+                    <li>Look at index trends (green ↑ = bullish, red ↓ = bearish)</li>
+                    <li>If both indices are same direction, you'll see trading alerts</li>
+                    <li>Each alert shows: Stock name, Option contract, Buy price, Sell target, Expected profit</li>
+                    <li>Green "Hold" = Keep position, Red "Exit" = Book profits</li>
+                    <li>Download CSV for your records</li>
+                </ol>
+            </div>
+
+            <!-- FOR END USERS SECTION -->
+            <div id="for-users">
+                <h1 class="section-header">📱 FOR END USERS</h1>
+
+                <!-- What Happens Automatically -->
+                <div id="what-happens-automatically" class="user-content">
+                    <h2>What Happens Automatically</h2>
+                    <p>When you open <code>https://trademanthan.in/scan.html</code>, the system automatically:</p>
+
+                    <h3>⏰ Every Hour (at 9:15 AM, 10:15 AM, 11:15 AM, etc.)</h3>
+                    
+                    <h4>1. Checks Market Direction</h4>
+                    <ul>
+                        <li>Fetches NIFTY 50 current price</li>
+                        <li>Fetches BANKNIFTY current price</li>
+                        <li>Determines if market is bullish (green ↑) or bearish (red ↓)</li>
+                        <li>Shows you the trend in the title bar</li>
+                    </ul>
+
+                    <div class="info-box">
+                        <strong>How it determines trend:</strong><br>
+                        • If index price is <strong>ABOVE</strong> today's opening price = Green candle = Bullish ↑<br>
+                        • If index price is <strong>BELOW</strong> today's opening price = Red candle = Bearish ↓
+                    </div>
+
+                    <h4>2. Updates Trading Alerts</h4>
+                    <ul>
+                        <li>Refreshes all stock alerts</li>
+                        <li>Updates prices and profit calculations</li>
+                        <li>Shows latest Hold/Exit signals</li>
+                    </ul>
+
+                    <h3>🔔 When Chartink Sends Alert (Real-time)</h3>
+                    <p><strong>The system instantly:</strong></p>
+                    <ol>
+                        <li>Receives stock name and price from Chartink scanner</li>
+                        <li>Fetches current market price from Upstox</li>
+                        <li>Finds the best option contract (highest liquidity)</li>
+                        <li>Calculates how many to buy (based on lot size)</li>
+                        <li>Sets entry price and profit target (50% gain)</li>
+                        <li>Displays the complete trade recommendation</li>
+                    </ol>
+
+                    <div class="success-box">
+                        <strong>You see:</strong><br>
+                        • 📈 BULLISH section for CALL options (when market is rising)<br>
+                        • 📉 BEARISH section for PUT options (when market is falling)
+                    </div>
+                </div>
+
+                <!-- Understanding the Dashboard -->
+                <div id="understanding-dashboard" class="user-content">
+                    <h2>Understanding the Dashboard</h2>
+
+                    <h3>🎯 Title Bar (Always Visible)</h3>
+                    <pre>
+┌──────────────────────────────────────────────────┐
+│  Logo  |  TradeManthan - Intraday Options Algo  │
+│        |  NIFTY 50: 24,500 ↑  BANKNIFTY: 52,300 ↑│
+└──────────────────────────────────────────────────┘</pre>
+
+                    <div class="info-box">
+                        <strong>What each symbol means:</strong><br>
+                        • ↑ Green Arrow = Bullish (price above today's open)<br>
+                        • ↓ Red Arrow = Bearish (price below today's open)<br>
+                        • → Gray Arrow = Neutral (no clear trend)
+                    </div>
+
+                    <h3>⚠️ Warning Messages</h3>
+                    
+                    <div class="warning-box">
+                        <strong>"Access Token Expired"</strong><br>
+                        • <strong>What it means:</strong> Connection to Upstox expired<br>
+                        • <strong>What to do:</strong> Click "Update Token" → "Login with Upstox"<br>
+                        • <strong>Why:</strong> You need active Upstox connection for live data
+                    </div>
+
+                    <div class="danger-box">
+                        <strong>"No Trade Applicable - Opposite Trends"</strong><br>
+                        • <strong>What it means:</strong> NIFTY and BANKNIFTY moving in different directions<br>
+                        • <strong>What to do:</strong> Wait for both to align in same direction<br>
+                        • <strong>Why:</strong> Conflicting signals = risky trading conditions
+                    </div>
+
+                    <h3>📊 Trading Alert Tables</h3>
+                    <p>Each alert shows you:</p>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Column</th>
+                                <th>What It Means</th>
+                                <th>Example</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><strong>Stock Name</strong></td>
+                                <td>Company symbol</td>
+                                <td>RELIANCE</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Stock LTP</strong></td>
+                                <td>Current stock price</td>
+                                <td>₹2,450</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Stock VWAP</strong></td>
+                                <td>Average price (volume-weighted)</td>
+                                <td>₹2,448</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Option Contract</strong></td>
+                                <td>Exact option to trade</td>
+                                <td>RELIANCE 25NOV 2500 CE</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Qty</strong></td>
+                                <td>How many contracts</td>
+                                <td>250 (lot size)</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Buy Price</strong></td>
+                                <td>Entry price per contract</td>
+                                <td>₹25.50</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Sell Price</strong></td>
+                                <td>Target exit price</td>
+                                <td>₹38.25 (50% profit)</td>
+                            </tr>
+                            <tr>
+                                <td><strong>PnL</strong></td>
+                                <td>Expected profit if target hit</td>
+                                <td>₹3,187</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <h3>🟢 Hold / 🔴 Exit Signals</h3>
+                    <div class="success-box">
+                        <strong>Green "Hold" Badge:</strong><br>
+                        • Stock price is ABOVE average (VWAP)<br>
+                        • Market has positive momentum<br>
+                        • <strong>Action:</strong> Continue holding the position
+                    </div>
+
+                    <div class="danger-box">
+                        <strong>Red "Exit" Badge:</strong><br>
+                        • Stock price is BELOW average (VWAP)<br>
+                        • Market losing momentum<br>
+                        • <strong>Action:</strong> Book profits and exit
+                    </div>
+                </div>
+
+                <!-- Reading Trading Signals -->
+                <div id="reading-signals" class="user-content">
+                    <h2>Reading Trading Signals</h2>
+
+                    <h3>Example 1: Bullish Market Setup</h3>
+                    <pre>
+Title Bar shows:
+NIFTY 50: 24,500 ↑ (Bullish)
+BANKNIFTY: 52,300 ↑ (Bullish)</pre>
+
+                    <p><strong>What you see:</strong></p>
+                    <ul>
+                        <li>✅ Both indices bullish = Trading allowed</li>
+                        <li>📈 BULLISH ALERTS section visible</li>
+                        <li>Recommendations for CALL (CE) options</li>
+                    </ul>
+
+                    <div class="success-box">
+                        <strong>Sample Alert:</strong><br>
+                        <code>RELIANCE | Stock LTP: ₹2,450 | VWAP: ₹2,448 | 🟢 Hold</code><br>
+                        <code>Option: RELIANCE 25NOV 2500 CE</code><br>
+                        <code>Qty: 250 | Buy: ₹25.50 | Sell: ₹38.25 | Profit: ₹3,187</code>
+                    </div>
+
+                    <p><strong>How to read this:</strong></p>
+                    <ul>
+                        <li>RELIANCE stock triggered at ₹2,450</li>
+                        <li>System suggests buying RELIANCE 25 November 2500 CALL option</li>
+                        <li>Buy at ₹25.50 per contract</li>
+                        <li>Quantity: 250 contracts (official lot size)</li>
+                        <li>Sell target: ₹38.25 (50% profit)</li>
+                        <li>If target hits: You make ₹3,187 profit</li>
+                        <li>Signal: HOLD (price above average, keep position)</li>
+                    </ul>
+
+                    <h3>Example 2: Opposite Trends - No Trading</h3>
+                    <pre>
+Title Bar shows:
+NIFTY 50: 24,500 ↑ (Bullish)
+BANKNIFTY: 52,300 ↓ (Bearish)</pre>
+
+                    <div class="warning-box">
+                        <strong>What you see:</strong><br>
+                        • ⚠️ Warning: "No Trade Applicable"<br>
+                        • Both sections visible (for information only)<br>
+                        • Recommendation: Wait for alignment<br><br>
+                        <strong>Why:</strong> When indices move in opposite directions, market signals are unclear and trading is risky.
+                    </div>
+                </div>
+
+                <!-- Daily Automated Tasks -->
+                <div id="daily-tasks" class="user-content">
+                    <h2>Daily Automated Tasks</h2>
+                    <p>The system runs several automated tasks in the background to keep data fresh:</p>
+
+                    <h3>🌅 Every Morning at 9:00 AM IST</h3>
+                    <h4>1. Master Stock Data Download</h4>
+
+                    <div class="info-box">
+                        <strong>What happens:</strong><br>
+                        • Downloads latest instrument data from Dhan API<br>
+                        • Updates all NSE stock and option details<br>
+                        • Refreshes lot sizes, strike prices, expiry dates<br>
+                        • Updates ~50,000+ instrument records
+                    </div>
+
+                    <p><strong>Why it matters:</strong></p>
+                    <ul>
+                        <li>Ensures you have latest option contracts</li>
+                        <li>Correct lot sizes for quantity calculations</li>
+                        <li>Updated expiry dates for current month</li>
+                    </ul>
+
+                    <p><strong>Data includes:</strong></p>
+                    <ul>
+                        <li>Stock symbols and ISINs</li>
+                        <li>Option strike prices</li>
+                        <li>Lot sizes (NIFTY: 50, BANKNIFTY: 15, etc.)</li>
+                        <li>Expiry dates (last Tuesday of month)</li>
+                        <li>Instrument keys for Upstox API</li>
+                    </ul>
+
+                    <h3>📊 Daily Data Refresh</h3>
+                    <p><strong>What gets updated:</strong></p>
+                    <ul>
+                        <li><strong>Option contracts</strong> for current month's expiry</li>
+                        <li><strong>Lot sizes</strong> (official exchange lot sizes)</li>
+                        <li><strong>Strike intervals</strong> (₹5, ₹10, ₹50, ₹100 based on stock price)</li>
+                        <li><strong>Instrument mappings</strong> (for Upstox API calls)</li>
+                    </ul>
+
+                    <div class="success-box">
+                        <strong>Automatic expiry month switching:</strong><br>
+                        • If today is <strong>1st to 18th</strong> → Uses <strong>current month</strong> options<br>
+                        • If today is <strong>19th to 31st</strong> → Uses <strong>next month</strong> options<br>
+                        • Switches automatically after 18th of each month
+                    </div>
+
+                    <p><strong>Example:</strong></p>
+                    <ul>
+                        <li>Nov 1-18: Shows November expiry options</li>
+                        <li>Nov 19-30: Shows December expiry options</li>
+                        <li>Auto-switches on Nov 19th at 9:00 AM</li>
+                    </ul>
+
+                    <h3>🔄 Continuous Updates (Every Hour at :15)</h3>
+                    <p><strong>Starting 9:15 AM IST, then every hour:</strong></p>
+                    <p><strong>What refreshes:</strong></p>
+                    <ol>
+                        <li>NIFTY & BANKNIFTY prices and trends</li>
+                        <li>Existing alert data (updates prices)</li>
+                        <li>Hold/Exit signals (based on new VWAP)</li>
+                    </ol>
+
+                    <p><strong>Schedule:</strong></p>
+                    <ul>
+                        <li>9:15 AM - First update</li>
+                        <li>10:15 AM - Second update</li>
+                        <li>11:15 AM - Third update</li>
+                        <li>12:15 PM - Fourth update</li>
+                        <li>1:15 PM - Fifth update</li>
+                        <li>2:15 PM - Sixth update</li>
+                        <li>3:15 PM - Seventh update (market close)</li>
+                        <li>And continues if page stays open</li>
+                    </ul>
+                </div>
+
+                <!-- User-Friendly Summary -->
+                <div id="user-summary" class="user-content">
+                    <h2>📱 User-Friendly Summary</h2>
+
+                    <h3>What You Need to Know</h3>
+
+                    <div class="success-box">
+                        <strong>🟢 When to Trade (Both Green ↑):</strong><br>
+                        • NIFTY Bullish ↑ + BANKNIFTY Bullish ↑ = Trade CALLS<br>
+                        • Look at BULLISH alerts section<br>
+                        • Buy the recommended CALL options
+                    </div>
+
+                    <div class="danger-box">
+                        <strong>🔴 When to Trade (Both Red ↓):</strong><br>
+                        • NIFTY Bearish ↓ + BANKNIFTY Bearish ↓ = Trade PUTS<br>
+                        • Look at BEARISH alerts section<br>
+                        • Buy the recommended PUT options
+                    </div>
+
+                    <div class="warning-box">
+                        <strong>⚠️ When NOT to Trade (Opposite):</strong><br>
+                        • One Green ↑, One Red ↓ = Don't trade<br>
+                        • Market signals conflicting<br>
+                        • Wait for both to align
+                    </div>
+
+                    <div class="success-box">
+                        <strong>🟢 When to Hold:</strong><br>
+                        • Stock price ABOVE average (VWAP)<br>
+                        • Positive momentum<br>
+                        • Keep your position
+                    </div>
+
+                    <div class="danger-box">
+                        <strong>🔴 When to Exit:</strong><br>
+                        • Stock price BELOW average (VWAP)<br>
+                        • Losing momentum<br>
+                        • Book profits and exit
+                    </div>
+
+                    <h3>Quick Actions</h3>
+                    <p><strong>Download Your Alerts:</strong></p>
+                    <ul>
+                        <li>Click "📥 Download CSV" button</li>
+                        <li>Get Excel file with all recommendations</li>
+                        <li>Keep records for your trading journal</li>
+                    </ul>
+
+                    <p><strong>Refresh Data Manually:</strong></p>
+                    <ul>
+                        <li>Page auto-refreshes every hour</li>
+                        <li>Or close and reopen browser tab</li>
+                        <li>All latest data loads automatically</li>
+                    </ul>
+
+                    <p><strong>Update Upstox Connection:</strong></p>
+                    <ul>
+                        <li>If you see "Token Expired" warning</li>
+                        <li>Click "Login with Upstox" button</li>
+                        <li>Authorize and come back</li>
+                        <li>Page will refresh automatically</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- FOR DEVELOPERS SECTION -->
+            <div id="for-developers">
+                <h1 class="section-header">👨‍💻 FOR DEVELOPERS</h1>
+
+                <div id="page-initialization" class="dev-content">
+                    <h2>Page Initialization Flow</h2>
+                    <p>When the scan page loads, the following sequence occurs:</p>
+                    
+                    <ol>
+                        <li><strong>DOM Ready:</strong> Wait for <code>DOMContentLoaded</code> event</li>
+                        <li><strong>Check OAuth Status:</strong> Look for <code>?auth=success</code> or <code>?auth=error</code> URL parameters</li>
+                        <li><strong>Load Index Prices:</strong> Fetch NIFTY 50 and BANKNIFTY current prices and trends</li>
+                        <li><strong>Load Latest Data:</strong> Fetch existing webhook alerts from backend</li>
+                        <li><strong>Start Auto-Refresh:</strong> Begin hourly polling at :15 minute mark</li>
+                    </ol>
+
+                    <pre><code>// Main initialization
+document.addEventListener('DOMContentLoaded', function() {
+    checkOAuthSuccess();
+    loadIndexPrices();
+    loadLatestData();
+    startAutoRefresh();
+});</code></pre>
+                </div>
+
+                <div id="index-monitoring" class="dev-content">
+                    <h2>Index Price Monitoring</h2>
+                    
+                    <h3>API Endpoint</h3>
+                    <p><code>GET /scan/index-prices</code></p>
+
+                    <h3>Index Trend Determination Logic</h3>
+                    <div class="info-box">
+                        <strong>Algorithm:</strong><br>
+                        • Fetch current LTP (Last Traded Price)<br>
+                        • Fetch today's opening price<br>
+                        • Compare: <code>trend = "bullish" if LTP > open_price else "bearish"</code><br>
+                        • NOT based on VWAP - uses candle color logic
+                    </div>
+
+                    <pre><code>def check_index_trends(self) -> dict:
+    nifty_data = self.get_quote("NSE_INDEX|Nifty 50")
+    banknifty_data = self.get_quote("NSE_INDEX|Nifty Bank")
+    
+    nifty_trend = "bullish" if nifty_ltp > nifty_open else "bearish"
+    banknifty_trend = "bullish" if bank_ltp > bank_open else "bearish"
+    
+    return {
+        "nifty": {"ltp": nifty_ltp, "trend": nifty_trend},
+        "banknifty": {"ltp": bank_ltp, "trend": banknifty_trend}
+    }</code></pre>
+                </div>
+
+                <div id="webhook-processing" class="dev-content">
+                    <h2>Webhook Processing</h2>
+                    
+                    <h3>Chartink Integration</h3>
+                    <p><code>POST /scan/webhook</code></p>
+
+                    <h3>Processing Flow</h3>
+                    <ol>
+                        <li>Receive stock alert from Chartink</li>
+                        <li>Determine option expiry date (based on 18th cutoff)</li>
+                        <li>Fetch stock LTP and VWAP from Upstox</li>
+                        <li>Get option chain for stock</li>
+                        <li>Find optimal strike (OTM-1 to OTM-5 with highest liquidity)</li>
+                        <li>Fetch lot size from master_stock table</li>
+                        <li>Calculate entry/exit prices and P&L</li>
+                        <li>Store in database as IntradayStockOption</li>
+                    </ol>
+
+                    <h3>Expiry Date Logic</h3>
+                    <div class="info-box">
+                        <strong>Rule:</strong><br>
+                        • If current date ≤ 18th → Use current month expiry<br>
+                        • If current date > 18th → Use next month expiry<br>
+                        • Expiry = Last Tuesday of the month
+                    </div>
+
+                    <pre><code>def get_monthly_expiry(self, reference_date: datetime = None):
+    if reference_date.day <= 18:
+        expiry_month = reference_date.month
+        expiry_year = reference_date.year
+    else:
+        # Use next month
+        if reference_date.month == 12:
+            expiry_month = 1
+            expiry_year = reference_date.year + 1
+        else:
+            expiry_month = reference_date.month + 1
+            expiry_year = reference_date.year
+    
+    # Find last Tuesday of the month
+    # ... (calculation logic)</code></pre>
+                </div>
+
+                <div id="trading-logic" class="dev-content">
+                    <h2>Trading Logic & Algorithms</h2>
+
+                    <h3>Strike Selection (OTM-1 to OTM-5)</h3>
+                    <div class="warning-box">
+                        <strong>NEW ALGORITHM:</strong> Instead of just OTM-1, we now consider OTM-1 through OTM-5 and select the strike with highest <code>volume × OI</code> for better liquidity.
+                    </div>
+
+                    <pre><code>def find_strike_from_option_chain(vwap_service, stock_name, option_type, stock_ltp):
+    option_chain = vwap_service.get_option_chain(stock_name, expiry_date)
+    
+    # Filter out-of-money strikes
+    if option_type == "CE":
+        otm_strikes = [s for s in strikes if s['strike_price'] > stock_ltp]
+    else:  # PE
+        otm_strikes = [s for s in strikes if s['strike_price'] < stock_ltp]
+    
+    # Sort by distance from LTP
+    otm_strikes.sort(key=lambda x: abs(x['strike_price'] - stock_ltp))
+    
+    # Get OTM-1 to OTM-5
+    otm_1_to_5 = otm_strikes[:5]
+    
+    # Select strike with highest liquidity (volume × OI)
+    selected = max(otm_1_to_5, key=lambda x: x['volume'] * x['oi'])
+    
+    return selected</code></pre>
+
+                    <h3>Quantity Calculation</h3>
+                    <div class="success-box">
+                        <strong>CORRECT LOGIC:</strong> Quantity is <strong>NOT</strong> calculated from a fixed margin. It uses the official <code>lot_size</code> from Upstox instruments data, stored in the <code>master_stock</code> table.
+                    </div>
+
+                    <pre><code># Fetch lot size from database
+master_stock = db.query(MasterStock).filter(
+    MasterStock.stock_name == stock_name
+).first()
+
+if master_stock:
+    qty = master_stock.lot_size  # Official exchange lot size
+else:
+    qty = 1  # Fallback</code></pre>
+
+                    <h3>Hold/Exit Signal Logic</h3>
+                    <pre><code>if stock_ltp >= stock_vwap:
+    signal = "Hold"  # Green badge
+else:
+    signal = "Exit"  # Red badge</code></pre>
+                </div>
+
+                <div id="authentication" class="dev-content">
+                    <h2>Authentication Flows</h2>
+
+                    <h3>Upstox OAuth 2.0</h3>
+                    <p><strong>Login Flow:</strong></p>
+                    <ol>
+                        <li>User clicks "Login with Upstox" button</li>
+                        <li>Frontend redirects to <code>GET /scan/upstox/login</code></li>
+                        <li>Backend generates state token and auth URL</li>
+                        <li>User is redirected to Upstox authorization page</li>
+                        <li>After approval, Upstox redirects to <code>GET /scan/upstox/callback?code=...</code></li>
+                        <li>Backend exchanges code for access token</li>
+                        <li>Token is saved to file and updated in memory</li>
+                        <li>User is redirected back to <code>/scan.html?auth=success</code></li>
+                    </ol>
+
+                    <div class="warning-box">
+                        <strong>Important:</strong> Access token is updated both in file (for persistence) and in memory (for immediate use) without requiring service restart.
+                    </div>
+
+                    <pre><code># Update token in memory
+if hasattr(vwap_service, 'access_token'):
+    vwap_service.access_token = access_token
+if hasattr(vwap_service, 'upstox'):
+    vwap_service.upstox.set_access_token(access_token)</code></pre>
+                </div>
+
+                <div id="api-endpoints" class="dev-content">
+                    <h2>API Endpoints</h2>
+
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Endpoint</th>
+                                <th>Method</th>
+                                <th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>/scan/index-prices</code></td>
+                                <td>GET</td>
+                                <td>Get NIFTY & BANKNIFTY current prices and trends</td>
+                            </tr>
+                            <tr>
+                                <td><code>/scan/webhook</code></td>
+                                <td>POST</td>
+                                <td>Receive stock alerts from Chartink</td>
+                            </tr>
+                            <tr>
+                                <td><code>/scan/latest</code></td>
+                                <td>GET</td>
+                                <td>Get all today's alerts (bullish & bearish)</td>
+                            </tr>
+                            <tr>
+                                <td><code>/scan/upstox/login</code></td>
+                                <td>GET</td>
+                                <td>Initiate Upstox OAuth flow</td>
+                            </tr>
+                            <tr>
+                                <td><code>/scan/upstox/callback</code></td>
+                                <td>GET</td>
+                                <td>Handle Upstox OAuth callback</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <h3>Response Examples</h3>
+                    <pre><code>// GET /scan/index-prices
+{
+  "nifty": {
+    "ltp": 24500.50,
+    "trend": "bullish",
+    "open": 24450.00
+  },
+  "banknifty": {
+    "ltp": 52300.75,
+    "trend": "bullish",
+    "open": 52200.00
+  }
+}</code></pre>
+
+                    <pre><code>// GET /scan/latest
+{
+  "bullish": [
+    {
+      "stock_name": "RELIANCE",
+      "stock_ltp": 2450.50,
+      "stock_vwap": 2448.25,
+      "option_name": "RELIANCE 25NOV 2500 CE",
+      "qty": 250,
+      "buy_price": 25.50,
+      "sell_price": 38.25,
+      "pnl": 3187.50,
+      "signal": "Hold"
+    }
+  ],
+  "bearish": [...]
+}</code></pre>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div style="margin-top: 60px; padding-top: 30px; border-top: 2px solid #e5e7eb; text-align: center; color: #888;">
+                <p><strong>TradeManthan</strong> - Intelligent Trading Solutions</p>
+                <p>For support: Contact your administrator</p>
+                <p><a href="scan.html" style="color: #1e40af;">← Back to Scan Page</a></p>
+            </div>
+
+        </main>
+    </div>
+
+    <!-- Scroll to Top Button -->
+    <div class="scroll-top" id="scrollTop">
+        <i class="fas fa-arrow-up"></i>
+    </div>
+
+    <script>
+        // Smooth scrolling for TOC links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                }
+            });
+        });
+
+        // Scroll to top button
+        const scrollTopBtn = document.getElementById('scrollTop');
+        
+        window.addEventListener('scroll', function() {
+            if (window.pageYOffset > 300) {
+                scrollTopBtn.classList.add('visible');
+            } else {
+                scrollTopBtn.classList.remove('visible');
+            }
+        });
+
+        scrollTopBtn.addEventListener('click', function() {
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        });
+
+        // Highlight active TOC item on scroll
+        const sections = document.querySelectorAll('[id]');
+        const tocLinks = document.querySelectorAll('.toc a');
+
+        window.addEventListener('scroll', function() {
+            let current = '';
+            sections.forEach(section => {
+                const sectionTop = section.offsetTop;
+                if (pageYOffset >= sectionTop - 100) {
+                    current = section.getAttribute('id');
+                }
+            });
+
+            tocLinks.forEach(link => {
+                link.style.fontWeight = 'normal';
+                link.style.background = 'transparent';
+                if (link.getAttribute('href') === '#' + current) {
+                    link.style.fontWeight = '600';
+                    link.style.background = '#f0f4ff';
+                }
+            });
+        });
+    </script>
+
+</body>
+</html>
+
