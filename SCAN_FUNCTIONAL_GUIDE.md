@@ -509,14 +509,14 @@ Offer two options:
 
 ## Trading Logic & Conditions
 
-### 1. OTM-1 Strike Selection Algorithm
+### 1. Strike Selection Algorithm (OTM-1 to OTM-5 with Highest Volume/OI)
 
-**File:** `backend/routers/scan.py` (Lines 45-165)
+**File:** `backend/routers/scan.py` (Lines 45-132)
 
 ```python
 def find_strike_from_option_chain(vwap_service, stock_name, option_type, stock_ltp):
     """
-    Find Out-of-The-Money (OTM-1) strike based on volume and OI
+    Find best strike from OTM-1 to OTM-5 based on highest volume × OI
     """
     
     # Step 1: Get option chain from Upstox
@@ -528,49 +528,58 @@ def find_strike_from_option_chain(vwap_service, stock_name, option_type, stock_l
     else:  # PE - Put options
         otm_strikes = [s for s in strikes if s['strike_price'] < stock_ltp]
     
-    # Step 3: Sort by distance from LTP (closest first)
+    # Step 3: Sort by distance from LTP to identify OTM levels
     otm_strikes.sort(key=lambda x: abs(x['strike_price'] - stock_ltp))
     
-    # Step 4: Select OTM-1 (first OTM strike)
-    if len(otm_strikes) > 0:
-        return otm_strikes[0]  # OTM-1
+    # Step 4: Get first 5 strikes (OTM-1 to OTM-5)
+    otm_1_to_5 = otm_strikes[:5]
     
-    return None
+    # Step 5: Select strike with HIGHEST volume × OI
+    selected = max(otm_1_to_5, key=lambda x: x['volume'] * x['oi'])
+    
+    return selected
 ```
 
-**OTM-1 Definition:**
-- **For CALL (CE):** First strike price ABOVE current LTP
-- **For PUT (PE):** First strike price BELOW current LTP
-
-**Selection Criteria:**
-1. Strike must be OTM (out of the money)
-2. Sorted by proximity to LTP
-3. First option is OTM-1 (most liquid)
+**Strike Selection Logic:**
+- **OTM Definition:**
+  - For CALL (CE): Strike > LTP
+  - For PUT (PE): Strike < LTP
+- **Range:** OTM-1 to OTM-5 (first 5 strikes beyond LTP)
+- **Selection Criteria:** Highest (Volume × OI) = Best liquidity
+- **May select:** OTM-1, OTM-2, OTM-3, OTM-4, or OTM-5 based on liquidity
 
 ### 2. Quantity Calculation Logic
 
-**File:** `backend/routers/scan.py` (Lines 400-450)
+**File:** `backend/routers/scan.py` (Lines 478-489)
+
+**IMPORTANT:** Quantity is **NOT calculated** - it's the actual **lot_size** from Upstox instruments data.
 
 ```python
-MARGIN_PER_TRADE = 10000  # ₹10,000 per trade
-
-def calculate_quantity(option_ltp):
+def get_quantity_from_master_stock(db, option_contract):
     """
-    Calculate quantity based on fixed margin
+    Get lot_size from master_stock table (populated from Upstox instruments JSON)
     """
-    if option_ltp <= 0:
-        return 0
+    master_record = db.query(MasterStock).filter(
+        MasterStock.symbol_name == option_contract
+    ).first()
     
-    qty = MARGIN_PER_TRADE / option_ltp
-    qty = round(qty)  # Round to nearest lot
+    if master_record and master_record.lot_size:
+        qty = int(master_record.lot_size)
+        return qty
     
-    return max(qty, 1)  # Minimum 1 quantity
+    return 0  # Default if not found
 ```
 
-**Example:**
-- Option LTP: ₹25.50
-- Margin: ₹10,000
-- Quantity: 10000 / 25.50 = 392 shares/contracts
+**Lot Size Examples:**
+- NIFTY options: 50 (standard lot)
+- BANKNIFTY options: 15 (standard lot)
+- RELIANCE options: 250 (varies by stock)
+- TCS options: 150 (varies by stock)
+
+**Source:**
+- Fetched daily from Upstox instruments API
+- Stored in `master_stock` table
+- Field: `LOT_SIZE` from NSE instruments data
 
 ### 3. Entry/Exit Price Logic
 
