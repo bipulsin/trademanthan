@@ -385,7 +385,7 @@ function renderAlertGroup(alert, type) {
                         const stock_ltp = stock.last_traded_price || stock.trigger_price || 0;
                         const stock_vwap = stock.stock_vwap || 0;
                         const shouldHold = stock_ltp > stock_vwap;
-                        const iconText = shouldHold ? 'Hold' : 'Exit';
+                        const iconText = shouldHold ? '' : '✖';
                         const iconClass = shouldHold ? 'hold-icon' : 'exit-icon';
                         
                         return '<tr>' +
@@ -409,7 +409,7 @@ function renderAlertGroup(alert, type) {
                     const stock_ltp = stock.last_traded_price || stock.trigger_price || 0;
                     const stock_vwap = stock.stock_vwap || 0;
                     const shouldHold = stock_ltp > stock_vwap;
-                    const iconText = shouldHold ? 'Hold' : 'Exit';
+                    const iconText = shouldHold ? '' : '✖';
                     const iconClass = shouldHold ? 'hold-icon' : 'exit-icon';
                     
                     // Parse PnL for color coding

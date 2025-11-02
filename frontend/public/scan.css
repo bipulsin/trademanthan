@@ -592,27 +592,32 @@ body {
 }
 
 .hold-icon {
-    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-    color: white;
-    padding: 4px 10px;
-    border-radius: 6px;
-    font-weight: bold;
-    font-size: 13px;
-    display: inline-block;
-    box-shadow: 0 2px 4px rgba(16, 185, 129, 0.3);
-    white-space: nowrap;
+    display: none;
 }
 
 .exit-icon {
-    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+    background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
     color: white;
-    padding: 4px 10px;
-    border-radius: 6px;
-    font-weight: bold;
-    font-size: 13px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-weight: 900;
+    font-size: 22px;
     display: inline-block;
-    box-shadow: 0 2px 4px rgba(239, 68, 68, 0.3);
+    box-shadow: 0 4px 8px rgba(220, 38, 38, 0.5);
     white-space: nowrap;
+    line-height: 1;
+    animation: pulse-exit 2s infinite;
+}
+
+@keyframes pulse-exit {
+    0%, 100% {
+        transform: scale(1);
+        box-shadow: 0 4px 8px rgba(220, 38, 38, 0.5);
+    }
+    50% {
+        transform: scale(1.1);
+        box-shadow: 0 6px 12px rgba(220, 38, 38, 0.7);
+    }
 }
 
 .stock-vwap {
