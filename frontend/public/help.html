@@ -437,17 +437,19 @@
                 <ul>
                     <li>✅ Monitors NIFTY & BANKNIFTY market direction (every hour)</li>
                     <li>✅ Receives real-time stock alerts from Chartink.com</li>
-                    <li>✅ Automatically finds the best option contracts to trade</li>
-                    <li>✅ Shows you exactly what to buy, how much, and profit targets</li>
-                    <li>✅ Tells you when to hold or exit based on market conditions</li>
+                    <li>✅ <strong>Shows ALL alerts regardless of index trends (NEW!)</strong></li>
+                    <li>✅ Automatically enters trades ONLY when trends align</li>
+                    <li>✅ Shows you exactly what to buy, Stop Loss, profit targets</li>
+                    <li>✅ Auto-closes all trades by 3:25 PM daily (intraday only)</li>
                 </ul>
                 <p><strong>How to use:</strong></p>
                 <ol>
                     <li>Open the page - it starts working automatically</li>
                     <li>Look at index trends (green ↑ = bullish, red ↓ = bearish)</li>
-                    <li>If both indices are same direction, you'll see trading alerts</li>
-                    <li>Each alert shows: Stock name, Option contract, Buy price, Sell target, Expected profit</li>
-                    <li>Green "Hold" = Keep position, Red "Exit" = Book profits</li>
+                    <li><strong>See ALL alerts in both bullish and bearish sections</strong></li>
+                    <li>Alerts with Buy Price = Trade ENTERED (when trends aligned)</li>
+                    <li>Alerts with "No Entry" (red) = NOT entered (opposite trends)</li>
+                    <li>Monitor: ✖ Exit signal, 🛑 SL HIT, 🎯 TARGET, ⏰ TIME badges</li>
                     <li>Download CSV for your records</li>
                 </ol>
             </div>
@@ -490,16 +492,40 @@
                         <li>Receives stock name and price from Chartink scanner</li>
                         <li>Fetches current market price from Upstox</li>
                         <li>Finds the best option contract (highest liquidity)</li>
-                        <li>Calculates how many to buy (based on lot size)</li>
-                        <li>Sets entry price and profit target (50% gain)</li>
-                        <li>Displays the complete trade recommendation</li>
+                        <li><strong>Checks index trends (NIFTY & BANKNIFTY)</strong></li>
+                        <li><strong>Decides: Enter trade OR mark "No Entry"</strong></li>
+                        <li>Displays the alert with entry status</li>
                     </ol>
 
                     <div class="success-box">
-                        <strong>You see:</strong><br>
-                        • 📈 BULLISH section for CALL options (when market is rising)<br>
-                        • 📉 BEARISH section for PUT options (when market is falling)
+                        <strong>You ALWAYS see:</strong><br>
+                        • 📈 BULLISH section - ALL bullish alerts (entered or not)<br>
+                        • 📉 BEARISH section - ALL bearish alerts (entered or not)<br>
+                        • <strong>Both sections shown regardless of index trends!</strong>
                     </div>
+
+                    <h3>🎯 Trade Entry Decision</h3>
+                    <div class="warning-box">
+                        <strong>Index trends control TRADE ENTRY, not alert visibility!</strong>
+                    </div>
+
+                    <p><strong>If Both Indices Same Direction:</strong></p>
+                    <ul>
+                        <li>✅ Trade is ENTERED</li>
+                        <li>✅ Buy Price set to option price</li>
+                        <li>✅ Quantity set to lot size (e.g., 250)</li>
+                        <li>✅ Stop Loss calculated</li>
+                        <li>✅ Trade tracking begins</li>
+                    </ul>
+
+                    <p><strong>If Indices Opposite Directions:</strong></p>
+                    <ul>
+                        <li>⚠️ Trade is NOT entered</li>
+                        <li>⚠️ Buy Price shows <strong>"No Entry"</strong> (red)</li>
+                        <li>⚠️ Quantity = 0</li>
+                        <li>⚠️ Alert still displayed for information</li>
+                        <li>⚠️ Will NEVER be entered later (permanent "No Entry")</li>
+                    </ul>
                 </div>
 
                 <!-- Understanding the Dashboard -->
@@ -529,11 +555,13 @@
                         • <strong>Why:</strong> You need active Upstox connection for live data
                     </div>
 
-                    <div class="danger-box">
-                        <strong>"No Trade Applicable - Opposite Trends"</strong><br>
-                        • <strong>What it means:</strong> NIFTY and BANKNIFTY moving in different directions<br>
-                        • <strong>What to do:</strong> Wait for both to align in same direction<br>
-                        • <strong>Why:</strong> Conflicting signals = risky trading conditions
+                    <div class="info-box">
+                        <strong>"No Entry" Status (NEW!)</strong><br>
+                        • <strong>What it means:</strong> Alert received when NIFTY and BANKNIFTY had opposite trends<br>
+                        • <strong>What you see:</strong> Alert displayed with "No Entry" in red in Buy Price column<br>
+                        • <strong>Trade status:</strong> NOT entered, Qty=0, no SL/Sell/PnL tracking<br>
+                        • <strong>Will it enter later?:</strong> NO - permanently "No Entry"<br>
+                        • <strong>Why shown?:</strong> For complete market awareness - you see all signals
                     </div>
 
                     <h3>📊 Trading Alert Tables</h3>
@@ -611,6 +639,16 @@
                     </div>
 
                     <h3>📊 Status Indicators</h3>
+                    
+                    <div class="danger-box">
+                        <strong>No Entry (Red Badge - NEW!):</strong><br>
+                        • Trade was NOT entered due to opposite index trends<br>
+                        • Buy Price column shows "No Entry" in red<br>
+                        • Qty = 0, SL/Sell/PnL show "-"<br>
+                        • Alert visible for market awareness<br>
+                        • <strong>Will NEVER be entered</strong> (permanent status)
+                    </div>
+
                     <div class="danger-box">
                         <strong>🛑 SL HIT (Red Badge):</strong><br>
                         • Stop loss has been triggered<br>
@@ -624,6 +662,15 @@
                         • Profit target reached (50% gain)<br>
                         • Trade exited automatically<br>
                         • Profit locked in<br>
+                        • <strong>sell_price is LOCKED</strong> (cannot be changed)
+                    </div>
+
+                    <div class="warning-box">
+                        <strong>⏰ TIME (Orange Badge - NEW!):</strong><br>
+                        • Time-based exit at 3:25 PM IST<br>
+                        • ALL open trades auto-closed daily<br>
+                        • No overnight positions<br>
+                        • Professional intraday discipline<br>
                         • <strong>sell_price is LOCKED</strong> (cannot be changed)
                     </div>
 
@@ -761,12 +808,31 @@ BANKNIFTY: 52,300 ↓ (Bearish)</pre>
 
                     <h3>🔄 Continuous Updates (Every Hour at :15)</h3>
                     <p><strong>Starting 9:15 AM IST, then every hour:</strong></p>
-                    <p><strong>What refreshes:</strong></p>
+                    <p><strong>What refreshes (for ENTERED trades only):</strong></p>
                     <ol>
                         <li>NIFTY & BANKNIFTY prices and trends</li>
-                        <li>Existing alert data (updates prices)</li>
-                        <li>Hold/Exit signals (based on new VWAP)</li>
+                        <li>Stock LTP (current stock price)</li>
+                        <li>Stock VWAP (volume-weighted average)</li>
+                        <li>Option LTP (current option price)</li>
+                        <li>PnL calculation: (option_ltp - buy_price) × qty</li>
+                        <li>Hold/Exit signals (based on stock_ltp vs VWAP)</li>
+                        <li><strong>Exit condition checks (SL, Target, Time)</strong></li>
                     </ol>
+
+                    <div class="danger-box">
+                        <strong>What NEVER Changes:</strong><br>
+                        • <code>buy_price</code> - Locked at entry<br>
+                        • <code>buy_time</code> - Locked at entry<br>
+                        • <code>qty</code> - Locked at entry<br>
+                        • <code>stop_loss</code> - Locked at entry
+                    </div>
+
+                    <div class="info-box">
+                        <strong>What Gets SKIPPED:</strong><br>
+                        • All <code>status='no_entry'</code> trades<br>
+                        • Never processed in hourly updates<br>
+                        • Remain "No Entry" permanently
+                    </div>
 
                     <p><strong>Schedule:</strong></p>
                     <ul>
@@ -776,8 +842,8 @@ BANKNIFTY: 52,300 ↓ (Bearish)</pre>
                         <li>12:15 PM - Fourth update</li>
                         <li>1:15 PM - Fifth update</li>
                         <li>2:15 PM - Sixth update</li>
-                        <li>3:15 PM - Seventh update (market close)</li>
-                        <li>And continues if page stays open</li>
+                        <li><strong>3:15 PM - Seventh update</strong></li>
+                        <li><strong>3:25 PM+ - TIME-BASED EXIT (all trades closed)</strong></li>
                     </ul>
                 </div>
 
@@ -787,25 +853,37 @@ BANKNIFTY: 52,300 ↓ (Bearish)</pre>
 
                     <h3>What You Need to Know</h3>
 
+                    <div class="info-box">
+                        <strong>📊 You ALWAYS See Both Sections (NEW!):</strong><br>
+                        • BULLISH alerts - ALL received CALL signals<br>
+                        • BEARISH alerts - ALL received PUT signals<br>
+                        • <strong>Both sections shown regardless of index trends</strong><br>
+                        • Complete market awareness
+                    </div>
+
                     <div class="success-box">
-                        <strong>🟢 When to Trade (Both Green ↑):</strong><br>
-                        • NIFTY Bullish ↑ + BANKNIFTY Bullish ↑ = Trade CALLS<br>
-                        • Look at BULLISH alerts section<br>
-                        • Buy the recommended CALL options
+                        <strong>✅ When Trades Are ENTERED (Both Green ↑ or Both Red ↓):</strong><br>
+                        • Both indices same direction = Trades entered automatically<br>
+                        • Buy Price, Qty, Stop Loss all set<br>
+                        • Trade tracking begins<br>
+                        • Full risk management active
                     </div>
 
                     <div class="danger-box">
-                        <strong>🔴 When to Trade (Both Red ↓):</strong><br>
-                        • NIFTY Bearish ↓ + BANKNIFTY Bearish ↓ = Trade PUTS<br>
-                        • Look at BEARISH alerts section<br>
-                        • Buy the recommended PUT options
+                        <strong>⚠️ When Trades Show "No Entry" (Opposite Trends):</strong><br>
+                        • One Green ↑, One Red ↓ = Trade NOT entered<br>
+                        • Alert still displayed for awareness<br>
+                        • Buy Price shows "No Entry" in red<br>
+                        • Qty = 0, SL/Sell/PnL show "-"<br>
+                        • <strong>Will NEVER be entered later</strong>
                     </div>
 
                     <div class="warning-box">
-                        <strong>⚠️ When NOT to Trade (Opposite):</strong><br>
-                        • One Green ↑, One Red ↓ = Don't trade<br>
-                        • Market signals conflicting<br>
-                        • Wait for both to align
+                        <strong>⏰ ALL Trades Close by 3:25 PM (NEW!):</strong><br>
+                        • Automatic time-based exit every day<br>
+                        • No overnight positions<br>
+                        • Shows ⏰ TIME badge when closed<br>
+                        • Professional intraday discipline
                     </div>
 
                     <div class="success-box">
@@ -914,10 +992,47 @@ document.addEventListener('DOMContentLoaded', function() {
                         <li>Get option chain for stock</li>
                         <li>Find optimal strike (OTM-1 to OTM-5 with highest liquidity)</li>
                         <li>Fetch lot size from master_stock table</li>
-                        <li><strong>Calculate Stop Loss (₹3,100 max loss)</strong></li>
-                        <li>Calculate entry/exit prices and P&L</li>
-                        <li>Store in database as IntradayStockOption with SL</li>
+                        <li><strong>Check index trends (NIFTY & BANKNIFTY) - NEW!</strong></li>
+                        <li><strong>Make trade entry decision based on trends - NEW!</strong></li>
+                        <li>If trends aligned: Calculate Stop Loss, set buy_price, qty, status='bought'</li>
+                        <li>If opposite trends: Set qty=0, buy_price=NULL, status='no_entry'</li>
+                        <li>Store in database as IntradayStockOption</li>
+                        <li><strong>Alert ALWAYS displayed regardless of entry decision</strong></li>
                     </ol>
+
+                    <h3>Trade Entry Decision Logic (NEW!)</h3>
+                    <div class="warning-box">
+                        <strong>CRITICAL:</strong> Index trends determine trade ENTRY, not alert VISIBILITY!
+                    </div>
+
+                    <pre><code># Check index trends at webhook receipt
+index_trends = vwap_service.check_index_trends()
+nifty_trend = index_trends.get("nifty", {}).get("trend")
+banknifty_trend = index_trends.get("banknifty", {}).get("trend")
+
+# Determine if trade entry is allowed
+can_enter_trade = False
+if (nifty_trend == "bullish" and banknifty_trend == "bullish") or \
+   (nifty_trend == "bearish" and banknifty_trend == "bearish"):
+    can_enter_trade = True
+
+if can_enter_trade:
+    # ENTER TRADE
+    qty = lot_size
+    buy_price = option_ltp
+    buy_time = current_time
+    stop_loss = calculate_sl(option_ltp, qty)
+    status = 'bought'
+else:
+    # NO ENTRY
+    qty = 0
+    buy_price = NULL
+    buy_time = NULL
+    stop_loss = NULL
+    status = 'no_entry'
+
+# Store alert in database (ALWAYS stored, regardless of entry)
+# Alert will be displayed on frontend with entry status</code></pre>
 
                     <h3>Expiry Date Logic</h3>
                     <div class="info-box">
@@ -1016,63 +1131,119 @@ if option_ltp_value > 0 and qty > 0:
                         <strong>CRITICAL:</strong> Once a trade is closed (exit_reason is set), <code>sell_price</code> and <code>sell_time</code> are <strong>PERMANENTLY LOCKED</strong> and cannot be overwritten by any process.
                     </div>
 
-                    <pre><code># Only update sell_price if trade is not already closed
-if not record.exit_reason:
-    # Check if Stop Loss is hit
-    if record.stop_loss and new_option_ltp <= record.stop_loss:
-        record.sell_price = new_option_ltp
-        record.sell_time = now
-        record.exit_reason = 'stop_loss'
-        record.status = 'sold'
-        record.pnl = (new_option_ltp - record.buy_price) * record.qty
-        print(f"🛑 STOP LOSS HIT: SL=₹{record.stop_loss}, LTP=₹{new_option_ltp}")
-    
-    # Check if Profit Target is hit (50% gain)
-    elif record.buy_price and new_option_ltp >= (record.buy_price * 1.5):
-        record.sell_price = new_option_ltp
-        record.sell_time = now
-        record.exit_reason = 'profit_target'
-        record.status = 'sold'
-        record.pnl = (new_option_ltp - record.buy_price) * record.qty
-        print(f"🎯 PROFIT TARGET HIT: Target=₹{record.buy_price * 1.5}")
-    
-    # Otherwise, just update current price
-    else:
-        record.sell_price = new_option_ltp
-        record.sell_time = now
-        record.pnl = (new_option_ltp - record.buy_price) * record.qty
-else:
-    # Trade already closed - sell_price is LOCKED
-    # Just calculate PnL for display
-    record.pnl = (record.sell_price - record.buy_price) * record.qty</code></pre>
+                    <div class="danger-box">
+                        <strong>NO RE-ENTRY:</strong> Trades with <code>status='no_entry'</code> are <strong>SKIPPED</strong> in hourly refresh and will <strong>NEVER</strong> be entered later.
+                    </div>
 
-                    <h3>Exit Reasons</h3>
+                    <pre><code># Get all records for today (SKIP 'no_entry' trades)
+records = db.query(IntradayStockOption).filter(
+    IntradayStockOption.trade_date == today,
+    IntradayStockOption.status != 'no_entry'  # Skip no_entry trades
+).all()
+
+# Check if it's time-based exit time (3:25 PM IST)
+current_time = now.time()
+exit_time = datetime.strptime("15:25", "%H:%M").time()
+is_exit_time = current_time >= exit_time
+
+for record in records:
+    # Fetch new option_ltp from Upstox
+    new_option_ltp = fetch_option_ltp(record.option_contract)
+    
+    # Update stock_ltp and stock_vwap (fresh values)
+    record.stock_ltp = fetch_stock_ltp(record.stock_name)
+    record.stock_vwap = fetch_stock_vwap(record.stock_name)
+    record.option_ltp = new_option_ltp
+    
+    # Only update sell_price if trade is not already closed
+    if not record.exit_reason:
+        # THREE EXIT CONDITIONS (checked in priority order):
+        
+        # 1. TIME-BASED EXIT (3:25 PM) - Highest priority
+        if is_exit_time:
+            record.sell_price = new_option_ltp
+            record.sell_time = now
+            record.exit_reason = 'time_based'
+            record.status = 'sold'
+            record.pnl = (new_option_ltp - record.buy_price) * record.qty
+            print(f"⏰ TIME EXIT (3:25 PM): {record.stock_name}")
+        
+        # 2. STOP LOSS HIT
+        elif record.stop_loss and new_option_ltp <= record.stop_loss:
+            record.sell_price = new_option_ltp
+            record.sell_time = now
+            record.exit_reason = 'stop_loss'
+            record.status = 'sold'
+            record.pnl = (new_option_ltp - record.buy_price) * record.qty
+            print(f"🛑 STOP LOSS HIT: {record.stock_name}")
+        
+        # 3. PROFIT TARGET HIT (50% gain)
+        elif record.buy_price and new_option_ltp >= (record.buy_price * 1.5):
+            record.sell_price = new_option_ltp
+            record.sell_time = now
+            record.exit_reason = 'profit_target'
+            record.status = 'sold'
+            record.pnl = (new_option_ltp - record.buy_price) * record.qty
+            print(f"🎯 PROFIT TARGET HIT: {record.stock_name}")
+        
+        # Otherwise, just update current price and PnL
+        else:
+            record.sell_price = new_option_ltp
+            record.sell_time = now
+            record.pnl = (new_option_ltp - record.buy_price) * record.qty
+    else:
+        # Trade already closed - sell_price is LOCKED
+        # Just calculate PnL for display
+        record.pnl = (record.sell_price - record.buy_price) * record.qty</code></pre>
+
+                    <h3>Exit Reasons & Status Values</h3>
                     <table>
                         <thead>
                             <tr>
-                                <th>exit_reason</th>
+                                <th>Status/exit_reason</th>
                                 <th>Trigger Condition</th>
                                 <th>Display</th>
                             </tr>
                         </thead>
                         <tbody>
                             <tr>
+                                <td><code>no_entry</code></td>
+                                <td>Opposite index trends at alert time</td>
+                                <td><strong>No Entry</strong> (red badge)</td>
+                            </tr>
+                            <tr>
+                                <td><code>time_based</code></td>
+                                <td>Time ≥ 3:25 PM IST</td>
+                                <td>⏰ TIME (orange badge)</td>
+                            </tr>
+                            <tr>
                                 <td><code>stop_loss</code></td>
                                 <td>option_ltp ≤ stop_loss</td>
-                                <td>🛑 SL HIT (red)</td>
+                                <td>🛑 SL HIT (red badge)</td>
                             </tr>
                             <tr>
                                 <td><code>profit_target</code></td>
                                 <td>option_ltp ≥ buy_price × 1.5</td>
-                                <td>🎯 TARGET (green)</td>
+                                <td>🎯 TARGET (green badge)</td>
                             </tr>
                             <tr>
                                 <td><code>NULL</code> (open trade)</td>
-                                <td>Trade still active</td>
+                                <td>Trade still active, monitoring</td>
                                 <td>✖ EXIT or (hidden)</td>
                             </tr>
                         </tbody>
                     </table>
+
+                    <h3>⏰ Mandatory Intraday Closure (NEW!)</h3>
+                    <div class="warning-box">
+                        <strong>NO OVERNIGHT POSITIONS:</strong><br>
+                        • At <strong>3:25 PM IST</strong> every trading day<br>
+                        • ALL open trades are automatically closed<br>
+                        • <code>exit_reason = 'time_based'</code><br>
+                        • <code>sell_price = current option_ltp</code><br>
+                        • Ensures 100% intraday discipline<br>
+                        • Professional risk management
+                    </div>
 
                     <h3>Hold/Exit Signal Logic (Open Trades Only)</h3>
                     <pre><code># For open trades (no exit_reason)
