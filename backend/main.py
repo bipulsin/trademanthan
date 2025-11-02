@@ -59,33 +59,43 @@ app.include_router(scan.router)
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on application startup"""
-    print("=" * 60)
-    print("🚀 TRADE MANTHAN API STARTUP")
-    print("=" * 60)
+    import sys
+    
+    print("=" * 60, flush=True)
+    print("🚀 TRADE MANTHAN API STARTUP", flush=True)
+    print("=" * 60, flush=True)
+    sys.stdout.flush()
     
     # Start master stock scheduler (downloads CSV daily at 9:00 AM)
     try:
-        print("Starting Master Stock Scheduler...")
+        print("Starting Master Stock Scheduler...", flush=True)
+        sys.stdout.flush()
         start_scheduler()
-        print("✅ Master Stock Scheduler: STARTED (Daily at 9:00 AM IST)")
+        print("✅ Master Stock Scheduler: STARTED (Daily at 9:00 AM IST)", flush=True)
+        sys.stdout.flush()
     except Exception as e:
-        print(f"❌ Master Stock Scheduler: FAILED - {e}")
+        print(f"❌ Master Stock Scheduler: FAILED - {e}", flush=True)
+        sys.stdout.flush()
         import traceback
         traceback.print_exc()
     
     # Start instruments scheduler (downloads JSON daily at 9:05 AM)
     try:
-        print("Starting Instruments Scheduler...")
+        print("Starting Instruments Scheduler...", flush=True)
+        sys.stdout.flush()
         start_instruments_scheduler()
-        print("✅ Instruments Scheduler: STARTED (Daily at 9:05 AM IST)")
+        print("✅ Instruments Scheduler: STARTED (Daily at 9:05 AM IST)", flush=True)
+        sys.stdout.flush()
     except Exception as e:
-        print(f"❌ Instruments Scheduler: FAILED - {e}")
+        print(f"❌ Instruments Scheduler: FAILED - {e}", flush=True)
+        sys.stdout.flush()
         import traceback
         traceback.print_exc()
     
-    print("=" * 60)
-    print("✅ STARTUP COMPLETE - All Schedulers Active")
-    print("=" * 60)
+    print("=" * 60, flush=True)
+    print("✅ STARTUP COMPLETE - All Schedulers Active", flush=True)
+    print("=" * 60, flush=True)
+    sys.stdout.flush()
 
 @app.on_event("shutdown")
 async def shutdown_event():
