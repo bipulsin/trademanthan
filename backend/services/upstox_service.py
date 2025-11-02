@@ -592,8 +592,8 @@ class UpstoxService:
         Get the monthly derivative expiry date (last TUESDAY of the month)
         
         Logic:
-        - If current date <= 17th → Use current month's expiry
-        - If current date > 17th → Use next month's expiry
+        - If current date <= 18th → Use current month's expiry
+        - If current date > 18th → Use next month's expiry
         
         Args:
             reference_date: Reference date (default: today)
@@ -610,7 +610,7 @@ class UpstoxService:
                 reference_date = ist.localize(reference_date)
             
             # Determine which month's expiry to use
-            if reference_date.day <= 17:
+            if reference_date.day <= 18:
                 # Use current month's expiry
                 expiry_month = reference_date.month
                 expiry_year = reference_date.year
