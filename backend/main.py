@@ -59,36 +59,33 @@ app.include_router(scan.router)
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on application startup"""
-    import logging
-    startup_logger = logging.getLogger("main.startup")
-    
-    startup_logger.info("=" * 60)
-    startup_logger.info("🚀 Starting up Trade Manthan API...")
-    startup_logger.info("=" * 60)
+    print("=" * 60)
+    print("🚀 TRADE MANTHAN API STARTUP")
+    print("=" * 60)
     
     # Start master stock scheduler (downloads CSV daily at 9:00 AM)
     try:
-        startup_logger.info("Starting master stock scheduler...")
+        print("Starting Master Stock Scheduler...")
         start_scheduler()
-        startup_logger.info("✅ Master Stock Scheduler: STARTED (Daily at 9:00 AM IST)")
+        print("✅ Master Stock Scheduler: STARTED (Daily at 9:00 AM IST)")
     except Exception as e:
-        startup_logger.error(f"❌ Master Stock Scheduler: FAILED - {e}")
+        print(f"❌ Master Stock Scheduler: FAILED - {e}")
         import traceback
-        startup_logger.error(traceback.format_exc())
+        traceback.print_exc()
     
     # Start instruments scheduler (downloads JSON daily at 9:05 AM)
     try:
-        startup_logger.info("Starting instruments scheduler...")
+        print("Starting Instruments Scheduler...")
         start_instruments_scheduler()
-        startup_logger.info("✅ Instruments Scheduler: STARTED (Daily at 9:05 AM IST)")
+        print("✅ Instruments Scheduler: STARTED (Daily at 9:05 AM IST)")
     except Exception as e:
-        startup_logger.error(f"❌ Instruments Scheduler: FAILED - {e}")
+        print(f"❌ Instruments Scheduler: FAILED - {e}")
         import traceback
-        startup_logger.error(traceback.format_exc())
+        traceback.print_exc()
     
-    startup_logger.info("=" * 60)
-    startup_logger.info("✅ Application startup complete - All schedulers active")
-    startup_logger.info("=" * 60)
+    print("=" * 60)
+    print("✅ STARTUP COMPLETE - All Schedulers Active")
+    print("=" * 60)
 
 @app.on_event("shutdown")
 async def shutdown_event():
