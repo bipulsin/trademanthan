@@ -8,6 +8,120 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Montserrat:wght@700&family=Orbitron:wght@600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <style>
+        /* New Home Page Layout */
+        .home-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 40px;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            min-height: calc(100vh - 200px);
+        }
+        
+        /* Left Side - Large Image */
+        .left-image-section {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .hero-image {
+            max-width: 100%;
+            width: 500px;
+            height: auto;
+            object-fit: contain;
+        }
+        
+        /* Right Side - 2x2 Grid */
+        .right-content-section {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: auto auto;
+            gap: 30px;
+            align-items: start;
+        }
+        
+        /* Logo Card - No Background */
+        .logo-card-new {
+            grid-column: 1 / 2;
+            grid-row: 1 / 2;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            background: transparent;
+        }
+        
+        .logo-home-image {
+            width: 180px;
+            height: auto;
+            object-fit: contain;
+            background: transparent;
+            border: none;
+            box-shadow: none;
+            border-radius: 0;
+        }
+        
+        /* Feature Cards in 2x2 Grid */
+        .right-content-section .feature-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 30px;
+            text-align: center;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+        
+        .right-content-section .feature-card:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 215, 0, 0.3);
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+        
+        /* Responsive Design */
+        @media (max-width: 1024px) {
+            .home-container {
+                flex-direction: column;
+                gap: 40px;
+            }
+            
+            .left-image-section {
+                width: 100%;
+            }
+            
+            .hero-image {
+                width: 400px;
+            }
+            
+            .right-content-section {
+                width: 100%;
+                max-width: 800px;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .right-content-section {
+                grid-template-columns: 1fr;
+                gap: 20px;
+            }
+            
+            .logo-card-new {
+                grid-column: 1 / 2;
+            }
+            
+            .hero-image {
+                width: 300px;
+            }
+        }
+    </style>
 </head>
 <body>
     <div id="app">
@@ -33,22 +147,24 @@
         <!-- Main Content -->
         <main class="main">
             <section id="features" class="section active">
-                <div class="container">
-                    <!-- Logo Card -->
-                    <div class="logo-card">
-                        <img src="tm_logo.png" alt="Trade Manthan Logo" class="logo-card-image">
+                <div class="home-container">
+                    <!-- Left Side: Large Image -->
+                    <div class="left-image-section">
+                        <img src="tradem_white.png" alt="Trade Manthan" class="hero-image">
                     </div>
                     
-                    <div class="features-grid">
+                    <!-- Right Side: Logo and Feature Cards in 2x2 Grid -->
+                    <div class="right-content-section">
+                        <!-- Logo (Top-Left) -->
+                        <div class="logo-card-new">
+                            <img src="tm_logo.png" alt="Trade Manthan Logo" class="logo-home-image">
+                        </div>
+                        
+                        <!-- Feature Cards Grid (2x2 - 3 cards) -->
                         <div class="feature-card">
                             <div class="feature-icon">🤖</div>
                             <h3>Algo Trading</h3>
                             <p>Automated trading strategies with real-time execution</p>
-                        </div>
-                        <div class="feature-card">
-                            <div class="feature-icon">📊</div>
-                            <h3>Portfolio Management</h3>
-                            <p>Comprehensive portfolio tracking and risk management</p>
                         </div>
                         <div class="feature-card">
                             <div class="feature-icon">⚡</div>
