@@ -11,7 +11,10 @@
     <style>
         /* Override body background for home page */
         body {
-            background: #ffffff !important;
+            background: url('body_bg.png') center center !important;
+            background-size: cover !important;
+            background-repeat: no-repeat !important;
+            background-attachment: fixed !important;
             min-height: 100vh;
         }
         
@@ -99,20 +102,20 @@
         
         /* Feature Cards in 2x2 Grid */
         .right-content-section .feature-card {
-            background: #f8f9fa;
+            background: #ffffff;
             border: 2px solid #e9ecef;
             border-radius: 16px;
             padding: 30px;
             text-align: center;
             transition: all 0.3s ease;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
         }
         
         .right-content-section .feature-card:hover {
             background: #ffffff;
             border-color: #1976d2;
             transform: translateY(-5px);
-            box-shadow: 0 8px 20px rgba(25, 118, 210, 0.2);
+            box-shadow: 0 8px 24px rgba(25, 118, 210, 0.3);
         }
         
         /* Feature card text colors */
