@@ -602,10 +602,21 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         
         # Save each stock to database
         saved_count = 0
+        SL_LOSS_TARGET = 3100.0  # Target loss for stop loss trigger
+        
         for stock in processed_data.get("stocks", []):
             try:
-                # Get option_ltp value
+                # Get option_ltp value and qty
                 option_ltp_value = stock.get("option_ltp", 0.0)
+                qty = stock.get("qty", 0)
+                
+                # Calculate Stop Loss (SL) price
+                # SL should trigger when loss reaches approximately -₹3,100
+                # Formula: SL_price = buy_price - (SL_LOSS_TARGET / qty)
+                stop_loss_price = None
+                if option_ltp_value > 0 and qty > 0:
+                    stop_loss_price = max(0.05, option_ltp_value - (SL_LOSS_TARGET / qty))
+                    # Ensure SL is at least ₹0.05 (minimum tick size)
                 
                 db_record = IntradayStockOption(
                     alert_time=triggered_datetime,
@@ -619,13 +630,15 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     option_strike=stock.get("otm1_strike"),
                     option_ltp=option_ltp_value,
                     option_vwap=stock.get("option_vwap"),
-                    qty=stock.get("qty", 0),
+                    qty=qty,
                     trade_date=trading_date,
                     status='alert_received',
                     # Set buy_price and sell_price to option_ltp on first webhook
                     buy_price=option_ltp_value,
+                    stop_loss=stop_loss_price,  # Set calculated SL price
                     sell_price=option_ltp_value,
                     buy_time=triggered_datetime,  # Set buy_time to alert_time
+                    exit_reason=None,  # Not exited yet
                     # PnL is 0 initially (buy_price = sell_price)
                     pnl=0.0
                 )
@@ -830,7 +843,9 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                     "option_vwap": record.option_vwap or 0.0,
                     "qty": record.qty or 0,
                     "buy_price": record.buy_price or 0.0,
+                    "stop_loss": record.stop_loss or 0.0,
                     "sell_price": record.sell_price or 0.0,
+                    "exit_reason": record.exit_reason or None,
                     "pnl": record.pnl or 0.0
                 })
             
@@ -865,7 +880,9 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                     "option_vwap": record.option_vwap or 0.0,
                     "qty": record.qty or 0,
                     "buy_price": record.buy_price or 0.0,
+                    "stop_loss": record.stop_loss or 0.0,
                     "sell_price": record.sell_price or 0.0,
+                    "exit_reason": record.exit_reason or None,
                     "pnl": record.pnl or 0.0
                 })
             
@@ -996,17 +1013,44 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                         if quote_data and quote_data.get('last_price'):
                             new_option_ltp = float(quote_data.get('last_price', 0))
                             
-                            # Update option_ltp and sell_price only
+                            # Always update option_ltp for current price tracking
                             record.option_ltp = new_option_ltp
-                            record.sell_price = new_option_ltp
-                            record.sell_time = now
                             
-                            # Calculate and update PnL
-                            if record.buy_price and record.qty:
-                                record.pnl = (new_option_ltp - record.buy_price) * record.qty
+                            # Only update sell_price if trade is not already closed
+                            if not record.exit_reason:
+                                # Check if Stop Loss is hit
+                                if record.stop_loss and new_option_ltp <= record.stop_loss:
+                                    record.sell_price = new_option_ltp
+                                    record.sell_time = now
+                                    record.exit_reason = 'stop_loss'
+                                    record.status = 'sold'
+                                    if record.buy_price and record.qty:
+                                        record.pnl = (new_option_ltp - record.buy_price) * record.qty
+                                    print(f"🛑 STOP LOSS HIT for {record.stock_name}: SL=₹{record.stop_loss}, LTP=₹{new_option_ltp}, Loss=₹{record.pnl}")
+                                
+                                # Check if Profit Target is hit (50% gain)
+                                elif record.buy_price and new_option_ltp >= (record.buy_price * 1.5):
+                                    record.sell_price = new_option_ltp
+                                    record.sell_time = now
+                                    record.exit_reason = 'profit_target'
+                                    record.status = 'sold'
+                                    if record.qty:
+                                        record.pnl = (new_option_ltp - record.buy_price) * record.qty
+                                    print(f"🎯 PROFIT TARGET HIT for {record.stock_name}: Target=₹{record.buy_price * 1.5}, LTP=₹{new_option_ltp}, Profit=₹{record.pnl}")
+                                
+                                # Otherwise, just update current price
+                                else:
+                                    record.sell_price = new_option_ltp
+                                    record.sell_time = now
+                                    if record.buy_price and record.qty:
+                                        record.pnl = (new_option_ltp - record.buy_price) * record.qty
+                            else:
+                                # Trade already closed, just calculate PnL for display
+                                if record.buy_price and record.qty:
+                                    record.pnl = (record.sell_price - record.buy_price) * record.qty
                             
                             updated_count += 1
-                            print(f"✅ Updated {record.stock_name}: option_ltp=₹{new_option_ltp}, PnL=₹{record.pnl}")
+                            print(f"✅ Updated {record.stock_name}: option_ltp=₹{new_option_ltp}, PnL=₹{record.pnl}, Exit={record.exit_reason or 'Open'}")
                         else:
                             print(f"❌ Could not fetch LTP for {option_contract}")
                             failed_count += 1

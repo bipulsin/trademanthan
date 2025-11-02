@@ -56,8 +56,10 @@ class IntradayStockOption(Base):
     qty = Column(Integer, nullable=True)
     buy_time = Column(DateTime, nullable=True)
     buy_price = Column(Float, nullable=True)
+    stop_loss = Column(Float, nullable=True)  # Stop loss price for risk management
     sell_time = Column(DateTime, nullable=True)
     sell_price = Column(Float, nullable=True)
+    exit_reason = Column(String(50), nullable=True)  # 'profit_target', 'stop_loss', 'time_based', 'manual'
     pnl = Column(Float, nullable=True)
     status = Column(String(50), default='alert_received')  # alert_received, bought, sold, cancelled
     

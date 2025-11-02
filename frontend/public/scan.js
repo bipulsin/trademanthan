@@ -376,7 +376,9 @@ function renderAlertGroup(alert, type) {
                         <th>Option Contract (OTM-1)</th>
                         <th>Qty</th>
                         <th>Buy Price</th>
+                        <th>Stop Loss</th>
                         <th>Sell Price</th>
+                        <th>Status</th>
                         <th>PnL</th>
                     </tr>
                 </thead>
@@ -388,15 +390,30 @@ function renderAlertGroup(alert, type) {
                         const iconText = shouldHold ? '' : '✖';
                         const iconClass = shouldHold ? 'hold-icon' : 'exit-icon';
                         
+                        // Determine exit status display
+                        let statusDisplay = '';
+                        if (stock.exit_reason === 'stop_loss') {
+                            statusDisplay = '<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🛑 SL HIT</span>';
+                        } else if (stock.exit_reason === 'profit_target') {
+                            statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🎯 TARGET</span>';
+                        } else if (stock.exit_reason) {
+                            statusDisplay = '<span style="background: #6b7280; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">CLOSED</span>';
+                        } else {
+                            // Only show Hold/Exit for open trades
+                            statusDisplay = '<span class="' + iconClass + '">' + iconText + '</span>';
+                        }
+                        
                         return '<tr>' +
                             '<td>' + (index + 1) + '</td>' +
                             '<td class="stock-name">' + escapeHtml(stock.stock_name) + '</td>' +
                             '<td class="trigger-price">₹' + formatPrice(stock_ltp) + '</td>' +
-                            '<td class="stock-vwap-col"><div style="display: flex; align-items: center; gap: 10px;"><span>₹' + formatPrice(stock_vwap) + '</span><span class="' + iconClass + '">' + iconText + '</span></div></td>' +
+                            '<td class="stock-vwap-col">₹' + formatPrice(stock_vwap) + '</td>' +
                             '<td class="option-contract">' + escapeHtml(stock.option_contract || 'N/A') + '</td>' +
                             '<td class="qty">' + (stock.qty || 'N/A') + '</td>' +
                             '<td class="buy-price">₹' + formatPrice(stock.buy_price || 0) + '</td>' +
+                            '<td class="stop-loss" style="color: #dc2626; font-weight: 600;">₹' + formatPrice(stock.stop_loss || 0) + '</td>' +
                             '<td class="sell-price">₹' + formatPrice(stock.sell_price || 0) + '</td>' +
+                            '<td class="status-col">' + statusDisplay + '</td>' +
                             '<td class="pnl">' + formatPNL(stock.pnl || 0) + '</td>' +
                             '</tr>';
                     }).join('')}
@@ -416,18 +433,33 @@ function renderAlertGroup(alert, type) {
                     let pnlValue = parseFloat(stock.pnl || 0);
                     let pnlColor = pnlValue > 0 ? 'green' : (pnlValue < 0 ? 'red' : '');
                     
+                    // Determine exit status display
+                    let statusDisplay = '';
+                    if (stock.exit_reason === 'stop_loss') {
+                        statusDisplay = '<span style="background: #dc2626; color: white; padding: 3px 6px; border-radius: 4px; font-weight: 700; font-size: 10px;">🛑 SL HIT</span>';
+                    } else if (stock.exit_reason === 'profit_target') {
+                        statusDisplay = '<span style="background: #16a34a; color: white; padding: 3px 6px; border-radius: 4px; font-weight: 700; font-size: 10px;">🎯 TARGET</span>';
+                    } else if (stock.exit_reason) {
+                        statusDisplay = '<span style="background: #6b7280; color: white; padding: 3px 6px; border-radius: 4px; font-weight: 700; font-size: 10px;">CLOSED</span>';
+                    } else {
+                        statusDisplay = '<span class="${iconClass}" style="font-size: 10px;">${iconText}</span>';
+                    }
+                    
                     return `
                         <div class="stock-card">
-                            <!-- Row 1: Stock Name, Stock LTP, Stock VWAP -->
+                            <!-- Row 1: Stock Name, Stock LTP, VWAP, Status -->
                             <div class="stock-card-row">
-                                <div style="flex: 1;">
+                                <div style="flex: 2;">
                                     <div class="stock-card-value large">${escapeHtml(stock.stock_name)}</div>
                                 </div>
                                 <div style="flex: 1;">
                                     <div class="stock-card-value">₹${formatPrice(stock_ltp)}</div>
                                 </div>
                                 <div style="flex: 1;">
-                                    <div class="stock-card-value">V:₹${formatPrice(stock_vwap)} <span class="${iconClass}" style="font-size: 10px;">${iconText}</span></div>
+                                    <div class="stock-card-value">V:₹${formatPrice(stock_vwap)}</div>
+                                </div>
+                                <div style="flex: 1; text-align: right;">
+                                    ${statusDisplay}
                                 </div>
                             </div>
                             
@@ -441,10 +473,13 @@ function renderAlertGroup(alert, type) {
                                 </div>
                             </div>
                             
-                            <!-- Row 3: Buy Price, Sell Price, PnL -->
+                            <!-- Row 3: Buy Price, SL, Sell Price, PnL -->
                             <div class="stock-card-row">
                                 <div style="flex: 1;">
                                     <div class="stock-card-value">B:₹${formatPrice(stock.buy_price || 0)}</div>
+                                </div>
+                                <div style="flex: 1;">
+                                    <div class="stock-card-value" style="color: #dc2626; font-weight: 600;">SL:₹${formatPrice(stock.stop_loss || 0)}</div>
                                 </div>
                                 <div style="flex: 1;">
                                     <div class="stock-card-value">S:₹${formatPrice(stock.sell_price || 0)}</div>
