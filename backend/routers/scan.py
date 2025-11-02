@@ -44,7 +44,12 @@ class StockAlert(BaseModel):
 # Helper function to find strike from option chain based on volume and OI
 def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: str, stock_ltp: float) -> Optional[Dict]:
     """
-    Find the best option strike from Upstox option chain based on volume and OI
+    Find the best option strike from OTM-1 to OTM-5 based on highest volume/OI
+    
+    Logic:
+    1. Get all OTM strikes (CE: strike > LTP, PE: strike < LTP)
+    2. Sort by distance from LTP to identify OTM-1, OTM-2, ..., OTM-5
+    3. Select the strike with HIGHEST volume × OI among OTM-1 to OTM-5
     
     Args:
         vwap_service: UpstoxService instance
@@ -53,7 +58,7 @@ def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: st
         stock_ltp: Current stock LTP
         
     Returns:
-        Dict with strike_price, volume, oi, or None
+        Dict with strike_price, volume, oi, ltp or None
     """
     try:
         # Get option chain from Upstox API
@@ -103,22 +108,28 @@ def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: st
             print(f"No OTM {option_type} strikes found for {stock_name}")
             return None
         
-        # Sort by volume * OI (combined metric for liquidity)
-        otm_strikes.sort(key=lambda x: (x['volume'] * x['oi']), reverse=True)
+        # Sort by distance from LTP (closest first) to get OTM-1 to OTM-5
+        otm_strikes.sort(key=lambda x: abs(x['strike_price'] - stock_ltp))
         
-        # Get top 3 most liquid strikes
-        top_strikes = otm_strikes[:3]
+        # Get first 5 OTM strikes (OTM-1 to OTM-5)
+        otm_1_to_5 = otm_strikes[:5]
         
-        print(f"Top 3 most liquid {option_type} strikes for {stock_name}:")
-        for i, strike in enumerate(top_strikes, 1):
-            print(f"  {i}. Strike: {strike['strike_price']}, Vol: {strike['volume']}, OI: {strike['oi']}, Score: {strike['volume'] * strike['oi']}")
+        if not otm_1_to_5:
+            print(f"Not enough OTM strikes for {stock_name}")
+            return otm_strikes[0] if otm_strikes else None
         
-        # For OTM+2, we want the strike that's 2nd most liquid among OTM options
-        # Index [1] gives us the 2nd item (0-based indexing: 0=most, 1=2nd, 2=3rd)
-        selected = top_strikes[1] if len(top_strikes) > 1 else top_strikes[0]
+        print(f"OTM-1 to OTM-5 strikes for {stock_name} {option_type}:")
+        for i, strike in enumerate(otm_1_to_5, 1):
+            liquidity_score = strike['volume'] * strike['oi']
+            print(f"  OTM-{i}: Strike {strike['strike_price']}, Vol: {strike['volume']}, OI: {strike['oi']}, Score: {liquidity_score}")
         
-        print(f"✅ Selected {option_type} strike: {selected['strike_price']} (Volume: {selected['volume']}, OI: {selected['oi']})")
-        print(f"   This is the 2nd most liquid OTM strike with good trading activity")
+        # Select strike with highest volume * OI among OTM-1 to OTM-5
+        selected = max(otm_1_to_5, key=lambda x: x['volume'] * x['oi'])
+        
+        otm_position = otm_1_to_5.index(selected) + 1
+        liquidity_score = selected['volume'] * selected['oi']
+        print(f"✅ Selected OTM-{otm_position} strike: {selected['strike_price']} (Volume: {selected['volume']}, OI: {selected['oi']}, Score: {liquidity_score})")
+        print(f"   Highest liquidity among OTM-1 to OTM-5")
         return selected
         
     except Exception as e:
