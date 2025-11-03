@@ -521,7 +521,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                 # Parse option contract format: STOCK-Nov2025-STRIKE-CE/PE
                                 # Example: IDFCFIRSTB-Nov2025-85-CE
                                 import re
-                                from datetime import datetime
+                                # datetime already imported at module level
                                 
                                 # Handle stocks with hyphens in symbol (e.g., BAJAJ-AUTO)
                                 match = re.match(r'^([A-Z-]+)-(\w{3})(\d{4})-(\d+\.?\d*?)-(CE|PE)$', option_contract)
@@ -1054,7 +1054,7 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
     """
     try:
         import pytz
-        from datetime import datetime
+        # datetime already imported at module level
         
         ist = pytz.timezone('Asia/Kolkata')
         now = datetime.now(ist)
@@ -1106,7 +1106,7 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                     continue
                 
                 import re
-                from datetime import datetime
+                # datetime already imported at module level
                 
                 # Parse option contract: STOCK-Nov2025-STRIKE-CE/PE
                 match = re.match(r'^([A-Z-]+)-(\w{3})(\d{4})-(\d+\.?\d*?)-(CE|PE)$', option_contract)
