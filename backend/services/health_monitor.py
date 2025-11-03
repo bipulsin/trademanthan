@@ -1,12 +1,14 @@
 """
 Self-Healing Health Monitor for TradeManthan
 Monitors critical services, detects failures, and attempts auto-recovery
-Sends alerts for issues requiring manual intervention
+Sends alerts for issues requiring manual intervention (Email + WhatsApp)
 """
 
 import logging
 import os
 import smtplib
+import urllib.request
+import urllib.parse
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
@@ -282,8 +284,42 @@ Generated: {now.strftime('%Y-%m-%d %H:%M:%S IST')}
         except Exception as e:
             logger.error(f"Daily health report failed: {str(e)}")
     
+    def send_whatsapp_message(self, message: str) -> bool:
+        """Send WhatsApp message via CallMeBot API"""
+        try:
+            whatsapp_phone = os.getenv("WHATSAPP_PHONE")  # Format: +919876543210
+            whatsapp_apikey = os.getenv("WHATSAPP_APIKEY")  # From CallMeBot registration
+            
+            if not whatsapp_phone or not whatsapp_apikey:
+                logger.debug("WhatsApp not configured, skipping")
+                return False
+            
+            # Truncate message to 1000 chars (CallMeBot limit)
+            if len(message) > 1000:
+                message = message[:997] + "..."
+            
+            # Format phone number (remove + and spaces)
+            phone = whatsapp_phone.replace("+", "").replace(" ", "").replace("-", "")
+            
+            # Build API URL
+            url = f"https://api.callmebot.com/whatsapp.php?phone={phone}&text={urllib.parse.quote(message)}&apikey={whatsapp_apikey}"
+            
+            # Send request
+            response = urllib.request.urlopen(url, timeout=10)
+            
+            if response.status == 200:
+                logger.info(f"✅ WhatsApp alert sent to {whatsapp_phone}")
+                return True
+            else:
+                logger.warning(f"WhatsApp API returned status {response.status}")
+                return False
+                
+        except Exception as e:
+            logger.warning(f"Could not send WhatsApp alert: {str(e)}")
+            return False
+    
     async def send_critical_alert(self, subject: str, message: str):
-        """Send critical alert via email/SMS/logging"""
+        """Send critical alert via email + WhatsApp + logging"""
         
         # Always log to console/journald
         logger.critical("=" * 60)
@@ -292,6 +328,7 @@ Generated: {now.strftime('%Y-%m-%d %H:%M:%S IST')}
         logger.critical("=" * 60)
         
         # Try to send email if configured
+        email_sent = False
         try:
             email_to = os.getenv("ALERT_EMAIL")
             email_from = os.getenv("SMTP_FROM_EMAIL", "alerts@trademanthan.in")
@@ -329,16 +366,31 @@ This is an automated alert. Please check the system immediately.
                     server.send_message(msg)
                     server.quit()
                     logger.info(f"✅ Alert email sent to {email_to}")
+                    email_sent = True
                 else:
                     # Try without authentication for local SMTP
                     server = smtplib.SMTP(smtp_server, smtp_port)
                     server.send_message(msg)
                     server.quit()
                     logger.info(f"✅ Alert email sent to {email_to}")
+                    email_sent = True
                     
         except Exception as e:
             logger.warning(f"Could not send email alert: {str(e)}")
-            # Email failed but alert is still logged
+        
+        # Try to send WhatsApp alert
+        whatsapp_message = f"🚨 *TradeManthan Alert*\n\n*{subject}*\n\n{message}\n\n_Time: {datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%H:%M IST')}_"
+        whatsapp_sent = self.send_whatsapp_message(whatsapp_message)
+        
+        # Log notification status
+        if email_sent and whatsapp_sent:
+            logger.info("✅ Alerts sent via Email + WhatsApp")
+        elif email_sent:
+            logger.info("✅ Alert sent via Email (WhatsApp not configured/failed)")
+        elif whatsapp_sent:
+            logger.info("✅ Alert sent via WhatsApp (Email failed)")
+        else:
+            logger.warning("⚠️ Alert sent via logs only (Email and WhatsApp failed)")
     
     def record_webhook_success(self):
         """Record successful webhook processing"""
