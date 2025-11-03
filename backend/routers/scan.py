@@ -4,12 +4,15 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, func, desc
+from sqlalchemy import and_, func, desc, text
 import json
 import os
 import sys
 import requests
 import secrets
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Add services to path
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -848,10 +851,10 @@ async def health_check(db: Session = Depends(get_db)):
         # Check database
         db_healthy = False
         try:
-            db.execute("SELECT 1")
+            db.execute(text("SELECT 1"))
             db_healthy = True
         except Exception as e:
-            logger.error(f"Database health check failed: {e}")
+            print(f"Database health check failed: {e}")
         
         # Check today's webhook activity
         today_alerts = 0
@@ -912,7 +915,9 @@ async def health_check(db: Session = Depends(get_db)):
         return JSONResponse(status_code=status_code, content=health_data)
         
     except Exception as e:
-        logger.error(f"Health check endpoint failed: {str(e)}")
+        print(f"Health check endpoint failed: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return JSONResponse(
             status_code=500,
             content={
