@@ -17,6 +17,7 @@ import routers.algo as algo
 import routers.scan as scan
 from services.master_stock_scheduler import start_scheduler, stop_scheduler
 from services.instruments_downloader import start_instruments_scheduler, stop_instruments_scheduler
+from services.health_monitor import start_health_monitor, stop_health_monitor
 
 load_dotenv()
 
@@ -92,31 +93,51 @@ async def startup_event():
         import traceback
         traceback.print_exc()
     
+    # Start health monitor (checks every 15 min during market hours)
+    try:
+        print("Starting Health Monitor...", flush=True)
+        sys.stdout.flush()
+        start_health_monitor()
+        print("✅ Health Monitor: STARTED (Every 15 min, 9 AM - 4 PM IST)", flush=True)
+        sys.stdout.flush()
+    except Exception as e:
+        print(f"❌ Health Monitor: FAILED - {e}", flush=True)
+        sys.stdout.flush()
+        import traceback
+        traceback.print_exc()
+    
     print("=" * 60, flush=True)
-    print("✅ STARTUP COMPLETE - All Schedulers Active", flush=True)
+    print("✅ STARTUP COMPLETE - All Services Active", flush=True)
     print("=" * 60, flush=True)
     sys.stdout.flush()
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on application shutdown"""
-    logger.info("🛑 Shutting down Trade Manthan API...")
+    print("🛑 Shutting down Trade Manthan API...", flush=True)
     
     # Stop master stock scheduler
     try:
         stop_scheduler()
-        logger.info("✅ Master stock scheduler stopped")
+        print("✅ Master stock scheduler stopped", flush=True)
     except Exception as e:
-        logger.warning(f"⚠️ Error stopping master stock scheduler: {e}")
+        print(f"⚠️ Error stopping master stock scheduler: {e}", flush=True)
     
     # Stop instruments scheduler
     try:
         stop_instruments_scheduler()
-        logger.info("✅ Instruments scheduler stopped")
+        print("✅ Instruments scheduler stopped", flush=True)
     except Exception as e:
-        logger.warning(f"⚠️ Error stopping instruments scheduler: {e}")
+        print(f"⚠️ Error stopping instruments scheduler: {e}", flush=True)
     
-    logger.info("✅ Shutdown complete")
+    # Stop health monitor
+    try:
+        stop_health_monitor()
+        print("✅ Health monitor stopped", flush=True)
+    except Exception as e:
+        print(f"⚠️ Error stopping health monitor: {e}", flush=True)
+    
+    print("✅ Shutdown complete", flush=True)
 
 def get_database_info():
     """Get database connection information"""

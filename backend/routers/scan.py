@@ -13,6 +13,12 @@ import secrets
 
 # Add services to path
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+
+# Import health monitor for tracking webhook success/failure
+try:
+    from services.health_monitor import health_monitor
+except ImportError:
+    health_monitor = None  # Graceful degradation if not available
 from services.upstox_service import upstox_service as vwap_service
 from database import get_db
 from models.trading import IntradayStockOption, MasterStock
@@ -792,6 +798,10 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         with open(os.path.join(data_dir, "bearish_data.json"), "w") as f:
             json.dump(bearish_data, f, indent=2)
         
+        # Track webhook success
+        if health_monitor:
+            health_monitor.record_webhook_success()
+        
         return JSONResponse(
             status_code=200,
             content={
@@ -800,19 +810,114 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 "alert_type": data_type.lower(),
                 "stocks_count": len(processed_data["stocks"]),
                 "timestamp": processed_data["received_at"],
-                "date": current_date
+                "date": current_date,
+                "saved_to_database": saved_count
             }
         )
         
     except Exception as e:
-        print(f"Error processing webhook: {str(e)}")
+        print(f"❌ CRITICAL ERROR processing webhook: {str(e)}")
         import traceback
         traceback.print_exc()
+        
+        # Track webhook failure
+        if health_monitor:
+            health_monitor.record_webhook_failure()
+        
         return JSONResponse(
             status_code=500,
             content={
                 "status": "error",
-                "message": f"Failed to process webhook: {str(e)}"
+                "message": f"Failed to process webhook: {str(e)}",
+                "error_type": type(e).__name__
+            }
+        )
+
+@router.get("/health")
+async def health_check(db: Session = Depends(get_db)):
+    """
+    Health check endpoint for monitoring system status
+    Returns status of all critical components
+    """
+    try:
+        import pytz
+        ist = pytz.timezone('Asia/Kolkata')
+        now = datetime.now(ist)
+        today = now.date()
+        
+        # Check database
+        db_healthy = False
+        try:
+            db.execute("SELECT 1")
+            db_healthy = True
+        except Exception as e:
+            logger.error(f"Database health check failed: {e}")
+        
+        # Check today's webhook activity
+        today_alerts = 0
+        try:
+            today_alerts = db.query(IntradayStockOption).filter(
+                IntradayStockOption.trade_date >= datetime.combine(today, datetime.min.time())
+            ).count()
+        except:
+            pass
+        
+        # Check Upstox token
+        token_valid = False
+        token_error = None
+        try:
+            result = vwap_service.check_index_trends()
+            if result and result.get('nifty'):
+                token_valid = True
+        except Exception as e:
+            token_error = str(e)
+        
+        # Check instruments file
+        instruments_exists = os.path.exists("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
+        
+        # Overall health status
+        is_healthy = db_healthy and (now.hour < 11 or today_alerts > 0 or now.weekday() >= 5)
+        
+        health_data = {
+            "status": "healthy" if is_healthy else "degraded",
+            "timestamp": now.isoformat(),
+            "components": {
+                "database": {
+                    "status": "ok" if db_healthy else "error",
+                    "healthy": db_healthy
+                },
+                "upstox_api": {
+                    "status": "ok" if token_valid else "error",
+                    "healthy": token_valid,
+                    "error": token_error if not token_valid else None
+                },
+                "webhooks": {
+                    "today_count": today_alerts,
+                    "status": "ok" if (today_alerts > 0 or now.hour < 11 or now.weekday() >= 5) else "warning",
+                    "message": f"{today_alerts} alerts today"
+                },
+                "instruments_file": {
+                    "status": "ok" if instruments_exists else "error",
+                    "exists": instruments_exists
+                }
+            },
+            "metrics": {
+                "consecutive_webhook_failures": health_monitor.webhook_failures if health_monitor else 0,
+                "consecutive_token_failures": health_monitor.api_token_failures if health_monitor else 0,
+                "consecutive_db_failures": health_monitor.database_failures if health_monitor else 0
+            }
+        }
+        
+        status_code = 200 if is_healthy else 503
+        return JSONResponse(status_code=status_code, content=health_data)
+        
+    except Exception as e:
+        logger.error(f"Health check endpoint failed: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "message": f"Health check failed: {str(e)}"
             }
         )
 
