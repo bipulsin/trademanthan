@@ -638,8 +638,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         # Check index trends at the time of alert
         # Index trends determine trade entry, not alert display
         index_trends = vwap_service.check_index_trends()
-        nifty_trend = index_trends.get("nifty", {}).get("trend", "unknown")
-        banknifty_trend = index_trends.get("banknifty", {}).get("trend", "unknown")
+        nifty_trend = index_trends.get("nifty_trend", "unknown")
+        banknifty_trend = index_trends.get("banknifty_trend", "unknown")
         
         # Determine if trade entry is allowed (both indices same direction)
         can_enter_trade = False
