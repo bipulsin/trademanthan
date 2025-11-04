@@ -142,16 +142,19 @@ function updateIndexDisplay(data) {
     
     if (footerNiftyPrice && footerNiftyArrow && data.nifty) {
         const price = data.market_status === 'closed' ? data.nifty.close_price : data.nifty.ltp;
-        footerNiftyPrice.textContent = formatPrice(price);
+        footerNiftyPrice.textContent = '₹' + formatPrice(price);
         
         // Update footer arrow based on trend
         footerNiftyArrow.className = 'footer-index-arrow';
         if (data.nifty.trend === 'bullish') {
             footerNiftyArrow.classList.add('bullish');
+            footerNiftyArrow.textContent = '↑';
         } else if (data.nifty.trend === 'bearish') {
             footerNiftyArrow.classList.add('bearish');
+            footerNiftyArrow.textContent = '↓';
         } else {
             footerNiftyArrow.classList.add('neutral');
+            footerNiftyArrow.textContent = '→';
         }
     }
     
@@ -161,16 +164,19 @@ function updateIndexDisplay(data) {
     
     if (footerBankniftyPrice && footerBankniftyArrow && data.banknifty) {
         const price = data.market_status === 'closed' ? data.banknifty.close_price : data.banknifty.ltp;
-        footerBankniftyPrice.textContent = formatPrice(price);
+        footerBankniftyPrice.textContent = '₹' + formatPrice(price);
         
         // Update footer arrow based on trend
         footerBankniftyArrow.className = 'footer-index-arrow';
         if (data.banknifty.trend === 'bullish') {
             footerBankniftyArrow.classList.add('bullish');
+            footerBankniftyArrow.textContent = '↑';
         } else if (data.banknifty.trend === 'bearish') {
             footerBankniftyArrow.classList.add('bearish');
+            footerBankniftyArrow.textContent = '↓';
         } else {
             footerBankniftyArrow.classList.add('neutral');
+            footerBankniftyArrow.textContent = '→';
         }
     }
 }
