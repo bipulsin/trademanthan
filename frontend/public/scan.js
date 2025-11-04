@@ -405,7 +405,7 @@ function renderAlertGroup(alert, type) {
                         
                         // Check if this is a "No Entry" trade
                         const isNoEntry = !stock.buy_price || stock.buy_price === 0 || stock.qty === 0;
-                        const buyPriceDisplay = isNoEntry ? '<span style="color: #dc2626; font-weight: 700;">No Entry</span>' : '₹' + formatPrice(stock.buy_price);
+                        const buyPriceDisplay = isNoEntry ? '-' : '₹' + formatPrice(stock.buy_price);
                         const stopLossDisplay = isNoEntry ? '-' : '₹' + formatPrice(stock.stop_loss || 0);
                         const sellPriceDisplay = isNoEntry ? '-' : '₹' + formatPrice(stock.sell_price || 0);
                         const pnlDisplay = isNoEntry ? '-' : formatPNL(stock.pnl || 0);
@@ -443,18 +443,18 @@ function renderAlertGroup(alert, type) {
                     let pnlValue = parseFloat(stock.pnl || 0);
                     let pnlColor = pnlValue > 0 ? 'green' : (pnlValue < 0 ? 'red' : '');
                     
-                    // Determine exit status display
+                    // Determine exit status display (text-only for mobile)
                     let statusDisplay = '';
                     if (isNoEntry) {
-                        statusDisplay = '<span style="background: #dc2626; color: white; padding: 3px 6px; border-radius: 4px; font-weight: 700; font-size: 10px;">No Entry</span>';
+                        statusDisplay = '<span style="color: #dc2626; font-weight: 600; font-size: 11px;">No Entry</span>';
                     } else if (stock.exit_reason === 'stop_loss') {
-                        statusDisplay = '<span style="background: #dc2626; color: white; padding: 3px 6px; border-radius: 4px; font-weight: 700; font-size: 10px;">🛑 SL HIT</span>';
+                        statusDisplay = '<span style="color: #dc2626; font-weight: 600; font-size: 11px;">🛑 SL HIT</span>';
                     } else if (stock.exit_reason === 'profit_target') {
-                        statusDisplay = '<span style="background: #16a34a; color: white; padding: 3px 6px; border-radius: 4px; font-weight: 700; font-size: 10px;">🎯 TARGET</span>';
+                        statusDisplay = '<span style="color: #16a34a; font-weight: 600; font-size: 11px;">🎯 TARGET</span>';
                     } else if (stock.exit_reason === 'time_based') {
-                        statusDisplay = '<span style="background: #f59e0b; color: white; padding: 3px 6px; border-radius: 4px; font-weight: 700; font-size: 10px;">⏰ TIME</span>';
+                        statusDisplay = '<span style="color: #f59e0b; font-weight: 600; font-size: 11px;">⏰ TIME</span>';
                     } else if (stock.exit_reason) {
-                        statusDisplay = '<span style="background: #6b7280; color: white; padding: 3px 6px; border-radius: 4px; font-weight: 700; font-size: 10px;">CLOSED</span>';
+                        statusDisplay = '<span style="color: #6b7280; font-weight: 600; font-size: 11px;">✖ CLOSED</span>';
                     } else {
                         statusDisplay = '<span class="${iconClass}" style="font-size: 10px;">${iconText}</span>';
                     }
@@ -490,7 +490,7 @@ function renderAlertGroup(alert, type) {
                             <!-- Row 3: Buy Price, SL, Sell Price, PnL -->
                             <div class="stock-card-row">
                                 <div style="flex: 1;">
-                                    <div class="stock-card-value">${isNoEntry ? '<span style="color: #dc2626; font-weight: 700;">No Entry</span>' : 'B:₹' + formatPrice(stock.buy_price)}</div>
+                                    <div class="stock-card-value">${isNoEntry ? '-' : 'B:₹' + formatPrice(stock.buy_price)}</div>
                                 </div>
                                 <div style="flex: 1;">
                                     <div class="stock-card-value" style="color: #dc2626; font-weight: 600;">${isNoEntry ? '-' : 'SL:₹' + formatPrice(stock.stop_loss || 0)}</div>
