@@ -117,14 +117,14 @@
     .stock-card {
         border-radius: 0 !important; /* Remove rounded corners */
         margin-bottom: 2px; /* Minimal spacing */
-        padding: 10px 4px; /* Reduced from 12px 6px */
+        padding: 6px 2px; /* Ultra-compact */
         margin-left: 0;
         margin-right: 0;
     }
     
     .stock-card-row {
-        gap: 6px !important; /* Reduce gap between columns */
-        margin-bottom: 8px !important;
+        gap: 3px !important; /* Tight gap between columns */
+        margin-bottom: 6px !important;
     }
     
     .stock-card-row > div {
