@@ -7,7 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Chartink Scan Alerts - Trade Manthan</title>
-    <link rel="stylesheet" href="scan.css?v=20251102140000">
+    <link rel="stylesheet" href="scan.css?v=20251104230000">
     <link rel="stylesheet" href="styles.css">
     <style>
         body {
@@ -700,7 +700,7 @@
         
         @media (max-width: 768px) {
             .title-bar-content {
-                padding: 8px 15px;
+                padding: 8px 3px;
                 height: 50px;
             }
             
@@ -716,34 +716,17 @@
                 font-size: 10px;
             }
             
+            /* Hide indices and help button on mobile - now in footer */
             .title-bar-indices {
-                gap: 15px;
-            }
-            
-            .index-item {
-                min-width: 80px;
-            }
-            
-            .index-name {
-                font-size: 12px;
-                gap: 4px;
-            }
-            
-            .trend-arrow {
-                font-size: 14px;
-            }
-            
-            .index-price {
-                font-size: 14px;
+                display: none !important;
             }
             
             .help-btn {
-                padding: 8px 12px;
-                font-size: 12px;
+                display: none !important;
             }
             
             .scan-container {
-                padding: 10px;
+                padding: 3px;
             }
             
             .scan-header h1 {
@@ -933,7 +916,7 @@
         </div>
     </div>
     
-    <script src="scan.js?v=20251104220000"></script>
+    <script src="scan.js?v=20251104230000"></script>
     <script>
         console.log('Page HTML loaded, starting scan.js');
         // Force immediate load for debugging
@@ -1037,11 +1020,18 @@
             flex: 1;
             display: flex;
             flex-direction: column;
-            align-items: center;
             justify-content: center;
             cursor: pointer;
-            padding: 5px;
+            padding: 5px 10px;
             transition: background 0.2s;
+        }
+        
+        .footer-index:first-child {
+            align-items: flex-start; /* Align NIFTY to left */
+        }
+        
+        .footer-index:last-child {
+            align-items: flex-end; /* Align BANKNIFTY to right */
         }
         
         .footer-index:active {
@@ -1050,7 +1040,7 @@
         
         .footer-index-name {
             font-size: 10px;
-            font-weight: 600;
+            font-weight: 700;
             color: #93c5fd; /* Light blue */
             margin-bottom: 2px;
             text-transform: uppercase;
@@ -1058,7 +1048,7 @@
         }
         
         .footer-index-value {
-            font-size: 13px;
+            font-size: 14px;
             font-weight: 700;
             color: #ffffff;
             display: flex;
@@ -1067,9 +1057,10 @@
         }
         
         .footer-index-arrow {
-            font-size: 16px;
+            font-size: 20px;
             font-weight: 900;
-            margin-left: 3px;
+            margin-left: 4px;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
         }
         
         .footer-index-arrow.bullish {

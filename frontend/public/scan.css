@@ -112,6 +112,22 @@
     .section-title .mobile-header {
         display: flex !important; /* Show mobile header on mobile */
     }
+    
+    /* Make stock cards rectangular on mobile */
+    .stock-card {
+        border-radius: 0 !important; /* Remove rounded corners */
+        margin-bottom: 2px; /* Minimal spacing */
+        padding: 12px 6px; /* Reduce padding */
+    }
+    
+    .time-group {
+        margin-bottom: 2px !important;
+    }
+    
+    .alert-section {
+        padding: 3px !important;
+        border-radius: 0 !important;
+    }
 }
     
     .scan-container {
