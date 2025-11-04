@@ -490,15 +490,15 @@ function renderAlertGroup(alert, type) {
                     // Determine exit status display (text-only for mobile)
                     let statusDisplay = '';
                     if (isNoEntry) {
-                        statusDisplay = '<span style="color: #dc2626; font-weight: 600; font-size: 11px;">No Entry</span>';
+                        statusDisplay = '<span style="color: #dc2626; font-weight: 700; font-size: 12px;">No Entry</span>';
                     } else if (stock.exit_reason === 'stop_loss') {
-                        statusDisplay = '<span style="color: #dc2626; font-weight: 600; font-size: 11px;">🛑 SL HIT</span>';
+                        statusDisplay = '<span style="color: #dc2626; font-weight: 700; font-size: 12px;">🛑 SL HIT</span>';
                     } else if (stock.exit_reason === 'profit_target') {
-                        statusDisplay = '<span style="color: #16a34a; font-weight: 600; font-size: 11px;">🎯 TARGET</span>';
+                        statusDisplay = '<span style="color: #16a34a; font-weight: 700; font-size: 12px;">🎯 TARGET</span>';
                     } else if (stock.exit_reason === 'time_based') {
-                        statusDisplay = '<span style="color: #f59e0b; font-weight: 600; font-size: 11px;">⏰ TIME</span>';
+                        statusDisplay = '<span style="color: #f59e0b; font-weight: 700; font-size: 12px;">⏰ TIME</span>';
                     } else if (stock.exit_reason) {
-                        statusDisplay = '<span style="color: #6b7280; font-weight: 600; font-size: 11px;">✖ CLOSED</span>';
+                        statusDisplay = '<span style="color: #6b7280; font-weight: 700; font-size: 12px;">✖ CLOSED</span>';
                     } else {
                         statusDisplay = '<span class="${iconClass}" style="font-size: 10px;">${iconText}</span>';
                     }

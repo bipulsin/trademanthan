@@ -117,16 +117,30 @@
     .stock-card {
         border-radius: 0 !important; /* Remove rounded corners */
         margin-bottom: 2px; /* Minimal spacing */
-        padding: 12px 6px; /* Reduce padding */
+        padding: 10px 4px; /* Reduced from 12px 6px */
+        margin-left: 0;
+        margin-right: 0;
+    }
+    
+    .stock-card-row {
+        gap: 6px !important; /* Reduce gap between columns */
+        margin-bottom: 8px !important;
+    }
+    
+    .stock-card-row > div {
+        padding: 0 2px; /* Minimal internal padding */
     }
     
     .time-group {
         margin-bottom: 2px !important;
+        padding: 0 !important;
     }
     
     .alert-section {
         padding: 3px !important;
         border-radius: 0 !important;
+        margin-left: 0 !important;
+        margin-right: 0 !important;
     }
 }
     
