@@ -933,7 +933,7 @@
         </div>
     </div>
     
-    <script src="scan.js?v=20251104210000"></script>
+    <script src="scan.js?v=20251104220000"></script>
     <script>
         console.log('Page HTML loaded, starting scan.js');
         // Force immediate load for debugging
@@ -976,6 +976,141 @@
         
         console.log('initiateUpstoxOAuth function defined:', typeof window.initiateUpstoxOAuth);
     </script>
+    
+    <!-- Mobile Fixed Footer Bar -->
+    <div class="mobile-footer-bar">
+        <!-- Left: NIFTY50 -->
+        <div class="footer-index" onclick="loadIndexPrices()">
+            <div class="footer-index-name">NIFTY</div>
+            <div class="footer-index-value" id="footer-nifty-price">...</div>
+            <span class="footer-index-arrow" id="footer-nifty-arrow">↑</span>
+        </div>
+        
+        <!-- Middle: Help Icon -->
+        <div class="footer-help" onclick="window.location.href='docs/SCAN_FUNCTIONAL_GUIDE.md'">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>
+        </div>
+        
+        <!-- Right: BANKNIFTY -->
+        <div class="footer-index" onclick="loadIndexPrices()">
+            <div class="footer-index-name">BANK</div>
+            <div class="footer-index-value" id="footer-banknifty-price">...</div>
+            <span class="footer-index-arrow" id="footer-banknifty-arrow">↑</span>
+        </div>
+    </div>
+    
+    <style>
+        /* Mobile Footer Bar - Only visible on mobile */
+        .mobile-footer-bar {
+            display: none; /* Hidden by default (desktop) */
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: #1e3a8a; /* Navy blue */
+            box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.3);
+            z-index: 1000;
+            height: 60px;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 15px;
+        }
+        
+        /* Show only on mobile (max-width: 768px) */
+        @media (max-width: 768px) {
+            .mobile-footer-bar {
+                display: flex;
+            }
+            
+            /* Add bottom padding to main content to prevent footer overlap */
+            body {
+                padding-bottom: 70px;
+            }
+        }
+        
+        /* Footer Index Sections (NIFTY & BANKNIFTY) */
+        .footer-index {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            padding: 5px;
+            transition: background 0.2s;
+        }
+        
+        .footer-index:active {
+            background: rgba(255, 255, 255, 0.1);
+        }
+        
+        .footer-index-name {
+            font-size: 10px;
+            font-weight: 600;
+            color: #93c5fd; /* Light blue */
+            margin-bottom: 2px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .footer-index-value {
+            font-size: 13px;
+            font-weight: 700;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        
+        .footer-index-arrow {
+            font-size: 16px;
+            font-weight: 900;
+            margin-left: 3px;
+        }
+        
+        .footer-index-arrow.bullish {
+            color: #22c55e; /* Green */
+        }
+        
+        .footer-index-arrow.bearish {
+            color: #ef4444; /* Red */
+            transform: rotate(180deg);
+            display: inline-block;
+        }
+        
+        .footer-index-arrow.neutral {
+            color: #fbbf24; /* Yellow */
+        }
+        
+        /* Footer Help Icon (Center) */
+        .footer-help {
+            flex: 0 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 50px;
+            height: 50px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .footer-help svg {
+            color: #ffffff;
+            filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+        }
+        
+        .footer-help:active {
+            transform: scale(0.95);
+        }
+        
+        .footer-help:active svg {
+            color: #93c5fd;
+        }
+    </style>
 </body>
 </html>
 

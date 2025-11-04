@@ -90,7 +90,7 @@ async function loadIndexPrices() {
 
 // Update index display with prices and trends
 function updateIndexDisplay(data) {
-    // Update NIFTY
+    // Update NIFTY (Desktop)
     const niftyPrice = document.getElementById('nifty-price');
     const niftyArrow = document.getElementById('nifty-arrow');
     
@@ -113,7 +113,7 @@ function updateIndexDisplay(data) {
         }
     }
     
-    // Update BANKNIFTY
+    // Update BANKNIFTY (Desktop)
     const bankniftyPrice = document.getElementById('banknifty-price');
     const bankniftyArrow = document.getElementById('banknifty-arrow');
     
@@ -133,6 +133,44 @@ function updateIndexDisplay(data) {
         } else {
             bankniftyArrow.textContent = '→';
             bankniftyArrow.classList.add('neutral');
+        }
+    }
+    
+    // Update NIFTY (Mobile Footer)
+    const footerNiftyPrice = document.getElementById('footer-nifty-price');
+    const footerNiftyArrow = document.getElementById('footer-nifty-arrow');
+    
+    if (footerNiftyPrice && footerNiftyArrow && data.nifty) {
+        const price = data.market_status === 'closed' ? data.nifty.close_price : data.nifty.ltp;
+        footerNiftyPrice.textContent = formatPrice(price);
+        
+        // Update footer arrow based on trend
+        footerNiftyArrow.className = 'footer-index-arrow';
+        if (data.nifty.trend === 'bullish') {
+            footerNiftyArrow.classList.add('bullish');
+        } else if (data.nifty.trend === 'bearish') {
+            footerNiftyArrow.classList.add('bearish');
+        } else {
+            footerNiftyArrow.classList.add('neutral');
+        }
+    }
+    
+    // Update BANKNIFTY (Mobile Footer)
+    const footerBankniftyPrice = document.getElementById('footer-banknifty-price');
+    const footerBankniftyArrow = document.getElementById('footer-banknifty-arrow');
+    
+    if (footerBankniftyPrice && footerBankniftyArrow && data.banknifty) {
+        const price = data.market_status === 'closed' ? data.banknifty.close_price : data.banknifty.ltp;
+        footerBankniftyPrice.textContent = formatPrice(price);
+        
+        // Update footer arrow based on trend
+        footerBankniftyArrow.className = 'footer-index-arrow';
+        if (data.banknifty.trend === 'bullish') {
+            footerBankniftyArrow.classList.add('bullish');
+        } else if (data.banknifty.trend === 'bearish') {
+            footerBankniftyArrow.classList.add('bearish');
+        } else {
+            footerBankniftyArrow.classList.add('neutral');
         }
     }
 }
