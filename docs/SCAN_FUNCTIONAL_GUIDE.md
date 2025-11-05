@@ -583,7 +583,93 @@ if (stock_ltp > stock_vwap) {
 - **Index Trends (NIFTY/BANKNIFTY):** Use LTP vs Day Open (candle color)
 - **Stock Signals (Hold/Exit):** Use LTP vs VWAP (momentum indicator)
 
-### 3. Section Display Logic
+### 3. Automated Exit Conditions (Hourly Refresh)
+
+**File:** `backend/routers/scan.py` (`/refresh-hourly` endpoint)
+
+The system automatically exits trades when any of these **FOUR** conditions are met:
+
+**Exit Condition Priority (checked in order):**
+
+#### 1. Time-Based Exit (3:25 PM IST)
+```python
+if current_time >= "15:25":
+    exit_reason = 'time_based'
+    # Force exit all open positions at market close
+```
+- **When:** At 3:25 PM IST (5 minutes before market close)
+- **Why:** Mandatory exit before market closes at 3:30 PM
+- **Action:** Exits ALL open positions regardless of P&L
+
+#### 2. Stop Loss Exit
+```python
+if option_ltp <= stop_loss_price:
+    exit_reason = 'stop_loss'
+    # Exit to limit loss to ₹3,100 per trade
+```
+- **When:** Option LTP drops to or below stop loss price
+- **Calculation:** `stop_loss = buy_price - (₹3,100 / qty)`
+- **Why:** Risk management - limits maximum loss per trade
+- **Action:** Exits immediately to prevent further losses
+
+#### 3. Stock VWAP Cross Exit (Directional) ⭐ NEW!
+```python
+# TIME RESTRICTION: Only check from 11:15 AM onwards (10:15 AM is entry time)
+if current_time >= 11:15 AM:
+    
+    # For CE (Bullish trades): Exit when stock closes BELOW VWAP
+    if option_type == 'CE' and stock_ltp < stock_vwap:
+        exit_reason = 'stock_vwap_cross'
+        # Lost bullish momentum
+
+    # For PE (Bearish trades): Exit when stock closes ABOVE VWAP  
+    if option_type == 'PE' and stock_ltp > stock_vwap:
+        exit_reason = 'stock_vwap_cross'
+        # Lost bearish momentum
+```
+- **When (CE):** Bullish trade - Stock's LTP drops below its 1-hour VWAP
+- **When (PE):** Bearish trade - Stock's LTP rises above its 1-hour VWAP
+- **Time Window:** **Only from 11:15 AM to 3:15 PM** (10:15 AM is entry time, no exit at entry)
+- **Why:** Indicates loss of directional momentum
+- **Logic:** 
+  - **Bullish (CE):** You bought CALL expecting stock to stay strong (above VWAP). If it goes below, exit.
+  - **Bearish (PE):** You bought PUT expecting stock to stay weak (below VWAP). If it goes above, exit.
+- **Action:** Exit the option position to avoid holding against momentum
+- **Example (CE):** RELIANCE CALL option bought, but RELIANCE stock (₹2,445) < VWAP (₹2,448) → Exit
+- **Example (PE):** TATAMOTORS PUT option bought, but TATAMOTORS stock (₹952) > VWAP (₹948) → Exit
+
+#### 4. Profit Target Exit (50% Gain)
+```python
+if option_ltp >= (buy_price * 1.5):
+    exit_reason = 'profit_target'
+    # Exit when 50% profit target is achieved
+```
+- **When:** Option LTP reaches 50% profit (1.5x of buy price)
+- **Why:** Book profits at predefined target
+- **Action:** Exit to secure gains
+
+**Exit Condition Summary:**
+
+| Priority | Condition | Trigger | Exit Reason Code |
+|----------|-----------|---------|------------------|
+| 1 | Time-based | Time ≥ 3:25 PM | `time_based` |
+| 2 | Stop Loss | Option LTP ≤ SL | `stop_loss` |
+| 3 | VWAP Cross (Directional) | CE: Stock < VWAP, PE: Stock > VWAP | `stock_vwap_cross` |
+| 4 | Profit Target | Option LTP ≥ Buy Price × 1.5 | `profit_target` |
+
+**How It Works:**
+- System checks these conditions **every hour** during the hourly refresh
+- Conditions are evaluated in **priority order** (1 → 2 → 3 → 4)
+- **First matching condition** triggers the exit
+- Once exited, position is marked as `sold` with the exit reason stored in database
+
+**Time Window for VWAP Exit:**
+- **10:15 AM:** First trade entry - VWAP exit check **SKIPPED** ⏭️
+- **11:15 AM onwards:** VWAP exit check **ACTIVE** ✅
+- **Until 3:15 PM:** VWAP exit check continues
+- **3:25 PM:** Time-based exit takes priority (market close)
+
+### 4. Section Display Logic
 
 **File:** `scan.js` (Lines 510-588)
 

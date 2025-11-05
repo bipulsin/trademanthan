@@ -1273,7 +1273,7 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                             
                             # Only update sell_price if trade is not already closed
                             if not record.exit_reason:
-                                # THREE EXIT CONDITIONS:
+                                # FOUR EXIT CONDITIONS:
                                 
                                 # 1. Check if TIME-BASED EXIT (3:25 PM)
                                 if is_exit_time:
@@ -1295,7 +1295,42 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                         record.pnl = (new_option_ltp - record.buy_price) * record.qty
                                     print(f"🛑 STOP LOSS HIT for {record.stock_name}: SL=₹{record.stop_loss}, LTP=₹{new_option_ltp}, Loss=₹{record.pnl}")
                                 
-                                # 3. Check if Profit Target is hit (50% gain)
+                                # 3. Check if underlying stock crosses VWAP (directional - based on option type)
+                                # For CE (Bullish): Exit when stock closes BELOW VWAP (lost bullish momentum)
+                                # For PE (Bearish): Exit when stock closes ABOVE VWAP (lost bearish momentum)
+                                # TIME RESTRICTION: Only check from 11:15 AM onwards (10:15 AM is entry time)
+                                elif record.stock_ltp and record.stock_vwap and record.option_type:
+                                    # Check if current time is >= 11:15 AM (after first entry time)
+                                    vwap_check_time = datetime.strptime("11:15", "%H:%M").time()
+                                    current_time_check = now.time()
+                                    
+                                    # Only apply VWAP exit from 11:15 AM onwards
+                                    if current_time_check >= vwap_check_time:
+                                        should_exit_vwap = False
+                                        exit_direction = ""
+                                        
+                                        if record.option_type == 'CE' and record.stock_ltp < record.stock_vwap:
+                                            # Bullish trade: stock went below VWAP (bearish signal)
+                                            should_exit_vwap = True
+                                            exit_direction = "below"
+                                        elif record.option_type == 'PE' and record.stock_ltp > record.stock_vwap:
+                                            # Bearish trade: stock went above VWAP (bullish signal)
+                                            should_exit_vwap = True
+                                            exit_direction = "above"
+                                        
+                                        if should_exit_vwap:
+                                            record.sell_price = new_option_ltp
+                                            record.sell_time = now
+                                            record.exit_reason = 'stock_vwap_cross'
+                                            record.status = 'sold'
+                                            if record.buy_price and record.qty:
+                                                record.pnl = (new_option_ltp - record.buy_price) * record.qty
+                                            print(f"📉 VWAP CROSS EXIT for {record.stock_name} ({record.option_type}): Stock LTP=₹{record.stock_ltp} {exit_direction} VWAP=₹{record.stock_vwap}, Option PnL=₹{record.pnl}")
+                                    else:
+                                        # Before 11:15 AM - skip VWAP exit check
+                                        print(f"⏰ Skipping VWAP exit check for {record.stock_name} (current time {current_time_check.strftime('%H:%M')} < 11:15 AM)")
+                                
+                                # 4. Check if Profit Target is hit (50% gain)
                                 elif record.buy_price and new_option_ltp >= (record.buy_price * 1.5):
                                     record.sell_price = new_option_ltp
                                     record.sell_time = now
