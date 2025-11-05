@@ -85,8 +85,9 @@ class HealthMonitor:
             
             # 1. Check database connectivity
             try:
+                from sqlalchemy import text
                 db = SessionLocal()
-                db.execute("SELECT 1")
+                db.execute(text("SELECT 1"))
                 db.close()
                 logger.info("✅ Database: OK")
                 self.database_failures = 0
@@ -102,14 +103,21 @@ class HealthMonitor:
                     IntradayStockOption.trade_date >= datetime.combine(today, datetime.min.time())
                 ).count()
                 
-                if now.hour >= 11 and today_alerts == 0:
-                    # After 11 AM, we should have received some webhooks
+                # Only alert if it's a weekday (Mon-Fri) and market hours
+                is_weekday = now.weekday() < 5  # 0=Monday, 4=Friday
+                
+                if is_weekday and now.hour >= 11 and today_alerts == 0:
+                    # After 11 AM on weekday, we should have received some webhooks
+                    # (Unless it's a trading holiday - but we can't detect all holidays)
                     self.webhook_failures += 1
-                    issues.append(f"⚠️ No webhooks received today (after 11 AM)")
-                    logger.warning(f"No webhooks received today after 11 AM")
+                    issues.append(f"⚠️ No webhooks received today (after 11 AM on weekday)")
+                    logger.warning(f"No webhooks received today after 11 AM (weekday)")
                 else:
                     self.webhook_failures = 0
-                    logger.info(f"✅ Webhooks: {today_alerts} alerts today")
+                    if is_weekday:
+                        logger.info(f"✅ Webhooks: {today_alerts} alerts today")
+                    else:
+                        logger.info(f"ℹ️ Weekend - No webhooks expected ({today_alerts} alerts)")
                 
                 db.close()
             except Exception as e:
@@ -118,9 +126,9 @@ class HealthMonitor:
             
             # 3. Check Upstox token status
             try:
-                from services.vwap_service import vwap_service
+                from services.upstox_service import upstox_service
                 # Try to fetch index prices (quick API call)
-                result = vwap_service.check_index_trends()
+                result = upstox_service.check_index_trends()
                 if result and result.get('nifty'):
                     self.api_token_failures = 0
                     logger.info("✅ Upstox API: OK")
@@ -269,13 +277,28 @@ Generated: {now.strftime('%Y-%m-%d %H:%M:%S IST')}
             
             logger.info(report)
             
-            # Send email if configured
-            if total_alerts == 0 and now.weekday() < 5:  # Weekday with no alerts
+            # Send email if configured (only on weekdays with no alerts)
+            # Skip alert if it's likely a holiday or weekend
+            is_weekday = now.weekday() < 5  # Mon-Fri
+            
+            # Send daily report summary (non-critical) on weekdays
+            alert_email = os.getenv("ALERT_EMAIL")
+            if alert_email and is_weekday and total_alerts > 0:
+                # Normal trading day - send summary
                 await self.send_critical_alert(
-                    "⚠️ NO WEBHOOKS TODAY",
+                    f"📊 TradeManthan Daily Report - {today.strftime('%b %d, %Y')}",
+                    report
+                )
+            
+            # Only send critical alert if NO webhooks AND consecutive failures
+            # This helps avoid false alarms on single-day holidays
+            if total_alerts == 0 and is_weekday and self.webhook_failures >= 2:
+                await self.send_critical_alert(
+                    "⚠️ NO WEBHOOKS - Multiple Days",
                     f"No webhook alerts received on {today.strftime('%B %d, %Y')} (weekday).\n\n" +
+                    f"This is the {self.webhook_failures}th consecutive check without data.\n\n" +
                     "This may indicate:\n" +
-                    "- Market holiday\n" +
+                    "- Multi-day market closure\n" +
                     "- Chartink not sending webhooks\n" +
                     "- Backend processing failures\n\n" +
                     "Please investigate."
