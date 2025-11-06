@@ -680,14 +680,15 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 # Determine trade entry based on index trends
                 if can_enter_trade and option_ltp_value > 0 and lot_size > 0:
                     # Enter trade: set qty, buy_price, buy_time, stop_loss
+                    # IMPORTANT: sell_price remains NULL initially, will be populated by hourly updater
                     qty = lot_size
                     buy_price = option_ltp_value
                     buy_time = triggered_datetime
-                    sell_price = option_ltp_value
+                    sell_price = None  # BLANK initially - will be updated hourly by market data updater
                     stop_loss_price = max(0.05, option_ltp_value - (SL_LOSS_TARGET / qty))
                     status = 'bought'  # Trade entered
                     pnl = 0.0
-                    print(f"✅ TRADE ENTERED: {stock_name} - Buy: ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price}")
+                    print(f"✅ TRADE ENTERED: {stock_name} - Buy: ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price}, Sell Price: BLANK (will update hourly)")
                 else:
                     # No entry: set qty=0, buy_price=None, buy_time=None
                     qty = 0
@@ -1351,12 +1352,12 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                         record.pnl = (new_option_ltp - record.buy_price) * record.qty
                                     print(f"🎯 PROFIT TARGET HIT for {record.stock_name}: Target=₹{record.buy_price * 1.5}, LTP=₹{new_option_ltp}, Profit=₹{record.pnl}")
                                 
-                                # Otherwise, just update current price and PnL
+                                # Otherwise, just update current price and PnL (trade still OPEN)
                                 else:
-                                    record.sell_price = new_option_ltp
-                                    record.sell_time = now
+                                    record.sell_price = new_option_ltp  # Update current Option LTP
+                                    # DO NOT update sell_time here - only set when trade exits
                                     if record.buy_price and record.qty:
-                                        record.pnl = (new_option_ltp - record.buy_price) * record.qty
+                                        record.pnl = (new_option_ltp - record.buy_price) * record.qty  # Current unrealized P&L
                             else:
                                 # Trade already closed, just calculate PnL for display
                                 if record.buy_price and record.qty:
