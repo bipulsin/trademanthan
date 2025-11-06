@@ -406,10 +406,6 @@ function renderAlertGroup(alert, type) {
                 <span class="stocks-count">${alert.stocks.length} Stock${alert.stocks.length > 1 ? 's' : ''}</span>
             </div>
             
-            <div style="margin-bottom: 10px; color: #718096; font-size: 14px;">
-                📋 <strong>Scan:</strong> ${escapeHtml(alert.scan_name || 'N/A')}
-            </div>
-            
             <table class="stocks-table">
                 <thead>
                     <tr>
