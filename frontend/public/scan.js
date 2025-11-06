@@ -439,13 +439,13 @@ function renderAlertGroup(alert, type) {
                         
                         // First check if trade was already closed (has exit_reason from backend)
                         if (stock.exit_reason === 'stop_loss') {
-                            statusDisplay = '<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🛑 EXITED</span>';
+                            statusDisplay = '<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🛑 EXITED-SL</span>';
                         } else if (stock.exit_reason === 'profit_target') {
-                            statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🎯 EXITED</span>';
+                            statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🎯 EXITED-TG</span>';
                         } else if (stock.exit_reason === 'time_based') {
-                            statusDisplay = '<span style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">⏰ EXITED</span>';
+                            statusDisplay = '<span style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">⏰ EXITED-TM</span>';
                         } else if (stock.exit_reason === 'stock_vwap_cross') {
-                            statusDisplay = '<span style="background: #8b5cf6; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">📉 EXITED</span>';
+                            statusDisplay = '<span style="background: #8b5cf6; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">📉 EXITED-VW</span>';
                         } else if (stock.exit_reason) {
                             statusDisplay = '<span style="background: #6b7280; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">✖ EXITED</span>';
                         } else {
@@ -537,13 +537,13 @@ function renderAlertGroup(alert, type) {
                     if (isNoEntry) {
                         statusDisplay = '<span style="color: #dc2626; font-weight: 700; font-size: 12px;">No Entry</span>';
                     } else if (stock.exit_reason === 'stop_loss') {
-                        statusDisplay = '<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🛑 EXITED</span>';
+                        statusDisplay = '<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🛑 EXITED-SL</span>';
                     } else if (stock.exit_reason === 'profit_target') {
-                        statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🎯 EXITED</span>';
+                        statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🎯 EXITED-TG</span>';
                     } else if (stock.exit_reason === 'time_based') {
-                        statusDisplay = '<span style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">⏰ EXITED</span>';
+                        statusDisplay = '<span style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">⏰ EXITED-TM</span>';
                     } else if (stock.exit_reason === 'stock_vwap_cross') {
-                        statusDisplay = '<span style="background: #8b5cf6; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">📉 EXITED</span>';
+                        statusDisplay = '<span style="background: #8b5cf6; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">📉 EXITED-VW</span>';
                     } else if (stock.exit_reason) {
                         statusDisplay = '<span style="background: #6b7280; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">✖ EXITED</span>';
                     } else {
