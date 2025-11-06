@@ -455,13 +455,16 @@ function renderAlertGroup(alert, type) {
                             const stop_loss = stock.stop_loss || 0;
                             const option_type = stock.option_type || 'CE';
                             
-                            // Get current time (IST)
+                            // Get current time in IST (UTC+5:30)
                             const now = new Date();
-                            const currentHour = now.getHours();
-                            const currentMinute = now.getMinutes();
+                            const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+                            const istOffset = 5.5 * 60 * 60000; // IST is UTC+5:30
+                            const istTime = new Date(utcTime + istOffset);
+                            const currentHour = istTime.getHours();
+                            const currentMinute = istTime.getMinutes();
                             const currentTimeMinutes = currentHour * 60 + currentMinute;
-                            const exitTimeMinutes = 15 * 60 + 25; // 3:25 PM
-                            const vwapCheckMinutes = 11 * 60 + 15; // 11:15 AM
+                            const exitTimeMinutes = 15 * 60 + 25; // 3:25 PM IST
+                            const vwapCheckMinutes = 11 * 60 + 15; // 11:15 AM IST
                             
                             // Check exit conditions in priority order
                             if (currentTimeMinutes >= exitTimeMinutes) {
@@ -553,13 +556,16 @@ function renderAlertGroup(alert, type) {
                         const stop_loss = stock.stop_loss || 0;
                         const option_type = stock.option_type || 'CE';
                         
-                        // Get current time (IST)
+                        // Get current time in IST (UTC+5:30)
                         const now = new Date();
-                        const currentHour = now.getHours();
-                        const currentMinute = now.getMinutes();
+                        const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+                        const istOffset = 5.5 * 60 * 60000; // IST is UTC+5:30
+                        const istTime = new Date(utcTime + istOffset);
+                        const currentHour = istTime.getHours();
+                        const currentMinute = istTime.getMinutes();
                         const currentTimeMinutes = currentHour * 60 + currentMinute;
-                        const exitTimeMinutes = 15 * 60 + 25; // 3:25 PM
-                        const vwapCheckMinutes = 11 * 60 + 15; // 11:15 AM
+                        const exitTimeMinutes = 15 * 60 + 25; // 3:25 PM IST
+                        const vwapCheckMinutes = 11 * 60 + 15; // 11:15 AM IST
                         
                         // Check exit conditions in priority order
                         if (currentTimeMinutes >= exitTimeMinutes) {
