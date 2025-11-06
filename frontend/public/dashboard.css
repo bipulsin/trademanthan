@@ -262,6 +262,7 @@ body {
     background: #e0e0e0;
     color: #666;
     margin-bottom: 0.5rem;
+    white-space: nowrap;
 }
 
 .status-badge.active {
@@ -829,8 +830,8 @@ body {
 }
 
 .strategy-mini-card-status.live {
-    background: #fff3e0;
-    color: #ef6c00;
+    background: #f59e0b;
+    color: #000000;
 }
 
 .strategy-mini-card-pnl {

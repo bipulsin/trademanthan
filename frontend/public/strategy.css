@@ -335,6 +335,7 @@ body {
     min-width: 80px;
     height: 40px;
     margin-left: 0.5rem;
+    white-space: nowrap;
 }
 
 .status-active {
@@ -356,9 +357,9 @@ body {
 }
 
 .execution-stopped {
-    background: #fff3e0;
-    color: #ef6c00;
-    border: 1px solid #ffcc02;
+    background: #f59e0b;
+    color: #000000;
+    border: 1px solid #f59e0b;
 }
 
 .strategy-details {

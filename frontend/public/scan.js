@@ -449,19 +449,19 @@ function renderAlertGroup(alert, type) {
                         
                         // PRIORITY CHECK: If after 3:30 PM IST, always show EXITED-TM
                         if (currentTimeMinutes >= marketCloseMinutes && !stock.exit_reason) {
-                            statusDisplay = '<span style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">⏰ EXITED-TM</span>';
+                            statusDisplay = '<span style="background: #f59e0b; color: black; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">⏰ EXITED-TM</span>';
                         }
                         // Check if trade was already closed (has exit_reason from backend)
                         else if (stock.exit_reason === 'stop_loss') {
-                            statusDisplay = '<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🛑 EXITED-SL</span>';
+                            statusDisplay = '<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">🛑 EXITED-SL</span>';
                         } else if (stock.exit_reason === 'profit_target') {
-                            statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🎯 EXITED-TG</span>';
+                            statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">🎯 EXITED-TG</span>';
                         } else if (stock.exit_reason === 'time_based') {
-                            statusDisplay = '<span style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">⏰ EXITED-TM</span>';
+                            statusDisplay = '<span style="background: #f59e0b; color: black; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">⏰ EXITED-TM</span>';
                         } else if (stock.exit_reason === 'stock_vwap_cross') {
-                            statusDisplay = '<span style="background: #8b5cf6; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">📉 EXITED-VW</span>';
+                            statusDisplay = '<span style="background: #8b5cf6; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">📉 EXITED-VW</span>';
                         } else if (stock.exit_reason) {
-                            statusDisplay = '<span style="background: #6b7280; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">✖ EXITED</span>';
+                            statusDisplay = '<span style="background: #6b7280; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">✖ EXITED</span>';
                         } else {
                             // For open trades: Check ALL exit criteria in priority order
                             const option_ltp = stock.sell_price || 0;  // Current option price
@@ -477,31 +477,31 @@ function renderAlertGroup(alert, type) {
                             // Check exit conditions in priority order
                             if (currentTimeMinutes >= marketCloseMinutesDesktop) {
                                 // After market close - show as already exited
-                                statusDisplay = '<span style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">⏰ EXITED-TM</span>';
+                                statusDisplay = '<span style="background: #f59e0b; color: black; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">⏰ EXITED-TM</span>';
                             } else if (currentTimeMinutes >= exitTimeMinutes) {
                                 // Between 3:25 PM and 3:30 PM - show exit now
-                                statusDisplay = '<span style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">⏰ EXIT NOW</span>';
+                                statusDisplay = '<span style="background: #f59e0b; color: black; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">⏰ EXIT NOW</span>';
                             } else if (stop_loss > 0 && option_ltp > 0 && option_ltp <= stop_loss) {
                                 // Stop loss hit
-                                statusDisplay = '<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🛑 EXIT SL</span>';
+                                statusDisplay = '<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">🛑 EXIT SL</span>';
                             } else if (currentTimeMinutes >= vwapCheckMinutes && stock_vwap > 0) {
                                 // VWAP cross check (directional)
                                 if ((option_type === 'CE' && stock_ltp < stock_vwap) || 
                                     (option_type === 'PE' && stock_ltp > stock_vwap)) {
-                                    statusDisplay = '<span style="background: #8b5cf6; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">📉 EXIT VWAP</span>';
+                                    statusDisplay = '<span style="background: #8b5cf6; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">📉 EXIT VWAP</span>';
                                 } else if (buy_price > 0 && option_ltp >= (buy_price * 1.5)) {
                                     // Profit target hit
-                                    statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🎯 EXIT TARGET</span>';
+                                    statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">🎯 EXIT TARGET</span>';
                                 } else {
                                     // No exit - holding
-                                    statusDisplay = '<span style="background: #10b981; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">✓ HOLD</span>';
+                                    statusDisplay = '<span style="background: #10b981; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">✓ HOLD</span>';
                                 }
                             } else if (buy_price > 0 && option_ltp >= (buy_price * 1.5)) {
                                 // Profit target hit (before 11:15 AM)
-                                statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🎯 EXIT TARGET</span>';
+                                statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">🎯 EXIT TARGET</span>';
                             } else {
                                 // Before 11:15 AM - no exit
-                                statusDisplay = '<span style="background: #10b981; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">✓ HOLD</span>';
+                                statusDisplay = '<span style="background: #10b981; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">✓ HOLD</span>';
                             }
                         }
                         
@@ -560,20 +560,20 @@ function renderAlertGroup(alert, type) {
                     
                     // PRIORITY CHECK: If after 3:30 PM IST, always show EXT-TM (mobile abbreviation)
                     if (currentTimeMinutes >= marketCloseMinutes && !isNoEntry && !stock.exit_reason) {
-                        statusDisplay = '<span style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">EXT-TM</span>';
+                        statusDisplay = '<span style="background: #f59e0b; color: black; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXT-TM</span>';
                     }
                     else if (isNoEntry) {
-                        statusDisplay = '<span style="color: #dc2626; font-weight: 700; font-size: 11px;">No Entry</span>';
+                        statusDisplay = '<span style="color: #dc2626; font-weight: 700; font-size: 11px; white-space: nowrap;">No Entry</span>';
                     } else if (stock.exit_reason === 'stop_loss') {
-                        statusDisplay = '<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">EXD-SL</span>';
+                        statusDisplay = '<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXD-SL</span>';
                     } else if (stock.exit_reason === 'profit_target') {
-                        statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">EXD-TG</span>';
+                        statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXD-TG</span>';
                     } else if (stock.exit_reason === 'time_based') {
-                        statusDisplay = '<span style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">EXT-TM</span>';
+                        statusDisplay = '<span style="background: #f59e0b; color: black; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXT-TM</span>';
                     } else if (stock.exit_reason === 'stock_vwap_cross') {
-                        statusDisplay = '<span style="background: #8b5cf6; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">EXD-VW</span>';
+                        statusDisplay = '<span style="background: #8b5cf6; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXD-VW</span>';
                     } else if (stock.exit_reason) {
-                        statusDisplay = '<span style="background: #6b7280; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">EXD</span>';
+                        statusDisplay = '<span style="background: #6b7280; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXD</span>';
                     } else {
                         // For open trades: Check ALL exit criteria in priority order
                         const option_ltp = stock.sell_price || 0;  // Current option price
@@ -589,28 +589,28 @@ function renderAlertGroup(alert, type) {
                         // Note: marketCloseMinutes already checked at top level
                         if (currentTimeMinutes >= exitTimeMinutes) {
                             // Between 3:25 PM and 3:30 PM - show exit now
-                            statusDisplay = '<span style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">EXIT NOW</span>';
+                            statusDisplay = '<span style="background: #f59e0b; color: black; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXIT NOW</span>';
                         } else if (stop_loss > 0 && option_ltp > 0 && option_ltp <= stop_loss) {
                             // Stop loss hit
-                            statusDisplay = '<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">EXIT SL</span>';
+                            statusDisplay = '<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXIT SL</span>';
                         } else if (currentTimeMinutes >= vwapCheckMinutes && stock_vwap > 0) {
                             // VWAP cross check (directional)
                             if ((option_type === 'CE' && stock_ltp < stock_vwap) || 
                                 (option_type === 'PE' && stock_ltp > stock_vwap)) {
-                                statusDisplay = '<span style="background: #8b5cf6; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">EXIT VWAP</span>';
+                                statusDisplay = '<span style="background: #8b5cf6; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXIT VWAP</span>';
                             } else if (buy_price > 0 && option_ltp >= (buy_price * 1.5)) {
                                 // Profit target hit
-                                statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">EXIT TG</span>';
+                                statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXIT TG</span>';
                             } else {
                                 // No exit - holding
-                                statusDisplay = '<span style="background: #10b981; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">HOLD</span>';
+                                statusDisplay = '<span style="background: #10b981; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">HOLD</span>';
                             }
                         } else if (buy_price > 0 && option_ltp >= (buy_price * 1.5)) {
                             // Profit target hit (before 11:15 AM)
-                            statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">EXIT TG</span>';
+                            statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXIT TG</span>';
                         } else {
                             // Before 11:15 AM - no exit
-                            statusDisplay = '<span style="background: #10b981; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">HOLD</span>';
+                            statusDisplay = '<span style="background: #10b981; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">HOLD</span>';
                         }
                     }
                     

@@ -440,6 +440,8 @@ body {
     font-weight: 500;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    white-space: nowrap;
+    display: inline-block;
 }
 
 .status-completed {
@@ -449,9 +451,9 @@ body {
 }
 
 .status-pending {
-    background: #fff3e0;
-    color: #ef6c00;
-    border: 1px solid #ffcc02;
+    background: #f59e0b;
+    color: #000000;
+    border: 1px solid #f59e0b;
 }
 
 .status-cancelled {

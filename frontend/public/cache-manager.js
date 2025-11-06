@@ -298,12 +298,13 @@ class CacheManager {
             top: 80px;
             right: 20px;
             background: ${type === 'success' ? '#4caf50' : type === 'warning' ? '#ff9800' : '#2196f3'};
-            color: white;
+            color: ${type === 'warning' ? 'black' : 'white'};
             padding: 10px 15px;
             border-radius: 5px;
             z-index: 10000;
             font-size: 14px;
             animation: slideIn 0.3s ease-out;
+            white-space: nowrap;
         `;
         
         document.body.appendChild(notification);
