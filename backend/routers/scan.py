@@ -1999,3 +1999,107 @@ async def upstox_oauth_status():
                 "message": f"Failed to check status: {str(e)}"
             }
         )
+
+
+@router.post("/update-vwap")
+async def manually_update_vwap(db: Session = Depends(get_db)):
+    """
+    Manually trigger VWAP update for all open positions
+    This is normally done automatically every hour during market hours
+    """
+    try:
+        import pytz
+        from datetime import datetime
+        
+        ist = pytz.timezone('Asia/Kolkata')
+        now = datetime.now(ist)
+        today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        logger.info(f"📊 Manual VWAP update triggered at {now.strftime('%Y-%m-%d %H:%M:%S IST')}")
+        
+        # Get all open positions from today (not sold/exited)
+        open_positions = db.query(IntradayStockOption).filter(
+            and_(
+                IntradayStockOption.trade_date >= today,
+                IntradayStockOption.status != 'sold',
+                IntradayStockOption.exit_reason == None  # No exit reason means still open
+            )
+        ).all()
+        
+        if not open_positions:
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "status": "success",
+                    "message": "No open positions found to update",
+                    "updated_count": 0,
+                    "failed_count": 0
+                }
+            )
+        
+        logger.info(f"Found {len(open_positions)} open positions to update")
+        
+        # Update each position
+        updated_count = 0
+        failed_count = 0
+        updates = []
+        
+        for position in open_positions:
+            try:
+                stock_name = position.stock_name
+                
+                # Fetch fresh VWAP from API
+                new_vwap = vwap_service.get_stock_vwap(stock_name)
+                
+                if new_vwap and new_vwap > 0:
+                    old_vwap = position.stock_vwap or 0.0
+                    position.stock_vwap = new_vwap
+                    position.updated_at = now
+                    
+                    updates.append({
+                        "stock": stock_name,
+                        "old_vwap": round(old_vwap, 2),
+                        "new_vwap": round(new_vwap, 2)
+                    })
+                    
+                    logger.info(f"✅ Updated {stock_name}: VWAP {old_vwap:.2f} → {new_vwap:.2f}")
+                    updated_count += 1
+                else:
+                    logger.warning(f"⚠️ Could not fetch VWAP for {stock_name}")
+                    failed_count += 1
+                    
+            except Exception as e:
+                logger.error(f"Error updating VWAP for {position.stock_name}: {str(e)}")
+                failed_count += 1
+        
+        # Commit all updates
+        db.commit()
+        
+        logger.info(f"📊 Manual VWAP Update Complete: {updated_count} updated, {failed_count} failed")
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "success",
+                "message": f"VWAP update completed successfully",
+                "updated_count": updated_count,
+                "failed_count": failed_count,
+                "total_positions": len(open_positions),
+                "updates": updates,
+                "timestamp": now.strftime('%Y-%m-%d %H:%M:%S IST')
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in manual VWAP update: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        db.rollback()
+        
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "message": f"Failed to update VWAP: {str(e)}"
+            }
+        )

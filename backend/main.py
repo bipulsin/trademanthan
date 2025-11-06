@@ -18,6 +18,7 @@ import routers.scan as scan
 from services.master_stock_scheduler import start_scheduler, stop_scheduler
 from services.instruments_downloader import start_instruments_scheduler, stop_instruments_scheduler
 from services.health_monitor import start_health_monitor, stop_health_monitor
+from services.vwap_updater import start_vwap_updater, stop_vwap_updater
 
 load_dotenv()
 
@@ -106,6 +107,19 @@ async def startup_event():
         import traceback
         traceback.print_exc()
     
+    # Start VWAP updater (updates hourly during market hours)
+    try:
+        print("Starting VWAP Updater...", flush=True)
+        sys.stdout.flush()
+        start_vwap_updater()
+        print("✅ VWAP Updater: STARTED (Hourly, 9:30 AM - 3:30 PM IST)", flush=True)
+        sys.stdout.flush()
+    except Exception as e:
+        print(f"❌ VWAP Updater: FAILED - {e}", flush=True)
+        sys.stdout.flush()
+        import traceback
+        traceback.print_exc()
+    
     print("=" * 60, flush=True)
     print("✅ STARTUP COMPLETE - All Services Active", flush=True)
     print("=" * 60, flush=True)
@@ -136,6 +150,13 @@ async def shutdown_event():
         print("✅ Health monitor stopped", flush=True)
     except Exception as e:
         print(f"⚠️ Error stopping health monitor: {e}", flush=True)
+    
+    # Stop VWAP updater
+    try:
+        stop_vwap_updater()
+        print("✅ VWAP updater stopped", flush=True)
+    except Exception as e:
+        print(f"⚠️ Error stopping VWAP updater: {e}", flush=True)
     
     print("✅ Shutdown complete", flush=True)
 
