@@ -9,6 +9,31 @@ let autoRefreshInterval = null;
 let currentBullishData = null;
 let currentBearishData = null;
 
+// Check token health periodically
+async function checkTokenHealth() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/scan/upstox/status`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const result = await response.json();
+        
+        // If token is not authenticated, show warning banner
+        if (result.status === 'success' && !result.authenticated) {
+            console.warn('⚠️ Upstox token is not valid:', result.message);
+            showTokenExpiredMessage();
+        } else if (result.authenticated) {
+            console.log('✅ Upstox token is valid');
+            hideTokenExpiredMessage();
+        }
+    } catch (error) {
+        console.error('Error checking token health:', error);
+    }
+}
+
 // Initialize page
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Scan page loaded');
@@ -18,7 +43,11 @@ document.addEventListener('DOMContentLoaded', function() {
     
     loadIndexPrices();
     loadLatestData();
+    checkTokenHealth(); // Check token status immediately on load
     startAutoRefresh();
+    
+    // Check token health every 5 minutes
+    setInterval(checkTokenHealth, 5 * 60 * 1000);
 });
 
 // Check if returning from successful OAuth

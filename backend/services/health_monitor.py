@@ -127,6 +127,13 @@ class HealthMonitor:
             # 3. Check Upstox token status
             try:
                 from services.upstox_service import upstox_service
+                
+                # First, try to reload token from storage (in case it was updated via OAuth)
+                try:
+                    upstox_service.reload_token_from_storage()
+                except Exception as reload_error:
+                    logger.debug(f"Token reload attempt: {reload_error}")
+                
                 # Try to fetch index prices (quick API call)
                 result = upstox_service.check_index_trends()
                 if result and result.get('nifty'):
@@ -138,8 +145,8 @@ class HealthMonitor:
                     logger.warning("Upstox API token check failed")
             except Exception as e:
                 self.api_token_failures += 1
-                if "401" in str(e) or "token" in str(e).lower():
-                    issues.append(f"❌ Upstox API token expired/invalid")
+                if "401" in str(e) or "token" in str(e).lower() or "unauthorized" in str(e).lower():
+                    issues.append(f"❌ Upstox API token expired/invalid - Please refresh via OAuth")
                 else:
                     issues.append(f"⚠️ Upstox API error: {str(e)}")
                 logger.error(f"Upstox API health check failed: {e}")

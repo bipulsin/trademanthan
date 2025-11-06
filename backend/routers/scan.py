@@ -1910,6 +1910,7 @@ async def upstox_oauth_callback(code: str = None, state: str = None, error: str 
         
         token_response = response.json()
         access_token = token_response.get("access_token")
+        expires_in = token_response.get("expires_in")  # Seconds until expiration
         
         if not access_token:
             return JSONResponse(
@@ -1920,25 +1921,47 @@ async def upstox_oauth_callback(code: str = None, state: str = None, error: str 
                 }
             )
         
-        # Update the token in upstox_service.py file
-        import re
-        from pathlib import Path
+        # Calculate expiration timestamp
+        expires_at = None
+        if expires_in:
+            from datetime import datetime, timedelta
+            expires_at = int((datetime.now() + timedelta(seconds=expires_in)).timestamp())
         
-        service_file = Path(__file__).parent.parent / "services" / "upstox_service.py"
+        # Save token using token manager (persistent storage)
+        try:
+            from services.token_manager import save_upstox_token
+            if save_upstox_token(access_token, expires_at):
+                logger.info("✅ Upstox token saved to token manager")
+            else:
+                logger.warning("⚠️ Failed to save token to token manager, trying fallback")
+        except Exception as e:
+            logger.error(f"❌ Token manager save failed: {str(e)}")
         
-        with open(service_file, 'r') as f:
-            content = f.read()
-        
-        # Replace the token
-        pattern = r'(UPSTOX_ACCESS_TOKEN\s*=\s*")([^"]+)(")'
-        new_content = re.sub(pattern, f'\\g<1>{access_token}\\g<3>', content)
-        
-        with open(service_file, 'w') as f:
-            f.write(new_content)
+        # Also update the token in upstox_service.py file as backup
+        try:
+            import re
+            from pathlib import Path
+            
+            service_file = Path(__file__).parent.parent / "services" / "upstox_service.py"
+            
+            with open(service_file, 'r') as f:
+                content = f.read()
+            
+            # Replace the token
+            pattern = r'(UPSTOX_ACCESS_TOKEN\s*=\s*")([^"]+)(")'
+            new_content = re.sub(pattern, f'\\g<1>{access_token}\\g<3>', content)
+            
+            with open(service_file, 'w') as f:
+                f.write(new_content)
+            
+            logger.info("✅ Upstox token updated in service file")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not update service file: {str(e)}")
         
         # Update the token in memory (so it works immediately without restart)
         if hasattr(vwap_service, 'access_token'):
             vwap_service.access_token = access_token
+            logger.info("✅ Upstox token updated in memory")
         if hasattr(vwap_service, 'upstox'):
             vwap_service.upstox.set_access_token(access_token)
         

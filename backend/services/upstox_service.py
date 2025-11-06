@@ -16,11 +16,53 @@ class UpstoxService:
     NIFTY50_KEY = "NSE_INDEX|Nifty 50"
     BANKNIFTY_KEY = "NSE_INDEX|Nifty Bank"
     
-    def __init__(self, api_key: str, api_secret: str, access_token: str):
+    def __init__(self, api_key: str, api_secret: str, access_token: str = None):
         self.api_key = api_key
         self.api_secret = api_secret
-        self.access_token = access_token
+        
+        # Try to load token from token manager first, fallback to provided token
+        try:
+            from services.token_manager import load_upstox_token
+            loaded_token = load_upstox_token()
+            self.access_token = loaded_token or access_token
+            if loaded_token:
+                logger.info("✅ Using Upstox token from token manager")
+            elif access_token:
+                logger.info("✅ Using Upstox token from initialization parameter")
+            else:
+                logger.warning("⚠️ No Upstox token available")
+        except Exception as e:
+            logger.warning(f"Could not load token from manager: {e}, using provided token")
+            self.access_token = access_token
+        
         self.base_url = "https://api.upstox.com/v3"
+    
+    def reload_token_from_storage(self) -> bool:
+        """
+        Reload access token from token manager storage
+        This is called to refresh the token without restarting the service
+        
+        Returns:
+            True if token was loaded successfully
+        """
+        try:
+            from services.token_manager import load_upstox_token
+            loaded_token = load_upstox_token()
+            
+            if loaded_token:
+                old_token_preview = self.access_token[:20] if self.access_token else "None"
+                new_token_preview = loaded_token[:20]
+                
+                self.access_token = loaded_token
+                logger.info(f"🔄 Token reloaded: {old_token_preview}... → {new_token_preview}...")
+                return True
+            else:
+                logger.warning("⚠️ No token found in storage")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to reload token: {str(e)}")
+            return False
         
     def refresh_access_token(self) -> Optional[str]:
         """
