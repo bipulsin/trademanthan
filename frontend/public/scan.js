@@ -437,8 +437,22 @@ function renderAlertGroup(alert, type) {
                         // Determine exit status display - Check ALL exit criteria
                         let statusDisplay = '';
                         
-                        // First check if trade was already closed (has exit_reason from backend)
-                        if (stock.exit_reason === 'stop_loss') {
+                        // Get current time in IST first to check market close
+                        const now = new Date();
+                        const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+                        const istOffset = 5.5 * 60 * 60000; // IST is UTC+5:30
+                        const istTime = new Date(utcTime + istOffset);
+                        const currentHour = istTime.getHours();
+                        const currentMinute = istTime.getMinutes();
+                        const currentTimeMinutes = currentHour * 60 + currentMinute;
+                        const marketCloseMinutes = 15 * 60 + 30; // 3:30 PM IST (market close)
+                        
+                        // PRIORITY CHECK: If after 3:30 PM IST, always show EXITED-TM
+                        if (currentTimeMinutes >= marketCloseMinutes && !stock.exit_reason) {
+                            statusDisplay = '<span style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">⏰ EXITED-TM</span>';
+                        }
+                        // Check if trade was already closed (has exit_reason from backend)
+                        else if (stock.exit_reason === 'stop_loss') {
                             statusDisplay = '<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🛑 EXITED-SL</span>';
                         } else if (stock.exit_reason === 'profit_target') {
                             statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🎯 EXITED-TG</span>';
@@ -455,20 +469,17 @@ function renderAlertGroup(alert, type) {
                             const stop_loss = stock.stop_loss || 0;
                             const option_type = stock.option_type || 'CE';
                             
-                            // Get current time in IST (UTC+5:30)
-                            const now = new Date();
-                            const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
-                            const istOffset = 5.5 * 60 * 60000; // IST is UTC+5:30
-                            const istTime = new Date(utcTime + istOffset);
-                            const currentHour = istTime.getHours();
-                            const currentMinute = istTime.getMinutes();
-                            const currentTimeMinutes = currentHour * 60 + currentMinute;
-                            const exitTimeMinutes = 15 * 60 + 25; // 3:25 PM IST
+                            // Calculate time thresholds in IST
+                            const exitTimeMinutes = 15 * 60 + 25; // 3:25 PM IST (exit signal time)
+                            const marketCloseMinutesDesktop = 15 * 60 + 30; // 3:30 PM IST (market close)
                             const vwapCheckMinutes = 11 * 60 + 15; // 11:15 AM IST
                             
                             // Check exit conditions in priority order
-                            if (currentTimeMinutes >= exitTimeMinutes) {
-                                // Time-based exit
+                            if (currentTimeMinutes >= marketCloseMinutesDesktop) {
+                                // After market close - show as already exited
+                                statusDisplay = '<span style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">⏰ EXITED-TM</span>';
+                            } else if (currentTimeMinutes >= exitTimeMinutes) {
+                                // Between 3:25 PM and 3:30 PM - show exit now
                                 statusDisplay = '<span style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">⏰ EXIT NOW</span>';
                             } else if (stop_loss > 0 && option_ltp > 0 && option_ltp <= stop_loss) {
                                 // Stop loss hit
@@ -537,14 +548,28 @@ function renderAlertGroup(alert, type) {
                     // Determine exit status display (mobile) - Check ALL exit criteria
                     let statusDisplay = '';
                     
-                    if (isNoEntry) {
+                    // Get current time in IST first to check market close
+                    const now = new Date();
+                    const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+                    const istOffset = 5.5 * 60 * 60000; // IST is UTC+5:30
+                    const istTime = new Date(utcTime + istOffset);
+                    const currentHour = istTime.getHours();
+                    const currentMinute = istTime.getMinutes();
+                    const currentTimeMinutes = currentHour * 60 + currentMinute;
+                    const marketCloseMinutes = 15 * 60 + 30; // 3:30 PM IST (market close)
+                    
+                    // PRIORITY CHECK: If after 3:30 PM IST, always show EXT-TM (mobile abbreviation)
+                    if (currentTimeMinutes >= marketCloseMinutes && !isNoEntry && !stock.exit_reason) {
+                        statusDisplay = '<span style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">EXT-TM</span>';
+                    }
+                    else if (isNoEntry) {
                         statusDisplay = '<span style="color: #dc2626; font-weight: 700; font-size: 11px;">No Entry</span>';
                     } else if (stock.exit_reason === 'stop_loss') {
                         statusDisplay = '<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">EXD-SL</span>';
                     } else if (stock.exit_reason === 'profit_target') {
                         statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">EXD-TG</span>';
                     } else if (stock.exit_reason === 'time_based') {
-                        statusDisplay = '<span style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">EXD-TM</span>';
+                        statusDisplay = '<span style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">EXT-TM</span>';
                     } else if (stock.exit_reason === 'stock_vwap_cross') {
                         statusDisplay = '<span style="background: #8b5cf6; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">EXD-VW</span>';
                     } else if (stock.exit_reason) {
@@ -556,20 +581,14 @@ function renderAlertGroup(alert, type) {
                         const stop_loss = stock.stop_loss || 0;
                         const option_type = stock.option_type || 'CE';
                         
-                        // Get current time in IST (UTC+5:30)
-                        const now = new Date();
-                        const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
-                        const istOffset = 5.5 * 60 * 60000; // IST is UTC+5:30
-                        const istTime = new Date(utcTime + istOffset);
-                        const currentHour = istTime.getHours();
-                        const currentMinute = istTime.getMinutes();
-                        const currentTimeMinutes = currentHour * 60 + currentMinute;
-                        const exitTimeMinutes = 15 * 60 + 25; // 3:25 PM IST
+                        // Note: IST time already calculated above in this scope
+                        const exitTimeMinutes = 15 * 60 + 25; // 3:25 PM IST (exit signal time)
                         const vwapCheckMinutes = 11 * 60 + 15; // 11:15 AM IST
                         
                         // Check exit conditions in priority order
+                        // Note: marketCloseMinutes already checked at top level
                         if (currentTimeMinutes >= exitTimeMinutes) {
-                            // Time-based exit
+                            // Between 3:25 PM and 3:30 PM - show exit now
                             statusDisplay = '<span style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">EXIT NOW</span>';
                         } else if (stop_loss > 0 && option_ltp > 0 && option_ltp <= stop_loss) {
                             // Stop loss hit
