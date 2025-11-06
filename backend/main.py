@@ -112,8 +112,9 @@ async def startup_event():
         print("Starting Market Data Updater...", flush=True)
         sys.stdout.flush()
         start_vwap_updater()
-        print("✅ Market Data Updater: STARTED (Hourly, 9:30 AM - 3:30 PM IST)", flush=True)
-        print("   - Updates: Stock VWAP, Stock LTP, Option LTP for all open positions", flush=True)
+        print("✅ Market Data Updater: STARTED", flush=True)
+        print("   - Hourly updates (9:30 AM - 3:30 PM): Stock VWAP, Stock LTP, Option LTP", flush=True)
+        print("   - End-of-day update (3:30 PM & 3:35 PM): Final day VWAP for ALL positions", flush=True)
         sys.stdout.flush()
     except Exception as e:
         print(f"❌ Market Data Updater: FAILED - {e}", flush=True)

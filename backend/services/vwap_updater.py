@@ -52,9 +52,28 @@ class VWAPUpdater:
                 replace_existing=True
             )
             
+            # End-of-day VWAP update at 3:30 PM (market close)
+            # This updates ALL positions (including exited ones) with final day VWAP
+            self.scheduler.add_job(
+                update_end_of_day_vwap,
+                trigger=CronTrigger(hour=15, minute=30, timezone='Asia/Kolkata'),
+                id='vwap_update_eod',
+                name='End of Day VWAP Update',
+                replace_existing=True
+            )
+            
+            # Also update at 3:35 PM to ensure we have complete market data
+            self.scheduler.add_job(
+                update_end_of_day_vwap,
+                trigger=CronTrigger(hour=15, minute=35, timezone='Asia/Kolkata'),
+                id='vwap_update_eod_final',
+                name='Final End of Day VWAP Update',
+                replace_existing=True
+            )
+            
             self.scheduler.start()
             self.is_running = True
-            logger.info("✅ VWAP Updater started - Updating hourly during market hours")
+            logger.info("✅ Market Data Updater started - Hourly updates + EOD VWAP at 3:30 PM")
     
     def stop(self):
         """Stop the VWAP updater"""
@@ -209,6 +228,96 @@ async def update_vwap_for_all_open_positions():
         
     except Exception as e:
         logger.error(f"Error in hourly market data update job: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def update_end_of_day_vwap():
+    """
+    Update Stock VWAP with end-of-day (complete trading day) VWAP at market close
+    
+    This function runs at 3:30 PM and 3:35 PM to capture the final VWAP for the entire trading day.
+    Updates ALL positions from today (both open and exited) so traders can see the final day VWAP.
+    
+    This is the complete, final VWAP that includes all trading activity from 9:15 AM to 3:30 PM.
+    """
+    db = SessionLocal()
+    try:
+        ist = pytz.timezone('Asia/Kolkata')
+        now = datetime.now(ist)
+        today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        logger.info(f"📊 Starting END-OF-DAY VWAP update at {now.strftime('%Y-%m-%d %H:%M:%S IST')}")
+        logger.info("💫 Updating ALL positions (open + exited) with final day VWAP")
+        
+        # Get ALL positions from today (both open and exited)
+        all_positions = db.query(IntradayStockOption).filter(
+            IntradayStockOption.trade_date >= today
+        ).all()
+        
+        if not all_positions:
+            logger.info("No positions found for today")
+            return
+        
+        logger.info(f"Found {len(all_positions)} total positions for end-of-day VWAP update")
+        
+        # Import VWAP service
+        try:
+            from services.upstox_service import upstox_service
+            vwap_service = upstox_service
+        except ImportError:
+            logger.error("Could not import upstox_service")
+            return
+        
+        # Get unique stock names (to avoid redundant API calls)
+        unique_stocks = {}
+        for position in all_positions:
+            if position.stock_name not in unique_stocks:
+                unique_stocks[position.stock_name] = []
+            unique_stocks[position.stock_name].append(position)
+        
+        logger.info(f"Fetching EOD VWAP for {len(unique_stocks)} unique stocks")
+        
+        # Fetch and update VWAP for each unique stock
+        updated_count = 0
+        failed_count = 0
+        
+        for stock_name, positions in unique_stocks.items():
+            try:
+                # Fetch final day VWAP from API (includes entire trading day)
+                final_vwap = vwap_service.get_stock_vwap(stock_name)
+                
+                if final_vwap and final_vwap > 0:
+                    # Update all positions for this stock
+                    for position in positions:
+                        old_vwap = position.stock_vwap or 0.0
+                        position.stock_vwap = final_vwap
+                        position.updated_at = now
+                        
+                        logger.info(f"✅ {stock_name} (ID:{position.id}): Final Day VWAP = ₹{final_vwap:.2f} (was: ₹{old_vwap:.2f})")
+                    
+                    updated_count += len(positions)
+                else:
+                    logger.warning(f"⚠️ Could not fetch EOD VWAP for {stock_name}")
+                    failed_count += len(positions)
+                    
+            except Exception as e:
+                logger.error(f"Error fetching EOD VWAP for {stock_name}: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                failed_count += len(positions)
+        
+        # Commit all updates
+        db.commit()
+        
+        logger.info(f"📊 END-OF-DAY VWAP Update Complete: {updated_count} positions updated, {failed_count} failed")
+        logger.info(f"💫 All positions now have final trading day VWAP")
+        
+    except Exception as e:
+        logger.error(f"Error in end-of-day VWAP update job: {str(e)}")
         import traceback
         traceback.print_exc()
         db.rollback()
