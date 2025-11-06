@@ -837,6 +837,55 @@
             </div>
         </div>
         
+        <!-- Day Summary Section (Collapsible) -->
+        <div id="daySummarySection" class="day-summary-container">
+            <div class="day-summary-header" onclick="toggleDaySummary()">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span id="summaryCaret" class="summary-caret">▼</span>
+                    <h3 style="margin: 0; font-size: 16px; font-weight: 600;">📊 Day Summary</h3>
+                </div>
+                <div id="summaryQuickStats" class="summary-quick-stats">
+                    <!-- Quick stats shown when collapsed -->
+                </div>
+            </div>
+            <div id="daySummaryContent" class="day-summary-content">
+                <div class="summary-grid">
+                    <div class="summary-card">
+                        <div class="summary-label">Net P&L</div>
+                        <div id="summaryNetPnL" class="summary-value pnl">₹0.00</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-label">Win Rate</div>
+                        <div id="summaryWinRate" class="summary-value">0%</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-label">Total Alerts</div>
+                        <div id="summaryTotalAlerts" class="summary-value">0</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-label">Trades Entered</div>
+                        <div id="summaryTradesEntered" class="summary-value">0</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-label">Bullish Trades</div>
+                        <div id="summaryBullishTrades" class="summary-value">0</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-label">Bearish Trades</div>
+                        <div id="summaryBearishTrades" class="summary-value">0</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-label">🛑 SL Exits</div>
+                        <div id="summarySLExits" class="summary-value">0</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-label">⏰ Time Exits</div>
+                        <div id="summaryTimeExits" class="summary-value">0</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
         <!-- Bullish Section -->
         <div id="bullishContainer">
             <div class="alert-section bullish-section">

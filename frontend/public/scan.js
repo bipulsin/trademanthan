@@ -9,6 +9,129 @@ let autoRefreshInterval = null;
 let currentBullishData = null;
 let currentBearishData = null;
 
+// Toggle Day Summary collapse/expand
+function toggleDaySummary() {
+    const content = document.getElementById('daySummaryContent');
+    const caret = document.getElementById('summaryCaret');
+    
+    if (content.classList.contains('collapsed')) {
+        content.classList.remove('collapsed');
+        caret.classList.remove('collapsed');
+        caret.textContent = '▼';
+    } else {
+        content.classList.add('collapsed');
+        caret.classList.add('collapsed');
+        caret.textContent = '▶';
+    }
+}
+
+// Calculate and update day summary
+function updateDaySummary(bullishData, bearishData) {
+    try {
+        let totalAlerts = 0;
+        let tradesEntered = 0;
+        let bullishTrades = 0;
+        let bearishTrades = 0;
+        let slExits = 0;
+        let timeExits = 0;
+        let totalPnL = 0;
+        let winners = 0;
+        let losers = 0;
+        
+        // Process bullish alerts
+        if (bullishData && bullishData.alerts) {
+            bullishData.alerts.forEach(alert => {
+                if (alert.stocks) {
+                    totalAlerts += alert.stocks.length;
+                    alert.stocks.forEach(stock => {
+                        // Check if trade was entered (has buy_price and qty > 0)
+                        if (stock.buy_price && stock.buy_price > 0 && stock.qty && stock.qty > 0) {
+                            tradesEntered++;
+                            bullishTrades++;
+                            
+                            // Check exit reason
+                            if (stock.exit_reason === 'stop_loss') {
+                                slExits++;
+                            } else if (stock.exit_reason === 'time_based') {
+                                timeExits++;
+                            }
+                            
+                            // Calculate P&L
+                            if (stock.pnl) {
+                                totalPnL += stock.pnl;
+                                if (stock.pnl > 0) winners++;
+                                else if (stock.pnl < 0) losers++;
+                            }
+                        }
+                    });
+                }
+            });
+        }
+        
+        // Process bearish alerts
+        if (bearishData && bearishData.alerts) {
+            bearishData.alerts.forEach(alert => {
+                if (alert.stocks) {
+                    totalAlerts += alert.stocks.length;
+                    alert.stocks.forEach(stock => {
+                        // Check if trade was entered
+                        if (stock.buy_price && stock.buy_price > 0 && stock.qty && stock.qty > 0) {
+                            tradesEntered++;
+                            bearishTrades++;
+                            
+                            // Check exit reason
+                            if (stock.exit_reason === 'stop_loss') {
+                                slExits++;
+                            } else if (stock.exit_reason === 'time_based') {
+                                timeExits++;
+                            }
+                            
+                            // Calculate P&L
+                            if (stock.pnl) {
+                                totalPnL += stock.pnl;
+                                if (stock.pnl > 0) winners++;
+                                else if (stock.pnl < 0) losers++;
+                            }
+                        }
+                    });
+                }
+            });
+        }
+        
+        // Calculate win rate
+        const winRate = tradesEntered > 0 ? ((winners / tradesEntered) * 100).toFixed(1) : 0;
+        
+        // Update summary values
+        document.getElementById('summaryNetPnL').textContent = `₹${totalPnL.toFixed(2)}`;
+        document.getElementById('summaryNetPnL').className = 'summary-value pnl ' + (totalPnL >= 0 ? 'positive' : 'negative');
+        
+        document.getElementById('summaryWinRate').textContent = `${winRate}%`;
+        document.getElementById('summaryTotalAlerts').textContent = totalAlerts;
+        document.getElementById('summaryTradesEntered').textContent = tradesEntered;
+        document.getElementById('summaryBullishTrades').textContent = bullishTrades;
+        document.getElementById('summaryBearishTrades').textContent = bearishTrades;
+        document.getElementById('summarySLExits').textContent = slExits;
+        document.getElementById('summaryTimeExits').textContent = timeExits;
+        
+        // Update quick stats (shown when collapsed)
+        const quickStatsHTML = `
+            <span class="${totalPnL >= 0 ? 'positive' : 'negative'}" style="color: ${totalPnL >= 0 ? '#a7f3d0' : '#fca5a5'};">
+                P&L: ₹${totalPnL.toFixed(2)}
+            </span>
+            <span style="opacity: 0.9;">
+                ${tradesEntered} Trades
+            </span>
+            <span style="opacity: 0.9;">
+                ${winRate}% Win
+            </span>
+        `;
+        document.getElementById('summaryQuickStats').innerHTML = quickStatsHTML;
+        
+    } catch (error) {
+        console.error('Error updating day summary:', error);
+    }
+}
+
 // Check token health periodically
 async function checkTokenHealth() {
     try {
@@ -781,6 +904,9 @@ function displaySectionsBasedOnTrends(indexCheck, bullishData, bearishData) {
     displayBullishData(bullishData);
     displayBearishData(bearishData);
     
+    // Update day summary with calculated metrics
+    updateDaySummary(bullishData, bearishData);
+    
     // Show opposite trends warning banner if indices are not aligned
     if (niftyTrend !== bankniftyTrend && niftyTrend !== 'unknown' && bankniftyTrend !== 'unknown') {
         console.log('Opposite trends detected - trades will show "No Entry"');
@@ -905,6 +1031,9 @@ function displayNoData() {
             </div>
         </div>
     `;
+    
+    // Update summary with empty data
+    updateDaySummary(null, null);
 }
 
 // Display error message
