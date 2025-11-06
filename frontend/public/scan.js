@@ -440,11 +440,17 @@ function renderAlertGroup(alert, type) {
                             statusDisplay = '<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🛑 SL HIT</span>';
                         } else if (stock.exit_reason === 'profit_target') {
                             statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🎯 TARGET</span>';
+                        } else if (stock.exit_reason === 'time_based') {
+                            statusDisplay = '<span style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">⏰ TIME</span>';
+                        } else if (stock.exit_reason === 'stock_vwap_cross') {
+                            statusDisplay = '<span style="background: #8b5cf6; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">📉 VWAP</span>';
                         } else if (stock.exit_reason) {
-                            statusDisplay = '<span style="background: #6b7280; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">CLOSED</span>';
+                            statusDisplay = '<span style="background: #6b7280; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">✖ CLOSED</span>';
                         } else {
                             // Only show Hold/Exit for open trades
-                            statusDisplay = '<span class="' + iconClass + '">' + iconText + '</span>';
+                            statusDisplay = shouldHold 
+                                ? '<span style="background: #10b981; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">✓ HOLD</span>'
+                                : '<span style="background: #ef4444; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">✖ EXIT</span>';
                         }
                         
                         // Check if this is a "No Entry" trade
@@ -497,10 +503,15 @@ function renderAlertGroup(alert, type) {
                         statusDisplay = '<span style="color: #16a34a; font-weight: 700; font-size: 12px;">🎯 TARGET</span>';
                     } else if (stock.exit_reason === 'time_based') {
                         statusDisplay = '<span style="color: #f59e0b; font-weight: 700; font-size: 12px;">⏰ TIME</span>';
+                    } else if (stock.exit_reason === 'stock_vwap_cross') {
+                        statusDisplay = '<span style="color: #8b5cf6; font-weight: 700; font-size: 12px;">📉 VWAP</span>';
                     } else if (stock.exit_reason) {
                         statusDisplay = '<span style="color: #6b7280; font-weight: 700; font-size: 12px;">✖ CLOSED</span>';
                     } else {
-                        statusDisplay = '<span class="${iconClass}" style="font-size: 10px;">${iconText}</span>';
+                        // Fix: Use proper HTML for open trades instead of template literals
+                        statusDisplay = shouldHold 
+                            ? '<span style="background: #10b981; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">✓ HOLD</span>'
+                            : '<span style="background: #ef4444; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">✖ EXIT</span>';
                     }
                     
                     return `
