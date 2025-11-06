@@ -523,14 +523,15 @@ body {
 }
 
 .stocks-table th {
-    padding: 15px;
+    padding: 12px 8px;
     text-align: left;
     font-weight: 600;
     color: var(--text-dark);
     border-bottom: 2px solid var(--border-color);
-    font-size: 14px;
+    font-size: 11px;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
 }
 
 .stocks-table tbody tr {
@@ -548,9 +549,10 @@ body {
 }
 
 .stocks-table td {
-    padding: 15px;
+    padding: 12px 8px;
     color: var(--text-medium);
-    font-size: 16px;
+    font-size: 13px;
+    white-space: nowrap;
 }
 
 .stock-name {
@@ -707,11 +709,12 @@ body {
     
     .stocks-table th,
     .stocks-table td {
-        padding: 10px 8px;
+        padding: 10px 6px;
+        font-size: 11px;
     }
     
     .stocks-table th {
-        font-size: 12px;
+        font-size: 10px;
     }
     
     .trigger-price {

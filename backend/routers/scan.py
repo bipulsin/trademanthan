@@ -681,14 +681,20 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 if can_enter_trade and option_ltp_value > 0 and lot_size > 0:
                     # Enter trade: set qty, buy_price, buy_time, stop_loss
                     # IMPORTANT: sell_price remains NULL initially, will be populated by hourly updater
+                    import math
+                    
                     qty = lot_size
                     buy_price = option_ltp_value
                     buy_time = triggered_datetime
                     sell_price = None  # BLANK initially - will be updated hourly by market data updater
-                    stop_loss_price = max(0.05, option_ltp_value - (SL_LOSS_TARGET / qty))
+                    
+                    # Calculate Stop Loss and round DOWN to nearest 10 paise (0.10)
+                    calculated_sl = option_ltp_value - (SL_LOSS_TARGET / qty)
+                    stop_loss_price = max(0.05, math.floor(calculated_sl / 0.10) * 0.10)
+                    
                     status = 'bought'  # Trade entered
                     pnl = 0.0
-                    print(f"✅ TRADE ENTERED: {stock_name} - Buy: ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price}, Sell Price: BLANK (will update hourly)")
+                    print(f"✅ TRADE ENTERED: {stock_name} - Buy: ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (rounded down), Sell Price: BLANK (will update hourly)")
                 else:
                     # No entry: set qty=0, buy_price=None, buy_time=None
                     qty = 0
