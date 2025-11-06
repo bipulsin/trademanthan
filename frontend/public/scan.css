@@ -454,7 +454,7 @@ body {
 .alert-section {
     background: white;
     border-radius: 12px;
-    padding: 30px;
+    padding: 15px;
     margin-bottom: 20px;
     box-shadow: var(--shadow);
     animation: slideIn 0.5s ease-out;
@@ -515,7 +515,7 @@ body {
 .stocks-table {
     width: 100%;
     border-collapse: collapse;
-    margin-top: 20px;
+    margin-top: 6px;
 }
 
 .stocks-table thead {
@@ -531,7 +531,9 @@ body {
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.3px;
-    white-space: nowrap;
+    white-space: normal;
+    word-wrap: break-word;
+    line-height: 1.3;
 }
 
 .stocks-table tbody tr {
@@ -691,7 +693,7 @@ body {
     }
     
     .alert-section {
-        padding: 20px;
+        padding: 12px;
     }
     
     .alert-header h2 {
