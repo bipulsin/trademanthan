@@ -500,7 +500,7 @@ function renderAlertGroup(alert, type) {
                     } else if (stock.exit_reason) {
                         statusDisplay = '<span style="color: #6b7280; font-weight: 700; font-size: 12px;">✖ CLOSED</span>';
                     } else {
-                        statusDisplay = '<span class="${iconClass}" style="font-size: 10px;">${iconText}</span>';
+                        statusDisplay = `<span class="${iconClass}" style="font-size: 10px;">${iconText}</span>`;
                     }
                     
                     return `
