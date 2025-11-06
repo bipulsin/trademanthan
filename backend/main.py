@@ -107,15 +107,16 @@ async def startup_event():
         import traceback
         traceback.print_exc()
     
-    # Start VWAP updater (updates hourly during market hours)
+    # Start Market Data Updater (updates VWAP, Stock LTP, Option LTP hourly)
     try:
-        print("Starting VWAP Updater...", flush=True)
+        print("Starting Market Data Updater...", flush=True)
         sys.stdout.flush()
         start_vwap_updater()
-        print("✅ VWAP Updater: STARTED (Hourly, 9:30 AM - 3:30 PM IST)", flush=True)
+        print("✅ Market Data Updater: STARTED (Hourly, 9:30 AM - 3:30 PM IST)", flush=True)
+        print("   - Updates: Stock VWAP, Stock LTP, Option LTP for all open positions", flush=True)
         sys.stdout.flush()
     except Exception as e:
-        print(f"❌ VWAP Updater: FAILED - {e}", flush=True)
+        print(f"❌ Market Data Updater: FAILED - {e}", flush=True)
         sys.stdout.flush()
         import traceback
         traceback.print_exc()
@@ -151,12 +152,12 @@ async def shutdown_event():
     except Exception as e:
         print(f"⚠️ Error stopping health monitor: {e}", flush=True)
     
-    # Stop VWAP updater
+    # Stop Market Data updater
     try:
         stop_vwap_updater()
-        print("✅ VWAP updater stopped", flush=True)
+        print("✅ Market data updater stopped", flush=True)
     except Exception as e:
-        print(f"⚠️ Error stopping VWAP updater: {e}", flush=True)
+        print(f"⚠️ Error stopping market data updater: {e}", flush=True)
     
     print("✅ Shutdown complete", flush=True)
 
