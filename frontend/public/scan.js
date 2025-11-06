@@ -434,8 +434,10 @@ function renderAlertGroup(alert, type) {
                         const iconText = shouldHold ? '' : '✖';
                         const iconClass = shouldHold ? 'hold-icon' : 'exit-icon';
                         
-                        // Determine exit status display
+                        // Determine exit status display - Check ALL exit criteria
                         let statusDisplay = '';
+                        
+                        // First check if trade was already closed (has exit_reason)
                         if (stock.exit_reason === 'stop_loss') {
                             statusDisplay = '<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🛑 SL HIT</span>';
                         } else if (stock.exit_reason === 'profit_target') {
@@ -447,10 +449,46 @@ function renderAlertGroup(alert, type) {
                         } else if (stock.exit_reason) {
                             statusDisplay = '<span style="background: #6b7280; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">✖ CLOSED</span>';
                         } else {
-                            // Only show Hold/Exit for open trades
-                            statusDisplay = shouldHold 
-                                ? '<span style="background: #10b981; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">✓ HOLD</span>'
-                                : '<span style="background: #ef4444; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">✖ EXIT</span>';
+                            // For open trades: Check ALL exit criteria in priority order
+                            const option_ltp = stock.sell_price || 0;  // Current option price
+                            const buy_price = stock.buy_price || 0;
+                            const stop_loss = stock.stop_loss || 0;
+                            const option_type = stock.option_type || 'CE';
+                            
+                            // Get current time (IST)
+                            const now = new Date();
+                            const currentHour = now.getHours();
+                            const currentMinute = now.getMinutes();
+                            const currentTimeMinutes = currentHour * 60 + currentMinute;
+                            const exitTimeMinutes = 15 * 60 + 25; // 3:25 PM
+                            const vwapCheckMinutes = 11 * 60 + 15; // 11:15 AM
+                            
+                            // Check exit conditions in priority order
+                            if (currentTimeMinutes >= exitTimeMinutes) {
+                                // Time-based exit
+                                statusDisplay = '<span style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">⏰ EXIT NOW</span>';
+                            } else if (stop_loss > 0 && option_ltp > 0 && option_ltp <= stop_loss) {
+                                // Stop loss hit
+                                statusDisplay = '<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🛑 EXIT SL</span>';
+                            } else if (currentTimeMinutes >= vwapCheckMinutes && stock_vwap > 0) {
+                                // VWAP cross check (directional)
+                                if ((option_type === 'CE' && stock_ltp < stock_vwap) || 
+                                    (option_type === 'PE' && stock_ltp > stock_vwap)) {
+                                    statusDisplay = '<span style="background: #8b5cf6; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">📉 EXIT VWAP</span>';
+                                } else if (buy_price > 0 && option_ltp >= (buy_price * 1.5)) {
+                                    // Profit target hit
+                                    statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🎯 EXIT TARGET</span>';
+                                } else {
+                                    // No exit - holding
+                                    statusDisplay = '<span style="background: #10b981; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">✓ HOLD</span>';
+                                }
+                            } else if (buy_price > 0 && option_ltp >= (buy_price * 1.5)) {
+                                // Profit target hit (before 11:15 AM)
+                                statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🎯 EXIT TARGET</span>';
+                            } else {
+                                // Before 11:15 AM - no exit
+                                statusDisplay = '<span style="background: #10b981; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">✓ HOLD</span>';
+                            }
                         }
                         
                         // Check if this is a "No Entry" trade
@@ -493,8 +531,9 @@ function renderAlertGroup(alert, type) {
                     let pnlValue = parseFloat(stock.pnl || 0);
                     let pnlColor = pnlValue > 0 ? 'green' : (pnlValue < 0 ? 'red' : '');
                     
-                    // Determine exit status display (text-only for mobile)
+                    // Determine exit status display (mobile) - Check ALL exit criteria
                     let statusDisplay = '';
+                    
                     if (isNoEntry) {
                         statusDisplay = '<span style="color: #dc2626; font-weight: 700; font-size: 12px;">No Entry</span>';
                     } else if (stock.exit_reason === 'stop_loss') {
@@ -508,10 +547,46 @@ function renderAlertGroup(alert, type) {
                     } else if (stock.exit_reason) {
                         statusDisplay = '<span style="color: #6b7280; font-weight: 700; font-size: 12px;">✖ CLOSED</span>';
                     } else {
-                        // Fix: Use proper HTML for open trades instead of template literals
-                        statusDisplay = shouldHold 
-                            ? '<span style="background: #10b981; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">✓ HOLD</span>'
-                            : '<span style="background: #ef4444; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">✖ EXIT</span>';
+                        // For open trades: Check ALL exit criteria in priority order
+                        const option_ltp = stock.sell_price || 0;  // Current option price
+                        const buy_price = stock.buy_price || 0;
+                        const stop_loss = stock.stop_loss || 0;
+                        const option_type = stock.option_type || 'CE';
+                        
+                        // Get current time (IST)
+                        const now = new Date();
+                        const currentHour = now.getHours();
+                        const currentMinute = now.getMinutes();
+                        const currentTimeMinutes = currentHour * 60 + currentMinute;
+                        const exitTimeMinutes = 15 * 60 + 25; // 3:25 PM
+                        const vwapCheckMinutes = 11 * 60 + 15; // 11:15 AM
+                        
+                        // Check exit conditions in priority order
+                        if (currentTimeMinutes >= exitTimeMinutes) {
+                            // Time-based exit
+                            statusDisplay = '<span style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">⏰ EXIT NOW</span>';
+                        } else if (stop_loss > 0 && option_ltp > 0 && option_ltp <= stop_loss) {
+                            // Stop loss hit
+                            statusDisplay = '<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🛑 EXIT SL</span>';
+                        } else if (currentTimeMinutes >= vwapCheckMinutes && stock_vwap > 0) {
+                            // VWAP cross check (directional)
+                            if ((option_type === 'CE' && stock_ltp < stock_vwap) || 
+                                (option_type === 'PE' && stock_ltp > stock_vwap)) {
+                                statusDisplay = '<span style="background: #8b5cf6; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">📉 EXIT VWAP</span>';
+                            } else if (buy_price > 0 && option_ltp >= (buy_price * 1.5)) {
+                                // Profit target hit
+                                statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🎯 EXIT TARGET</span>';
+                            } else {
+                                // No exit - holding
+                                statusDisplay = '<span style="background: #10b981; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">✓ HOLD</span>';
+                            }
+                        } else if (buy_price > 0 && option_ltp >= (buy_price * 1.5)) {
+                            // Profit target hit (before 11:15 AM)
+                            statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🎯 EXIT TARGET</span>';
+                        } else {
+                            // Before 11:15 AM - no exit
+                            statusDisplay = '<span style="background: #10b981; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">✓ HOLD</span>';
+                        }
                     }
                     
                     return `
