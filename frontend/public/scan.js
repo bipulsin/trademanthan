@@ -437,17 +437,17 @@ function renderAlertGroup(alert, type) {
                         // Determine exit status display - Check ALL exit criteria
                         let statusDisplay = '';
                         
-                        // First check if trade was already closed (has exit_reason)
+                        // First check if trade was already closed (has exit_reason from backend)
                         if (stock.exit_reason === 'stop_loss') {
-                            statusDisplay = '<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🛑 SL HIT</span>';
+                            statusDisplay = '<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🛑 EXITED</span>';
                         } else if (stock.exit_reason === 'profit_target') {
-                            statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🎯 TARGET</span>';
+                            statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🎯 EXITED</span>';
                         } else if (stock.exit_reason === 'time_based') {
-                            statusDisplay = '<span style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">⏰ TIME</span>';
+                            statusDisplay = '<span style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">⏰ EXITED</span>';
                         } else if (stock.exit_reason === 'stock_vwap_cross') {
-                            statusDisplay = '<span style="background: #8b5cf6; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">📉 VWAP</span>';
+                            statusDisplay = '<span style="background: #8b5cf6; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">📉 EXITED</span>';
                         } else if (stock.exit_reason) {
-                            statusDisplay = '<span style="background: #6b7280; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">✖ CLOSED</span>';
+                            statusDisplay = '<span style="background: #6b7280; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">✖ EXITED</span>';
                         } else {
                             // For open trades: Check ALL exit criteria in priority order
                             const option_ltp = stock.sell_price || 0;  // Current option price
@@ -537,15 +537,15 @@ function renderAlertGroup(alert, type) {
                     if (isNoEntry) {
                         statusDisplay = '<span style="color: #dc2626; font-weight: 700; font-size: 12px;">No Entry</span>';
                     } else if (stock.exit_reason === 'stop_loss') {
-                        statusDisplay = '<span style="color: #dc2626; font-weight: 700; font-size: 12px;">🛑 SL HIT</span>';
+                        statusDisplay = '<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🛑 EXITED</span>';
                     } else if (stock.exit_reason === 'profit_target') {
-                        statusDisplay = '<span style="color: #16a34a; font-weight: 700; font-size: 12px;">🎯 TARGET</span>';
+                        statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">🎯 EXITED</span>';
                     } else if (stock.exit_reason === 'time_based') {
-                        statusDisplay = '<span style="color: #f59e0b; font-weight: 700; font-size: 12px;">⏰ TIME</span>';
+                        statusDisplay = '<span style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">⏰ EXITED</span>';
                     } else if (stock.exit_reason === 'stock_vwap_cross') {
-                        statusDisplay = '<span style="color: #8b5cf6; font-weight: 700; font-size: 12px;">📉 VWAP</span>';
+                        statusDisplay = '<span style="background: #8b5cf6; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">📉 EXITED</span>';
                     } else if (stock.exit_reason) {
-                        statusDisplay = '<span style="color: #6b7280; font-weight: 700; font-size: 12px;">✖ CLOSED</span>';
+                        statusDisplay = '<span style="background: #6b7280; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">✖ EXITED</span>';
                     } else {
                         // For open trades: Check ALL exit criteria in priority order
                         const option_ltp = stock.sell_price || 0;  // Current option price
