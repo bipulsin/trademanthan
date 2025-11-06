@@ -141,8 +141,9 @@ def fix_nov6_trades():
             else:
                 # should_enter and not is_currently_no_trade
                 # Correctly entered trade
+                buy_price_display = f"₹{pos.buy_price:.2f}" if pos.buy_price else "₹0"
                 print(f"✅ {stock_name} ({alert_hour:02d}:{alert_minute:02d} {alert_type}): {reason}")
-                print(f"    Correctly ENTERED (Buy: ₹{pos.buy_price:.2f if pos.buy_price else 0}, Qty: {pos.qty})")
+                print(f"    Correctly ENTERED (Buy: {buy_price_display}, Qty: {pos.qty})")
                 unchanged_count += 1
         
         # Commit all corrections
