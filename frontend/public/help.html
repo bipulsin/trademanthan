@@ -423,6 +423,7 @@
                     <li><a href="#trading-logic">Trading Logic & Algorithms</a></li>
                     <li><a href="#authentication">Authentication Flows</a></li>
                     <li><a href="#api-endpoints">API Endpoints</a></li>
+                    <li><a href="#system-workflow">📊 System Workflow (Complete)</a></li>
                 </ul>
             </ul>
         </aside>
@@ -1352,6 +1353,497 @@ if hasattr(vwap_service, 'upstox'):
   ],
   "bearish": [...]
 }</code></pre>
+                </div>
+            </div>
+
+            <!-- System Workflow Documentation -->
+            <div id="system-workflow" class="dev-content" style="margin-top: 60px;">
+                <h1 class="section-header">📊 SCAN ALGO SYSTEM WORKFLOW</h1>
+                <p>Complete technical workflow with function names and file locations</p>
+
+                <h2>🔄 Complete System Architecture</h2>
+                
+                <pre style="background: #f8fafc; color: #1e293b; border: 2px solid #cbd5e1; line-height: 1.8;">
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                          🌐 CHARTINK WEBHOOK (External)                             │
+│                     https://chartink.com → TradeManthan Server                      │
+└────────────────────────────────────┬────────────────────────────────────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│  STEP 1: WEBHOOK RECEPTION                                                          │
+│  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
+│                                                                                     │
+│  📍 File: backend/routers/scan.py                                                   │
+│  📍 Endpoints:                                                                      │
+│     • POST /scan/chartink-webhook-bullish                                          │
+│       └─ receive_bullish_webhook(request: Request, db: Session)                    │
+│                                                                                     │
+│     • POST /scan/chartink-webhook-bearish                                          │
+│       └─ receive_bearish_webhook(request: Request, db: Session)                    │
+│                                                                                     │
+│  ⚙️  Both webhooks call:                                                            │
+│     └─ process_webhook_data(data: dict, alert_type: str, db: Session)              │
+│                                                                                     │
+└────────────────────────────────────┬────────────────────────────────────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│  STEP 2: INDEX TREND CHECK                                                          │
+│  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
+│                                                                                     │
+│  📍 File: backend/services/upstox_service.py                                        │
+│  📍 Function: check_index_trends()                                                  │
+│                                                                                     │
+│  ⚙️  Sub-functions called:                                                          │
+│     ├─ get_ohlc_data(instrument_key) - Fetch OHLC for NIFTY & BANKNIFTY            │
+│     ├─ Determines: bullish/bearish based on LTP vs Day Open                        │
+│     └─ Returns: {nifty_trend, banknifty_trend, opposite_trends, allow_trading}     │
+│                                                                                     │
+│  ✅ Decision Logic:                                                                  │
+│     IF (both bullish) OR (both bearish) → allow_trading = True                     │
+│     ELSE (opposite trends) → allow_trading = False                                 │
+│                                                                                     │
+└────────────────────────────────────┬────────────────────────────────────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│  STEP 3: DATA ENRICHMENT                                                            │
+│  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
+│                                                                                     │
+│  📍 File: backend/routers/scan.py                                                   │
+│  📍 Function: enrich_stock_data(stocks: List[str], alert_type: str, db: Session)   │
+│                                                                                     │
+│  ⚙️  For each stock in alert:                                                       │
+│     ├─ upstox_service.get_stock_ltp_from_market_quote(stock_name)                  │
+│     ├─ upstox_service.get_stock_vwap(stock_name)                                   │
+│     ├─ get_monthly_expiry(reference_date) - Determine option expiry                │
+│     ├─ upstox_service.get_option_chain(stock_name, expiry_date)                    │
+│     ├─ find_strike_from_option_chain() - Select OTM-1 to OTM-5 (highest liquidity) │
+│     ├─ get_lot_size_from_master(stock_name, option_contract, db)                   │
+│     └─ upstox_service.get_option_ltp(instrument_key)                               │
+│                                                                                     │
+│  📦 Returns enriched data with: stock_ltp, stock_vwap, option_contract,            │
+│     option_ltp, lot_size for each stock                                            │
+│                                                                                     │
+└────────────────────────────────────┬────────────────────────────────────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│  STEP 4: TRADE ENTRY DECISION                                                       │
+│  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
+│                                                                                     │
+│  📍 File: backend/routers/scan.py                                                   │
+│  📍 Function: process_webhook_data() [continued]                                    │
+│                                                                                     │
+│  🔀 DECISION BRANCH:                                                                 │
+│                                                                                     │
+│  ✅ IF allow_trading = True (Trends Aligned):                                       │
+│     ├─ status = 'bought'                                                            │
+│     ├─ qty = lot_size                                                               │
+│     ├─ buy_price = option_ltp                                                       │
+│     ├─ buy_time = now                                                               │
+│     ├─ stop_loss = max(0.05, floor((buy_price - 3100/qty) / 0.10) * 0.10)          │
+│     │  └─ Rounds down to nearest 10 paise                                           │
+│     ├─ sell_price = None (blank, will update hourly)                               │
+│     └─ Trade is ENTERED and tracking begins                                        │
+│                                                                                     │
+│  ❌ ELSE (Opposite Trends):                                                          │
+│     ├─ status = 'no_entry'                                                          │
+│     ├─ qty = 0                                                                      │
+│     ├─ buy_price = None                                                             │
+│     ├─ stop_loss = None                                                             │
+│     ├─ sell_price = None                                                            │
+│     └─ Alert stored but NOT entered (permanent NO ENTRY)                           │
+│                                                                                     │
+│  💾 Save to Database: IntradayStockOption model (database.py)                       │
+│                                                                                     │
+└────────────────────────────────────┬────────────────────────────────────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│  STEP 5: HOURLY MARKET DATA UPDATES (9:30 AM - 3:15 PM, Every Hour at :15)         │
+│  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
+│                                                                                     │
+│  📍 File: backend/services/vwap_updater.py                                          │
+│  📍 Function: update_vwap_for_all_open_positions()                                  │
+│  📍 Scheduler: VWAPUpdater.start() - APScheduler with CronTrigger                   │
+│                                                                                     │
+│  ⚙️  Process:                                                                        │
+│     1. Query all OPEN positions (status != 'sold', status != 'no_entry')           │
+│     2. For each position:                                                           │
+│        ├─ upstox_service.get_stock_vwap(stock_name) → Update stock_vwap            │
+│        ├─ upstox_service.get_stock_ltp_from_market_quote() → Update stock_ltp      │
+│        └─ Fetch option LTP from instruments JSON → Update sell_price               │
+│                                                                                     │
+│  📊 Updates 3 key fields hourly:                                                    │
+│     • stock_vwap - For VWAP cross exit logic                                       │
+│     • stock_ltp - For display and monitoring                                       │
+│     • sell_price - Current option price (used for SL/Target checks)                │
+│                                                                                     │
+│  ⚠️  IMPORTANT: status='no_entry' trades are SKIPPED (never processed)              │
+│                                                                                     │
+└────────────────────────────────────┬────────────────────────────────────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│  STEP 6: EXIT CONDITION CHECKS (Called after each hourly update)                   │
+│  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
+│                                                                                     │
+│  📍 File: backend/routers/scan.py                                                   │
+│  📍 Function: refresh_hourly_prices(db: Session)                                    │
+│  📍 Endpoint: GET /scan/refresh-hourly-prices                                       │
+│                                                                                     │
+│  🔍 EXIT CONDITIONS (Checked in Priority Order):                                    │
+│                                                                                     │
+│  1️⃣  TIME-BASED EXIT (Highest Priority)                                             │
+│     ├─ Condition: current_time >= 15:25 (3:25 PM IST)                              │
+│     ├─ exit_reason = 'time_based'                                                  │
+│     ├─ status = 'sold'                                                              │
+│     ├─ sell_price = current option LTP (LOCKED)                                    │
+│     ├─ sell_time = now (LOCKED)                                                    │
+│     └─ Badge: ⏰ TIME (Orange)                                                       │
+│                                                                                     │
+│  2️⃣  STOP LOSS HIT                                                                   │
+│     ├─ Condition: sell_price <= stop_loss                                          │
+│     ├─ exit_reason = 'stop_loss'                                                   │
+│     ├─ status = 'sold'                                                              │
+│     ├─ sell_price = LOCKED at trigger price                                        │
+│     ├─ sell_time = LOCKED at trigger time                                          │
+│     ├─ Loss capped at ~₹3,100                                                       │
+│     └─ Badge: 🛑 SL HIT (Red)                                                        │
+│                                                                                     │
+│  3️⃣  PROFIT TARGET HIT                                                               │
+│     ├─ Condition: sell_price >= (buy_price * 1.5)                                  │
+│     ├─ exit_reason = 'profit_target'                                               │
+│     ├─ status = 'sold'                                                              │
+│     ├─ sell_price = LOCKED at 50% gain                                             │
+│     ├─ sell_time = LOCKED at trigger time                                          │
+│     └─ Badge: 🎯 TARGET (Green)                                                      │
+│                                                                                     │
+│  4️⃣  VWAP CROSS (Visual Signal Only)                                                 │
+│     ├─ Condition: stock_ltp < stock_vwap                                           │
+│     ├─ Trade remains OPEN                                                           │
+│     ├─ No automatic exit                                                            │
+│     └─ Badge: ✖ EXIT (Red Pulsing Cross) - User advisory                            │
+│                                                                                     │
+│  ⚠️  PROTECTION: Once exit_reason is set, sell_price & sell_time are IMMUTABLE!     │
+│                                                                                     │
+└────────────────────────────────────┬────────────────────────────────────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│  STEP 7: END-OF-DAY VWAP UPDATE (3:30 PM & 3:35 PM)                                │
+│  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
+│                                                                                     │
+│  📍 File: backend/services/vwap_updater.py                                          │
+│  📍 Function: update_end_of_day_vwap()                                              │
+│  📍 Scheduler: VWAPUpdater.start() - Runs at 15:30 and 15:35 IST                   │
+│                                                                                     │
+│  ⚙️  Process:                                                                        │
+│     1. Query ALL positions from today (both open AND closed)                       │
+│     2. Get unique stock names                                                       │
+│     3. For each stock:                                                              │
+│        └─ upstox_service.get_stock_vwap(stock_name) → Final day VWAP               │
+│     4. Update stock_vwap for ALL positions of that stock                           │
+│                                                                                     │
+│  📊 Purpose:                                                                         │
+│     • Captures complete trading day VWAP (9:15 AM - 3:30 PM)                       │
+│     • Updates ALL positions (not just open ones)                                   │
+│     • Provides final VWAP for post-trade analysis                                  │
+│                                                                                     │
+└────────────────────────────────────┬────────────────────────────────────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│  STEP 8: FRONTEND DISPLAY & USER INTERACTION                                        │
+│  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
+│                                                                                     │
+│  📍 File: frontend/public/scan.js                                                   │
+│  📍 File: frontend/public/scan.html                                                 │
+│  📍 File: frontend/public/scan.css                                                  │
+│                                                                                     │
+│  🌐 Page Load Sequence:                                                             │
+│     1. DOMContentLoaded event fires                                                 │
+│        └─ Calls: initializePage()                                                   │
+│                                                                                     │
+│     2. Check OAuth Status                                                           │
+│        └─ checkOAuthSuccess() - Displays token refresh confirmation                │
+│                                                                                     │
+│     3. Load Index Prices                                                            │
+│        └─ loadIndexPrices()                                                         │
+│           └─ Fetches: GET /scan/index-prices                                        │
+│           └─ Updates title bar: NIFTY ↑/↓, BANKNIFTY ↑/↓                            │
+│                                                                                     │
+│     4. Load Latest Data                                                             │
+│        └─ loadLatestData()                                                          │
+│           └─ Fetches: GET /scan/latest                                              │
+│           └─ Calls: displaySectionsBasedOnTrends(data)                              │
+│                                                                                     │
+│     5. Display Trade Alerts                                                         │
+│        ├─ displayBullishAlerts(bullishData) - Shows ALL bullish alerts             │
+│        │  └─ createStockCard(alert, 'bullish') - Creates visual card               │
+│        └─ displayBearishAlerts(bearishData) - Shows ALL bearish alerts             │
+│           └─ createStockCard(alert, 'bearish') - Creates visual card               │
+│                                                                                     │
+│     6. Start Auto-Refresh                                                           │
+│        └─ startAutoRefresh()                                                        │
+│           └─ Sets up hourly refresh at :15 past each hour                           │
+│                                                                                     │
+│     7. Token Health Check                                                           │
+│        └─ checkTokenHealth()                                                        │
+│           └─ Fetches: GET /scan/upstox/status                                       │
+│           └─ Shows banner if token expired                                          │
+│                                                                                     │
+│     8. Day Summary Calculation                                                      │
+│        └─ updateDaySummary(bullishData, bearishData)                               │
+│           └─ Calculates: Net P&L, Win Rate, Total Trades, SL Exits, etc.           │
+│                                                                                     │
+│  🎨 Visual Components:                                                               │
+│     • Status Badges: ⏰ TIME, 🛑 SL HIT, 🎯 TARGET, ✖ EXIT, No Entry               │
+│     • Color Coding: Green (profit), Red (loss/exit), Orange (time/pending)         │
+│     • Real-time P&L: (sell_price - buy_price) × qty                                │
+│     • Collapsible Day Summary with key metrics                                     │
+│                                                                                     │
+│  📥 User Actions:                                                                    │
+│     • Download CSV: exportToCSV() - Exports all alerts to Excel                    │
+│     • Upstox Login: Redirects to /scan/upstox/login                                │
+│     • Toggle Summary: toggleDaySummary() - Expand/collapse day stats               │
+│                                                                                     │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+</pre>
+
+                <h2>📂 File Structure Reference</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Component</th>
+                            <th>File Path</th>
+                            <th>Key Functions/Classes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Webhook Handler</strong></td>
+                            <td><code>backend/routers/scan.py</code></td>
+                            <td>
+                                • receive_bullish_webhook()<br>
+                                • receive_bearish_webhook()<br>
+                                • process_webhook_data()<br>
+                                • enrich_stock_data()<br>
+                                • refresh_hourly_prices()
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Upstox Integration</strong></td>
+                            <td><code>backend/services/upstox_service.py</code></td>
+                            <td>
+                                • UpstoxService class<br>
+                                • check_index_trends()<br>
+                                • get_stock_ltp_from_market_quote()<br>
+                                • get_stock_vwap()<br>
+                                • get_option_chain()<br>
+                                • get_option_ltp()<br>
+                                • get_ohlc_data()
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>VWAP Updater</strong></td>
+                            <td><code>backend/services/vwap_updater.py</code></td>
+                            <td>
+                                • VWAPUpdater class<br>
+                                • update_vwap_for_all_open_positions()<br>
+                                • update_end_of_day_vwap()<br>
+                                • start_vwap_updater()<br>
+                                • stop_vwap_updater()
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Token Management</strong></td>
+                            <td><code>backend/services/token_manager.py</code></td>
+                            <td>
+                                • save_upstox_token()<br>
+                                • load_upstox_token()<br>
+                                • delete_upstox_token()
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Database Models</strong></td>
+                            <td><code>backend/models/trading.py</code></td>
+                            <td>
+                                • IntradayStockOption class<br>
+                                • MasterStock class<br>
+                                • Broker class
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Database Connection</strong></td>
+                            <td><code>backend/database.py</code></td>
+                            <td>
+                                • SessionLocal (SQLAlchemy)<br>
+                                • engine<br>
+                                • get_db()
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Frontend Logic</strong></td>
+                            <td><code>frontend/public/scan.js</code></td>
+                            <td>
+                                • loadIndexPrices()<br>
+                                • loadLatestData()<br>
+                                • displaySectionsBasedOnTrends()<br>
+                                • createStockCard()<br>
+                                • updateDaySummary()<br>
+                                • checkTokenHealth()<br>
+                                • startAutoRefresh()<br>
+                                • exportToCSV()
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Frontend Styling</strong></td>
+                            <td><code>frontend/public/scan.css</code></td>
+                            <td>
+                                • Status badge styles<br>
+                                • Table layouts<br>
+                                • Responsive design<br>
+                                • Day summary container
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Frontend HTML</strong></td>
+                            <td><code>frontend/public/scan.html</code></td>
+                            <td>
+                                • Page structure<br>
+                                • Day summary section<br>
+                                • Alert tables<br>
+                                • Token expired banner
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Main Application</strong></td>
+                            <td><code>backend/main.py</code></td>
+                            <td>
+                                • FastAPI app initialization<br>
+                                • startup_event()<br>
+                                • shutdown_event()<br>
+                                • Router includes<br>
+                                • Service startup/shutdown
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h2>🔑 Key Constants & Configurations</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Constant</th>
+                            <th>Value</th>
+                            <th>Location</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>SL_LOSS_TARGET</code></td>
+                            <td>₹3,100</td>
+                            <td>backend/routers/scan.py</td>
+                        </tr>
+                        <tr>
+                            <td><code>PROFIT_TARGET_MULTIPLIER</code></td>
+                            <td>1.5 (50% gain)</td>
+                            <td>backend/routers/scan.py</td>
+                        </tr>
+                        <tr>
+                            <td><code>TIME_BASED_EXIT</code></td>
+                            <td>15:25 (3:25 PM IST)</td>
+                            <td>backend/routers/scan.py</td>
+                        </tr>
+                        <tr>
+                            <td><code>HOURLY_UPDATE_TIMES</code></td>
+                            <td>9:30, 10:15, 11:15, 12:15, 1:15, 2:15, 3:15</td>
+                            <td>backend/services/vwap_updater.py</td>
+                        </tr>
+                        <tr>
+                            <td><code>EOD_VWAP_TIMES</code></td>
+                            <td>15:30, 15:35 (3:30 & 3:35 PM IST)</td>
+                            <td>backend/services/vwap_updater.py</td>
+                        </tr>
+                        <tr>
+                            <td><code>EXPIRY_CUTOFF_DATE</code></td>
+                            <td>18th of month</td>
+                            <td>backend/routers/scan.py</td>
+                        </tr>
+                        <tr>
+                            <td><code>OTM_RANGE</code></td>
+                            <td>OTM-1 to OTM-5</td>
+                            <td>backend/routers/scan.py</td>
+                        </tr>
+                        <tr>
+                            <td><code>STOP_LOSS_ROUNDING</code></td>
+                            <td>0.10 (10 paise, rounded down)</td>
+                            <td>backend/routers/scan.py</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h2>🔄 Scheduler Jobs (APScheduler)</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Job Name</th>
+                            <th>Schedule</th>
+                            <th>Function</th>
+                            <th>Purpose</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Master Stock Download</strong></td>
+                            <td>Daily 9:00 AM IST</td>
+                            <td>download_master_stock_data()</td>
+                            <td>Download Dhan instruments data</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Instruments Data Refresh</strong></td>
+                            <td>Daily 9:05 AM IST</td>
+                            <td>fetch_and_store_instruments()</td>
+                            <td>Update Upstox instruments JSON</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Hourly Market Updates</strong></td>
+                            <td>Hourly at :15 (9:15-3:15)</td>
+                            <td>update_vwap_for_all_open_positions()</td>
+                            <td>Update VWAP, LTP, sell_price</td>
+                        </tr>
+                        <tr>
+                            <td><strong>EOD VWAP Update</strong></td>
+                            <td>3:30 PM & 3:35 PM IST</td>
+                            <td>update_end_of_day_vwap()</td>
+                            <td>Final day VWAP for all positions</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Health Monitor</strong></td>
+                            <td>Every 15 min (9 AM-4 PM)</td>
+                            <td>perform_health_check()</td>
+                            <td>Monitor Upstox API, database, services</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <div class="success-box">
+                    <strong>📌 Quick Reference:</strong><br>
+                    • <strong>Entry Logic:</strong> backend/routers/scan.py → process_webhook_data()<br>
+                    • <strong>Exit Logic:</strong> backend/routers/scan.py → refresh_hourly_prices()<br>
+                    • <strong>Hourly Updates:</strong> backend/services/vwap_updater.py → update_vwap_for_all_open_positions()<br>
+                    • <strong>Frontend Display:</strong> frontend/public/scan.js → displaySectionsBasedOnTrends()<br>
+                    • <strong>Index Trends:</strong> backend/services/upstox_service.py → check_index_trends()
+                </div>
+
+                <div class="info-box">
+                    <strong>🔗 Data Flow Summary:</strong><br>
+                    Chartink Webhook → process_webhook_data() → check_index_trends() → enrich_stock_data() → 
+                    Save to DB → Hourly: update_vwap_for_all_open_positions() → refresh_hourly_prices() → 
+                    Check Exit Conditions → Update DB → Frontend: loadLatestData() → Display to User
                 </div>
             </div>
 
