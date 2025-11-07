@@ -915,7 +915,7 @@ class UpstoxService:
         """
         try:
             # OHLC endpoint (using v2 like other market-quote endpoints)
-            url = f"https://api.upstox.com/v2/market-quote/ohlc?instrument_key={instrument_key}&interval=day"
+            url = f"https://api.upstox.com/v2/market-quote/ohlc?instrument_key={instrument_key}&interval=1d"
             
             # Make request
             response = requests.get(url, headers=self.get_headers(), timeout=10)
