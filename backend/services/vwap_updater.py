@@ -172,20 +172,22 @@ async def update_vwap_for_all_open_positions():
                                 symbol, month, year, strike, opt_type = match.groups()
                                 strike_value = float(strike)
                                 
-                                # Search for matching instrument
-                                for instrument_key, instrument_data in instruments_data.items():
-                                    if (instrument_data.get('name', '').upper() == symbol.upper() and
-                                        instrument_data.get('instrument_type') == 'OPTSTK' and
-                                        instrument_data.get('option_type') == opt_type):
+                                # Search for matching instrument (instruments_data is a list)
+                                for instrument in instruments_data:
+                                    if (instrument.get('underlying_symbol', '').upper() == symbol.upper() and
+                                        instrument.get('segment') == 'NSE_FO' and
+                                        instrument.get('instrument_type') == opt_type):
                                         
                                         # Check strike price match
-                                        inst_strike = float(instrument_data.get('strike_price', 0))
+                                        inst_strike = float(instrument.get('strike_price', 0))
                                         if abs(inst_strike - strike_value) < 0.01:
                                             # Found the option - fetch its LTP
-                                            option_ltp_data = vwap_service.get_option_ltp(instrument_key)
-                                            if option_ltp_data and option_ltp_data > 0:
-                                                new_option_ltp = option_ltp_data
-                                                break
+                                            instrument_key = instrument.get('instrument_key')
+                                            if instrument_key:
+                                                option_ltp_data = vwap_service.get_option_ltp(instrument_key)
+                                                if option_ltp_data and option_ltp_data > 0:
+                                                    new_option_ltp = option_ltp_data
+                                                    break
                     except Exception as e:
                         logger.warning(f"Could not fetch option LTP for {option_contract}: {str(e)}")
                 
