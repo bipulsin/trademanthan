@@ -431,6 +431,21 @@
         <!-- Main Content -->
         <main class="content">
 
+            <!-- Recent Updates Banner -->
+            <div class="success-box" style="margin-bottom: 30px;">
+                <h2 style="color: #059669; margin-bottom: 15px;">🎉 Recent Updates & Improvements</h2>
+                <p><strong>Latest enhancements to the system (November 2025):</strong></p>
+                <ul style="margin-left: 20px; margin-top: 10px;">
+                    <li>✅ <strong>Hourly Sell Price Updates:</strong> Option LTP now refreshes every hour for accurate tracking</li>
+                    <li>✅ <strong>Stop Loss Rounding:</strong> SL now rounds down to nearest 10 paise for cleaner pricing</li>
+                    <li>✅ <strong>Token Persistence:</strong> Upstox token survives server restarts (no daily re-login!)</li>
+                    <li>✅ <strong>Bug Fixes:</strong> Fixed instruments data parsing, OHLC API interval, sell_time updates</li>
+                    <li>✅ <strong>OHLC API Fix:</strong> Webhook failures resolved (interval changed from "day" to "1d")</li>
+                    <li>✅ <strong>Day Summary:</strong> Collapsible daily metrics (Net P&L, Win Rate, Trades)</li>
+                    <li>✅ <strong>Complete Workflow Documentation:</strong> Added comprehensive system flow diagram</li>
+                </ul>
+            </div>
+
             <!-- Quick Start -->
             <div id="quick-start" class="quick-start">
                 <h2>🎯 Quick Start (For End Users)</h2>
@@ -550,10 +565,22 @@
                     <h3>⚠️ Warning Messages</h3>
                     
                     <div class="warning-box">
-                        <strong>"Access Token Expired"</strong><br>
+                        <strong>"Access Token Expired" - IMPROVED!</strong><br>
                         • <strong>What it means:</strong> Connection to Upstox expired<br>
                         • <strong>What to do:</strong> Click "Update Token" → "Login with Upstox"<br>
-                        • <strong>Why:</strong> You need active Upstox connection for live data
+                        • <strong>Why:</strong> You need active Upstox connection for live data<br>
+                        • <strong>🆕 NEW:</strong> Token now persists across server restarts<br>
+                        • <strong>🆕 NEW:</strong> Automatic token health checks every hour<br>
+                        • <strong>🆕 NEW:</strong> Instant token updates without server restart
+                    </div>
+                    
+                    <div class="info-box">
+                        <strong>🆕 Token Persistence (NEW!):</strong><br>
+                        • Upstox token is saved to file: <code>/home/ubuntu/trademanthan/data/upstox_token.json</code><br>
+                        • Token survives server restarts (no more daily re-login!)<br>
+                        • Automatic reload on startup<br>
+                        • Health monitor checks token validity every 15 minutes<br>
+                        • Frontend displays banner if token needs refresh
                     </div>
 
                     <div class="info-box">
@@ -631,12 +658,25 @@
 
                     <h3>🛡️ Stop Loss & Risk Management</h3>
                     <div class="warning-box">
-                        <strong>Automatic Stop Loss:</strong><br>
+                        <strong>Automatic Stop Loss (UPDATED!):</strong><br>
                         • Calculated when trade is created<br>
-                        • Formula: <code>SL = buy_price - (₹3,100 / qty)</code><br>
+                        • Formula: <code>SL = floor((buy_price - 3100/qty) / 0.10) * 0.10</code><br>
+                        • <strong>Rounded DOWN to nearest 10 paise</strong><br>
                         • <strong>Maximum loss per trade: ~₹3,100</strong><br>
-                        • Example: Buy ₹25.50, Qty 250 → SL ₹13.10<br>
+                        • Example: Buy ₹25.50, Qty 250 → Calculated: ₹13.10 → Rounded: ₹13.10<br>
+                        • Example: Buy ₹49.88, Qty 150 → Calculated: ₹29.21 → Rounded: ₹29.20<br>
                         • Shown in <strong style="color: #dc2626;">red color</strong> in table
+                    </div>
+                    
+                    <h3>💰 Sell Price Updates (NEW!)</h3>
+                    <div class="info-box">
+                        <strong>How Sell Price Works:</strong><br>
+                        • <strong>At Entry:</strong> Sell Price is BLANK (not set)<br>
+                        • <strong>First Hourly Update (11:15 AM):</strong> Populated with current option LTP<br>
+                        • <strong>Every Hour After:</strong> Updated with fresh option LTP from Upstox<br>
+                        • <strong>Used For:</strong> Stop Loss checks, Profit Target checks, P&L calculation<br>
+                        • <strong>On Exit:</strong> LOCKED permanently (cannot change)<br>
+                        • This ensures accurate real-time tracking and exit decisions
                     </div>
 
                     <h3>📊 Status Indicators</h3>
@@ -807,32 +847,44 @@ BANKNIFTY: 52,300 ↓ (Bearish)</pre>
                         <li>Auto-switches on Nov 19th at 9:00 AM</li>
                     </ul>
 
-                    <h3>🔄 Continuous Updates (Every Hour at :15)</h3>
-                    <p><strong>Starting 9:15 AM IST, then every hour:</strong></p>
+                    <h3>🔄 Continuous Updates (Every Hour at :15) - UPDATED!</h3>
+                    <p><strong>Starting 9:30 AM IST, then every hour at :15:</strong></p>
                     <p><strong>What refreshes (for ENTERED trades only):</strong></p>
                     <ol>
                         <li>NIFTY & BANKNIFTY prices and trends</li>
                         <li>Stock LTP (current stock price)</li>
                         <li>Stock VWAP (volume-weighted average)</li>
-                        <li>Option LTP (current option price)</li>
-                        <li>PnL calculation: (option_ltp - buy_price) × qty</li>
+                        <li><strong>🆕 Sell Price (Option LTP) - Hourly refresh from Upstox</strong></li>
+                        <li>PnL calculation: (sell_price - buy_price) × qty</li>
                         <li>Hold/Exit signals (based on stock_ltp vs VWAP)</li>
                         <li><strong>Exit condition checks (SL, Target, Time)</strong></li>
                     </ol>
+
+                    <div class="success-box">
+                        <strong>🆕 NEW: Sell Price Hourly Updates!</strong><br>
+                        • Fetches current option LTP from Upstox instruments data<br>
+                        • Updates <code>sell_price</code> field for all open trades<br>
+                        • Used for real-time SL/Target monitoring<br>
+                        • Ensures accurate exit decisions based on latest prices<br>
+                        • Fixed bug: Instruments data is now correctly read as a list
+                    </div>
 
                     <div class="danger-box">
                         <strong>What NEVER Changes:</strong><br>
                         • <code>buy_price</code> - Locked at entry<br>
                         • <code>buy_time</code> - Locked at entry<br>
                         • <code>qty</code> - Locked at entry<br>
-                        • <code>stop_loss</code> - Locked at entry
+                        • <code>stop_loss</code> - Locked at entry (rounded to 10 paise)<br>
+                        • <code>sell_price</code> - LOCKED once trade exits (exit_reason set)<br>
+                        • <code>sell_time</code> - LOCKED once trade exits
                     </div>
 
                     <div class="info-box">
                         <strong>What Gets SKIPPED:</strong><br>
                         • All <code>status='no_entry'</code> trades<br>
                         • Never processed in hourly updates<br>
-                        • Remain "No Entry" permanently
+                        • Remain "No Entry" permanently<br>
+                        • No sell price updates for these trades
                     </div>
 
                     <p><strong>Schedule:</strong></p>
@@ -1103,19 +1155,24 @@ if master_stock:
 else:
     qty = 1  # Fallback</code></pre>
 
-                    <h3>Stop Loss Calculation</h3>
+                    <h3>Stop Loss Calculation - UPDATED!</h3>
                     <div class="danger-box">
-                        <strong>RISK MANAGEMENT:</strong> Stop Loss is calculated automatically when a trade is created to limit maximum loss to approximately <strong>₹3,100 per trade</strong>.
+                        <strong>RISK MANAGEMENT (UPDATED!):</strong> Stop Loss is calculated automatically when a trade is created to limit maximum loss to approximately <strong>₹3,100 per trade</strong>. The SL is now <strong>rounded DOWN to the nearest 10 paise</strong> for cleaner pricing.
                     </div>
 
                     <pre><code>SL_LOSS_TARGET = 3100.0  # Target loss for stop loss trigger
 
-# Calculate Stop Loss (SL) price
+# Calculate Stop Loss (SL) price - UPDATED with rounding!
 # SL should trigger when loss reaches approximately -₹3,100
-# Formula: SL_price = buy_price - (SL_LOSS_TARGET / qty)
+# Formula: SL_price = floor((buy_price - (SL_LOSS_TARGET / qty)) / 0.10) * 0.10
+import math
+
 stop_loss_price = None
 if option_ltp_value > 0 and qty > 0:
-    stop_loss_price = max(0.05, option_ltp_value - (SL_LOSS_TARGET / qty))
+    # Calculate raw SL
+    calculated_sl = option_ltp_value - (SL_LOSS_TARGET / qty)
+    # Round DOWN to nearest 10 paise (0.10)
+    stop_loss_price = max(0.05, math.floor(calculated_sl / 0.10) * 0.10)
     # Ensure SL is at least ₹0.05 (minimum tick size)</code></pre>
 
                     <p><strong>Example:</strong></p>
@@ -1127,13 +1184,22 @@ if option_ltp_value > 0 and qty > 0:
                         <li>If option price drops to ₹13.10 → Auto-exit with ~₹3,100 loss</li>
                     </ul>
 
-                    <h3>Auto-Exit Logic (Hourly Monitoring)</h3>
+                    <h3>Auto-Exit Logic (Hourly Monitoring) - UPDATED!</h3>
                     <div class="warning-box">
                         <strong>CRITICAL:</strong> Once a trade is closed (exit_reason is set), <code>sell_price</code> and <code>sell_time</code> are <strong>PERMANENTLY LOCKED</strong> and cannot be overwritten by any process.
                     </div>
 
                     <div class="danger-box">
                         <strong>NO RE-ENTRY:</strong> Trades with <code>status='no_entry'</code> are <strong>SKIPPED</strong> in hourly refresh and will <strong>NEVER</strong> be entered later.
+                    </div>
+                    
+                    <div class="success-box">
+                        <strong>🆕 RECENT IMPROVEMENTS:</strong><br>
+                        • <strong>Sell Price Updates:</strong> Now fetches option LTP hourly from instruments data<br>
+                        • <strong>Bug Fixed:</strong> Instruments JSON correctly parsed as list (was trying .items() on list)<br>
+                        • <strong>Sell Time Fix:</strong> No longer updates sell_time for open trades (only on exit)<br>
+                        • <strong>SL Rounding:</strong> Stop Loss rounded to nearest 10 paise for cleaner pricing<br>
+                        • <strong>OHLC API Fix:</strong> Changed interval from "day" to "1d" for Upstox compatibility
                     </div>
 
                     <pre><code># Get all records for today (SKIP 'no_entry' trades)
@@ -1255,10 +1321,10 @@ else:
                 </div>
 
                 <div id="authentication" class="dev-content">
-                    <h2>Authentication Flows</h2>
+                    <h2>Authentication Flows - UPDATED!</h2>
 
-                    <h3>Upstox OAuth 2.0</h3>
-                    <p><strong>Login Flow:</strong></p>
+                    <h3>Upstox OAuth 2.0 with Token Persistence</h3>
+                    <p><strong>Login Flow (UPDATED!):</strong></p>
                     <ol>
                         <li>User clicks "Login with Upstox" button</li>
                         <li>Frontend redirects to <code>GET /scan/upstox/login</code></li>
@@ -1266,19 +1332,66 @@ else:
                         <li>User is redirected to Upstox authorization page</li>
                         <li>After approval, Upstox redirects to <code>GET /scan/upstox/callback?code=...</code></li>
                         <li>Backend exchanges code for access token</li>
-                        <li>Token is saved to file and updated in memory</li>
+                        <li><strong>🆕 Token is saved to persistent file (token_manager.py)</strong></li>
+                        <li><strong>🆕 Token is updated in memory for immediate use</strong></li>
+                        <li><strong>🆕 Token is backed up in upstox_service.py</strong></li>
                         <li>User is redirected back to <code>/scan.html?auth=success</code></li>
                     </ol>
 
-                    <div class="warning-box">
-                        <strong>Important:</strong> Access token is updated both in file (for persistence) and in memory (for immediate use) without requiring service restart.
+                    <div class="success-box">
+                        <strong>🆕 Token Persistence Architecture:</strong><br>
+                        • <strong>File:</strong> backend/services/token_manager.py<br>
+                        • <strong>Storage:</strong> /home/ubuntu/trademanthan/data/upstox_token.json<br>
+                        • <strong>Permissions:</strong> 0600 (secure file permissions)<br>
+                        • <strong>Format:</strong> JSON with access_token and expires_at<br>
+                        • <strong>Reload:</strong> Automatically loaded on service startup<br>
+                        • <strong>Health Check:</strong> Validated every 15 minutes
                     </div>
 
-                    <pre><code># Update token in memory
+                    <div class="warning-box">
+                        <strong>Important:</strong> Access token is updated in THREE places:<br>
+                        1. <strong>Persistent File</strong> - Survives restarts<br>
+                        2. <strong>Memory (vwap_service)</strong> - Immediate use<br>
+                        3. <strong>Backup (upstox_service.py)</strong> - Redundancy<br><br>
+                        This ensures no service restart is needed and token persists.
+                    </div>
+
+                    <pre><code># Token Manager - Save token persistently
+from services.token_manager import save_upstox_token
+
+# Save to file (persists across restarts)
+save_upstox_token(access_token, expires_at)
+
+# Update in memory (immediate use)
 if hasattr(vwap_service, 'access_token'):
     vwap_service.access_token = access_token
 if hasattr(vwap_service, 'upstox'):
-    vwap_service.upstox.set_access_token(access_token)</code></pre>
+    vwap_service.upstox.set_access_token(access_token)
+    
+# Also update backup in upstox_service.py
+upstox_service.reload_token_from_storage()</code></pre>
+
+                    <h3>🆕 Token Health Monitoring</h3>
+                    <p><strong>File:</strong> backend/services/health_monitor.py</p>
+                    <div class="info-box">
+                        <strong>Automatic Health Checks:</strong><br>
+                        • Runs every 15 minutes (9 AM - 4 PM IST)<br>
+                        • Reloads token from storage before check<br>
+                        • Validates token with Upstox API<br>
+                        • Reports failures in daily health summary<br>
+                        • Frontend displays banner if token expired
+                    </div>
+
+                    <pre><code># Health check with token reload
+def perform_health_check():
+    # Reload token from persistent storage
+    upstox_service.reload_token_from_storage()
+    
+    # Test API with current token
+    status = upstox_service.test_connection()
+    
+    # Log and report status
+    logger.info(f"Upstox API: {status}")</code></pre>
                 </div>
 
                 <div id="api-endpoints" class="dev-content">
