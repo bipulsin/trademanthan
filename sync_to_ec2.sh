@@ -6,7 +6,7 @@
 set -e  # Exit on any error
 
 # Configuration (Edit these values)
-EC2_HOST="YOUR_EC2_IP_OR_DOMAIN"  # e.g., "13.233.123.45" or "trademanthan.in"
+EC2_HOST="13.234.119.21"  # e.g., "13.233.123.45" or "trademanthan.in"
 EC2_USER="ubuntu"
 EC2_KEY="TradeM.pem"
 APP_DIR="/home/ubuntu/trademanthan"

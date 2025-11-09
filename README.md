@@ -29,7 +29,6 @@ TradeManthan/
 │   └── strategy/    # Trading strategies
 └── main.py          # Main entry point
 
-```
 
 ## Setup
 
