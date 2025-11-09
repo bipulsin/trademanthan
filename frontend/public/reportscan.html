@@ -443,6 +443,7 @@
                     <thead>
                         <tr>
                             <th>Date</th>
+                            <th>Market<br/>Trend</th>
                             <th>Total Alerts</th>
                             <th>Total Trades</th>
                             <th>Bullish<br/>W/L</th>
@@ -457,6 +458,9 @@
                         ${data.map(day => `
                             <tr>
                                 <td><strong>${formatDate(day.date)}</strong></td>
+                                <td style="text-align: center; font-size: 24px;">
+                                    ${getMarketTrendIcon(day.market_trend)}
+                                </td>
                                 <td>${day.total_alerts}</td>
                                 <td>${day.total_trades}</td>
                                 <td>
@@ -499,6 +503,21 @@
             return date.toLocaleDateString('en-IN', options);
         }
 
+        function getMarketTrendIcon(trend) {
+            // Returns arrow icon based on market trend
+            // Bullish: Both NIFTY & BANKNIFTY up
+            // Bearish: Both NIFTY & BANKNIFTY down
+            // Sideways: Opposite directions or mixed
+            
+            if (trend === 'bullish') {
+                return '<span style="color: #28a745;" title="Bullish: Both NIFTY50 & BANKNIFTY trending up">↑</span>';
+            } else if (trend === 'bearish') {
+                return '<span style="color: #dc3545;" title="Bearish: Both NIFTY50 & BANKNIFTY trending down">↓</span>';
+            } else {
+                return '<span style="color: #6c757d;" title="Sideways: Indexes in opposite directions or mixed">↔</span>';
+            }
+        }
+
         function clearFilters() {
             const today = new Date();
             const thirtyDaysAgo = new Date();
@@ -520,6 +539,7 @@
             // Build CSV
             const headers = [
                 'Date',
+                'Market Trend',
                 'Total Alerts',
                 'Total Trades',
                 'Bullish Wins',
@@ -537,6 +557,7 @@
 
             const rows = reportData.map(day => [
                 day.date,
+                day.market_trend ? day.market_trend.charAt(0).toUpperCase() + day.market_trend.slice(1) : 'Unknown',
                 day.total_alerts,
                 day.total_trades,
                 day.bullish_wins,

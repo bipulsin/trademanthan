@@ -2506,6 +2506,8 @@ async def get_trading_report(
             'date': None,
             'total_alerts': 0,
             'total_trades': 0,
+            'bullish_alerts': 0,
+            'bearish_alerts': 0,
             'bullish_wins': 0,
             'bullish_losses': 0,
             'bearish_wins': 0,
@@ -2526,6 +2528,12 @@ async def get_trading_report(
             
             # Count alerts (all records)
             day_data['total_alerts'] += 1
+            
+            # Count alert types for market trend calculation
+            if record.alert_type.lower() == 'bullish':
+                day_data['bullish_alerts'] += 1
+            elif record.alert_type.lower() == 'bearish':
+                day_data['bearish_alerts'] += 1
             
             # Count trades (status = bought or sold)
             if record.status in ['bought', 'sold']:
@@ -2572,8 +2580,22 @@ async def get_trading_report(
             total_wins = day['bullish_wins'] + day['bearish_wins']
             win_rate = (total_wins / total_closed * 100) if total_closed > 0 else 0
             
+            # Calculate market trend based on alert distribution
+            # Since alerts are only generated when NIFTY & BANKNIFTY agree,
+            # we can infer market trend from dominant alert type
+            bullish_pct = (day['bullish_alerts'] / day['total_alerts'] * 100) if day['total_alerts'] > 0 else 0
+            bearish_pct = (day['bearish_alerts'] / day['total_alerts'] * 100) if day['total_alerts'] > 0 else 0
+            
+            if bullish_pct >= 70:
+                market_trend = 'bullish'  # Both indexes bullish
+            elif bearish_pct >= 70:
+                market_trend = 'bearish'  # Both indexes bearish
+            else:
+                market_trend = 'sideways'  # Mixed or opposite trends
+            
             report.append({
                 'date': day['date'],
+                'market_trend': market_trend,
                 'total_alerts': day['total_alerts'],
                 'total_trades': day['total_trades'],
                 'bullish_wins': day['bullish_wins'],
