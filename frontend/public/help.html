@@ -337,7 +337,7 @@
             color: #991b1b;
         }
 
-        /* Responsive */
+        /* Responsive - Tablet */
         @media (max-width: 968px) {
             .container {
                 grid-template-columns: 1fr;
@@ -350,6 +350,204 @@
 
             .content {
                 padding: 20px;
+            }
+        }
+
+        /* Mobile Optimization */
+        @media (max-width: 768px) {
+            body {
+                padding: 0;
+            }
+
+            .header {
+                padding: 20px 15px;
+                position: relative;
+            }
+
+            .header-content {
+                flex-direction: column;
+                gap: 15px;
+                text-align: center;
+            }
+
+            .header h1 {
+                font-size: 22px;
+            }
+
+            .header-subtitle {
+                font-size: 13px;
+            }
+
+            .back-btn {
+                font-size: 14px;
+                padding: 8px 16px;
+                display: inline-block;
+                width: auto;
+            }
+
+            .container {
+                padding: 15px;
+                gap: 20px;
+            }
+
+            .toc {
+                padding: 15px;
+                border-radius: 8px;
+                margin-bottom: 15px;
+            }
+
+            .toc h2 {
+                font-size: 16px;
+                margin-bottom: 12px;
+            }
+
+            .toc ul li a {
+                font-size: 13px;
+                padding: 8px 12px;
+            }
+
+            .content {
+                padding: 15px;
+            }
+
+            .content h2 {
+                font-size: 20px;
+                margin-top: 20px;
+                margin-bottom: 12px;
+            }
+
+            .content h3 {
+                font-size: 17px;
+                margin-top: 15px;
+                margin-bottom: 10px;
+            }
+
+            .content h4 {
+                font-size: 15px;
+                margin-top: 12px;
+                margin-bottom: 8px;
+            }
+
+            .content p, .content li {
+                font-size: 14px;
+                line-height: 1.6;
+            }
+
+            .content ul, .content ol {
+                padding-left: 20px;
+            }
+
+            .info-box {
+                padding: 12px;
+                margin: 15px 0;
+                border-radius: 8px;
+            }
+
+            .info-box strong {
+                font-size: 14px;
+            }
+
+            .info-box ul {
+                font-size: 13px;
+            }
+
+            code {
+                font-size: 13px;
+                padding: 2px 6px;
+            }
+
+            pre code {
+                font-size: 12px;
+                padding: 12px;
+            }
+
+            table {
+                font-size: 13px;
+                display: block;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            table th, table td {
+                padding: 8px 10px;
+                white-space: nowrap;
+            }
+
+            .scroll-top {
+                width: 45px;
+                height: 45px;
+                bottom: 20px;
+                right: 20px;
+            }
+
+            /* Improve readability on mobile */
+            .section {
+                scroll-margin-top: 80px;
+            }
+
+            /* Better spacing for mobile */
+            .content > * + * {
+                margin-top: 12px;
+            }
+
+            .content > h2 + * {
+                margin-top: 15px;
+            }
+
+            .content > h3 + * {
+                margin-top: 12px;
+            }
+        }
+
+        /* Small Mobile Devices */
+        @media (max-width: 480px) {
+            .header h1 {
+                font-size: 18px;
+            }
+
+            .header-subtitle {
+                font-size: 12px;
+            }
+
+            .container {
+                padding: 10px;
+            }
+
+            .toc {
+                padding: 12px;
+            }
+
+            .content {
+                padding: 12px;
+            }
+
+            .content h2 {
+                font-size: 18px;
+            }
+
+            .content h3 {
+                font-size: 16px;
+            }
+
+            .content h4 {
+                font-size: 14px;
+            }
+
+            .content p, .content li {
+                font-size: 13px;
+            }
+
+            .info-box {
+                padding: 10px;
+                font-size: 13px;
+            }
+
+            table {
+                font-size: 12px;
+            }
+
+            table th, table td {
+                padding: 6px 8px;
             }
         }
 
