@@ -3,6 +3,7 @@ Upstox API Service for fetching market data
 """
 import requests
 import logging
+import time
 from datetime import datetime, timedelta
 from typing import Dict, Optional, List
 import pytz
@@ -132,6 +133,136 @@ class UpstoxService:
             "Accept": "application/json",
             "Authorization": f"Bearer {self.access_token}"
         }
+    
+    def make_api_request(
+        self,
+        url: str,
+        method: str = "GET",
+        params: Optional[Dict] = None,
+        data: Optional[Dict] = None,
+        timeout: int = 10,
+        max_retries: int = 2
+    ) -> Optional[Dict]:
+        """
+        Make a request to Upstox API with built-in retry, token refresh, and error handling
+        
+        Args:
+            url: API endpoint URL
+            method: HTTP method (GET or POST)
+            params: Query parameters
+            data: Request body data
+            timeout: Request timeout in seconds
+            max_retries: Maximum number of retries
+        
+        Returns:
+            API response data or None
+        """
+        last_error = None
+        
+        for attempt in range(max_retries):
+            try:
+                headers = self.get_headers()
+                
+                # Make request
+                if method.upper() == "GET":
+                    response = requests.get(
+                        url,
+                        headers=headers,
+                        params=params,
+                        timeout=timeout
+                    )
+                elif method.upper() == "POST":
+                    response = requests.post(
+                        url,
+                        headers=headers,
+                        json=data,
+                        timeout=timeout
+                    )
+                else:
+                    raise ValueError(f"Unsupported HTTP method: {method}")
+                
+                # Handle different status codes
+                if response.status_code == 200:
+                    response_data = response.json()
+                    
+                    # Return data (let caller validate success status)
+                    return response_data
+                
+                elif response.status_code == 401:
+                    # Token expired
+                    logger.warning(f"🔑 Token expired (attempt {attempt + 1}/{max_retries}) for {url}")
+                    
+                    # Try to reload token from storage (faster)
+                    if self.reload_token_from_storage():
+                        logger.info("✅ Token reloaded from storage, retrying...")
+                        time.sleep(0.5)  # Small delay before retry
+                        continue
+                    
+                    # If not available in storage, log warning
+                    logger.error("❌ Token reload failed - manual token refresh needed")
+                    last_error = "Token expired and reload failed"
+                    break
+                
+                elif response.status_code == 429:
+                    # Rate limit exceeded
+                    wait_time = min(2 ** attempt, 8)  # Exponential backoff, max 8s
+                    logger.warning(f"⏱️ Rate limit (429) for {url}, waiting {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue
+                
+                elif response.status_code == 400:
+                    # Bad request - don't retry
+                    logger.error(f"❌ Bad request (400) for {url}: {response.text[:200]}")
+                    last_error = f"Bad request: {response.text[:100]}"
+                    break
+                
+                elif response.status_code == 404:
+                    # Not found - don't retry
+                    logger.error(f"❌ Resource not found (404): {url}")
+                    last_error = "Resource not found"
+                    break
+                
+                elif response.status_code >= 500:
+                    # Server error - retry
+                    logger.warning(f"⚠️ Server error ({response.status_code}) for {url}, retrying...")
+                    time.sleep(1)
+                    continue
+                
+                else:
+                    # Other errors
+                    logger.error(f"❌ HTTP {response.status_code} for {url}: {response.text[:200]}")
+                    last_error = f"HTTP {response.status_code}"
+                    break
+            
+            except requests.exceptions.Timeout:
+                logger.warning(f"⏱️ Request timeout (attempt {attempt + 1}/{max_retries}) for {url}")
+                last_error = "Timeout"
+                if attempt < max_retries - 1:
+                    time.sleep(1)
+                    continue
+                break
+            
+            except requests.exceptions.ConnectionError as e:
+                logger.warning(f"🔌 Connection error (attempt {attempt + 1}/{max_retries}) for {url}")
+                last_error = "Connection error"
+                if attempt < max_retries - 1:
+                    time.sleep(2)
+                    continue
+                break
+            
+            except requests.exceptions.RequestException as e:
+                logger.error(f"❌ Request exception for {url}: {str(e)}")
+                last_error = str(e)
+                break
+            
+            except Exception as e:
+                logger.error(f"❌ Unexpected error for {url}: {str(e)}")
+                last_error = str(e)
+                break
+        
+        # All retries failed
+        logger.error(f"❌ All {max_retries} attempts failed for {url}: {last_error}")
+        return None
     
     def get_market_holidays(self, year: int = None) -> List[str]:
         """
@@ -508,6 +639,7 @@ class UpstoxService:
     def get_historical_candles_by_instrument_key(self, instrument_key: str, interval: str = "hours/1", days_back: int = 2) -> Optional[List[Dict]]:
         """
         Fetch historical candle data using instrument key directly
+        Uses improved API request with automatic retry and token refresh
         
         Args:
             instrument_key: Full instrument key (e.g., "NSE_FO|RELIANCE25NOV1450CE")
@@ -530,40 +662,35 @@ class UpstoxService:
             # Upstox V3 API endpoint
             url = f"{self.base_url}/historical-candle/{instrument_key}/{interval}/{to_date}/{from_date}"
             
-            logger.info(f"Fetching {interval} candles for {instrument_key} from {from_date} to {to_date}")
+            logger.info(f"📊 Fetching {interval} candles for {instrument_key} ({from_date} to {to_date})")
             
-            # Make request
-            response = requests.get(url, headers=self.get_headers(), timeout=10)
+            # Use improved API request with retry and token refresh
+            data = self.make_api_request(url, method="GET", timeout=15, max_retries=2)
             
-            if response.status_code == 200:
-                data = response.json()
+            if data and data.get('status') == 'success' and 'data' in data:
+                candles = data['data'].get('candles', [])
                 
-                if data.get('status') == 'success' and 'data' in data:
-                    candles = data['data'].get('candles', [])
-                    
-                    # Convert to structured format
-                    structured_candles = []
-                    for candle in candles:
-                        if len(candle) >= 6:
-                            structured_candles.append({
-                                'timestamp': candle[0],
-                                'open': float(candle[1]),
-                                'high': float(candle[2]),
-                                'low': float(candle[3]),
-                                'close': float(candle[4]),
-                                'volume': float(candle[5])
-                            })
-                    
-                    return structured_candles
-                else:
-                    logger.warning(f"No candle data for {instrument_key}")
-                    return None
+                # Convert to structured format
+                structured_candles = []
+                for candle in candles:
+                    if len(candle) >= 6:
+                        structured_candles.append({
+                            'timestamp': candle[0],
+                            'open': float(candle[1]),
+                            'high': float(candle[2]),
+                            'low': float(candle[3]),
+                            'close': float(candle[4]),
+                            'volume': float(candle[5])
+                        })
+                
+                logger.info(f"✅ Fetched {len(structured_candles)} candles for {instrument_key}")
+                return structured_candles
             else:
-                logger.error(f"API error for {instrument_key}: {response.status_code}")
+                logger.warning(f"⚠️ No candle data for {instrument_key}")
                 return None
                 
         except Exception as e:
-            logger.error(f"Error fetching candles for {instrument_key}: {str(e)}")
+            logger.error(f"❌ Error fetching candles for {instrument_key}: {str(e)}")
             return None
     
     def get_option_chain(self, symbol: str) -> Optional[Dict]:
@@ -994,6 +1121,7 @@ class UpstoxService:
     def get_market_quote_by_key(self, instrument_key: str) -> Optional[Dict]:
         """
         Get real-time market quote (LTP) using instrument key directly
+        Uses improved API request with automatic retry and token refresh
         
         Returns:
             {
@@ -1006,45 +1134,43 @@ class UpstoxService:
             # Market quote endpoint (V2 API)
             url = f"https://api.upstox.com/v2/market-quote/quotes?instrument_key={instrument_key}"
             
-            # Make request
-            response = requests.get(url, headers=self.get_headers(), timeout=10)
+            # Use improved API request with retry and token refresh
+            data = self.make_api_request(url, method="GET", timeout=10, max_retries=2)
             
-            if response.status_code == 200:
-                data = response.json()
+            if data and data.get('status') == 'success' and 'data' in data:
+                # Try different key formats:
+                quote_data = None
                 
-                if data.get('status') == 'success' and 'data' in data:
-                    # Try different key formats:
-                    quote_data = None
+                # Try to find the quote data
+                for key in data['data']:
+                    if instrument_key in key:
+                        quote_data = data['data'][key]
+                        break
+                
+                if not quote_data and len(data['data']) > 0:
+                    # Use first available data if exact match not found
+                    quote_data = list(data['data'].values())[0]
+                
+                if quote_data:
+                    ohlc = quote_data.get('ohlc', {})
+                    ltp = float(quote_data.get('last_price', 0))
+                    close_price = float(ohlc.get('close', ltp))
                     
-                    # Try to find the quote data
-                    for key in data['data']:
-                        if instrument_key in key:
-                            quote_data = data['data'][key]
-                            break
+                    logger.info(f"✅ Market quote for {instrument_key}: LTP=₹{ltp}, Close=₹{close_price}")
                     
-                    if not quote_data and len(data['data']) > 0:
-                        # Use first available data if exact match not found
-                        quote_data = list(data['data'].values())[0]
-                    
-                    if quote_data:
-                        ohlc = quote_data.get('ohlc', {})
-                        ltp = float(quote_data.get('last_price', 0))
-                        close_price = float(ohlc.get('close', ltp))
-                        
-                        logger.info(f"Market quote for {instrument_key}: LTP={ltp}, Close={close_price}")
-                        
-                        return {
-                            'last_price': ltp,
-                            'close_price': close_price,
-                            'ohlc': ohlc
-                        }
-                else:
-                    logger.warning(f"No quote data found for {instrument_key} in response")
-            else:
-                logger.error(f"Market quote API error for {instrument_key}: {response.status_code} - {response.text}")
+                    return {
+                        'last_price': ltp,
+                        'close_price': close_price,
+                        'ohlc': ohlc,
+                        'open': float(ohlc.get('open', 0)),
+                        'high': float(ohlc.get('high', 0)),
+                        'low': float(ohlc.get('low', 0))
+                    }
+            
+            logger.warning(f"⚠️ No valid quote data for {instrument_key}")
                 
         except Exception as e:
-            logger.error(f"Error fetching market quote for {instrument_key}: {str(e)}")
+            logger.error(f"❌ Error fetching market quote for {instrument_key}: {str(e)}")
             
         return None
 
@@ -1163,6 +1289,7 @@ class UpstoxService:
     def get_historical_candles(self, symbol: str, interval: str = "hours/1", days_back: int = 2) -> Optional[List[Dict]]:
         """
         Fetch historical candle data from Upstox V3 API
+        Uses improved API request with automatic retry and token refresh
         
         Args:
             symbol: Stock symbol (e.g., "RELIANCE")
@@ -1194,41 +1321,36 @@ class UpstoxService:
             url = f"{self.base_url}/historical-candle/{instrument_key}/{interval}/{to_date}/{from_date}"
             
             # Log the request for debugging
-            logger.info(f"Fetching {interval} candles for {symbol} (key: {instrument_key}) from {from_date} to {to_date}")
+            logger.info(f"📊 Fetching {interval} candles for {symbol} ({from_date} to {to_date})")
             
-            # Make request
-            response = requests.get(url, headers=self.get_headers(), timeout=10)
+            # Use improved API request with retry and token refresh
+            data = self.make_api_request(url, method="GET", timeout=15, max_retries=2)
             
-            if response.status_code == 200:
-                data = response.json()
+            if data and data.get('status') == 'success' and 'data' in data:
+                candles = data['data'].get('candles', [])
                 
-                if data.get('status') == 'success' and 'data' in data:
-                    candles = data['data'].get('candles', [])
-                    
-                    # Convert to structured format
-                    structured_candles = []
-                    for candle in candles:
-                        # Upstox format: [timestamp, open, high, low, close, volume, oi]
-                        if len(candle) >= 6:
-                            structured_candles.append({
-                                'timestamp': candle[0],
-                                'open': float(candle[1]),
-                                'high': float(candle[2]),
-                                'low': float(candle[3]),
-                                'close': float(candle[4]),
-                                'volume': float(candle[5])
-                            })
-                    
-                    return structured_candles
-                else:
-                    logger.warning(f"No candle data for {symbol}: {data}")
-                    return None
+                # Convert to structured format
+                structured_candles = []
+                for candle in candles:
+                    # Upstox format: [timestamp, open, high, low, close, volume, oi]
+                    if len(candle) >= 6:
+                        structured_candles.append({
+                            'timestamp': candle[0],
+                            'open': float(candle[1]),
+                            'high': float(candle[2]),
+                            'low': float(candle[3]),
+                            'close': float(candle[4]),
+                            'volume': float(candle[5])
+                        })
+                
+                logger.info(f"✅ Fetched {len(structured_candles)} candles for {symbol}")
+                return structured_candles
             else:
-                logger.error(f"Upstox API error for {symbol}: {response.status_code} - {response.text}")
+                logger.warning(f"⚠️ No candle data for {symbol}")
                 return None
                 
         except Exception as e:
-            logger.error(f"Error fetching candles for {symbol}: {str(e)}")
+            logger.error(f"❌ Error fetching candles for {symbol}: {str(e)}")
             return None
     
     def get_vwap_data(self, symbol: str, triggered_at: str = None) -> Dict[str, float]:
@@ -1544,6 +1666,7 @@ class UpstoxService:
     def get_stock_ltp_and_vwap(self, stock_symbol: str) -> Optional[Dict]:
         """
         Get both LTP and VWAP for a stock in a single call with fallback mechanisms
+        Uses improved API request with automatic retry and token refresh
         
         Args:
             stock_symbol: Stock symbol (e.g., "RELIANCE")
@@ -1556,60 +1679,60 @@ class UpstoxService:
             instrument_key = f"NSE_EQ|{stock_symbol}"
             url = f"https://api.upstox.com/v2/market-quote/quotes?instrument_key={instrument_key}"
             
-            response = requests.get(url, headers=self.get_headers(), timeout=10)
+            # Use improved API request with retry and token refresh
+            data = self.make_api_request(url, method="GET", timeout=10, max_retries=2)
             
-            if response.status_code == 200:
-                data = response.json()
+            if data and data.get('status') == 'success' and 'data' in data:
+                quote_data = None
                 
-                if data.get('status') == 'success' and 'data' in data:
-                    quote_data = None
+                for key in data['data']:
+                    if instrument_key in key or stock_symbol in key:
+                        quote_data = data['data'][key]
+                        break
+                
+                if not quote_data and len(data['data']) > 0:
+                    quote_data = list(data['data'].values())[0]
+                
+                if quote_data:
+                    ltp = float(quote_data.get('last_price', 0))
                     
-                    for key in data['data']:
-                        if instrument_key in key or stock_symbol in key:
-                            quote_data = data['data'][key]
-                            break
+                    # Try to get VWAP from quote (some responses include it)
+                    vwap = quote_data.get('vwap', 0) or quote_data.get('average_price', 0)
                     
-                    if not quote_data and len(data['data']) > 0:
-                        quote_data = list(data['data'].values())[0]
+                    # If VWAP not in quote, calculate from historical candles
+                    if not vwap or vwap == 0:
+                        logger.info(f"VWAP not in market quote for {stock_symbol}, fetching from candles")
+                        vwap = self.get_stock_vwap(stock_symbol)
                     
-                    if quote_data:
-                        ltp = float(quote_data.get('last_price', 0))
-                        
-                        # Try to get VWAP from quote (some responses include it)
-                        vwap = quote_data.get('vwap', 0) or quote_data.get('average_price', 0)
-                        
-                        # If VWAP not in quote, calculate from historical candles
-                        if not vwap or vwap == 0:
-                            logger.info(f"VWAP not in market quote for {stock_symbol}, fetching from candles")
-                            vwap = self.get_stock_vwap(stock_symbol)
-                        
-                        if ltp > 0:
-                            logger.info(f"Fetched LTP and VWAP for {stock_symbol}: LTP=₹{ltp:.2f}, VWAP=₹{vwap:.2f}")
-                            return {
-                                'ltp': ltp,
-                                'vwap': float(vwap) if vwap else 0.0
-                            }
+                    if ltp > 0:
+                        logger.info(f"✅ Fetched LTP and VWAP for {stock_symbol}: LTP=₹{ltp:.2f}, VWAP=₹{vwap:.2f}")
+                        return {
+                            'ltp': ltp,
+                            'vwap': float(vwap) if vwap else 0.0
+                        }
             else:
-                logger.warning(f"Market quote API failed for {stock_symbol}: {response.status_code}, falling back to historical candles")
+                logger.warning(f"Market quote API failed for {stock_symbol}, falling back to historical candles")
                 
             # Method 2 fallback: Use historical candles for both LTP and VWAP
             vwap = self.get_stock_vwap(stock_symbol)
             ltp = self.get_stock_ltp_from_market_quote(stock_symbol)
             
             if ltp > 0 or vwap > 0:
+                logger.info(f"✅ Fallback success for {stock_symbol}: LTP=₹{ltp:.2f}, VWAP=₹{vwap:.2f}")
                 return {
                     'ltp': ltp or 0.0,
                     'vwap': vwap or 0.0
                 }
                 
         except Exception as e:
-            logger.error(f"Error getting LTP and VWAP for {stock_symbol}: {str(e)}")
+            logger.error(f"❌ Error getting LTP and VWAP for {stock_symbol}: {str(e)}")
         
         return None
     
     def get_stock_vwap(self, stock_symbol: str) -> float:
         """
         Calculate VWAP for a stock using Upstox historical candle data
+        Uses improved API request with automatic retry and token refresh
         
         Args:
             stock_symbol: Stock symbol (e.g., "RELIANCE")
@@ -1623,16 +1746,11 @@ class UpstoxService:
             
             # Fetch intraday historical candles (1 hour interval)
             url = f"https://api.upstox.com/v3/historical-candle/intraday/{instrument_key}/hours/1"
-            headers = self.get_headers()
             
-            # Get data for today
-            today = datetime.now(pytz.timezone('Asia/Kolkata'))
-            date_str = today.strftime('%Y-%m-%d')
+            # Use improved API request with retry and token refresh
+            data = self.make_api_request(url, method="GET", timeout=10, max_retries=2)
             
-            response = requests.get(url, headers=headers, timeout=10)
-            
-            if response.status_code == 200:
-                data = response.json()
+            if data and data.get('status') == 'success':
                 candles = data.get('data', {}).get('candles', [])
                 
                 if candles and len(candles) > 0:
@@ -1656,7 +1774,7 @@ class UpstoxService:
                                 total_pv += typical_price * volume
                                 total_volume += volume
                         except (ValueError, IndexError) as e:
-                            logger.warning(f"Error parsing candle data for {stock_symbol}: {e}")
+                            logger.warning(f"⚠️ Error parsing candle for {stock_symbol}: {e}")
                             continue
                     
                     if total_volume > 0:
@@ -1667,24 +1785,107 @@ class UpstoxService:
                         logger.warning(f"⚠️ Zero volume in candle data for {stock_symbol}")
                 else:
                     logger.warning(f"⚠️ No candle data available for {stock_symbol}")
-            elif response.status_code == 401:
-                logger.error(f"❌ Authentication failed for {stock_symbol} - Token may be expired")
-            elif response.status_code == 429:
-                logger.error(f"❌ Rate limit exceeded for {stock_symbol} - Too many requests")
             else:
-                logger.warning(f"⚠️ Failed to fetch historical candles for {stock_symbol}: HTTP {response.status_code}")
-                logger.debug(f"Response: {response.text[:200]}")
+                logger.warning(f"⚠️ Failed to fetch VWAP candles for {stock_symbol}")
                 
-        except requests.exceptions.Timeout:
-            logger.error(f"❌ Timeout fetching VWAP for {stock_symbol}")
-        except requests.exceptions.ConnectionError:
-            logger.error(f"❌ Connection error fetching VWAP for {stock_symbol}")
         except Exception as e:
             logger.error(f"❌ Error calculating VWAP for {stock_symbol}: {str(e)}")
             import traceback
             logger.debug(traceback.format_exc())
         
         return 0.0
+    
+    def check_api_health(self) -> Dict[str, any]:
+        """
+        Check if Upstox API is accessible and token is valid
+        Useful for monitoring API status during market hours
+        
+        Returns:
+            {
+                'api_accessible': bool,
+                'token_valid': bool,
+                'response_time_ms': int,
+                'message': str,
+                'timestamp': str
+            }
+        """
+        try:
+            start_time = time.time()
+            
+            # Try a simple API call (NIFTY quote)
+            url = f"https://api.upstox.com/v2/market-quote/quotes?instrument_key={self.NIFTY50_KEY}"
+            
+            response = requests.get(
+                url,
+                headers=self.get_headers(),
+                timeout=5
+            )
+            
+            response_time = int((time.time() - start_time) * 1000)  # milliseconds
+            ist = pytz.timezone('Asia/Kolkata')
+            timestamp = datetime.now(ist).strftime('%Y-%m-%d %H:%M:%S')
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('status') == 'success':
+                    logger.info(f"✅ API health check passed ({response_time}ms)")
+                    return {
+                        'api_accessible': True,
+                        'token_valid': True,
+                        'response_time_ms': response_time,
+                        'message': 'API healthy',
+                        'timestamp': timestamp
+                    }
+            
+            elif response.status_code == 401:
+                logger.warning(f"⚠️ API health check: Token expired")
+                return {
+                    'api_accessible': True,
+                    'token_valid': False,
+                    'response_time_ms': response_time,
+                    'message': 'Token expired - refresh needed',
+                    'timestamp': timestamp
+                }
+            
+            else:
+                logger.warning(f"⚠️ API health check: HTTP {response.status_code}")
+                return {
+                    'api_accessible': True,
+                    'token_valid': False,
+                    'response_time_ms': response_time,
+                    'message': f'API error: {response.status_code}',
+                    'timestamp': timestamp
+                }
+        
+        except requests.exceptions.Timeout:
+            logger.error(f"❌ API health check: Timeout")
+            return {
+                'api_accessible': False,
+                'token_valid': False,
+                'response_time_ms': 5000,
+                'message': 'Request timeout',
+                'timestamp': datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%Y-%m-%d %H:%M:%S')
+            }
+        
+        except requests.exceptions.ConnectionError:
+            logger.error(f"❌ API health check: Connection failed")
+            return {
+                'api_accessible': False,
+                'token_valid': False,
+                'response_time_ms': 0,
+                'message': 'Connection failed',
+                'timestamp': datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%Y-%m-%d %H:%M:%S')
+            }
+        
+        except Exception as e:
+            logger.error(f"❌ API health check error: {str(e)}")
+            return {
+                'api_accessible': False,
+                'token_valid': False,
+                'response_time_ms': 0,
+                'message': f'Error: {str(e)}',
+                'timestamp': datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%Y-%m-%d %H:%M:%S')
+            }
 
 
 # Initialize Upstox service with credentials
