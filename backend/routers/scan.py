@@ -452,28 +452,29 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             stock_ltp = trigger_price
             stock_vwap = 0.0
             
-            # Try to fetch LTP from Upstox API (may fail if token expired)
+            # Try to fetch both LTP and VWAP in a single call (optimized with fallback)
             try:
-                fetched_ltp = vwap_service.get_stock_ltp_from_market_quote(stock_name)
-                if fetched_ltp and fetched_ltp > 0:
-                    stock_ltp = fetched_ltp
-                    print(f"Stock LTP for {stock_name}: ₹{stock_ltp}")
+                stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
+                if stock_data:
+                    if stock_data.get('ltp') and stock_data['ltp'] > 0:
+                        stock_ltp = stock_data['ltp']
+                        print(f"✅ Stock LTP for {stock_name}: ₹{stock_ltp:.2f}")
+                    else:
+                        print(f"⚠️ Could not fetch LTP for {stock_name}, using trigger price: ₹{trigger_price}")
+                    
+                    if stock_data.get('vwap') and stock_data['vwap'] > 0:
+                        stock_vwap = stock_data['vwap']
+                        print(f"✅ Stock VWAP for {stock_name}: ₹{stock_vwap:.2f}")
+                    else:
+                        print(f"⚠️ Could not fetch VWAP for {stock_name} - will retry via hourly updater")
                 else:
-                    print(f"Could not fetch LTP for {stock_name}, using trigger price: ₹{trigger_price}")
+                    print(f"⚠️ Stock data fetch completely failed for {stock_name} - using defaults")
+                    stock_ltp = trigger_price
             except Exception as e:
-                print(f"⚠️ LTP fetch failed for {stock_name} (token issue?): {str(e)} - Using trigger price")
+                print(f"❌ Stock data fetch failed for {stock_name}: {str(e)} - Using trigger price")
+                import traceback
+                print(traceback.format_exc())
                 stock_ltp = trigger_price
-            
-            # Try to fetch Stock VWAP (may fail if token expired)
-            try:
-                fetched_vwap = vwap_service.get_stock_vwap(stock_name)
-                if fetched_vwap and fetched_vwap > 0:
-                    stock_vwap = fetched_vwap
-                    print(f"Stock VWAP for {stock_name}: ₹{stock_vwap}")
-                else:
-                    print(f"Could not fetch VWAP for {stock_name}")
-            except Exception as e:
-                print(f"⚠️ VWAP fetch failed for {stock_name} (token issue?): {str(e)}")
             
             # Initialize option-related fields with defaults
             option_contract = None
@@ -622,6 +623,41 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         processed_data["stocks"] = enriched_stocks
         print(f"Successfully processed {len(enriched_stocks)} stocks")
         
+        # ====================================================================
+        # STOCK RANKING & SELECTION (If too many stocks)
+        # ====================================================================
+        MAX_STOCKS_PER_ALERT = 15  # Maximum stocks to enter per alert
+        
+        if len(enriched_stocks) > MAX_STOCKS_PER_ALERT:
+            print(f"\n📊 TOO MANY STOCKS ({len(enriched_stocks)}) - Applying ranking to select best {MAX_STOCKS_PER_ALERT}")
+            
+            # Import ranker
+            try:
+                from services.stock_ranker import rank_and_select_stocks
+                
+                # Rank and select top stocks
+                selected_stocks, summary = rank_and_select_stocks(
+                    enriched_stocks, 
+                    max_stocks=MAX_STOCKS_PER_ALERT,
+                    alert_type=forced_option_type
+                )
+                
+                print(f"✅ RANKING COMPLETE:")
+                print(f"   • Total Available: {summary['total_available']}")
+                print(f"   • Selected: {summary['total_selected']}")
+                print(f"   • Rejected: {summary['total_rejected']}")
+                print(f"   • Avg Score: {summary['avg_score']}")
+                print(f"   • Score Range: {summary['min_score']}-{summary['max_score']}")
+                
+                # Replace stocks with selected ones
+                enriched_stocks = selected_stocks
+                processed_data["stocks"] = selected_stocks
+                
+            except ImportError as e:
+                print(f"⚠️ Stock ranker not available, using all stocks: {str(e)}")
+        else:
+            print(f"✅ Stock count ({len(enriched_stocks)}) within limit ({MAX_STOCKS_PER_ALERT}), using all stocks")
+        
         # Get current date for grouping
         current_date = trading_date.strftime('%Y-%m-%d')
         
@@ -630,10 +666,14 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         data_type = "Bullish" if is_bullish else "Bearish"
         
         # Check if this is a new date - if so, clear old data
+        # IMPORTANT: Only clear if it's ACTUALLY a different day, not just different time
         if target_data["date"] != current_date:
-            print(f"New trading date detected for {data_type}: {current_date} (previous: {target_data['date']})")
+            print(f"📅 New trading date detected for {data_type}: {current_date} (previous: {target_data['date']})")
             target_data["date"] = current_date
             target_data["alerts"] = []
+            print(f"   Cleared old alerts from previous date")
+        else:
+            print(f"📅 Same trading date ({current_date}), appending to existing alerts")
         
         # Check index trends at the time of alert
         # Index trends determine trade entry, not alert display
@@ -2210,3 +2250,143 @@ async def manually_update_vwap(db: Session = Depends(get_db)):
                 "message": f"Failed to update VWAP: {str(e)}"
             }
         )
+
+
+@router.post("/backfill-vwap")
+async def backfill_vwap_for_date(
+    date_str: str = Query(..., description="Date in YYYY-MM-DD format (e.g., 2025-11-07)"),
+    db: Session = Depends(get_db)
+):
+    """
+    Backfill missing stock_vwap data for records from a specific date.
+    This endpoint fixes records that have empty or zero VWAP values.
+    """
+    try:
+        from datetime import datetime
+        import pytz
+        
+        ist = pytz.timezone('Asia/Kolkata')
+        
+        # Parse the date
+        try:
+            target_date = datetime.strptime(date_str, '%Y-%m-%d')
+            target_date = ist.localize(target_date.replace(hour=0, minute=0, second=0, microsecond=0))
+            next_date = target_date + timedelta(days=1)
+        except ValueError:
+            return {"success": False, "message": "Invalid date format. Use YYYY-MM-DD"}
+        
+        print(f"\n{'='*80}")
+        print(f"VWAP BACKFILL FOR {date_str}")
+        print(f"{'='*80}\n")
+        
+        # Get all records from the specified date
+        records = db.query(IntradayStockOption).filter(
+            IntradayStockOption.trade_date >= target_date,
+            IntradayStockOption.trade_date < next_date
+        ).all()
+        
+        total_records = len(records)
+        print(f"📊 Found {total_records} total records from {date_str}")
+        
+        # Filter records with missing VWAP
+        empty_vwap_records = [r for r in records if not r.stock_vwap or r.stock_vwap == 0.0]
+        empty_count = len(empty_vwap_records)
+        
+        print(f"⚠️  Records with missing/zero stock_vwap: {empty_count}")
+        
+        if not empty_vwap_records:
+            return {
+                "success": True,
+                "message": f"No records need VWAP backfill for {date_str}",
+                "total_records": total_records,
+                "empty_vwap": 0,
+                "updated": 0,
+                "failed": 0
+            }
+        
+        # Get VWAP service
+        vwap_service = upstox_service
+        
+        # Group by unique stock names to avoid redundant API calls
+        unique_stocks = {}
+        for record in empty_vwap_records:
+            stock_name = record.stock_name
+            if stock_name not in unique_stocks:
+                unique_stocks[stock_name] = []
+            unique_stocks[stock_name].append(record)
+        
+        print(f"📈 Processing {len(unique_stocks)} unique stocks...\n")
+        
+        updated_count = 0
+        failed_count = 0
+        results = []
+        
+        for stock_name, stock_records in unique_stocks.items():
+            try:
+                print(f"Fetching VWAP for {stock_name} ({len(stock_records)} records)...")
+                
+                # Fetch VWAP from Upstox API
+                vwap = vwap_service.get_stock_vwap(stock_name)
+                
+                if vwap and vwap > 0:
+                    # Update all records for this stock
+                    for record in stock_records:
+                        record.stock_vwap = vwap
+                        record.updated_at = datetime.now(ist)
+                    
+                    print(f"  ✅ Updated {len(stock_records)} records with VWAP = ₹{vwap:.2f}")
+                    updated_count += len(stock_records)
+                    results.append({
+                        "stock": stock_name,
+                        "status": "success",
+                        "vwap": vwap,
+                        "records_updated": len(stock_records)
+                    })
+                else:
+                    print(f"  ⚠️  Could not fetch VWAP for {stock_name} (API returned 0 or failed)")
+                    failed_count += len(stock_records)
+                    results.append({
+                        "stock": stock_name,
+                        "status": "failed",
+                        "reason": "API returned 0 or failed",
+                        "records": len(stock_records)
+                    })
+                    
+            except Exception as e:
+                print(f"  ❌ Error processing {stock_name}: {str(e)}")
+                failed_count += len(stock_records)
+                results.append({
+                    "stock": stock_name,
+                    "status": "error",
+                    "error": str(e),
+                    "records": len(stock_records)
+                })
+        
+        # Commit all changes
+        db.commit()
+        
+        print(f"\n{'='*80}")
+        print("BACKFILL COMPLETE")
+        print(f"{'='*80}")
+        print(f"✅ Successfully updated: {updated_count} records")
+        print(f"❌ Failed: {failed_count} records\n")
+        
+        return {
+            "success": True,
+            "message": f"Backfill completed for {date_str}",
+            "total_records": total_records,
+            "empty_vwap": empty_count,
+            "updated": updated_count,
+            "failed": failed_count,
+            "results": results
+        }
+        
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Error in backfill: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "success": False,
+            "message": f"Error: {str(e)}"
+        }

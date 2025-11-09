@@ -1541,6 +1541,72 @@ class UpstoxService:
         
         return enriched_stocks
     
+    def get_stock_ltp_and_vwap(self, stock_symbol: str) -> Optional[Dict]:
+        """
+        Get both LTP and VWAP for a stock in a single call with fallback mechanisms
+        
+        Args:
+            stock_symbol: Stock symbol (e.g., "RELIANCE")
+            
+        Returns:
+            {'ltp': float, 'vwap': float} or None if completely unable to fetch
+        """
+        try:
+            # Try Method 1: Use market quote API (includes VWAP if available)
+            instrument_key = f"NSE_EQ|{stock_symbol}"
+            url = f"https://api.upstox.com/v2/market-quote/quotes?instrument_key={instrument_key}"
+            
+            response = requests.get(url, headers=self.get_headers(), timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                if data.get('status') == 'success' and 'data' in data:
+                    quote_data = None
+                    
+                    for key in data['data']:
+                        if instrument_key in key or stock_symbol in key:
+                            quote_data = data['data'][key]
+                            break
+                    
+                    if not quote_data and len(data['data']) > 0:
+                        quote_data = list(data['data'].values())[0]
+                    
+                    if quote_data:
+                        ltp = float(quote_data.get('last_price', 0))
+                        
+                        # Try to get VWAP from quote (some responses include it)
+                        vwap = quote_data.get('vwap', 0) or quote_data.get('average_price', 0)
+                        
+                        # If VWAP not in quote, calculate from historical candles
+                        if not vwap or vwap == 0:
+                            logger.info(f"VWAP not in market quote for {stock_symbol}, fetching from candles")
+                            vwap = self.get_stock_vwap(stock_symbol)
+                        
+                        if ltp > 0:
+                            logger.info(f"Fetched LTP and VWAP for {stock_symbol}: LTP=₹{ltp:.2f}, VWAP=₹{vwap:.2f}")
+                            return {
+                                'ltp': ltp,
+                                'vwap': float(vwap) if vwap else 0.0
+                            }
+            else:
+                logger.warning(f"Market quote API failed for {stock_symbol}: {response.status_code}, falling back to historical candles")
+                
+            # Method 2 fallback: Use historical candles for both LTP and VWAP
+            vwap = self.get_stock_vwap(stock_symbol)
+            ltp = self.get_stock_ltp_from_market_quote(stock_symbol)
+            
+            if ltp > 0 or vwap > 0:
+                return {
+                    'ltp': ltp or 0.0,
+                    'vwap': vwap or 0.0
+                }
+                
+        except Exception as e:
+            logger.error(f"Error getting LTP and VWAP for {stock_symbol}: {str(e)}")
+        
+        return None
+    
     def get_stock_vwap(self, stock_symbol: str) -> float:
         """
         Calculate VWAP for a stock using Upstox historical candle data
@@ -1563,7 +1629,7 @@ class UpstoxService:
             today = datetime.now(pytz.timezone('Asia/Kolkata'))
             date_str = today.strftime('%Y-%m-%d')
             
-            response = requests.get(url, headers=headers, params={'to_date': date_str})
+            response = requests.get(url, headers=headers, timeout=10)
             
             if response.status_code == 200:
                 data = response.json()
@@ -1590,18 +1656,33 @@ class UpstoxService:
                                 total_pv += typical_price * volume
                                 total_volume += volume
                         except (ValueError, IndexError) as e:
-                            logger.warning(f"Error parsing candle data: {e}")
+                            logger.warning(f"Error parsing candle data for {stock_symbol}: {e}")
                             continue
                     
                     if total_volume > 0:
                         vwap = total_pv / total_volume
-                        logger.info(f"Calculated VWAP for {stock_symbol}: ₹{vwap:.2f}")
+                        logger.info(f"✅ Calculated VWAP for {stock_symbol}: ₹{vwap:.2f} (from {len(candles)} candles)")
                         return round(vwap, 2)
+                    else:
+                        logger.warning(f"⚠️ Zero volume in candle data for {stock_symbol}")
+                else:
+                    logger.warning(f"⚠️ No candle data available for {stock_symbol}")
+            elif response.status_code == 401:
+                logger.error(f"❌ Authentication failed for {stock_symbol} - Token may be expired")
+            elif response.status_code == 429:
+                logger.error(f"❌ Rate limit exceeded for {stock_symbol} - Too many requests")
             else:
-                logger.warning(f"Failed to fetch historical candles for {stock_symbol}: {response.status_code}")
+                logger.warning(f"⚠️ Failed to fetch historical candles for {stock_symbol}: HTTP {response.status_code}")
+                logger.debug(f"Response: {response.text[:200]}")
                 
+        except requests.exceptions.Timeout:
+            logger.error(f"❌ Timeout fetching VWAP for {stock_symbol}")
+        except requests.exceptions.ConnectionError:
+            logger.error(f"❌ Connection error fetching VWAP for {stock_symbol}")
         except Exception as e:
-            logger.error(f"Error calculating VWAP for {stock_symbol}: {str(e)}")
+            logger.error(f"❌ Error calculating VWAP for {stock_symbol}: {str(e)}")
+            import traceback
+            logger.debug(traceback.format_exc())
         
         return 0.0
 
