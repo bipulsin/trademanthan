@@ -684,20 +684,20 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         # Determine if trade entry is allowed based on alert type and index trends
         # BULLISH ALERT: Both indices must be BULLISH to enter trade
         # BEARISH ALERT: Both indices must be BEARISH to enter trade
-        can_enter_trade = False
+        can_enter_trade_by_index = False
         
         if is_bullish:
             # Bullish alert - both indices must be bullish
             if nifty_trend == "bullish" and banknifty_trend == "bullish":
-                can_enter_trade = True
-                print(f"✅ BULLISH ALERT: Both indices bullish - Trade entry ALLOWED")
+                can_enter_trade_by_index = True
+                print(f"✅ BULLISH ALERT: Both indices bullish - Index check PASSED")
             else:
                 print(f"⚠️ BULLISH ALERT: Index trends not aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend}) - NO TRADE")
         elif is_bearish:
             # Bearish alert - both indices must be bearish
             if nifty_trend == "bearish" and banknifty_trend == "bearish":
-                can_enter_trade = True
-                print(f"✅ BEARISH ALERT: Both indices bearish - Trade entry ALLOWED")
+                can_enter_trade_by_index = True
+                print(f"✅ BEARISH ALERT: Both indices bearish - Index check PASSED")
             else:
                 print(f"⚠️ BEARISH ALERT: Index trends not aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend}) - NO TRADE")
         
@@ -717,8 +717,49 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 option_ltp_value = stock.get("option_ltp", 0.0)
                 lot_size = stock.get("qty", 0)
                 
-                # Determine trade entry based on index trends
-                if can_enter_trade and option_ltp_value > 0 and lot_size > 0:
+                # ====================================================================
+                # MOMENTUM FILTER: Only enter if momentum >= 1.5%
+                # ====================================================================
+                MINIMUM_MOMENTUM_PCT = 1.5  # Minimum 1.5% momentum required
+                
+                stock_ltp = stock.get("last_traded_price", 0.0)
+                stock_vwap = stock.get("stock_vwap", 0.0)
+                option_type = stock.get("option_type", "")
+                
+                # Calculate momentum and check if it meets threshold
+                has_strong_momentum = False
+                momentum_pct = 0.0
+                momentum_reason = ""
+                
+                if stock_ltp > 0 and stock_vwap > 0:
+                    momentum_pct = abs((stock_ltp - stock_vwap) / stock_vwap) * 100
+                    
+                    # Check if momentum is in correct direction
+                    if option_type == 'PE' and stock_ltp < stock_vwap:
+                        # Bearish - stock should be BELOW VWAP
+                        if momentum_pct >= MINIMUM_MOMENTUM_PCT:
+                            has_strong_momentum = True
+                            momentum_reason = f"Strong bearish momentum: {momentum_pct:.2f}% below VWAP"
+                        else:
+                            momentum_reason = f"Weak momentum: {momentum_pct:.2f}% (need ≥{MINIMUM_MOMENTUM_PCT}%)"
+                    elif option_type == 'CE' and stock_ltp > stock_vwap:
+                        # Bullish - stock should be ABOVE VWAP
+                        if momentum_pct >= MINIMUM_MOMENTUM_PCT:
+                            has_strong_momentum = True
+                            momentum_reason = f"Strong bullish momentum: {momentum_pct:.2f}% above VWAP"
+                        else:
+                            momentum_reason = f"Weak momentum: {momentum_pct:.2f}% (need ≥{MINIMUM_MOMENTUM_PCT}%)"
+                    else:
+                        # Wrong direction
+                        momentum_reason = f"WRONG direction: {option_type} but stock {'above' if stock_ltp > stock_vwap else 'below'} VWAP"
+                else:
+                    momentum_reason = "No VWAP data available"
+                
+                # Determine trade entry based on:
+                # 1. Index trends (must be aligned)
+                # 2. Strong momentum (>= 1.5%)
+                # 3. Valid option data (option_ltp > 0, lot_size > 0)
+                if can_enter_trade_by_index and has_strong_momentum and option_ltp_value > 0 and lot_size > 0:
                     # Enter trade: set qty, buy_price, buy_time, stop_loss
                     # IMPORTANT: sell_price remains NULL initially, will be populated by hourly updater
                     import math
@@ -734,7 +775,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     
                     status = 'bought'  # Trade entered
                     pnl = 0.0
-                    print(f"✅ TRADE ENTERED: {stock_name} - Buy: ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (rounded down), Sell Price: BLANK (will update hourly)")
+                    print(f"✅ TRADE ENTERED: {stock_name} - {momentum_reason}")
+                    print(f"   Buy: ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price}, LTP: ₹{stock_ltp}, VWAP: ₹{stock_vwap}")
                 else:
                     # No entry: set qty=0, buy_price=None, buy_time=None
                     qty = 0
@@ -742,14 +784,18 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     buy_time = None
                     sell_price = None
                     stop_loss_price = None
-                    status = 'no_entry'  # Trade not entered due to opposite trends or missing data
+                    status = 'no_entry'  # Trade not entered
                     pnl = None
                     
                     # Log reason for no entry
-                    if not can_enter_trade:
-                        print(f"⚠️ NO ENTRY: {stock_name} - Opposite index trends")
-                    else:
+                    if not can_enter_trade_by_index:
+                        print(f"⚠️ NO ENTRY: {stock_name} - Index trends not aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
+                    elif not has_strong_momentum:
+                        print(f"🚫 NO ENTRY: {stock_name} - {momentum_reason}")
+                    elif option_ltp_value <= 0 or lot_size <= 0:
                         print(f"⚠️ NO ENTRY: {stock_name} - Missing option data (option_ltp={option_ltp_value}, qty={lot_size})")
+                    else:
+                        print(f"⚠️ NO ENTRY: {stock_name} - Unknown reason")
                 
                 # ALWAYS create database record with whatever data we have
                 db_record = IntradayStockOption(
@@ -819,11 +865,16 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         try:
             db.commit()
             print(f"\n✅ DATABASE COMMIT SUCCESSFUL")
-            print(f"   • Saved: {saved_count} stocks")
+            print(f"   • Total Stocks Processed: {len(processed_data.get('stocks', []))}")
+            print(f"   • Saved to DB: {saved_count} stocks")
             if failed_count > 0:
                 print(f"   • Failed: {failed_count} stocks")
             print(f"   • Alert Type: {data_type}")
             print(f"   • Alert Time: {triggered_at_str}")
+            print(f"\n📊 MOMENTUM FILTER SUMMARY:")
+            print(f"   • Minimum Momentum Required: ≥1.5%")
+            print(f"   • Stocks that passed momentum filter: Check 'bought' status above")
+            print(f"   • Stocks rejected by momentum: Check 'no_entry' with momentum reason")
         except Exception as commit_error:
             print(f"\n❌ DATABASE COMMIT FAILED: {str(commit_error)}")
             print(f"   • Attempted to save: {saved_count} stocks")
