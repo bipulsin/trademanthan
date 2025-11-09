@@ -168,7 +168,7 @@ class StockRanker:
         breakdown['completeness'] = round(completeness_score, 1)
         
         # =====================================================================
-        # BONUS: EXTREME MOMENTUM MULTIPLIER
+        # BONUS 1: EXTREME MOMENTUM MULTIPLIER
         # =====================================================================
         # If stock has EXTREME momentum (>4%), give bonus regardless of other factors!
         if stock_ltp > 0 and stock_vwap > 0:
@@ -184,6 +184,38 @@ class StockRanker:
                     score += extreme_bonus
                     breakdown['extreme_bonus'] = extreme_bonus
                     logger.info(f"🚀 EXTREME MOMENTUM: {stock.get('stock_name')} - {vwap_diff_pct:.2f}% from VWAP!")
+        
+        # =====================================================================
+        # BONUS 2: "LIKELY TO HOLD" CHARACTERISTICS
+        # =====================================================================
+        # Nov 7 analysis: Winners were stocks that held till time-based exit (50% win rate)
+        # vs VWAP cross exits (16% win rate)
+        # 
+        # Characteristics of stocks likely to hold momentum:
+        # - Moderate lot sizes (not extreme high which indicates retail frenzy)
+        # - Mid-range premiums (₹10-60 tend to be more stable)
+        # - Not penny options (< ₹2 are too volatile)
+        
+        hold_bonus = 0
+        
+        # Factor: Stable premium range
+        if 10 <= option_ltp <= 60:
+            hold_bonus += 5  # These premiums tend to hold better
+            breakdown['hold_bonus_premium'] = 5
+        
+        # Factor: Not penny option (too volatile)
+        if option_ltp >= 2:
+            hold_bonus += 3  # Avoid ultra-cheap volatile options
+            breakdown['hold_bonus_stable'] = 3
+        
+        # Factor: Reasonable liquidity (not too high = retail frenzy)
+        if 150 <= qty <= 800:
+            hold_bonus += 2  # Sweet spot - not too hot, not too cold
+            breakdown['hold_bonus_liquidity'] = 2
+        
+        if hold_bonus > 0:
+            score += hold_bonus
+            breakdown['hold_bonus_total'] = hold_bonus
         
         return score, breakdown
     

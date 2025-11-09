@@ -718,9 +718,13 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 lot_size = stock.get("qty", 0)
                 
                 # ====================================================================
-                # MOMENTUM FILTER: Only enter if momentum >= 1.5%
+                # MOMENTUM FILTER: Direction check + Minimum momentum
                 # ====================================================================
-                MINIMUM_MOMENTUM_PCT = 1.5  # Minimum 1.5% momentum required
+                # IMPORTANT: Nov 7 analysis showed winners had 0.18-1.05% momentum
+                # Setting too high (1.5%) would block all winners!
+                # Real differentiator was exit timing, not entry momentum
+                # Strategy: Lower threshold for direction check, let ranking choose best
+                MINIMUM_MOMENTUM_PCT = 0.3  # Minimum 0.3% momentum (direction validation only)
                 
                 stock_ltp = stock.get("last_traded_price", 0.0)
                 stock_vwap = stock.get("stock_vwap", 0.0)
