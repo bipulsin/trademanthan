@@ -2445,3 +2445,164 @@ async def backfill_vwap_for_date(
             "success": False,
             "message": f"Error: {str(e)}"
         }
+
+
+@router.get("/trading-report")
+async def get_trading_report(
+    start_date: str = Query(None, description="Start date in YYYY-MM-DD format"),
+    end_date: str = Query(None, description="End date in YYYY-MM-DD format"),
+    alert_type: str = Query(None, description="Filter by Bullish or Bearish"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get comprehensive trading report with daily statistics
+    
+    Returns daily summary with:
+    - Total alerts, total trades
+    - Bullish wins/losses, bearish wins/losses
+    - Win rate, total P&L
+    - Best and worst performers
+    """
+    try:
+        from datetime import datetime
+        import pytz
+        
+        ist = pytz.timezone('Asia/Kolkata')
+        
+        # Build query filters
+        filters = []
+        
+        if start_date:
+            try:
+                start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+                start_dt = ist.localize(start_dt.replace(hour=0, minute=0, second=0))
+                filters.append(IntradayStockOption.trade_date >= start_dt)
+            except ValueError:
+                return {"success": False, "message": "Invalid start_date format. Use YYYY-MM-DD"}
+        
+        if end_date:
+            try:
+                end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+                end_dt = ist.localize(end_dt.replace(hour=23, minute=59, second=59))
+                filters.append(IntradayStockOption.trade_date <= end_dt)
+            except ValueError:
+                return {"success": False, "message": "Invalid end_date format. Use YYYY-MM-DD"}
+        
+        if alert_type:
+            filters.append(IntradayStockOption.alert_type == alert_type)
+        
+        # Query base data
+        if filters:
+            query = db.query(IntradayStockOption).filter(and_(*filters))
+        else:
+            query = db.query(IntradayStockOption)
+        
+        # Get all records
+        all_records = query.order_by(IntradayStockOption.trade_date.desc()).all()
+        
+        # Group by trading date
+        from collections import defaultdict
+        daily_data = defaultdict(lambda: {
+            'date': None,
+            'total_alerts': 0,
+            'total_trades': 0,
+            'bullish_wins': 0,
+            'bullish_losses': 0,
+            'bearish_wins': 0,
+            'bearish_losses': 0,
+            'total_pnl': 0.0,
+            'best_trade': {'stock': None, 'pnl': 0.0},
+            'worst_trade': {'stock': None, 'pnl': 0.0},
+            'trades_detail': []
+        })
+        
+        for record in all_records:
+            date_key = record.trade_date.date().isoformat()
+            day_data = daily_data[date_key]
+            
+            # Set date
+            if day_data['date'] is None:
+                day_data['date'] = date_key
+            
+            # Count alerts (all records)
+            day_data['total_alerts'] += 1
+            
+            # Count trades (status = bought or sold)
+            if record.status in ['bought', 'sold']:
+                day_data['total_trades'] += 1
+                
+                # Track by alert type
+                if record.pnl is not None:
+                    if record.alert_type.lower() == 'bullish':
+                        if record.pnl > 0:
+                            day_data['bullish_wins'] += 1
+                        else:
+                            day_data['bullish_losses'] += 1
+                    elif record.alert_type.lower() == 'bearish':
+                        if record.pnl > 0:
+                            day_data['bearish_wins'] += 1
+                        else:
+                            day_data['bearish_losses'] += 1
+                    
+                    # Total P&L
+                    day_data['total_pnl'] += record.pnl
+                    
+                    # Best trade
+                    if record.pnl > day_data['best_trade']['pnl']:
+                        day_data['best_trade'] = {
+                            'stock': record.stock_name,
+                            'pnl': record.pnl,
+                            'contract': record.option_contract
+                        }
+                    
+                    # Worst trade
+                    if record.pnl < day_data['worst_trade']['pnl']:
+                        day_data['worst_trade'] = {
+                            'stock': record.stock_name,
+                            'pnl': record.pnl,
+                            'contract': record.option_contract
+                        }
+        
+        # Convert to list and calculate percentages
+        report = []
+        for date_key in sorted(daily_data.keys(), reverse=True):
+            day = daily_data[date_key]
+            
+            total_closed = day['bullish_wins'] + day['bullish_losses'] + day['bearish_wins'] + day['bearish_losses']
+            total_wins = day['bullish_wins'] + day['bearish_wins']
+            win_rate = (total_wins / total_closed * 100) if total_closed > 0 else 0
+            
+            report.append({
+                'date': day['date'],
+                'total_alerts': day['total_alerts'],
+                'total_trades': day['total_trades'],
+                'bullish_wins': day['bullish_wins'],
+                'bullish_losses': day['bullish_losses'],
+                'bearish_wins': day['bearish_wins'],
+                'bearish_losses': day['bearish_losses'],
+                'total_closed': total_closed,
+                'win_rate': round(win_rate, 2),
+                'total_pnl': round(day['total_pnl'], 2),
+                'best_trade': day['best_trade'],
+                'worst_trade': day['worst_trade']
+            })
+        
+        return {
+            "success": True,
+            "data": report,
+            "summary": {
+                "total_days": len(report),
+                "total_alerts": sum(d['total_alerts'] for d in report),
+                "total_trades": sum(d['total_trades'] for d in report),
+                "overall_pnl": round(sum(d['total_pnl'] for d in report), 2)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error generating trading report: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "success": False,
+            "message": f"Error: {str(e)}"
+        }
