@@ -22,22 +22,30 @@ from services.vwap_updater import start_vwap_updater, stop_vwap_updater
 
 load_dotenv()
 
-# Configure logging with file handler
+# Configure logging with file handler - MUST be done before any loggers are created
 log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
 os.makedirs(log_dir, exist_ok=True)
 
 log_file = os.path.join(log_dir, 'trademanthan.log')
 
+# Remove any existing handlers
+root_logger = logging.getLogger()
+for handler in root_logger.handlers[:]:
+    root_logger.removeHandler(handler)
+
+# Configure root logger
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
     handlers=[
-        logging.FileHandler(log_file),
+        logging.FileHandler(log_file, mode='a'),
         logging.StreamHandler()  # Also log to console
-    ]
+    ],
+    force=True  # Override existing configuration
 )
 
 logger = logging.getLogger(__name__)
+logger.info("🚀 TradeManthan backend starting...")
 
 app = FastAPI(
     title="Trade Manthan API",
