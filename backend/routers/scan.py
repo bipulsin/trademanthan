@@ -2359,8 +2359,8 @@ async def backfill_vwap_for_date(
                 "failed": 0
             }
         
-        # Get VWAP service
-        vwap_service = upstox_service
+        # Use the imported vwap_service (which is upstox_service)
+        # Already imported at top: from services.upstox_service import upstox_service as vwap_service
         
         # Group by unique stock names to avoid redundant API calls
         unique_stocks = {}
