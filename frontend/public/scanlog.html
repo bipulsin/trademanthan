@@ -417,8 +417,8 @@
     </div>
 
     <script>
-        // Use relative URL - nginx proxies /api to backend
-        const API_BASE_URL = '/api';
+        // Use /scan proxy - nginx has location /scan/ configured
+        const API_BASE_URL = '';
         
         let autoRefreshInterval = null;
         let isAutoRefreshEnabled = true;
