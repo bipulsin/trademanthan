@@ -229,6 +229,10 @@
             text-align: center;
         }
 
+        .menu-dropdown-content a.scan-link i {
+            color: #0891b2;
+        }
+
         .menu-dropdown-content a.report-link i {
             color: #28a745;
         }
@@ -257,24 +261,9 @@
             }
         }
 
-        /* Mobile view - keep buttons visible */
-        @media (max-width: 768px) {
-            .menu-dropdown-desktop {
-                display: none;
-            }
-            .menu-buttons-mobile {
-                display: flex;
-                gap: 10px;
-            }
-        }
-
-        @media (min-width: 769px) {
-            .menu-dropdown-desktop {
-                display: inline-block;
-            }
-            .menu-buttons-mobile {
-                display: none;
-            }
+        /* Show dropdown menu on all screen sizes */
+        .menu-dropdown-desktop {
+            display: inline-block;
         }
         
         .scan-container {
@@ -907,13 +896,16 @@
                 </div>
             </div>
             
-            <!-- Dropdown Menu for Desktop -->
+            <!-- Dropdown Menu -->
             <div class="menu-dropdown-desktop">
                 <div class="menu-dropdown" id="menu-dropdown">
                     <button class="menu-btn" onclick="toggleMenu()" title="Menu">
                         <i class="fas fa-bars"></i> Menu <i class="fas fa-chevron-down" style="font-size: 10px;"></i>
                     </button>
                     <div class="menu-dropdown-content">
+                        <a href="scan.html" class="scan-link">
+                            <i class="fas fa-search"></i> Scan Dashboard
+                        </a>
                         <a href="reportscan.html" class="report-link">
                             <i class="fas fa-chart-bar"></i> Trading Report
                         </a>
@@ -925,19 +917,6 @@
                         </a>
                     </div>
                 </div>
-            </div>
-
-            <!-- Buttons for Mobile -->
-            <div class="menu-buttons-mobile" style="display: flex; gap: 10px;">
-                <a href="reportscan.html" class="help-btn" style="background: linear-gradient(135deg, #28a745 0%, #20c997 100%);" title="View Trading Report">
-                    <i class="fas fa-chart-bar"></i> Report
-                </a>
-                <a href="scanlog.html" class="help-btn" style="background: linear-gradient(135deg, #6610f2 0%, #5a08d0 100%);" title="View Scan Logs">
-                    <i class="fas fa-file-alt"></i> Logs
-                </a>
-                <a href="help.html" class="help-btn" title="View Help Guide">
-                    <i class="fas fa-question-circle"></i> Help
-                </a>
             </div>
         </div>
     </div>
