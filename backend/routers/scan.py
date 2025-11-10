@@ -2317,7 +2317,7 @@ async def backfill_vwap_for_date(
     This endpoint fixes records that have empty or zero VWAP values.
     """
     try:
-        from datetime import datetime
+        from datetime import datetime, timedelta
         import pytz
         
         ist = pytz.timezone('Asia/Kolkata')
