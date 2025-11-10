@@ -1677,8 +1677,14 @@ class UpstoxService:
             {'ltp': float, 'vwap': float} or None if completely unable to fetch
         """
         try:
+            # Get proper instrument key with ISIN code
+            instrument_key = self.get_instrument_key(stock_symbol)
+            
+            if not instrument_key:
+                logger.warning(f"⚠️ Could not get instrument key for {stock_symbol}")
+                return None
+            
             # Try Method 1: Use market quote API (includes VWAP if available)
-            instrument_key = f"NSE_EQ|{stock_symbol}"
             url = f"https://api.upstox.com/v2/market-quote/quotes?instrument_key={instrument_key}"
             
             # Use improved API request with retry and token refresh
@@ -1719,15 +1725,21 @@ class UpstoxService:
             vwap = self.get_stock_vwap(stock_symbol)
             ltp = self.get_stock_ltp_from_market_quote(stock_symbol)
             
-            if ltp > 0 or vwap > 0:
-                logger.info(f"✅ Fallback success for {stock_symbol}: LTP=₹{ltp:.2f}, VWAP=₹{vwap:.2f}")
+            # Ensure we have valid values (not None)
+            ltp_value = ltp if ltp is not None else 0.0
+            vwap_value = vwap if vwap is not None else 0.0
+            
+            if ltp_value > 0 or vwap_value > 0:
+                logger.info(f"✅ Fallback success for {stock_symbol}: LTP=₹{ltp_value:.2f}, VWAP=₹{vwap_value:.2f}")
                 return {
-                    'ltp': ltp or 0.0,
-                    'vwap': vwap or 0.0
+                    'ltp': ltp_value,
+                    'vwap': vwap_value
                 }
                 
         except Exception as e:
             logger.error(f"❌ Error getting LTP and VWAP for {stock_symbol}: {str(e)}")
+            import traceback
+            logger.debug(traceback.format_exc())
         
         return None
     
@@ -1743,8 +1755,12 @@ class UpstoxService:
             VWAP value or 0.0 if unable to fetch
         """
         try:
-            # Get instrument key for the stock
-            instrument_key = f"NSE_EQ|{stock_symbol}"
+            # Get proper instrument key with ISIN code
+            instrument_key = self.get_instrument_key(stock_symbol)
+            
+            if not instrument_key:
+                logger.warning(f"⚠️ Could not get instrument key for {stock_symbol}")
+                return 0.0
             
             # Fetch intraday historical candles (1 hour interval)
             url = f"https://api.upstox.com/v3/historical-candle/intraday/{instrument_key}/hours/1"
