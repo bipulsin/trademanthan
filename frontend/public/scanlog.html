@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scan Algorithm Logs - TradeManthan</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #000000 100%);
+            color: #e0e0e0;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c5aa0 0%, #1a3a6b 100%);
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .header h1 {
+            font-size: 28px;
+            color: #ffffff;
+            margin-bottom: 5px;
+        }
+
+        .header p {
+            color: #b0d4ff;
+            font-size: 14px;
+        }
+
+        .top-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #4a90e2 0%, #357abd 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #357abd 0%, #2868a8 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(74, 144, 226, 0.3);
+        }
+
+        .btn-secondary {
+            background: linear-gradient(135deg, #6c757d 0%, #5a6268 100%);
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: linear-gradient(135deg, #5a6268 0%, #495057 100%);
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #28a745 0%, #218838 100%);
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: linear-gradient(135deg, #218838 0%, #1e7e34 100%);
+        }
+
+        .status-bar {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 12px 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.active {
+            background: #28a745;
+        }
+
+        .status-dot.inactive {
+            background: #dc3545;
+            animation: none;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .filter-bar {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .filter-bar label {
+            font-weight: 600;
+            color: #b0d4ff;
+        }
+
+        .filter-bar input[type="number"] {
+            width: 80px;
+            padding: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            color: #ffffff;
+        }
+
+        .filter-bar select {
+            padding: 8px 12px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            color: #ffffff;
+        }
+
+        .log-container {
+            background: #1a1a1a;
+            border-radius: 8px;
+            padding: 20px;
+            min-height: 600px;
+            max-height: 70vh;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .log-container::-webkit-scrollbar {
+            width: 10px;
+        }
+
+        .log-container::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 5px;
+        }
+
+        .log-container::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 5px;
+        }
+
+        .log-container::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .log-entry {
+            padding: 8px 12px;
+            margin-bottom: 4px;
+            border-left: 3px solid transparent;
+            border-radius: 4px;
+            transition: background 0.2s ease;
+        }
+
+        .log-entry:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .log-entry.new-entry {
+            animation: highlightNew 1s ease;
+        }
+
+        @keyframes highlightNew {
+            0% { background: rgba(74, 144, 226, 0.3); }
+            100% { background: transparent; }
+        }
+
+        .log-entry.ERROR {
+            border-left-color: #dc3545;
+            background: rgba(220, 53, 69, 0.1);
+        }
+
+        .log-entry.WARNING {
+            border-left-color: #ffc107;
+            background: rgba(255, 193, 7, 0.1);
+        }
+
+        .log-entry.INFO {
+            border-left-color: #17a2b8;
+        }
+
+        .log-entry.DEBUG {
+            border-left-color: #6c757d;
+            opacity: 0.7;
+        }
+
+        .log-entry.SUCCESS {
+            border-left-color: #28a745;
+            background: rgba(40, 167, 69, 0.1);
+        }
+
+        .log-timestamp {
+            color: #6c757d;
+            font-weight: 600;
+        }
+
+        .log-level {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-weight: 700;
+            font-size: 11px;
+            margin: 0 8px;
+        }
+
+        .log-level.ERROR {
+            background: #dc3545;
+            color: white;
+        }
+
+        .log-level.WARNING {
+            background: #ffc107;
+            color: #000;
+        }
+
+        .log-level.INFO {
+            background: #17a2b8;
+            color: white;
+        }
+
+        .log-level.DEBUG {
+            background: #6c757d;
+            color: white;
+        }
+
+        .log-level.SUCCESS {
+            background: #28a745;
+            color: white;
+        }
+
+        .log-module {
+            color: #4a90e2;
+            font-weight: 600;
+        }
+
+        .log-message {
+            color: #e0e0e0;
+            word-wrap: break-word;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6c757d;
+        }
+
+        .empty-state i {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #4a90e2;
+        }
+
+        .loading::after {
+            content: '...';
+            animation: dots 1.5s infinite;
+        }
+
+        @keyframes dots {
+            0%, 20% { content: '.'; }
+            40% { content: '..'; }
+            60%, 100% { content: '...'; }
+        }
+
+        /* Mobile Responsiveness */
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+
+            .header h1 {
+                font-size: 22px;
+            }
+
+            .top-bar {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .controls {
+                justify-content: space-between;
+            }
+
+            .btn {
+                flex: 1;
+                text-align: center;
+            }
+
+            .log-container {
+                font-size: 11px;
+                max-height: 60vh;
+            }
+
+            .filter-bar {
+                flex-direction: column;
+                align-items: stretch;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Scan Algorithm Logs</h1>
+            <p>Real-time monitoring of trading algorithm execution</p>
+        </div>
+
+        <div class="top-bar">
+            <div class="controls">
+                <a href="scan.html" class="btn btn-secondary">← Back to Scan</a>
+                <button class="btn btn-success" onclick="refreshLogs()">🔄 Refresh Now</button>
+                <button class="btn btn-primary" onclick="toggleAutoRefresh()">
+                    <span id="auto-refresh-text">⏸ Pause Auto-Refresh</span>
+                </button>
+            </div>
+        </div>
+
+        <div class="status-bar">
+            <div class="status-item">
+                <div class="status-dot" id="status-dot"></div>
+                <span id="status-text">Connecting...</span>
+            </div>
+            <div class="status-item">
+                <span id="log-info">Loading logs...</span>
+            </div>
+            <div class="status-item">
+                <span id="last-update">Never</span>
+            </div>
+        </div>
+
+        <div class="filter-bar">
+            <label>Lines:</label>
+            <input type="number" id="lines-input" value="100" min="10" max="1000" step="10">
+            
+            <label>Filter Level:</label>
+            <select id="level-filter" onchange="applyFilter()">
+                <option value="ALL">All Levels</option>
+                <option value="ERROR">Errors Only</option>
+                <option value="WARNING">Warnings Only</option>
+                <option value="INFO">Info Only</option>
+                <option value="DEBUG">Debug Only</option>
+                <option value="SUCCESS">Success Only</option>
+            </select>
+
+            <label>Search:</label>
+            <input type="text" id="search-input" placeholder="Search in logs..." style="width: 200px;" oninput="applyFilter()">
+
+            <button class="btn btn-secondary" onclick="clearLogs()" style="margin-left: auto;">🗑 Clear Display</button>
+        </div>
+
+        <div class="log-container" id="log-container">
+            <div class="loading">Loading logs</div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://13.234.119.21:8000';
+        let autoRefreshInterval = null;
+        let isAutoRefreshEnabled = true;
+        let allLogs = [];
+        let lastLogCount = 0;
+
+        // Start auto-refresh on page load
+        window.onload = function() {
+            refreshLogs();
+            startAutoRefresh();
+        };
+
+        function startAutoRefresh() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+            }
+            autoRefreshInterval = setInterval(refreshLogs, 3000); // Refresh every 3 seconds
+            isAutoRefreshEnabled = true;
+            updateAutoRefreshButton();
+        }
+
+        function stopAutoRefresh() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+            }
+            isAutoRefreshEnabled = false;
+            updateAutoRefreshButton();
+        }
+
+        function toggleAutoRefresh() {
+            if (isAutoRefreshEnabled) {
+                stopAutoRefresh();
+                updateStatus('inactive', 'Auto-refresh paused');
+            } else {
+                startAutoRefresh();
+                updateStatus('active', 'Auto-refresh active');
+            }
+        }
+
+        function updateAutoRefreshButton() {
+            const btn = document.getElementById('auto-refresh-text');
+            if (isAutoRefreshEnabled) {
+                btn.textContent = '⏸ Pause Auto-Refresh';
+            } else {
+                btn.textContent = '▶ Resume Auto-Refresh';
+            }
+        }
+
+        function updateStatus(status, text) {
+            const dot = document.getElementById('status-dot');
+            const statusText = document.getElementById('status-text');
+            
+            dot.className = `status-dot ${status}`;
+            statusText.textContent = text;
+        }
+
+        function updateLogInfo(totalLines, logFile) {
+            const logInfo = document.getElementById('log-info');
+            logInfo.textContent = `${totalLines} lines from ${logFile ? logFile.split('/').pop() : 'log file'}`;
+        }
+
+        function updateLastUpdate() {
+            const lastUpdate = document.getElementById('last-update');
+            const now = new Date();
+            lastUpdate.textContent = `Last update: ${now.toLocaleTimeString()}`;
+        }
+
+        async function refreshLogs() {
+            try {
+                updateStatus('active', 'Fetching logs...');
+                
+                const lines = document.getElementById('lines-input').value;
+                const response = await fetch(`${API_BASE_URL}/scan/logs?lines=${lines}`);
+                const data = await response.json();
+
+                if (data.success && data.logs) {
+                    const isNewLogs = data.logs.length > lastLogCount;
+                    lastLogCount = data.logs.length;
+                    
+                    allLogs = data.logs;
+                    displayLogs(data.logs, isNewLogs);
+                    updateLogInfo(data.total_lines, data.log_file);
+                    updateLastUpdate();
+                    updateStatus('active', 'Auto-refresh active');
+                } else {
+                    displayError(data.message || 'Failed to load logs');
+                    updateStatus('inactive', 'Error loading logs');
+                }
+            } catch (error) {
+                console.error('Error fetching logs:', error);
+                displayError(`Error: ${error.message}`);
+                updateStatus('inactive', 'Connection error');
+            }
+        }
+
+        function displayLogs(logs, highlightNew = false) {
+            const container = document.getElementById('log-container');
+            
+            if (!logs || logs.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div style="font-size: 48px;">📝</div>
+                        <h3>No logs available</h3>
+                        <p>Logs will appear here when the system generates them</p>
+                    </div>
+                `;
+                return;
+            }
+
+            const wasScrolledToBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 50;
+
+            container.innerHTML = logs.map((log, index) => {
+                const isNew = highlightNew && index >= logs.length - 10;
+                return `
+                    <div class="log-entry ${log.level} ${isNew ? 'new-entry' : ''}">
+                        ${log.timestamp ? `<span class="log-timestamp">${log.timestamp}</span>` : ''}
+                        <span class="log-level ${log.level}">${log.level}</span>
+                        ${log.module ? `<span class="log-module">[${log.module}]</span>` : ''}
+                        <span class="log-message">${escapeHtml(log.message)}</span>
+                    </div>
+                `;
+            }).join('');
+
+            // Auto-scroll to bottom if user was already at bottom
+            if (wasScrolledToBottom) {
+                container.scrollTop = container.scrollHeight;
+            }
+        }
+
+        function applyFilter() {
+            const levelFilter = document.getElementById('level-filter').value;
+            const searchText = document.getElementById('search-input').value.toLowerCase();
+
+            let filteredLogs = allLogs;
+
+            // Apply level filter
+            if (levelFilter !== 'ALL') {
+                filteredLogs = filteredLogs.filter(log => log.level === levelFilter);
+            }
+
+            // Apply search filter
+            if (searchText) {
+                filteredLogs = filteredLogs.filter(log => 
+                    log.message.toLowerCase().includes(searchText) ||
+                    (log.module && log.module.toLowerCase().includes(searchText))
+                );
+            }
+
+            displayLogs(filteredLogs, false);
+        }
+
+        function clearLogs() {
+            const container = document.getElementById('log-container');
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div style="font-size: 48px;">🗑️</div>
+                    <h3>Display cleared</h3>
+                    <p>Logs will reappear on next refresh</p>
+                </div>
+            `;
+        }
+
+        function displayError(message) {
+            const container = document.getElementById('log-container');
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div style="font-size: 48px; color: #dc3545;">⚠️</div>
+                    <h3>Error Loading Logs</h3>
+                    <p>${escapeHtml(message)}</p>
+                    <button class="btn btn-primary" onclick="refreshLogs()" style="margin-top: 20px;">Retry</button>
+                </div>
+            `;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Listen for lines input changes
+        document.getElementById('lines-input').addEventListener('change', function() {
+            refreshLogs();
+        });
+    </script>
+</body>
+</html>
+

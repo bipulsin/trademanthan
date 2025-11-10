@@ -11,6 +11,7 @@ import sys
 import requests
 import secrets
 import logging
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -2627,4 +2628,107 @@ async def get_trading_report(
         return {
             "success": False,
             "message": f"Error: {str(e)}"
+        }
+
+
+@router.get("/logs")
+async def get_scan_logs(lines: int = Query(100, ge=1, le=1000)):
+    """
+    Get the last N lines from the application log file
+    
+    Args:
+        lines: Number of lines to return (default 100, max 1000)
+    
+    Returns:
+        JSON with log lines
+    """
+    try:
+        # Determine log file path
+        # Check if running on EC2 or locally
+        if os.path.exists('/home/ubuntu/trademanthan/logs'):
+            log_dir = Path('/home/ubuntu/trademanthan/logs')
+        else:
+            # Local environment
+            log_dir = Path(__file__).parent.parent.parent / 'logs'
+        
+        # Find the most recent log file
+        log_file = log_dir / 'trademanthan.log'
+        
+        # Alternative: try to find from logging configuration
+        if not log_file.exists():
+            # Try alternative locations
+            alternative_paths = [
+                Path('/var/log/trademanthan/trademanthan.log'),
+                Path('/tmp/trademanthan.log'),
+                Path.home() / 'trademanthan.log'
+            ]
+            
+            for alt_path in alternative_paths:
+                if alt_path.exists():
+                    log_file = alt_path
+                    break
+        
+        if not log_file.exists():
+            return {
+                "success": False,
+                "message": f"Log file not found. Searched in: {log_dir}",
+                "logs": []
+            }
+        
+        # Read last N lines from log file
+        with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+            # Read all lines
+            all_lines = f.readlines()
+            
+            # Get last N lines
+            log_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines
+            
+            # Parse log lines into structured format
+            parsed_logs = []
+            for line in log_lines:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # Try to parse structured log format
+                # Typical format: 2025-11-10 14:15:30,123 - INFO - module - message
+                parts = line.split(' - ', 3)
+                
+                if len(parts) >= 3:
+                    parsed_logs.append({
+                        'timestamp': parts[0].strip(),
+                        'level': parts[1].strip() if len(parts) > 1 else 'INFO',
+                        'module': parts[2].strip() if len(parts) > 2 else '',
+                        'message': parts[3].strip() if len(parts) > 3 else line,
+                        'raw': line
+                    })
+                else:
+                    # Fallback for non-standard format
+                    parsed_logs.append({
+                        'timestamp': '',
+                        'level': 'INFO',
+                        'module': '',
+                        'message': line,
+                        'raw': line
+                    })
+            
+            return {
+                "success": True,
+                "log_file": str(log_file),
+                "total_lines": len(parsed_logs),
+                "logs": parsed_logs
+            }
+    
+    except FileNotFoundError:
+        return {
+            "success": False,
+            "message": "Log file not found",
+            "logs": []
+        }
+    except Exception as e:
+        logger.error(f"Error reading logs: {str(e)}")
+        return {
+            "success": False,
+            "message": f"Error reading logs: {str(e)}",
+            "logs": []
         }
