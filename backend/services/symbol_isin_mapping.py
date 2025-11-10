@@ -14,13 +14,21 @@ from typing import Optional, Dict
 logger = logging.getLogger(__name__)
 
 # Path to instruments JSON file (downloaded daily at 9:05 AM)
-INSTRUMENTS_FILE = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
+# Auto-detect path based on environment
+import os
+if os.path.exists("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json"):
+    # Production (EC2)
+    INSTRUMENTS_FILE = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
+else:
+    # Development (local) - relative to project root
+    INSTRUMENTS_FILE = Path(__file__).parent.parent.parent / "data" / "instruments" / "nse_instruments.json"
 
 # In-memory cache for ISIN mappings (loaded once, reused)
 _ISIN_CACHE: Dict[str, str] = {}
 _CACHE_LOADED = False
 
 # Fallback static mapping for common stocks (used if instruments file not available)
+# This is only used as fallback - primary source is instruments JSON file
 SYMBOL_TO_ISIN_FALLBACK = {
     # Nifty 50 Stocks
     "RELIANCE": "INE002A01018",
