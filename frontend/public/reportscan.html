@@ -152,6 +152,173 @@
             }
         }
 
+        /* Mobile Bottom Bar */
+        .mobile-bottom-bar {
+            display: none;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(30, 64, 175, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 15px 20px;
+            box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.3);
+            z-index: 999;
+        }
+
+        .mobile-menu-btn {
+            background: white;
+            color: #1e40af;
+            border: none;
+            border-radius: 50%;
+            width: 56px;
+            height: 56px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            margin: 0 auto;
+            font-size: 24px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+
+        .mobile-menu-btn:hover {
+            transform: scale(1.1);
+        }
+
+        .mobile-menu-btn:active {
+            transform: scale(0.95);
+        }
+
+        /* Mobile Drawer */
+        .mobile-drawer {
+            display: none;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: white;
+            border-radius: 20px 20px 0 0;
+            box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);
+            z-index: 1001;
+            transform: translateY(100%);
+            transition: transform 0.3s ease;
+        }
+
+        .mobile-drawer.show {
+            display: block;
+            transform: translateY(0);
+            animation: slideUp 0.3s ease;
+        }
+
+        @keyframes slideUp {
+            from { transform: translateY(100%); }
+            to { transform: translateY(0); }
+        }
+
+        .drawer-handle {
+            text-align: center;
+            padding: 15px 0 10px;
+        }
+
+        .drawer-handle-bar {
+            width: 40px;
+            height: 4px;
+            background: #cbd5e0;
+            border-radius: 2px;
+            display: inline-block;
+        }
+
+        .drawer-header {
+            padding: 10px 20px 15px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+
+        .drawer-header h3 {
+            color: #2d3748;
+            font-size: 18px;
+            margin: 0;
+        }
+
+        .drawer-menu {
+            padding: 10px 0;
+            max-height: 60vh;
+            overflow-y: auto;
+        }
+
+        .drawer-menu a {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 16px 20px;
+            color: #2d3748;
+            text-decoration: none;
+            transition: all 0.2s;
+            border-bottom: 1px solid #f7fafc;
+        }
+
+        .drawer-menu a:last-child {
+            border-bottom: none;
+        }
+
+        .drawer-menu a:active {
+            background: #edf2f7;
+        }
+
+        .drawer-menu a i {
+            width: 24px;
+            text-align: center;
+            font-size: 20px;
+        }
+
+        .drawer-menu a.scan-link i { color: #0891b2; }
+        .drawer-menu a.report-link i { color: #28a745; }
+        .drawer-menu a.logs-link i { color: #6610f2; }
+        .drawer-menu a.help-link i { color: #1e40af; }
+
+        .drawer-menu a span {
+            font-size: 16px;
+            font-weight: 500;
+        }
+
+        .drawer-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+        }
+
+        .drawer-overlay.show {
+            display: block;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        /* Show mobile bottom bar on mobile screens */
+        @media (max-width: 768px) {
+            .mobile-bottom-bar {
+                display: block;
+            }
+
+            .menu-dropdown-desktop {
+                display: none;
+            }
+
+            body {
+                padding-bottom: 90px;
+            }
+        }
+
         .filters {
             padding: 30px;
             background: #f8f9fa;
@@ -955,7 +1122,66 @@
             document.body.removeChild(a);
             window.URL.revokeObjectURL(url);
         }
+
+        // Mobile drawer functions
+        function openMobileDrawer() {
+            document.getElementById('mobile-drawer').classList.add('show');
+            document.getElementById('drawer-overlay').classList.add('show');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeMobileDrawer() {
+            document.getElementById('mobile-drawer').classList.remove('show');
+            document.getElementById('drawer-overlay').classList.remove('show');
+            document.body.style.overflow = '';
+        }
+
+        // Close drawer on ESC key
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                closeMobileDrawer();
+            }
+        });
     </script>
+
+    <!-- Mobile Bottom Bar -->
+    <div class="mobile-bottom-bar">
+        <button class="mobile-menu-btn" onclick="openMobileDrawer()">
+            <i class="fas fa-bars"></i>
+        </button>
+    </div>
+
+    <!-- Mobile Drawer Overlay -->
+    <div class="drawer-overlay" id="drawer-overlay" onclick="closeMobileDrawer()"></div>
+
+    <!-- Mobile Drawer Menu -->
+    <div class="mobile-drawer" id="mobile-drawer">
+        <div class="drawer-handle" onclick="closeMobileDrawer()">
+            <div class="drawer-handle-bar"></div>
+        </div>
+        <div class="drawer-header">
+            <h3><i class="fas fa-compass"></i> Navigation</h3>
+        </div>
+        <div class="drawer-menu">
+            <a href="scan.html" class="scan-link">
+                <i class="fas fa-search"></i>
+                <span>Scan Dashboard</span>
+            </a>
+            <a href="reportscan.html" class="report-link">
+                <i class="fas fa-chart-bar"></i>
+                <span>Trading Report</span>
+            </a>
+            <a href="scanlog.html" class="logs-link">
+                <i class="fas fa-file-alt"></i>
+                <span>Scan Logs</span>
+            </a>
+            <a href="help.html" class="help-link">
+                <i class="fas fa-question-circle"></i>
+                <span>Help Guide</span>
+            </a>
+        </div>
+    </div>
+
 </body>
 </html>
 

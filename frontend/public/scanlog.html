@@ -142,6 +142,56 @@
             }
         }
 
+        /* Mobile Bottom Bar */
+        .mobile-bottom-bar {
+            display: none;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(30, 64, 175, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 15px 20px;
+            box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.3);
+            z-index: 999;
+        }
+
+        .drawer-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+        }
+
+        .drawer-overlay.show {
+            display: block;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        /* Show mobile bottom bar on mobile screens */
+        @media (max-width: 768px) {
+            .mobile-bottom-bar {
+                display: block;
+            }
+
+            .menu-dropdown-desktop {
+                display: none;
+            }
+
+            body {
+                padding-bottom: 90px;
+            }
+        }
+
         .top-bar {
             display: flex;
             justify-content: space-between;
@@ -737,7 +787,66 @@
         document.getElementById('lines-input').addEventListener('change', function() {
             refreshLogs();
         });
+
+        // Mobile drawer functions
+        function openMobileDrawer() {
+            document.getElementById('mobile-drawer').classList.add('show');
+            document.getElementById('drawer-overlay').classList.add('show');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeMobileDrawer() {
+            document.getElementById('mobile-drawer').classList.remove('show');
+            document.getElementById('drawer-overlay').classList.remove('show');
+            document.body.style.overflow = '';
+        }
+
+        // Close drawer on ESC key
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                closeMobileDrawer();
+            }
+        });
     </script>
+
+    <!-- Mobile Bottom Bar -->
+    <div class="mobile-bottom-bar">
+        <button class="mobile-menu-btn" onclick="openMobileDrawer()">
+            <i class="fas fa-bars"></i>
+        </button>
+    </div>
+
+    <!-- Mobile Drawer Overlay -->
+    <div class="drawer-overlay" id="drawer-overlay" onclick="closeMobileDrawer()"></div>
+
+    <!-- Mobile Drawer Menu -->
+    <div class="mobile-drawer" id="mobile-drawer">
+        <div class="drawer-handle" onclick="closeMobileDrawer()">
+            <div class="drawer-handle-bar"></div>
+        </div>
+        <div class="drawer-header">
+            <h3><i class="fas fa-compass"></i> Navigation</h3>
+        </div>
+        <div class="drawer-menu">
+            <a href="scan.html" class="scan-link">
+                <i class="fas fa-search"></i>
+                <span>Scan Dashboard</span>
+            </a>
+            <a href="reportscan.html" class="report-link">
+                <i class="fas fa-chart-bar"></i>
+                <span>Trading Report</span>
+            </a>
+            <a href="scanlog.html" class="logs-link">
+                <i class="fas fa-file-alt"></i>
+                <span>Scan Logs</span>
+            </a>
+            <a href="help.html" class="help-link">
+                <i class="fas fa-question-circle"></i>
+                <span>Help Guide</span>
+            </a>
+        </div>
+    </div>
+
 </body>
 </html>
 
