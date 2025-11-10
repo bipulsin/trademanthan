@@ -417,7 +417,9 @@
     </div>
 
     <script>
-        const API_BASE_URL = 'http://13.234.119.21:8000';
+        // Use relative URL - nginx proxies /api to backend
+        const API_BASE_URL = '/api';
+        
         let autoRefreshInterval = null;
         let isAutoRefreshEnabled = true;
         let allLogs = [];
