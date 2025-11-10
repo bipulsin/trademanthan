@@ -279,8 +279,10 @@ class UpstoxService:
                 ist = pytz.timezone('Asia/Kolkata')
                 year = datetime.now(ist).year
             
-            # Upstox v2 API endpoint for market holidays
-            url = f"https://api.upstox.com/v2/market/holidays/{year}"
+            # Upstox v2 API endpoint for market holidays (requires date format, not just year)
+            # Use January 1st of the year to get all holidays for that year
+            date_param = f"{year}-01-01"
+            url = f"https://api.upstox.com/v2/market/holidays/{date_param}"
             
             response = requests.get(url, headers=self.get_headers(), timeout=10)
             
