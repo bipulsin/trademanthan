@@ -72,6 +72,14 @@ class InstrumentsDownloader:
                 logger.info("Building index for quick lookup...")
                 self._build_index(instruments_data)
                 
+                # Reload ISIN cache in symbol_isin_mapping
+                try:
+                    from services.symbol_isin_mapping import reload_isin_cache
+                    reload_isin_cache()
+                    logger.info("✅ ISIN cache reloaded with new instruments data")
+                except Exception as e:
+                    logger.warning(f"Could not reload ISIN cache: {e}")
+                
                 logger.info(f"✅ Successfully downloaded {len(instruments_data)} instruments")
                 return True
             else:

@@ -1,10 +1,27 @@
 """
 Symbol to ISIN mapping for NSE stocks
 ISIN (International Securities Identification Number) format: INE######A##
+
+This module now dynamically loads ISIN codes from the instruments JSON file
+downloaded daily from Upstox, with a static fallback for common stocks.
 """
 
-# Top 100 NSE stocks with their ISIN codes
-SYMBOL_TO_ISIN = {
+import json
+import logging
+from pathlib import Path
+from typing import Optional, Dict
+
+logger = logging.getLogger(__name__)
+
+# Path to instruments JSON file (downloaded daily at 9:05 AM)
+INSTRUMENTS_FILE = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
+
+# In-memory cache for ISIN mappings (loaded once, reused)
+_ISIN_CACHE: Dict[str, str] = {}
+_CACHE_LOADED = False
+
+# Fallback static mapping for common stocks (used if instruments file not available)
+SYMBOL_TO_ISIN_FALLBACK = {
     # Nifty 50 Stocks
     "RELIANCE": "INE002A01018",
     "TCS": "INE467B01029",
@@ -171,22 +188,111 @@ SYMBOL_TO_ISIN = {
     # Note: BAJFINANCE, ULTRACEMCO, LUPIN already exist above
 }
 
-def get_isin(symbol: str) -> str:
+def load_isin_from_instruments() -> Dict[str, str]:
+    """
+    Load ISIN mappings from the instruments JSON file
+    This file is downloaded daily at 9:05 AM from Upstox
+    
+    Returns:
+        Dictionary mapping symbol to ISIN code
+    """
+    global _ISIN_CACHE, _CACHE_LOADED
+    
+    # Return cache if already loaded
+    if _CACHE_LOADED and _ISIN_CACHE:
+        return _ISIN_CACHE
+    
+    try:
+        if not INSTRUMENTS_FILE.exists():
+            logger.warning(f"Instruments file not found: {INSTRUMENTS_FILE}")
+            logger.warning("Using fallback static ISIN mapping")
+            _ISIN_CACHE = SYMBOL_TO_ISIN_FALLBACK.copy()
+            _CACHE_LOADED = True
+            return _ISIN_CACHE
+        
+        logger.info(f"Loading ISIN mappings from {INSTRUMENTS_FILE}")
+        
+        with open(INSTRUMENTS_FILE, 'r') as f:
+            instruments = json.load(f)
+        
+        # Filter equity instruments (segment == NSE_EQ and has ISIN)
+        isin_map = {}
+        
+        for inst in instruments:
+            if inst.get('segment') == 'NSE_EQ':
+                # Get trading symbol and ISIN
+                trading_symbol = inst.get('trading_symbol', '').strip().upper()
+                name = inst.get('name', '').strip().upper()
+                isin = inst.get('isin', '').strip()
+                
+                # Only add if we have both symbol and ISIN
+                if trading_symbol and isin and isin.startswith('INE'):
+                    isin_map[trading_symbol] = isin
+                
+                # Also try to map common variations of the name
+                # This helps with stocks that might have different trading symbols
+                if name and isin and isin.startswith('INE'):
+                    # Extract first word of company name as potential symbol
+                    first_word = name.split()[0] if name else ''
+                    if first_word and len(first_word) > 2:
+                        # Only if not already mapped
+                        if first_word not in isin_map:
+                            isin_map[first_word] = isin
+        
+        # Cache the result
+        _ISIN_CACHE = isin_map
+        _CACHE_LOADED = True
+        
+        logger.info(f"✅ Loaded {len(isin_map)} equity ISIN mappings from instruments file")
+        return isin_map
+        
+    except Exception as e:
+        logger.error(f"Error loading ISIN from instruments file: {str(e)}")
+        logger.warning("Using fallback static ISIN mapping")
+        _ISIN_CACHE = SYMBOL_TO_ISIN_FALLBACK.copy()
+        _CACHE_LOADED = True
+        return _ISIN_CACHE
+
+def reload_isin_cache():
+    """
+    Force reload of ISIN cache from instruments file
+    Call this after instruments file is updated
+    """
+    global _CACHE_LOADED
+    _CACHE_LOADED = False
+    logger.info("🔄 ISIN cache invalidated, will reload on next get_isin() call")
+
+def get_isin(symbol: str) -> Optional[str]:
     """
     Get ISIN code for a given stock symbol
+    Dynamically loads from instruments JSON file (cached after first load)
     
     Args:
-        symbol: Stock symbol (e.g., "RELIANCE")
+        symbol: Stock symbol (e.g., "RELIANCE", "BHEL")
         
     Returns:
-        ISIN code if found, otherwise symbol itself
+        ISIN code if found, None otherwise
     """
+    if not symbol:
+        return None
+    
     symbol = symbol.strip().upper()
     
     # Remove common suffixes
     symbol = symbol.replace("-EQ", "").replace(".NS", "").replace(".BO", "")
     
-    return SYMBOL_TO_ISIN.get(symbol, None)
+    # Load ISIN mappings (cached after first load)
+    isin_map = load_isin_from_instruments()
+    
+    # Lookup the symbol
+    isin = isin_map.get(symbol)
+    
+    if isin:
+        logger.debug(f"Found ISIN for {symbol}: {isin}")
+        return isin
+    else:
+        logger.debug(f"No ISIN found for {symbol}")
+        return None
 
 def get_instrument_key(symbol: str, exchange: str = "NSE_EQ") -> str:
     """
@@ -210,6 +316,7 @@ def get_instrument_key(symbol: str, exchange: str = "NSE_EQ") -> str:
 def is_symbol_supported(symbol: str) -> bool:
     """
     Check if symbol is supported (has ISIN mapping)
+    Checks against dynamically loaded instruments
     
     Args:
         symbol: Stock symbol
@@ -217,13 +324,36 @@ def is_symbol_supported(symbol: str) -> bool:
     Returns:
         True if symbol has ISIN mapping, False otherwise
     """
+    if not symbol:
+        return False
+    
     symbol = symbol.strip().upper()
-    return symbol in SYMBOL_TO_ISIN
+    isin = get_isin(symbol)
+    return isin is not None
 
 def get_all_symbols():
-    """Get list of all supported symbols"""
-    return list(SYMBOL_TO_ISIN.keys())
+    """
+    Get list of all supported symbols
+    Returns symbols from dynamically loaded instruments
+    """
+    isin_map = load_isin_from_instruments()
+    return list(isin_map.keys())
 
-# Summary
-print(f"Loaded {len(SYMBOL_TO_ISIN)} stock symbols with ISIN mappings")
+def get_stats():
+    """Get statistics about loaded ISIN mappings"""
+    isin_map = load_isin_from_instruments()
+    return {
+        'total_stocks': len(isin_map),
+        'source': 'instruments_json' if INSTRUMENTS_FILE.exists() else 'static_fallback',
+        'instruments_file': str(INSTRUMENTS_FILE),
+        'cache_loaded': _CACHE_LOADED
+    }
+
+# Load cache on module import (for faster first access)
+try:
+    load_isin_from_instruments()
+    print(f"✅ Loaded {len(_ISIN_CACHE)} stock ISIN mappings from instruments JSON")
+except Exception as e:
+    print(f"⚠️ Could not load instruments JSON, using fallback mapping: {e}")
+    print(f"Loaded {len(SYMBOL_TO_ISIN_FALLBACK)} stock symbols with static ISIN mappings")
 
