@@ -161,6 +161,121 @@
         .help-btn:active {
             transform: translateY(0);
         }
+
+        /* Dropdown Menu Styles */
+        .menu-dropdown {
+            position: relative;
+            display: inline-block;
+        }
+
+        .menu-btn {
+            background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 2px 8px rgba(30, 64, 175, 0.3);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+        }
+
+        .menu-btn:hover {
+            background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(30, 64, 175, 0.4);
+        }
+
+        .menu-dropdown-content {
+            display: none;
+            position: absolute;
+            right: 0;
+            background: white;
+            min-width: 180px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+            border-radius: 8px;
+            z-index: 1000;
+            margin-top: 5px;
+            overflow: hidden;
+        }
+
+        .menu-dropdown-content a {
+            color: #2d3748;
+            padding: 12px 20px;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.2s;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .menu-dropdown-content a:last-child {
+            border-bottom: none;
+        }
+
+        .menu-dropdown-content a:hover {
+            background: #f7fafc;
+            padding-left: 24px;
+        }
+
+        .menu-dropdown-content a i {
+            width: 20px;
+            text-align: center;
+        }
+
+        .menu-dropdown-content a.report-link i {
+            color: #28a745;
+        }
+
+        .menu-dropdown-content a.logs-link i {
+            color: #6610f2;
+        }
+
+        .menu-dropdown-content a.help-link i {
+            color: #1e40af;
+        }
+
+        .menu-dropdown.show .menu-dropdown-content {
+            display: block;
+            animation: slideDown 0.3s ease;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Mobile view - keep buttons visible */
+        @media (max-width: 768px) {
+            .menu-dropdown-desktop {
+                display: none;
+            }
+            .menu-buttons-mobile {
+                display: flex;
+                gap: 10px;
+            }
+        }
+
+        @media (min-width: 769px) {
+            .menu-dropdown-desktop {
+                display: inline-block;
+            }
+            .menu-buttons-mobile {
+                display: none;
+            }
+        }
         
         .scan-container {
             max-width: 1400px;
@@ -792,8 +907,28 @@
                 </div>
             </div>
             
-            <!-- Help, Report, and Logs Buttons -->
-            <div style="display: flex; gap: 10px;">
+            <!-- Dropdown Menu for Desktop -->
+            <div class="menu-dropdown-desktop">
+                <div class="menu-dropdown" id="menu-dropdown">
+                    <button class="menu-btn" onclick="toggleMenu()" title="Menu">
+                        <i class="fas fa-bars"></i> Menu <i class="fas fa-chevron-down" style="font-size: 10px;"></i>
+                    </button>
+                    <div class="menu-dropdown-content">
+                        <a href="reportscan.html" class="report-link">
+                            <i class="fas fa-chart-bar"></i> Trading Report
+                        </a>
+                        <a href="scanlog.html" class="logs-link">
+                            <i class="fas fa-file-alt"></i> Scan Logs
+                        </a>
+                        <a href="help.html" class="help-link">
+                            <i class="fas fa-question-circle"></i> Help Guide
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Buttons for Mobile -->
+            <div class="menu-buttons-mobile" style="display: flex; gap: 10px;">
                 <a href="reportscan.html" class="help-btn" style="background: linear-gradient(135deg, #28a745 0%, #20c997 100%);" title="View Trading Report">
                     <i class="fas fa-chart-bar"></i> Report
                 </a>
@@ -985,6 +1120,22 @@
     
     <script src="scan.js?v=20251104233000"></script>
     <script>
+        // Dropdown menu toggle function
+        function toggleMenu() {
+            const dropdown = document.getElementById('menu-dropdown');
+            dropdown.classList.toggle('show');
+        }
+
+        // Close dropdown when clicking outside
+        window.addEventListener('click', function(event) {
+            const dropdown = document.getElementById('menu-dropdown');
+            const menuBtn = event.target.closest('.menu-btn');
+            
+            if (!menuBtn && dropdown && dropdown.classList.contains('show')) {
+                dropdown.classList.remove('show');
+            }
+        });
+
         console.log('Page HTML loaded, starting scan.js');
         // Force immediate load for debugging
         if (typeof loadLatestData !== 'undefined') {
