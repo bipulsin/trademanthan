@@ -50,19 +50,101 @@
             margin-top: 5px;
         }
 
-        .back-btn {
-            background: rgba(255,255,255,0.2);
-            color: white;
-            padding: 10px 20px;
-            border-radius: 8px;
-            text-decoration: none;
-            transition: all 0.3s;
-            border: 1px solid rgba(255,255,255,0.3);
+        /* Dropdown Menu Styles */
+        .menu-dropdown {
+            position: relative;
+            display: inline-block;
         }
 
-        .back-btn:hover {
+        .menu-btn {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: 1px solid rgba(255,255,255,0.3);
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+        }
+
+        .menu-btn:hover {
             background: rgba(255,255,255,0.3);
             transform: translateY(-2px);
+        }
+
+        .menu-dropdown-content {
+            display: none;
+            position: absolute;
+            right: 0;
+            background: white;
+            min-width: 200px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+            border-radius: 8px;
+            z-index: 1000;
+            margin-top: 5px;
+            overflow: hidden;
+        }
+
+        .menu-dropdown-content a {
+            color: #2d3748;
+            padding: 12px 20px;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.2s;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .menu-dropdown-content a:last-child {
+            border-bottom: none;
+        }
+
+        .menu-dropdown-content a:hover {
+            background: #f7fafc;
+            padding-left: 24px;
+        }
+
+        .menu-dropdown-content a i {
+            width: 20px;
+            text-align: center;
+        }
+
+        .menu-dropdown-content a.scan-link i {
+            color: #0891b2;
+        }
+
+        .menu-dropdown-content a.report-link i {
+            color: #28a745;
+        }
+
+        .menu-dropdown-content a.logs-link i {
+            color: #6610f2;
+        }
+
+        .menu-dropdown-content a.help-link i {
+            color: #1e40af;
+        }
+
+        .menu-dropdown.show .menu-dropdown-content {
+            display: block;
+            animation: slideDown 0.3s ease;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         /* Container */
@@ -378,11 +460,9 @@
                 font-size: 13px;
             }
 
-            .back-btn {
+            .menu-btn {
                 font-size: 14px;
                 padding: 8px 16px;
-                display: inline-block;
-                width: auto;
             }
 
             .container {
@@ -591,13 +671,24 @@
                 <h1><i class="fas fa-book"></i> TradeManthan - Help Guide</h1>
                 <div class="header-subtitle">Complete guide for Scan Page - For Users & Developers</div>
             </div>
-            <div style="display: flex; gap: 10px;">
-                <a href="scan.html" class="back-btn">
-                    <i class="fas fa-arrow-left"></i> Back to Scan
-                </a>
-                <a href="reportscan.html" class="back-btn" style="background: rgba(40, 167, 69, 0.8);">
-                    <i class="fas fa-chart-bar"></i> Report
-                </a>
+            <div class="menu-dropdown" id="menu-dropdown">
+                <button class="menu-btn" onclick="toggleMenu()" title="Menu">
+                    <i class="fas fa-bars"></i> Menu <i class="fas fa-chevron-down" style="font-size: 10px;"></i>
+                </button>
+                <div class="menu-dropdown-content">
+                    <a href="scan.html" class="scan-link">
+                        <i class="fas fa-search"></i> Scan Dashboard
+                    </a>
+                    <a href="reportscan.html" class="report-link">
+                        <i class="fas fa-chart-bar"></i> Trading Report
+                    </a>
+                    <a href="scanlog.html" class="logs-link">
+                        <i class="fas fa-file-alt"></i> Scan Logs
+                    </a>
+                    <a href="help.html" class="help-link">
+                        <i class="fas fa-question-circle"></i> Help Guide
+                    </a>
+                </div>
             </div>
         </div>
     </div>
@@ -2166,7 +2257,6 @@ def perform_health_check():
             <div style="margin-top: 60px; padding-top: 30px; border-top: 2px solid #e5e7eb; text-align: center; color: #888;">
                 <p><strong>TradeManthan</strong> - Intelligent Trading Solutions</p>
                 <p>For support: Contact your administrator</p>
-                <p><a href="scan.html" style="color: #1e40af;">← Back to Scan Page</a></p>
             </div>
 
         </main>
@@ -2178,6 +2268,22 @@ def perform_health_check():
     </div>
 
     <script>
+        // Dropdown menu toggle function
+        function toggleMenu() {
+            const dropdown = document.getElementById('menu-dropdown');
+            dropdown.classList.toggle('show');
+        }
+
+        // Close dropdown when clicking outside
+        window.addEventListener('click', function(event) {
+            const dropdown = document.getElementById('menu-dropdown');
+            const menuBtn = event.target.closest('.menu-btn');
+            
+            if (!menuBtn && dropdown && dropdown.classList.contains('show')) {
+                dropdown.classList.remove('show');
+            }
+        });
+
         // Smooth scrolling for TOC links
         document.querySelectorAll('a[href^="#"]').forEach(anchor => {
             anchor.addEventListener('click', function (e) {

@@ -43,6 +43,105 @@
             font-size: 14px;
         }
 
+        /* Dropdown Menu Styles */
+        .menu-dropdown {
+            position: relative;
+            display: inline-block;
+        }
+
+        .menu-btn {
+            background: linear-gradient(135deg, #4a90e2 0%, #357abd 100%);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 2px 8px rgba(74, 144, 226, 0.3);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+        }
+
+        .menu-btn:hover {
+            background: linear-gradient(135deg, #357abd 0%, #2868a8 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(74, 144, 226, 0.4);
+        }
+
+        .menu-dropdown-content {
+            display: none;
+            position: absolute;
+            left: 0;
+            background: white;
+            min-width: 200px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+            border-radius: 8px;
+            z-index: 1000;
+            margin-top: 5px;
+            overflow: hidden;
+        }
+
+        .menu-dropdown-content a {
+            color: #2d3748;
+            padding: 12px 20px;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.2s;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .menu-dropdown-content a:last-child {
+            border-bottom: none;
+        }
+
+        .menu-dropdown-content a:hover {
+            background: #f7fafc;
+            padding-left: 24px;
+        }
+
+        .menu-dropdown-content a i {
+            width: 20px;
+            text-align: center;
+        }
+
+        .menu-dropdown-content a.scan-link i {
+            color: #0891b2;
+        }
+
+        .menu-dropdown-content a.report-link i {
+            color: #28a745;
+        }
+
+        .menu-dropdown-content a.logs-link i {
+            color: #6610f2;
+        }
+
+        .menu-dropdown-content a.help-link i {
+            color: #1e40af;
+        }
+
+        .menu-dropdown.show .menu-dropdown-content {
+            display: block;
+            animation: slideDown 0.3s ease;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
         .top-bar {
             display: flex;
             justify-content: space-between;
@@ -370,7 +469,25 @@
 
         <div class="top-bar">
             <div class="controls">
-                <a href="scan.html" class="btn btn-secondary">← Back to Scan</a>
+                <div class="menu-dropdown" id="menu-dropdown">
+                    <button class="menu-btn" onclick="toggleMenu()" title="Menu">
+                        <i class="fas fa-bars"></i> Menu <i class="fas fa-chevron-down" style="font-size: 10px;"></i>
+                    </button>
+                    <div class="menu-dropdown-content">
+                        <a href="scan.html" class="scan-link">
+                            <i class="fas fa-search"></i> Scan Dashboard
+                        </a>
+                        <a href="reportscan.html" class="report-link">
+                            <i class="fas fa-chart-bar"></i> Trading Report
+                        </a>
+                        <a href="scanlog.html" class="logs-link">
+                            <i class="fas fa-file-alt"></i> Scan Logs
+                        </a>
+                        <a href="help.html" class="help-link">
+                            <i class="fas fa-question-circle"></i> Help Guide
+                        </a>
+                    </div>
+                </div>
                 <button class="btn btn-success" onclick="refreshLogs()">🔄 Refresh Now</button>
                 <button class="btn btn-primary" onclick="toggleAutoRefresh()">
                     <span id="auto-refresh-text">⏸ Pause Auto-Refresh</span>
@@ -417,6 +534,22 @@
     </div>
 
     <script>
+        // Dropdown menu toggle function
+        function toggleMenu() {
+            const dropdown = document.getElementById('menu-dropdown');
+            dropdown.classList.toggle('show');
+        }
+
+        // Close dropdown when clicking outside
+        window.addEventListener('click', function(event) {
+            const dropdown = document.getElementById('menu-dropdown');
+            const menuBtn = event.target.closest('.menu-btn');
+            
+            if (!menuBtn && dropdown && dropdown.classList.contains('show')) {
+                dropdown.classList.remove('show');
+            }
+        });
+
         // Use /scan proxy - nginx has location /scan/ configured
         const API_BASE_URL = '';
         
