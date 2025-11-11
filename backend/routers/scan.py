@@ -956,6 +956,34 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             }
         )
 
+@router.post("/manual-close-trades")
+async def manual_close_trades(db: Session = Depends(get_db)):
+    """Manually trigger close_all_open_trades - one-time emergency use"""
+    try:
+        from services.vwap_updater import close_all_open_trades
+        
+        logger.info("🔧 Manual trigger: Closing all open trades NOW")
+        
+        # Call the close function
+        await close_all_open_trades()
+        
+        return {
+            "success": True,
+            "message": "All open trades closed successfully",
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in manual close trades: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+
 @router.get("/scheduler-status")
 async def get_scheduler_status():
     """Get status of all schedulers - verifies they are running"""
