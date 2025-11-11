@@ -385,6 +385,31 @@
             gap: 15px;
         }
 
+        .scheduler-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-sm {
+            padding: 4px 12px;
+            font-size: 12px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .btn-warning {
+            background: #ffc107;
+            color: #000;
+            border: none;
+            font-weight: 600;
+        }
+
+        .btn-warning:hover {
+            background: #ffb300;
+            transform: translateY(-1px);
+        }
+
         .status-item {
             display: flex;
             align-items: center;
@@ -405,6 +430,11 @@
         .status-dot.inactive {
             background: #dc3545;
             animation: none;
+        }
+
+        .status-dot.warning {
+            background: #ffc107;
+            animation: pulse 1s infinite;
         }
 
         @keyframes pulse {
@@ -679,6 +709,15 @@
                 <span id="log-info">Loading logs...</span>
             </div>
             <div class="status-item">
+                <div class="scheduler-status" id="scheduler-status">
+                    <div class="status-dot" id="scheduler-dot"></div>
+                    <span id="scheduler-text">Schedulers: Checking...</span>
+                </div>
+                <button class="btn btn-sm btn-warning" id="start-schedulers-btn" onclick="startSchedulers()" style="display: none; margin-left: 10px;">
+                    ⚡ Start Schedulers
+                </button>
+            </div>
+            <div class="status-item">
                 <span id="last-update">Never</span>
             </div>
         </div>
@@ -737,7 +776,93 @@
         window.onload = function() {
             refreshLogs();
             startAutoRefresh();
+            checkSchedulerStatus(); // Check scheduler status on load
+            startSchedulerStatusRefresh(); // Auto-refresh scheduler status
         };
+
+        let schedulerStatusInterval = null;
+
+        // Check scheduler status
+        async function checkSchedulerStatus() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/scan/scheduler-status`);
+                const data = await response.json();
+                
+                if (data.success && data.all_schedulers_running) {
+                    // All schedulers running
+                    updateSchedulerStatus('running', `Schedulers: Active (${data.schedulers.vwap_updater.jobs_count + data.schedulers.health_monitor.jobs_count} jobs)`);
+                    document.getElementById('start-schedulers-btn').style.display = 'none';
+                } else if (data.success) {
+                    // Some schedulers not running
+                    const runningCount = [
+                        data.schedulers.health_monitor.running,
+                        data.schedulers.vwap_updater.running,
+                        data.schedulers.master_stock.running,
+                        data.schedulers.instruments.running
+                    ].filter(Boolean).length;
+                    
+                    updateSchedulerStatus('warning', `Schedulers: ${runningCount}/4 Running`);
+                    document.getElementById('start-schedulers-btn').style.display = 'inline-block';
+                } else {
+                    updateSchedulerStatus('error', 'Schedulers: Error');
+                    document.getElementById('start-schedulers-btn').style.display = 'inline-block';
+                }
+            } catch (error) {
+                console.error('Error checking scheduler status:', error);
+                updateSchedulerStatus('error', 'Schedulers: Unknown');
+            }
+        }
+
+        function updateSchedulerStatus(status, text) {
+            const dot = document.getElementById('scheduler-dot');
+            const textEl = document.getElementById('scheduler-text');
+            
+            textEl.textContent = text;
+            
+            if (status === 'running') {
+                dot.className = 'status-dot active';
+            } else if (status === 'warning') {
+                dot.className = 'status-dot warning';
+            } else {
+                dot.className = 'status-dot inactive';
+            }
+        }
+
+        async function startSchedulers() {
+            const btn = document.getElementById('start-schedulers-btn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Starting...';
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/scan/manual-start-schedulers`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    updateSchedulerStatus('running', 'Schedulers: Started ✅');
+                    btn.style.display = 'none';
+                    
+                    // Refresh status after 2 seconds
+                    setTimeout(checkSchedulerStatus, 2000);
+                } else {
+                    alert('Failed to start schedulers: ' + (data.error || 'Unknown error'));
+                    btn.disabled = false;
+                    btn.textContent = '⚡ Start Schedulers';
+                }
+            } catch (error) {
+                console.error('Error starting schedulers:', error);
+                alert('Error starting schedulers: ' + error.message);
+                btn.disabled = false;
+                btn.textContent = '⚡ Start Schedulers';
+            }
+        }
+
+        function startSchedulerStatusRefresh() {
+            // Refresh scheduler status every 30 seconds
+            schedulerStatusInterval = setInterval(checkSchedulerStatus, 30000);
+        }
 
         function startAutoRefresh() {
             if (autoRefreshInterval) {
