@@ -52,15 +52,6 @@
             opacity: 0.9;
         }
 
-        .top-bar {
-            background: #f8f9fa;
-            padding: 15px 30px;
-            border-bottom: 1px solid #dee2e6;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
         /* Dropdown Menu Styles */
         .menu-dropdown {
             position: relative;
@@ -344,7 +335,8 @@
 
         .filter-group {
             flex: 1;
-            min-width: 200px;
+            min-width: 150px;
+            max-width: 250px;
         }
 
         .filter-group label {
@@ -563,28 +555,6 @@
                 font-size: 14px;
             }
 
-            .top-bar {
-                flex-direction: column;
-                padding: 12px 15px;
-                gap: 12px;
-                align-items: stretch;
-            }
-
-            .top-bar > div {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 8px;
-                justify-content: center;
-            }
-
-            .top-bar a {
-                font-size: 13px;
-                padding: 8px 12px;
-                flex: 1;
-                min-width: 120px;
-                text-align: center;
-            }
-
             .filters {
                 padding: 15px;
             }
@@ -715,16 +685,6 @@
                 font-size: 13px;
             }
 
-            .top-bar {
-                padding: 10px;
-            }
-
-            .top-bar a {
-                font-size: 12px;
-                padding: 8px 10px;
-                min-width: 100px;
-            }
-
             .filters {
                 padding: 12px;
             }
@@ -835,12 +795,6 @@
             </div>
         </div>
 
-        <div class="top-bar">
-            <div>
-                <button class="btn btn-success" onclick="downloadReport()">📥 Download CSV</button>
-            </div>
-        </div>
-
         <div class="filters">
             <div class="filter-row">
                 <div class="filter-group">
@@ -862,6 +816,7 @@
                 <div>
                     <button class="btn btn-primary" onclick="loadReport()">🔍 Filter</button>
                     <button class="btn btn-secondary" onclick="clearFilters()">🔄 Clear</button>
+                    <button class="btn btn-success" onclick="downloadReport()">📥 Download CSV</button>
                 </div>
             </div>
         </div>
