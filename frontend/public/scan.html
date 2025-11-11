@@ -946,6 +946,38 @@
             margin-bottom: 15px;
         }
         
+        /* Collapsible section styles */
+        .section-header-collapsible {
+            transition: background-color 0.2s ease;
+            border-radius: 8px;
+            padding: 5px;
+            margin: -5px;
+        }
+        
+        .section-header-collapsible:hover {
+            background-color: rgba(0, 0, 0, 0.02);
+        }
+        
+        .section-caret {
+            font-size: 14px;
+            font-weight: bold;
+            display: inline-block;
+            transition: transform 0.3s ease;
+        }
+        
+        .section-content {
+            max-height: 10000px;
+            overflow: hidden;
+            transition: max-height 0.4s ease, opacity 0.3s ease;
+            opacity: 1;
+        }
+        
+        .section-content.collapsed {
+            max-height: 0;
+            opacity: 0;
+            transition: max-height 0.3s ease, opacity 0.2s ease;
+        }
+        
         .bullish-section {
             border-left: 4px solid #10b981;
         }

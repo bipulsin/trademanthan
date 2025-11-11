@@ -25,6 +25,54 @@ function toggleDaySummary() {
     }
 }
 
+// Toggle Bullish/Bearish section collapse/expand
+function toggleSection(sectionType) {
+    const content = document.getElementById(`${sectionType}Content`);
+    const caret = document.getElementById(`${sectionType}Caret`);
+    
+    if (content && caret) {
+        if (content.classList.contains('collapsed')) {
+            content.classList.remove('collapsed');
+            caret.textContent = '▼';
+        } else {
+            content.classList.add('collapsed');
+            caret.textContent = '▶';
+        }
+    }
+}
+
+// Check if section should be collapsed by default
+// Returns true if section is empty OR all trades are 'no_entry' status
+function shouldCollapseByDefault(data) {
+    if (!data || !data.alerts || data.alerts.length === 0) {
+        return true; // Empty section → collapsed
+    }
+    
+    // Check all stocks across all alerts
+    let totalStocks = 0;
+    let noEntryStocks = 0;
+    
+    data.alerts.forEach(alert => {
+        if (alert.stocks && alert.stocks.length > 0) {
+            alert.stocks.forEach(stock => {
+                totalStocks++;
+                // Check if it's a "No Entry" trade
+                const isNoEntry = !stock.buy_price || stock.buy_price === 0 || stock.qty === 0;
+                if (isNoEntry) {
+                    noEntryStocks++;
+                }
+            });
+        }
+    });
+    
+    // If all stocks are "No Entry", collapse by default
+    if (totalStocks > 0 && noEntryStocks === totalStocks) {
+        return true; // All "No Entry" → collapsed
+    }
+    
+    return false; // Has actual trades → expanded
+}
+
 // Calculate and update day summary
 function updateDaySummary(bullishData, bearishData) {
     try {
@@ -410,33 +458,44 @@ async function loadLatestData() {
 function displayBullishData(data) {
     const container = document.getElementById('bullishContainer');
     
+    // Determine if should be collapsed by default
+    const shouldCollapse = shouldCollapseByDefault(data);
+    const collapsedClass = shouldCollapse ? 'collapsed' : '';
+    const caretSymbol = shouldCollapse ? '▶' : '▼';
+    
     if (!data || !data.alerts || data.alerts.length === 0) {
         container.innerHTML = `
             <div class="alert-section bullish-section">
-                <div class="section-title">
-                    <!-- Desktop version -->
-                    <div class="desktop-header" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                        <h2 style="margin: 0; color: #10b981;">
-                            📈 BULLISH ALERTS (CALL)
-                    </h2>
-                    <button class="download-btn" onclick="downloadCSV('bullish')" disabled style="opacity: 0.5; cursor: not-allowed;">
-                        📥 Download CSV
-                    </button>
-                    </div>
-                    <!-- Mobile version -->
-                    <div class="mobile-header" style="display: none; justify-content: space-between; align-items: center; width: 100%;">
-                        <h2 style="margin: 0; color: #10b981; font-weight: bold;">
-                            BULLISH
-                        </h2>
-                        <a href="#" onclick="downloadCSV('bullish'); return false;" style="color: #3b82f6; text-decoration: none; font-weight: bold; cursor: pointer;" disabled="true">
-                            CSV
-                        </a>
+                <div class="section-header-collapsible" onclick="toggleSection('bullish')" style="cursor: pointer; user-select: none;">
+                    <div class="section-title">
+                        <!-- Desktop version -->
+                        <div class="desktop-header" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                            <h2 style="margin: 0; color: #10b981; display: flex; align-items: center; gap: 10px;">
+                                <span id="bullishCaret" class="section-caret">${caretSymbol}</span>
+                                📈 BULLISH ALERTS (CALL)
+                            </h2>
+                            <button class="download-btn" onclick="event.stopPropagation(); downloadCSV('bullish')" disabled style="opacity: 0.5; cursor: not-allowed;">
+                                📥 Download CSV
+                            </button>
+                        </div>
+                        <!-- Mobile version -->
+                        <div class="mobile-header" style="display: none; justify-content: space-between; align-items: center; width: 100%;">
+                            <h2 style="margin: 0; color: #10b981; font-weight: bold; display: flex; align-items: center; gap: 8px;">
+                                <span id="bullishCaret" class="section-caret">${caretSymbol}</span>
+                                BULLISH
+                            </h2>
+                            <a href="#" onclick="event.stopPropagation(); downloadCSV('bullish'); return false;" style="color: #3b82f6; text-decoration: none; font-weight: bold; cursor: pointer; pointer-events: auto;" disabled="true">
+                                CSV
+                            </a>
+                        </div>
                     </div>
                 </div>
-                <div class="no-data">
-                    <div class="no-data-icon">📭</div>
-                    <h3>No Bullish Alerts Yet</h3>
-                    <p>Waiting for Bullish webhook data from Chartink...</p>
+                <div id="bullishContent" class="section-content ${collapsedClass}">
+                    <div class="no-data">
+                        <div class="no-data-icon">📭</div>
+                        <h3>No Bullish Alerts Yet</h3>
+                        <p>Waiting for Bullish webhook data from Chartink...</p>
+                    </div>
                 </div>
             </div>
         `;
@@ -445,28 +504,33 @@ function displayBullishData(data) {
     
     const html = `
         <div class="alert-section bullish-section">
-            <div class="section-title">
-                <!-- Desktop version -->
-                <div class="desktop-header" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                    <h2 style="margin: 0; color: #10b981;">
-                        📈 BULLISH ALERTS (CALL)
-                </h2>
-                <button class="download-btn" onclick="downloadCSV('bullish')">
-                    📥 Download CSV
-                </button>
-                </div>
-                <!-- Mobile version -->
-                <div class="mobile-header" style="display: none; justify-content: space-between; align-items: center; width: 100%;">
-                    <h2 style="margin: 0; color: #10b981; font-weight: bold;">
-                        BULLISH
-                    </h2>
-                    <a href="#" onclick="downloadCSV('bullish'); return false;" style="color: #3b82f6; text-decoration: none; font-weight: bold; cursor: pointer;">
-                        CSV
-                    </a>
+            <div class="section-header-collapsible" onclick="toggleSection('bullish')" style="cursor: pointer; user-select: none;">
+                <div class="section-title">
+                    <!-- Desktop version -->
+                    <div class="desktop-header" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                        <h2 style="margin: 0; color: #10b981; display: flex; align-items: center; gap: 10px;">
+                            <span id="bullishCaret" class="section-caret">${caretSymbol}</span>
+                            📈 BULLISH ALERTS (CALL)
+                        </h2>
+                        <button class="download-btn" onclick="event.stopPropagation(); downloadCSV('bullish')">
+                            📥 Download CSV
+                        </button>
+                    </div>
+                    <!-- Mobile version -->
+                    <div class="mobile-header" style="display: none; justify-content: space-between; align-items: center; width: 100%;">
+                        <h2 style="margin: 0; color: #10b981; font-weight: bold; display: flex; align-items: center; gap: 8px;">
+                            <span id="bullishCaret" class="section-caret">${caretSymbol}</span>
+                            BULLISH
+                        </h2>
+                        <a href="#" onclick="event.stopPropagation(); downloadCSV('bullish'); return false;" style="color: #3b82f6; text-decoration: none; font-weight: bold; cursor: pointer; pointer-events: auto;">
+                            CSV
+                        </a>
+                    </div>
                 </div>
             </div>
-            
-            ${data.alerts.map(alert => renderAlertGroup(alert, 'bullish')).join('')}
+            <div id="bullishContent" class="section-content ${collapsedClass}">
+                ${data.alerts.map(alert => renderAlertGroup(alert, 'bullish')).join('')}
+            </div>
         </div>
     `;
     
@@ -477,33 +541,44 @@ function displayBullishData(data) {
 function displayBearishData(data) {
     const container = document.getElementById('bearishContainer');
     
+    // Determine if should be collapsed by default
+    const shouldCollapse = shouldCollapseByDefault(data);
+    const collapsedClass = shouldCollapse ? 'collapsed' : '';
+    const caretSymbol = shouldCollapse ? '▶' : '▼';
+    
     if (!data || !data.alerts || data.alerts.length === 0) {
         container.innerHTML = `
             <div class="alert-section bearish-section">
-                <div class="section-title">
-                    <!-- Desktop version -->
-                    <div class="desktop-header" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                        <h2 style="margin: 0; color: #ef4444;">
-                            📉 BEARISH ALERTS (PUT)
-                    </h2>
-                    <button class="download-btn" onclick="downloadCSV('bearish')" disabled style="opacity: 0.5; cursor: not-allowed;">
-                        📥 Download CSV
-                    </button>
-                    </div>
-                    <!-- Mobile version -->
-                    <div class="mobile-header" style="display: none; justify-content: space-between; align-items: center; width: 100%;">
-                        <h2 style="margin: 0; color: #ef4444; font-weight: bold;">
-                            BEARISH
-                        </h2>
-                        <a href="#" onclick="downloadCSV('bearish'); return false;" style="color: #3b82f6; text-decoration: none; font-weight: bold; cursor: pointer;" disabled="true">
-                            CSV
-                        </a>
+                <div class="section-header-collapsible" onclick="toggleSection('bearish')" style="cursor: pointer; user-select: none;">
+                    <div class="section-title">
+                        <!-- Desktop version -->
+                        <div class="desktop-header" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                            <h2 style="margin: 0; color: #ef4444; display: flex; align-items: center; gap: 10px;">
+                                <span id="bearishCaret" class="section-caret">${caretSymbol}</span>
+                                📉 BEARISH ALERTS (PUT)
+                            </h2>
+                            <button class="download-btn" onclick="event.stopPropagation(); downloadCSV('bearish')" disabled style="opacity: 0.5; cursor: not-allowed;">
+                                📥 Download CSV
+                            </button>
+                        </div>
+                        <!-- Mobile version -->
+                        <div class="mobile-header" style="display: none; justify-content: space-between; align-items: center; width: 100%;">
+                            <h2 style="margin: 0; color: #ef4444; font-weight: bold; display: flex; align-items: center; gap: 8px;">
+                                <span id="bearishCaret" class="section-caret">${caretSymbol}</span>
+                                BEARISH
+                            </h2>
+                            <a href="#" onclick="event.stopPropagation(); downloadCSV('bearish'); return false;" style="color: #3b82f6; text-decoration: none; font-weight: bold; cursor: pointer; pointer-events: auto;" disabled="true">
+                                CSV
+                            </a>
+                        </div>
                     </div>
                 </div>
-                <div class="no-data">
-                    <div class="no-data-icon">📭</div>
-                    <h3>No Bearish Alerts Yet</h3>
-                    <p>Waiting for Bearish webhook data from Chartink...</p>
+                <div id="bearishContent" class="section-content ${collapsedClass}">
+                    <div class="no-data">
+                        <div class="no-data-icon">📭</div>
+                        <h3>No Bearish Alerts Yet</h3>
+                        <p>Waiting for Bearish webhook data from Chartink...</p>
+                    </div>
                 </div>
             </div>
         `;
@@ -512,28 +587,33 @@ function displayBearishData(data) {
     
     const html = `
         <div class="alert-section bearish-section">
-            <div class="section-title">
-                <!-- Desktop version -->
-                <div class="desktop-header" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                    <h2 style="margin: 0; color: #ef4444;">
-                        📉 BEARISH ALERTS (PUT)
-                </h2>
-                <button class="download-btn" onclick="downloadCSV('bearish')">
-                    📥 Download CSV
-                </button>
-                </div>
-                <!-- Mobile version -->
-                <div class="mobile-header" style="display: none; justify-content: space-between; align-items: center; width: 100%;">
-                    <h2 style="margin: 0; color: #ef4444; font-weight: bold;">
-                        BEARISH
-                    </h2>
-                    <a href="#" onclick="downloadCSV('bearish'); return false;" style="color: #3b82f6; text-decoration: none; font-weight: bold; cursor: pointer;">
-                        CSV
-                    </a>
+            <div class="section-header-collapsible" onclick="toggleSection('bearish')" style="cursor: pointer; user-select: none;">
+                <div class="section-title">
+                    <!-- Desktop version -->
+                    <div class="desktop-header" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                        <h2 style="margin: 0; color: #ef4444; display: flex; align-items: center; gap: 10px;">
+                            <span id="bearishCaret" class="section-caret">${caretSymbol}</span>
+                            📉 BEARISH ALERTS (PUT)
+                        </h2>
+                        <button class="download-btn" onclick="event.stopPropagation(); downloadCSV('bearish')">
+                            📥 Download CSV
+                        </button>
+                    </div>
+                    <!-- Mobile version -->
+                    <div class="mobile-header" style="display: none; justify-content: space-between; align-items: center; width: 100%;">
+                        <h2 style="margin: 0; color: #ef4444; font-weight: bold; display: flex; align-items: center; gap: 8px;">
+                            <span id="bearishCaret" class="section-caret">${caretSymbol}</span>
+                            BEARISH
+                        </h2>
+                        <a href="#" onclick="event.stopPropagation(); downloadCSV('bearish'); return false;" style="color: #3b82f6; text-decoration: none; font-weight: bold; cursor: pointer; pointer-events: auto;">
+                            CSV
+                        </a>
+                    </div>
                 </div>
             </div>
-            
-            ${data.alerts.map(alert => renderAlertGroup(alert, 'bearish')).join('')}
+            <div id="bearishContent" class="section-content ${collapsedClass}">
+                ${data.alerts.map(alert => renderAlertGroup(alert, 'bearish')).join('')}
+            </div>
         </div>
     `;
     
