@@ -155,11 +155,40 @@
             right: 0;
             background: rgba(30, 64, 175, 0.95);
             backdrop-filter: blur(10px);
-            padding: 15px 20px;
+            padding: 12px 15px;
             box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.3);
             z-index: 999;
-            justify-content: center;
+            justify-content: space-between;
             align-items: center;
+        }
+
+        .mobile-footer-item {
+            color: white;
+            font-size: 11px;
+            text-align: center;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+        }
+
+        .mobile-footer-item .label {
+            font-size: 9px;
+            opacity: 0.8;
+        }
+
+        .mobile-footer-item .value {
+            font-size: 14px;
+            font-weight: bold;
+        }
+
+        .mobile-footer-item.positive .value {
+            color: #4ade80;
+        }
+
+        .mobile-footer-item.negative .value {
+            color: #f87171;
         }
 
         .mobile-menu-btn {
@@ -311,7 +340,7 @@
             }
 
             body {
-                padding-bottom: 90px;
+                padding-bottom: 80px;
             }
         }
 
@@ -364,6 +393,14 @@
             font-weight: 600;
             cursor: pointer;
             transition: all 0.3s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            justify-content: center;
+        }
+
+        .btn i {
+            font-size: 14px;
         }
 
         .btn-primary {
@@ -632,10 +669,38 @@
                 padding: 10px 12px;
             }
 
+            .filter-row > div:last-child {
+                display: flex;
+                gap: 8px;
+            }
+
             .btn {
-                width: 100%;
-                padding: 12px 20px;
-                font-size: 14px;
+                flex: 1;
+                padding: 12px;
+                font-size: 20px;
+                border: none;
+                border-radius: 8px;
+                cursor: pointer;
+                transition: all 0.3s;
+            }
+
+            .btn-primary {
+                background: #2a5298;
+                color: white;
+            }
+
+            .btn-secondary {
+                background: #6c757d;
+                color: white;
+            }
+
+            .btn-success {
+                background: #28a745;
+                color: white;
+            }
+
+            .btn .btn-text {
+                display: none;
             }
 
             .content {
@@ -643,22 +708,26 @@
             }
 
             .summary-cards {
-                grid-template-columns: 1fr 1fr;
-                gap: 12px;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 10px;
                 margin-bottom: 20px;
             }
 
             .summary-card {
-                padding: 15px 12px;
+                padding: 12px 8px;
             }
 
             .summary-card h3 {
-                font-size: 12px;
-                margin-bottom: 8px;
+                font-size: 11px;
+                margin-bottom: 6px;
             }
 
             .summary-card .value {
-                font-size: 22px;
+                font-size: 20px;
+            }
+
+            .summary-card.mobile-hide {
+                display: none;
             }
 
             .table-container {
@@ -738,6 +807,7 @@
         @media (max-width: 480px) {
             body {
                 padding: 5px;
+                padding-bottom: 80px;
             }
 
             .container {
@@ -761,20 +831,24 @@
             }
 
             .summary-cards {
-                grid-template-columns: 1fr;
-                gap: 10px;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 8px;
             }
 
             .summary-card {
-                padding: 12px 10px;
+                padding: 10px 6px;
             }
 
             .summary-card h3 {
-                font-size: 11px;
+                font-size: 10px;
             }
 
             .summary-card .value {
-                font-size: 20px;
+                font-size: 18px;
+            }
+
+            .summary-card.mobile-hide {
+                display: none;
             }
 
             table {
@@ -817,7 +891,7 @@
         /* Landscape Mobile */
         @media (max-width: 768px) and (orientation: landscape) {
             .summary-cards {
-                grid-template-columns: repeat(5, 1fr);
+                grid-template-columns: repeat(3, 1fr);
                 gap: 8px;
             }
 
@@ -831,6 +905,10 @@
 
             .summary-card .value {
                 font-size: 16px;
+            }
+
+            .summary-card.mobile-hide {
+                display: none;
             }
         }
     </style>
@@ -880,9 +958,18 @@
                     </select>
                 </div>
                 <div>
-                    <button class="btn btn-primary" onclick="loadReport()">🔍 Filter</button>
-                    <button class="btn btn-secondary" onclick="clearFilters()">🔄 Clear</button>
-                    <button class="btn btn-success" onclick="downloadReport()">📥 Download CSV</button>
+                    <button class="btn btn-primary" onclick="loadReport()">
+                        <i class="fas fa-search"></i>
+                        <span class="btn-text">Filter</span>
+                    </button>
+                    <button class="btn btn-secondary" onclick="clearFilters()">
+                        <i class="fas fa-redo"></i>
+                        <span class="btn-text">Clear</span>
+                    </button>
+                    <button class="btn btn-success" onclick="downloadReport()">
+                        <i class="fas fa-download"></i>
+                        <span class="btn-text">Download CSV</span>
+                    </button>
                 </div>
             </div>
         </div>
@@ -992,25 +1079,34 @@
             const totalClosed = totalWins + totalLosses;
             const cumulativeWinRate = totalClosed > 0 ? (totalWins / totalClosed * 100) : 0;
             
+            // Store summary data globally for mobile footer
+            window.summaryData = {
+                totalDays: summary.total_days,
+                totalAlerts: summary.total_alerts,
+                totalTrades: summary.total_trades,
+                cumulativeWinRate: cumulativeWinRate,
+                overallPnL: summary.overall_pnl
+            };
+            
             // Display summary cards
             const summaryHTML = `
                 <div class="summary-card">
-                    <h3>Total Days</h3>
+                    <h3>Days</h3>
                     <div class="value">${summary.total_days}</div>
                 </div>
                 <div class="summary-card">
-                    <h3>Total Alerts</h3>
+                    <h3>Alerts</h3>
                     <div class="value">${summary.total_alerts}</div>
                 </div>
                 <div class="summary-card">
-                    <h3>Total Trades</h3>
+                    <h3>Trades</h3>
                     <div class="value">${summary.total_trades}</div>
                 </div>
-                <div class="summary-card">
+                <div class="summary-card mobile-hide">
                     <h3>Cumulative Win Rate</h3>
                     <div class="value">${cumulativeWinRate.toFixed(1)}%</div>
                 </div>
-                <div class="summary-card">
+                <div class="summary-card mobile-hide">
                     <h3>Overall P&L</h3>
                     <div class="value">
                         ₹${summary.overall_pnl.toLocaleString('en-IN')}
@@ -1019,6 +1115,9 @@
             `;
             document.getElementById('summaryCards').innerHTML = summaryHTML;
             document.getElementById('summaryCards').style.display = 'grid';
+            
+            // Update mobile footer with P&L and Win Rate
+            updateMobileFooter();
 
             // Build table
             const tableHTML = `
@@ -1216,6 +1315,28 @@
                 .join(' ');
         }
 
+        function updateMobileFooter() {
+            // Update mobile footer with P&L and Win Rate
+            if (window.summaryData) {
+                const pnlElement = document.getElementById('mobile-pnl');
+                const winrateElement = document.getElementById('mobile-winrate');
+                
+                // Update P&L
+                const pnlValue = window.summaryData.overallPnL;
+                pnlElement.querySelector('.value').textContent = `₹${pnlValue.toLocaleString('en-IN')}`;
+                if (pnlValue >= 0) {
+                    pnlElement.classList.add('positive');
+                    pnlElement.classList.remove('negative');
+                } else {
+                    pnlElement.classList.add('negative');
+                    pnlElement.classList.remove('positive');
+                }
+                
+                // Update Win Rate
+                winrateElement.querySelector('.value').textContent = `${window.summaryData.cumulativeWinRate.toFixed(1)}%`;
+            }
+        }
+
         function clearFilters() {
             const today = new Date();
             const thirtyDaysAgo = new Date();
@@ -1311,9 +1432,17 @@
 
     <!-- Mobile Bottom Bar -->
     <div class="mobile-bottom-bar">
+        <div class="mobile-footer-item" id="mobile-pnl">
+            <div class="label">P&L</div>
+            <div class="value">₹0</div>
+        </div>
         <button class="mobile-menu-btn" onclick="openMobileDrawer()">
             <i class="fas fa-home"></i>
         </button>
+        <div class="mobile-footer-item" id="mobile-winrate">
+            <div class="label">Win%</div>
+            <div class="value">0%</div>
+        </div>
     </div>
 
     <!-- Mobile Drawer Overlay -->
