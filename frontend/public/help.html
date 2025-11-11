@@ -159,6 +159,8 @@
             padding: 15px 20px;
             box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.3);
             z-index: 999;
+            justify-content: center;
+            align-items: center;
         }
 
         .mobile-menu-btn {
@@ -302,7 +304,7 @@
         /* Show mobile bottom bar on mobile screens */
         @media (max-width: 768px) {
             .mobile-bottom-bar {
-                display: block;
+                display: flex;
             }
 
             .menu-dropdown-desktop {
@@ -2530,7 +2532,7 @@ def perform_health_check():
     <!-- Mobile Bottom Bar -->
     <div class="mobile-bottom-bar">
         <button class="mobile-menu-btn" onclick="openMobileDrawer()">
-            <i class="fas fa-bars"></i>
+            <i class="fas fa-home"></i>
         </button>
     </div>
 

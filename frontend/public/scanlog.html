@@ -154,6 +154,33 @@
             padding: 15px 20px;
             box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.3);
             z-index: 999;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .mobile-menu-btn {
+            background: white;
+            color: #1e40af;
+            border: none;
+            border-radius: 50%;
+            width: 56px;
+            height: 56px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            transition: all 0.3s ease;
+        }
+
+        .mobile-menu-btn:hover {
+            transform: scale(1.1);
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+        }
+
+        .mobile-menu-btn:active {
+            transform: scale(0.95);
         }
 
         .drawer-overlay {
@@ -180,7 +207,7 @@
         /* Show mobile bottom bar on mobile screens */
         @media (max-width: 768px) {
             .mobile-bottom-bar {
-                display: block;
+                display: flex;
             }
 
             .menu-dropdown-desktop {
@@ -812,7 +839,7 @@
     <!-- Mobile Bottom Bar -->
     <div class="mobile-bottom-bar">
         <button class="mobile-menu-btn" onclick="openMobileDrawer()">
-            <i class="fas fa-bars"></i>
+            <i class="fas fa-home"></i>
         </button>
     </div>
 
