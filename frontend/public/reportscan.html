@@ -32,7 +32,14 @@
             background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
             color: white;
             padding: 30px;
+            position: relative;
             text-align: center;
+        }
+
+        .header .menu-dropdown {
+            position: absolute;
+            top: 30px;
+            right: 30px;
         }
 
         .header h1 {
@@ -544,6 +551,10 @@
                 padding: 20px 15px;
             }
 
+            .header .menu-dropdown {
+                display: none;
+            }
+
             .header h1 {
                 font-size: 24px;
             }
@@ -802,12 +813,7 @@
         <div class="header">
             <h1>📊 Trading Report</h1>
             <p>Comprehensive daily trading statistics and performance analysis</p>
-        </div>
-
-        <div class="top-bar">
-            <div>
-                <button class="btn btn-success" onclick="downloadReport()">📥 Download CSV</button>
-            </div>
+            
             <div class="menu-dropdown menu-dropdown-desktop" id="menu-dropdown">
                 <button class="menu-btn" onclick="toggleMenu()" title="Menu">
                     <i class="fas fa-bars"></i> Menu <i class="fas fa-chevron-down" style="font-size: 10px;"></i>
@@ -826,6 +832,12 @@
                         <i class="fas fa-question-circle"></i> Help Guide
                     </a>
                 </div>
+            </div>
+        </div>
+
+        <div class="top-bar">
+            <div>
+                <button class="btn btn-success" onclick="downloadReport()">📥 Download CSV</button>
             </div>
         </div>
 
