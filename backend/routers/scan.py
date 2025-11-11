@@ -1129,13 +1129,20 @@ async def health_check(db: Session = Depends(get_db)):
         except:
             pass
         
-        # Check Upstox token
+        # Check Upstox token (only during market hours to avoid unnecessary API calls)
         token_valid = False
         token_error = None
         try:
-            result = vwap_service.check_index_trends()
-            if result and result.get('nifty'):
+            # Only check during market hours (9 AM - 4 PM)
+            current_hour = datetime.now().hour
+            if 9 <= current_hour <= 16:
+                result = vwap_service.check_index_trends()
+                if result and result.get('nifty'):
+                    token_valid = True
+            else:
+                # After market hours, assume token is valid (skip API call)
                 token_valid = True
+                token_error = "Market closed - token check skipped"
         except Exception as e:
             token_error = str(e)
         
@@ -1467,8 +1474,26 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
             "alerts": bearish_alerts
         }
         
-        # Check index trends before returning data
-        index_check = vwap_service.check_index_trends()
+        # Check index trends before returning data (only during market hours to avoid unnecessary API calls)
+        import pytz
+        ist = pytz.timezone('Asia/Kolkata')
+        current_time = datetime.now(ist)
+        current_hour = current_time.hour
+        
+        # Only check index trends during market hours (9 AM - 4 PM)
+        if 9 <= current_hour <= 16:
+            index_check = vwap_service.check_index_trends()
+        else:
+            # After market hours, return cached/default values without API call
+            index_check = {
+                "nifty_trend": "unknown",
+                "banknifty_trend": "unknown",
+                "allow_trading": False,
+                "nifty_data": {},
+                "banknifty_data": {},
+                "message": "Market closed - index data not updated after hours"
+            }
+            logger.info(f"⏰ After market hours ({current_hour}:00) - skipping index check")
         
         return JSONResponse(
             status_code=200,
@@ -1854,8 +1879,52 @@ async def refresh_current_vwap():
 async def get_index_prices():
     """
     Get current NIFTY and BANKNIFTY prices with trends using real-time market quotes
+    Only fetches during market hours (9 AM - 4 PM) to avoid unnecessary API calls
     """
     try:
+        # Check if during market hours (9 AM - 4 PM)
+        import pytz
+        ist = pytz.timezone('Asia/Kolkata')
+        current_time = datetime.now(ist)
+        current_hour = current_time.hour
+        
+        # If after market hours, return cached/default response without API call
+        if current_hour < 9 or current_hour > 16:
+            logger.info(f"⏰ After market hours ({current_hour}:00) - skipping index price fetch")
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "status": "success",
+                    "data": {
+                        "nifty": {
+                            "name": "NIFTY 50",
+                            "ltp": 0,
+                            "close_price": 0,
+                            "day_open": 0,
+                            "trend": "unknown",
+                            "change": 0,
+                            "change_percent": 0,
+                            "market_status": "Closed"
+                        },
+                        "banknifty": {
+                            "name": "BANKNIFTY",
+                            "ltp": 0,
+                            "close_price": 0,
+                            "day_open": 0,
+                            "trend": "unknown",
+                            "change": 0,
+                            "change_percent": 0,
+                            "market_status": "Closed"
+                        },
+                        "timestamp": datetime.now().isoformat(),
+                        "data_source": "cached",
+                        "market_status": "closed",
+                        "message": "Market closed - no live data available"
+                    }
+                }
+            )
+        
+        # During market hours - fetch real-time data
         # Get real-time market quotes for indices using correct instrument keys
         nifty_quote = vwap_service.get_market_quote_by_key(vwap_service.NIFTY50_KEY)
         banknifty_quote = vwap_service.get_market_quote_by_key(vwap_service.BANKNIFTY_KEY)
@@ -1946,9 +2015,21 @@ async def get_index_prices():
                 }
             )
         else:
-            # Fallback to historical data if real-time data is not available
+            # Fallback to historical data if real-time data is not available (only during market hours)
             print("Real-time data not available, falling back to historical data")
-            index_check_result = vwap_service.check_index_trends()
+            
+            # Double-check we're still in market hours before fallback API call
+            current_hour = datetime.now(ist).hour
+            if 9 <= current_hour <= 16:
+                index_check_result = vwap_service.check_index_trends()
+            else:
+                # Return default/empty data after hours
+                index_check_result = {
+                    "nifty_data": {"ltp": 0, "day_open": 0},
+                    "banknifty_data": {"ltp": 0, "day_open": 0},
+                    "nifty_trend": "unknown",
+                    "banknifty_trend": "unknown"
+                }
             
             nifty_data = index_check_result.get('nifty_data', {})
             banknifty_data = index_check_result.get('banknifty_data', {})
