@@ -23,6 +23,7 @@
     margin-bottom: 12px;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
     transition: transform 0.2s ease, box-shadow 0.2s ease;
+    font-family: Arial, sans-serif;
 }
 
 .stock-card:hover {
@@ -36,7 +37,8 @@
     align-items: stretch;
     gap: 10px;
     margin-bottom: 12px;
-    font-size: 13px;
+    font-size: 14px;
+    font-family: Arial, sans-serif;
 }
 
 .stock-card-row:last-child {
@@ -53,7 +55,8 @@
 .stock-card-label {
     color: #718096;
     font-weight: 500;
-    font-size: 13px;
+    font-size: 12px;
+    font-family: Arial, sans-serif;
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
@@ -61,10 +64,13 @@
 .stock-card-value {
     color: #2d3748;
     font-weight: 600;
+    font-size: 14px;
+    font-family: Arial, sans-serif;
 }
 
 .stock-card-value.large {
-    font-size: 15px;
+    font-size: 14px;
+    font-family: Arial, sans-serif;
 }
 
 .stock-card-value.green {
@@ -516,6 +522,7 @@ body {
     width: 100%;
     border-collapse: collapse;
     margin-top: 6px;
+    font-family: Arial, sans-serif;
 }
 
 .stocks-table thead {
@@ -528,7 +535,8 @@ body {
     font-weight: 600;
     color: var(--text-dark);
     border-bottom: 2px solid var(--border-color);
-    font-size: 11px;
+    font-size: 13px;
+    font-family: Arial, sans-serif;
     text-transform: uppercase;
     letter-spacing: 0.3px;
     white-space: normal;
@@ -553,34 +561,37 @@ body {
 .stocks-table td {
     padding: 12px 8px;
     color: var(--text-medium);
-    font-size: 13px;
+    font-size: 14px;
+    font-family: Arial, sans-serif;
     white-space: nowrap;
 }
 
 .stock-name {
     font-weight: 600;
     color: var(--text-dark);
+    font-family: Arial, sans-serif;
+    font-size: 14px;
 }
 
 .trigger-price {
     font-weight: 600;
     color: var(--success-color);
-    font-family: 'Courier New', Courier, monospace;
-    font-size: 18px;
+    font-family: Arial, sans-serif;
+    font-size: 14px;
 }
 
 .vwap-current {
     font-weight: 600;
     color: #4299e1;
-    font-family: 'Courier New', Courier, monospace;
-    font-size: 16px;
+    font-family: Arial, sans-serif;
+    font-size: 14px;
 }
 
 .vwap-previous {
     font-weight: 600;
     color: #9f7aea;
-    font-family: 'Courier New', Courier, monospace;
-    font-size: 16px;
+    font-family: Arial, sans-serif;
+    font-size: 14px;
 }
 
 /* No Data State */
@@ -707,20 +718,27 @@ body {
     
     .stocks-table {
         font-size: 14px;
+        font-family: Arial, sans-serif;
     }
     
     .stocks-table th,
     .stocks-table td {
         padding: 10px 6px;
-        font-size: 11px;
+        font-size: 13px;
+        font-family: Arial, sans-serif;
     }
     
     .stocks-table th {
-        font-size: 10px;
+        font-size: 12px;
+        font-family: Arial, sans-serif;
     }
     
-    .trigger-price {
-        font-size: 16px;
+    .trigger-price,
+    .vwap-current,
+    .vwap-previous,
+    .stock-name {
+        font-size: 14px;
+        font-family: Arial, sans-serif;
     }
     
     .no-data {
