@@ -211,6 +211,13 @@ async def update_vwap_for_all_open_positions():
                     old_option_ltp = position.sell_price or 0.0
                     position.sell_price = new_option_ltp  # Update sell_price with current option price
                     updates_made.append(f"Option LTP: {old_option_ltp:.2f}→{new_option_ltp:.2f}")
+                    
+                    # Calculate and update unrealized P&L for open trades
+                    if position.buy_price and position.qty:
+                        old_pnl = position.pnl or 0.0
+                        new_pnl = (new_option_ltp - position.buy_price) * position.qty
+                        position.pnl = new_pnl
+                        updates_made.append(f"P&L: ₹{old_pnl:.2f}→₹{new_pnl:.2f}")
                 
                 if updates_made:
                     position.updated_at = now
