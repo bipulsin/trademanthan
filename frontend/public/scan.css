@@ -563,32 +563,33 @@ body {
     color: var(--text-medium);
     font-size: 14px;
     font-family: Arial, sans-serif;
+    font-weight: normal;
     white-space: nowrap;
 }
 
 .stock-name {
-    font-weight: 600;
+    font-weight: normal;
     color: var(--text-dark);
     font-family: Arial, sans-serif;
     font-size: 14px;
 }
 
 .trigger-price {
-    font-weight: 600;
+    font-weight: normal;
     color: var(--success-color);
     font-family: Arial, sans-serif;
     font-size: 14px;
 }
 
 .vwap-current {
-    font-weight: 600;
+    font-weight: normal;
     color: #4299e1;
     font-family: Arial, sans-serif;
     font-size: 14px;
 }
 
 .vwap-previous {
-    font-weight: 600;
+    font-weight: normal;
     color: #9f7aea;
     font-family: Arial, sans-serif;
     font-size: 14px;
