@@ -956,6 +956,67 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             }
         )
 
+@router.post("/manual-start-schedulers")
+async def manual_start_schedulers():
+    """Manually start all schedulers if they're not running"""
+    try:
+        from services.health_monitor import start_health_monitor, health_monitor
+        from services.vwap_updater import start_vwap_updater, vwap_updater
+        from services.master_stock_scheduler import start_scheduler, master_stock_scheduler
+        from services.instruments_downloader import start_instruments_scheduler, instruments_scheduler
+        
+        results = {}
+        
+        # Start Health Monitor
+        if not health_monitor.is_running:
+            start_health_monitor()
+            results["health_monitor"] = "started"
+            logger.info("✅ Health Monitor manually started")
+        else:
+            results["health_monitor"] = "already_running"
+        
+        # Start VWAP Updater
+        if not vwap_updater.is_running:
+            start_vwap_updater()
+            results["vwap_updater"] = "started"
+            logger.info("✅ VWAP Updater manually started")
+        else:
+            results["vwap_updater"] = "already_running"
+        
+        # Start Master Stock Scheduler
+        if not master_stock_scheduler.is_running:
+            start_scheduler()
+            results["master_stock"] = "started"
+            logger.info("✅ Master Stock Scheduler manually started")
+        else:
+            results["master_stock"] = "already_running"
+        
+        # Start Instruments Scheduler
+        if not instruments_scheduler.is_running:
+            start_instruments_scheduler()
+            results["instruments"] = "started"
+            logger.info("✅ Instruments Scheduler manually started")
+        else:
+            results["instruments"] = "already_running"
+        
+        return {
+            "success": True,
+            "message": "Schedulers checked and started if needed",
+            "results": results,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error starting schedulers: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+
 @router.post("/manual-close-trades")
 async def manual_close_trades(db: Session = Depends(get_db)):
     """Manually trigger close_all_open_trades - one-time emergency use"""

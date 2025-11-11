@@ -1143,7 +1143,7 @@ function startAutoRefresh() {
     
     const targetMinutes = 15; // :15 minute mark (9:15, 10:15, 11:15, etc.)
 
-    // Helper to check if it's :15 minute mark in IST
+    // Helper to check if it's :15 minute mark in IST during market hours
     function isTargetTimeIST(date) {
         try {
             const istDate = new Date(date.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
@@ -1151,9 +1151,13 @@ function startAutoRefresh() {
             const m = istDate.getMinutes();
             const s = istDate.getSeconds();
             
-            // Trigger at :15 minute mark, starting from 9:15 AM
+            // Trigger at :15 minute mark, ONLY during market hours (9:15 AM to 3:45 PM)
+            // Check: 9:15 AM to 3:15 PM (hour 9-15, minute 15)
             // Trigger within first 10 seconds of the target minute
-            return h >= 9 && m === targetMinutes && s < 10;
+            const isDuringMarketHours = (h >= 9 && h <= 15);
+            const isTargetMinute = (m === targetMinutes && s < 10);
+            
+            return isDuringMarketHours && isTargetMinute;
         } catch (e) {
             return false;
         }
