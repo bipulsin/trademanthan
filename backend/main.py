@@ -2,6 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import sessionmaker
+from contextlib import asynccontextmanager
 import os
 import logging
 from dotenv import load_dotenv
@@ -47,54 +48,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 logger.info("🚀 TradeManthan backend starting...")
 
-app = FastAPI(
-    title="Trade Manthan API",
-    description="Professional Algo Trading Platform API",
-    version="1.0.0"
-)
-
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["https://trademanthan.in", "http://localhost:3000", "http://localhost:8000", "https://65.2.29.219"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Create database tables
-try:
-    create_tables()
-    logger.info("✅ Database tables created successfully")
-except Exception as e:
-    logger.warning(f"⚠️ Could not create database tables: {e}")
-    logger.warning("Database will be initialized when first accessed")
-
-# Include routers
-app.include_router(auth.router)
-app.include_router(dashboard.router)
-app.include_router(strategy.router)
-app.include_router(broker.router)
-app.include_router(products.router)
-app.include_router(algo.router)
-app.include_router(scan.router)
-
-# Global flag to track if services are already initialized
-_services_initialized = False
-
-# Startup and shutdown events
-@app.on_event("startup")
-async def startup_event():
-    """Initialize services on application startup"""
-    global _services_initialized
-    
-    # Prevent double initialization
-    if _services_initialized:
-        logger.info("⚠️ Services already initialized, skipping duplicate startup")
-        return
-    
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifespan context manager for startup and shutdown events
+    This ensures schedulers start once and stay running
+    """
     import sys
     
+    # STARTUP
     print("=" * 60, flush=True)
     print("🚀 TRADE MANTHAN API STARTUP", flush=True)
     print("=" * 60, flush=True)
@@ -131,7 +93,7 @@ async def startup_event():
         print("Starting Health Monitor...", flush=True)
         sys.stdout.flush()
         start_health_monitor()
-        print("✅ Health Monitor: STARTED (Every 15 min, 9 AM - 4 PM IST)", flush=True)
+        print("✅ Health Monitor: STARTED (Every 15 min, 9:15 AM - 3:45 PM IST)", flush=True)
         sys.stdout.flush()
     except Exception as e:
         print(f"❌ Health Monitor: FAILED - {e}", flush=True)
@@ -146,6 +108,7 @@ async def startup_event():
         start_vwap_updater()
         print("✅ Market Data Updater: STARTED", flush=True)
         print("   - Hourly updates (9:30 AM - 3:30 PM): Stock VWAP, Stock LTP, Option LTP", flush=True)
+        print("   - Auto-close trades at 3:25 PM", flush=True)
         print("   - End-of-day update (3:30 PM & 3:35 PM): Final day VWAP for ALL positions", flush=True)
         sys.stdout.flush()
     except Exception as e:
@@ -158,26 +121,13 @@ async def startup_event():
     print("✅ STARTUP COMPLETE - All Services Active", flush=True)
     print("=" * 60, flush=True)
     sys.stdout.flush()
-    
-    # Mark services as initialized ONLY after all services have started successfully
-    _services_initialized = True
     logger.info("✅ All services initialized and running")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on application shutdown"""
-    global _services_initialized
     
-    # Only shutdown if services were actually initialized
-    if not _services_initialized:
-        logger.info("⚠️ Shutdown called but services were never initialized, skipping")
-        return
+    yield  # Application runs here
     
+    # SHUTDOWN
     print("🛑 Shutting down Trade Manthan API...", flush=True)
     logger.info("🛑 Shutting down all services...")
-    
-    # Reset flag
-    _services_initialized = False
     
     # Stop master stock scheduler
     try:
@@ -203,11 +153,44 @@ async def shutdown_event():
     # Stop Market Data updater
     try:
         stop_vwap_updater()
-        print("✅ Market data updater stopped", flush=True)
+        print("✅ Market Data updater stopped", flush=True)
     except Exception as e:
-        print(f"⚠️ Error stopping market data updater: {e}", flush=True)
+        print(f"⚠️ Error stopping Market Data updater: {e}", flush=True)
     
     print("✅ Shutdown complete", flush=True)
+
+app = FastAPI(
+    title="Trade Manthan API",
+    description="Professional Algo Trading Platform API",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://trademanthan.in", "http://localhost:3000", "http://localhost:8000", "https://65.2.29.219"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Create database tables
+try:
+    create_tables()
+    logger.info("✅ Database tables created successfully")
+except Exception as e:
+    logger.warning(f"⚠️ Could not create database tables: {e}")
+    logger.warning("Database will be initialized when first accessed")
+
+# Include routers
+app.include_router(auth.router)
+app.include_router(dashboard.router)
+app.include_router(strategy.router)
+app.include_router(broker.router)
+app.include_router(products.router)
+app.include_router(algo.router)
+app.include_router(scan.router)
 
 def get_database_info():
     """Get database connection information"""
