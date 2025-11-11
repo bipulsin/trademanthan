@@ -365,15 +365,45 @@ async def close_all_open_trades():
                     continue
                 
                 # Get current option LTP for final sell price
-                instrument_key = position.instrument_key
                 option_ltp = None
                 
-                if instrument_key:
+                if option_contract:
                     try:
-                        option_quote = vwap_service.get_market_quote_by_key(instrument_key)
-                        if option_quote and 'last_price' in option_quote:
-                            option_ltp = option_quote['last_price']
-                            logger.info(f"📍 {option_contract}: Final LTP = ₹{option_ltp:.2f}")
+                        # Get instrument key by parsing option contract
+                        from pathlib import Path
+                        import json as json_lib
+                        import re
+                        
+                        instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
+                        if not instruments_file.exists():
+                            instruments_file = Path(__file__).parent.parent.parent / 'data' / 'instruments' / 'nse_instruments.json'
+                        
+                        if instruments_file.exists():
+                            with open(instruments_file, 'r') as f:
+                                instruments_data = json_lib.load(f)
+                            
+                            # Parse option contract: SYMBOL-MonthYYYY-STRIKE-TYPE
+                            match = re.match(r'^([A-Z&]+)-(\w{3})(\d{4})-(\d+\.?\d*?)-(CE|PE)$', option_contract)
+                            
+                            if match:
+                                symbol, month, year, strike, opt_type = match.groups()
+                                strike_value = float(strike)
+                                
+                                # Find matching instrument
+                                for instrument in instruments_data:
+                                    if (instrument.get('underlying_symbol', '').upper() == symbol.upper() and
+                                        instrument.get('segment') == 'NSE_FO' and
+                                        instrument.get('instrument_type') == opt_type):
+                                        
+                                        inst_strike = float(instrument.get('strike_price', 0))
+                                        if abs(inst_strike - strike_value) < 0.01:
+                                            instrument_key = instrument.get('instrument_key')
+                                            if instrument_key:
+                                                option_quote = vwap_service.get_market_quote_by_key(instrument_key)
+                                                if option_quote and 'last_price' in option_quote:
+                                                    option_ltp = option_quote['last_price']
+                                                    logger.info(f"📍 {option_contract}: Final LTP = ₹{option_ltp:.2f}")
+                                                break
                     except Exception as e:
                         logger.warning(f"⚠️ Could not fetch final LTP for {option_contract}: {e}")
                 
