@@ -3036,6 +3036,7 @@ async def get_daily_trades(
                 "sell_price": float(trade.sell_price) if trade.sell_price else 0,
                 "pnl": float(trade.pnl) if trade.pnl else 0,
                 "status": trade.status,
+                "exit_reason": trade.exit_reason,
                 "alert_type": trade.alert_type,
                 "alert_time": trade.alert_time.strftime("%H:%M") if trade.alert_time else ""
             })

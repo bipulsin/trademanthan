@@ -1165,7 +1165,7 @@
                                         </td>
                                         <td>
                                             <span class="badge ${getStatusBadgeClass(trade.status)}">
-                                                ${formatStatus(trade.status)}
+                                                ${formatStatus(trade.status, trade.exit_reason)}
                                             </span>
                                         </td>
                                     </tr>
@@ -1197,8 +1197,20 @@
             return 'badge-secondary';
         }
 
-        function formatStatus(status) {
-            // Format status for display
+        function formatStatus(status, exitReason) {
+            // If trade is sold/exited, show exit reason
+            if ((status === 'sold' || status.includes('exit')) && exitReason) {
+                const exitReasonMap = {
+                    'time_based': 'EXITED-TM',
+                    'stock_vwap_cross': 'EXITED-VW',
+                    'profit_target': 'EXITED-TG',
+                    'stop_loss': 'EXITED-SL',
+                    'manual': 'EXITED-MN'
+                };
+                return exitReasonMap[exitReason] || 'EXITED';
+            }
+            
+            // For other statuses, format normally
             return status.replace(/_/g, ' ').split(' ')
                 .map(word => word.charAt(0).toUpperCase() + word.slice(1))
                 .join(' ');
