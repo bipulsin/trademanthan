@@ -100,8 +100,6 @@ async def startup_event():
     print("=" * 60, flush=True)
     sys.stdout.flush()
     
-    _services_initialized = True
-    
     # Start master stock scheduler (downloads CSV daily at 9:00 AM)
     try:
         print("Starting Master Stock Scheduler...", flush=True)
@@ -160,6 +158,10 @@ async def startup_event():
     print("✅ STARTUP COMPLETE - All Services Active", flush=True)
     print("=" * 60, flush=True)
     sys.stdout.flush()
+    
+    # Mark services as initialized ONLY after all services have started successfully
+    _services_initialized = True
+    logger.info("✅ All services initialized and running")
 
 @app.on_event("shutdown")
 async def shutdown_event():
