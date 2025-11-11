@@ -184,10 +184,13 @@ async def update_vwap_for_all_open_positions():
                                             # Found the option - fetch its LTP
                                             instrument_key = instrument.get('instrument_key')
                                             if instrument_key:
-                                                option_ltp_data = vwap_service.get_option_ltp(instrument_key)
-                                                if option_ltp_data and option_ltp_data > 0:
-                                                    new_option_ltp = option_ltp_data
-                                                    break
+                                                # Use get_market_quote_by_key which takes only instrument_key
+                                                option_quote = vwap_service.get_market_quote_by_key(instrument_key)
+                                                if option_quote and 'last_price' in option_quote:
+                                                    option_ltp_data = option_quote['last_price']
+                                                    if option_ltp_data and option_ltp_data > 0:
+                                                        new_option_ltp = option_ltp_data
+                                                        break
                     except Exception as e:
                         logger.warning(f"Could not fetch option LTP for {option_contract}: {str(e)}")
                 
