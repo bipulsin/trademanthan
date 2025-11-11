@@ -906,64 +906,39 @@ function displaySectionsBasedOnTrends(indexCheck, bullishData, bearishData) {
     // Update day summary with calculated metrics
     updateDaySummary(bullishData, bearishData);
     
-    // Show opposite trends warning banner if indices are not aligned (informational only)
+    // DO NOT show opposite trends banner - let individual trade status show 'No Entry'
+    // Always hide the banner - individual trades will show their status
+    hideOppositeTrendsBanner();
+    
+    // Log for debugging
     if (niftyTrend !== bankniftyTrend && niftyTrend !== 'unknown' && bankniftyTrend !== 'unknown') {
-        console.log('Opposite trends detected - showing informational banner');
-        showOppositeTrendsBanner(niftyTrend, bankniftyTrend);
-    } else {
-        hideOppositeTrendsBanner();
+        console.log('Opposite trends detected - trades will show "No Entry" status');
     }
     
 }
 
-// Display opposite trends warning
+// Display opposite trends warning - DEPRECATED
+// This function is no longer used - we don't show the banner anymore
+// Individual trades show "No Entry" status instead
 function displayOppositeTrends(indexCheck) {
+    console.log('displayOppositeTrends called - but banner disabled, showing sections with No Entry status');
+    
+    // Don't show the banner - let individual trade status speak
+    hideOppositeTrendsBanner();
+    
+    // Display the sections normally with trade status showing "No Entry"
     const niftyTrend = indexCheck.nifty_trend || 'unknown';
     const bankniftyTrend = indexCheck.banknifty_trend || 'unknown';
     
-    // Show the banner
-    const banner = document.getElementById('oppositeTrendsBanner');
-    if (banner) {
-        banner.style.display = 'block';
-        
-        // Update trend displays
-        const niftyDisplay = document.getElementById('niftyTrendDisplay');
-        const bankniftyDisplay = document.getElementById('bankniftyTrendDisplay');
-        
-        if (niftyDisplay) {
-            niftyDisplay.textContent = niftyTrend.toUpperCase();
-        }
-        if (bankniftyDisplay) {
-            bankniftyDisplay.textContent = bankniftyTrend.toUpperCase();
-        }
-        
-        console.log('Opposite trends banner shown - but sections will still display');
-    }
-    
-    // DO NOT hide the alert sections - always show alerts regardless of index trends
-    // The 'no_entry' status will indicate which trades were not entered
-    console.log('Alert sections remain visible despite opposite trends');
+    console.log(`Index trends: NIFTY=${niftyTrend}, BANKNIFTY=${bankniftyTrend} - trades will show individual status`);
 }
 
-// Show opposite trends banner (informational only, doesn't hide sections)
+// Show opposite trends banner - DISABLED
+// We no longer show this banner - individual trade status is sufficient
 function showOppositeTrendsBanner(niftyTrend, bankniftyTrend) {
-    const banner = document.getElementById('oppositeTrendsBanner');
-    if (banner) {
-        banner.style.display = 'block';
-        
-        // Update trend displays
-        const niftyDisplay = document.getElementById('niftyTrendDisplay');
-        const bankniftyDisplay = document.getElementById('bankniftyTrendDisplay');
-        
-        if (niftyDisplay) {
-            niftyDisplay.textContent = niftyTrend.toUpperCase();
-        }
-        if (bankniftyDisplay) {
-            bankniftyDisplay.textContent = bankniftyTrend.toUpperCase();
-        }
-        
-        console.log('Opposite trends banner shown (informational)');
-    }
+    // Do nothing - banner is disabled
+    // Individual trades will show "No Entry" status instead
+    console.log(`Index trends: NIFTY=${niftyTrend}, BANKNIFTY=${bankniftyTrend} - banner disabled, using trade status`);
 }
 
 function hideOppositeTrendsBanner() {
