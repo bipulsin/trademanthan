@@ -1,16 +1,18 @@
-from fastapi import APIRouter, Request, HTTPException, Depends, Query
+from fastapi import APIRouter, Request, HTTPException, Depends, Query, BackgroundTasks
 from fastapi.responses import JSONResponse, RedirectResponse
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func, desc, text
+from starlette.requests import ClientDisconnect
 import json
 import os
 import sys
 import requests
 import secrets
 import logging
+import asyncio
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -1041,7 +1043,7 @@ async def health_check(db: Session = Depends(get_db)):
         )
 
 @router.post("/chartink-webhook-bullish")
-async def receive_bullish_webhook(request: Request, db: Session = Depends(get_db)):
+async def receive_bullish_webhook(request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """
     Dedicated endpoint for Bullish alerts from Chartink.com
     All alerts received here will be treated as BULLISH with CALL options.
@@ -1056,11 +1058,49 @@ async def receive_bullish_webhook(request: Request, db: Session = Depends(get_db
         "alert_name": "Alert for Bullish Breakout"
     }
     """
-    data = await request.json()
-    return await process_webhook_data(data, db, forced_type='bullish')
+    try:
+        # Try to read JSON body with timeout protection
+        data = await asyncio.wait_for(request.json(), timeout=2.0)
+        logger.info(f"📥 Received bullish webhook with {len(data.get('stocks', '').split(','))} stocks")
+        
+        # Respond immediately to prevent timeout
+        response_data = {
+            "status": "accepted",
+            "message": "Bullish webhook received and queued for processing",
+            "alert_type": "bullish",
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Process in background to avoid blocking
+        background_tasks.add_task(process_webhook_data, data, db, 'bullish')
+        
+        return JSONResponse(content=response_data, status_code=202)
+        
+    except ClientDisconnect:
+        logger.error("⚠️ Client disconnected before webhook data could be read (bullish). Chartink timeout likely due to slow processing.")
+        return JSONResponse(
+            content={
+                "status": "error",
+                "message": "Client disconnected - webhook data lost. Please check Chartink timeout settings.",
+                "suggestion": "Consider increasing Chartink webhook timeout or optimizing server processing speed"
+            },
+            status_code=499
+        )
+    except asyncio.TimeoutError:
+        logger.error("⚠️ Timeout reading bullish webhook body")
+        return JSONResponse(
+            content={"status": "error", "message": "Timeout reading request body"},
+            status_code=408
+        )
+    except Exception as e:
+        logger.error(f"❌ Error processing bullish webhook: {str(e)}")
+        return JSONResponse(
+            content={"status": "error", "message": f"Error: {str(e)}"},
+            status_code=500
+        )
 
 @router.post("/chartink-webhook-bearish")
-async def receive_bearish_webhook(request: Request, db: Session = Depends(get_db)):
+async def receive_bearish_webhook(request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """
     Dedicated endpoint for Bearish alerts from Chartink.com
     All alerts received here will be treated as BEARISH with PUT options.
@@ -1075,8 +1115,46 @@ async def receive_bearish_webhook(request: Request, db: Session = Depends(get_db
         "alert_name": "Alert for Bearish Breakdown"
     }
     """
-    data = await request.json()
-    return await process_webhook_data(data, db, forced_type='bearish')
+    try:
+        # Try to read JSON body with timeout protection
+        data = await asyncio.wait_for(request.json(), timeout=2.0)
+        logger.info(f"📥 Received bearish webhook with {len(data.get('stocks', '').split(','))} stocks")
+        
+        # Respond immediately to prevent timeout
+        response_data = {
+            "status": "accepted",
+            "message": "Bearish webhook received and queued for processing",
+            "alert_type": "bearish",
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Process in background to avoid blocking
+        background_tasks.add_task(process_webhook_data, data, db, 'bearish')
+        
+        return JSONResponse(content=response_data, status_code=202)
+        
+    except ClientDisconnect:
+        logger.error("⚠️ Client disconnected before webhook data could be read (bearish). Chartink timeout likely due to slow processing.")
+        return JSONResponse(
+            content={
+                "status": "error",
+                "message": "Client disconnected - webhook data lost. Please check Chartink timeout settings.",
+                "suggestion": "Consider increasing Chartink webhook timeout or optimizing server processing speed"
+            },
+            status_code=499
+        )
+    except asyncio.TimeoutError:
+        logger.error("⚠️ Timeout reading bearish webhook body")
+        return JSONResponse(
+            content={"status": "error", "message": "Timeout reading request body"},
+            status_code=408
+        )
+    except Exception as e:
+        logger.error(f"❌ Error processing bearish webhook: {str(e)}")
+        return JSONResponse(
+            content={"status": "error", "message": f"Error: {str(e)}"},
+            status_code=500
+        )
 
 @router.post("/chartink-webhook")
 async def receive_chartink_webhook(request: Request, db: Session = Depends(get_db)):
