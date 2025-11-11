@@ -1484,16 +1484,51 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
         if 9 <= current_hour <= 16:
             index_check = vwap_service.check_index_trends()
         else:
-            # After market hours, return cached/default values without API call
+            # After market hours, fetch closing prices to show last known state
+            logger.info(f"⏰ After market hours ({current_hour}:00) - fetching closing prices for display")
+            
+            # Get OHLC data which contains closing prices
+            nifty_quote = vwap_service.get_market_quote_by_key(vwap_service.NIFTY50_KEY)
+            banknifty_quote = vwap_service.get_market_quote_by_key(vwap_service.BANKNIFTY_KEY)
+            
+            # Process NIFTY closing data
+            nifty_data = {}
+            nifty_trend = 'unknown'
+            if nifty_quote:
+                ohlc = nifty_quote.get('ohlc', {})
+                nifty_close = float(ohlc.get('close', 0)) if ohlc.get('close') else float(nifty_quote.get('last_price', 0))
+                nifty_open = float(ohlc.get('open', 0))
+                if nifty_close > 0 and nifty_open > 0:
+                    nifty_trend = 'bullish' if nifty_close > nifty_open else 'bearish' if nifty_close < nifty_open else 'neutral'
+                    nifty_data = {
+                        'ltp': nifty_close,
+                        'day_open': nifty_open,
+                        'close_price': nifty_close
+                    }
+            
+            # Process BANKNIFTY closing data
+            banknifty_data = {}
+            banknifty_trend = 'unknown'
+            if banknifty_quote:
+                ohlc = banknifty_quote.get('ohlc', {})
+                banknifty_close = float(ohlc.get('close', 0)) if ohlc.get('close') else float(banknifty_quote.get('last_price', 0))
+                banknifty_open = float(ohlc.get('open', 0))
+                if banknifty_close > 0 and banknifty_open > 0:
+                    banknifty_trend = 'bullish' if banknifty_close > banknifty_open else 'bearish' if banknifty_close < banknifty_open else 'neutral'
+                    banknifty_data = {
+                        'ltp': banknifty_close,
+                        'day_open': banknifty_open,
+                        'close_price': banknifty_close
+                    }
+            
             index_check = {
-                "nifty_trend": "unknown",
-                "banknifty_trend": "unknown",
+                "nifty_trend": nifty_trend,
+                "banknifty_trend": banknifty_trend,
                 "allow_trading": False,
-                "nifty_data": {},
-                "banknifty_data": {},
-                "message": "Market closed - index data not updated after hours"
+                "nifty_data": nifty_data,
+                "banknifty_data": banknifty_data,
+                "message": "Market closed - showing closing prices"
             }
-            logger.info(f"⏰ After market hours ({current_hour}:00) - skipping index check")
         
         return JSONResponse(
             status_code=200,
@@ -1888,9 +1923,36 @@ async def get_index_prices():
         current_time = datetime.now(ist)
         current_hour = current_time.hour
         
-        # If after market hours, return cached/default response without API call
+        # If after market hours, fetch closing prices from OHLC (doesn't update live quotes)
         if current_hour < 9 or current_hour > 16:
-            logger.info(f"⏰ After market hours ({current_hour}:00) - skipping index price fetch")
+            logger.info(f"⏰ After market hours ({current_hour}:00) - fetching closing prices")
+            
+            # Get OHLC data which contains closing prices
+            nifty_quote = vwap_service.get_market_quote_by_key(vwap_service.NIFTY50_KEY)
+            banknifty_quote = vwap_service.get_market_quote_by_key(vwap_service.BANKNIFTY_KEY)
+            
+            # Process NIFTY closing data
+            nifty_close = 0
+            nifty_open = 0
+            nifty_trend = 'unknown'
+            if nifty_quote:
+                ohlc = nifty_quote.get('ohlc', {})
+                nifty_close = float(ohlc.get('close', 0)) if ohlc.get('close') else float(nifty_quote.get('last_price', 0))
+                nifty_open = float(ohlc.get('open', 0))
+                if nifty_close > 0 and nifty_open > 0:
+                    nifty_trend = 'bullish' if nifty_close > nifty_open else 'bearish' if nifty_close < nifty_open else 'neutral'
+            
+            # Process BANKNIFTY closing data
+            banknifty_close = 0
+            banknifty_open = 0
+            banknifty_trend = 'unknown'
+            if banknifty_quote:
+                ohlc = banknifty_quote.get('ohlc', {})
+                banknifty_close = float(ohlc.get('close', 0)) if ohlc.get('close') else float(banknifty_quote.get('last_price', 0))
+                banknifty_open = float(ohlc.get('open', 0))
+                if banknifty_close > 0 and banknifty_open > 0:
+                    banknifty_trend = 'bullish' if banknifty_close > banknifty_open else 'bearish' if banknifty_close < banknifty_open else 'neutral'
+            
             return JSONResponse(
                 status_code=200,
                 content={
@@ -1898,28 +1960,28 @@ async def get_index_prices():
                     "data": {
                         "nifty": {
                             "name": "NIFTY 50",
-                            "ltp": 0,
-                            "close_price": 0,
-                            "day_open": 0,
-                            "trend": "unknown",
-                            "change": 0,
-                            "change_percent": 0,
+                            "ltp": nifty_close,
+                            "close_price": nifty_close,
+                            "day_open": nifty_open,
+                            "trend": nifty_trend,
+                            "change": nifty_close - nifty_open if nifty_close > 0 and nifty_open > 0 else 0,
+                            "change_percent": ((nifty_close - nifty_open) / nifty_open * 100) if nifty_open > 0 else 0,
                             "market_status": "Closed"
                         },
                         "banknifty": {
                             "name": "BANKNIFTY",
-                            "ltp": 0,
-                            "close_price": 0,
-                            "day_open": 0,
-                            "trend": "unknown",
-                            "change": 0,
-                            "change_percent": 0,
+                            "ltp": banknifty_close,
+                            "close_price": banknifty_close,
+                            "day_open": banknifty_open,
+                            "trend": banknifty_trend,
+                            "change": banknifty_close - banknifty_open if banknifty_close > 0 and banknifty_open > 0 else 0,
+                            "change_percent": ((banknifty_close - banknifty_open) / banknifty_open * 100) if banknifty_open > 0 else 0,
                             "market_status": "Closed"
                         },
                         "timestamp": datetime.now().isoformat(),
-                        "data_source": "cached",
+                        "data_source": "closing_prices",
                         "market_status": "closed",
-                        "message": "Market closed - no live data available"
+                        "message": "Market closed - showing closing prices"
                     }
                 }
             )
