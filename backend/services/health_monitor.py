@@ -136,13 +136,13 @@ class HealthMonitor:
                 
                 # Try to fetch index prices (quick API call)
                 result = upstox_service.check_index_trends()
-                if result and result.get('nifty'):
+                if result and result.get('nifty_data'):
                     self.api_token_failures = 0
                     logger.info("✅ Upstox API: OK")
                 else:
                     self.api_token_failures += 1
                     issues.append("⚠️ Upstox API token may be expired")
-                    logger.warning("Upstox API token check failed")
+                    logger.warning(f"⚠️ Upstox API token check failed - Result: {result}")
             except Exception as e:
                 self.api_token_failures += 1
                 if "401" in str(e) or "token" in str(e).lower() or "unauthorized" in str(e).lower():
