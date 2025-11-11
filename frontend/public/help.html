@@ -18,6 +18,8 @@
             line-height: 1.6;
             color: #333;
             background: #f5f5f5;
+            overflow-x: hidden;
+            width: 100%;
         }
 
         /* Header */
@@ -156,12 +158,12 @@
             right: 0;
             background: rgba(30, 64, 175, 0.95);
             backdrop-filter: blur(10px);
-            padding: 6px 15px;
+            padding: 8px 15px;
             box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.3);
             z-index: 999;
             justify-content: center;
             align-items: flex-end;
-            height: 48px;
+            height: 60px;
         }
 
         .mobile-menu-btn {
@@ -315,7 +317,7 @@
             }
 
             body {
-                padding-bottom: 70px;
+                padding-bottom: 80px;
             }
         }
 
@@ -390,6 +392,8 @@
             padding: 40px;
             border-radius: 12px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            overflow-x: hidden;
+            width: 100%;
         }
 
         /* Quick Start Banner */
@@ -506,6 +510,7 @@
             border-collapse: collapse;
             margin: 20px 0;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            table-layout: auto;
         }
 
         th {
@@ -611,6 +616,11 @@
         @media (max-width: 768px) {
             body {
                 padding: 0;
+                overflow-x: hidden;
+            }
+            
+            * {
+                max-width: 100%;
             }
 
             .header {
@@ -638,8 +648,10 @@
             }
 
             .container {
-                padding: 15px;
+                padding: 10px;
                 gap: 20px;
+                width: 100%;
+                overflow-x: hidden;
             }
 
             .toc {
@@ -660,6 +672,8 @@
 
             .content {
                 padding: 15px;
+                overflow-x: hidden;
+                word-wrap: break-word;
             }
 
             .content h2 {
@@ -687,6 +701,18 @@
 
             .content ul, .content ol {
                 padding-left: 20px;
+            }
+
+            table {
+                display: block;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            pre, code {
+                overflow-x: auto;
+                word-wrap: break-word;
+                white-space: pre-wrap;
             }
 
             .info-box {
@@ -753,6 +779,14 @@
 
         /* Small Mobile Devices */
         @media (max-width: 480px) {
+            body {
+                overflow-x: hidden;
+            }
+
+            .header {
+                padding: 15px 10px;
+            }
+
             .header h1 {
                 font-size: 18px;
             }
@@ -762,7 +796,9 @@
             }
 
             .container {
-                padding: 10px;
+                padding: 5px;
+                width: 100%;
+                overflow-x: hidden;
             }
 
             .toc {
@@ -770,7 +806,8 @@
             }
 
             .content {
-                padding: 12px;
+                padding: 10px;
+                overflow-x: hidden;
             }
 
             .content h2 {
@@ -787,6 +824,20 @@
 
             .content p, .content li {
                 font-size: 13px;
+            }
+
+            img {
+                max-width: 100% !important;
+                height: auto !important;
+            }
+
+            table {
+                font-size: 12px;
+            }
+
+            table th, table td {
+                padding: 8px 4px;
+                font-size: 11px;
             }
 
             .info-box {
