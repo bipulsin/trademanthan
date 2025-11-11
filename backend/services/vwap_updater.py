@@ -144,6 +144,26 @@ async def update_vwap_for_all_open_positions():
                 stock_name = position.stock_name
                 option_contract = position.option_contract
                 
+                # ═══════════════════════════════════════════════════════════════
+                # SAFETY CHECK: Ensure trade is in HOLD status (still open)
+                # ═══════════════════════════════════════════════════════════════
+                # A trade has "HOLD" status (frontend) when:
+                #   - exit_reason = None (database)
+                #   - status = 'bought' (database)
+                #   - No exit conditions met (profit target, SL, VWAP cross)
+                #
+                # We ONLY update sell_price/sell_time for trades that are OPEN.
+                # Once exit_reason is set, the trade is CLOSED and excluded from future updates.
+                # ═══════════════════════════════════════════════════════════════
+                
+                if position.exit_reason is not None:
+                    logger.warning(f"⚠️ Skipping {stock_name} - exit_reason already set to '{position.exit_reason}' (trade closed)")
+                    continue
+                
+                if position.status == 'sold':
+                    logger.warning(f"⚠️ Skipping {stock_name} - status already 'sold' (trade closed)")
+                    continue
+                
                 # 1. Fetch fresh Stock VWAP from API
                 new_vwap = vwap_service.get_stock_vwap(stock_name)
                 
@@ -250,9 +270,17 @@ async def update_vwap_for_all_open_positions():
                                     logger.info(f"📉 AUTO-EXIT: {stock_name} VWAP cross! Stock LTP: ₹{new_stock_ltp:.2f} vs VWAP: ₹{new_vwap:.2f} ({option_type})")
                         
                         # Set exit fields if any exit condition was triggered
+                        # ═══════════════════════════════════════════════════════════════
+                        # IMPORTANT: sell_time is ONLY set here, at the moment of exit
+                        # After this update:
+                        #   - exit_reason will be set → Trade excluded from future updates
+                        #   - sell_price is FROZEN at the current value
+                        #   - sell_time is FROZEN at the current timestamp
+                        #   - No more updates will be applied to this trade
+                        # ═══════════════════════════════════════════════════════════════
                         if exit_triggered and exit_reason_to_set:
                             position.exit_reason = exit_reason_to_set
-                            position.sell_time = now
+                            position.sell_time = now  # Set ONLY once at exit
                             position.status = 'sold'
                             updates_made.append(f"🚨 EXITED: {exit_reason_to_set}")
                             logger.warning(f"⚠️ {stock_name} automatically exited: {exit_reason_to_set}")
