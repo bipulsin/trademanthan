@@ -495,17 +495,8 @@
         }
 
         .trade-details {
-            padding: 20px 30px;
+            padding: 15px 30px;
             background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-        }
-
-        .trade-details h4 {
-            margin: 0 0 15px 0;
-            color: #1e3c72;
-            font-size: 16px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
         }
 
         .trade-details-table {
@@ -724,10 +715,6 @@
 
             .trade-details {
                 padding: 15px;
-            }
-
-            .trade-details h4 {
-                font-size: 14px;
             }
 
             .trade-details-table {
@@ -1163,13 +1150,6 @@
                 
                 if (result.success && result.trades.length > 0) {
                     const detailsHTML = `
-                        <h4>
-                            <i class="fas fa-chart-line"></i>
-                            Trade Details for ${formatDate(date)}
-                            <span style="font-size: 14px; font-weight: normal; color: #6c757d; margin-left: 10px;">
-                                (${result.total_trades} executed trades)
-                            </span>
-                        </h4>
                         <table class="trade-details-table">
                             <thead>
                                 <tr>
