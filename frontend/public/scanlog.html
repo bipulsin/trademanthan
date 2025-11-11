@@ -391,6 +391,34 @@
             gap: 8px;
         }
 
+        .scheduler-icon {
+            font-size: 18px;
+            font-weight: bold;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 24px;
+        }
+
+        .scheduler-icon.active {
+            color: #28a745;
+            font-size: 20px;
+        }
+
+        .scheduler-icon.inactive {
+            background: #dc3545;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 16px;
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            0%, 50%, 100% { opacity: 1; }
+            25%, 75% { opacity: 0.6; }
+        }
+
         .btn-sm {
             padding: 4px 12px;
             font-size: 12px;
@@ -416,31 +444,6 @@
             gap: 8px;
         }
 
-        .status-dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            animation: pulse 2s infinite;
-        }
-
-        .status-dot.active {
-            background: #28a745;
-        }
-
-        .status-dot.inactive {
-            background: #dc3545;
-            animation: none;
-        }
-
-        .status-dot.warning {
-            background: #ffc107;
-            animation: pulse 1s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
 
         .filter-bar {
             background: rgba(255, 255, 255, 0.05);
@@ -710,7 +713,7 @@
             </div>
             <div class="status-item">
                 <div class="scheduler-status" id="scheduler-status">
-                    <div class="status-dot" id="scheduler-dot"></div>
+                    <span id="scheduler-icon" class="scheduler-icon">⏳</span>
                     <span id="scheduler-text">Schedulers: Checking...</span>
                 </div>
                 <button class="btn btn-sm btn-warning" id="start-schedulers-btn" onclick="startSchedulers()" style="display: none; margin-left: 10px;">
@@ -788,12 +791,15 @@
                 const response = await fetch(`${API_BASE_URL}/scan/scheduler-status`);
                 const data = await response.json();
                 
-                if (data.success && data.all_schedulers_running) {
-                    // All schedulers running
-                    updateSchedulerStatus('running', `Schedulers: Active (${data.schedulers.vwap_updater.jobs_count + data.schedulers.health_monitor.jobs_count} jobs)`);
+                const totalJobs = data.schedulers.vwap_updater.jobs_count + data.schedulers.health_monitor.jobs_count;
+                
+                // If ALL schedulers running AND all jobs present (39 total expected)
+                if (data.success && data.all_schedulers_running && totalJobs >= 39) {
+                    // All schedulers running with all jobs
+                    updateSchedulerStatus('active', `Schedulers: Active (${totalJobs} jobs)`);
                     document.getElementById('start-schedulers-btn').style.display = 'none';
-                } else if (data.success) {
-                    // Some schedulers not running
+                } else {
+                    // Even if 1 job missing or 1 scheduler stopped → show as inactive
                     const runningCount = [
                         data.schedulers.health_monitor.running,
                         data.schedulers.vwap_updater.running,
@@ -801,30 +807,34 @@
                         data.schedulers.instruments.running
                     ].filter(Boolean).length;
                     
-                    updateSchedulerStatus('warning', `Schedulers: ${runningCount}/4 Running`);
-                    document.getElementById('start-schedulers-btn').style.display = 'inline-block';
-                } else {
-                    updateSchedulerStatus('error', 'Schedulers: Error');
+                    if (totalJobs < 39) {
+                        updateSchedulerStatus('inactive', `Schedulers: Missing Jobs (${totalJobs}/39)`);
+                    } else {
+                        updateSchedulerStatus('inactive', `Schedulers: ${runningCount}/4 Running`);
+                    }
                     document.getElementById('start-schedulers-btn').style.display = 'inline-block';
                 }
             } catch (error) {
                 console.error('Error checking scheduler status:', error);
-                updateSchedulerStatus('error', 'Schedulers: Unknown');
+                updateSchedulerStatus('inactive', 'Schedulers: Error');
+                document.getElementById('start-schedulers-btn').style.display = 'inline-block';
             }
         }
 
         function updateSchedulerStatus(status, text) {
-            const dot = document.getElementById('scheduler-dot');
+            const icon = document.getElementById('scheduler-icon');
             const textEl = document.getElementById('scheduler-text');
             
             textEl.textContent = text;
             
-            if (status === 'running') {
-                dot.className = 'status-dot active';
-            } else if (status === 'warning') {
-                dot.className = 'status-dot warning';
+            if (status === 'active') {
+                // Green checkmark for all active
+                icon.textContent = '✅';
+                icon.className = 'scheduler-icon active';
             } else {
-                dot.className = 'status-dot inactive';
+                // Red box with cross for any issue
+                icon.textContent = '❌';
+                icon.className = 'scheduler-icon inactive';
             }
         }
 
@@ -841,10 +851,10 @@
                 const data = await response.json();
                 
                 if (data.success) {
-                    updateSchedulerStatus('running', 'Schedulers: Started ✅');
+                    updateSchedulerStatus('active', 'Schedulers: Started ✅');
                     btn.style.display = 'none';
                     
-                    // Refresh status after 2 seconds
+                    // Refresh status after 2 seconds to verify
                     setTimeout(checkSchedulerStatus, 2000);
                 } else {
                     alert('Failed to start schedulers: ' + (data.error || 'Unknown error'));
