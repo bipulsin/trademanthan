@@ -779,20 +779,20 @@
         /* Landscape Mobile */
         @media (max-width: 768px) and (orientation: landscape) {
             .summary-cards {
-                grid-template-columns: repeat(4, 1fr);
-                gap: 10px;
+                grid-template-columns: repeat(5, 1fr);
+                gap: 8px;
             }
 
             .summary-card {
-                padding: 10px 8px;
+                padding: 10px 6px;
             }
 
             .summary-card h3 {
-                font-size: 11px;
+                font-size: 10px;
             }
 
             .summary-card .value {
-                font-size: 18px;
+                font-size: 16px;
             }
         }
     </style>
@@ -949,6 +949,16 @@
         }
 
         function displayReport(data, summary) {
+            // Calculate cumulative win rate
+            let totalWins = 0;
+            let totalLosses = 0;
+            data.forEach(day => {
+                totalWins += (day.bullish_wins + day.bearish_wins);
+                totalLosses += (day.bullish_losses + day.bearish_losses);
+            });
+            const totalClosed = totalWins + totalLosses;
+            const cumulativeWinRate = totalClosed > 0 ? (totalWins / totalClosed * 100) : 0;
+            
             // Display summary cards
             const summaryHTML = `
                 <div class="summary-card">
@@ -962,6 +972,10 @@
                 <div class="summary-card">
                     <h3>Total Trades</h3>
                     <div class="value">${summary.total_trades}</div>
+                </div>
+                <div class="summary-card">
+                    <h3>Cumulative Win Rate</h3>
+                    <div class="value">${cumulativeWinRate.toFixed(1)}%</div>
                 </div>
                 <div class="summary-card">
                     <h3>Overall P&L</h3>
