@@ -79,16 +79,28 @@ app.include_router(products.router)
 app.include_router(algo.router)
 app.include_router(scan.router)
 
+# Global flag to track if services are already initialized
+_services_initialized = False
+
 # Startup and shutdown events
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on application startup"""
+    global _services_initialized
+    
+    # Prevent double initialization
+    if _services_initialized:
+        logger.info("⚠️ Services already initialized, skipping duplicate startup")
+        return
+    
     import sys
     
     print("=" * 60, flush=True)
     print("🚀 TRADE MANTHAN API STARTUP", flush=True)
     print("=" * 60, flush=True)
     sys.stdout.flush()
+    
+    _services_initialized = True
     
     # Start master stock scheduler (downloads CSV daily at 9:00 AM)
     try:
@@ -152,7 +164,18 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on application shutdown"""
+    global _services_initialized
+    
+    # Only shutdown if services were actually initialized
+    if not _services_initialized:
+        logger.info("⚠️ Shutdown called but services were never initialized, skipping")
+        return
+    
     print("🛑 Shutting down Trade Manthan API...", flush=True)
+    logger.info("🛑 Shutting down all services...")
+    
+    # Reset flag
+    _services_initialized = False
     
     # Stop master stock scheduler
     try:
