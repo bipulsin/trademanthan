@@ -390,13 +390,8 @@ async function loadLatestData() {
             console.log('Bullish Data:', currentBullishData);
             console.log('Bearish Data:', currentBearishData);
             
-            // Check if trading is allowed based on index trends
-            if (result.data.index_check && !result.data.allow_trading) {
-                displayOppositeTrends(result.data.index_check);
-                return;
-            }
-            
-            // Display sections based on index trends
+            // ALWAYS display sections regardless of index trends
+            // Index trends only affect trade ENTRY status, not alert DISPLAY
             console.log('About to call displaySectionsBasedOnTrends with:', result.data.index_check);
             displaySectionsBasedOnTrends(result.data.index_check, currentBullishData, currentBearishData);
         } else {
@@ -895,6 +890,10 @@ function displaySectionsBasedOnTrends(indexCheck, bullishData, bearishData) {
     // NEW LOGIC: ALWAYS display both sections regardless of index trends
     // Index trends only affect trade ENTRY (buy_price), not alert DISPLAY
     
+    // Ensure containers are visible
+    if (bullishContainer) bullishContainer.style.display = 'block';
+    if (bearishContainer) bearishContainer.style.display = 'block';
+    
     // Clear both containers first
     bullishContainer.innerHTML = '';
     bearishContainer.innerHTML = '';
@@ -907,14 +906,10 @@ function displaySectionsBasedOnTrends(indexCheck, bullishData, bearishData) {
     // Update day summary with calculated metrics
     updateDaySummary(bullishData, bearishData);
     
-    // Show opposite trends warning banner if indices are not aligned
+    // Show opposite trends warning banner if indices are not aligned (informational only)
     if (niftyTrend !== bankniftyTrend && niftyTrend !== 'unknown' && bankniftyTrend !== 'unknown') {
-        console.log('Opposite trends detected - trades will show "No Entry"');
-        // Note: Backend will handle "No Entry" logic when setting buy_price
-        // Alerts are still displayed, but trades won't be entered
-        // This banner is informational only - we still show all alerts
-        // Commented out showOppositeTrendsBanner() as we're changing the logic
-        // showOppositeTrendsBanner(niftyTrend, bankniftyTrend);
+        console.log('Opposite trends detected - showing informational banner');
+        showOppositeTrendsBanner(niftyTrend, bankniftyTrend);
     } else {
         hideOppositeTrendsBanner();
     }
@@ -942,14 +937,33 @@ function displayOppositeTrends(indexCheck) {
             bankniftyDisplay.textContent = bankniftyTrend.toUpperCase();
         }
         
-        console.log('Opposite trends banner shown');
+        console.log('Opposite trends banner shown - but sections will still display');
     }
     
-    // Hide the alert sections
-    const bullishContainer = document.getElementById('bullishContainer');
-    const bearishContainer = document.getElementById('bearishContainer');
-    if (bullishContainer) bullishContainer.style.display = 'none';
-    if (bearishContainer) bearishContainer.style.display = 'none';
+    // DO NOT hide the alert sections - always show alerts regardless of index trends
+    // The 'no_entry' status will indicate which trades were not entered
+    console.log('Alert sections remain visible despite opposite trends');
+}
+
+// Show opposite trends banner (informational only, doesn't hide sections)
+function showOppositeTrendsBanner(niftyTrend, bankniftyTrend) {
+    const banner = document.getElementById('oppositeTrendsBanner');
+    if (banner) {
+        banner.style.display = 'block';
+        
+        // Update trend displays
+        const niftyDisplay = document.getElementById('niftyTrendDisplay');
+        const bankniftyDisplay = document.getElementById('bankniftyTrendDisplay');
+        
+        if (niftyDisplay) {
+            niftyDisplay.textContent = niftyTrend.toUpperCase();
+        }
+        if (bankniftyDisplay) {
+            bankniftyDisplay.textContent = bankniftyTrend.toUpperCase();
+        }
+        
+        console.log('Opposite trends banner shown (informational)');
+    }
 }
 
 function hideOppositeTrendsBanner() {
