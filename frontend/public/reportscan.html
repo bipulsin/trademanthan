@@ -466,6 +466,78 @@
             background: #f8f9fa;
         }
 
+        tbody tr.data-row {
+            cursor: pointer;
+        }
+
+        tbody tr.data-row td.date-cell {
+            color: #2a5298;
+            text-decoration: underline;
+            cursor: pointer;
+        }
+
+        tbody tr.data-row td.date-cell:hover {
+            color: #1e40af;
+            font-weight: bold;
+        }
+
+        tbody tr.expandable-row {
+            display: none;
+            background: #f8f9fa;
+        }
+
+        tbody tr.expandable-row.expanded {
+            display: table-row;
+        }
+
+        tbody tr.expandable-row td {
+            padding: 0 !important;
+        }
+
+        .trade-details {
+            padding: 20px 30px;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+        }
+
+        .trade-details h4 {
+            margin: 0 0 15px 0;
+            color: #1e3c72;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .trade-details-table {
+            width: 100%;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .trade-details-table th {
+            background: #2a5298;
+            color: white;
+            padding: 12px;
+            font-size: 13px;
+            text-align: left;
+        }
+
+        .trade-details-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #e9ecef;
+            font-size: 13px;
+        }
+
+        .trade-details-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .trade-details-table tr:hover {
+            background: #f8f9fa;
+        }
+
         .positive {
             color: #28a745;
             font-weight: 600;
@@ -648,6 +720,23 @@
             /* Better touch targets */
             tbody tr {
                 cursor: pointer;
+            }
+
+            .trade-details {
+                padding: 15px;
+            }
+
+            .trade-details h4 {
+                font-size: 14px;
+            }
+
+            .trade-details-table {
+                font-size: 11px;
+            }
+
+            .trade-details-table th,
+            .trade-details-table td {
+                padding: 8px 6px;
             }
 
             /* Loading and No Data states */
@@ -972,9 +1061,12 @@
                         </tr>
                     </thead>
                     <tbody>
-                        ${data.map(day => `
-                            <tr>
-                                <td><strong>${formatDate(day.date)}</strong></td>
+                        ${data.map((day, index) => `
+                            <tr class="data-row" onclick="toggleTradeDetails('${day.date}', ${index})">
+                                <td class="date-cell">
+                                    <i class="fas fa-chevron-right" id="expand-icon-${index}" style="font-size: 10px; margin-right: 8px; transition: transform 0.3s;"></i>
+                                    <strong>${formatDate(day.date)}</strong>
+                                </td>
                                 <td style="text-align: center; font-size: 24px;">
                                     ${getMarketTrendIcon(day.market_trend)}
                                 </td>
@@ -1005,6 +1097,15 @@
                                         : '-'}
                                 </td>
                             </tr>
+                            <tr class="expandable-row" id="details-row-${index}">
+                                <td colspan="10">
+                                    <div class="trade-details" id="trade-details-${index}">
+                                        <div style="text-align: center; color: #6c757d; padding: 20px;">
+                                            <i class="fas fa-spinner fa-spin"></i> Loading trade details...
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
                         `).join('')}
                     </tbody>
                 </table>
@@ -1033,6 +1134,104 @@
             } else {
                 return '<span style="color: #6c757d;" title="Sideways: Indexes in opposite directions or mixed">↔</span>';
             }
+        }
+
+        // Track which rows are expanded
+        const expandedRows = {};
+
+        async function toggleTradeDetails(date, rowIndex) {
+            const detailsRow = document.getElementById(`details-row-${rowIndex}`);
+            const expandIcon = document.getElementById(`expand-icon-${rowIndex}`);
+            
+            // If already expanded, collapse it
+            if (expandedRows[rowIndex]) {
+                detailsRow.classList.remove('expanded');
+                expandIcon.style.transform = 'rotate(0deg)';
+                expandedRows[rowIndex] = false;
+                return;
+            }
+            
+            // Expand and load data
+            detailsRow.classList.add('expanded');
+            expandIcon.style.transform = 'rotate(90deg)';
+            expandedRows[rowIndex] = true;
+            
+            // Fetch trade details for this date
+            try {
+                const response = await fetch(`/scan/daily-trades/${date}`);
+                const result = await response.json();
+                
+                if (result.success && result.trades.length > 0) {
+                    const detailsHTML = `
+                        <h4>
+                            <i class="fas fa-chart-line"></i>
+                            Trade Details for ${formatDate(date)}
+                            <span style="font-size: 14px; font-weight: normal; color: #6c757d; margin-left: 10px;">
+                                (${result.total_trades} executed trades)
+                            </span>
+                        </h4>
+                        <table class="trade-details-table">
+                            <thead>
+                                <tr>
+                                    <th>Stock Name</th>
+                                    <th>Option Contract</th>
+                                    <th>Qty</th>
+                                    <th>Buy Price</th>
+                                    <th>Sell Price</th>
+                                    <th>P&L</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${result.trades.map(trade => `
+                                    <tr>
+                                        <td><strong>${trade.stock_name}</strong></td>
+                                        <td style="font-size: 11px; color: #6c757d;">${trade.option_contract}</td>
+                                        <td>${trade.qty}</td>
+                                        <td>₹${trade.buy_price.toFixed(2)}</td>
+                                        <td>₹${trade.sell_price > 0 ? trade.sell_price.toFixed(2) : '-'}</td>
+                                        <td class="${trade.pnl >= 0 ? 'positive' : 'negative'}">
+                                            <strong>₹${trade.pnl.toLocaleString('en-IN')}</strong>
+                                        </td>
+                                        <td>
+                                            <span class="badge ${getStatusBadgeClass(trade.status)}">
+                                                ${formatStatus(trade.status)}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    `;
+                    document.getElementById(`trade-details-${rowIndex}`).innerHTML = detailsHTML;
+                } else {
+                    document.getElementById(`trade-details-${rowIndex}`).innerHTML = `
+                        <div style="text-align: center; color: #6c757d; padding: 20px;">
+                            <i class="fas fa-info-circle"></i> No executed trades for this day
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                console.error('Error loading trade details:', error);
+                document.getElementById(`trade-details-${rowIndex}`).innerHTML = `
+                    <div style="text-align: center; color: #dc3545; padding: 20px;">
+                        <i class="fas fa-exclamation-triangle"></i> Error loading trade details
+                    </div>
+                `;
+            }
+        }
+
+        function getStatusBadgeClass(status) {
+            if (status === 'sold' || status.includes('exit')) return 'badge-success';
+            if (status === 'hold') return 'badge-warning';
+            return 'badge-secondary';
+        }
+
+        function formatStatus(status) {
+            // Format status for display
+            return status.replace(/_/g, ' ').split(' ')
+                .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                .join(' ');
         }
 
         function clearFilters() {

@@ -3000,6 +3000,68 @@ async def get_trading_report(
         }
 
 
+@router.get("/daily-trades/{trade_date}")
+async def get_daily_trades(
+    trade_date: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get detailed trade information for a specific date
+    Only returns trades with status != 'no_entry'
+    
+    Args:
+        trade_date: Date in YYYY-MM-DD format
+    
+    Returns:
+        List of trades with: stock_name, option_contract, qty, buy_price, sell_price, pnl, status
+    """
+    try:
+        # Parse the date
+        target_date = datetime.strptime(trade_date, "%Y-%m-%d").date()
+        
+        # Query trades for this date, excluding 'no_entry' status
+        trades = db.query(IntradayStockOption).filter(
+            func.date(IntradayStockOption.trade_date) == target_date,
+            IntradayStockOption.status != 'no_entry'
+        ).order_by(IntradayStockOption.alert_time).all()
+        
+        # Format trade data
+        trade_details = []
+        for trade in trades:
+            trade_details.append({
+                "stock_name": trade.stock_symbol,
+                "option_contract": trade.option_contract,
+                "qty": trade.qty,
+                "buy_price": float(trade.buy_price) if trade.buy_price else 0,
+                "sell_price": float(trade.sell_price) if trade.sell_price else 0,
+                "pnl": float(trade.pnl) if trade.pnl else 0,
+                "status": trade.status,
+                "alert_type": trade.alert_type,
+                "alert_time": trade.alert_time.strftime("%H:%M") if trade.alert_time else ""
+            })
+        
+        return {
+            "success": True,
+            "date": trade_date,
+            "total_trades": len(trade_details),
+            "trades": trade_details
+        }
+        
+    except ValueError as e:
+        return {
+            "success": False,
+            "message": f"Invalid date format. Use YYYY-MM-DD: {str(e)}",
+            "trades": []
+        }
+    except Exception as e:
+        logger.error(f"Error fetching daily trades for {trade_date}: {e}")
+        return {
+            "success": False,
+            "message": f"Error: {str(e)}",
+            "trades": []
+        }
+
+
 @router.get("/logs")
 async def get_scan_logs(lines: int = Query(100, ge=1, le=1000)):
     """
