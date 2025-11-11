@@ -39,9 +39,10 @@ class HealthMonitor:
     def start(self):
         """Start the health monitor scheduler"""
         if not self.is_running:
-            # Health check every 15 minutes during market hours (9 AM - 4 PM)
+            # Health check every 15 minutes during market hours (9:15 AM - 3:45 PM)
+            # Schedule: 9:15, 9:30, 9:45, 10:00, ..., 15:30, 15:45
             for hour in range(9, 16):
-                for minute in [0, 15, 30, 45]:
+                for minute in [15, 30, 45]:
                     self.scheduler.add_job(
                         self.perform_health_check,
                         trigger=CronTrigger(hour=hour, minute=minute, timezone='Asia/Kolkata'),
@@ -49,6 +50,16 @@ class HealthMonitor:
                         name=f'Health Check {hour:02d}:{minute:02d}',
                         replace_existing=True
                     )
+            
+            # Add hourly checks from 10:00 AM onwards (10:00, 11:00, 12:00, 13:00, 14:00, 15:00)
+            for hour in range(10, 16):
+                self.scheduler.add_job(
+                    self.perform_health_check,
+                    trigger=CronTrigger(hour=hour, minute=0, timezone='Asia/Kolkata'),
+                    id=f'health_check_{hour}_0',
+                    name=f'Health Check {hour:02d}:00',
+                    replace_existing=True
+                )
             
             # Daily health report at 4:00 PM (after market close)
             self.scheduler.add_job(
@@ -61,7 +72,7 @@ class HealthMonitor:
             
             self.scheduler.start()
             self.is_running = True
-            logger.info("✅ Health Monitor started - Checking every 15 min during market hours")
+            logger.info("✅ Health Monitor started - Checking every 15 min from 9:15 AM to 3:45 PM")
     
     def stop(self):
         """Stop the health monitor"""
