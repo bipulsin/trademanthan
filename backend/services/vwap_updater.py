@@ -218,6 +218,44 @@ async def update_vwap_for_all_open_positions():
                         new_pnl = (new_option_ltp - position.buy_price) * position.qty
                         position.pnl = new_pnl
                         updates_made.append(f"P&L: ₹{old_pnl:.2f}→₹{new_pnl:.2f}")
+                        
+                        # AUTO-EXIT LOGIC: Check if exit conditions are met
+                        # This ensures database exit_reason is set when frontend shows exit signals
+                        exit_triggered = False
+                        exit_reason_to_set = None
+                        
+                        # Check profit target (1.5x buy price)
+                        profit_target = position.buy_price * 1.5
+                        if new_option_ltp >= profit_target:
+                            exit_triggered = True
+                            exit_reason_to_set = 'profit_target'
+                            logger.info(f"🎯 AUTO-EXIT: {stock_name} hit profit target! LTP: ₹{new_option_ltp:.2f} >= Target: ₹{profit_target:.2f}")
+                        
+                        # Check stop loss
+                        elif position.stop_loss and new_option_ltp <= position.stop_loss:
+                            exit_triggered = True
+                            exit_reason_to_set = 'stop_loss'
+                            logger.info(f"🛑 AUTO-EXIT: {stock_name} hit stop loss! LTP: ₹{new_option_ltp:.2f} <= SL: ₹{position.stop_loss:.2f}")
+                        
+                        # Check VWAP cross (only after 11:15 AM)
+                        elif now.hour >= 11 and now.minute >= 15:
+                            if new_vwap and new_vwap > 0 and new_stock_ltp and new_stock_ltp > 0:
+                                option_type = position.option_type or 'CE'
+                                # CE: Exit if stock LTP falls below VWAP
+                                # PE: Exit if stock LTP rises above VWAP
+                                if (option_type == 'CE' and new_stock_ltp < new_vwap) or \
+                                   (option_type == 'PE' and new_stock_ltp > new_vwap):
+                                    exit_triggered = True
+                                    exit_reason_to_set = 'stock_vwap_cross'
+                                    logger.info(f"📉 AUTO-EXIT: {stock_name} VWAP cross! Stock LTP: ₹{new_stock_ltp:.2f} vs VWAP: ₹{new_vwap:.2f} ({option_type})")
+                        
+                        # Set exit fields if any exit condition was triggered
+                        if exit_triggered and exit_reason_to_set:
+                            position.exit_reason = exit_reason_to_set
+                            position.sell_time = now
+                            position.status = 'sold'
+                            updates_made.append(f"🚨 EXITED: {exit_reason_to_set}")
+                            logger.warning(f"⚠️ {stock_name} automatically exited: {exit_reason_to_set}")
                 
                 if updates_made:
                     position.updated_at = now
