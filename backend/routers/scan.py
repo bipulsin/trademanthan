@@ -3029,7 +3029,7 @@ async def get_daily_trades(
         trade_details = []
         for trade in trades:
             trade_details.append({
-                "stock_name": trade.stock_symbol,
+                "stock_name": trade.stock_name,
                 "option_contract": trade.option_contract,
                 "qty": trade.qty,
                 "buy_price": float(trade.buy_price) if trade.buy_price else 0,
