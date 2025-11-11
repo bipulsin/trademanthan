@@ -155,11 +155,12 @@
             right: 0;
             background: rgba(30, 64, 175, 0.95);
             backdrop-filter: blur(10px);
-            padding: 12px 15px;
+            padding: 6px 15px;
             box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.3);
             z-index: 999;
             justify-content: space-between;
-            align-items: center;
+            align-items: flex-end;
+            height: 48px;
         }
 
         .mobile-footer-item {
@@ -170,17 +171,22 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 2px;
+            gap: 1px;
+            padding-bottom: 2px;
         }
 
         .mobile-footer-item .label {
-            font-size: 9px;
-            opacity: 0.8;
+            font-size: 10px;
+            opacity: 0.95;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
 
         .mobile-footer-item .value {
-            font-size: 14px;
-            font-weight: bold;
+            font-size: 17px;
+            font-weight: 900;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.4);
         }
 
         .mobile-footer-item.positive .value {
@@ -196,17 +202,19 @@
             color: #1e40af;
             border: none;
             border-radius: 50%;
-            width: 56px;
-            height: 56px;
+            width: 60px;
+            height: 60px;
             display: flex;
             align-items: center;
             justify-content: center;
             cursor: pointer;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 -2px 16px rgba(0, 0, 0, 0.4);
             margin: 0 auto;
             font-size: 24px;
             font-weight: bold;
             transition: all 0.3s ease;
+            position: relative;
+            bottom: 12px;
         }
 
         .mobile-menu-btn:hover {
@@ -340,7 +348,7 @@
             }
 
             body {
-                padding-bottom: 80px;
+                padding-bottom: 70px;
             }
         }
 
@@ -807,7 +815,7 @@
         @media (max-width: 480px) {
             body {
                 padding: 5px;
-                padding-bottom: 80px;
+                padding-bottom: 70px;
             }
 
             .container {
