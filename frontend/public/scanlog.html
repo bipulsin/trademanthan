@@ -870,15 +870,15 @@
         }
 
         function startSchedulerStatusRefresh() {
-            // Refresh scheduler status every 30 seconds
-            schedulerStatusInterval = setInterval(checkSchedulerStatus, 30000);
+            // Refresh scheduler status every 3 minutes
+            schedulerStatusInterval = setInterval(checkSchedulerStatus, 180000);
         }
 
         function startAutoRefresh() {
             if (autoRefreshInterval) {
                 clearInterval(autoRefreshInterval);
             }
-            autoRefreshInterval = setInterval(refreshLogs, 3000); // Refresh every 3 seconds
+            autoRefreshInterval = setInterval(refreshLogs, 180000); // Refresh every 3 minutes
             isAutoRefreshEnabled = true;
             updateAutoRefreshButton();
         }
