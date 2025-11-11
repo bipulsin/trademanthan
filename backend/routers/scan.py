@@ -324,9 +324,13 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 elif hour < 13 or (hour == 13 and minute <= 15):
                     corrected_time = "1:15 PM"
                     corrected_hour, corrected_minute = 13, 15
-                else:
+                elif hour < 14 or (hour == 14 and minute <= 15):
                     corrected_time = "2:15 PM"
                     corrected_hour, corrected_minute = 14, 15
+                else:
+                    # 3:15 PM is the last alert time
+                    corrected_time = "3:15 PM"
+                    corrected_hour, corrected_minute = 15, 15
                 
                 # Create the corrected datetime directly
                 triggered_datetime = trading_date.replace(

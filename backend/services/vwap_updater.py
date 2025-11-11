@@ -71,9 +71,18 @@ class VWAPUpdater:
                 replace_existing=True
             )
             
+            # Close all open trades at 3:25 PM (before market close)
+            self.scheduler.add_job(
+                close_all_open_trades,
+                trigger=CronTrigger(hour=15, minute=25, timezone='Asia/Kolkata'),
+                id='close_all_trades_eod',
+                name='Close All Open Trades at 3:25 PM',
+                replace_existing=True
+            )
+            
             self.scheduler.start()
             self.is_running = True
-            logger.info("✅ Market Data Updater started - Hourly updates + EOD VWAP at 3:30 PM")
+            logger.info("✅ Market Data Updater started - Hourly updates + EOD exits at 3:25 PM + EOD VWAP at 3:30 PM")
     
     def stop(self):
         """Stop the VWAP updater"""
@@ -306,6 +315,104 @@ async def update_vwap_for_all_open_positions():
         
     except Exception as e:
         logger.error(f"Error in hourly market data update job: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def close_all_open_trades():
+    """
+    Close all open trades at 3:25 PM (before market close)
+    Sets exit_reason = 'time_based', status = 'sold', sell_time = now
+    """
+    from database import SessionLocal
+    from models.trading import IntradayStockOption
+    from services.upstox_service import upstox_service as vwap_service
+    import pytz
+    
+    logger.info("🔔 3:25 PM - Closing all open trades (End of Day)")
+    
+    db = SessionLocal()
+    try:
+        ist = pytz.timezone('Asia/Kolkata')
+        now = datetime.now(ist)
+        today = now.date()
+        
+        # Find all open positions for today (exit_reason is NULL or status != 'sold')
+        open_positions = db.query(IntradayStockOption).filter(
+            IntradayStockOption.trade_date == today,
+            IntradayStockOption.exit_reason.is_(None),
+            IntradayStockOption.status != 'sold'
+        ).all()
+        
+        if not open_positions:
+            logger.info("✅ No open positions to close - all already exited")
+            return
+        
+        logger.info(f"📊 Found {len(open_positions)} open positions to close")
+        
+        closed_count = 0
+        for position in open_positions:
+            try:
+                stock_name = position.stock_name
+                option_contract = position.option_contract
+                
+                # Skip if already no_entry (was never bought)
+                if position.status == 'no_entry':
+                    logger.info(f"⚪ Skipping {stock_name} - never entered (no_entry)")
+                    continue
+                
+                # Get current option LTP for final sell price
+                instrument_key = position.instrument_key
+                option_ltp = None
+                
+                if instrument_key:
+                    try:
+                        option_quote = vwap_service.get_market_quote_by_key(instrument_key)
+                        if option_quote and 'last_price' in option_quote:
+                            option_ltp = option_quote['last_price']
+                            logger.info(f"📍 {option_contract}: Final LTP = ₹{option_ltp:.2f}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Could not fetch final LTP for {option_contract}: {e}")
+                
+                # Update position for EOD exit
+                old_sell_price = position.sell_price or 0.0
+                if option_ltp and option_ltp > 0:
+                    position.sell_price = option_ltp
+                else:
+                    # If can't fetch LTP, use last known sell_price
+                    if not position.sell_price or position.sell_price == 0:
+                        logger.warning(f"⚠️ No LTP available for {option_contract}, using buy_price as fallback")
+                        position.sell_price = position.buy_price
+                
+                position.sell_time = now
+                position.exit_reason = 'time_based'
+                position.status = 'sold'
+                
+                # Calculate final P&L if not already set
+                if position.buy_price and position.qty and position.sell_price:
+                    position.pnl = (position.sell_price - position.buy_price) * position.qty
+                    
+                    logger.info(f"🔴 EOD EXIT: {stock_name} {option_contract}")
+                    logger.info(f"   Buy: ₹{position.buy_price:.2f}, Sell: ₹{position.sell_price:.2f}, P&L: ₹{position.pnl:.2f}")
+                else:
+                    logger.warning(f"⚠️ Could not calculate P&L for {stock_name}")
+                
+                closed_count += 1
+                
+            except Exception as e:
+                logger.error(f"Error closing position for {stock_name}: {str(e)}")
+                continue
+        
+        # Commit all changes
+        db.commit()
+        
+        logger.info(f"✅ EOD: Closed {closed_count} open positions at 3:25 PM")
+        
+    except Exception as e:
+        logger.error(f"Error in close_all_open_trades: {str(e)}")
         import traceback
         traceback.print_exc()
         db.rollback()
