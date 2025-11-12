@@ -801,31 +801,38 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     print(f"✅ TRADE ENTERED: {stock_name} - {momentum_reason}")
                     print(f"   Buy: ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price}, LTP: ₹{stock_ltp}, VWAP: ₹{stock_vwap}")
                 else:
-                    # No entry: Store qty and buy_price for reference, but don't execute trade
+                    # No entry: Store qty, buy_price, and SL for reference, but don't execute trade
                     # This helps track what trades would have been if conditions were favorable
+                    import math
+                    
                     qty = lot_size  # Store the quantity that would have been traded
                     buy_price = option_ltp_value  # Store the option price at alert time
                     buy_time = None  # Don't set buy time since trade wasn't executed
                     sell_price = None  # No sell since trade wasn't executed
-                    stop_loss_price = None  # No SL since trade wasn't executed
+                    
+                    # Calculate Stop Loss same as actual trades (for analysis purposes)
+                    calculated_sl = option_ltp_value - (SL_LOSS_TARGET / qty)
+                    stop_loss_price = max(0.05, math.floor(calculated_sl / 0.10) * 0.10)
+                    
                     status = 'no_entry'  # Trade not entered
                     pnl = None  # No P&L since trade wasn't executed
                     
-                    # Log reason for no entry with stored data
+                    # Log reason for no entry with complete trade setup
                     if not can_enter_trade_by_index:
                         print(f"⚠️ NO ENTRY: {stock_name} - Index trends not aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
-                        print(f"   Would have been: Buy ₹{buy_price}, Qty: {qty} (not executed)")
+                        print(f"   Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
                     elif not has_strong_momentum:
                         print(f"🚫 NO ENTRY: {stock_name} - {momentum_reason}")
-                        print(f"   Would have been: Buy ₹{buy_price}, Qty: {qty} (not executed)")
+                        print(f"   Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
                     elif option_ltp_value <= 0 or lot_size <= 0:
                         print(f"⚠️ NO ENTRY: {stock_name} - Missing option data (option_ltp={option_ltp_value}, qty={lot_size})")
-                        # For missing data, keep qty=0 and buy_price=None
+                        # For missing data, keep qty=0, buy_price=None, stop_loss=None
                         qty = 0
                         buy_price = None
+                        stop_loss_price = None
                     else:
                         print(f"⚠️ NO ENTRY: {stock_name} - Unknown reason")
-                        print(f"   Would have been: Buy ₹{buy_price}, Qty: {qty} (not executed)")
+                        print(f"   Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
                 
                 # ALWAYS create database record with whatever data we have
                 db_record = IntradayStockOption(
