@@ -422,6 +422,18 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 }
                 processed_data["stocks"].append(stock_data)
         
+        # Filter out index names (NIFTY, BANKNIFTY, etc.) - these are not tradable stocks
+        INDEX_NAMES = ['NIFTY', 'NIFTY50', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX']
+        original_count = len(processed_data["stocks"])
+        processed_data["stocks"] = [
+            stock for stock in processed_data["stocks"]
+            if stock.get("stock_name", "").strip().upper() not in INDEX_NAMES
+        ]
+        filtered_count = original_count - len(processed_data["stocks"])
+        if filtered_count > 0:
+            logger.info(f"🚫 Filtered out {filtered_count} index name(s) from stocks list")
+            print(f"🚫 Filtered out {filtered_count} index name(s) from stocks list (original: {original_count}, remaining: {len(processed_data['stocks'])})")
+        
         # Determine if this is Bullish or Bearish
         if forced_type:
             # Use forced type from endpoint

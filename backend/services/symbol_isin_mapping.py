@@ -311,15 +311,32 @@ def get_instrument_key(symbol: str, exchange: str = "NSE_EQ") -> str:
         exchange: Exchange identifier (default: NSE_EQ)
         
     Returns:
-        Instrument key in format: NSE_EQ|INE######A##
+        Instrument key in format: NSE_EQ|INE######A## or NSE_INDEX|IndexName
     """
+    # Special handling for indices - they should use NSE_INDEX, not NSE_EQ
+    symbol_upper = symbol.strip().upper()
+    
+    index_mappings = {
+        'NIFTY': 'NSE_INDEX|Nifty 50',
+        'NIFTY50': 'NSE_INDEX|Nifty 50',
+        'BANKNIFTY': 'NSE_INDEX|Nifty Bank',
+        'FINNIFTY': 'NSE_INDEX|Nifty Fin Service',
+        'MIDCPNIFTY': 'NSE_INDEX|NIFTY MID SELECT'
+    }
+    
+    if symbol_upper in index_mappings:
+        logger.info(f"🔍 Index detected: {symbol_upper} → {index_mappings[symbol_upper]}")
+        return index_mappings[symbol_upper]
+    
+    # Regular stock handling
     isin = get_isin(symbol)
     
     if isin:
         return f"{exchange}|{isin}"
     else:
-        # Fallback to simple format (may not work)
-        return f"{exchange}|{symbol.strip().upper()}"
+        # Fallback to simple format (may not work for regular stocks)
+        logger.warning(f"⚠️ No ISIN found for {symbol}, using fallback format")
+        return f"{exchange}|{symbol_upper}"
 
 def is_symbol_supported(symbol: str) -> bool:
     """
