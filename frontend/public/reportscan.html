@@ -1171,7 +1171,7 @@
                                 </td>
                                 <td>
                                     ${day.total_closed === 0 ? 
-                                        '<div style="color: #28a745; font-style: italic;">Not losing capital</div>' :
+                                        '<div style="color: #28a745; font-style: italic;">Not losing is winning</div>' :
                                         (day.best_trade.stock ? 
                                             `<div><strong>${day.best_trade.stock}</strong></div>
                                              <div class="positive">+₹${day.best_trade.pnl.toLocaleString('en-IN')}</div>` 
@@ -1180,7 +1180,7 @@
                                 </td>
                                 <td>
                                     ${day.total_closed === 0 ? 
-                                        '<div style="color: #28a745; font-style: italic;">is winning too!</div>' :
+                                        '' :
                                         (day.worst_trade.stock ? 
                                             `<div><strong>${day.worst_trade.stock}</strong></div>
                                              <div class="negative">₹${day.worst_trade.pnl.toLocaleString('en-IN')}</div>` 
@@ -1401,9 +1401,9 @@
                 day.total_closed,
                 day.win_rate.toFixed(2),
                 day.total_pnl.toFixed(2),
-                day.total_closed === 0 ? 'Not losing capital' : (day.best_trade.stock || ''),
+                day.total_closed === 0 ? 'Not losing is winning' : (day.best_trade.stock || ''),
                 day.total_closed === 0 ? '' : (day.best_trade.pnl || 0),
-                day.total_closed === 0 ? 'is winning too!' : (day.worst_trade.stock || ''),
+                day.total_closed === 0 ? '' : (day.worst_trade.stock || ''),
                 day.total_closed === 0 ? '' : (day.worst_trade.pnl || 0)
             ]);
 
