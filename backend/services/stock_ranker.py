@@ -160,9 +160,30 @@ class StockRanker:
         # Factor 5: DATA COMPLETENESS (5 pts)
         # =====================================================================
         # Must have critical data to make informed decision
-        required_fields = ['option_ltp', 'qty', 'stock_vwap', 'option_contract', 'otm1_strike']
-        complete_fields = sum(1 for field in required_fields if stock.get(field, 0) > 0 or stock.get(field, '') != '')
-        completeness_score = (complete_fields / len(required_fields)) * 5
+        complete_fields = 0
+        
+        # Check numeric fields
+        numeric_fields = ['option_ltp', 'qty', 'stock_vwap', 'otm1_strike']
+        for field in numeric_fields:
+            try:
+                value = stock.get(field, 0)
+                if isinstance(value, (int, float)) and value > 0:
+                    complete_fields += 1
+            except (TypeError, ValueError):
+                pass  # Skip invalid values
+        
+        # Check string fields
+        string_fields = ['option_contract']
+        for field in string_fields:
+            try:
+                value = stock.get(field, '')
+                if value and str(value).strip():
+                    complete_fields += 1
+            except (TypeError, ValueError):
+                pass  # Skip invalid values
+        
+        required_fields_count = len(numeric_fields) + len(string_fields)
+        completeness_score = (complete_fields / required_fields_count) * 5
         
         score += completeness_score
         breakdown['completeness'] = round(completeness_score, 1)
