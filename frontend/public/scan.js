@@ -82,6 +82,8 @@ function updateDaySummary(bullishData, bearishData) {
         let bearishTrades = 0;
         let slExits = 0;
         let timeExits = 0;
+        let targetExits = 0;
+        let vwapExits = 0;
         let totalPnL = 0;
         let winners = 0;
         let losers = 0;
@@ -102,6 +104,10 @@ function updateDaySummary(bullishData, bearishData) {
                                 slExits++;
                             } else if (stock.exit_reason === 'time_based') {
                                 timeExits++;
+                            } else if (stock.exit_reason === 'target_profit') {
+                                targetExits++;
+                            } else if (stock.exit_reason === 'vwap_crossed') {
+                                vwapExits++;
                             }
                             
                             // Calculate P&L
@@ -132,6 +138,10 @@ function updateDaySummary(bullishData, bearishData) {
                                 slExits++;
                             } else if (stock.exit_reason === 'time_based') {
                                 timeExits++;
+                            } else if (stock.exit_reason === 'target_profit') {
+                                targetExits++;
+                            } else if (stock.exit_reason === 'vwap_crossed') {
+                                vwapExits++;
                             }
                             
                             // Calculate P&L
@@ -158,6 +168,8 @@ function updateDaySummary(bullishData, bearishData) {
         document.getElementById('summaryTradesEntered').textContent = tradesEntered;
         document.getElementById('summaryBullishTrades').textContent = bullishTrades;
         document.getElementById('summaryBearishTrades').textContent = bearishTrades;
+        document.getElementById('summaryTargetExits').textContent = targetExits;
+        document.getElementById('summaryVWAPExits').textContent = vwapExits;
         document.getElementById('summarySLExits').textContent = slExits;
         document.getElementById('summaryTimeExits').textContent = timeExits;
         
