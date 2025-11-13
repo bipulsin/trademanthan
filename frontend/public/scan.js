@@ -104,9 +104,9 @@ function updateDaySummary(bullishData, bearishData) {
                                 slExits++;
                             } else if (stock.exit_reason === 'time_based') {
                                 timeExits++;
-                            } else if (stock.exit_reason === 'target_profit') {
+                            } else if (stock.exit_reason === 'profit_target') {
                                 targetExits++;
-                            } else if (stock.exit_reason === 'vwap_crossed') {
+                            } else if (stock.exit_reason === 'stock_vwap_cross') {
                                 vwapExits++;
                             }
                             
@@ -138,9 +138,9 @@ function updateDaySummary(bullishData, bearishData) {
                                 slExits++;
                             } else if (stock.exit_reason === 'time_based') {
                                 timeExits++;
-                            } else if (stock.exit_reason === 'target_profit') {
+                            } else if (stock.exit_reason === 'profit_target') {
                                 targetExits++;
-                            } else if (stock.exit_reason === 'vwap_crossed') {
+                            } else if (stock.exit_reason === 'stock_vwap_cross') {
                                 vwapExits++;
                             }
                             
