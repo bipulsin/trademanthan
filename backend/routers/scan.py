@@ -1711,9 +1711,12 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                             
                             # Only update sell_price if trade is not already closed
                             if not record.exit_reason:
-                                # FOUR EXIT CONDITIONS:
+                                # FOUR EXIT CONDITIONS (checked in priority order):
+                                # Priority: Time > Stop Loss > VWAP Cross > Profit Target
                                 
-                                # 1. Check if TIME-BASED EXIT (3:25 PM)
+                                exit_triggered = False
+                                
+                                # 1. Check if TIME-BASED EXIT (3:25 PM) - HIGHEST PRIORITY
                                 if is_exit_time:
                                     record.sell_price = new_option_ltp
                                     record.sell_time = now
@@ -1722,9 +1725,10 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                     if record.buy_price and record.qty:
                                         record.pnl = (new_option_ltp - record.buy_price) * record.qty
                                     print(f"⏰ TIME EXIT (3:25 PM) for {record.stock_name}: LTP=₹{new_option_ltp}, PnL=₹{record.pnl}")
+                                    exit_triggered = True
                                 
                                 # 2. Check if Stop Loss is hit
-                                elif record.stop_loss and new_option_ltp <= record.stop_loss:
+                                if not exit_triggered and record.stop_loss and new_option_ltp <= record.stop_loss:
                                     record.sell_price = new_option_ltp
                                     record.sell_time = now
                                     record.exit_reason = 'stop_loss'
@@ -1732,12 +1736,13 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                     if record.buy_price and record.qty:
                                         record.pnl = (new_option_ltp - record.buy_price) * record.qty
                                     print(f"🛑 STOP LOSS HIT for {record.stock_name}: SL=₹{record.stop_loss}, LTP=₹{new_option_ltp}, Loss=₹{record.pnl}")
+                                    exit_triggered = True
                                 
                                 # 3. Check if underlying stock crosses VWAP (directional - based on option type)
                                 # For CE (Bullish): Exit when stock closes BELOW VWAP (lost bullish momentum)
                                 # For PE (Bearish): Exit when stock closes ABOVE VWAP (lost bearish momentum)
                                 # TIME RESTRICTION: Only check from 11:15 AM onwards (10:15 AM is entry time)
-                                elif record.stock_ltp and record.stock_vwap and record.option_type:
+                                if not exit_triggered and record.stock_ltp and record.stock_vwap and record.option_type:
                                     # Check if current time is >= 11:15 AM (after first entry time)
                                     vwap_check_time = datetime.strptime("11:15", "%H:%M").time()
                                     current_time_check = now.time()
@@ -1746,6 +1751,9 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                     if current_time_check >= vwap_check_time:
                                         should_exit_vwap = False
                                         exit_direction = ""
+                                        
+                                        # Enhanced logging for debugging
+                                        print(f"📊 VWAP CHECK for {record.stock_name} ({record.option_type}): Stock LTP=₹{record.stock_ltp}, VWAP=₹{record.stock_vwap}, Time={current_time_check.strftime('%H:%M')}")
                                         
                                         if record.option_type == 'CE' and record.stock_ltp < record.stock_vwap:
                                             # Bullish trade: stock went below VWAP (bearish signal)
@@ -1763,13 +1771,16 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                             record.status = 'sold'
                                             if record.buy_price and record.qty:
                                                 record.pnl = (new_option_ltp - record.buy_price) * record.qty
-                                            print(f"📉 VWAP CROSS EXIT for {record.stock_name} ({record.option_type}): Stock LTP=₹{record.stock_ltp} {exit_direction} VWAP=₹{record.stock_vwap}, Option PnL=₹{record.pnl}")
+                                            print(f"✅ 📉 VWAP CROSS EXIT TRIGGERED for {record.stock_name} ({record.option_type}): Stock LTP=₹{record.stock_ltp} {exit_direction} VWAP=₹{record.stock_vwap}, Option LTP=₹{new_option_ltp}, Option PnL=₹{record.pnl}")
+                                            exit_triggered = True
+                                        else:
+                                            print(f"ℹ️ VWAP OK for {record.stock_name} - No exit (Stock {record.stock_ltp} {'>' if record.option_type == 'CE' else '<'} VWAP {record.stock_vwap})")
                                     else:
                                         # Before 11:15 AM - skip VWAP exit check
                                         print(f"⏰ Skipping VWAP exit check for {record.stock_name} (current time {current_time_check.strftime('%H:%M')} < 11:15 AM)")
                                 
                                 # 4. Check if Profit Target is hit (50% gain)
-                                elif record.buy_price and new_option_ltp >= (record.buy_price * 1.5):
+                                if not exit_triggered and record.buy_price and new_option_ltp >= (record.buy_price * 1.5):
                                     record.sell_price = new_option_ltp
                                     record.sell_time = now
                                     record.exit_reason = 'profit_target'
@@ -1777,9 +1788,10 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                     if record.qty:
                                         record.pnl = (new_option_ltp - record.buy_price) * record.qty
                                     print(f"🎯 PROFIT TARGET HIT for {record.stock_name}: Target=₹{record.buy_price * 1.5}, LTP=₹{new_option_ltp}, Profit=₹{record.pnl}")
+                                    exit_triggered = True
                                 
-                                # Otherwise, just update current price and PnL (trade still OPEN)
-                                else:
+                                # If no exit was triggered, just update current price and PnL (trade still OPEN)
+                                if not exit_triggered:
                                     record.sell_price = new_option_ltp  # Update current Option LTP
                                     # DO NOT update sell_time here - only set when trade exits
                                     if record.buy_price and record.qty:
