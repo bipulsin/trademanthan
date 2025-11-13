@@ -214,14 +214,52 @@ async def update_vwap_for_all_open_positions():
                                             instrument_key = instrument.get('instrument_key')
                                             if instrument_key:
                                                 # Use get_market_quote_by_key which takes only instrument_key
+                                                logger.info(f"🔍 [{now.strftime('%H:%M:%S')}] Fetching option LTP for {option_contract}")
+                                                logger.info(f"   Instrument Key: {instrument_key}")
+                                                logger.info(f"   Strike: {inst_strike}, Type: {opt_type}")
+                                                
                                                 option_quote = vwap_service.get_market_quote_by_key(instrument_key)
+                                                
+                                                logger.info(f"   API Response: {option_quote}")
+                                                
                                                 if option_quote and 'last_price' in option_quote:
                                                     option_ltp_data = option_quote['last_price']
                                                     if option_ltp_data and option_ltp_data > 0:
                                                         new_option_ltp = option_ltp_data
+                                                        logger.info(f"📥 [{now.strftime('%H:%M:%S')}] API returned option LTP: ₹{new_option_ltp:.2f} for {option_contract}")
                                                         break
+                                                    else:
+                                                        logger.warning(f"⚠️ Invalid LTP data: {option_ltp_data}")
+                                                else:
+                                                    logger.warning(f"⚠️ No last_price in quote data for {instrument_key}: {option_quote}")
                     except Exception as e:
                         logger.warning(f"Could not fetch option LTP for {option_contract}: {str(e)}")
+                
+                # CRITICAL: Even if option LTP fetch fails, check VWAP cross using stock data
+                # If VWAP cross detected, exit with last known option price (sell_price)
+                if new_option_ltp == 0:
+                    logger.warning(f"⚠️ Option LTP fetch FAILED for {stock_name} {option_contract}")
+                    logger.warning(f"   new_vwap={new_vwap}, new_stock_ltp={new_stock_ltp}, option_type={position.option_type}")
+                    
+                    if new_vwap > 0 and new_stock_ltp > 0 and position.option_type:
+                        if now.hour >= 11 and now.minute >= 15:
+                            option_type = position.option_type
+                            if (option_type == 'CE' and new_stock_ltp < new_vwap) or \
+                               (option_type == 'PE' and new_stock_ltp > new_vwap):
+                                logger.critical(f"🚨 VWAP CROSS DETECTED for {stock_name} but option LTP fetch FAILED!")
+                                logger.critical(f"   Stock LTP: ₹{new_stock_ltp:.2f}, VWAP: ₹{new_vwap:.2f}, Type: {option_type}")
+                                logger.critical(f"   Using last known sell_price: ₹{position.sell_price:.2f} for exit")
+                                
+                                # Use last known sell_price for exit
+                                if position.sell_price and position.sell_price > 0:
+                                    position.exit_reason = 'stock_vwap_cross'
+                                    position.sell_time = now
+                                    position.status = 'sold'
+                                    if position.buy_price and position.qty:
+                                        position.pnl = (position.sell_price - position.buy_price) * position.qty
+                                    logger.critical(f"✅ FORCED EXIT: {stock_name} on VWAP cross with last known price ₹{position.sell_price:.2f}, PnL=₹{position.pnl:.2f}")
+                                    updated_count += 1
+                                    # Don't continue - still update stock LTP/VWAP below for record keeping
                 
                 # Update position with new values
                 updates_made = []
@@ -238,8 +276,16 @@ async def update_vwap_for_all_open_positions():
                 
                 if new_option_ltp > 0:
                     old_option_ltp = position.sell_price or 0.0
+                    
+                    # Sanity check: Flag suspicious price movements
+                    if old_option_ltp > 0:
+                        price_change_pct = abs((new_option_ltp - old_option_ltp) / old_option_ltp) * 100
+                        if price_change_pct > 100:
+                            logger.warning(f"⚠️ SUSPICIOUS PRICE CHANGE for {stock_name}: ₹{old_option_ltp:.2f} → ₹{new_option_ltp:.2f} ({price_change_pct:.1f}% change)")
+                    
                     position.sell_price = new_option_ltp  # Update sell_price with current option price
                     updates_made.append(f"Option LTP: {old_option_ltp:.2f}→{new_option_ltp:.2f}")
+                    logger.info(f"📌 {stock_name} Option LTP updated at {now.strftime('%H:%M:%S')}: ₹{old_option_ltp:.2f} → ₹{new_option_ltp:.2f}")
                     
                     # Calculate and update unrealized P&L for open trades
                     if position.buy_price and position.qty:
@@ -248,42 +294,68 @@ async def update_vwap_for_all_open_positions():
                         position.pnl = new_pnl
                         updates_made.append(f"P&L: ₹{old_pnl:.2f}→₹{new_pnl:.2f}")
                         
-                        # AUTO-EXIT LOGIC: Check if exit conditions are met
-                        # This ensures database exit_reason is set when frontend shows exit signals
+                        # CHECK ALL EXIT CONDITIONS INDEPENDENTLY
+                        # Then apply the highest priority exit
+                        # Priority: Stop Loss > VWAP Cross > Profit Target
+                        exit_conditions = {
+                            'stop_loss': False,
+                            'vwap_cross': False,
+                            'profit_target': False
+                        }
+                        
+                        # 1. CHECK STOP LOSS
+                        if position.stop_loss and new_option_ltp <= position.stop_loss:
+                            exit_conditions['stop_loss'] = True
+                            logger.info(f"🛑 STOP LOSS CONDITION MET for {stock_name}: LTP ₹{new_option_ltp:.2f} <= SL ₹{position.stop_loss:.2f}")
+                        
+                        # 2. CHECK VWAP CROSS (only after 11:15 AM)
+                        if now.hour >= 11 and now.minute >= 15:
+                            if new_vwap and new_vwap > 0 and new_stock_ltp and new_stock_ltp > 0:
+                                option_type = position.option_type or 'CE'
+                                logger.info(f"📊 VWAP CHECK for {stock_name} ({option_type}): Stock LTP=₹{new_stock_ltp:.2f}, VWAP=₹{new_vwap:.2f}")
+                                
+                                # CE: Exit if stock LTP falls below VWAP
+                                # PE: Exit if stock LTP rises above VWAP
+                                if (option_type == 'CE' and new_stock_ltp < new_vwap):
+                                    exit_conditions['vwap_cross'] = True
+                                    logger.info(f"📉 VWAP CROSS CONDITION MET for {stock_name} (CE): Stock LTP ₹{new_stock_ltp:.2f} < VWAP ₹{new_vwap:.2f}")
+                                elif (option_type == 'PE' and new_stock_ltp > new_vwap):
+                                    exit_conditions['vwap_cross'] = True
+                                    logger.info(f"📈 VWAP CROSS CONDITION MET for {stock_name} (PE): Stock LTP ₹{new_stock_ltp:.2f} > VWAP ₹{new_vwap:.2f}")
+                                else:
+                                    logger.info(f"✅ VWAP OK for {stock_name} - Stock {'>' if option_type == 'CE' else '<'} VWAP")
+                        
+                        # 3. CHECK PROFIT TARGET (1.5x buy price)
+                        profit_target = position.buy_price * 1.5
+                        if new_option_ltp >= profit_target:
+                            exit_conditions['profit_target'] = True
+                            logger.info(f"🎯 PROFIT TARGET CONDITION MET for {stock_name}: LTP ₹{new_option_ltp:.2f} >= Target ₹{profit_target:.2f}")
+                        
+                        # APPLY THE HIGHEST PRIORITY EXIT CONDITION
                         exit_triggered = False
                         exit_reason_to_set = None
                         
-                        # Check profit target (1.5x buy price)
-                        profit_target = position.buy_price * 1.5
-                        if new_option_ltp >= profit_target:
-                            exit_triggered = True
-                            exit_reason_to_set = 'profit_target'
-                            logger.info(f"🎯 AUTO-EXIT: {stock_name} hit profit target! LTP: ₹{new_option_ltp:.2f} >= Target: ₹{profit_target:.2f}")
-                        
-                        # Check stop loss
-                        elif position.stop_loss and new_option_ltp <= position.stop_loss:
+                        if exit_conditions['stop_loss']:
                             exit_triggered = True
                             exit_reason_to_set = 'stop_loss'
-                            logger.info(f"🛑 AUTO-EXIT: {stock_name} hit stop loss! LTP: ₹{new_option_ltp:.2f} <= SL: ₹{position.stop_loss:.2f}")
+                            logger.warning(f"✅ APPLIED: STOP LOSS EXIT for {stock_name}")
                         
-                        # Check VWAP cross (only after 11:15 AM)
-                        elif now.hour >= 11 and now.minute >= 15:
-                            if new_vwap and new_vwap > 0 and new_stock_ltp and new_stock_ltp > 0:
-                                option_type = position.option_type or 'CE'
-                                # CE: Exit if stock LTP falls below VWAP
-                                # PE: Exit if stock LTP rises above VWAP
-                                if (option_type == 'CE' and new_stock_ltp < new_vwap) or \
-                                   (option_type == 'PE' and new_stock_ltp > new_vwap):
-                                    exit_triggered = True
-                                    exit_reason_to_set = 'stock_vwap_cross'
-                                    logger.info(f"📉 AUTO-EXIT: {stock_name} VWAP cross! Stock LTP: ₹{new_stock_ltp:.2f} vs VWAP: ₹{new_vwap:.2f} ({option_type})")
+                        elif exit_conditions['vwap_cross']:
+                            exit_triggered = True
+                            exit_reason_to_set = 'stock_vwap_cross'
+                            logger.warning(f"✅ APPLIED: VWAP CROSS EXIT for {stock_name}")
+                        
+                        elif exit_conditions['profit_target']:
+                            exit_triggered = True
+                            exit_reason_to_set = 'profit_target'
+                            logger.warning(f"✅ APPLIED: PROFIT TARGET EXIT for {stock_name}")
                         
                         # Set exit fields if any exit condition was triggered
                         # ═══════════════════════════════════════════════════════════════
                         # IMPORTANT: sell_time is ONLY set here, at the moment of exit
                         # After this update:
                         #   - exit_reason will be set → Trade excluded from future updates
-                        #   - sell_price is FROZEN at the current value
+                        #   - sell_price is FROZEN at the current value (new_option_ltp)
                         #   - sell_time is FROZEN at the current timestamp
                         #   - No more updates will be applied to this trade
                         # ═══════════════════════════════════════════════════════════════
@@ -291,8 +363,15 @@ async def update_vwap_for_all_open_positions():
                             position.exit_reason = exit_reason_to_set
                             position.sell_time = now  # Set ONLY once at exit
                             position.status = 'sold'
-                            updates_made.append(f"🚨 EXITED: {exit_reason_to_set}")
-                            logger.warning(f"⚠️ {stock_name} automatically exited: {exit_reason_to_set}")
+                            # sell_price is already set to new_option_ltp above (line 252)
+                            updates_made.append(f"🚨 EXITED: {exit_reason_to_set} at ₹{new_option_ltp:.2f}")
+                            logger.critical(f"🔴 EXIT RECORDED for {stock_name}:")
+                            logger.critical(f"   Exit Reason: {exit_reason_to_set}")
+                            logger.critical(f"   Sell Price: ₹{position.sell_price:.2f}")
+                            logger.critical(f"   Option LTP (fetched): ₹{new_option_ltp:.2f}")
+                            logger.critical(f"   Sell Time: {now.strftime('%H:%M:%S')}")
+                            logger.critical(f"   Stock LTP: ₹{new_stock_ltp:.2f if new_stock_ltp else 0:.2f}, VWAP: ₹{new_vwap:.2f if new_vwap else 0:.2f}")
+                            logger.critical(f"   PnL: ₹{position.pnl:.2f}")
                 
                 if updates_made:
                     position.updated_at = now
