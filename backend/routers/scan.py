@@ -1711,87 +1711,98 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                             
                             # Only update sell_price if trade is not already closed
                             if not record.exit_reason:
-                                # FOUR EXIT CONDITIONS (checked in priority order):
+                                # CHECK ALL EXIT CONDITIONS INDEPENDENTLY
+                                # Then apply the highest priority exit
                                 # Priority: Time > Stop Loss > VWAP Cross > Profit Target
                                 
-                                exit_triggered = False
+                                exit_conditions = {
+                                    'time_based': False,
+                                    'stop_loss': False,
+                                    'vwap_cross': False,
+                                    'profit_target': False
+                                }
                                 
-                                # 1. Check if TIME-BASED EXIT (3:25 PM) - HIGHEST PRIORITY
+                                # 1. CHECK TIME-BASED EXIT (3:25 PM) - HIGHEST PRIORITY
                                 if is_exit_time:
+                                    exit_conditions['time_based'] = True
+                                    print(f"⏰ TIME EXIT CONDITION MET for {record.stock_name}: Current time >= 3:25 PM")
+                                
+                                # 2. CHECK STOP LOSS
+                                if record.stop_loss and new_option_ltp <= record.stop_loss:
+                                    exit_conditions['stop_loss'] = True
+                                    print(f"🛑 STOP LOSS CONDITION MET for {record.stock_name}: LTP ₹{new_option_ltp} <= SL ₹{record.stop_loss}")
+                                
+                                # 3. CHECK VWAP CROSS (only after 11:15 AM)
+                                vwap_check_time = datetime.strptime("11:15", "%H:%M").time()
+                                current_time_check = now.time()
+                                
+                                if current_time_check >= vwap_check_time and record.stock_ltp and record.stock_vwap and record.option_type:
+                                    # Enhanced logging for debugging
+                                    print(f"📊 VWAP CHECK for {record.stock_name} ({record.option_type}): Stock LTP=₹{record.stock_ltp}, VWAP=₹{record.stock_vwap}, Time={current_time_check.strftime('%H:%M')}")
+                                    
+                                    if record.option_type == 'CE' and record.stock_ltp < record.stock_vwap:
+                                        # Bullish trade: stock went below VWAP (bearish signal)
+                                        exit_conditions['vwap_cross'] = True
+                                        print(f"📉 VWAP CROSS CONDITION MET for {record.stock_name} (CE): Stock LTP ₹{record.stock_ltp} < VWAP ₹{record.stock_vwap}")
+                                    elif record.option_type == 'PE' and record.stock_ltp > record.stock_vwap:
+                                        # Bearish trade: stock went above VWAP (bullish signal)
+                                        exit_conditions['vwap_cross'] = True
+                                        print(f"📈 VWAP CROSS CONDITION MET for {record.stock_name} (PE): Stock LTP ₹{record.stock_ltp} > VWAP ₹{record.stock_vwap}")
+                                    else:
+                                        print(f"✅ VWAP OK for {record.stock_name} - Stock {record.stock_ltp} {'>' if record.option_type == 'CE' else '<'} VWAP {record.stock_vwap}")
+                                elif current_time_check < vwap_check_time:
+                                    print(f"⏰ VWAP check skipped for {record.stock_name} (time {current_time_check.strftime('%H:%M')} < 11:15 AM)")
+                                
+                                # 4. CHECK PROFIT TARGET (50% gain)
+                                if record.buy_price and new_option_ltp >= (record.buy_price * 1.5):
+                                    exit_conditions['profit_target'] = True
+                                    print(f"🎯 PROFIT TARGET CONDITION MET for {record.stock_name}: LTP ₹{new_option_ltp} >= Target ₹{record.buy_price * 1.5}")
+                                
+                                # APPLY THE HIGHEST PRIORITY EXIT CONDITION
+                                exit_applied = False
+                                
+                                if exit_conditions['time_based']:
                                     record.sell_price = new_option_ltp
                                     record.sell_time = now
                                     record.exit_reason = 'time_based'
                                     record.status = 'sold'
                                     if record.buy_price and record.qty:
                                         record.pnl = (new_option_ltp - record.buy_price) * record.qty
-                                    print(f"⏰ TIME EXIT (3:25 PM) for {record.stock_name}: LTP=₹{new_option_ltp}, PnL=₹{record.pnl}")
-                                    exit_triggered = True
+                                    print(f"✅ APPLIED: TIME EXIT for {record.stock_name}: PnL=₹{record.pnl}")
+                                    exit_applied = True
                                 
-                                # 2. Check if Stop Loss is hit
-                                if not exit_triggered and record.stop_loss and new_option_ltp <= record.stop_loss:
+                                elif exit_conditions['stop_loss']:
                                     record.sell_price = new_option_ltp
                                     record.sell_time = now
                                     record.exit_reason = 'stop_loss'
                                     record.status = 'sold'
                                     if record.buy_price and record.qty:
                                         record.pnl = (new_option_ltp - record.buy_price) * record.qty
-                                    print(f"🛑 STOP LOSS HIT for {record.stock_name}: SL=₹{record.stop_loss}, LTP=₹{new_option_ltp}, Loss=₹{record.pnl}")
-                                    exit_triggered = True
+                                    print(f"✅ APPLIED: STOP LOSS EXIT for {record.stock_name}: PnL=₹{record.pnl}")
+                                    exit_applied = True
                                 
-                                # 3. Check if underlying stock crosses VWAP (directional - based on option type)
-                                # For CE (Bullish): Exit when stock closes BELOW VWAP (lost bullish momentum)
-                                # For PE (Bearish): Exit when stock closes ABOVE VWAP (lost bearish momentum)
-                                # TIME RESTRICTION: Only check from 11:15 AM onwards (10:15 AM is entry time)
-                                if not exit_triggered and record.stock_ltp and record.stock_vwap and record.option_type:
-                                    # Check if current time is >= 11:15 AM (after first entry time)
-                                    vwap_check_time = datetime.strptime("11:15", "%H:%M").time()
-                                    current_time_check = now.time()
-                                    
-                                    # Only apply VWAP exit from 11:15 AM onwards
-                                    if current_time_check >= vwap_check_time:
-                                        should_exit_vwap = False
-                                        exit_direction = ""
-                                        
-                                        # Enhanced logging for debugging
-                                        print(f"📊 VWAP CHECK for {record.stock_name} ({record.option_type}): Stock LTP=₹{record.stock_ltp}, VWAP=₹{record.stock_vwap}, Time={current_time_check.strftime('%H:%M')}")
-                                        
-                                        if record.option_type == 'CE' and record.stock_ltp < record.stock_vwap:
-                                            # Bullish trade: stock went below VWAP (bearish signal)
-                                            should_exit_vwap = True
-                                            exit_direction = "below"
-                                        elif record.option_type == 'PE' and record.stock_ltp > record.stock_vwap:
-                                            # Bearish trade: stock went above VWAP (bullish signal)
-                                            should_exit_vwap = True
-                                            exit_direction = "above"
-                                        
-                                        if should_exit_vwap:
-                                            record.sell_price = new_option_ltp
-                                            record.sell_time = now
-                                            record.exit_reason = 'stock_vwap_cross'
-                                            record.status = 'sold'
-                                            if record.buy_price and record.qty:
-                                                record.pnl = (new_option_ltp - record.buy_price) * record.qty
-                                            print(f"✅ 📉 VWAP CROSS EXIT TRIGGERED for {record.stock_name} ({record.option_type}): Stock LTP=₹{record.stock_ltp} {exit_direction} VWAP=₹{record.stock_vwap}, Option LTP=₹{new_option_ltp}, Option PnL=₹{record.pnl}")
-                                            exit_triggered = True
-                                        else:
-                                            print(f"ℹ️ VWAP OK for {record.stock_name} - No exit (Stock {record.stock_ltp} {'>' if record.option_type == 'CE' else '<'} VWAP {record.stock_vwap})")
-                                    else:
-                                        # Before 11:15 AM - skip VWAP exit check
-                                        print(f"⏰ Skipping VWAP exit check for {record.stock_name} (current time {current_time_check.strftime('%H:%M')} < 11:15 AM)")
+                                elif exit_conditions['vwap_cross']:
+                                    record.sell_price = new_option_ltp
+                                    record.sell_time = now
+                                    record.exit_reason = 'stock_vwap_cross'
+                                    record.status = 'sold'
+                                    if record.buy_price and record.qty:
+                                        record.pnl = (new_option_ltp - record.buy_price) * record.qty
+                                    print(f"✅ APPLIED: VWAP CROSS EXIT for {record.stock_name}: PnL=₹{record.pnl}")
+                                    exit_applied = True
                                 
-                                # 4. Check if Profit Target is hit (50% gain)
-                                if not exit_triggered and record.buy_price and new_option_ltp >= (record.buy_price * 1.5):
+                                elif exit_conditions['profit_target']:
                                     record.sell_price = new_option_ltp
                                     record.sell_time = now
                                     record.exit_reason = 'profit_target'
                                     record.status = 'sold'
                                     if record.qty:
                                         record.pnl = (new_option_ltp - record.buy_price) * record.qty
-                                    print(f"🎯 PROFIT TARGET HIT for {record.stock_name}: Target=₹{record.buy_price * 1.5}, LTP=₹{new_option_ltp}, Profit=₹{record.pnl}")
-                                    exit_triggered = True
+                                    print(f"✅ APPLIED: PROFIT TARGET EXIT for {record.stock_name}: PnL=₹{record.pnl}")
+                                    exit_applied = True
                                 
-                                # If no exit was triggered, just update current price and PnL (trade still OPEN)
-                                if not exit_triggered:
+                                # If no exit was applied, just update current price and PnL (trade still OPEN)
+                                if not exit_applied:
                                     record.sell_price = new_option_ltp  # Update current Option LTP
                                     # DO NOT update sell_time here - only set when trade exits
                                     if record.buy_price and record.qty:
