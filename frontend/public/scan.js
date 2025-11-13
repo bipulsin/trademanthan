@@ -95,11 +95,23 @@ function updateDaySummary(bullishData, bearishData) {
                     totalAlerts += alert.stocks.length;
                     alert.stocks.forEach(stock => {
                         // Check if trade was entered (has buy_price and qty > 0)
-                        if (stock.buy_price && stock.buy_price > 0 && stock.qty && stock.qty > 0) {
+                        const tradeWasEntered = stock.buy_price && stock.buy_price > 0 && stock.qty && stock.qty > 0;
+                        
+                        if (tradeWasEntered) {
                             tradesEntered++;
                             bullishTrades++;
                             
-                            // Check exit reason
+                            // Calculate P&L
+                            if (stock.pnl) {
+                                totalPnL += stock.pnl;
+                                if (stock.pnl > 0) winners++;
+                                else if (stock.pnl < 0) losers++;
+                            }
+                        }
+                        
+                        // Count exits for any trade that has an exit_reason (even if it wasn't "entered" properly)
+                        // This ensures we capture all exits including time_based exits at 3:25 PM
+                        if (stock.exit_reason) {
                             if (stock.exit_reason === 'stop_loss') {
                                 slExits++;
                             } else if (stock.exit_reason === 'time_based') {
@@ -108,13 +120,6 @@ function updateDaySummary(bullishData, bearishData) {
                                 targetExits++;
                             } else if (stock.exit_reason === 'stock_vwap_cross') {
                                 vwapExits++;
-                            }
-                            
-                            // Calculate P&L
-                            if (stock.pnl) {
-                                totalPnL += stock.pnl;
-                                if (stock.pnl > 0) winners++;
-                                else if (stock.pnl < 0) losers++;
                             }
                         }
                     });
@@ -129,11 +134,23 @@ function updateDaySummary(bullishData, bearishData) {
                     totalAlerts += alert.stocks.length;
                     alert.stocks.forEach(stock => {
                         // Check if trade was entered
-                        if (stock.buy_price && stock.buy_price > 0 && stock.qty && stock.qty > 0) {
+                        const tradeWasEntered = stock.buy_price && stock.buy_price > 0 && stock.qty && stock.qty > 0;
+                        
+                        if (tradeWasEntered) {
                             tradesEntered++;
                             bearishTrades++;
                             
-                            // Check exit reason
+                            // Calculate P&L
+                            if (stock.pnl) {
+                                totalPnL += stock.pnl;
+                                if (stock.pnl > 0) winners++;
+                                else if (stock.pnl < 0) losers++;
+                            }
+                        }
+                        
+                        // Count exits for any trade that has an exit_reason (even if it wasn't "entered" properly)
+                        // This ensures we capture all exits including time_based exits at 3:25 PM
+                        if (stock.exit_reason) {
                             if (stock.exit_reason === 'stop_loss') {
                                 slExits++;
                             } else if (stock.exit_reason === 'time_based') {
@@ -142,13 +159,6 @@ function updateDaySummary(bullishData, bearishData) {
                                 targetExits++;
                             } else if (stock.exit_reason === 'stock_vwap_cross') {
                                 vwapExits++;
-                            }
-                            
-                            // Calculate P&L
-                            if (stock.pnl) {
-                                totalPnL += stock.pnl;
-                                if (stock.pnl > 0) winners++;
-                                else if (stock.pnl < 0) losers++;
                             }
                         }
                     });
