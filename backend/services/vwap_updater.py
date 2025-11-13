@@ -173,6 +173,15 @@ async def update_vwap_for_all_open_positions():
                     logger.warning(f"⚠️ Skipping {stock_name} - status already 'sold' (trade closed)")
                     continue
                 
+                # Check if this position was updated recently (within last 30 minutes)
+                # This helps detect if multiple update systems are running simultaneously
+                if position.updated_at:
+                    time_since_last_update = (now - position.updated_at).total_seconds() / 60
+                    if time_since_last_update < 30:
+                        logger.warning(f"⚠️ {stock_name} was updated {time_since_last_update:.1f} minutes ago - possible duplicate update!")
+                        logger.warning(f"   Current sell_price: ₹{position.sell_price:.2f}, buy_price: ₹{position.buy_price:.2f}")
+                        logger.warning(f"   This may indicate multiple update systems running simultaneously")
+                
                 # 1. Fetch fresh Stock VWAP from API
                 new_vwap = vwap_service.get_stock_vwap(stock_name)
                 
@@ -277,11 +286,34 @@ async def update_vwap_for_all_open_positions():
                 if new_option_ltp > 0:
                     old_option_ltp = position.sell_price or 0.0
                     
-                    # Sanity check: Flag suspicious price movements
+                    # CRITICAL SANITY CHECKS
+                    sanity_passed = True
+                    
+                    # Check 1: Flag suspicious price movements (>100% change)
                     if old_option_ltp > 0:
                         price_change_pct = abs((new_option_ltp - old_option_ltp) / old_option_ltp) * 100
                         if price_change_pct > 100:
-                            logger.warning(f"⚠️ SUSPICIOUS PRICE CHANGE for {stock_name}: ₹{old_option_ltp:.2f} → ₹{new_option_ltp:.2f} ({price_change_pct:.1f}% change)")
+                            logger.error(f"🚨 SUSPICIOUS PRICE CHANGE for {stock_name}: ₹{old_option_ltp:.2f} → ₹{new_option_ltp:.2f} ({price_change_pct:.1f}% change)")
+                            logger.error(f"   This suggests possible data corruption or API error")
+                    
+                    # Check 2: Detect if new_option_ltp seems like a sum instead of replacement
+                    if position.buy_price and position.buy_price > 0:
+                        ratio = new_option_ltp / position.buy_price
+                        if ratio > 3.0:  # If option LTP is more than 3x buy price
+                            logger.error(f"🚨 UNREALISTIC OPTION PRICE for {stock_name}:")
+                            logger.error(f"   Buy Price: ₹{position.buy_price:.2f}")
+                            logger.error(f"   New Option LTP: ₹{new_option_ltp:.2f} ({ratio:.1f}x buy price)")
+                            logger.error(f"   Old sell_price: ₹{old_option_ltp:.2f}")
+                            logger.error(f"   This may indicate cumulative addition bug or API error")
+                            
+                            # If this looks like cumulative addition (new = old + actual_ltp)
+                            # Try to detect and fix
+                            if old_option_ltp > 0 and new_option_ltp > old_option_ltp:
+                                difference = new_option_ltp - old_option_ltp
+                                if difference < position.buy_price * 2:  # Difference seems reasonable
+                                    logger.error(f"   Possible fix: Use difference ₹{difference:.2f} as actual LTP instead of ₹{new_option_ltp:.2f}")
+                                    new_option_ltp = difference
+                                    logger.error(f"   CORRECTED: Using ₹{new_option_ltp:.2f} as option LTP")
                     
                     position.sell_price = new_option_ltp  # Update sell_price with current option price
                     updates_made.append(f"Option LTP: {old_option_ltp:.2f}→{new_option_ltp:.2f}")

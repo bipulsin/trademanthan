@@ -1616,12 +1616,15 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
         if is_exit_time:
             print(f"⏰ TIME-BASED EXIT: Current time {current_time.strftime('%H:%M')} >= 15:25 - Exiting all open trades")
         
-        # Get all records for today that are NOT 'no_entry'
-        # Skip 'no_entry' trades - they will NEVER be entered
+        # Get all OPEN records for today (not exited, not no_entry)
+        # Only update trades that are still open
         records = db.query(IntradayStockOption).filter(
-            IntradayStockOption.trade_date == today,
-            IntradayStockOption.option_contract.isnot(None),
-            IntradayStockOption.status != 'no_entry'  # Skip no_entry trades
+            and_(
+                IntradayStockOption.trade_date == today,
+                IntradayStockOption.option_contract.isnot(None),
+                IntradayStockOption.status != 'no_entry',  # Skip no_entry trades
+                IntradayStockOption.exit_reason == None  # CRITICAL: Only update open trades, not exited ones
+            )
         ).all()
         
         updated_count = 0
@@ -1635,6 +1638,11 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
         
         for record in records:
             try:
+                # SAFETY CHECK: Skip if trade already has exit_reason (should be filtered by query, but double-check)
+                if record.exit_reason is not None:
+                    print(f"⚠️ Skipping {record.stock_name} - already exited with reason: {record.exit_reason}")
+                    continue
+                
                 # Load instruments JSON if needed
                 from pathlib import Path
                 import json as json_lib
@@ -1803,14 +1811,26 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                 
                                 # If no exit was applied, just update current price and PnL (trade still OPEN)
                                 if not exit_applied:
+                                    old_sell_price = record.sell_price or 0.0
                                     record.sell_price = new_option_ltp  # Update current Option LTP
+                                    print(f"📝 PRICE UPDATE for {record.stock_name}: sell_price ₹{old_sell_price:.2f} → ₹{new_option_ltp:.2f} (OPEN trade)")
+                                    
                                     # DO NOT update sell_time here - only set when trade exits
                                     if record.buy_price and record.qty:
                                         record.pnl = (new_option_ltp - record.buy_price) * record.qty  # Current unrealized P&L
+                                        
+                                    # Sanity check for unrealistic prices
+                                    if record.buy_price and new_option_ltp > record.buy_price * 3:
+                                        print(f"🚨 WARNING: Unrealistic option price for {record.stock_name}!")
+                                        print(f"   Buy: ₹{record.buy_price:.2f}, Current: ₹{new_option_ltp:.2f} ({new_option_ltp/record.buy_price:.1f}x)")
+                                        print(f"   Previous sell_price: ₹{old_sell_price:.2f}")
+                                        print(f"   This may indicate data corruption!")
                             else:
-                                # Trade already closed, just calculate PnL for display
-                                if record.buy_price and record.qty:
-                                    record.pnl = (record.sell_price - record.buy_price) * record.qty
+                                # Trade already closed - this should NOT happen due to query filter
+                                # But if it does, log it and skip
+                                print(f"🚨 ERROR: {record.stock_name} already has exit_reason='{record.exit_reason}' but was still in query results!")
+                                print(f"   This indicates query filter bug. Skipping update.")
+                                continue
                             
                             updated_count += 1
                             print(f"✅ Updated {record.stock_name}: option_ltp=₹{new_option_ltp}, PnL=₹{record.pnl}, Exit={record.exit_reason or 'Open'}")
