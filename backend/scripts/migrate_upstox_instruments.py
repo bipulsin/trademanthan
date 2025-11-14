@@ -10,8 +10,10 @@ import json
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from database import SessionLocal, create_tables
-from models.trading import UpstoxInstrument
+from database import SessionLocal, create_tables, Base
+# Import all models to ensure they're registered with Base
+from models import UpstoxInstrument  # This imports all models
+from models.trading import UpstoxInstrument as UI
 import pytz
 
 def convert_expiry_timestamp(timestamp):
@@ -57,8 +59,13 @@ def migrate_instruments(json_file_path: str = None):
     db = SessionLocal()
     
     try:
-        # Check if table already has data
-        existing_count = db.query(UpstoxInstrument).count()
+        # Check if table already has data (handle case where table doesn't exist yet)
+        try:
+            existing_count = db.query(UpstoxInstrument).count()
+        except Exception:
+            # Table doesn't exist yet, will be created by create_tables()
+            existing_count = 0
+        
         if existing_count > 0:
             response = input(f"⚠️  Table already contains {existing_count} records. Delete all and reload? (yes/no): ")
             if response.lower() == 'yes':
