@@ -44,8 +44,11 @@ def migrate_instruments(json_file_path: str = None):
     
     print(f"📂 Loading instruments from: {json_file_path}")
     
-    # Create tables first
+    # Create tables first - IMPORTANT: Import model before creating tables
     print("📋 Creating database tables...")
+    # Import model to register it with Base
+    from models.trading import UpstoxInstrument
+    # Now create tables (this will create all registered models)
     create_tables()
     
     # Load JSON data
@@ -62,8 +65,9 @@ def migrate_instruments(json_file_path: str = None):
         # Check if table already has data (handle case where table doesn't exist yet)
         try:
             existing_count = db.query(UpstoxInstrument).count()
-        except Exception:
+        except Exception as e:
             # Table doesn't exist yet, will be created by create_tables()
+            print(f"⚠️  Table check failed (this is OK if table is being created): {str(e)}")
             existing_count = 0
         
         if existing_count > 0:
@@ -196,15 +200,23 @@ if __name__ == "__main__":
         json_file_path = None
     
     if args.force:
-        # Force mode: delete existing data
+        # Force mode: delete existing data after ensuring table exists
+        # Import model and create table first
+        from models.trading import UpstoxInstrument
+        create_tables()
+        
         db = SessionLocal()
         try:
-            existing_count = db.query(UpstoxInstrument).count()
-            if existing_count > 0:
-                print(f"🗑️  Force mode: Deleting {existing_count} existing records...")
-                db.query(UpstoxInstrument).delete()
-                db.commit()
-                print("✅ Existing records deleted")
+            try:
+                existing_count = db.query(UpstoxInstrument).count()
+                if existing_count > 0:
+                    print(f"🗑️  Force mode: Deleting {existing_count} existing records...")
+                    db.query(UpstoxInstrument).delete()
+                    db.commit()
+                    print("✅ Existing records deleted")
+            except Exception:
+                # Table doesn't exist yet, that's OK
+                print("ℹ️  Table doesn't exist yet, will be created during migration")
         finally:
             db.close()
     
