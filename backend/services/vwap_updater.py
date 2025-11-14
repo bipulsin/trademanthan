@@ -176,7 +176,16 @@ async def update_vwap_for_all_open_positions():
                 # Check if this position was updated recently (within last 30 minutes)
                 # This helps detect if multiple update systems are running simultaneously
                 if position.updated_at:
-                    time_since_last_update = (now - position.updated_at).total_seconds() / 60
+                    # Handle timezone-aware vs timezone-naive datetime comparison
+                    updated_at = position.updated_at
+                    if updated_at.tzinfo is None:
+                        # If updated_at is timezone-naive, assume it's in IST and localize it
+                        updated_at = ist.localize(updated_at)
+                    elif updated_at.tzinfo != ist:
+                        # If it's in a different timezone, convert to IST
+                        updated_at = updated_at.astimezone(ist)
+                    
+                    time_since_last_update = (now - updated_at).total_seconds() / 60
                     if time_since_last_update < 30:
                         logger.warning(f"⚠️ {stock_name} was updated {time_since_last_update:.1f} minutes ago - possible duplicate update!")
                         logger.warning(f"   Current sell_price: ₹{position.sell_price:.2f}, buy_price: ₹{position.buy_price:.2f}")
