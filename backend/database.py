@@ -1,5 +1,4 @@
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
 from dotenv import load_dotenv
@@ -9,10 +8,12 @@ load_dotenv()
 # Database configuration - PostgreSQL production database (configurable via DATABASE_URL env var)
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://trademanthan:trademanthan123@localhost/trademanthan")
 
+# Import Base from models.base to ensure all models use the same Base instance
+from models.base import Base
+
 # Initialize engine and session factory
 engine = None
 SessionLocal = None
-Base = declarative_base()
 
 try:
     # Create engine with proper configuration to prevent rollbacks
