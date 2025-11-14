@@ -228,7 +228,16 @@ async def update_vwap_for_all_open_positions():
                                 symbol, month, year, strike, opt_type = match.groups()
                                 strike_value = float(strike)
                                 
-                                # Search for matching instrument (instruments_data is a list)
+                                # Parse expiry month and year
+                                month_map = {
+                                    'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
+                                    'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
+                                    'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
+                                }
+                                target_month = month_map.get(month[:3].capitalize(), 11)
+                                target_year = int(year)
+                                
+                                # Search for matching instrument - CRITICAL: Also check expiry month/year
                                 for instrument in instruments_data:
                                     if (instrument.get('underlying_symbol', '').upper() == symbol.upper() and
                                         instrument.get('segment') == 'NSE_FO' and
@@ -237,28 +246,42 @@ async def update_vwap_for_all_open_positions():
                                         # Check strike price match
                                         inst_strike = float(instrument.get('strike_price', 0))
                                         if abs(inst_strike - strike_value) < 0.01:
-                                            # Found the option - fetch its LTP
-                                            instrument_key = instrument.get('instrument_key')
-                                            if instrument_key:
-                                                # Use get_market_quote_by_key which takes only instrument_key
-                                                logger.info(f"🔍 [{now.strftime('%H:%M:%S')}] Fetching option LTP for {option_contract}")
-                                                logger.info(f"   Instrument Key: {instrument_key}")
-                                                logger.info(f"   Strike: {inst_strike}, Type: {opt_type}")
-                                                
-                                                option_quote = vwap_service.get_market_quote_by_key(instrument_key)
-                                                
-                                                logger.info(f"   API Response: {option_quote}")
-                                                
-                                                if option_quote and 'last_price' in option_quote:
-                                                    option_ltp_data = option_quote['last_price']
-                                                    if option_ltp_data and option_ltp_data > 0:
-                                                        new_option_ltp = option_ltp_data
-                                                        logger.info(f"📥 [{now.strftime('%H:%M:%S')}] API returned option LTP: ₹{new_option_ltp:.2f} for {option_contract}")
-                                                        break
-                                                    else:
-                                                        logger.warning(f"⚠️ Invalid LTP data: {option_ltp_data}")
-                                                else:
-                                                    logger.warning(f"⚠️ No last_price in quote data for {instrument_key}: {option_quote}")
+                                            # CRITICAL: Check expiry month/year matches
+                                            expiry_timestamp = instrument.get('expiry')
+                                            if expiry_timestamp:
+                                                try:
+                                                    # Convert timestamp (milliseconds) to datetime
+                                                    if expiry_timestamp > 1e12:
+                                                        expiry_timestamp = expiry_timestamp / 1000
+                                                    inst_expiry = datetime.fromtimestamp(expiry_timestamp, tz=pytz.UTC)
+                                                    
+                                                    # Check if expiry month/year matches
+                                                    if inst_expiry.year == target_year and inst_expiry.month == target_month:
+                                                        # Found the correct option - fetch its LTP
+                                                        instrument_key = instrument.get('instrument_key')
+                                                        if instrument_key:
+                                                            # Use get_market_quote_by_key which takes only instrument_key
+                                                            logger.info(f"🔍 [{now.strftime('%H:%M:%S')}] Fetching option LTP for {option_contract}")
+                                                            logger.info(f"   Instrument Key: {instrument_key}")
+                                                            logger.info(f"   Strike: {inst_strike}, Type: {opt_type}, Expiry: {inst_expiry.strftime('%d-%b-%Y')}")
+                                                            
+                                                            option_quote = vwap_service.get_market_quote_by_key(instrument_key)
+                                                            
+                                                            logger.info(f"   API Response: {option_quote}")
+                                                            
+                                                            if option_quote and 'last_price' in option_quote:
+                                                                option_ltp_data = option_quote['last_price']
+                                                                if option_ltp_data and option_ltp_data > 0:
+                                                                    new_option_ltp = option_ltp_data
+                                                                    logger.info(f"📥 [{now.strftime('%H:%M:%S')}] API returned option LTP: ₹{new_option_ltp:.2f} for {option_contract}")
+                                                                    break  # Found correct match, exit loop
+                                                                else:
+                                                                    logger.warning(f"⚠️ Invalid LTP data: {option_ltp_data}")
+                                                            else:
+                                                                logger.warning(f"⚠️ No last_price in quote data for {instrument_key}: {option_quote}")
+                                                except (ValueError, TypeError) as exp_error:
+                                                    logger.warning(f"⚠️ Error parsing expiry for {option_contract}: {exp_error}")
+                                                    continue
                     except Exception as e:
                         logger.warning(f"Could not fetch option LTP for {option_contract}: {str(e)}")
                 
@@ -518,7 +541,16 @@ async def close_all_open_trades():
                                 symbol, month, year, strike, opt_type = match.groups()
                                 strike_value = float(strike)
                                 
-                                # Find matching instrument
+                                # Parse expiry month and year
+                                month_map = {
+                                    'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
+                                    'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
+                                    'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
+                                }
+                                target_month = month_map.get(month[:3].capitalize(), 11)
+                                target_year = int(year)
+                                
+                                # Find matching instrument - CRITICAL: Also check expiry month/year
                                 for instrument in instruments_data:
                                     if (instrument.get('underlying_symbol', '').upper() == symbol.upper() and
                                         instrument.get('segment') == 'NSE_FO' and
@@ -526,38 +558,53 @@ async def close_all_open_trades():
                                         
                                         inst_strike = float(instrument.get('strike_price', 0))
                                         if abs(inst_strike - strike_value) < 0.01:
-                                            instrument_key = instrument.get('instrument_key')
-                                            if instrument_key:
-                                                option_quote = vwap_service.get_market_quote_by_key(instrument_key)
-                                                if option_quote and 'last_price' in option_quote:
-                                                    raw_ltp = option_quote['last_price']
+                                            # CRITICAL: Check expiry month/year matches
+                                            expiry_timestamp = instrument.get('expiry')
+                                            if expiry_timestamp:
+                                                try:
+                                                    # Convert timestamp (milliseconds) to datetime
+                                                    if expiry_timestamp > 1e12:
+                                                        expiry_timestamp = expiry_timestamp / 1000
+                                                    inst_expiry = datetime.fromtimestamp(expiry_timestamp, tz=pytz.UTC)
                                                     
-                                                    # CRITICAL: Sanity check for unrealistic option LTP
-                                                    # If option LTP is >3x buy_price, it's likely wrong
-                                                    if position.buy_price and position.buy_price > 0:
-                                                        ratio = raw_ltp / position.buy_price
-                                                        if ratio > 3.0:
-                                                            logger.error(f"🚨 UNREALISTIC LTP DETECTED for {option_contract}!")
-                                                            logger.error(f"   Buy Price: ₹{position.buy_price:.2f}")
-                                                            logger.error(f"   Raw LTP from API: ₹{raw_ltp:.2f} ({ratio:.2f}x buy price)")
-                                                            logger.error(f"   This is likely an API error or data corruption")
-                                                            
-                                                            # Try to use last known sell_price if it's reasonable
-                                                            if position.sell_price and position.sell_price > 0:
-                                                                last_ratio = position.sell_price / position.buy_price
-                                                                if last_ratio <= 3.0:
-                                                                    logger.warning(f"   Using last known sell_price: ₹{position.sell_price:.2f} instead")
-                                                                    option_ltp = position.sell_price
-                                                                else:
-                                                                    logger.error(f"   Last sell_price also unrealistic: ₹{position.sell_price:.2f}")
-                                                                    logger.error(f"   Using buy_price as fallback: ₹{position.buy_price:.2f}")
-                                                                    option_ltp = position.buy_price
-                                                            else:
-                                                                logger.error(f"   Using buy_price as fallback: ₹{position.buy_price:.2f}")
-                                                                option_ltp = position.buy_price
-                                                        else:
-                                                            option_ltp = raw_ltp
-                                                            logger.info(f"📍 {option_contract}: Final LTP = ₹{option_ltp:.2f}")
+                                                    # Check if expiry month/year matches
+                                                    if inst_expiry.year == target_year and inst_expiry.month == target_month:
+                                                        instrument_key = instrument.get('instrument_key')
+                                                        if instrument_key:
+                                                            option_quote = vwap_service.get_market_quote_by_key(instrument_key)
+                                                            if option_quote and 'last_price' in option_quote:
+                                                                raw_ltp = option_quote['last_price']
+                                                                
+                                                                # CRITICAL: Sanity check for unrealistic option LTP
+                                                                # If option LTP is >3x buy_price, it's likely wrong
+                                                                if position.buy_price and position.buy_price > 0:
+                                                                    ratio = raw_ltp / position.buy_price
+                                                                    if ratio > 3.0:
+                                                                        logger.error(f"🚨 UNREALISTIC LTP DETECTED for {option_contract}!")
+                                                                        logger.error(f"   Buy Price: ₹{position.buy_price:.2f}")
+                                                                        logger.error(f"   Raw LTP from API: ₹{raw_ltp:.2f} ({ratio:.2f}x buy price)")
+                                                                        logger.error(f"   This is likely an API error or data corruption")
+                                                                        
+                                                                        # Try to use last known sell_price if it's reasonable
+                                                                        if position.sell_price and position.sell_price > 0:
+                                                                            last_ratio = position.sell_price / position.buy_price
+                                                                            if last_ratio <= 3.0:
+                                                                                logger.warning(f"   Using last known sell_price: ₹{position.sell_price:.2f} instead")
+                                                                                raw_ltp = position.sell_price
+                                                                            else:
+                                                                                logger.error(f"   Last sell_price also unrealistic: ₹{position.sell_price:.2f}")
+                                                                                logger.error(f"   Using buy_price as fallback: ₹{position.buy_price:.2f}")
+                                                                                raw_ltp = position.buy_price
+                                                                        else:
+                                                                            logger.error(f"   Using buy_price as fallback: ₹{position.buy_price:.2f}")
+                                                                            raw_ltp = position.buy_price
+                                                                
+                                                                option_ltp = raw_ltp
+                                                                logger.info(f"📍 {option_contract}: Final LTP = ₹{option_ltp:.2f}")
+                                                                break  # Found correct match, exit loop
+                                                except (ValueError, TypeError) as exp_error:
+                                                    logger.warning(f"⚠️ Error parsing expiry for {option_contract}: {exp_error}")
+                                                    continue
                                                     else:
                                                         option_ltp = raw_ltp
                                                         logger.info(f"📍 {option_contract}: Final LTP = ₹{option_ltp:.2f}")
