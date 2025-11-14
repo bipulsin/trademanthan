@@ -105,3 +105,52 @@ class MasterStock(Base):
         return f"<MasterStock(id={self.id}, symbol='{self.symbol_name}', strike={self.strike_price}, type='{self.option_type}')>"
 
 
+class UpstoxInstrument(Base):
+    """
+    Upstox instrument data from nse_instruments.json
+    Stores all instrument details from Upstox API
+    """
+    __tablename__ = "upstox_instrument"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    instrument_key = Column(String(255), nullable=False, unique=True, index=True)  # Primary key from Upstox
+    name = Column(String(255), nullable=True)
+    trading_symbol = Column(String(255), nullable=True, index=True)
+    exchange = Column(String(50), nullable=True, index=True)  # NSE, BSE, etc.
+    segment = Column(String(50), nullable=True, index=True)  # NSE_EQ, NSE_FO, NCD_FO, etc.
+    instrument_type = Column(String(50), nullable=True, index=True)  # CE, PE, EQ, FUT, etc.
+    exchange_token = Column(String(50), nullable=True, index=True)
+    isin = Column(String(50), nullable=True, index=True)
+    
+    # Asset/Symbol information
+    asset_symbol = Column(String(100), nullable=True, index=True)
+    asset_type = Column(String(50), nullable=True)  # CUR, EQ, etc.
+    underlying_symbol = Column(String(100), nullable=True, index=True)
+    underlying_type = Column(String(50), nullable=True)
+    underlying_key = Column(String(255), nullable=True)
+    asset_key = Column(String(255), nullable=True)
+    
+    # Option/Future specific fields
+    strike_price = Column(Float, nullable=True, index=True)
+    expiry = Column(DateTime, nullable=True, index=True)  # Expiry timestamp
+    weekly = Column(Boolean, nullable=True, default=False)
+    last_trading_date = Column(DateTime, nullable=True)
+    
+    # Trading parameters
+    lot_size = Column(Integer, nullable=True)
+    minimum_lot = Column(Integer, nullable=True)
+    tick_size = Column(Float, nullable=True)
+    qty_multiplier = Column(Float, nullable=True)
+    freeze_quantity = Column(Float, nullable=True)
+    price_quote_unit = Column(String(50), nullable=True)
+    security_type = Column(String(50), nullable=True)  # NORMAL, etc.
+    short_name = Column(String(255), nullable=True)
+    
+    # Metadata
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    
+    def __repr__(self):
+        return f"<UpstoxInstrument(id={self.id}, instrument_key='{self.instrument_key}', trading_symbol='{self.trading_symbol}')>"
+
+
