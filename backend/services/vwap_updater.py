@@ -605,10 +605,6 @@ async def close_all_open_trades():
                                                 except (ValueError, TypeError) as exp_error:
                                                     logger.warning(f"⚠️ Error parsing expiry for {option_contract}: {exp_error}")
                                                     continue
-                                                    else:
-                                                        option_ltp = raw_ltp
-                                                        logger.info(f"📍 {option_contract}: Final LTP = ₹{option_ltp:.2f}")
-                                                break
                     except Exception as e:
                         logger.warning(f"⚠️ Could not fetch final LTP for {option_contract}: {e}")
                 
