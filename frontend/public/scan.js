@@ -95,8 +95,11 @@ function updateDaySummary(bullishData, bearishData) {
                 if (alert.stocks) {
                     totalAlerts += alert.stocks.length;
                     alert.stocks.forEach(stock => {
-                        // Check if trade was entered (has buy_price and qty > 0)
-                        const tradeWasEntered = stock.buy_price && stock.buy_price > 0 && stock.qty && stock.qty > 0;
+                        // Check if trade was entered - use status field first, then fallback to buy_price/qty
+                        // A trade is entered if status is 'bought' or 'sold', NOT 'no_entry'
+                        const tradeWasEntered = stock.status !== 'no_entry' && 
+                                              stock.buy_price && stock.buy_price > 0 && 
+                                              stock.qty && stock.qty > 0;
                         
                         if (tradeWasEntered) {
                             tradesEntered++;
@@ -134,8 +137,11 @@ function updateDaySummary(bullishData, bearishData) {
                 if (alert.stocks) {
                     totalAlerts += alert.stocks.length;
                     alert.stocks.forEach(stock => {
-                        // Check if trade was entered
-                        const tradeWasEntered = stock.buy_price && stock.buy_price > 0 && stock.qty && stock.qty > 0;
+                        // Check if trade was entered - use status field first, then fallback to buy_price/qty
+                        // A trade is entered if status is 'bought' or 'sold', NOT 'no_entry'
+                        const tradeWasEntered = stock.status !== 'no_entry' && 
+                                              stock.buy_price && stock.buy_price > 0 && 
+                                              stock.qty && stock.qty > 0;
                         
                         if (tradeWasEntered) {
                             tradesEntered++;
