@@ -177,19 +177,28 @@ async def update_vwap_for_all_open_positions():
                 # This helps detect if multiple update systems are running simultaneously
                 if position.updated_at:
                     # Handle timezone-aware vs timezone-naive datetime comparison
-                    updated_at = position.updated_at
-                    if updated_at.tzinfo is None:
-                        # If updated_at is timezone-naive, assume it's in IST and localize it
-                        updated_at = ist.localize(updated_at)
-                    elif updated_at.tzinfo != ist:
-                        # If it's in a different timezone, convert to IST
-                        updated_at = updated_at.astimezone(ist)
-                    
-                    time_since_last_update = (now - updated_at).total_seconds() / 60
-                    if time_since_last_update < 30:
-                        logger.warning(f"⚠️ {stock_name} was updated {time_since_last_update:.1f} minutes ago - possible duplicate update!")
-                        logger.warning(f"   Current sell_price: ₹{position.sell_price:.2f}, buy_price: ₹{position.buy_price:.2f}")
-                        logger.warning(f"   This may indicate multiple update systems running simultaneously")
+                    try:
+                        updated_at = position.updated_at
+                        # Convert to IST timezone-aware datetime for comparison
+                        if updated_at.tzinfo is None:
+                            # If updated_at is timezone-naive, assume it's in IST and localize it
+                            # Note: localize() can only be called on naive datetimes
+                            updated_at = ist.localize(updated_at)
+                        else:
+                            # If it's already timezone-aware (could be UTC from PostgreSQL), convert to IST
+                            # Note: astimezone() requires timezone-aware datetime
+                            updated_at = updated_at.astimezone(ist)
+                        
+                        # Now both now and updated_at are timezone-aware in IST, safe to subtract
+                        time_since_last_update = (now - updated_at).total_seconds() / 60
+                        if time_since_last_update < 30:
+                            logger.warning(f"⚠️ {stock_name} was updated {time_since_last_update:.1f} minutes ago - possible duplicate update!")
+                            logger.warning(f"   Current sell_price: ₹{position.sell_price:.2f}, buy_price: ₹{position.buy_price:.2f}")
+                            logger.warning(f"   This may indicate multiple update systems running simultaneously")
+                    except (ValueError, TypeError) as tz_error:
+                        # If timezone conversion fails (e.g., can't subtract naive/aware), log but don't block update
+                        logger.warning(f"⚠️ Timezone conversion error for {stock_name}: {str(tz_error)} - continuing with update")
+                        # Continue processing - don't let timezone check block the update
                 
                 # 1. Fetch fresh Stock VWAP from API
                 new_vwap = vwap_service.get_stock_vwap(stock_name)
