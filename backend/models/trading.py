@@ -56,6 +56,7 @@ class IntradayStockOption(Base):
     qty = Column(Integer, nullable=True)
     buy_time = Column(DateTime, nullable=True)
     buy_price = Column(Float, nullable=True)
+    instrument_key = Column(String(255), nullable=True, index=True)  # Upstox instrument key (e.g., NSE_FO|104500) - stored at trade entry
     stop_loss = Column(Float, nullable=True)  # Stop loss price for risk management
     sell_time = Column(DateTime, nullable=True)
     sell_price = Column(Float, nullable=True)

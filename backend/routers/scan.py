@@ -500,6 +500,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             option_strike = 0.0
             qty = 0
             option_ltp = 0.0
+            instrument_key = None  # Will store Upstox instrument key (e.g., NSE_FO|104500) for future LTP fetches
             
             # Try to find option contract (may fail if token expired)
             try:
@@ -863,6 +864,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     trade_date=trading_date,
                     status=status,
                     buy_price=buy_price,
+                    instrument_key=instrument_key,  # Store instrument key for future LTP fetches (hourly updates & EOD exit)
                     stop_loss=stop_loss_price,
                     sell_price=sell_price,
                     buy_time=buy_time,
