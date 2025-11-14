@@ -700,13 +700,13 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         nifty_trend = index_trends.get("nifty_trend", "unknown")
         banknifty_trend = index_trends.get("banknifty_trend", "unknown")
         
-        # Check if time is at or after 3:15 PM - NO NEW TRADES after this time
+        # Check if time is at or after 3:00 PM - NO NEW TRADES after this time
         alert_hour = triggered_datetime.hour
         alert_minute = triggered_datetime.minute
-        is_after_3_15pm = (alert_hour > 15) or (alert_hour == 15 and alert_minute >= 15)
+        is_after_3_00pm = (alert_hour > 15) or (alert_hour == 15 and alert_minute >= 0)
         
-        if is_after_3_15pm:
-            print(f"🚫 ALERT TIME {triggered_at_display} is at or after 3:15 PM - NO NEW TRADES ALLOWED")
+        if is_after_3_00pm:
+            print(f"🚫 ALERT TIME {triggered_at_display} is at or after 3:00 PM - NO NEW TRADES ALLOWED")
         
         # Determine if trade entry is allowed based on alert type and index trends
         # BULLISH ALERT: Both indices must be BULLISH to enter trade
@@ -787,11 +787,11 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     momentum_reason = "No VWAP data available"
                 
                 # Determine trade entry based on:
-                # 1. Time check (must be before 3:15 PM)
+                # 1. Time check (must be before 3:00 PM)
                 # 2. Index trends (must be aligned)
                 # 3. Strong momentum (>= 1.5%)
                 # 4. Valid option data (option_ltp > 0, lot_size > 0)
-                if not is_after_3_15pm and can_enter_trade_by_index and has_strong_momentum and option_ltp_value > 0 and lot_size > 0:
+                if not is_after_3_00pm and can_enter_trade_by_index and has_strong_momentum and option_ltp_value > 0 and lot_size > 0:
                     # Enter trade: set qty, buy_price, buy_time, stop_loss
                     # IMPORTANT: sell_price remains NULL initially, will be populated by hourly updater
                     import math
@@ -827,8 +827,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     pnl = None  # No P&L since trade wasn't executed
                     
                     # Log reason for no entry with complete trade setup
-                    if is_after_3_15pm:
-                        print(f"🚫 NO ENTRY: {stock_name} - Alert time {triggered_at_display} is at or after 3:15 PM")
+                    if is_after_3_00pm:
+                        print(f"🚫 NO ENTRY: {stock_name} - Alert time {triggered_at_display} is at or after 3:00 PM")
                         print(f"   Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
                     elif not can_enter_trade_by_index:
                         print(f"⚠️ NO ENTRY: {stock_name} - Index trends not aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
