@@ -530,8 +530,37 @@ async def close_all_open_trades():
                                             if instrument_key:
                                                 option_quote = vwap_service.get_market_quote_by_key(instrument_key)
                                                 if option_quote and 'last_price' in option_quote:
-                                                    option_ltp = option_quote['last_price']
-                                                    logger.info(f"📍 {option_contract}: Final LTP = ₹{option_ltp:.2f}")
+                                                    raw_ltp = option_quote['last_price']
+                                                    
+                                                    # CRITICAL: Sanity check for unrealistic option LTP
+                                                    # If option LTP is >3x buy_price, it's likely wrong
+                                                    if position.buy_price and position.buy_price > 0:
+                                                        ratio = raw_ltp / position.buy_price
+                                                        if ratio > 3.0:
+                                                            logger.error(f"🚨 UNREALISTIC LTP DETECTED for {option_contract}!")
+                                                            logger.error(f"   Buy Price: ₹{position.buy_price:.2f}")
+                                                            logger.error(f"   Raw LTP from API: ₹{raw_ltp:.2f} ({ratio:.2f}x buy price)")
+                                                            logger.error(f"   This is likely an API error or data corruption")
+                                                            
+                                                            # Try to use last known sell_price if it's reasonable
+                                                            if position.sell_price and position.sell_price > 0:
+                                                                last_ratio = position.sell_price / position.buy_price
+                                                                if last_ratio <= 3.0:
+                                                                    logger.warning(f"   Using last known sell_price: ₹{position.sell_price:.2f} instead")
+                                                                    option_ltp = position.sell_price
+                                                                else:
+                                                                    logger.error(f"   Last sell_price also unrealistic: ₹{position.sell_price:.2f}")
+                                                                    logger.error(f"   Using buy_price as fallback: ₹{position.buy_price:.2f}")
+                                                                    option_ltp = position.buy_price
+                                                            else:
+                                                                logger.error(f"   Using buy_price as fallback: ₹{position.buy_price:.2f}")
+                                                                option_ltp = position.buy_price
+                                                        else:
+                                                            option_ltp = raw_ltp
+                                                            logger.info(f"📍 {option_contract}: Final LTP = ₹{option_ltp:.2f}")
+                                                    else:
+                                                        option_ltp = raw_ltp
+                                                        logger.info(f"📍 {option_contract}: Final LTP = ₹{option_ltp:.2f}")
                                                 break
                     except Exception as e:
                         logger.warning(f"⚠️ Could not fetch final LTP for {option_contract}: {e}")
