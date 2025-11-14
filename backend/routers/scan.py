@@ -1459,7 +1459,8 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                     "stop_loss": record.stop_loss or 0.0,
                     "sell_price": record.sell_price or 0.0,
                     "exit_reason": record.exit_reason or None,
-                    "pnl": record.pnl or 0.0
+                    "pnl": record.pnl or 0.0,
+                    "status": record.status  # Include status to identify no_entry trades
                 })
             
             bullish_alerts = list(grouped_bullish.values())
@@ -1496,7 +1497,8 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                     "stop_loss": record.stop_loss or 0.0,
                     "sell_price": record.sell_price or 0.0,
                     "exit_reason": record.exit_reason or None,
-                    "pnl": record.pnl or 0.0
+                    "pnl": record.pnl or 0.0,
+                    "status": record.status  # Include status to identify no_entry trades
                 })
             
             bearish_alerts = list(grouped_bearish.values())

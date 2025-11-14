@@ -57,7 +57,8 @@ function shouldCollapseByDefault(data) {
             alert.stocks.forEach(stock => {
                 totalStocks++;
                 // Check if it's a "No Entry" trade
-                const isNoEntry = !stock.buy_price || stock.buy_price === 0 || stock.qty === 0;
+                // Use status field if available, otherwise fallback to buy_price/qty check
+                const isNoEntry = stock.status === 'no_entry' || (!stock.buy_price || stock.buy_price === 0 || stock.qty === 0);
                 if (isNoEntry) {
                     noEntryStocks++;
                 }
@@ -751,7 +752,8 @@ function renderAlertGroup(alert, type) {
                         }
                         
                         // Check if this is a "No Entry" trade
-                        const isNoEntry = !stock.buy_price || stock.buy_price === 0 || stock.qty === 0;
+                        // Use status field if available, otherwise fallback to buy_price/qty check
+                        const isNoEntry = stock.status === 'no_entry' || (!stock.buy_price || stock.buy_price === 0 || stock.qty === 0);
                         const buyPriceDisplay = isNoEntry ? '-' : '₹' + formatPrice(stock.buy_price);
                         const stopLossDisplay = isNoEntry ? '-' : '₹' + formatPrice(stock.stop_loss || 0);
                         const sellPriceDisplay = isNoEntry ? '-' : '₹' + formatPrice(stock.sell_price || 0);
@@ -784,7 +786,8 @@ function renderAlertGroup(alert, type) {
                     const iconClass = shouldHold ? 'hold-icon' : 'exit-icon';
                     
                     // Check if this is a "No Entry" trade
-                    const isNoEntry = !stock.buy_price || stock.buy_price === 0 || stock.qty === 0;
+                    // Use status field if available, otherwise fallback to buy_price/qty check
+                const isNoEntry = stock.status === 'no_entry' || (!stock.buy_price || stock.buy_price === 0 || stock.qty === 0);
                     
                     // Parse PnL for color coding
                     let pnlValue = parseFloat(stock.pnl || 0);
