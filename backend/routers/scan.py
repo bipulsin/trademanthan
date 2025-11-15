@@ -848,6 +848,12 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         print(f"   Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
                 
                 # ALWAYS create database record with whatever data we have
+                # SAFEGUARD: If buy_price is set and status is not 'no_entry', ensure buy_time is set
+                # Use alert_time as fallback if buy_time is None but trade was entered
+                if buy_price and buy_price > 0 and status != 'no_entry' and buy_time is None:
+                    buy_time = triggered_datetime  # Use alert_time as buy_time fallback
+                    print(f"⚠️  Setting buy_time to alert_time for {stock_name} (buy_price set but buy_time was None)")
+                
                 db_record = IntradayStockOption(
                     alert_time=triggered_datetime,
                     alert_type=data_type,
