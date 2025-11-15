@@ -3124,7 +3124,9 @@ async def get_daily_trades(
                 "status": trade.status,
                 "exit_reason": trade.exit_reason,
                 "alert_type": trade.alert_type,
-                "alert_time": trade.alert_time.strftime("%H:%M") if trade.alert_time else ""
+                "alert_time": trade.alert_time.strftime("%H:%M") if trade.alert_time else "",
+                "buy_time": trade.buy_time.strftime("%H:%M") if trade.buy_time else "",
+                "sell_time": trade.sell_time.strftime("%H:%M") if trade.sell_time else ""
             })
         
         return {

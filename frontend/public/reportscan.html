@@ -1261,7 +1261,9 @@
                                     <th>Option Contract</th>
                                     <th>Qty</th>
                                     <th>Buy Price</th>
+                                    <th>Buy Time</th>
                                     <th>Sell Price</th>
+                                    <th>Sell Time</th>
                                     <th>P&L</th>
                                     <th>Status</th>
                                 </tr>
@@ -1270,10 +1272,12 @@
                                 ${result.trades.map(trade => `
                                     <tr>
                                         <td><strong>${trade.stock_name}</strong></td>
-                                        <td style="font-size: 11px; color: #6c757d;">${trade.option_contract}</td>
-                                        <td>${trade.qty}</td>
+                                        <td style="font-size: 11px; color: #6c757d;">${trade.option_contract || '-'}</td>
+                                        <td>${trade.qty || 0}</td>
                                         <td>₹${trade.buy_price.toFixed(2)}</td>
+                                        <td>${trade.buy_time || '-'}</td>
                                         <td>₹${trade.sell_price > 0 ? trade.sell_price.toFixed(2) : '-'}</td>
+                                        <td>${trade.sell_time || '-'}</td>
                                         <td class="${trade.pnl >= 0 ? 'positive' : 'negative'}">
                                             <strong>₹${trade.pnl.toLocaleString('en-IN')}</strong>
                                         </td>
