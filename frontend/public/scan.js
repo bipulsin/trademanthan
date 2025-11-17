@@ -655,6 +655,13 @@ function renderAlertGroup(alert, type) {
         return '';
     }
     
+    // Sort stocks alphabetically by stock_name within this time frame
+    const sortedStocks = [...alert.stocks].sort((a, b) => {
+        const nameA = (a.stock_name || '').toUpperCase();
+        const nameB = (b.stock_name || '').toUpperCase();
+        return nameA.localeCompare(nameB);
+    });
+    
     return `
         <div class="time-group">
             <div class="time-header">
@@ -679,7 +686,7 @@ function renderAlertGroup(alert, type) {
                     </tr>
                 </thead>
                 <tbody>
-                    ${alert.stocks.map(function(stock, index) {
+                    ${sortedStocks.map(function(stock, index) {
                         const stock_ltp = stock.last_traded_price || stock.trigger_price || 0;
                         const stock_vwap = stock.stock_vwap || 0;
                         const shouldHold = stock_ltp > stock_vwap;
@@ -784,7 +791,7 @@ function renderAlertGroup(alert, type) {
             
             <!-- Mobile Card View -->
             <div class="stock-card-container">
-                ${alert.stocks.map(function(stock, index) {
+                ${sortedStocks.map(function(stock, index) {
                     const stock_ltp = stock.last_traded_price || stock.trigger_price || 0;
                     const stock_vwap = stock.stock_vwap || 0;
                     const shouldHold = stock_ltp > stock_vwap;
