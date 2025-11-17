@@ -3203,11 +3203,14 @@ async def get_daily_trades(
         target_date = datetime.strptime(trade_date, "%Y-%m-%d").date()
         
         # Query trades for this date, excluding 'no_entry' status
-        # Sort by Buy Time in ascending order (earliest trades first)
+        # Sort by Buy Time in ascending order (earliest trades first), then by stock_name ascending
         trades = db.query(IntradayStockOption).filter(
             func.date(IntradayStockOption.trade_date) == target_date,
             IntradayStockOption.status != 'no_entry'
-        ).order_by(IntradayStockOption.buy_time.asc().nulls_last()).all()
+        ).order_by(
+            IntradayStockOption.buy_time.asc().nulls_last(),
+            IntradayStockOption.stock_name.asc()
+        ).all()
         
         # Format trade data
         trade_details = []
