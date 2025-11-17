@@ -1201,6 +1201,15 @@ class UpstoxService:
                                 logger.info(f"✅ Found core ID match for {instrument_key} (core: {core_id}, response key: {key})")
                                 break
                 
+                # Strategy 5: If still no match, use the first (and likely only) entry if response has exactly one key
+                # This handles cases where API returns data in a different format but it's the correct instrument
+                if not quote_data and len(data['data']) == 1:
+                    # Only use this if we have exactly one response - it's likely the correct one
+                    single_key = list(data['data'].keys())[0]
+                    quote_data = data['data'][single_key]
+                    logger.warning(f"⚠️ Using single response entry for {instrument_key} (response key: {single_key})")
+                    logger.warning(f"   This assumes the API returned the correct instrument despite key format mismatch")
+                
                 # CRITICAL FIX: Remove dangerous fallback that uses first value
                 # If we can't find a match, return None instead of using wrong data
                 if not quote_data:
