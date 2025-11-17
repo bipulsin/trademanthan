@@ -1140,23 +1140,94 @@ class UpstoxService:
             data = self.make_api_request(url, method="GET", timeout=10, max_retries=2)
             
             if data and data.get('status') == 'success' and 'data' in data:
-                # Try different key formats:
+                # Try different key formats to find exact match
+                # Upstox API may return keys in different formats than requested:
+                # - Request: "NSE_FO|104500" (pipe separator)
+                # - Response: "NSE_FO|104500" or "NSE_FO:104500" (colon separator) or other formats
                 quote_data = None
+                available_keys = list(data['data'].keys())
                 
-                # Try to find the quote data
-                for key in data['data']:
-                    if instrument_key in key:
-                        quote_data = data['data'][key]
-                        break
+                # Strategy 1: Exact match
+                if instrument_key in data['data']:
+                    quote_data = data['data'][instrument_key]
+                    logger.debug(f"✅ Found exact match for {instrument_key}")
                 
-                if not quote_data and len(data['data']) > 0:
-                    # Use first available data if exact match not found
-                    quote_data = list(data['data'].values())[0]
+                # Strategy 2: Handle pipe vs colon separator mismatch
+                # Convert pipe to colon and vice versa for comparison
+                if not quote_data:
+                    # Try with colon instead of pipe
+                    alt_key1 = instrument_key.replace('|', ':')
+                    if alt_key1 in data['data']:
+                        quote_data = data['data'][alt_key1]
+                        logger.info(f"✅ Found match with colon separator: {alt_key1} (requested: {instrument_key})")
+                    
+                    # Try with pipe instead of colon
+                    if not quote_data:
+                        alt_key2 = instrument_key.replace(':', '|')
+                        if alt_key2 in data['data']:
+                            quote_data = data['data'][alt_key2]
+                            logger.info(f"✅ Found match with pipe separator: {alt_key2} (requested: {instrument_key})")
+                
+                # Strategy 3: Case-insensitive normalized match (handles spaces, case differences)
+                if not quote_data:
+                    # Normalize: remove spaces, convert to uppercase, normalize separators to pipe
+                    def normalize_key(key):
+                        return key.replace(' ', '').replace(':', '|').upper()
+                    
+                    normalized_request = normalize_key(instrument_key)
+                    for key in data['data']:
+                        normalized_response = normalize_key(key)
+                        if normalized_request == normalized_response:
+                            quote_data = data['data'][key]
+                            logger.info(f"✅ Found normalized match for {instrument_key} (response key: {key})")
+                            break
+                
+                # Strategy 4: Extract core identifier and match (e.g., "NSE_FO|104500" -> "104500")
+                if not quote_data:
+                    # Extract the core identifier (token/number after separator)
+                    core_id = None
+                    for sep in ['|', ':']:
+                        if sep in instrument_key:
+                            core_id = instrument_key.split(sep)[-1]
+                            break
+                    if not core_id:
+                        core_id = instrument_key.split()[-1] if ' ' in instrument_key else instrument_key
+                    
+                    if core_id:
+                        for key in data['data']:
+                            # Check if core_id appears in the key (at end or as substring)
+                            if core_id in key or key.endswith(core_id) or key.endswith(f'|{core_id}') or key.endswith(f':{core_id}'):
+                                quote_data = data['data'][key]
+                                logger.info(f"✅ Found core ID match for {instrument_key} (core: {core_id}, response key: {key})")
+                                break
+                
+                # CRITICAL FIX: Remove dangerous fallback that uses first value
+                # If we can't find a match, return None instead of using wrong data
+                if not quote_data:
+                    logger.error(f"❌ CRITICAL: No match found for instrument_key '{instrument_key}'")
+                    logger.error(f"   Requested format: {instrument_key}")
+                    logger.error(f"   Available keys in response ({len(available_keys)} total):")
+                    for i, key in enumerate(available_keys[:10]):  # Show first 10 keys
+                        logger.error(f"     [{i+1}] {key}")
+                    if len(available_keys) > 10:
+                        logger.error(f"     ... and {len(available_keys) - 10} more")
+                    logger.error(f"   This prevents using wrong data for different instruments")
+                    logger.error(f"   Possible causes:")
+                    logger.error(f"     1. Instrument expired or no longer traded")
+                    logger.error(f"     2. Format mismatch (pipe vs colon separator)")
+                    logger.error(f"     3. Stale instrument_key in database")
+                    logger.error(f"     4. API returned data for different instrument")
+                    return None
                 
                 if quote_data:
                     ohlc = quote_data.get('ohlc', {})
                     ltp = float(quote_data.get('last_price', 0))
                     close_price = float(ohlc.get('close', ltp))
+                    
+                    # Additional validation: Ensure LTP is reasonable (not zero or negative)
+                    if ltp <= 0:
+                        logger.warning(f"⚠️ Invalid LTP (₹{ltp}) for {instrument_key} - returning None")
+                        return None
                     
                     logger.info(f"✅ Market quote for {instrument_key}: LTP=₹{ltp}, Close=₹{close_price}")
                     
@@ -1209,15 +1280,25 @@ class UpstoxService:
                     
                     quote_data = None
                     
-                    # Try to find the quote data
-                    for key in data['data'].keys():
-                        if symbol in key or instrument_key in key:
-                            quote_data = data['data'][key]
-                            break
+                    # Strategy 1: Exact match with instrument_key
+                    if instrument_key in data['data']:
+                        quote_data = data['data'][instrument_key]
                     
-                    if not quote_data and len(data['data']) > 0:
-                        # Just use the first (and likely only) entry
-                        quote_data = list(data['data'].values())[0]
+                    # Strategy 2: Try to find by symbol or instrument_key substring
+                    if not quote_data:
+                        for key in data['data'].keys():
+                            if symbol.upper() in key.upper() or instrument_key in key:
+                                quote_data = data['data'][key]
+                                break
+                    
+                    # CRITICAL FIX: Remove dangerous fallback
+                    # If we can't find a match, return None instead of using wrong data
+                    if not quote_data:
+                        available_keys = list(data['data'].keys())
+                        logger.warning(f"⚠️ No match found for symbol '{symbol}' (instrument_key: {instrument_key})")
+                        logger.warning(f"   Available keys in response: {available_keys[:3]}...")
+                        # Return None instead of using first value
+                        return None
                     
                     if quote_data:
                         ohlc = quote_data.get('ohlc', {})
