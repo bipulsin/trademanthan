@@ -1455,14 +1455,16 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
         
         # If it's after 9:00 AM IST, only show today's data
         # If it's before 9:00 AM IST, show yesterday's data
+        from datetime import timedelta
         if current_hour > 9 or (current_hour == 9 and current_minute >= 0):
             # After 9:00 AM - show only today's data
-            filter_date = today
+            filter_date_start = today
+            filter_date_end = today + timedelta(days=1)
             print(f"Current time: {now.strftime('%Y-%m-%d %H:%M:%S')} IST - Showing TODAY's data (after 9:00 AM)")
         else:
             # Before 9:00 AM - show yesterday's data
-            from datetime import timedelta
-            filter_date = today - timedelta(days=1)
+            filter_date_start = today - timedelta(days=1)
+            filter_date_end = today
             print(f"Current time: {now.strftime('%Y-%m-%d %H:%M:%S')} IST - Showing YESTERDAY's data (before 9:00 AM)")
         
         # For intraday alerts, use today if it's a trading day, otherwise get last trading date
@@ -1473,15 +1475,19 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
         current_date = trading_date.strftime('%Y-%m-%d')
         
         # Fetch Bullish alerts from database for the current trading day only
+        # Use date range comparison instead of exact equality to handle timezone/time differences
         bullish_records = db.query(IntradayStockOption).filter(
             IntradayStockOption.alert_type == 'Bullish',
-            IntradayStockOption.trade_date == filter_date
+            IntradayStockOption.trade_date >= filter_date_start,
+            IntradayStockOption.trade_date < filter_date_end
         ).order_by(desc(IntradayStockOption.alert_time)).limit(200).all()
         
         # Fetch Bearish alerts from database for the current trading day only
+        # Use date range comparison instead of exact equality to handle timezone/time differences
         bearish_records = db.query(IntradayStockOption).filter(
             IntradayStockOption.alert_type == 'Bearish',
-            IntradayStockOption.trade_date == filter_date
+            IntradayStockOption.trade_date >= filter_date_start,
+            IntradayStockOption.trade_date < filter_date_end
         ).order_by(desc(IntradayStockOption.alert_time)).limit(200).all()
         
         # Group records by alert_time for Bullish
