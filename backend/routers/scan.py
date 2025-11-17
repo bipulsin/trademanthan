@@ -572,21 +572,70 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                     target_year = int(year)
                                     
                                     # Search for matching option in NSE_FO segment
+                                    # CRITICAL: Must match exactly on underlying_symbol, instrument_type, segment, strike, and expiry
+                                    # This ensures each option contract gets its unique instrument_key
+                                    best_match = None
+                                    best_match_score = 0
+                                    
                                     for inst in instruments_data:
+                                        # Basic filters
                                         if (inst.get('underlying_symbol') == symbol and 
                                             inst.get('instrument_type') == opt_type and
                                             inst.get('segment') == 'NSE_FO'):
-                                            # Check if strike matches
+                                            
+                                            # Check strike price - must match exactly (or very close for float precision)
                                             inst_strike = inst.get('strike_price', 0)
-                                            if abs(inst_strike - strike_value) < 1:  # Allow small float differences
-                                                # Check expiry date
-                                                expiry_ms = inst.get('expiry', 0)
-                                                if expiry_ms:
-                                                    inst_expiry = datetime.fromtimestamp(expiry_ms/1000)
-                                                    if inst_expiry.year == target_year and inst_expiry.month == target_month:
+                                            strike_diff = abs(inst_strike - strike_value)
+                                            
+                                            # Check expiry date - must match exact date, not just month/year
+                                            expiry_ms = inst.get('expiry', 0)
+                                            if expiry_ms:
+                                                # Handle both millisecond and second timestamps
+                                                if expiry_ms > 1e12:
+                                                    expiry_ms = expiry_ms / 1000
+                                                inst_expiry = datetime.fromtimestamp(expiry_ms)
+                                                
+                                                # Calculate match score (lower is better)
+                                                # Priority: exact strike match > exact expiry date match
+                                                score = strike_diff * 1000  # Strike difference weighted heavily
+                                                
+                                                # Check if expiry year and month match
+                                                if inst_expiry.year == target_year and inst_expiry.month == target_month:
+                                                    # Prefer exact strike match
+                                                    if strike_diff < 0.01:  # Exact match (within 1 paise)
                                                         instrument_key = inst.get('instrument_key')
-                                                        print(f"Found matching option: {inst.get('trading_symbol')} (strike: {inst_strike}, expiry: {inst_expiry.strftime('%d %b %Y')})")
-                                                        break
+                                                        trading_symbol = inst.get('trading_symbol', 'Unknown')
+                                                        print(f"✅ Found EXACT match for {option_contract}:")
+                                                        print(f"   Instrument Key: {instrument_key}")
+                                                        print(f"   Trading Symbol: {trading_symbol}")
+                                                        print(f"   Strike: {inst_strike} (requested: {strike_value}, diff: {strike_diff:.4f})")
+                                                        print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
+                                                        break  # Found exact match, exit loop
+                                                    else:
+                                                        # Track best match if no exact match found yet
+                                                        if best_match is None or score < best_match_score:
+                                                            best_match = inst
+                                                            best_match_score = score
+                                    
+                                    # If no exact match found, use best match (but log warning)
+                                    if not instrument_key and best_match:
+                                        instrument_key = best_match.get('instrument_key')
+                                        inst_strike = best_match.get('strike_price', 0)
+                                        expiry_ms = best_match.get('expiry', 0)
+                                        if expiry_ms > 1e12:
+                                            expiry_ms = expiry_ms / 1000
+                                        inst_expiry = datetime.fromtimestamp(expiry_ms)
+                                        trading_symbol = best_match.get('trading_symbol', 'Unknown')
+                                        print(f"⚠️ WARNING: Using BEST MATCH (not exact) for {option_contract}:")
+                                        print(f"   Instrument Key: {instrument_key}")
+                                        print(f"   Trading Symbol: {trading_symbol}")
+                                        print(f"   Strike: {inst_strike} (requested: {strike_value}, diff: {abs(inst_strike - strike_value):.4f})")
+                                        print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
+                                        print(f"   ⚠️ This may not be the correct instrument!")
+                                    
+                                    if not instrument_key:
+                                        print(f"❌ ERROR: Could not find instrument_key for {option_contract}")
+                                        print(f"   Searched for: symbol={symbol}, type={opt_type}, strike={strike_value}, expiry={target_month}/{target_year}")
                                 
                                 if instrument_key:
                                     print(f"Found instrument key for {option_contract}: {instrument_key}")
@@ -1690,20 +1739,52 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                     target_month = month_map.get(month[:3].capitalize(), 11)
                     target_year = int(year)
                     
-                    # Find instrument_key
+                    # Find instrument_key with strict matching
+                    # CRITICAL: Must match exactly to ensure each option gets its unique instrument_key
                     instrument_key = None
+                    best_match = None
+                    best_match_score = 0
+                    
                     for inst in instruments_data:
+                        # Basic filters
                         if (inst.get('underlying_symbol') == symbol and 
                             inst.get('instrument_type') == opt_type and
                             inst.get('segment') == 'NSE_FO'):
+                            
+                            # Check strike price - must match exactly (within 1 paise)
                             inst_strike = inst.get('strike_price', 0)
-                            if abs(inst_strike - strike_value) < 1:
-                                expiry_ms = inst.get('expiry', 0)
-                                if expiry_ms:
-                                    inst_expiry = datetime.fromtimestamp(expiry_ms/1000)
-                                    if inst_expiry.year == target_year and inst_expiry.month == target_month:
+                            strike_diff = abs(inst_strike - strike_value)
+                            
+                            # Check expiry date
+                            expiry_ms = inst.get('expiry', 0)
+                            if expiry_ms:
+                                # Handle both millisecond and second timestamps
+                                if expiry_ms > 1e12:
+                                    expiry_ms = expiry_ms / 1000
+                                inst_expiry = datetime.fromtimestamp(expiry_ms)
+                                
+                                # Check if expiry year and month match
+                                if inst_expiry.year == target_year and inst_expiry.month == target_month:
+                                    # Prefer exact strike match
+                                    if strike_diff < 0.01:  # Exact match (within 1 paise)
                                         instrument_key = inst.get('instrument_key')
-                                        break
+                                        print(f"✅ Found EXACT match for {option_contract}: {instrument_key} (strike: {inst_strike})")
+                                        break  # Found exact match, exit loop
+                                    else:
+                                        # Track best match if no exact match found yet
+                                        score = strike_diff * 1000
+                                        if best_match is None or score < best_match_score:
+                                            best_match = inst
+                                            best_match_score = score
+                    
+                    # If no exact match found, use best match (but log warning)
+                    if not instrument_key and best_match:
+                        instrument_key = best_match.get('instrument_key')
+                        inst_strike = best_match.get('strike_price', 0)
+                        print(f"⚠️ WARNING: Using BEST MATCH (not exact) for {option_contract}: {instrument_key} (strike: {inst_strike}, requested: {strike_value})")
+                    
+                    if not instrument_key:
+                        print(f"❌ ERROR: Could not find instrument_key for {option_contract}")
                     
                     # Fetch option LTP
                     if instrument_key:
