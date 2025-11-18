@@ -118,7 +118,19 @@ def main():
     target_date_end = datetime(2025, 11, 19, 0, 0, 0).replace(tzinfo=ist)
     
     # Load instruments data
-    instruments_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'nse_instruments.json')
+    # Check multiple possible locations
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    possible_paths = [
+        os.path.join(base_dir, '..', 'data', 'instruments', 'nse_instruments.json'),
+        os.path.join('/home/ubuntu/trademanthan/data/instruments/nse_instruments.json'),
+        os.path.join(base_dir, 'data', 'nse_instruments.json'),
+    ]
+    
+    instruments_file = None
+    for path in possible_paths:
+        if os.path.exists(path):
+            instruments_file = path
+            break
     
     if not os.path.exists(instruments_file):
         print(f"❌ ERROR: Instruments file not found: {instruments_file}")
