@@ -667,7 +667,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             # GUARANTEED FIELDS (always available from Chartink):
             # - stock_name, trigger_price, alert_time
             # OPTIONAL FIELDS (may be missing if Upstox token expired):
-            # - stock_ltp, stock_vwap, option_contract, option_ltp, qty
+            # - stock_ltp, stock_vwap, option_contract, option_ltp, qty, instrument_key
             enriched_stock = {
                 "stock_name": stock_name,
                 "trigger_price": trigger_price,
@@ -678,7 +678,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 "otm1_strike": option_strike,  # May be 0.0 if not found
                 "option_ltp": option_ltp,  # May be 0.0 if fetch failed
                 "option_vwap": 0.0,  # Not used
-                "qty": qty  # May be 0 if not found
+                "qty": qty,  # May be 0 if not found
+                "instrument_key": instrument_key  # CRITICAL: Store instrument_key for each stock individually
             }
             
             enriched_stocks.append(enriched_stock)
@@ -908,6 +909,10 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         # If buy_time is set but different from alert_time, log for debugging
                         print(f"ℹ️  buy_time ({buy_time}) differs from alert_time ({triggered_datetime}) for {stock_name}")
                 
+                # CRITICAL: Get instrument_key from the stock dictionary, not from a variable
+                # This ensures each stock gets its own unique instrument_key
+                stock_instrument_key = stock.get("instrument_key")
+                
                 db_record = IntradayStockOption(
                     alert_time=triggered_datetime,
                     alert_type=data_type,
@@ -924,7 +929,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     trade_date=trading_date,
                     status=status,
                     buy_price=buy_price,
-                    instrument_key=instrument_key,  # Store instrument key for future LTP fetches (hourly updates & EOD exit)
+                    instrument_key=stock_instrument_key,  # Get from stock dictionary, not from variable
                     stop_loss=stop_loss_price,
                     sell_price=sell_price,
                     buy_time=buy_time,  # Will be set to triggered_datetime if trade was entered
