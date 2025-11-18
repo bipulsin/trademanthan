@@ -931,13 +931,17 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         print(f"   Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
                 
                 # ALWAYS create database record with whatever data we have
-                # SAFEGUARD: If buy_price is set and status is not 'no_entry', ensure buy_time is set
-                # Use alert_time as fallback if buy_time is None but trade was entered
+                # SAFEGUARD: If buy_price is set, ensure buy_time is set (for both entered and no_entry trades)
+                # Use alert_time as fallback if buy_time is None
                 # CRITICAL: This prevents data integrity issues where trades have buy_price but no buy_time
-                if buy_price and buy_price > 0 and status != 'no_entry':
+                # Note: Even no_entry trades should have buy_time set if buy_price is set, for display purposes
+                if buy_price and buy_price > 0:
                     if buy_time is None:
                         buy_time = triggered_datetime  # Use alert_time as buy_time fallback
-                        print(f"⚠️  Setting buy_time to alert_time for {stock_name} (buy_price set but buy_time was None)")
+                        if status != 'no_entry':
+                            print(f"⚠️  Setting buy_time to alert_time for {stock_name} (buy_price set but buy_time was None)")
+                        else:
+                            print(f"ℹ️  Setting buy_time to alert_time for {stock_name} (no_entry trade with buy_price)")
                     elif buy_time != triggered_datetime:
                         # If buy_time is set but different from alert_time, log for debugging
                         print(f"ℹ️  buy_time ({buy_time}) differs from alert_time ({triggered_datetime}) for {stock_name}")
