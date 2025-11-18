@@ -155,6 +155,7 @@ def find_option_contract_from_master_stock(db: Session, stock_name: str, option_
     - underlying_symbol matching stock_name
     - option_type matching (CE/PE)
     - Strike price from option chain API (volume/OI based) or calculated fallback
+    - Expiry month: If current date > 17th, use next month's expiry; otherwise use current month
     
     Args:
         db: Database session
@@ -167,6 +168,27 @@ def find_option_contract_from_master_stock(db: Session, stock_name: str, option_
         symbol_name from master_stock table, or None if not found
     """
     try:
+        import pytz
+        ist = pytz.timezone('Asia/Kolkata')
+        now = datetime.now(ist)
+        
+        # Determine target expiry month based on current date
+        # If day > 17, use next month's expiry; otherwise use current month
+        if now.day > 17:
+            # Use next month's expiry
+            if now.month == 12:
+                target_expiry_month = 1
+                target_expiry_year = now.year + 1
+            else:
+                target_expiry_month = now.month + 1
+                target_expiry_year = now.year
+        else:
+            # Use current month's expiry
+            target_expiry_month = now.month
+            target_expiry_year = now.year
+        
+        print(f"Target expiry: {target_expiry_year}-{target_expiry_month:02d} (current date: {now.strftime('%Y-%m-%d')})")
+        
         # Try to get strike from option chain API first
         target_strike = None
         if vwap_service:
@@ -194,13 +216,16 @@ def find_option_contract_from_master_stock(db: Session, stock_name: str, option_
         
         print(f"Looking for {option_type} option with strike {target_strike} for {stock_name}")
         
-        # Query master_stock table
+        # Query master_stock table with expiry month filter
+        # Filter by expiry month/year to ensure we get the correct expiry
         option_record = db.query(MasterStock).filter(
             and_(
                 MasterStock.underlying_symbol == stock_name,
                 MasterStock.option_type == option_type,
                 MasterStock.strike_price == target_strike,
-                MasterStock.expiry_flag == 'M'  # Monthly expiry
+                MasterStock.expiry_flag == 'M',  # Monthly expiry
+                func.extract('year', MasterStock.sm_expiry_date) == target_expiry_year,
+                func.extract('month', MasterStock.sm_expiry_date) == target_expiry_month
             )
         ).first()
         
@@ -218,18 +243,22 @@ def find_option_contract_from_master_stock(db: Session, stock_name: str, option_
                     MasterStock.underlying_symbol == stock_name,
                     MasterStock.option_type == option_type,
                     MasterStock.strike_price >= target_strike,
-                    MasterStock.expiry_flag == 'M'
+                    MasterStock.expiry_flag == 'M',
+                    func.extract('year', MasterStock.sm_expiry_date) == target_expiry_year,
+                    func.extract('month', MasterStock.sm_expiry_date) == target_expiry_month
                 )
             ).order_by(MasterStock.strike_price.asc()).first()
             
-            # If no strike >= target found, get the highest available strike
+            # If no strike >= target found, get the highest available strike for target expiry
             if not closest_record:
                 print(f"No strike >= {target_strike} found, getting highest available strike")
                 closest_record = db.query(MasterStock).filter(
                     and_(
                         MasterStock.underlying_symbol == stock_name,
                         MasterStock.option_type == option_type,
-                        MasterStock.expiry_flag == 'M'
+                        MasterStock.expiry_flag == 'M',
+                        func.extract('year', MasterStock.sm_expiry_date) == target_expiry_year,
+                        func.extract('month', MasterStock.sm_expiry_date) == target_expiry_month
                     )
                 ).order_by(MasterStock.strike_price.desc()).first()
         else:  # PE
@@ -239,18 +268,22 @@ def find_option_contract_from_master_stock(db: Session, stock_name: str, option_
                     MasterStock.underlying_symbol == stock_name,
                     MasterStock.option_type == option_type,
                     MasterStock.strike_price <= target_strike,
-                    MasterStock.expiry_flag == 'M'
+                    MasterStock.expiry_flag == 'M',
+                    func.extract('year', MasterStock.sm_expiry_date) == target_expiry_year,
+                    func.extract('month', MasterStock.sm_expiry_date) == target_expiry_month
                 )
             ).order_by(MasterStock.strike_price.desc()).first()
             
-            # If no strike <= target found, get the lowest available strike
+            # If no strike <= target found, get the lowest available strike for target expiry
             if not closest_record:
                 print(f"No strike <= {target_strike} found, getting lowest available strike")
                 closest_record = db.query(MasterStock).filter(
                     and_(
                         MasterStock.underlying_symbol == stock_name,
                         MasterStock.option_type == option_type,
-                        MasterStock.expiry_flag == 'M'
+                        MasterStock.expiry_flag == 'M',
+                        func.extract('year', MasterStock.sm_expiry_date) == target_expiry_year,
+                        func.extract('month', MasterStock.sm_expiry_date) == target_expiry_month
                     )
                 ).order_by(MasterStock.strike_price.asc()).first()
         
