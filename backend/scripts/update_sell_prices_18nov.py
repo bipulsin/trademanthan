@@ -12,7 +12,7 @@ from database import SessionLocal
 from models.trading import IntradayStockOption
 from datetime import datetime
 import pytz
-from services.upstox_service import UpstoxService
+from services.upstox_service import upstox_service as vwap_service
 
 def main():
     db = SessionLocal()
@@ -22,15 +22,13 @@ def main():
     target_date = datetime(2025, 11, 18, 0, 0, 0).replace(tzinfo=ist)
     target_date_end = datetime(2025, 11, 19, 0, 0, 0).replace(tzinfo=ist)
     
-    # Initialize Upstox service
-    print("Initializing Upstox service...")
-    try:
-        vwap_service = UpstoxService()
-        print("✅ Upstox service initialized")
-    except Exception as e:
-        print(f"❌ ERROR: Failed to initialize Upstox service: {str(e)}")
+    # Check Upstox service
+    print("Checking Upstox service...")
+    if not vwap_service:
+        print("❌ ERROR: Upstox service not available")
         db.close()
         return
+    print("✅ Upstox service available")
     
     # Get all trades from 18-Nov-2025 that have instrument_key
     trades = db.query(IntradayStockOption).filter(
