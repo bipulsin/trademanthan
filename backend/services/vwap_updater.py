@@ -121,7 +121,146 @@ async def update_vwap_for_all_open_positions():
         
         logger.info(f"📊 Starting hourly market data update at {now.strftime('%Y-%m-%d %H:%M:%S IST')}")
         
-        # Get all open positions from today (not sold/exited)
+        # Import VWAP service
+        try:
+            from services.upstox_service import upstox_service
+            vwap_service = upstox_service
+        except ImportError:
+            logger.error("Could not import upstox_service")
+            return
+        
+        # ═══════════════════════════════════════════════════════════════
+        # RE-EVALUATE "no_entry" TRADES: Check if conditions are now met
+        # ═══════════════════════════════════════════════════════════════
+        # If a trade had "no_entry" status due to weak momentum at alert time,
+        # but momentum becomes sufficient later, enter the trade with current
+        # time and prices (not alert time)
+        # ═══════════════════════════════════════════════════════════════
+        no_entry_trades = db.query(IntradayStockOption).filter(
+            and_(
+                IntradayStockOption.trade_date >= today,
+                IntradayStockOption.status == 'no_entry',
+                IntradayStockOption.exit_reason == None
+            )
+        ).all()
+        
+        if no_entry_trades:
+            logger.info(f"🔍 Found {len(no_entry_trades)} 'no_entry' trades to re-evaluate")
+            
+            # Check index trends
+            index_trends = vwap_service.check_index_trends()
+            nifty_trend = index_trends.get("nifty_trend", "unknown")
+            banknifty_trend = index_trends.get("banknifty_trend", "unknown")
+            
+            # Check if time is before 3:00 PM
+            is_before_3pm = now.hour < 15
+            
+            # Re-evaluate each no_entry trade
+            for no_entry_trade in no_entry_trades:
+                try:
+                    stock_name = no_entry_trade.stock_name
+                    option_type = no_entry_trade.option_type or 'PE'
+                    
+                    # Fetch current stock LTP and VWAP
+                    stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
+                    if not stock_data:
+                        logger.warning(f"⚠️ Could not fetch stock data for {stock_name} - skipping re-evaluation")
+                        continue
+                    
+                    current_stock_ltp = stock_data.get('ltp', 0)
+                    current_stock_vwap = stock_data.get('vwap', 0)
+                    
+                    if current_stock_ltp <= 0 or current_stock_vwap <= 0:
+                        logger.warning(f"⚠️ Invalid stock data for {stock_name} (LTP: {current_stock_ltp}, VWAP: {current_stock_vwap}) - skipping")
+                        continue
+                    
+                    # Calculate momentum
+                    momentum_pct = abs((current_stock_ltp - current_stock_vwap) / current_stock_vwap) * 100
+                    MINIMUM_MOMENTUM_PCT = 0.3
+                    
+                    # Check momentum direction and strength
+                    has_strong_momentum = False
+                    if option_type == 'PE' and current_stock_ltp < current_stock_vwap:
+                        # Bearish - stock should be BELOW VWAP
+                        if momentum_pct >= MINIMUM_MOMENTUM_PCT:
+                            has_strong_momentum = True
+                    elif option_type == 'CE' and current_stock_ltp > current_stock_vwap:
+                        # Bullish - stock should be ABOVE VWAP
+                        if momentum_pct >= MINIMUM_MOMENTUM_PCT:
+                            has_strong_momentum = True
+                    
+                    # Check index trends alignment
+                    can_enter_by_index = False
+                    if option_type == 'PE':
+                        # Bearish - both indices must be bearish
+                        if nifty_trend == "bearish" and banknifty_trend == "bearish":
+                            can_enter_by_index = True
+                    elif option_type == 'CE':
+                        # Bullish - both indices must be bullish
+                        if nifty_trend == "bullish" and banknifty_trend == "bullish":
+                            can_enter_by_index = True
+                    
+                    # Check if all entry conditions are met
+                    if (is_before_3pm and 
+                        can_enter_by_index and 
+                        has_strong_momentum and 
+                        no_entry_trade.option_contract and 
+                        no_entry_trade.instrument_key):
+                        
+                        # Fetch current option LTP
+                        option_quote = vwap_service.get_market_quote_by_key(no_entry_trade.instrument_key)
+                        if option_quote and option_quote.get('last_price', 0) > 0:
+                            current_option_ltp = float(option_quote.get('last_price', 0))
+                            
+                            # Enter the trade with CURRENT time and prices
+                            import math
+                            SL_LOSS_TARGET = 3100.0
+                            
+                            no_entry_trade.buy_price = current_option_ltp
+                            no_entry_trade.buy_time = now  # Use CURRENT time, not alert time
+                            no_entry_trade.stock_ltp = current_stock_ltp
+                            no_entry_trade.stock_vwap = current_stock_vwap
+                            no_entry_trade.option_ltp = current_option_ltp
+                            no_entry_trade.status = 'bought'
+                            no_entry_trade.pnl = 0.0
+                            
+                            # Calculate stop loss
+                            qty = no_entry_trade.qty or 0
+                            if qty > 0:
+                                calculated_sl = current_option_ltp - (SL_LOSS_TARGET / qty)
+                                no_entry_trade.stop_loss = max(0.05, math.floor(calculated_sl / 0.10) * 0.10)
+                            
+                            logger.info(f"✅ RE-ENTERED TRADE: {stock_name} ({no_entry_trade.option_contract})")
+                            logger.info(f"   Entry Time: {now.strftime('%H:%M:%S')} (was 'no_entry' at alert time)")
+                            logger.info(f"   Buy Price: ₹{current_option_ltp:.2f} (current LTP)")
+                            logger.info(f"   Stock LTP: ₹{current_stock_ltp:.2f}, VWAP: ₹{current_stock_vwap:.2f}")
+                            logger.info(f"   Momentum: {momentum_pct:.2f}% (now sufficient)")
+                            logger.info(f"   Index Trends: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
+                        else:
+                            logger.warning(f"⚠️ Could not fetch option LTP for {stock_name} - cannot enter")
+                    else:
+                        # Log why entry conditions are not met
+                        reasons = []
+                        if not is_before_3pm:
+                            reasons.append("time >= 3:00 PM")
+                        if not can_enter_by_index:
+                            reasons.append(f"index trends not aligned (NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend})")
+                        if not has_strong_momentum:
+                            reasons.append(f"weak momentum ({momentum_pct:.2f}% < {MINIMUM_MOMENTUM_PCT}%)")
+                        if not no_entry_trade.option_contract or not no_entry_trade.instrument_key:
+                            reasons.append("missing option data")
+                        
+                        logger.debug(f"⚪ {stock_name} still 'no_entry': {', '.join(reasons)}")
+                        
+                except Exception as e:
+                    logger.error(f"Error re-evaluating no_entry trade for {no_entry_trade.stock_name}: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+        
+        # Commit any re-entries before updating existing positions
+        db.commit()
+        
+        # Get all open positions from today (not sold/exited) - includes newly entered trades
         open_positions = db.query(IntradayStockOption).filter(
             and_(
                 IntradayStockOption.trade_date >= today,
@@ -136,13 +275,145 @@ async def update_vwap_for_all_open_positions():
         
         logger.info(f"Found {len(open_positions)} open positions to update")
         
-        # Import VWAP service
-        try:
-            from services.upstox_service import upstox_service
-            vwap_service = upstox_service
-        except ImportError:
-            logger.error("Could not import upstox_service")
-            return
+        # ═══════════════════════════════════════════════════════════════
+        # RE-EVALUATE "no_entry" TRADES: Check if conditions are now met
+        # ═══════════════════════════════════════════════════════════════
+        # If a trade had "no_entry" status due to weak momentum at alert time,
+        # but momentum becomes sufficient later, enter the trade with current
+        # time and prices (not alert time)
+        # ═══════════════════════════════════════════════════════════════
+        no_entry_trades = db.query(IntradayStockOption).filter(
+            and_(
+                IntradayStockOption.trade_date >= today,
+                IntradayStockOption.status == 'no_entry',
+                IntradayStockOption.exit_reason == None
+            )
+        ).all()
+        
+        if no_entry_trades:
+            logger.info(f"🔍 Found {len(no_entry_trades)} 'no_entry' trades to re-evaluate")
+            
+            # Check index trends
+            index_trends = vwap_service.check_index_trends()
+            nifty_trend = index_trends.get("nifty_trend", "unknown")
+            banknifty_trend = index_trends.get("banknifty_trend", "unknown")
+            
+            # Check if time is before 3:00 PM
+            is_before_3pm = now.hour < 15
+            
+            # Re-evaluate each no_entry trade
+            for no_entry_trade in no_entry_trades:
+                try:
+                    stock_name = no_entry_trade.stock_name
+                    option_type = no_entry_trade.option_type or 'PE'
+                    
+                    # Fetch current stock LTP and VWAP
+                    stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
+                    if not stock_data:
+                        logger.warning(f"⚠️ Could not fetch stock data for {stock_name} - skipping re-evaluation")
+                        continue
+                    
+                    current_stock_ltp = stock_data.get('ltp', 0)
+                    current_stock_vwap = stock_data.get('vwap', 0)
+                    
+                    if current_stock_ltp <= 0 or current_stock_vwap <= 0:
+                        logger.warning(f"⚠️ Invalid stock data for {stock_name} (LTP: {current_stock_ltp}, VWAP: {current_stock_vwap}) - skipping")
+                        continue
+                    
+                    # Calculate momentum
+                    momentum_pct = abs((current_stock_ltp - current_stock_vwap) / current_stock_vwap) * 100
+                    MINIMUM_MOMENTUM_PCT = 0.3
+                    
+                    # Check momentum direction and strength
+                    has_strong_momentum = False
+                    if option_type == 'PE' and current_stock_ltp < current_stock_vwap:
+                        # Bearish - stock should be BELOW VWAP
+                        if momentum_pct >= MINIMUM_MOMENTUM_PCT:
+                            has_strong_momentum = True
+                    elif option_type == 'CE' and current_stock_ltp > current_stock_vwap:
+                        # Bullish - stock should be ABOVE VWAP
+                        if momentum_pct >= MINIMUM_MOMENTUM_PCT:
+                            has_strong_momentum = True
+                    
+                    # Check index trends alignment
+                    can_enter_by_index = False
+                    if option_type == 'PE':
+                        # Bearish - both indices must be bearish
+                        if nifty_trend == "bearish" and banknifty_trend == "bearish":
+                            can_enter_by_index = True
+                    elif option_type == 'CE':
+                        # Bullish - both indices must be bullish
+                        if nifty_trend == "bullish" and banknifty_trend == "bullish":
+                            can_enter_by_index = True
+                    
+                    # Check if all entry conditions are met
+                    if (is_before_3pm and 
+                        can_enter_by_index and 
+                        has_strong_momentum and 
+                        no_entry_trade.option_contract and 
+                        no_entry_trade.instrument_key):
+                        
+                        # Fetch current option LTP
+                        option_quote = vwap_service.get_market_quote_by_key(no_entry_trade.instrument_key)
+                        if option_quote and option_quote.get('last_price', 0) > 0:
+                            current_option_ltp = float(option_quote.get('last_price', 0))
+                            
+                            # Enter the trade with CURRENT time and prices
+                            import math
+                            SL_LOSS_TARGET = 3100.0
+                            
+                            no_entry_trade.buy_price = current_option_ltp
+                            no_entry_trade.buy_time = now  # Use CURRENT time, not alert time
+                            no_entry_trade.stock_ltp = current_stock_ltp
+                            no_entry_trade.stock_vwap = current_stock_vwap
+                            no_entry_trade.option_ltp = current_option_ltp
+                            no_entry_trade.status = 'bought'
+                            no_entry_trade.pnl = 0.0
+                            
+                            # Calculate stop loss
+                            qty = no_entry_trade.qty or 0
+                            if qty > 0:
+                                calculated_sl = current_option_ltp - (SL_LOSS_TARGET / qty)
+                                no_entry_trade.stop_loss = max(0.05, math.floor(calculated_sl / 0.10) * 0.10)
+                            
+                            logger.info(f"✅ RE-ENTERED TRADE: {stock_name} ({no_entry_trade.option_contract})")
+                            logger.info(f"   Entry Time: {now.strftime('%H:%M:%S')} (was 'no_entry' at alert time)")
+                            logger.info(f"   Buy Price: ₹{current_option_ltp:.2f} (current LTP)")
+                            logger.info(f"   Stock LTP: ₹{current_stock_ltp:.2f}, VWAP: ₹{current_stock_vwap:.2f}")
+                            logger.info(f"   Momentum: {momentum_pct:.2f}% (now sufficient)")
+                            logger.info(f"   Index Trends: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
+                        else:
+                            logger.warning(f"⚠️ Could not fetch option LTP for {stock_name} - cannot enter")
+                    else:
+                        # Log why entry conditions are not met
+                        reasons = []
+                        if not is_before_3pm:
+                            reasons.append("time >= 3:00 PM")
+                        if not can_enter_by_index:
+                            reasons.append(f"index trends not aligned (NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend})")
+                        if not has_strong_momentum:
+                            reasons.append(f"weak momentum ({momentum_pct:.2f}% < {MINIMUM_MOMENTUM_PCT}%)")
+                        if not no_entry_trade.option_contract or not no_entry_trade.instrument_key:
+                            reasons.append("missing option data")
+                        
+                        logger.debug(f"⚪ {stock_name} still 'no_entry': {', '.join(reasons)}")
+                        
+                except Exception as e:
+                    logger.error(f"Error re-evaluating no_entry trade for {no_entry_trade.stock_name}: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+        
+        # Commit any re-entries before updating existing positions
+        db.commit()
+        
+        # Refresh open_positions query to include newly entered trades
+        open_positions = db.query(IntradayStockOption).filter(
+            and_(
+                IntradayStockOption.trade_date >= today,
+                IntradayStockOption.status != 'sold',
+                IntradayStockOption.exit_reason == None
+            )
+        ).all()
         
         # Update each position
         updated_count = 0
