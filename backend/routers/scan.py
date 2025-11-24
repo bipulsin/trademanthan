@@ -891,8 +891,22 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     
                     status = 'bought'  # Trade entered
                     pnl = 0.0
+                    entry_time_str = triggered_datetime.strftime('%Y-%m-%d %H:%M:%S IST')
                     print(f"✅ TRADE ENTERED: {stock_name} - {momentum_reason}")
-                    print(f"   Buy: ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price}, LTP: ₹{stock_ltp}, VWAP: ₹{stock_vwap}")
+                    print(f"   ⏰ Entry Time: {entry_time_str}")
+                    print(f"   📊 Entry Conditions:")
+                    print(f"      - Time Check: ✅ Before 3:00 PM ({triggered_at_display})")
+                    print(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
+                    print(f"      - Momentum: ✅ {momentum_pct:.2f}% ({momentum_reason})")
+                    print(f"      - Option Data: ✅ Valid (LTP: ₹{option_ltp_value:.2f}, Qty: {lot_size})")
+                    print(f"   💰 Trade Details:")
+                    print(f"      - Buy Price: ₹{buy_price:.2f}")
+                    print(f"      - Quantity: {qty}")
+                    print(f"      - Stop Loss: ₹{stop_loss_price:.2f}")
+                    print(f"      - Stock LTP: ₹{stock_ltp:.2f}")
+                    print(f"      - Stock VWAP: ₹{stock_vwap:.2f}")
+                    print(f"      - Option Contract: {stock.get('option_contract', 'N/A')}")
+                    logger.info(f"✅ ENTRY DECISION: {stock_name} | Time: {entry_time_str} | Price: ₹{buy_price:.2f} | Momentum: {momentum_pct:.2f}% | Indices: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
                 else:
                     # No entry: Store qty, buy_price, and SL for reference, but don't execute trade
                     # This helps track what trades would have been if conditions were favorable
@@ -911,24 +925,61 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     pnl = None  # No P&L since trade wasn't executed
                     
                     # Log reason for no entry with complete trade setup
+                    no_entry_time_str = triggered_datetime.strftime('%Y-%m-%d %H:%M:%S IST')
                     if is_after_3_00pm:
                         print(f"🚫 NO ENTRY: {stock_name} - Alert time {triggered_at_display} is at or after 3:00 PM")
-                        print(f"   Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
+                        print(f"   ⏰ Decision Time: {no_entry_time_str}")
+                        print(f"   📊 Entry Conditions:")
+                        print(f"      - Time Check: ❌ At or after 3:00 PM ({triggered_at_display})")
+                        print(f"      - Index Trends: {'✅' if can_enter_trade_by_index else '❌'} {'Aligned' if can_enter_trade_by_index else f'Not Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})'}")
+                        print(f"      - Momentum: {'✅' if has_strong_momentum else '❌'} {momentum_reason}")
+                        print(f"      - Option Data: {'✅' if option_ltp_value > 0 and lot_size > 0 else '❌'} {'Valid' if option_ltp_value > 0 and lot_size > 0 else f'Missing (LTP: {option_ltp_value}, Qty: {lot_size})'}")
+                        print(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
+                        logger.info(f"🚫 NO ENTRY DECISION: {stock_name} | Time: {no_entry_time_str} | Reason: Time >= 3:00 PM")
                     elif not can_enter_trade_by_index:
                         print(f"⚠️ NO ENTRY: {stock_name} - Index trends not aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
-                        print(f"   Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
+                        print(f"   ⏰ Decision Time: {no_entry_time_str}")
+                        print(f"   📊 Entry Conditions:")
+                        print(f"      - Time Check: ✅ Before 3:00 PM ({triggered_at_display})")
+                        print(f"      - Index Trends: ❌ Not Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
+                        print(f"      - Momentum: {'✅' if has_strong_momentum else '❌'} {momentum_reason}")
+                        print(f"      - Option Data: {'✅' if option_ltp_value > 0 and lot_size > 0 else '❌'} {'Valid' if option_ltp_value > 0 and lot_size > 0 else f'Missing (LTP: {option_ltp_value}, Qty: {lot_size})'}")
+                        print(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
+                        logger.info(f"🚫 NO ENTRY DECISION: {stock_name} | Time: {no_entry_time_str} | Reason: Index trends not aligned (NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend})")
                     elif not has_strong_momentum:
                         print(f"🚫 NO ENTRY: {stock_name} - {momentum_reason}")
-                        print(f"   Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
+                        print(f"   ⏰ Decision Time: {no_entry_time_str}")
+                        print(f"   📊 Entry Conditions:")
+                        print(f"      - Time Check: ✅ Before 3:00 PM ({triggered_at_display})")
+                        print(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
+                        print(f"      - Momentum: ❌ {momentum_reason}")
+                        print(f"      - Option Data: {'✅' if option_ltp_value > 0 and lot_size > 0 else '❌'} {'Valid' if option_ltp_value > 0 and lot_size > 0 else f'Missing (LTP: {option_ltp_value}, Qty: {lot_size})'}")
+                        print(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
+                        logger.info(f"🚫 NO ENTRY DECISION: {stock_name} | Time: {no_entry_time_str} | Reason: {momentum_reason}")
                     elif option_ltp_value <= 0 or lot_size <= 0:
                         print(f"⚠️ NO ENTRY: {stock_name} - Missing option data (option_ltp={option_ltp_value}, qty={lot_size})")
+                        print(f"   ⏰ Decision Time: {no_entry_time_str}")
+                        print(f"   📊 Entry Conditions:")
+                        print(f"      - Time Check: ✅ Before 3:00 PM ({triggered_at_display})")
+                        print(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
+                        print(f"      - Momentum: {'✅' if has_strong_momentum else '❌'} {momentum_reason}")
+                        print(f"      - Option Data: ❌ Missing (LTP: {option_ltp_value}, Qty: {lot_size})")
+                        print(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
                         # For missing data, keep qty=0, buy_price=None, stop_loss=None
                         qty = 0
                         buy_price = None
                         stop_loss_price = None
+                        logger.info(f"🚫 NO ENTRY DECISION: {stock_name} | Time: {no_entry_time_str} | Reason: Missing option data (LTP={option_ltp_value}, Qty={lot_size})")
                     else:
                         print(f"⚠️ NO ENTRY: {stock_name} - Unknown reason")
-                        print(f"   Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
+                        print(f"   ⏰ Decision Time: {no_entry_time_str}")
+                        print(f"   📊 Entry Conditions:")
+                        print(f"      - Time Check: ✅ Before 3:00 PM ({triggered_at_display})")
+                        print(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
+                        print(f"      - Momentum: ✅ {momentum_reason}")
+                        print(f"      - Option Data: ✅ Valid (LTP: ₹{option_ltp_value:.2f}, Qty: {lot_size})")
+                        print(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
+                        logger.info(f"🚫 NO ENTRY DECISION: {stock_name} | Time: {no_entry_time_str} | Reason: Unknown")
                 
                 # ALWAYS create database record with whatever data we have
                 # SAFEGUARD: If buy_price is set, ensure buy_time is set (for both entered and no_entry trades)

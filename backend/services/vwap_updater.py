@@ -230,12 +230,28 @@ async def update_vwap_for_all_open_positions():
                                 calculated_sl = current_option_ltp - (SL_LOSS_TARGET / qty)
                                 no_entry_trade.stop_loss = max(0.05, math.floor(calculated_sl / 0.10) * 0.10)
                             
+                            re_entry_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
+                            alert_time_str = no_entry_trade.alert_time.strftime('%H:%M:%S') if no_entry_trade.alert_time else 'N/A'
                             logger.info(f"✅ RE-ENTERED TRADE: {stock_name} ({no_entry_trade.option_contract})")
-                            logger.info(f"   Entry Time: {now.strftime('%H:%M:%S')} (was 'no_entry' at alert time)")
+                            logger.info(f"   Entry Time: {re_entry_time_str} (was 'no_entry' at alert time: {alert_time_str})")
                             logger.info(f"   Buy Price: ₹{current_option_ltp:.2f} (current LTP)")
                             logger.info(f"   Stock LTP: ₹{current_stock_ltp:.2f}, VWAP: ₹{current_stock_vwap:.2f}")
                             logger.info(f"   Momentum: {momentum_pct:.2f}% (now sufficient)")
                             logger.info(f"   Index Trends: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
+                            print(f"✅ RE-ENTRY DECISION: {stock_name} ({no_entry_trade.option_contract})")
+                            print(f"   ⏰ Entry Time: {re_entry_time_str} (was 'no_entry' at alert time: {alert_time_str})")
+                            print(f"   📊 Entry Conditions:")
+                            print(f"      - Time Check: ✅ Before 3:00 PM ({now.strftime('%H:%M:%S')})")
+                            print(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
+                            print(f"      - Momentum: ✅ {momentum_pct:.2f}% (now sufficient, was weak at alert time)")
+                            print(f"      - Option Data: ✅ Valid")
+                            print(f"   💰 Trade Details:")
+                            print(f"      - Buy Price: ₹{current_option_ltp:.2f} (current LTP at {now.strftime('%H:%M:%S')})")
+                            print(f"      - Quantity: {qty}")
+                            print(f"      - Stop Loss: ₹{no_entry_trade.stop_loss:.2f}")
+                            print(f"      - Stock LTP: ₹{current_stock_ltp:.2f}")
+                            print(f"      - Stock VWAP: ₹{current_stock_vwap:.2f}")
+                            logger.info(f"✅ RE-ENTRY DECISION: {stock_name} | Time: {re_entry_time_str} | Price: ₹{current_option_ltp:.2f} | Momentum: {momentum_pct:.2f}% | Indices: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
                         else:
                             logger.warning(f"⚠️ Could not fetch option LTP for {stock_name} - cannot enter")
                     else:
@@ -376,12 +392,28 @@ async def update_vwap_for_all_open_positions():
                                 calculated_sl = current_option_ltp - (SL_LOSS_TARGET / qty)
                                 no_entry_trade.stop_loss = max(0.05, math.floor(calculated_sl / 0.10) * 0.10)
                             
+                            re_entry_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
+                            alert_time_str = no_entry_trade.alert_time.strftime('%H:%M:%S') if no_entry_trade.alert_time else 'N/A'
                             logger.info(f"✅ RE-ENTERED TRADE: {stock_name} ({no_entry_trade.option_contract})")
-                            logger.info(f"   Entry Time: {now.strftime('%H:%M:%S')} (was 'no_entry' at alert time)")
+                            logger.info(f"   Entry Time: {re_entry_time_str} (was 'no_entry' at alert time: {alert_time_str})")
                             logger.info(f"   Buy Price: ₹{current_option_ltp:.2f} (current LTP)")
                             logger.info(f"   Stock LTP: ₹{current_stock_ltp:.2f}, VWAP: ₹{current_stock_vwap:.2f}")
                             logger.info(f"   Momentum: {momentum_pct:.2f}% (now sufficient)")
                             logger.info(f"   Index Trends: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
+                            print(f"✅ RE-ENTRY DECISION: {stock_name} ({no_entry_trade.option_contract})")
+                            print(f"   ⏰ Entry Time: {re_entry_time_str} (was 'no_entry' at alert time: {alert_time_str})")
+                            print(f"   📊 Entry Conditions:")
+                            print(f"      - Time Check: ✅ Before 3:00 PM ({now.strftime('%H:%M:%S')})")
+                            print(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
+                            print(f"      - Momentum: ✅ {momentum_pct:.2f}% (now sufficient, was weak at alert time)")
+                            print(f"      - Option Data: ✅ Valid")
+                            print(f"   💰 Trade Details:")
+                            print(f"      - Buy Price: ₹{current_option_ltp:.2f} (current LTP at {now.strftime('%H:%M:%S')})")
+                            print(f"      - Quantity: {qty}")
+                            print(f"      - Stop Loss: ₹{no_entry_trade.stop_loss:.2f}")
+                            print(f"      - Stock LTP: ₹{current_stock_ltp:.2f}")
+                            print(f"      - Stock VWAP: ₹{current_stock_vwap:.2f}")
+                            logger.info(f"✅ RE-ENTRY DECISION: {stock_name} | Time: {re_entry_time_str} | Price: ₹{current_option_ltp:.2f} | Momentum: {momentum_pct:.2f}% | Indices: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
                         else:
                             logger.warning(f"⚠️ Could not fetch option LTP for {stock_name} - cannot enter")
                     else:
@@ -700,17 +732,60 @@ async def update_vwap_for_all_open_positions():
                         if exit_conditions['stop_loss']:
                             exit_triggered = True
                             exit_reason_to_set = 'stop_loss'
+                            exit_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
                             logger.warning(f"✅ APPLIED: STOP LOSS EXIT for {stock_name}")
+                            logger.info(f"🛑 EXIT DECISION: {stock_name} | Time: {exit_time_str} | Reason: Stop Loss | Option LTP: ₹{new_option_ltp:.2f} <= SL: ₹{position.stop_loss:.2f} | PnL: ₹{position.pnl:.2f}")
+                            print(f"🛑 EXIT DECISION: {stock_name} ({option_contract})")
+                            print(f"   ⏰ Exit Time: {exit_time_str}")
+                            print(f"   📊 Exit Conditions:")
+                            print(f"      - Stop Loss: ✅ Triggered (LTP: ₹{new_option_ltp:.2f} <= SL: ₹{position.stop_loss:.2f})")
+                            print(f"      - VWAP Cross: {'✅' if exit_conditions['vwap_cross'] else '❌'} {'Triggered' if exit_conditions['vwap_cross'] else 'Not Triggered'}")
+                            print(f"      - Profit Target: {'✅' if exit_conditions['profit_target'] else '❌'} {'Triggered' if exit_conditions['profit_target'] else 'Not Triggered'}")
+                            print(f"      - Time Based: {'✅' if exit_conditions['time_based'] else '❌'} {'Triggered' if exit_conditions['time_based'] else 'Not Triggered'}")
+                            print(f"   💰 Exit Details:")
+                            print(f"      - Buy Price: ₹{position.buy_price:.2f}")
+                            print(f"      - Sell Price: ₹{new_option_ltp:.2f}")
+                            print(f"      - Quantity: {position.qty}")
+                            print(f"      - PnL: ₹{position.pnl:.2f}")
                         
                         elif exit_conditions['vwap_cross']:
                             exit_triggered = True
                             exit_reason_to_set = 'stock_vwap_cross'
+                            exit_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
                             logger.warning(f"✅ APPLIED: VWAP CROSS EXIT for {stock_name}")
+                            logger.info(f"📉 EXIT DECISION: {stock_name} | Time: {exit_time_str} | Reason: VWAP Cross | Stock LTP: ₹{new_stock_ltp:.2f}, VWAP: ₹{new_vwap:.2f} | PnL: ₹{position.pnl:.2f}")
+                            print(f"📉 EXIT DECISION: {stock_name} ({option_contract})")
+                            print(f"   ⏰ Exit Time: {exit_time_str}")
+                            print(f"   📊 Exit Conditions:")
+                            print(f"      - Stop Loss: {'✅' if exit_conditions['stop_loss'] else '❌'} {'Triggered' if exit_conditions['stop_loss'] else 'Not Triggered'}")
+                            print(f"      - VWAP Cross: ✅ Triggered (Stock LTP: ₹{new_stock_ltp:.2f} {'<' if option_type == 'CE' else '>'} VWAP: ₹{new_vwap:.2f})")
+                            print(f"      - Profit Target: {'✅' if exit_conditions['profit_target'] else '❌'} {'Triggered' if exit_conditions['profit_target'] else 'Not Triggered'}")
+                            print(f"      - Time Based: {'✅' if exit_conditions['time_based'] else '❌'} {'Triggered' if exit_conditions['time_based'] else 'Not Triggered'}")
+                            print(f"   💰 Exit Details:")
+                            print(f"      - Buy Price: ₹{position.buy_price:.2f}")
+                            print(f"      - Sell Price: ₹{new_option_ltp:.2f}")
+                            print(f"      - Quantity: {position.qty}")
+                            print(f"      - PnL: ₹{position.pnl:.2f}")
                         
                         elif exit_conditions['profit_target']:
                             exit_triggered = True
                             exit_reason_to_set = 'profit_target'
+                            exit_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
+                            profit_target = position.buy_price * 1.5
                             logger.warning(f"✅ APPLIED: PROFIT TARGET EXIT for {stock_name}")
+                            logger.info(f"🎯 EXIT DECISION: {stock_name} | Time: {exit_time_str} | Reason: Profit Target | Option LTP: ₹{new_option_ltp:.2f} >= Target: ₹{profit_target:.2f} | PnL: ₹{position.pnl:.2f}")
+                            print(f"🎯 EXIT DECISION: {stock_name} ({option_contract})")
+                            print(f"   ⏰ Exit Time: {exit_time_str}")
+                            print(f"   📊 Exit Conditions:")
+                            print(f"      - Stop Loss: {'✅' if exit_conditions['stop_loss'] else '❌'} {'Triggered' if exit_conditions['stop_loss'] else 'Not Triggered'}")
+                            print(f"      - VWAP Cross: {'✅' if exit_conditions['vwap_cross'] else '❌'} {'Triggered' if exit_conditions['vwap_cross'] else 'Not Triggered'}")
+                            print(f"      - Profit Target: ✅ Triggered (LTP: ₹{new_option_ltp:.2f} >= Target: ₹{profit_target:.2f})")
+                            print(f"      - Time Based: {'✅' if exit_conditions['time_based'] else '❌'} {'Triggered' if exit_conditions['time_based'] else 'Not Triggered'}")
+                            print(f"   💰 Exit Details:")
+                            print(f"      - Buy Price: ₹{position.buy_price:.2f}")
+                            print(f"      - Sell Price: ₹{new_option_ltp:.2f}")
+                            print(f"      - Quantity: {position.qty}")
+                            print(f"      - PnL: ₹{position.pnl:.2f}")
                         
                         # Set exit fields if any exit condition was triggered
                         # ═══════════════════════════════════════════════════════════════
@@ -950,6 +1025,7 @@ async def close_all_open_trades():
                         logger.warning(f"⚠️ No LTP available for {option_contract}, using buy_price as fallback")
                         position.sell_price = position.buy_price
                 
+                exit_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
                 position.sell_time = now
                 position.exit_reason = 'time_based'
                 position.status = 'sold'
@@ -960,6 +1036,21 @@ async def close_all_open_trades():
                     
                     logger.info(f"🔴 EOD EXIT: {stock_name} {option_contract}")
                     logger.info(f"   Buy: ₹{position.buy_price:.2f}, Sell: ₹{position.sell_price:.2f}, P&L: ₹{position.pnl:.2f}")
+                    logger.info(f"⏰ EXIT DECISION: {stock_name} | Time: {exit_time_str} | Reason: Time Based (3:25 PM) | PnL: ₹{position.pnl:.2f}")
+                    print(f"⏰ EXIT DECISION: {stock_name} ({option_contract})")
+                    print(f"   ⏰ Exit Time: {exit_time_str}")
+                    print(f"   📊 Exit Conditions:")
+                    print(f"      - Time Based: ✅ Triggered (Current time >= 3:25 PM)")
+                    print(f"      - Stop Loss: ❌ Not Checked (Time-based exit takes priority)")
+                    print(f"      - VWAP Cross: ❌ Not Checked (Time-based exit takes priority)")
+                    print(f"      - Profit Target: ❌ Not Checked (Time-based exit takes priority)")
+                    print(f"   💰 Exit Details:")
+                    print(f"      - Buy Price: ₹{position.buy_price:.2f}")
+                    print(f"      - Buy Time: {position.buy_time.strftime('%H:%M:%S') if position.buy_time else 'N/A'}")
+                    print(f"      - Sell Price: ₹{position.sell_price:.2f}")
+                    print(f"      - Quantity: {position.qty}")
+                    print(f"      - Hold Duration: {((now - position.buy_time).total_seconds() / 60):.0f} minutes" if position.buy_time else "N/A")
+                    print(f"      - PnL: ₹{position.pnl:.2f}")
                 else:
                     logger.warning(f"⚠️ Could not calculate P&L for {stock_name}")
                 
