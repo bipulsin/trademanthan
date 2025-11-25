@@ -190,15 +190,31 @@ async def update_vwap_for_all_open_positions():
                             has_strong_momentum = True
                     
                     # Check index trends alignment
+                    # Rules:
+                    # 1. If both indices are Bullish → trade will be considered for both bullish & bearish alerts
+                    # 2. If both indices are Bearish → only Bearish scan alerts trade will be processed
+                    # 3. If indices are in opposite directions → no trade will be processed
                     can_enter_by_index = False
+                    both_bullish = (nifty_trend == "bullish" and banknifty_trend == "bullish")
+                    both_bearish = (nifty_trend == "bearish" and banknifty_trend == "bearish")
+                    opposite_directions = not both_bullish and not both_bearish
+                    
                     if option_type == 'PE':
-                        # Bearish - both indices must be bearish
-                        if nifty_trend == "bearish" and banknifty_trend == "bearish":
+                        # Bearish alert
+                        if both_bullish or both_bearish:
+                            # Both indices bullish OR both bearish → bearish alerts can enter
                             can_enter_by_index = True
+                        elif opposite_directions:
+                            # Indices in opposite directions → no trade
+                            can_enter_by_index = False
                     elif option_type == 'CE':
-                        # Bullish - both indices must be bullish
-                        if nifty_trend == "bullish" and banknifty_trend == "bullish":
+                        # Bullish alert
+                        if both_bullish:
+                            # Both indices bullish → bullish alerts can enter
                             can_enter_by_index = True
+                        elif both_bearish or opposite_directions:
+                            # Both indices bearish OR opposite directions → bullish alerts cannot enter
+                            can_enter_by_index = False
                     
                     # Check if all entry conditions are met
                     if (is_before_3pm and 
@@ -352,15 +368,31 @@ async def update_vwap_for_all_open_positions():
                             has_strong_momentum = True
                     
                     # Check index trends alignment
+                    # Rules:
+                    # 1. If both indices are Bullish → trade will be considered for both bullish & bearish alerts
+                    # 2. If both indices are Bearish → only Bearish scan alerts trade will be processed
+                    # 3. If indices are in opposite directions → no trade will be processed
                     can_enter_by_index = False
+                    both_bullish = (nifty_trend == "bullish" and banknifty_trend == "bullish")
+                    both_bearish = (nifty_trend == "bearish" and banknifty_trend == "bearish")
+                    opposite_directions = not both_bullish and not both_bearish
+                    
                     if option_type == 'PE':
-                        # Bearish - both indices must be bearish
-                        if nifty_trend == "bearish" and banknifty_trend == "bearish":
+                        # Bearish alert
+                        if both_bullish or both_bearish:
+                            # Both indices bullish OR both bearish → bearish alerts can enter
                             can_enter_by_index = True
+                        elif opposite_directions:
+                            # Indices in opposite directions → no trade
+                            can_enter_by_index = False
                     elif option_type == 'CE':
-                        # Bullish - both indices must be bullish
-                        if nifty_trend == "bullish" and banknifty_trend == "bullish":
+                        # Bullish alert
+                        if both_bullish:
+                            # Both indices bullish → bullish alerts can enter
                             can_enter_by_index = True
+                        elif both_bearish or opposite_directions:
+                            # Both indices bearish OR opposite directions → bullish alerts cannot enter
+                            can_enter_by_index = False
                     
                     # Check if all entry conditions are met
                     if (is_before_3pm and 

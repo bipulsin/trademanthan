@@ -793,24 +793,45 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             print(f"🚫 ALERT TIME {triggered_at_display} is at or after 3:00 PM - NO NEW TRADES ALLOWED")
         
         # Determine if trade entry is allowed based on alert type and index trends
-        # BULLISH ALERT: Both indices must be BULLISH to enter trade
-        # BEARISH ALERT: Both indices must be BEARISH to enter trade
+        # Rules:
+        # 1. If both indices are Bullish → trade will be considered for both bullish & bearish alerts
+        # 2. If both indices are Bearish → only Bearish scan alerts trade will be processed
+        # 3. If indices are in opposite directions → no trade will be processed
         can_enter_trade_by_index = False
         
+        # Check index trend alignment
+        both_bullish = (nifty_trend == "bullish" and banknifty_trend == "bullish")
+        both_bearish = (nifty_trend == "bearish" and banknifty_trend == "bearish")
+        opposite_directions = not both_bullish and not both_bearish
+        
         if is_bullish:
-            # Bullish alert - both indices must be bullish
-            if nifty_trend == "bullish" and banknifty_trend == "bullish":
+            # Bullish alert
+            if both_bullish:
+                # Both indices bullish → bullish alerts can enter
                 can_enter_trade_by_index = True
                 print(f"✅ BULLISH ALERT: Both indices bullish - Index check PASSED")
-            else:
-                print(f"⚠️ BULLISH ALERT: Index trends not aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend}) - NO TRADE")
+            elif both_bearish:
+                # Both indices bearish → bullish alerts cannot enter
+                can_enter_trade_by_index = False
+                print(f"⚠️ BULLISH ALERT: Both indices bearish - Only bearish alerts allowed - NO TRADE")
+            elif opposite_directions:
+                # Indices in opposite directions → no trade
+                can_enter_trade_by_index = False
+                print(f"⚠️ BULLISH ALERT: Indices in opposite directions (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend}) - NO TRADE")
         elif is_bearish:
-            # Bearish alert - both indices must be bearish
-            if nifty_trend == "bearish" and banknifty_trend == "bearish":
+            # Bearish alert
+            if both_bullish:
+                # Both indices bullish → bearish alerts can enter
+                can_enter_trade_by_index = True
+                print(f"✅ BEARISH ALERT: Both indices bullish - Index check PASSED")
+            elif both_bearish:
+                # Both indices bearish → bearish alerts can enter
                 can_enter_trade_by_index = True
                 print(f"✅ BEARISH ALERT: Both indices bearish - Index check PASSED")
-            else:
-                print(f"⚠️ BEARISH ALERT: Index trends not aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend}) - NO TRADE")
+            elif opposite_directions:
+                # Indices in opposite directions → no trade
+                can_enter_trade_by_index = False
+                print(f"⚠️ BEARISH ALERT: Indices in opposite directions (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend}) - NO TRADE")
         
         # Save each stock to database
         # CRITICAL: Always save at minimum stock_name and alert_time, even if enrichment failed
