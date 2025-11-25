@@ -46,11 +46,24 @@ class IntradayStockOption(Base):
     stock_name = Column(String(100), nullable=False, index=True)
     stock_ltp = Column(Float, nullable=True)
     stock_vwap = Column(Float, nullable=True)
+    stock_vwap_previous_hour = Column(Float, nullable=True)  # VWAP from previous 1-hour candle
+    stock_vwap_previous_hour_time = Column(DateTime, nullable=True)  # Time of previous hour VWAP
     option_contract = Column(String(255), nullable=True)
     option_type = Column(String(10), nullable=True)  # 'CE' or 'PE'
     option_strike = Column(Float, nullable=True)
     option_ltp = Column(Float, nullable=True)
     option_vwap = Column(Float, nullable=True)
+    # Option OHLC candles
+    option_current_candle_open = Column(Float, nullable=True)
+    option_current_candle_high = Column(Float, nullable=True)
+    option_current_candle_low = Column(Float, nullable=True)
+    option_current_candle_close = Column(Float, nullable=True)
+    option_current_candle_time = Column(DateTime, nullable=True)
+    option_previous_candle_open = Column(Float, nullable=True)
+    option_previous_candle_high = Column(Float, nullable=True)
+    option_previous_candle_low = Column(Float, nullable=True)
+    option_previous_candle_close = Column(Float, nullable=True)
+    option_previous_candle_time = Column(DateTime, nullable=True)
     
     # Trading execution fields (filled later)
     qty = Column(Integer, nullable=True)

@@ -679,12 +679,29 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                         if quote_data and quote_data.get('last_price'):
                                             option_ltp = float(quote_data.get('last_price', 0))
                                             print(f"✅ Fetched option LTP for {option_contract}: ₹{option_ltp}")
+                                            
+                                            # ====================================================================
+                                            # FETCH OPTION OHLC CANDLES (Current and Previous 1-hour)
+                                            # ====================================================================
+                                            try:
+                                                option_candles = vwap_service.get_option_candles_current_and_previous(instrument_key)
+                                                if option_candles:
+                                                    print(f"✅ Fetched option OHLC candles for {option_contract}")
+                                                else:
+                                                    print(f"⚠️ Could not fetch option OHLC candles for {option_contract}")
+                                                    option_candles = None
+                                            except Exception as candle_error:
+                                                print(f"⚠️ Error fetching option OHLC candles: {str(candle_error)}")
+                                                option_candles = None
                                         else:
                                             print(f"Could not fetch option LTP for {option_contract} - no quote data")
+                                            option_candles = None
                                     else:
                                         print(f"vwap_service not available")
+                                        option_candles = None
                                 else:
                                     print(f"Could not find instrument key for {option_contract} in instruments JSON")
+                                    option_candles = None
                             else:
                                 print(f"Instruments JSON file not found")
                         except Exception as ltp_error:
@@ -696,23 +713,46 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 except Exception as e:
                     print(f"Error fetching lot_size/option_ltp: {str(e)}")
             
+            # ====================================================================
+            # FETCH PREVIOUS HOUR STOCK VWAP
+            # ====================================================================
+            stock_vwap_previous_hour = None
+            stock_vwap_previous_hour_time = None
+            if vwap_service and stock_name:
+                try:
+                    prev_vwap_data = vwap_service.get_stock_vwap_for_previous_hour(stock_name)
+                    if prev_vwap_data:
+                        stock_vwap_previous_hour = prev_vwap_data.get('vwap')
+                        stock_vwap_previous_hour_time = prev_vwap_data.get('time')
+                        print(f"✅ Fetched previous hour VWAP for {stock_name}: ₹{stock_vwap_previous_hour:.2f} at {stock_vwap_previous_hour_time.strftime('%H:%M:%S')}")
+                    else:
+                        print(f"⚠️ Could not fetch previous hour VWAP for {stock_name}")
+                except Exception as prev_vwap_error:
+                    print(f"⚠️ Error fetching previous hour VWAP: {str(prev_vwap_error)}")
+            
             # Create enriched stock data
             # GUARANTEED FIELDS (always available from Chartink):
             # - stock_name, trigger_price, alert_time
             # OPTIONAL FIELDS (may be missing if Upstox token expired):
             # - stock_ltp, stock_vwap, option_contract, option_ltp, qty, instrument_key
+            # NEW FIELDS:
+            # - option_candles (current and previous OHLC)
+            # - stock_vwap_previous_hour, stock_vwap_previous_hour_time
             enriched_stock = {
                 "stock_name": stock_name,
                 "trigger_price": trigger_price,
                 "last_traded_price": stock_ltp,  # May be trigger_price if fetch failed
                 "stock_vwap": stock_vwap,  # May be 0.0 if fetch failed
+                "stock_vwap_previous_hour": stock_vwap_previous_hour,  # Previous hour VWAP
+                "stock_vwap_previous_hour_time": stock_vwap_previous_hour_time,  # Previous hour VWAP time
                 "option_type": forced_option_type,
                 "option_contract": option_contract or "",  # May be empty if not found
                 "otm1_strike": option_strike,  # May be 0.0 if not found
                 "option_ltp": option_ltp,  # May be 0.0 if fetch failed
                 "option_vwap": 0.0,  # Not used
                 "qty": qty,  # May be 0 if not found
-                "instrument_key": instrument_key  # CRITICAL: Store instrument_key for each stock individually
+                "instrument_key": instrument_key,  # CRITICAL: Store instrument_key for each stock individually
+                "option_candles": option_candles if 'option_candles' in locals() else None  # Current and previous OHLC candles
             }
             
             enriched_stocks.append(enriched_stock)
@@ -858,53 +898,84 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 lot_size = stock.get("qty", 0)
                 
                 # ====================================================================
-                # MOMENTUM FILTER: Direction check + Minimum momentum
+                # NEW ENTRY FILTERS: VWAP Slope + Option Candle Size
                 # ====================================================================
-                # IMPORTANT: Nov 7 analysis showed winners had 0.18-1.05% momentum
-                # Setting too high (1.5%) would block all winners!
-                # Real differentiator was exit timing, not entry momentum
-                # Strategy: Lower threshold for direction check, let ranking choose best
-                MINIMUM_MOMENTUM_PCT = 0.3  # Minimum 0.3% momentum (direction validation only)
+                # Replaced momentum filter with:
+                # 1. VWAP Slope Filter: Check if VWAP has 45-degree inclination
+                # 2. Candle Size Filter: Check if current candle < 7-8x previous candle
+                # ====================================================================
                 
                 stock_ltp = stock.get("last_traded_price", 0.0)
                 stock_vwap = stock.get("stock_vwap", 0.0)
+                stock_vwap_prev = stock.get("stock_vwap_previous_hour")
+                stock_vwap_prev_time = stock.get("stock_vwap_previous_hour_time")
                 option_type = stock.get("option_type", "")
+                option_candles = stock.get("option_candles")
                 
-                # Calculate momentum and check if it meets threshold
-                has_strong_momentum = False
-                momentum_pct = 0.0
-                momentum_reason = ""
+                # Initialize filter results
+                vwap_slope_passed = False
+                candle_size_passed = False
+                vwap_slope_reason = ""
+                candle_size_reason = ""
                 
-                if stock_ltp > 0 and stock_vwap > 0:
-                    momentum_pct = abs((stock_ltp - stock_vwap) / stock_vwap) * 100
-                    
-                    # Check if momentum is in correct direction
-                    if option_type == 'PE' and stock_ltp < stock_vwap:
-                        # Bearish - stock should be BELOW VWAP
-                        if momentum_pct >= MINIMUM_MOMENTUM_PCT:
-                            has_strong_momentum = True
-                            momentum_reason = f"Strong bearish momentum: {momentum_pct:.2f}% below VWAP"
+                # 1. VWAP SLOPE FILTER
+                if stock_vwap and stock_vwap > 0 and stock_vwap_prev and stock_vwap_prev > 0 and stock_vwap_prev_time:
+                    try:
+                        # Use vwap_slope method to check if slope >= 45 degrees
+                        slope_result = vwap_service.vwap_slope(
+                            vwap1=stock_vwap_prev,
+                            time1=stock_vwap_prev_time,
+                            vwap2=stock_vwap,
+                            time2=triggered_datetime
+                        )
+                        
+                        if slope_result == "Yes":
+                            vwap_slope_passed = True
+                            vwap_slope_reason = f"VWAP slope >= 45° (Previous: ₹{stock_vwap_prev:.2f} at {stock_vwap_prev_time.strftime('%H:%M')}, Current: ₹{stock_vwap:.2f})"
                         else:
-                            momentum_reason = f"Weak momentum: {momentum_pct:.2f}% (need ≥{MINIMUM_MOMENTUM_PCT}%)"
-                    elif option_type == 'CE' and stock_ltp > stock_vwap:
-                        # Bullish - stock should be ABOVE VWAP
-                        if momentum_pct >= MINIMUM_MOMENTUM_PCT:
-                            has_strong_momentum = True
-                            momentum_reason = f"Strong bullish momentum: {momentum_pct:.2f}% above VWAP"
-                        else:
-                            momentum_reason = f"Weak momentum: {momentum_pct:.2f}% (need ≥{MINIMUM_MOMENTUM_PCT}%)"
-                    else:
-                        # Wrong direction
-                        momentum_reason = f"WRONG direction: {option_type} but stock {'above' if stock_ltp > stock_vwap else 'below'} VWAP"
+                            vwap_slope_reason = f"VWAP slope < 45° (Previous: ₹{stock_vwap_prev:.2f} at {stock_vwap_prev_time.strftime('%H:%M')}, Current: ₹{stock_vwap:.2f})"
+                    except Exception as slope_error:
+                        vwap_slope_reason = f"Error calculating VWAP slope: {str(slope_error)}"
                 else:
-                    momentum_reason = "No VWAP data available"
+                    vwap_slope_reason = f"Missing VWAP data (Current: {'✅' if stock_vwap else '❌'}, Previous: {'✅' if stock_vwap_prev else '❌'})"
+                
+                # 2. CANDLE SIZE FILTER
+                if option_candles:
+                    try:
+                        current_candle = option_candles.get('current_candle', {})
+                        previous_candle = option_candles.get('previous_candle', {})
+                        
+                        if current_candle and previous_candle:
+                            # Calculate candle size (High - Low)
+                            current_size = abs(current_candle.get('high', 0) - current_candle.get('low', 0))
+                            previous_size = abs(previous_candle.get('high', 0) - previous_candle.get('low', 0))
+                            
+                            if previous_size > 0:
+                                size_ratio = current_size / previous_size
+                                
+                                # Check if current candle is less than 7-8 times previous candle
+                                # Using 7.5 as threshold (middle of 7-8 range)
+                                if size_ratio < 7.5:
+                                    candle_size_passed = True
+                                    candle_size_reason = f"Candle size OK: Current ({current_size:.2f}) < 7.5× Previous ({previous_size:.2f}), Ratio: {size_ratio:.2f}"
+                                else:
+                                    candle_size_reason = f"Candle size too large: Current ({current_size:.2f}) >= 7.5× Previous ({previous_size:.2f}), Ratio: {size_ratio:.2f}"
+                            else:
+                                candle_size_reason = "Previous candle size is zero (cannot calculate ratio)"
+                        else:
+                            candle_size_reason = "Missing candle data"
+                    except Exception as candle_error:
+                        candle_size_reason = f"Error calculating candle size: {str(candle_error)}"
+                else:
+                    candle_size_reason = "Option OHLC candles not available"
                 
                 # Determine trade entry based on:
                 # 1. Time check (must be before 3:00 PM)
                 # 2. Index trends (must be aligned)
-                # 3. Strong momentum (>= 1.5%)
-                # 4. Valid option data (option_ltp > 0, lot_size > 0)
-                if not is_after_3_00pm and can_enter_trade_by_index and has_strong_momentum and option_ltp_value > 0 and lot_size > 0:
+                # 3. VWAP slope >= 45 degrees
+                # 4. Current candle size < 7-8x previous candle
+                # 5. Valid option data (option_ltp > 0, lot_size > 0)
+                if not is_after_3_00pm and can_enter_trade_by_index and vwap_slope_passed and candle_size_passed and option_ltp_value > 0 and lot_size > 0:
                     # Enter trade: set qty, buy_price, buy_time, stop_loss
                     # IMPORTANT: sell_price remains NULL initially, will be populated by hourly updater
                     import math
@@ -921,12 +992,13 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     status = 'bought'  # Trade entered
                     pnl = 0.0
                     entry_time_str = triggered_datetime.strftime('%Y-%m-%d %H:%M:%S IST')
-                    print(f"✅ TRADE ENTERED: {stock_name} - {momentum_reason}")
+                    print(f"✅ TRADE ENTERED: {stock_name}")
                     print(f"   ⏰ Entry Time: {entry_time_str}")
                     print(f"   📊 Entry Conditions:")
                     print(f"      - Time Check: ✅ Before 3:00 PM ({triggered_at_display})")
                     print(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
-                    print(f"      - Momentum: ✅ {momentum_pct:.2f}% ({momentum_reason})")
+                    print(f"      - VWAP Slope: ✅ {vwap_slope_reason}")
+                    print(f"      - Candle Size: ✅ {candle_size_reason}")
                     print(f"      - Option Data: ✅ Valid (LTP: ₹{option_ltp_value:.2f}, Qty: {lot_size})")
                     print(f"   💰 Trade Details:")
                     print(f"      - Buy Price: ₹{buy_price:.2f}")
@@ -934,8 +1006,9 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     print(f"      - Stop Loss: ₹{stop_loss_price:.2f}")
                     print(f"      - Stock LTP: ₹{stock_ltp:.2f}")
                     print(f"      - Stock VWAP: ₹{stock_vwap:.2f}")
+                    print(f"      - Stock VWAP (Previous Hour): ₹{stock_vwap_prev:.2f if stock_vwap_prev else 'N/A'}")
                     print(f"      - Option Contract: {stock.get('option_contract', 'N/A')}")
-                    logger.info(f"✅ ENTRY DECISION: {stock_name} | Time: {entry_time_str} | Price: ₹{buy_price:.2f} | Momentum: {momentum_pct:.2f}% | Indices: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
+                    logger.info(f"✅ ENTRY DECISION: {stock_name} | Time: {entry_time_str} | Price: ₹{buy_price:.2f} | VWAP Slope: {vwap_slope_reason} | Candle Size: {candle_size_reason} | Indices: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
                 else:
                     # No entry: Store qty, buy_price, and SL for reference, but don't execute trade
                     # This helps track what trades would have been if conditions were favorable
@@ -961,7 +1034,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         print(f"   📊 Entry Conditions:")
                         print(f"      - Time Check: ❌ At or after 3:00 PM ({triggered_at_display})")
                         print(f"      - Index Trends: {'✅' if can_enter_trade_by_index else '❌'} {'Aligned' if can_enter_trade_by_index else f'Not Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})'}")
-                        print(f"      - Momentum: {'✅' if has_strong_momentum else '❌'} {momentum_reason}")
+                        print(f"      - VWAP Slope: {'✅' if vwap_slope_passed else '❌'} {vwap_slope_reason}")
+                        print(f"      - Candle Size: {'✅' if candle_size_passed else '❌'} {candle_size_reason}")
                         print(f"      - Option Data: {'✅' if option_ltp_value > 0 and lot_size > 0 else '❌'} {'Valid' if option_ltp_value > 0 and lot_size > 0 else f'Missing (LTP: {option_ltp_value}, Qty: {lot_size})'}")
                         print(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
                         logger.info(f"🚫 NO ENTRY DECISION: {stock_name} | Time: {no_entry_time_str} | Reason: Time >= 3:00 PM")
@@ -971,27 +1045,41 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         print(f"   📊 Entry Conditions:")
                         print(f"      - Time Check: ✅ Before 3:00 PM ({triggered_at_display})")
                         print(f"      - Index Trends: ❌ Not Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
-                        print(f"      - Momentum: {'✅' if has_strong_momentum else '❌'} {momentum_reason}")
+                        print(f"      - VWAP Slope: {'✅' if vwap_slope_passed else '❌'} {vwap_slope_reason}")
+                        print(f"      - Candle Size: {'✅' if candle_size_passed else '❌'} {candle_size_reason}")
                         print(f"      - Option Data: {'✅' if option_ltp_value > 0 and lot_size > 0 else '❌'} {'Valid' if option_ltp_value > 0 and lot_size > 0 else f'Missing (LTP: {option_ltp_value}, Qty: {lot_size})'}")
                         print(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
                         logger.info(f"🚫 NO ENTRY DECISION: {stock_name} | Time: {no_entry_time_str} | Reason: Index trends not aligned (NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend})")
-                    elif not has_strong_momentum:
-                        print(f"🚫 NO ENTRY: {stock_name} - {momentum_reason}")
+                    elif not vwap_slope_passed:
+                        print(f"🚫 NO ENTRY: {stock_name} - VWAP slope condition not met")
                         print(f"   ⏰ Decision Time: {no_entry_time_str}")
                         print(f"   📊 Entry Conditions:")
                         print(f"      - Time Check: ✅ Before 3:00 PM ({triggered_at_display})")
                         print(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
-                        print(f"      - Momentum: ❌ {momentum_reason}")
+                        print(f"      - VWAP Slope: ❌ {vwap_slope_reason}")
+                        print(f"      - Candle Size: {'✅' if candle_size_passed else '❌'} {candle_size_reason}")
                         print(f"      - Option Data: {'✅' if option_ltp_value > 0 and lot_size > 0 else '❌'} {'Valid' if option_ltp_value > 0 and lot_size > 0 else f'Missing (LTP: {option_ltp_value}, Qty: {lot_size})'}")
                         print(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
-                        logger.info(f"🚫 NO ENTRY DECISION: {stock_name} | Time: {no_entry_time_str} | Reason: {momentum_reason}")
+                        logger.info(f"🚫 NO ENTRY DECISION: {stock_name} | Time: {no_entry_time_str} | Reason: {vwap_slope_reason}")
+                    elif not candle_size_passed:
+                        print(f"🚫 NO ENTRY: {stock_name} - Candle size condition not met")
+                        print(f"   ⏰ Decision Time: {no_entry_time_str}")
+                        print(f"   📊 Entry Conditions:")
+                        print(f"      - Time Check: ✅ Before 3:00 PM ({triggered_at_display})")
+                        print(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
+                        print(f"      - VWAP Slope: ✅ {vwap_slope_reason}")
+                        print(f"      - Candle Size: ❌ {candle_size_reason}")
+                        print(f"      - Option Data: {'✅' if option_ltp_value > 0 and lot_size > 0 else '❌'} {'Valid' if option_ltp_value > 0 and lot_size > 0 else f'Missing (LTP: {option_ltp_value}, Qty: {lot_size})'}")
+                        print(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
+                        logger.info(f"🚫 NO ENTRY DECISION: {stock_name} | Time: {no_entry_time_str} | Reason: {candle_size_reason}")
                     elif option_ltp_value <= 0 or lot_size <= 0:
                         print(f"⚠️ NO ENTRY: {stock_name} - Missing option data (option_ltp={option_ltp_value}, qty={lot_size})")
                         print(f"   ⏰ Decision Time: {no_entry_time_str}")
                         print(f"   📊 Entry Conditions:")
                         print(f"      - Time Check: ✅ Before 3:00 PM ({triggered_at_display})")
                         print(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
-                        print(f"      - Momentum: {'✅' if has_strong_momentum else '❌'} {momentum_reason}")
+                        print(f"      - VWAP Slope: {'✅' if vwap_slope_passed else '❌'} {vwap_slope_reason}")
+                        print(f"      - Candle Size: {'✅' if candle_size_passed else '❌'} {candle_size_reason}")
                         print(f"      - Option Data: ❌ Missing (LTP: {option_ltp_value}, Qty: {lot_size})")
                         print(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
                         # For missing data, keep qty=0, buy_price=None, stop_loss=None
@@ -1005,7 +1093,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         print(f"   📊 Entry Conditions:")
                         print(f"      - Time Check: ✅ Before 3:00 PM ({triggered_at_display})")
                         print(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
-                        print(f"      - Momentum: ✅ {momentum_reason}")
+                        print(f"      - VWAP Slope: {'✅' if vwap_slope_passed else '❌'} {vwap_slope_reason}")
+                        print(f"      - Candle Size: {'✅' if candle_size_passed else '❌'} {candle_size_reason}")
                         print(f"      - Option Data: ✅ Valid (LTP: ₹{option_ltp_value:.2f}, Qty: {lot_size})")
                         print(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
                         logger.info(f"🚫 NO ENTRY DECISION: {stock_name} | Time: {no_entry_time_str} | Reason: Unknown")
@@ -1030,6 +1119,11 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 # This ensures each stock gets its own unique instrument_key
                 stock_instrument_key = stock.get("instrument_key")
                 
+                # Extract OHLC data from option_candles
+                option_candles_data = stock.get("option_candles")
+                current_candle = option_candles_data.get('current_candle', {}) if option_candles_data else {}
+                previous_candle = option_candles_data.get('previous_candle', {}) if option_candles_data else {}
+                
                 db_record = IntradayStockOption(
                     alert_time=triggered_datetime,
                     alert_type=data_type,
@@ -1037,11 +1131,24 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     stock_name=stock_name,
                     stock_ltp=stock.get("last_traded_price") or stock.get("trigger_price", 0.0),
                     stock_vwap=stock.get("stock_vwap", 0.0),
+                    stock_vwap_previous_hour=stock.get("stock_vwap_previous_hour"),
+                    stock_vwap_previous_hour_time=stock.get("stock_vwap_previous_hour_time"),
                     option_contract=stock.get("option_contract", ""),
                     option_type=stock.get("option_type", ""),
                     option_strike=stock.get("otm1_strike", 0.0),
                     option_ltp=option_ltp_value,
                     option_vwap=stock.get("option_vwap", 0.0),
+                    # Option OHLC candles
+                    option_current_candle_open=current_candle.get('open'),
+                    option_current_candle_high=current_candle.get('high'),
+                    option_current_candle_low=current_candle.get('low'),
+                    option_current_candle_close=current_candle.get('close'),
+                    option_current_candle_time=current_candle.get('time'),
+                    option_previous_candle_open=previous_candle.get('open'),
+                    option_previous_candle_high=previous_candle.get('high'),
+                    option_previous_candle_low=previous_candle.get('low'),
+                    option_previous_candle_close=previous_candle.get('close'),
+                    option_previous_candle_time=previous_candle.get('time'),
                     qty=qty,
                     trade_date=trading_date,
                     status=status,
@@ -1104,10 +1211,11 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 print(f"   • Failed: {failed_count} stocks")
             print(f"   • Alert Type: {data_type}")
             print(f"   • Alert Time: {triggered_at_str}")
-            print(f"\n📊 MOMENTUM FILTER SUMMARY:")
-            print(f"   • Minimum Momentum Required: ≥1.5%")
-            print(f"   • Stocks that passed momentum filter: Check 'bought' status above")
-            print(f"   • Stocks rejected by momentum: Check 'no_entry' with momentum reason")
+            print(f"\n📊 ENTRY FILTER SUMMARY:")
+            print(f"   • VWAP Slope Filter: >= 45 degrees")
+            print(f"   • Candle Size Filter: Current candle < 7.5× previous candle")
+            print(f"   • Stocks that passed both filters: Check 'bought' status above")
+            print(f"   • Stocks rejected: Check 'no_entry' with filter reasons")
         except Exception as commit_error:
             print(f"\n❌ DATABASE COMMIT FAILED: {str(commit_error)}")
             print(f"   • Attempted to save: {saved_count} stocks")
@@ -1646,16 +1754,64 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                         "stocks": []
                     }
                 
+                # Calculate VWAP slope and candle size for display
+                vwap_slope_status = None
+                candle_size_ratio = None
+                candle_size_status = None
+                
+                if record.stock_vwap and record.stock_vwap > 0 and record.stock_vwap_previous_hour and record.stock_vwap_previous_hour > 0 and record.stock_vwap_previous_hour_time:
+                    try:
+                        slope_result = vwap_service.vwap_slope(
+                            vwap1=record.stock_vwap_previous_hour,
+                            time1=record.stock_vwap_previous_hour_time,
+                            vwap2=record.stock_vwap,
+                            time2=record.alert_time
+                        )
+                        vwap_slope_status = slope_result
+                    except:
+                        pass
+                
+                if record.option_current_candle_high and record.option_current_candle_low and record.option_previous_candle_high and record.option_previous_candle_low:
+                    try:
+                        current_size = abs(record.option_current_candle_high - record.option_current_candle_low)
+                        previous_size = abs(record.option_previous_candle_high - record.option_previous_candle_low)
+                        if previous_size > 0:
+                            candle_size_ratio = current_size / previous_size
+                            candle_size_status = "Pass" if candle_size_ratio < 7.5 else "Fail"
+                    except:
+                        pass
+                
                 grouped_bullish[alert_key]["stocks"].append({
                     "stock_name": record.stock_name,
                     "trigger_price": record.stock_ltp or 0.0,
                     "last_traded_price": record.stock_ltp or 0.0,
                     "stock_vwap": record.stock_vwap or 0.0,
+                    "stock_vwap_previous_hour": record.stock_vwap_previous_hour,
+                    "stock_vwap_previous_hour_time": record.stock_vwap_previous_hour_time.isoformat() if record.stock_vwap_previous_hour_time else None,
                     "option_contract": record.option_contract or "",
                     "option_type": record.option_type or "CE",
                     "otm1_strike": record.option_strike or 0.0,
                     "option_ltp": record.option_ltp or 0.0,
                     "option_vwap": record.option_vwap or 0.0,
+                    # Option OHLC candles
+                    "option_current_candle": {
+                        "open": record.option_current_candle_open,
+                        "high": record.option_current_candle_high,
+                        "low": record.option_current_candle_low,
+                        "close": record.option_current_candle_close,
+                        "time": record.option_current_candle_time.isoformat() if record.option_current_candle_time else None
+                    } if record.option_current_candle_open else None,
+                    "option_previous_candle": {
+                        "open": record.option_previous_candle_open,
+                        "high": record.option_previous_candle_high,
+                        "low": record.option_previous_candle_low,
+                        "close": record.option_previous_candle_close,
+                        "time": record.option_previous_candle_time.isoformat() if record.option_previous_candle_time else None
+                    } if record.option_previous_candle_open else None,
+                    # Entry filter status
+                    "vwap_slope_status": vwap_slope_status,
+                    "candle_size_ratio": candle_size_ratio,
+                    "candle_size_status": candle_size_status,
                     "qty": record.qty or 0,
                     "buy_price": record.buy_price or 0.0,
                     "stop_loss": record.stop_loss or 0.0,
@@ -1684,16 +1840,64 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                         "stocks": []
                     }
                 
+                # Calculate VWAP slope and candle size for display
+                vwap_slope_status = None
+                candle_size_ratio = None
+                candle_size_status = None
+                
+                if record.stock_vwap and record.stock_vwap > 0 and record.stock_vwap_previous_hour and record.stock_vwap_previous_hour > 0 and record.stock_vwap_previous_hour_time:
+                    try:
+                        slope_result = vwap_service.vwap_slope(
+                            vwap1=record.stock_vwap_previous_hour,
+                            time1=record.stock_vwap_previous_hour_time,
+                            vwap2=record.stock_vwap,
+                            time2=record.alert_time
+                        )
+                        vwap_slope_status = slope_result
+                    except:
+                        pass
+                
+                if record.option_current_candle_high and record.option_current_candle_low and record.option_previous_candle_high and record.option_previous_candle_low:
+                    try:
+                        current_size = abs(record.option_current_candle_high - record.option_current_candle_low)
+                        previous_size = abs(record.option_previous_candle_high - record.option_previous_candle_low)
+                        if previous_size > 0:
+                            candle_size_ratio = current_size / previous_size
+                            candle_size_status = "Pass" if candle_size_ratio < 7.5 else "Fail"
+                    except:
+                        pass
+                
                 grouped_bearish[alert_key]["stocks"].append({
                     "stock_name": record.stock_name,
                     "trigger_price": record.stock_ltp or 0.0,
                     "last_traded_price": record.stock_ltp or 0.0,
                     "stock_vwap": record.stock_vwap or 0.0,
+                    "stock_vwap_previous_hour": record.stock_vwap_previous_hour,
+                    "stock_vwap_previous_hour_time": record.stock_vwap_previous_hour_time.isoformat() if record.stock_vwap_previous_hour_time else None,
                     "option_contract": record.option_contract or "",
                     "option_type": record.option_type or "PE",
                     "otm1_strike": record.option_strike or 0.0,
                     "option_ltp": record.option_ltp or 0.0,
                     "option_vwap": record.option_vwap or 0.0,
+                    # Option OHLC candles
+                    "option_current_candle": {
+                        "open": record.option_current_candle_open,
+                        "high": record.option_current_candle_high,
+                        "low": record.option_current_candle_low,
+                        "close": record.option_current_candle_close,
+                        "time": record.option_current_candle_time.isoformat() if record.option_current_candle_time else None
+                    } if record.option_current_candle_open else None,
+                    "option_previous_candle": {
+                        "open": record.option_previous_candle_open,
+                        "high": record.option_previous_candle_high,
+                        "low": record.option_previous_candle_low,
+                        "close": record.option_previous_candle_close,
+                        "time": record.option_previous_candle_time.isoformat() if record.option_previous_candle_time else None
+                    } if record.option_previous_candle_open else None,
+                    # Entry filter status
+                    "vwap_slope_status": vwap_slope_status,
+                    "candle_size_ratio": candle_size_ratio,
+                    "candle_size_status": candle_size_status,
                     "qty": record.qty or 0,
                     "buy_price": record.buy_price or 0.0,
                     "stop_loss": record.stop_loss or 0.0,

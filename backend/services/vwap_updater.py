@@ -139,9 +139,9 @@ async def update_vwap_for_all_open_positions():
         # ═══════════════════════════════════════════════════════════════
         # RE-EVALUATE "no_entry" TRADES: Check if conditions are now met
         # ═══════════════════════════════════════════════════════════════
-        # If a trade had "no_entry" status due to weak momentum at alert time,
-        # but momentum becomes sufficient later, enter the trade with current
-        # time and prices (not alert time)
+        # If a trade had "no_entry" status due to VWAP slope or candle size
+        # conditions not being met at alert time, but conditions become
+        # favorable later, enter the trade with current time and prices
         # ═══════════════════════════════════════════════════════════════
         no_entry_trades = db.query(IntradayStockOption).filter(
             and_(
@@ -181,20 +181,67 @@ async def update_vwap_for_all_open_positions():
                         logger.warning(f"⚠️ Invalid stock data for {stock_name} (LTP: {current_stock_ltp}, VWAP: {current_stock_vwap}) - skipping")
                         continue
                     
-                    # Calculate momentum
-                    momentum_pct = abs((current_stock_ltp - current_stock_vwap) / current_stock_vwap) * 100
-                    MINIMUM_MOMENTUM_PCT = 0.3
+                    # ====================================================================
+                    # NEW ENTRY FILTERS: VWAP Slope + Option Candle Size
+                    # ====================================================================
+                    # Get previous hour VWAP (use stored if available, else fetch)
+                    stock_vwap_prev = no_entry_trade.stock_vwap_previous_hour
+                    stock_vwap_prev_time = no_entry_trade.stock_vwap_previous_hour_time
                     
-                    # Check momentum direction and strength
-                    has_strong_momentum = False
-                    if option_type == 'PE' and current_stock_ltp < current_stock_vwap:
-                        # Bearish - stock should be BELOW VWAP
-                        if momentum_pct >= MINIMUM_MOMENTUM_PCT:
-                            has_strong_momentum = True
-                    elif option_type == 'CE' and current_stock_ltp > current_stock_vwap:
-                        # Bullish - stock should be ABOVE VWAP
-                        if momentum_pct >= MINIMUM_MOMENTUM_PCT:
-                            has_strong_momentum = True
+                    # If not stored, fetch it
+                    if not stock_vwap_prev or not stock_vwap_prev_time:
+                        prev_vwap_data = vwap_service.get_stock_vwap_for_previous_hour(stock_name)
+                        if prev_vwap_data:
+                            stock_vwap_prev = prev_vwap_data.get('vwap')
+                            stock_vwap_prev_time = prev_vwap_data.get('time')
+                            # Update database
+                            no_entry_trade.stock_vwap_previous_hour = stock_vwap_prev
+                            no_entry_trade.stock_vwap_previous_hour_time = stock_vwap_prev_time
+                    
+                    # Check VWAP slope
+                    vwap_slope_passed = False
+                    if stock_vwap_prev and stock_vwap_prev > 0 and stock_vwap_prev_time and current_stock_vwap > 0:
+                        try:
+                            slope_result = vwap_service.vwap_slope(
+                                vwap1=stock_vwap_prev,
+                                time1=stock_vwap_prev_time,
+                                vwap2=current_stock_vwap,
+                                time2=now
+                            )
+                            vwap_slope_passed = (slope_result == "Yes")
+                        except Exception as slope_error:
+                            logger.warning(f"Error calculating VWAP slope for {stock_name}: {str(slope_error)}")
+                    
+                    # Fetch option candles and check size
+                    candle_size_passed = False
+                    if no_entry_trade.instrument_key:
+                        try:
+                            option_candles = vwap_service.get_option_candles_current_and_previous(no_entry_trade.instrument_key)
+                            if option_candles:
+                                current_candle = option_candles.get('current_candle', {})
+                                previous_candle = option_candles.get('previous_candle', {})
+                                
+                                if current_candle and previous_candle:
+                                    current_size = abs(current_candle.get('high', 0) - current_candle.get('low', 0))
+                                    previous_size = abs(previous_candle.get('high', 0) - previous_candle.get('low', 0))
+                                    
+                                    if previous_size > 0:
+                                        size_ratio = current_size / previous_size
+                                        candle_size_passed = (size_ratio < 7.5)
+                                        
+                                        # Update database with candle data
+                                        no_entry_trade.option_current_candle_open = current_candle.get('open')
+                                        no_entry_trade.option_current_candle_high = current_candle.get('high')
+                                        no_entry_trade.option_current_candle_low = current_candle.get('low')
+                                        no_entry_trade.option_current_candle_close = current_candle.get('close')
+                                        no_entry_trade.option_current_candle_time = current_candle.get('time')
+                                        no_entry_trade.option_previous_candle_open = previous_candle.get('open')
+                                        no_entry_trade.option_previous_candle_high = previous_candle.get('high')
+                                        no_entry_trade.option_previous_candle_low = previous_candle.get('low')
+                                        no_entry_trade.option_previous_candle_close = previous_candle.get('close')
+                                        no_entry_trade.option_previous_candle_time = previous_candle.get('time')
+                        except Exception as candle_error:
+                            logger.warning(f"Error fetching option candles for {stock_name}: {str(candle_error)}")
                     
                     # Check index trends alignment
                     # Rules:
@@ -226,7 +273,8 @@ async def update_vwap_for_all_open_positions():
                     # Check if all entry conditions are met
                     if (is_before_3pm and 
                         can_enter_by_index and 
-                        has_strong_momentum and 
+                        vwap_slope_passed and 
+                        candle_size_passed and 
                         no_entry_trade.option_contract and 
                         no_entry_trade.instrument_key):
                         
@@ -259,14 +307,16 @@ async def update_vwap_for_all_open_positions():
                             logger.info(f"   Entry Time: {re_entry_time_str} (was 'no_entry' at alert time: {alert_time_str})")
                             logger.info(f"   Buy Price: ₹{current_option_ltp:.2f} (current LTP)")
                             logger.info(f"   Stock LTP: ₹{current_stock_ltp:.2f}, VWAP: ₹{current_stock_vwap:.2f}")
-                            logger.info(f"   Momentum: {momentum_pct:.2f}% (now sufficient)")
+                            logger.info(f"   VWAP Slope: ✅ >= 45° (Previous: ₹{stock_vwap_prev:.2f if stock_vwap_prev else 0:.2f}, Current: ₹{current_stock_vwap:.2f})")
+                            logger.info(f"   Candle Size: ✅ Passed")
                             logger.info(f"   Index Trends: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
                             print(f"✅ RE-ENTRY DECISION: {stock_name} ({no_entry_trade.option_contract})")
                             print(f"   ⏰ Entry Time: {re_entry_time_str} (was 'no_entry' at alert time: {alert_time_str})")
                             print(f"   📊 Entry Conditions:")
                             print(f"      - Time Check: ✅ Before 3:00 PM ({now.strftime('%H:%M:%S')})")
                             print(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
-                            print(f"      - Momentum: ✅ {momentum_pct:.2f}% (now sufficient, was weak at alert time)")
+                            print(f"      - VWAP Slope: ✅ >= 45° (Previous: ₹{stock_vwap_prev:.2f if stock_vwap_prev else 0:.2f} at {stock_vwap_prev_time.strftime('%H:%M') if stock_vwap_prev_time else 'N/A'}, Current: ₹{current_stock_vwap:.2f})")
+                            print(f"      - Candle Size: ✅ Passed (now sufficient)")
                             print(f"      - Option Data: ✅ Valid")
                             print(f"   💰 Trade Details:")
                             print(f"      - Buy Price: ₹{current_option_ltp:.2f} (current LTP at {now.strftime('%H:%M:%S')})")
@@ -274,7 +324,7 @@ async def update_vwap_for_all_open_positions():
                             print(f"      - Stop Loss: ₹{no_entry_trade.stop_loss:.2f}")
                             print(f"      - Stock LTP: ₹{current_stock_ltp:.2f}")
                             print(f"      - Stock VWAP: ₹{current_stock_vwap:.2f}")
-                            logger.info(f"✅ RE-ENTRY DECISION: {stock_name} | Time: {re_entry_time_str} | Price: ₹{current_option_ltp:.2f} | Momentum: {momentum_pct:.2f}% | Indices: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
+                            logger.info(f"✅ RE-ENTRY DECISION: {stock_name} | Time: {re_entry_time_str} | Price: ₹{current_option_ltp:.2f} | VWAP Slope: ✅ | Candle Size: ✅ | Indices: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
                         else:
                             logger.warning(f"⚠️ Could not fetch option LTP for {stock_name} - cannot enter")
                     else:
@@ -284,8 +334,10 @@ async def update_vwap_for_all_open_positions():
                             reasons.append("time >= 3:00 PM")
                         if not can_enter_by_index:
                             reasons.append(f"index trends not aligned (NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend})")
-                        if not has_strong_momentum:
-                            reasons.append(f"weak momentum ({momentum_pct:.2f}% < {MINIMUM_MOMENTUM_PCT}%)")
+                        if not vwap_slope_passed:
+                            reasons.append("VWAP slope < 45°")
+                        if not candle_size_passed:
+                            reasons.append("candle size >= 7.5× previous")
                         if not no_entry_trade.option_contract or not no_entry_trade.instrument_key:
                             reasons.append("missing option data")
                         
@@ -317,9 +369,9 @@ async def update_vwap_for_all_open_positions():
         # ═══════════════════════════════════════════════════════════════
         # RE-EVALUATE "no_entry" TRADES: Check if conditions are now met
         # ═══════════════════════════════════════════════════════════════
-        # If a trade had "no_entry" status due to weak momentum at alert time,
-        # but momentum becomes sufficient later, enter the trade with current
-        # time and prices (not alert time)
+        # If a trade had "no_entry" status due to VWAP slope or candle size
+        # conditions not being met at alert time, but conditions become
+        # favorable later, enter the trade with current time and prices
         # ═══════════════════════════════════════════════════════════════
         no_entry_trades = db.query(IntradayStockOption).filter(
             and_(
@@ -359,20 +411,67 @@ async def update_vwap_for_all_open_positions():
                         logger.warning(f"⚠️ Invalid stock data for {stock_name} (LTP: {current_stock_ltp}, VWAP: {current_stock_vwap}) - skipping")
                         continue
                     
-                    # Calculate momentum
-                    momentum_pct = abs((current_stock_ltp - current_stock_vwap) / current_stock_vwap) * 100
-                    MINIMUM_MOMENTUM_PCT = 0.3
+                    # ====================================================================
+                    # NEW ENTRY FILTERS: VWAP Slope + Option Candle Size
+                    # ====================================================================
+                    # Get previous hour VWAP (use stored if available, else fetch)
+                    stock_vwap_prev = no_entry_trade.stock_vwap_previous_hour
+                    stock_vwap_prev_time = no_entry_trade.stock_vwap_previous_hour_time
                     
-                    # Check momentum direction and strength
-                    has_strong_momentum = False
-                    if option_type == 'PE' and current_stock_ltp < current_stock_vwap:
-                        # Bearish - stock should be BELOW VWAP
-                        if momentum_pct >= MINIMUM_MOMENTUM_PCT:
-                            has_strong_momentum = True
-                    elif option_type == 'CE' and current_stock_ltp > current_stock_vwap:
-                        # Bullish - stock should be ABOVE VWAP
-                        if momentum_pct >= MINIMUM_MOMENTUM_PCT:
-                            has_strong_momentum = True
+                    # If not stored, fetch it
+                    if not stock_vwap_prev or not stock_vwap_prev_time:
+                        prev_vwap_data = vwap_service.get_stock_vwap_for_previous_hour(stock_name)
+                        if prev_vwap_data:
+                            stock_vwap_prev = prev_vwap_data.get('vwap')
+                            stock_vwap_prev_time = prev_vwap_data.get('time')
+                            # Update database
+                            no_entry_trade.stock_vwap_previous_hour = stock_vwap_prev
+                            no_entry_trade.stock_vwap_previous_hour_time = stock_vwap_prev_time
+                    
+                    # Check VWAP slope
+                    vwap_slope_passed = False
+                    if stock_vwap_prev and stock_vwap_prev > 0 and stock_vwap_prev_time and current_stock_vwap > 0:
+                        try:
+                            slope_result = vwap_service.vwap_slope(
+                                vwap1=stock_vwap_prev,
+                                time1=stock_vwap_prev_time,
+                                vwap2=current_stock_vwap,
+                                time2=now
+                            )
+                            vwap_slope_passed = (slope_result == "Yes")
+                        except Exception as slope_error:
+                            logger.warning(f"Error calculating VWAP slope for {stock_name}: {str(slope_error)}")
+                    
+                    # Fetch option candles and check size
+                    candle_size_passed = False
+                    if no_entry_trade.instrument_key:
+                        try:
+                            option_candles = vwap_service.get_option_candles_current_and_previous(no_entry_trade.instrument_key)
+                            if option_candles:
+                                current_candle = option_candles.get('current_candle', {})
+                                previous_candle = option_candles.get('previous_candle', {})
+                                
+                                if current_candle and previous_candle:
+                                    current_size = abs(current_candle.get('high', 0) - current_candle.get('low', 0))
+                                    previous_size = abs(previous_candle.get('high', 0) - previous_candle.get('low', 0))
+                                    
+                                    if previous_size > 0:
+                                        size_ratio = current_size / previous_size
+                                        candle_size_passed = (size_ratio < 7.5)
+                                        
+                                        # Update database with candle data
+                                        no_entry_trade.option_current_candle_open = current_candle.get('open')
+                                        no_entry_trade.option_current_candle_high = current_candle.get('high')
+                                        no_entry_trade.option_current_candle_low = current_candle.get('low')
+                                        no_entry_trade.option_current_candle_close = current_candle.get('close')
+                                        no_entry_trade.option_current_candle_time = current_candle.get('time')
+                                        no_entry_trade.option_previous_candle_open = previous_candle.get('open')
+                                        no_entry_trade.option_previous_candle_high = previous_candle.get('high')
+                                        no_entry_trade.option_previous_candle_low = previous_candle.get('low')
+                                        no_entry_trade.option_previous_candle_close = previous_candle.get('close')
+                                        no_entry_trade.option_previous_candle_time = previous_candle.get('time')
+                        except Exception as candle_error:
+                            logger.warning(f"Error fetching option candles for {stock_name}: {str(candle_error)}")
                     
                     # Check index trends alignment
                     # Rules:
@@ -404,7 +503,8 @@ async def update_vwap_for_all_open_positions():
                     # Check if all entry conditions are met
                     if (is_before_3pm and 
                         can_enter_by_index and 
-                        has_strong_momentum and 
+                        vwap_slope_passed and 
+                        candle_size_passed and 
                         no_entry_trade.option_contract and 
                         no_entry_trade.instrument_key):
                         
@@ -437,14 +537,16 @@ async def update_vwap_for_all_open_positions():
                             logger.info(f"   Entry Time: {re_entry_time_str} (was 'no_entry' at alert time: {alert_time_str})")
                             logger.info(f"   Buy Price: ₹{current_option_ltp:.2f} (current LTP)")
                             logger.info(f"   Stock LTP: ₹{current_stock_ltp:.2f}, VWAP: ₹{current_stock_vwap:.2f}")
-                            logger.info(f"   Momentum: {momentum_pct:.2f}% (now sufficient)")
+                            logger.info(f"   VWAP Slope: ✅ >= 45° (Previous: ₹{stock_vwap_prev:.2f if stock_vwap_prev else 0:.2f}, Current: ₹{current_stock_vwap:.2f})")
+                            logger.info(f"   Candle Size: ✅ Passed")
                             logger.info(f"   Index Trends: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
                             print(f"✅ RE-ENTRY DECISION: {stock_name} ({no_entry_trade.option_contract})")
                             print(f"   ⏰ Entry Time: {re_entry_time_str} (was 'no_entry' at alert time: {alert_time_str})")
                             print(f"   📊 Entry Conditions:")
                             print(f"      - Time Check: ✅ Before 3:00 PM ({now.strftime('%H:%M:%S')})")
                             print(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
-                            print(f"      - Momentum: ✅ {momentum_pct:.2f}% (now sufficient, was weak at alert time)")
+                            print(f"      - VWAP Slope: ✅ >= 45° (Previous: ₹{stock_vwap_prev:.2f if stock_vwap_prev else 0:.2f} at {stock_vwap_prev_time.strftime('%H:%M') if stock_vwap_prev_time else 'N/A'}, Current: ₹{current_stock_vwap:.2f})")
+                            print(f"      - Candle Size: ✅ Passed (now sufficient)")
                             print(f"      - Option Data: ✅ Valid")
                             print(f"   💰 Trade Details:")
                             print(f"      - Buy Price: ₹{current_option_ltp:.2f} (current LTP at {now.strftime('%H:%M:%S')})")
@@ -452,7 +554,7 @@ async def update_vwap_for_all_open_positions():
                             print(f"      - Stop Loss: ₹{no_entry_trade.stop_loss:.2f}")
                             print(f"      - Stock LTP: ₹{current_stock_ltp:.2f}")
                             print(f"      - Stock VWAP: ₹{current_stock_vwap:.2f}")
-                            logger.info(f"✅ RE-ENTRY DECISION: {stock_name} | Time: {re_entry_time_str} | Price: ₹{current_option_ltp:.2f} | Momentum: {momentum_pct:.2f}% | Indices: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
+                            logger.info(f"✅ RE-ENTRY DECISION: {stock_name} | Time: {re_entry_time_str} | Price: ₹{current_option_ltp:.2f} | VWAP Slope: ✅ | Candle Size: ✅ | Indices: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
                         else:
                             logger.warning(f"⚠️ Could not fetch option LTP for {stock_name} - cannot enter")
                     else:
@@ -462,8 +564,10 @@ async def update_vwap_for_all_open_positions():
                             reasons.append("time >= 3:00 PM")
                         if not can_enter_by_index:
                             reasons.append(f"index trends not aligned (NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend})")
-                        if not has_strong_momentum:
-                            reasons.append(f"weak momentum ({momentum_pct:.2f}% < {MINIMUM_MOMENTUM_PCT}%)")
+                        if not vwap_slope_passed:
+                            reasons.append("VWAP slope < 45°")
+                        if not candle_size_passed:
+                            reasons.append("candle size >= 7.5× previous")
                         if not no_entry_trade.option_contract or not no_entry_trade.instrument_key:
                             reasons.append("missing option data")
                         

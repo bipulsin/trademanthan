@@ -676,6 +676,8 @@ function renderAlertGroup(alert, type) {
                         <th>Stock Name</th>
                         <th>Stock LTP</th>
                         <th>Stock VWAP</th>
+                        <th>VWAP Slope</th>
+                        <th>Candle Size</th>
                         <th>Option Contract (OTM-1)</th>
                         <th>Qty</th>
                         <th>Buy Price</th>
@@ -772,11 +774,29 @@ function renderAlertGroup(alert, type) {
                         const sellPriceDisplay = isNoEntry ? '-' : '₹' + formatPrice(stock.sell_price || 0);
                         const pnlDisplay = isNoEntry ? '-' : formatPNL(stock.pnl || 0);
                         
+                        // Format VWAP slope status
+                        let vwapSlopeDisplay = '-';
+                        if (stock.vwap_slope_status) {
+                            const slopeColor = stock.vwap_slope_status === 'Yes' ? '#10b981' : '#dc2626';
+                            const slopeIcon = stock.vwap_slope_status === 'Yes' ? '✅' : '❌';
+                            vwapSlopeDisplay = `<span style="color: ${slopeColor}; font-weight: 600;">${slopeIcon} ${stock.vwap_slope_status}</span>`;
+                        }
+                        
+                        // Format candle size status
+                        let candleSizeDisplay = '-';
+                        if (stock.candle_size_ratio !== null && stock.candle_size_ratio !== undefined) {
+                            const sizeColor = stock.candle_size_status === 'Pass' ? '#10b981' : '#dc2626';
+                            const sizeIcon = stock.candle_size_status === 'Pass' ? '✅' : '❌';
+                            candleSizeDisplay = `<span style="color: ${sizeColor}; font-weight: 600;" title="Ratio: ${stock.candle_size_ratio.toFixed(2)}×">${sizeIcon} ${stock.candle_size_status} (${stock.candle_size_ratio.toFixed(2)}×)</span>`;
+                        }
+                        
                         return '<tr>' +
                             '<td>' + (index + 1) + '</td>' +
                             '<td class="stock-name">' + escapeHtml(stock.stock_name) + '</td>' +
                             '<td class="trigger-price">₹' + formatPrice(stock_ltp) + '</td>' +
                             '<td class="stock-vwap-col">₹' + formatPrice(stock_vwap) + '</td>' +
+                            '<td class="vwap-slope-col" style="font-size: 12px;">' + vwapSlopeDisplay + '</td>' +
+                            '<td class="candle-size-col" style="font-size: 12px;">' + candleSizeDisplay + '</td>' +
                             '<td class="option-contract">' + escapeHtml(stock.option_contract || 'N/A') + '</td>' +
                             '<td class="qty">' + (stock.qty || 0) + '</td>' +
                             '<td class="buy-price">' + buyPriceDisplay + '</td>' +
@@ -893,7 +913,17 @@ function renderAlertGroup(alert, type) {
                                 </div>
                             </div>
                             
-                            <!-- Row 2: Option Contract, Qty -->
+                            <!-- Row 2: Entry Criteria (VWAP Slope & Candle Size) -->
+                            ${stock.vwap_slope_status || stock.candle_size_status ? `
+                            <div class="stock-card-row" style="background: rgba(59, 130, 246, 0.1); padding: 4px 8px; border-radius: 4px; margin: 4px 0;">
+                                <div style="flex: 1; font-size: 11px; color: #93c5fd;">
+                                    ${stock.vwap_slope_status ? `<span style="color: ${stock.vwap_slope_status === 'Yes' ? '#10b981' : '#dc2626'}; font-weight: 600;">Slope: ${stock.vwap_slope_status === 'Yes' ? '✅' : '❌'}</span>` : ''}
+                                    ${stock.candle_size_status ? `<span style="color: ${stock.candle_size_status === 'Pass' ? '#10b981' : '#dc2626'}; font-weight: 600; margin-left: 8px;">Size: ${stock.candle_size_status === 'Pass' ? '✅' : '❌'} ${stock.candle_size_ratio ? '(' + stock.candle_size_ratio.toFixed(2) + '×)' : ''}</span>` : ''}
+                                </div>
+                            </div>
+                            ` : ''}
+                            
+                            <!-- Row 3: Option Contract, Qty -->
                             <div class="stock-card-row">
                                 <div style="flex: 2;">
                                     <div class="stock-card-value" style="font-size: 12px;">${escapeHtml(stock.option_contract || 'N/A')}</div>

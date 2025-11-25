@@ -2014,6 +2014,171 @@ class UpstoxService:
         
         return 0.0
     
+    def get_stock_vwap_for_previous_hour(self, stock_symbol: str) -> Optional[Dict]:
+        """
+        Get stock VWAP for the previous 1-hour candle
+        
+        Args:
+            stock_symbol: Stock symbol (e.g., "RELIANCE")
+            
+        Returns:
+            Dict with 'vwap', 'timestamp', 'time' or None
+            {
+                'vwap': float,
+                'timestamp': datetime,
+                'time': datetime (timezone-aware)
+            }
+        """
+        try:
+            instrument_key = self.get_instrument_key(stock_symbol)
+            if not instrument_key:
+                logger.warning(f"⚠️ Could not get instrument key for {stock_symbol}")
+                return None
+            
+            # Fetch last 2 hours of candles to get previous hour
+            candles = self.get_historical_candles_by_instrument_key(
+                instrument_key, 
+                interval="hours/1", 
+                days_back=1
+            )
+            
+            if not candles or len(candles) < 2:
+                logger.warning(f"⚠️ Not enough candles for {stock_symbol} to calculate previous hour VWAP")
+                return None
+            
+            # Get previous hour candle (second to last)
+            prev_candle = candles[-2]
+            
+            # Calculate VWAP for previous hour using that single candle
+            # VWAP = (High + Low + Close) / 3 for single candle
+            high = prev_candle.get('high', 0)
+            low = prev_candle.get('low', 0)
+            close = prev_candle.get('close', 0)
+            volume = prev_candle.get('volume', 0)
+            
+            if volume > 0:
+                # For single candle, typical price is (H+L+C)/3
+                typical_price = (high + low + close) / 3
+                vwap = typical_price  # For single candle, VWAP = typical price
+            else:
+                # Fallback: use close price
+                vwap = close
+            
+            # Parse timestamp
+            timestamp_ms = prev_candle.get('timestamp', 0)
+            if timestamp_ms > 1e12:
+                timestamp_ms = timestamp_ms / 1000
+            
+            ist = pytz.timezone('Asia/Kolkata')
+            candle_time = datetime.fromtimestamp(timestamp_ms, tz=ist)
+            
+            logger.info(f"✅ Previous hour VWAP for {stock_symbol}: ₹{vwap:.2f} at {candle_time.strftime('%H:%M:%S')}")
+            
+            return {
+                'vwap': round(vwap, 2),
+                'timestamp': timestamp_ms,
+                'time': candle_time
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error getting previous hour VWAP for {stock_symbol}: {str(e)}")
+            return None
+    
+    def get_option_candles_current_and_previous(self, instrument_key: str) -> Optional[Dict]:
+        """
+        Get current and previous 1-hour candles for an option contract
+        
+        Args:
+            instrument_key: Option instrument key (e.g., "NSE_FO|RELIANCE25NOV1450CE")
+            
+        Returns:
+            Dict with 'current_candle' and 'previous_candle' or None
+            {
+                'current_candle': {
+                    'open': float,
+                    'high': float,
+                    'low': float,
+                    'close': float,
+                    'volume': float,
+                    'timestamp': int,
+                    'time': datetime
+                },
+                'previous_candle': {
+                    'open': float,
+                    'high': float,
+                    'low': float,
+                    'close': float,
+                    'volume': float,
+                    'timestamp': int,
+                    'time': datetime
+                }
+            }
+        """
+        try:
+            # Fetch last 2 hours of candles
+            candles = self.get_historical_candles_by_instrument_key(
+                instrument_key,
+                interval="hours/1",
+                days_back=1
+            )
+            
+            if not candles or len(candles) < 2:
+                logger.warning(f"⚠️ Not enough candles for {instrument_key} (need at least 2)")
+                return None
+            
+            # Get last two candles
+            current_candle_raw = candles[-1]
+            previous_candle_raw = candles[-2]
+            
+            ist = pytz.timezone('Asia/Kolkata')
+            
+            # Parse current candle
+            current_timestamp_ms = current_candle_raw.get('timestamp', 0)
+            if current_timestamp_ms > 1e12:
+                current_timestamp_ms = current_timestamp_ms / 1000
+            current_time = datetime.fromtimestamp(current_timestamp_ms, tz=ist)
+            
+            # Parse previous candle
+            previous_timestamp_ms = previous_candle_raw.get('timestamp', 0)
+            if previous_timestamp_ms > 1e12:
+                previous_timestamp_ms = previous_timestamp_ms / 1000
+            previous_time = datetime.fromtimestamp(previous_timestamp_ms, tz=ist)
+            
+            current_candle = {
+                'open': current_candle_raw.get('open', 0),
+                'high': current_candle_raw.get('high', 0),
+                'low': current_candle_raw.get('low', 0),
+                'close': current_candle_raw.get('close', 0),
+                'volume': current_candle_raw.get('volume', 0),
+                'timestamp': current_timestamp_ms,
+                'time': current_time
+            }
+            
+            previous_candle = {
+                'open': previous_candle_raw.get('open', 0),
+                'high': previous_candle_raw.get('high', 0),
+                'low': previous_candle_raw.get('low', 0),
+                'close': previous_candle_raw.get('close', 0),
+                'volume': previous_candle_raw.get('volume', 0),
+                'timestamp': previous_timestamp_ms,
+                'time': previous_time
+            }
+            
+            logger.info(f"✅ Fetched candles for {instrument_key}")
+            logger.info(f"   Current: O={current_candle['open']:.2f}, H={current_candle['high']:.2f}, L={current_candle['low']:.2f}, C={current_candle['close']:.2f} at {current_time.strftime('%H:%M:%S')}")
+            logger.info(f"   Previous: O={previous_candle['open']:.2f}, H={previous_candle['high']:.2f}, L={previous_candle['low']:.2f}, C={previous_candle['close']:.2f} at {previous_time.strftime('%H:%M:%S')}")
+            
+            return {
+                'current_candle': current_candle,
+                'previous_candle': previous_candle
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error getting option candles for {instrument_key}: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
     def check_api_health(self) -> Dict[str, any]:
         """
         Check if Upstox API is accessible and token is valid
