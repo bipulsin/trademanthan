@@ -16,10 +16,10 @@ from pydantic import BaseModel
 algos_path = '/home/ubuntu/trademanthan/algos'
 sys.path.append(algos_path)
 
-from database import get_db
-from models import Broker
-from routers.auth import get_current_user
-from models.user import User
+from backend.database import get_db
+from backend.models import Broker
+from backend.routers.auth import get_current_user
+from backend.models.user import User
 from utils.log_manager import log_manager
 
 # Import strategy classes

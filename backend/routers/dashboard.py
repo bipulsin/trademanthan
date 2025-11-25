@@ -3,10 +3,10 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 import requests
 
-import models.user
-import models.trading
-from database import get_db
-import routers.auth
+import backend.models.user as models.user
+import backend.models.trading as models.trading
+from backend.database import get_db
+import backend.routers.auth as routers.auth
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 

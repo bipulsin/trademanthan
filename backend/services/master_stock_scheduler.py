@@ -19,10 +19,8 @@ import sys
 import os
 
 # Add parent directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from database import SessionLocal
-from models.trading import MasterStock
+from backend.database import SessionLocal
+from backend.models.trading import MasterStock
 
 logger = logging.getLogger(__name__)
 

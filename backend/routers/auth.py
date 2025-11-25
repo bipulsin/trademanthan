@@ -8,9 +8,9 @@ from typing import Optional
 import os
 from pydantic import BaseModel
 
-import models
-from database import get_db
-from config import settings
+import backend.models as models
+from backend.database import get_db
+from backend.config import settings
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 

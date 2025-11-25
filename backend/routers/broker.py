@@ -2,9 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from datetime import datetime
 from typing import List, Optional
-import models
-from database import get_db
-from config import settings
+import backend.models as models
+from backend.database import get_db
+from backend.config import settings
 
 router = APIRouter(prefix="/broker", tags=["broker management"])
 

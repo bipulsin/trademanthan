@@ -25,10 +25,10 @@ try:
     from services.health_monitor import health_monitor
 except ImportError:
     health_monitor = None  # Graceful degradation if not available
-from services.upstox_service import upstox_service as vwap_service
-from database import get_db
-from models.trading import IntradayStockOption, MasterStock
-from config import settings
+from backend.services.upstox_service import upstox_service as vwap_service
+from backend.database import get_db
+from backend.models.trading import IntradayStockOption, MasterStock
+from backend.config import settings
 
 router = APIRouter(prefix="/scan", tags=["scan"])
 
