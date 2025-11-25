@@ -7,19 +7,19 @@ import os
 import logging
 from dotenv import load_dotenv
 
-from database import engine, SessionLocal, create_tables
-import models
-import routers.auth as auth
-import routers.dashboard as dashboard
-import routers.strategy as strategy
-import routers.broker as broker
-import routers.products as products
-import routers.algo as algo
-import routers.scan as scan
-from services.master_stock_scheduler import start_scheduler, stop_scheduler
-from services.instruments_downloader import start_instruments_scheduler, stop_instruments_scheduler
-from services.health_monitor import start_health_monitor, stop_health_monitor
-from services.vwap_updater import start_vwap_updater, stop_vwap_updater
+from backend.database import engine, SessionLocal, create_tables
+import backend.models as models
+import backend.routers.auth as auth
+import backend.routers.dashboard as dashboard
+import backend.routers.strategy as strategy
+import backend.routers.broker as broker
+import backend.routers.products as products
+import backend.routers.algo as algo
+import backend.routers.scan as scan
+from backend.services.master_stock_scheduler import start_scheduler, stop_scheduler
+from backend.services.instruments_downloader import start_instruments_scheduler, stop_instruments_scheduler
+from backend.services.health_monitor import start_health_monitor, stop_health_monitor
+from backend.services.vwap_updater import start_vwap_updater, stop_vwap_updater
 
 load_dotenv()
 
