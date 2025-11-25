@@ -1386,6 +1386,9 @@ class UpstoxService:
         The first VWAP (vwap1) is considered as the starting point of the slope.
         Both positive (upward) and negative (downward) inclinations are considered.
         
+        Uses a scaling factor based on the stock's price range normalized by time,
+        which better matches visual chart angles.
+        
         Args:
             vwap1: First VWAP value (starting point, lower timeframe)
             time1: Timestamp of first VWAP (datetime object)
@@ -1397,13 +1400,19 @@ class UpstoxService:
         
         Formula:
             - Calculate time difference in hours
-            - Calculate VWAP change as percentage of initial VWAP (starting point)
-            - Normalize slope: (vwap_change_percentage) / (time_diff_hours)
-            - Positive slope = upward inclination (VWAP increasing)
-            - Negative slope = downward inclination (VWAP decreasing)
-            - For 45 degrees: normalized_slope should be >= 100% per hour (upward) or <= -100% per hour (downward)
-            - Angle = arctan(|normalized_slope| / 100) * (180 / π)
+            - Calculate absolute VWAP change per hour: |vwap2 - vwap1| / time_diff_hours
+            - Calculate scaling factor: starting_price / (scaling_base * time_normalization)
+            - For visual 45-degree angle: price_change_per_hour should equal scaling_factor
+            - Normalized slope ratio = (price_change_per_hour) / (scaling_factor)
+            - Angle = arctan(normalized_slope_ratio) * (180 / π)
             - Returns "Yes" if absolute angle >= 45 degrees
+            
+        Scaling Approach:
+            - Uses 0.2% of starting price per hour as the baseline for 45 degrees
+            - This means: if price changes by 0.2% per hour = 45 degrees
+            - Formula: scaling_factor = vwap1 * 0.002 per hour
+            - This better matches visual chart perception for price movements
+            - More sensitive than percentage-based approach, better aligns with visual angles
         """
         import math
         
@@ -1425,38 +1434,42 @@ class UpstoxService:
                 logger.warning("Invalid time difference")
                 return "No"
             
-            # Calculate VWAP change from starting point (vwap1)
+            # Calculate absolute VWAP change from starting point (vwap1)
             vwap_change = vwap2 - vwap1
+            vwap_change_absolute = abs(vwap_change)
             vwap_change_percentage = (vwap_change / vwap1) * 100  # Percentage change from starting point
             
-            # Calculate normalized slope (percentage change per hour)
-            # Positive = upward inclination, Negative = downward inclination
-            normalized_slope_per_hour = vwap_change_percentage / time_diff_hours
+            # Calculate price change per hour (absolute)
+            price_change_per_hour = vwap_change_absolute / time_diff_hours
+            
+            # Calculate scaling factor based on stock's price range normalized by time
+            # For visual 45-degree angle: use 0.2% of starting price per hour as baseline
+            # This means: if price changes by 0.2% of its value per hour = 45 degrees
+            # This scaling better matches visual chart perception for price movements
+            # Scaling factor = (0.2% of starting price) per hour
+            scaling_factor_per_hour = vwap1 * 0.002  # 0.2% of starting price per hour
+            
+            # Normalize the actual price change per hour by the scaling factor
+            # This gives us a ratio where 1.0 = 45 degrees
+            normalized_slope_ratio = price_change_per_hour / scaling_factor_per_hour if scaling_factor_per_hour > 0 else 0
             
             # Determine direction
-            direction = "upward" if normalized_slope_per_hour > 0 else "downward" if normalized_slope_per_hour < 0 else "flat"
-            
-            # For angle calculation:
-            # A 45-degree angle means: rise = run (when axes are properly scaled)
-            # We define: 100% change per hour = 45 degrees (baseline)
-            # So: |normalized_slope_per_hour| / 100 = tan(45°) = 1
-            # Therefore: slope_ratio = |normalized_slope_per_hour| / 100
-            # For 45 degrees: slope_ratio = 1, meaning 100% change per hour (up or down)
-            slope_ratio = abs(normalized_slope_per_hour) / 100.0
+            direction = "upward" if vwap_change > 0 else "downward" if vwap_change < 0 else "flat"
             
             # Calculate angle in degrees
             # arctan gives angle in radians, convert to degrees
-            # When slope_ratio = 1, angle = 45 degrees
-            angle_radians = math.atan(slope_ratio)
+            # When normalized_slope_ratio = 1, angle = 45 degrees
+            angle_radians = math.atan(normalized_slope_ratio)
             angle_degrees = math.degrees(angle_radians)
             
-            logger.debug(f"VWAP Slope Calculation:")
+            logger.debug(f"VWAP Slope Calculation (Price-Range Normalized):")
             logger.debug(f"  Starting point (VWAP1): ₹{vwap1:.2f} at {time1.strftime('%H:%M:%S')}")
             logger.debug(f"  End point (VWAP2): ₹{vwap2:.2f} at {time2.strftime('%H:%M:%S')}")
             logger.debug(f"  Time diff: {time_diff_hours:.2f} hours")
-            logger.debug(f"  VWAP change: ₹{vwap_change:.2f} ({vwap_change_percentage:+.2f}%)")
-            logger.debug(f"  Normalized slope: {normalized_slope_per_hour:+.2f}% per hour ({direction})")
-            logger.debug(f"  Slope ratio: {slope_ratio:.4f}")
+            logger.debug(f"  VWAP change: ₹{vwap_change:.2f} ({vwap_change_percentage:+.4f}%)")
+            logger.debug(f"  Price change per hour: ₹{price_change_per_hour:.2f}/hour")
+            logger.debug(f"  Scaling factor (1% of starting price/hour): ₹{scaling_factor_per_hour:.2f}/hour")
+            logger.debug(f"  Normalized slope ratio: {normalized_slope_ratio:.4f}")
             logger.debug(f"  Angle: {angle_degrees:.2f} degrees ({direction})")
             
             # Return "Yes" if absolute angle is 45 degrees or more (for both upward and downward slopes)
