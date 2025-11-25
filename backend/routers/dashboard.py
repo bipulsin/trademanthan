@@ -3,25 +3,25 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 import requests
 
-import backend.models.user as models.user
-import backend.models.trading as models.trading
+import backend.models.user
+import backend.models.trading
 from backend.database import get_db
-import backend.routers.auth as routers.auth
+import backend.routers.auth
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
-async def get_current_user(token: str = Depends(routers.auth.oauth2_scheme), db: Session = Depends(get_db)):
+async def get_current_user(token: str = Depends(backend.routers.auth.oauth2_scheme), db: Session = Depends(get_db)):
     """Get current user from token"""
     try:
         from jose import jwt
-        from config import settings
+        from backend.config import settings
         
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
         user_id: str = payload.get("sub")
         if user_id is None:
             raise HTTPException(status_code=401, detail="Invalid token")
         
-        user = db.query(models.user.User).filter(models.user.User.id == int(user_id)).first()
+        user = db.query(backend.models.user.User).filter(backend.models.user.User.id == int(user_id)).first()
         if user is None:
             raise HTTPException(status_code=401, detail="User not found")
         
@@ -31,9 +31,9 @@ async def get_current_user(token: str = Depends(routers.auth.oauth2_scheme), db:
         raise HTTPException(status_code=401, detail="Invalid token")
 
 @router.get("/brokers")
-async def get_user_brokers(current_user: models.user.User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def get_user_brokers(current_user: backend.models.user.User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Get all brokers for the current user"""
-    brokers = db.query(models.trading.Broker).filter(models.trading.Broker.user_id == current_user.id).all()
+    brokers = db.query(backend.models.trading.Broker).filter(backend.models.trading.Broker.user_id == current_user.id).all()
     return [
         {
             "id": broker.id,
@@ -50,11 +50,11 @@ async def create_broker(
     name: str,
     api_key: str,
     api_secret: str,
-    current_user: models.user.User = Depends(get_current_user),
+    current_user: backend.models.user.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Create a new broker connection"""
-    broker = models.trading.Broker(
+    broker = backend.models.trading.Broker(
         user_id=current_user.id,
         name=name,
         api_key=api_key,
@@ -72,9 +72,9 @@ async def create_broker(
     }
 
 @router.get("/strategies")
-async def get_user_strategies(current_user: models.user.User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def get_user_strategies(current_user: backend.models.user.User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Get all strategies for the current user"""
-    strategies = db.query(models.trading.Strategy).filter(models.trading.Strategy.user_id == current_user.id).all()
+    strategies = db.query(backend.models.trading.Strategy).filter(backend.models.trading.Strategy.user_id == current_user.id).all()
     return [
         {
             "id": strategy.id,
@@ -92,11 +92,11 @@ async def create_strategy(
     name: str,
     description: Optional[str] = None,
     broker_id: Optional[int] = None,
-    current_user: models.user.User = Depends(get_current_user),
+    current_user: backend.models.user.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Create a new trading strategy"""
-    strategy = models.trading.Strategy(
+    strategy = backend.models.trading.Strategy(
         user_id=current_user.id,
         name=name,
         description=description,
@@ -171,10 +171,10 @@ async def get_crypto_prices():
         ]
 
 @router.get("/summary")
-async def get_dashboard_summary(current_user: models.user.User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def get_dashboard_summary(current_user: backend.models.user.User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Get dashboard summary data"""
-    brokers = db.query(models.trading.Broker).filter(models.trading.Broker.user_id == current_user.id).all()
-    strategies = db.query(models.trading.Strategy).filter(models.trading.Strategy.user_id == current_user.id).all()
+    brokers = db.query(backend.models.trading.Broker).filter(backend.models.trading.Broker.user_id == current_user.id).all()
+    strategies = db.query(backend.models.trading.Strategy).filter(backend.models.trading.Strategy.user_id == current_user.id).all()
     
     total_brokers = len(brokers)
     connected_brokers = len([b for b in brokers if b.is_connected])
