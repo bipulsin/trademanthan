@@ -33,6 +33,7 @@ This document lists all scheduled tasks, their execution times, and what data th
   - **9:15 AM** - First update
   - **9:30 AM** - Market open update
   - **10:15 AM** - Hourly update
+  - **10:30 AM** - Special scan for 10:15 AM alert stocks (NEW!)
   - **11:15 AM** - Hourly update
   - **12:15 PM** - Hourly update
   - **1:15 PM** - Hourly update
@@ -40,6 +41,7 @@ This document lists all scheduled tasks, their execution times, and what data th
   - **3:15 PM** - Hourly update
 - **File**: `backend/services/vwap_updater.py`
 - **Function**: `update_vwap_for_all_open_positions()`
+- **Special Function**: `update_10_15_alert_stocks_at_10_30()` - Runs at 10:30 AM
 - **What it fetches** (for each open position):
   1. **Stock VWAP** (`stock_vwap`)
      - Fetched via `upstox_service.get_stock_vwap(stock_name)`
@@ -65,6 +67,20 @@ This document lists all scheduled tasks, their execution times, and what data th
   - Checks for stop loss triggers
   - Checks for profit target hits
   - Updates PnL calculations
+
+### 3a. Special 10:30 AM Scan for 10:15 AM Alert Stocks
+- **Time**: **10:30 AM IST**
+- **File**: `backend/services/vwap_updater.py`
+- **Function**: `update_10_15_alert_stocks_at_10_30()`
+- **What it does**:
+  - Queries all stocks that were alerted at **10:15 AM** today
+  - Fetches for each stock:
+    1. **Stock LTP** - Current Last Traded Price
+    2. **Stock VWAP** - Current Volume Weighted Average Price
+    3. **Option LTP** - Current Option Last Traded Price (if available)
+  - Saves all data to `historical_market_data` table
+  - Provides 15-minute price movement snapshot after initial alert
+- **Purpose**: Track price movements of stocks from the first webhook alert of the day
 
 ---
 
@@ -142,6 +158,7 @@ This document lists all scheduled tasks, their execution times, and what data th
 | Master Stock Download | Daily | 9:00 AM | Dhan API scrip master CSV |
 | Instruments Download | Daily | 9:05 AM | Upstox instruments JSON |
 | Market Data Update | Hourly | 9:15, 9:30, 10:15, 11:15, 12:15, 1:15, 2:15, 3:15 | Stock VWAP, Stock LTP, Option LTP, Index Trends |
+| 10:30 AM Special Scan | Daily | 10:30 AM | Stock LTP, Stock VWAP, Option LTP (for 10:15 AM alert stocks) |
 | Close Open Trades | Daily | 3:25 PM | None (closes positions) |
 | EOD VWAP Update | Daily | 3:30 PM, 3:35 PM | Final VWAP for all positions |
 | Health Check | Every 15 min | 9:15 AM - 3:45 PM | Database, Webhooks, API Token, Instruments file |
