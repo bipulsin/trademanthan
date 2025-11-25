@@ -965,39 +965,65 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 # 4. Current candle size < 7-8x previous candle
                 # 5. Valid option data (option_ltp > 0, lot_size > 0)
                 if not is_after_3_00pm and can_enter_trade_by_index and vwap_slope_passed and candle_size_passed and option_ltp_value > 0 and lot_size > 0:
-                    # Enter trade: set qty, buy_price, buy_time, stop_loss
+                    # Enter trade: Fetch current option LTP again, set buy_time to current system time, stop_loss from previous candle low
                     # IMPORTANT: sell_price remains NULL initially, will be populated by hourly updater
-                    import math
+                    import pytz
+                    ist = pytz.timezone('Asia/Kolkata')
+                    current_time = datetime.now(ist)
+                    
+                    # Fetch current option LTP at entry moment (not from enrichment phase)
+                    current_option_ltp = option_ltp_value  # Default to enrichment value
+                    if stock.get('instrument_key'):
+                        try:
+                            option_quote = vwap_service.get_market_quote_by_key(stock.get('instrument_key'))
+                            if option_quote and option_quote.get('last_price', 0) > 0:
+                                current_option_ltp = float(option_quote.get('last_price', 0))
+                                print(f"✅ Fetched fresh option LTP at entry: ₹{current_option_ltp:.2f}")
+                            else:
+                                print(f"⚠️ Could not fetch fresh option LTP, using enrichment value: ₹{current_option_ltp:.2f}")
+                        except Exception as ltp_error:
+                            print(f"⚠️ Error fetching fresh option LTP: {str(ltp_error)}, using enrichment value: ₹{current_option_ltp:.2f}")
                     
                     qty = lot_size
-                    buy_price = option_ltp_value
-                    buy_time = triggered_datetime
+                    buy_price = current_option_ltp  # Use current LTP fetched at entry moment
+                    buy_time = current_time  # Use current system time, not alert time
                     sell_price = None  # BLANK initially - will be updated hourly by market data updater
                     
-                    # Calculate Stop Loss and round DOWN to nearest 10 paise (0.10)
-                    calculated_sl = option_ltp_value - (SL_LOSS_TARGET / qty)
-                    stop_loss_price = max(0.05, math.floor(calculated_sl / 0.10) * 0.10)
+                    # Stop Loss = Low price of previous option candle
+                    stop_loss_price = None
+                    if option_candles and option_candles.get('previous_candle'):
+                        previous_candle_low = option_candles.get('previous_candle', {}).get('low')
+                        if previous_candle_low and previous_candle_low > 0:
+                            stop_loss_price = float(previous_candle_low)
+                            print(f"✅ Stop Loss set from previous candle low: ₹{stop_loss_price:.2f}")
+                        else:
+                            print(f"⚠️ Previous candle low not available, setting SL to 0.05")
+                            stop_loss_price = 0.05
+                    else:
+                        print(f"⚠️ Previous candle data not available, setting SL to 0.05")
+                        stop_loss_price = 0.05
                     
                     status = 'bought'  # Trade entered
                     pnl = 0.0
-                    entry_time_str = triggered_datetime.strftime('%Y-%m-%d %H:%M:%S IST')
+                    entry_time_str = buy_time.strftime('%Y-%m-%d %H:%M:%S IST')
+                    alert_time_str = triggered_datetime.strftime('%Y-%m-%d %H:%M:%S IST')
                     print(f"✅ TRADE ENTERED: {stock_name}")
-                    print(f"   ⏰ Entry Time: {entry_time_str}")
+                    print(f"   ⏰ Entry Time: {entry_time_str} (Alert Time: {alert_time_str})")
                     print(f"   📊 Entry Conditions:")
                     print(f"      - Time Check: ✅ Before 3:00 PM ({triggered_at_display})")
                     print(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
                     print(f"      - VWAP Slope: ✅ {vwap_slope_reason}")
                     print(f"      - Candle Size: ✅ {candle_size_reason}")
-                    print(f"      - Option Data: ✅ Valid (LTP: ₹{option_ltp_value:.2f}, Qty: {lot_size})")
+                    print(f"      - Option Data: ✅ Valid (LTP at entry: ₹{buy_price:.2f}, Qty: {lot_size})")
                     print(f"   💰 Trade Details:")
-                    print(f"      - Buy Price: ₹{buy_price:.2f}")
+                    print(f"      - Buy Price: ₹{buy_price:.2f} (fetched at entry moment)")
                     print(f"      - Quantity: {qty}")
-                    print(f"      - Stop Loss: ₹{stop_loss_price:.2f}")
+                    print(f"      - Stop Loss: ₹{stop_loss_price:.2f} (previous candle low)")
                     print(f"      - Stock LTP: ₹{stock_ltp:.2f}")
                     print(f"      - Stock VWAP: ₹{stock_vwap:.2f}")
                     print(f"      - Stock VWAP (Previous Hour): ₹{stock_vwap_prev:.2f if stock_vwap_prev else 'N/A'}")
                     print(f"      - Option Contract: {stock.get('option_contract', 'N/A')}")
-                    logger.info(f"✅ ENTRY DECISION: {stock_name} | Time: {entry_time_str} | Price: ₹{buy_price:.2f} | VWAP Slope: {vwap_slope_reason} | Candle Size: {candle_size_reason} | Indices: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
+                    logger.info(f"✅ ENTRY DECISION: {stock_name} | Entry Time: {entry_time_str} | Alert Time: {alert_time_str} | Price: ₹{buy_price:.2f} | SL: ₹{stop_loss_price:.2f} | VWAP Slope: {vwap_slope_reason} | Candle Size: {candle_size_reason} | Indices: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
                 else:
                     # No entry: Store qty, buy_price, and SL for reference, but don't execute trade
                     # This helps track what trades would have been if conditions were favorable
