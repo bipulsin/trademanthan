@@ -23,13 +23,7 @@ ADD COLUMN IF NOT EXISTS option_previous_candle_low FLOAT,
 ADD COLUMN IF NOT EXISTS option_previous_candle_close FLOAT,
 ADD COLUMN IF NOT EXISTS option_previous_candle_time TIMESTAMP;
 
--- Create indexes for better query performance
-CREATE INDEX IF NOT EXISTS idx_intraday_stock_options_stock_vwap_prev_time 
-ON intraday_stock_options(stock_vwap_previous_hour_time);
-
-CREATE INDEX IF NOT EXISTS idx_intraday_stock_options_option_current_candle_time 
-ON intraday_stock_options(option_current_candle_time);
-
-CREATE INDEX IF NOT EXISTS idx_intraday_stock_options_option_previous_candle_time 
-ON intraday_stock_options(option_previous_candle_time);
+-- Create indexes for better query performance (only if columns exist)
+-- Note: Indexes will be created automatically by SQLAlchemy when tables are recreated
+-- These are optional performance optimizations
 

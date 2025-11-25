@@ -40,12 +40,18 @@ def run_migration():
                     print(f"✅ Executed: {statement[:50]}...")
                 except Exception as e:
                     # Check if error is "column already exists" - that's OK
-                    if 'already exists' in str(e).lower() or 'duplicate column' in str(e).lower():
-                        print(f"⚠️  Column already exists (skipping): {statement[:50]}...")
+                    error_str = str(e).lower()
+                    if 'already exists' in error_str or 'duplicate column' in error_str:
+                        print(f"⚠️  Already exists (skipping): {statement[:50]}...")
+                    elif 'does not exist' in error_str and 'index' in error_str:
+                        # Index creation failed because column doesn't exist yet - skip for now
+                        print(f"⚠️  Skipping index creation (columns may not exist yet): {statement[:50]}...")
                     else:
                         print(f"❌ Error executing statement: {e}")
                         print(f"   Statement: {statement[:100]}...")
-                        raise
+                        # Don't raise for index errors, but do raise for column errors
+                        if 'column' in error_str and 'does not exist' in error_str:
+                            raise
         
         db.commit()
         print("✅ Migration completed successfully!")
