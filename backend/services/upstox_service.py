@@ -1383,23 +1383,27 @@ class UpstoxService:
         Calculate the inclination (slope angle) in degrees between two VWAP points
         for the same stock on the same day.
         
+        The first VWAP (vwap1) is considered as the starting point of the slope.
+        Both positive (upward) and negative (downward) inclinations are considered.
+        
         Args:
-            vwap1: First VWAP value (lower timeframe)
+            vwap1: First VWAP value (starting point, lower timeframe)
             time1: Timestamp of first VWAP (datetime object)
-            vwap2: Second VWAP value (higher timeframe)
+            vwap2: Second VWAP value (end point, higher timeframe)
             time2: Timestamp of second VWAP (datetime object, should be later than time1)
         
         Returns:
-            "Yes" if inclination is 45 degrees or more, "No" otherwise
+            "Yes" if absolute inclination is 45 degrees or more (either upward or downward), "No" otherwise
         
         Formula:
             - Calculate time difference in hours
-            - Calculate VWAP change as percentage of initial VWAP
+            - Calculate VWAP change as percentage of initial VWAP (starting point)
             - Normalize slope: (vwap_change_percentage) / (time_diff_hours)
-            - For 45 degrees: normalized_slope should be >= 100% per hour
-              (meaning price changes by at least 100% of its value per hour)
-            - Angle = arctan(normalized_slope / 100) * (180 / π)
-            - Returns "Yes" if angle >= 45 degrees
+            - Positive slope = upward inclination (VWAP increasing)
+            - Negative slope = downward inclination (VWAP decreasing)
+            - For 45 degrees: normalized_slope should be >= 100% per hour (upward) or <= -100% per hour (downward)
+            - Angle = arctan(|normalized_slope| / 100) * (180 / π)
+            - Returns "Yes" if absolute angle >= 45 degrees
         """
         import math
         
@@ -1421,19 +1425,23 @@ class UpstoxService:
                 logger.warning("Invalid time difference")
                 return "No"
             
-            # Calculate VWAP change percentage
+            # Calculate VWAP change from starting point (vwap1)
             vwap_change = vwap2 - vwap1
-            vwap_change_percentage = (vwap_change / vwap1) * 100  # Percentage change
+            vwap_change_percentage = (vwap_change / vwap1) * 100  # Percentage change from starting point
             
             # Calculate normalized slope (percentage change per hour)
+            # Positive = upward inclination, Negative = downward inclination
             normalized_slope_per_hour = vwap_change_percentage / time_diff_hours
+            
+            # Determine direction
+            direction = "upward" if normalized_slope_per_hour > 0 else "downward" if normalized_slope_per_hour < 0 else "flat"
             
             # For angle calculation:
             # A 45-degree angle means: rise = run (when axes are properly scaled)
             # We define: 100% change per hour = 45 degrees (baseline)
-            # So: normalized_slope_per_hour / 100 = tan(45°) = 1
-            # Therefore: slope_ratio = normalized_slope_per_hour / 100
-            # For 45 degrees: slope_ratio = 1, meaning 100% change per hour
+            # So: |normalized_slope_per_hour| / 100 = tan(45°) = 1
+            # Therefore: slope_ratio = |normalized_slope_per_hour| / 100
+            # For 45 degrees: slope_ratio = 1, meaning 100% change per hour (up or down)
             slope_ratio = abs(normalized_slope_per_hour) / 100.0
             
             # Calculate angle in degrees
@@ -1443,15 +1451,15 @@ class UpstoxService:
             angle_degrees = math.degrees(angle_radians)
             
             logger.debug(f"VWAP Slope Calculation:")
-            logger.debug(f"  VWAP1: ₹{vwap1:.2f} at {time1.strftime('%H:%M:%S')}")
-            logger.debug(f"  VWAP2: ₹{vwap2:.2f} at {time2.strftime('%H:%M:%S')}")
+            logger.debug(f"  Starting point (VWAP1): ₹{vwap1:.2f} at {time1.strftime('%H:%M:%S')}")
+            logger.debug(f"  End point (VWAP2): ₹{vwap2:.2f} at {time2.strftime('%H:%M:%S')}")
             logger.debug(f"  Time diff: {time_diff_hours:.2f} hours")
-            logger.debug(f"  VWAP change: {vwap_change_percentage:.2f}%")
-            logger.debug(f"  Normalized slope: {normalized_slope_per_hour:.2f}% per hour")
+            logger.debug(f"  VWAP change: ₹{vwap_change:.2f} ({vwap_change_percentage:+.2f}%)")
+            logger.debug(f"  Normalized slope: {normalized_slope_per_hour:+.2f}% per hour ({direction})")
             logger.debug(f"  Slope ratio: {slope_ratio:.4f}")
-            logger.debug(f"  Angle: {angle_degrees:.2f} degrees")
+            logger.debug(f"  Angle: {angle_degrees:.2f} degrees ({direction})")
             
-            # Return "Yes" if angle is 45 degrees or more
+            # Return "Yes" if absolute angle is 45 degrees or more (for both upward and downward slopes)
             if angle_degrees >= 45.0:
                 return "Yes"
             else:
