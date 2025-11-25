@@ -282,9 +282,10 @@ For trades with `status = 'no_entry'`:
 
 3. **If Conditions Met**:
    - Change `status` from `'no_entry'` to `'bought'`
-   - Set `buy_price` = Current option LTP
-   - Set `buy_time` = Current time (NOT alert time)
-   - Calculate `stop_loss`
+   - **Fetch Fresh Option LTP**: Option LTP is fetched again at the exact moment of entry
+   - Set `buy_price` = Current option LTP (fetched at entry moment)
+   - Set `buy_time` = Current system time (IST), **NOT** alert time
+   - Set `stop_loss` = Low price of **previous option candle** (not calculated)
    - Set `pnl` = 0.0
    - **Trade is now active!**
 
@@ -516,7 +517,7 @@ For Each Stock:
     ├─ Fetch Stock LTP & VWAP (current)
     ├─ Fetch Stock VWAP (previous hour)
     ├─ Find Option Contract
-    ├─ Fetch Option LTP & VWAP
+    ├─ Fetch Option LTP & VWAP (enrichment phase)
     ├─ Fetch Option OHLC (current & previous)
     └─ Check Index Trends
     ↓
@@ -527,18 +528,24 @@ Entry Decision:
     ├─ Candle Size < 7.5×?
     └─ Option Data Valid?
     ↓
-    ├─ YES → Enter Trade (status='bought')
+    ├─ YES → Enter Trade:
+    │   ├─ Fetch Fresh Option LTP (at entry moment)
+    │   ├─ Set buy_price = Current Option LTP
+    │   ├─ Set buy_time = Current System Time
+    │   ├─ Set stop_loss = Previous Candle Low
+    │   └─ status='bought'
     └─ NO → Mark as No Entry (status='no_entry')
     ↓
 Hourly Updates:
     ├─ Re-evaluate no_entry trades
+    │   └─ If conditions met: Fetch fresh LTP, set buy_time=now, SL=prev candle low
     ├─ Update open positions
     └─ Check exit conditions
     ↓
 Exit Conditions:
-    ├─ Stop Loss
+    ├─ Stop Loss (option_ltp <= stop_loss)
     ├─ VWAP Cross
-    ├─ Profit Target
+    ├─ Profit Target (1.5× buy_price)
     └─ Time-Based (3:25 PM)
     ↓
 End of Day:
