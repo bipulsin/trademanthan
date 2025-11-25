@@ -839,9 +839,17 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         failed_count = 0
         SL_LOSS_TARGET = 3100.0  # Target loss for stop loss trigger
         
-        print(f"\n💾 Saving {len(processed_data.get('stocks', []))} stocks to database...")
+        stocks_to_save = processed_data.get('stocks', [])
+        print(f"\n💾 Saving {len(stocks_to_save)} stocks to database...")
         
-        for stock in processed_data.get("stocks", []):
+        if len(stocks_to_save) == 0:
+            print("⚠️ WARNING: No stocks to save! Webhook payload may be empty or malformed.")
+            print(f"   Original data keys: {list(data.keys())}")
+            print(f"   Stocks field type: {type(data.get('stocks'))}")
+            print(f"   Stocks field value: {data.get('stocks')}")
+            logger.warning(f"No stocks found in webhook payload. Data: {json.dumps(data, indent=2)}")
+        
+        for stock in stocks_to_save:
             stock_name = stock.get("stock_name", "UNKNOWN")
             
             try:
@@ -1430,7 +1438,13 @@ async def receive_bullish_webhook(request: Request, background_tasks: Background
     try:
         # Try to read JSON body with timeout protection
         data = await asyncio.wait_for(request.json(), timeout=2.0)
-        logger.info(f"📥 Received bullish webhook with {len(data.get('stocks', '').split(','))} stocks")
+        
+        # Enhanced logging: Log full payload for debugging
+        stocks_count = len(data.get('stocks', '').split(',')) if isinstance(data.get('stocks'), str) else len(data.get('stocks', []))
+        logger.info(f"📥 Received bullish webhook with {stocks_count} stocks")
+        logger.info(f"📦 Full webhook payload: {json.dumps(data, indent=2)}")
+        print(f"📥 Received bullish webhook at {datetime.now().isoformat()}")
+        print(f"📦 Payload: {json.dumps(data, indent=2)}")
         
         # Respond immediately to prevent timeout
         response_data = {
@@ -1487,7 +1501,13 @@ async def receive_bearish_webhook(request: Request, background_tasks: Background
     try:
         # Try to read JSON body with timeout protection
         data = await asyncio.wait_for(request.json(), timeout=2.0)
-        logger.info(f"📥 Received bearish webhook with {len(data.get('stocks', '').split(','))} stocks")
+        
+        # Enhanced logging: Log full payload for debugging
+        stocks_count = len(data.get('stocks', '').split(',')) if isinstance(data.get('stocks'), str) else len(data.get('stocks', []))
+        logger.info(f"📥 Received bearish webhook with {stocks_count} stocks")
+        logger.info(f"📦 Full webhook payload: {json.dumps(data, indent=2)}")
+        print(f"📥 Received bearish webhook at {datetime.now().isoformat()}")
+        print(f"📦 Payload: {json.dumps(data, indent=2)}")
         
         # Respond immediately to prevent timeout
         response_data = {
