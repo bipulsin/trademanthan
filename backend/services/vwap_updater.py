@@ -78,6 +78,15 @@ class VWAPUpdater:
                 replace_existing=True
             )
             
+            # Special scan at 10:30 AM for stocks from 10:15 AM webhook alert
+            self.scheduler.add_job(
+                update_10_15_alert_stocks_at_10_30,
+                trigger=CronTrigger(hour=10, minute=30, timezone='Asia/Kolkata'),
+                id='update_10_15_stocks_10_30',
+                name='Update 10:15 AM Alert Stocks at 10:30 AM',
+                replace_existing=True
+            )
+            
             self.scheduler.start()
             self.is_running = True
             logger.info("✅ Market Data Updater started - Hourly updates + EOD exits at 3:25 PM + EOD VWAP at 3:30 PM")
@@ -882,6 +891,126 @@ async def update_vwap_for_all_open_positions():
         
     except Exception as e:
         logger.error(f"Error in hourly market data update job: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def update_10_15_alert_stocks_at_10_30():
+    """
+    Special scan at 10:30 AM for stocks that were alerted at 10:15 AM
+    Fetches Stock LTP, Stock VWAP, and Option LTP and stores in historical_market_data table
+    """
+    db = SessionLocal()
+    try:
+        ist = pytz.timezone('Asia/Kolkata')
+        now = datetime.now(ist)
+        today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        # Target alert time: 10:15 AM
+        target_alert_time = today.replace(hour=10, minute=15, second=0, microsecond=0)
+        
+        logger.info(f"📊 Starting 10:30 AM scan for 10:15 AM alert stocks at {now.strftime('%Y-%m-%d %H:%M:%S IST')}")
+        
+        # Import VWAP service
+        try:
+            from services.upstox_service import upstox_service
+            vwap_service = upstox_service
+        except ImportError:
+            logger.error("Could not import upstox_service")
+            return
+        
+        # Query all stocks that were alerted at 10:15 AM today
+        # Match alert_time exactly at 10:15 AM (within a small time window to account for timezone differences)
+        from datetime import timedelta
+        alert_time_start = target_alert_time
+        alert_time_end = target_alert_time + timedelta(minutes=1)  # 1 minute window
+        
+        stocks_from_10_15 = db.query(IntradayStockOption).filter(
+            and_(
+                IntradayStockOption.trade_date >= today,
+                IntradayStockOption.alert_time >= alert_time_start,
+                IntradayStockOption.alert_time < alert_time_end
+            )
+        ).all()
+        
+        if not stocks_from_10_15:
+            logger.info(f"ℹ️ No stocks found with alert time at 10:15 AM")
+            return
+        
+        logger.info(f"📋 Found {len(stocks_from_10_15)} stocks from 10:15 AM alert")
+        
+        saved_count = 0
+        failed_count = 0
+        
+        for stock_record in stocks_from_10_15:
+            try:
+                stock_name = stock_record.stock_name
+                option_contract = stock_record.option_contract
+                instrument_key = stock_record.instrument_key
+                
+                logger.info(f"📊 Processing {stock_name} (from 10:15 AM alert)")
+                
+                # Fetch Stock LTP and VWAP
+                stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
+                stock_ltp = None
+                stock_vwap = None
+                
+                if stock_data:
+                    stock_ltp = stock_data.get('ltp', None)
+                    stock_vwap = stock_data.get('vwap', None)
+                    logger.info(f"   Stock LTP: ₹{stock_ltp:.2f}" if stock_ltp else "   Stock LTP: Not available")
+                    logger.info(f"   Stock VWAP: ₹{stock_vwap:.2f}" if stock_vwap else "   Stock VWAP: Not available")
+                else:
+                    logger.warning(f"   ⚠️ Could not fetch stock data for {stock_name}")
+                
+                # Fetch Option LTP if instrument_key is available
+                option_ltp = None
+                if instrument_key:
+                    try:
+                        option_quote = vwap_service.get_market_quote_by_key(instrument_key)
+                        if option_quote and option_quote.get('last_price', 0) > 0:
+                            option_ltp = float(option_quote.get('last_price', 0))
+                            logger.info(f"   Option LTP: ₹{option_ltp:.2f}")
+                        else:
+                            logger.warning(f"   ⚠️ Could not fetch option LTP for {stock_name}")
+                    except Exception as opt_error:
+                        logger.warning(f"   ⚠️ Error fetching option LTP: {str(opt_error)}")
+                elif option_contract:
+                    logger.warning(f"   ⚠️ No instrument_key available for {stock_name} ({option_contract})")
+                
+                # Save to historical_market_data table
+                historical_record = HistoricalMarketData(
+                    stock_name=stock_name,
+                    stock_vwap=stock_vwap if stock_vwap and stock_vwap > 0 else None,
+                    stock_ltp=stock_ltp if stock_ltp and stock_ltp > 0 else None,
+                    option_contract=option_contract,
+                    option_instrument_key=instrument_key,
+                    option_ltp=option_ltp if option_ltp and option_ltp > 0 else None,
+                    scan_date=now,
+                    scan_time=now.strftime('%I:%M %p').lower()
+                )
+                db.add(historical_record)
+                saved_count += 1
+                
+                logger.info(f"   ✅ Saved historical data for {stock_name} at 10:30 AM")
+                
+            except Exception as e:
+                logger.error(f"   ❌ Error processing {stock_record.stock_name}: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                failed_count += 1
+        
+        # Commit all historical records
+        db.commit()
+        
+        logger.info(f"📊 10:30 AM Scan Complete: {saved_count} stocks saved, {failed_count} failed")
+        logger.info(f"   Stocks from 10:15 AM alert: {len(stocks_from_10_15)}")
+        
+    except Exception as e:
+        logger.error(f"❌ Error in 10:30 AM scan for 10:15 AM alert stocks: {str(e)}")
         import traceback
         traceback.print_exc()
         db.rollback()
