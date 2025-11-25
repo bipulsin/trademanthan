@@ -181,11 +181,6 @@ class HistoricalMarketData(Base):
     # Metadata
     created_at = Column(DateTime, default=func.now(), nullable=False)
     
-    # Indexes for common queries
-    __table_args__ = (
-        {'mysql_engine': 'InnoDB', 'mysql_charset': 'utf8mb4'} if 'mysql' in str(Base.metadata.bind) else {},
-    )
-    
     def __repr__(self):
         return f"<HistoricalMarketData(id={self.id}, stock='{self.stock_name}', option='{self.option_contract}', time='{self.scan_date}')>"
 
