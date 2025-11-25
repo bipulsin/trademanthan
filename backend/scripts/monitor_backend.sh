@@ -2,7 +2,7 @@
 # Backend Monitoring Script
 # Checks if backend is running and restarts if needed
 
-BACKEND_URL="http://localhost:8000/health"
+BACKEND_URL="http://localhost:8000/scan/index-prices"
 LOG_FILE="/tmp/backend_monitor.log"
 MAX_RESTART_ATTEMPTS=3
 RESTART_COOLDOWN=300  # 5 minutes between restart attempts
