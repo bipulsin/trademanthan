@@ -9,7 +9,7 @@ load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://trademanthan:trademanthan123@localhost/trademanthan")
 
 # Import Base from models.base to ensure all models use the same Base instance
-from models.base import Base
+from .models.base import Base
 
 # Initialize engine and session factory
 engine = None
