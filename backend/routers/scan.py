@@ -189,7 +189,7 @@ def find_option_contract_from_master_stock(db: Session, stock_name: str, option_
         
         print(f"Target expiry: {target_expiry_year}-{target_expiry_month:02d} (current date: {now.strftime('%Y-%m-%d')})")
         
-        # Try to get strike from option chain API first
+        # Get strike from option chain API - REQUIRED, no fallback
         target_strike = None
         if vwap_service:
             strike_data = find_strike_from_option_chain(vwap_service, stock_name, option_type, stock_ltp)
@@ -197,22 +197,10 @@ def find_option_contract_from_master_stock(db: Session, stock_name: str, option_
                 target_strike = strike_data['strike_price']
                 print(f"Using option chain strike for {stock_name}: {target_strike} (Volume: {strike_data['volume']}, OI: {strike_data['oi']})")
         
-        # Fallback to calculated strike if option chain not available
+        # If option chain not available, return None to mark trade as no_entry
         if target_strike is None or target_strike == 0:
-            print(f"Falling back to calculated strike for {stock_name}")
-            # Calculate appropriate strike interval based on stock price
-            if stock_ltp < 500:
-                strike_interval = 10
-            elif stock_ltp < 2000:
-                strike_interval = 5
-            else:
-                strike_interval = 10
-            
-            # Calculate 2nd OTM strike
-            if option_type == 'CE':
-                target_strike = round(stock_ltp / strike_interval) * strike_interval + (2 * strike_interval)
-            else:  # PE
-                target_strike = round(stock_ltp / strike_interval) * strike_interval - (2 * strike_interval)
+            print(f"❌ Option chain not available for {stock_name} - Cannot determine strike. Trade will be marked as no_entry.")
+            return None
         
         print(f"Looking for {option_type} option with strike {target_strike} for {stock_name}")
         

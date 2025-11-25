@@ -123,11 +123,8 @@ The system finds the best option strike using this logic:
    - For **PE**: Strikes < Stock LTP
 3. **Sort by Distance** from LTP to identify OTM-1, OTM-2, ..., OTM-5
 4. **Select Strike** with **HIGHEST volume × OI** among OTM-1 to OTM-5
-5. **Fallback**: If option chain unavailable, calculate strike:
-   - Stock price < ₹500: Strike interval = ₹10
-   - Stock price < ₹2000: Strike interval = ₹5
-   - Stock price >= ₹2000: Strike interval = ₹10
-   - OTM-2 strike calculated based on interval
+
+**Important**: If option chain is **not available** or **strike cannot be determined**, the function returns `None` and the trade is marked as **`no_entry`**. No fallback strike calculation is performed.
 
 **Step 3: Query MasterStock Table**
 With the determined expiry month/year and strike price, query the `master_stock` table:
