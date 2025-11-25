@@ -1378,6 +1378,91 @@ class UpstoxService:
             logger.error(f"Error calculating VWAP: {str(e)}")
             return 0.0
     
+    def vwap_slope(self, vwap1: float, time1: datetime, vwap2: float, time2: datetime) -> str:
+        """
+        Calculate the inclination (slope angle) in degrees between two VWAP points
+        for the same stock on the same day.
+        
+        Args:
+            vwap1: First VWAP value (lower timeframe)
+            time1: Timestamp of first VWAP (datetime object)
+            vwap2: Second VWAP value (higher timeframe)
+            time2: Timestamp of second VWAP (datetime object, should be later than time1)
+        
+        Returns:
+            "Yes" if inclination is 45 degrees or more, "No" otherwise
+        
+        Formula:
+            - Calculate time difference in hours
+            - Calculate VWAP change as percentage of initial VWAP
+            - Normalize slope: (vwap_change_percentage) / (time_diff_hours)
+            - For 45 degrees: normalized_slope should be >= 100% per hour
+              (meaning price changes by at least 100% of its value per hour)
+            - Angle = arctan(normalized_slope / 100) * (180 / π)
+            - Returns "Yes" if angle >= 45 degrees
+        """
+        import math
+        
+        try:
+            # Validate inputs
+            if vwap1 <= 0 or vwap2 <= 0:
+                logger.warning("Invalid VWAP values (must be > 0)")
+                return "No"
+            
+            if time1 >= time2:
+                logger.warning("time1 must be earlier than time2")
+                return "No"
+            
+            # Calculate time difference in hours
+            time_diff = time2 - time1
+            time_diff_hours = time_diff.total_seconds() / 3600.0  # Convert to hours
+            
+            if time_diff_hours <= 0:
+                logger.warning("Invalid time difference")
+                return "No"
+            
+            # Calculate VWAP change percentage
+            vwap_change = vwap2 - vwap1
+            vwap_change_percentage = (vwap_change / vwap1) * 100  # Percentage change
+            
+            # Calculate normalized slope (percentage change per hour)
+            normalized_slope_per_hour = vwap_change_percentage / time_diff_hours
+            
+            # For angle calculation:
+            # A 45-degree angle means: rise = run (when axes are properly scaled)
+            # We define: 100% change per hour = 45 degrees (baseline)
+            # So: normalized_slope_per_hour / 100 = tan(45°) = 1
+            # Therefore: slope_ratio = normalized_slope_per_hour / 100
+            # For 45 degrees: slope_ratio = 1, meaning 100% change per hour
+            slope_ratio = abs(normalized_slope_per_hour) / 100.0
+            
+            # Calculate angle in degrees
+            # arctan gives angle in radians, convert to degrees
+            # When slope_ratio = 1, angle = 45 degrees
+            angle_radians = math.atan(slope_ratio)
+            angle_degrees = math.degrees(angle_radians)
+            
+            logger.debug(f"VWAP Slope Calculation:")
+            logger.debug(f"  VWAP1: ₹{vwap1:.2f} at {time1.strftime('%H:%M:%S')}")
+            logger.debug(f"  VWAP2: ₹{vwap2:.2f} at {time2.strftime('%H:%M:%S')}")
+            logger.debug(f"  Time diff: {time_diff_hours:.2f} hours")
+            logger.debug(f"  VWAP change: {vwap_change_percentage:.2f}%")
+            logger.debug(f"  Normalized slope: {normalized_slope_per_hour:.2f}% per hour")
+            logger.debug(f"  Slope ratio: {slope_ratio:.4f}")
+            logger.debug(f"  Angle: {angle_degrees:.2f} degrees")
+            
+            # Return "Yes" if angle is 45 degrees or more
+            if angle_degrees >= 45.0:
+                return "Yes"
+            else:
+                return "No"
+                
+        except Exception as e:
+            logger.error(f"Error calculating VWAP slope: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return "No"
+    
     def get_historical_candles(self, symbol: str, interval: str = "hours/1", days_back: int = 2) -> Optional[List[Dict]]:
         """
         Fetch historical candle data from Upstox V3 API
