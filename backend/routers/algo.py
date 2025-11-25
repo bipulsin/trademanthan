@@ -20,7 +20,7 @@ from backend.database import get_db
 from backend.models import Broker
 from backend.routers.auth import get_current_user
 from backend.models.user import User
-from utils.log_manager import log_manager
+from backend.utils.log_manager import log_manager
 
 # Import strategy classes
 try:
