@@ -13,6 +13,7 @@ import backend.routers.dashboard as dashboard
 import backend.routers.strategy as strategy
 import backend.routers.broker as broker
 import backend.routers.products as products
+import backend.routers.scan as scan
 
 load_dotenv()
 
@@ -40,6 +41,7 @@ app.include_router(dashboard.router)
 app.include_router(strategy.router)
 app.include_router(broker.router)
 app.include_router(products.router)
+app.include_router(scan.router)
 
 # Serve static files (frontend)
 app.mount("/", StaticFiles(directory="frontend/public", html=True), name="static")
