@@ -11,8 +11,9 @@ Run this script to add the new columns to the database:
 import sys
 import os
 
-# Add parent directory to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add project root to path
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, project_root)
 
 from sqlalchemy import text
 from backend.database import engine, SessionLocal
