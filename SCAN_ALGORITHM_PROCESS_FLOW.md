@@ -213,13 +213,19 @@ Rules based on NIFTY and BANKNIFTY trends:
 
 #### **✅ ENTRY (Status: `bought`)**
 If ALL conditions met:
-- `buy_price` = Current option LTP
-- `buy_time` = Alert time
-- `qty` = Lot size
-- `stop_loss` = Calculated: `buy_price - (₹3100 / qty)`, rounded DOWN to nearest 10 paise
-- `status` = `'bought'`
-- `pnl` = 0.0
-- `sell_price` = NULL (will be updated hourly)
+
+**At Entry Moment:**
+1. **Fetch Fresh Option LTP**: Option LTP is fetched again at the exact moment of entry (not from enrichment phase)
+2. **Set Buy Price**: `buy_price` = Current option LTP (fetched at entry moment)
+3. **Set Buy Time**: `buy_time` = Current system time (IST), **NOT** alert time
+4. **Set Stop Loss**: `stop_loss` = Low price of **previous option candle** (not calculated)
+   - If previous candle low not available, defaults to ₹0.05
+5. **Set Quantity**: `qty` = Lot size
+6. **Set Status**: `status` = `'bought'`
+7. **Initialize P&L**: `pnl` = 0.0
+8. **Sell Price**: `sell_price` = NULL (will be updated hourly)
+
+**Stored Data:**
 - `stock_vwap_previous_hour` = Previous hour VWAP
 - `stock_vwap_previous_hour_time` = Previous hour VWAP timestamp
 - `option_current_candle_*` = Current option OHLC data
@@ -228,9 +234,9 @@ If ALL conditions met:
 #### **❌ NO ENTRY (Status: `no_entry`)**
 If ANY condition fails:
 - `buy_price` = Option LTP at alert time (for reference)
-- `buy_time` = NULL
+- `buy_time` = NULL (trade not executed)
 - `qty` = Lot size (for reference)
-- `stop_loss` = Calculated (for reference)
+- `stop_loss` = Previous option candle low (for reference, same as entry logic)
 - `status` = `'no_entry'`
 - `pnl` = NULL
 - `sell_price` = NULL
