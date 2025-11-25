@@ -90,7 +90,32 @@ For each stock, the system fetches:
 - **Stock VWAP Time** (Timestamp of previous hour)
 
 #### **2.2.3 Option Contract Selection**
-The system finds the best option contract using this logic:
+
+**Step 1: Determine Expiry Month & Year**
+Before selecting the option contract, the system first determines the target expiry month and year based on the current date:
+
+- **If current day > 17**: Use **next month's expiry**
+  - Example: If today is November 18, use December expiry
+  - Special case: If current month is December (month 12), use January of next year
+- **If current day ≤ 17**: Use **current month's expiry**
+  - Example: If today is November 15, use November expiry
+
+**Logic:**
+```python
+if current_day > 17:
+    if current_month == 12:
+        target_expiry_month = 1
+        target_expiry_year = current_year + 1
+    else:
+        target_expiry_month = current_month + 1
+        target_expiry_year = current_year
+else:
+    target_expiry_month = current_month
+    target_expiry_year = current_year
+```
+
+**Step 2: Find Strike Price**
+The system finds the best option strike using this logic:
 
 1. **Get Option Chain** from Upstox API
 2. **Identify OTM Strikes**:
@@ -103,6 +128,24 @@ The system finds the best option contract using this logic:
    - Stock price < ₹2000: Strike interval = ₹5
    - Stock price >= ₹2000: Strike interval = ₹10
    - OTM-2 strike calculated based on interval
+
+**Step 3: Query MasterStock Table**
+With the determined expiry month/year and strike price, query the `master_stock` table:
+
+1. **Filter Criteria**:
+   - `underlying_symbol` = Stock name
+   - `option_type` = CE or PE
+   - `strike_price` = Selected strike
+   - `expiry_flag` = 'M' (Monthly expiry)
+   - `sm_expiry_date` year = Target expiry year
+   - `sm_expiry_date` month = Target expiry month
+
+2. **Exact Match**: If exact strike found → Return option contract
+
+3. **Closest Match**: If exact strike not found:
+   - For **CE**: Find closest strike >= target_strike
+   - For **PE**: Find closest strike <= target_strike
+   - If no match in direction, get highest/lowest available strike for target expiry
 
 #### **2.2.4 Option Data Fetching**
 - **Option Contract Name** (e.g., "RELIANCE-Dec2025-2500-CE")
