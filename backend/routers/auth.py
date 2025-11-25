@@ -28,8 +28,14 @@ GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 
-if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
-    raise ValueError("GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set in environment variables")
+# Only validate Google OAuth credentials when actually needed (not during import)
+def validate_google_oauth():
+    """Validate Google OAuth credentials - call this before using OAuth endpoints"""
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Google OAuth is not configured. GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set in environment variables"
+        )
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
@@ -44,6 +50,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
 @router.post("/google")
 async def google_oauth(request: GoogleOAuthRequest, db: Session = Depends(get_db)):
     """Handle Google OAuth login/signup using JWT credential"""
+    validate_google_oauth()  # Validate credentials before use
     try:
         # Verify the JWT credential with Google
         verify_url = f"https://oauth2.googleapis.com/tokeninfo?id_token={request.credential}"
@@ -114,6 +121,7 @@ async def google_oauth(request: GoogleOAuthRequest, db: Session = Depends(get_db
 @router.post("/google-verify")
 async def google_oauth_verify(user_data: dict, db: Session = Depends(get_db)):
     """Handle Google OAuth verification from frontend"""
+    validate_google_oauth()  # Validate credentials before use
     try:
         google_id = user_data.get('google_id')
         email = user_data.get('email')
@@ -215,6 +223,7 @@ async def google_oauth_verify(user_data: dict, db: Session = Depends(get_db)):
 @router.post("/google-code")
 async def google_oauth_code(request: GoogleOAuthCodeRequest, db: Session = Depends(get_db)):
     """Handle Google OAuth code exchange for mobile browsers"""
+    validate_google_oauth()  # Validate credentials before use
     try:
         # Exchange authorization code for access token
         token_response = requests.post(GOOGLE_TOKEN_URL, data={
