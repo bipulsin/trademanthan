@@ -1,6 +1,6 @@
 from .base import Base
 from .user import User
-from .trading import Broker, IntradayStockOption, MasterStock, UpstoxInstrument
+from .trading import Broker, IntradayStockOption, MasterStock, UpstoxInstrument, HistoricalMarketData
 from .strategy import Strategy, Trade, Backtest, INDICATOR_PARAMETERS, AVAILABLE_INDICATORS, LOGIC_OPERATORS
 from .products import Product
 
@@ -11,6 +11,7 @@ __all__ = [
     "IntradayStockOption",
     "MasterStock",
     "UpstoxInstrument",
+    "HistoricalMarketData",
     "Strategy", 
     "Trade", 
     "Backtest",

@@ -155,3 +155,38 @@ class UpstoxInstrument(Base):
         return f"<UpstoxInstrument(id={self.id}, instrument_key='{self.instrument_key}', trading_symbol='{self.trading_symbol}')>"
 
 
+class HistoricalMarketData(Base):
+    """
+    Historical market data captured during hourly updates
+    Stores VWAP, LTP, and option prices for historical analysis
+    """
+    __tablename__ = "historical_market_data"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Stock information
+    stock_name = Column(String(100), nullable=False, index=True)
+    stock_vwap = Column(Float, nullable=True)  # Volume Weighted Average Price
+    stock_ltp = Column(Float, nullable=True)  # Last Traded Price
+    
+    # Option information
+    option_contract = Column(String(255), nullable=True, index=True)  # Option contract name (e.g., RELIANCE-Nov2024-2500-CE)
+    option_instrument_key = Column(String(255), nullable=True, index=True)  # Upstox instrument key (e.g., NSE_FO|104500)
+    option_ltp = Column(Float, nullable=True)  # Option Last Traded Price
+    
+    # Timestamp
+    scan_date = Column(DateTime, nullable=False, index=True)  # Date and time of the scan/update
+    scan_time = Column(String(20), nullable=True)  # Human-readable time (e.g., "10:15 AM")
+    
+    # Metadata
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    
+    # Indexes for common queries
+    __table_args__ = (
+        {'mysql_engine': 'InnoDB', 'mysql_charset': 'utf8mb4'} if 'mysql' in str(Base.metadata.bind) else {},
+    )
+    
+    def __repr__(self):
+        return f"<HistoricalMarketData(id={self.id}, stock='{self.stock_name}', option='{self.option_contract}', time='{self.scan_date}')>"
+
+

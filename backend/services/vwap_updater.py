@@ -16,7 +16,7 @@ from sqlalchemy import and_
 
 # Add parent directory to path for imports
 from backend.database import SessionLocal
-from backend.models.trading import IntradayStockOption
+from backend.models.trading import IntradayStockOption, HistoricalMarketData
 
 logger = logging.getLogger(__name__)
 
@@ -674,6 +674,27 @@ async def update_vwap_for_all_open_positions():
                     old_stock_ltp = position.stock_ltp or 0.0
                     position.stock_ltp = new_stock_ltp
                     updates_made.append(f"Stock LTP: {old_stock_ltp:.2f}→{new_stock_ltp:.2f}")
+                
+                # ═══════════════════════════════════════════════════════════════
+                # SAVE HISTORICAL MARKET DATA
+                # ═══════════════════════════════════════════════════════════════
+                # Store historical snapshot of market data for analysis
+                try:
+                    historical_record = HistoricalMarketData(
+                        stock_name=stock_name,
+                        stock_vwap=new_vwap if new_vwap and new_vwap > 0 else None,
+                        stock_ltp=new_stock_ltp if new_stock_ltp and new_stock_ltp > 0 else None,
+                        option_contract=option_contract,
+                        option_instrument_key=position.instrument_key,
+                        option_ltp=new_option_ltp if new_option_ltp > 0 else None,
+                        scan_date=now,
+                        scan_time=now.strftime('%I:%M %p').lower()
+                    )
+                    db.add(historical_record)
+                    logger.debug(f"📊 Saved historical data for {stock_name} at {now.strftime('%H:%M:%S')}")
+                except Exception as hist_error:
+                    logger.warning(f"⚠️ Failed to save historical data for {stock_name}: {str(hist_error)}")
+                    # Don't fail the entire update if historical save fails
                 
                 if new_option_ltp > 0:
                     old_option_ltp = position.sell_price or 0.0
