@@ -441,9 +441,16 @@ Returns data grouped by alert time:
 ### Key Methods
 - **`process_webhook_data()`**: Main webhook processing logic
 - **`find_strike_from_option_chain()`**: Option strike selection
+- **`find_option_contract_from_master_stock()`**: Option contract lookup with expiry determination
 - **`vwap_slope()`**: VWAP slope calculation
 - **`update_vwap_for_all_open_positions()`**: Hourly update logic
 - **`close_all_open_trades()`**: End-of-day closure
+
+### Key Entry Logic Details
+- **Buy Price**: Always fetched fresh at entry moment using `instrument_key` via `get_market_quote_by_key()`
+- **Buy Time**: Always set to current system time (`datetime.now(ist)`), not alert time
+- **Stop Loss**: Always set to previous option candle low price, not calculated
+- **Fallback**: If fresh LTP fetch fails, uses enrichment-phase LTP; if previous candle low unavailable, defaults to ₹0.05
 
 ---
 
