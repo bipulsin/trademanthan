@@ -1383,36 +1383,37 @@ class UpstoxService:
         Calculate the inclination (slope angle) in degrees between two VWAP points
         for the same stock on the same day.
         
-        The first VWAP (vwap1) is considered as the starting point of the slope.
+        The first VWAP (vwap1) is set as the origin (0) on the price axis.
+        The angle is calculated between:
+        - Point 1: (time1, 0) - starting point where price change = 0
+        - Point 2: (time2, vwap_change) - end point where price change = vwap2 - vwap1
+        
         Both positive (upward) and negative (downward) inclinations are considered.
         
-        Uses a scaling factor based on the stock's price range normalized by time,
-        which better matches visual chart angles.
-        
         Args:
-            vwap1: First VWAP value (starting point, lower timeframe)
+            vwap1: First VWAP value (origin point, set as 0 for calculation)
             time1: Timestamp of first VWAP (datetime object)
-            vwap2: Second VWAP value (end point, higher timeframe)
+            vwap2: Second VWAP value (end point)
             time2: Timestamp of second VWAP (datetime object, should be later than time1)
         
         Returns:
             "Yes" if absolute inclination is 45 degrees or more (either upward or downward), "No" otherwise
         
         Formula:
-            - Calculate time difference in hours
-            - Calculate absolute VWAP change per hour: |vwap2 - vwap1| / time_diff_hours
-            - Calculate scaling factor: starting_price / (scaling_base * time_normalization)
-            - For visual 45-degree angle: price_change_per_hour should equal scaling_factor
-            - Normalized slope ratio = (price_change_per_hour) / (scaling_factor)
-            - Angle = arctan(normalized_slope_ratio) * (180 / π)
+            - Set first VWAP as origin: price_change_at_start = 0
+            - Calculate price change: vwap_change = vwap2 - vwap1
+            - Calculate time difference in hours: time_diff_hours = (time2 - time1) in hours
+            - For 45-degree angle: rise (price_change) should equal run (time_diff) when properly scaled
+            - Scale time to match price units: normalized_time = time_diff_hours * scaling_factor
+            - Scaling factor: 0.2% of starting price per hour (for visual chart matching)
+            - Angle = arctan(|vwap_change| / normalized_time) * (180 / π)
             - Returns "Yes" if absolute angle >= 45 degrees
             
-        Scaling Approach:
-            - Uses 0.2% of starting price per hour as the baseline for 45 degrees
-            - This means: if price changes by 0.2% per hour = 45 degrees
-            - Formula: scaling_factor = vwap1 * 0.002 per hour
-            - This better matches visual chart perception for price movements
-            - More sensitive than percentage-based approach, better aligns with visual angles
+        Coordinate System:
+            - X-axis: Time (normalized)
+            - Y-axis: Price change from origin (vwap1 = 0)
+            - Point 1: (0, 0) - time1, no price change
+            - Point 2: (normalized_time, vwap_change) - time2, price change from origin
         """
         import math
         
@@ -1434,42 +1435,46 @@ class UpstoxService:
                 logger.warning("Invalid time difference")
                 return "No"
             
-            # Calculate absolute VWAP change from starting point (vwap1)
+            # Set first VWAP as origin (0)
+            # Calculate price change from origin
             vwap_change = vwap2 - vwap1
             vwap_change_absolute = abs(vwap_change)
-            vwap_change_percentage = (vwap_change / vwap1) * 100  # Percentage change from starting point
             
-            # Calculate price change per hour (absolute)
-            price_change_per_hour = vwap_change_absolute / time_diff_hours
-            
-            # Calculate scaling factor based on stock's price range normalized by time
+            # Calculate scaling factor to normalize time axis to match price axis
             # For visual 45-degree angle: use 0.2% of starting price per hour as baseline
-            # This means: if price changes by 0.2% of its value per hour = 45 degrees
-            # This scaling better matches visual chart perception for price movements
-            # Scaling factor = (0.2% of starting price) per hour
+            # This means: if price changes by 0.2% of starting price per hour = 45 degrees
+            # Scaling factor converts hours to price-equivalent units
             scaling_factor_per_hour = vwap1 * 0.002  # 0.2% of starting price per hour
             
-            # Normalize the actual price change per hour by the scaling factor
-            # This gives us a ratio where 1.0 = 45 degrees
-            normalized_slope_ratio = price_change_per_hour / scaling_factor_per_hour if scaling_factor_per_hour > 0 else 0
+            # Normalize time to price-equivalent units
+            # This allows us to compare price_change (Y-axis) with normalized_time (X-axis)
+            normalized_time = time_diff_hours * scaling_factor_per_hour
+            
+            # Calculate angle using rise (price_change) and run (normalized_time)
+            # For 45 degrees: rise = run, so ratio = 1
+            # Angle = arctan(rise / run) = arctan(price_change / normalized_time)
+            if normalized_time > 0:
+                slope_ratio = vwap_change_absolute / normalized_time
+            else:
+                slope_ratio = 0
             
             # Determine direction
             direction = "upward" if vwap_change > 0 else "downward" if vwap_change < 0 else "flat"
             
             # Calculate angle in degrees
             # arctan gives angle in radians, convert to degrees
-            # When normalized_slope_ratio = 1, angle = 45 degrees
-            angle_radians = math.atan(normalized_slope_ratio)
+            # When slope_ratio = 1 (rise = run), angle = 45 degrees
+            angle_radians = math.atan(slope_ratio)
             angle_degrees = math.degrees(angle_radians)
             
-            logger.debug(f"VWAP Slope Calculation (Price-Range Normalized):")
-            logger.debug(f"  Starting point (VWAP1): ₹{vwap1:.2f} at {time1.strftime('%H:%M:%S')}")
+            logger.debug(f"VWAP Slope Calculation (Origin-Based):")
+            logger.debug(f"  Origin point (VWAP1 = 0): ₹{vwap1:.2f} at {time1.strftime('%H:%M:%S')}")
             logger.debug(f"  End point (VWAP2): ₹{vwap2:.2f} at {time2.strftime('%H:%M:%S')}")
-            logger.debug(f"  Time diff: {time_diff_hours:.2f} hours")
-            logger.debug(f"  VWAP change: ₹{vwap_change:.2f} ({vwap_change_percentage:+.4f}%)")
-            logger.debug(f"  Price change per hour: ₹{price_change_per_hour:.2f}/hour")
-            logger.debug(f"  Scaling factor (1% of starting price/hour): ₹{scaling_factor_per_hour:.2f}/hour")
-            logger.debug(f"  Normalized slope ratio: {normalized_slope_ratio:.4f}")
+            logger.debug(f"  Price change from origin: ₹{vwap_change:.2f}")
+            logger.debug(f"  Time difference: {time_diff_hours:.2f} hours")
+            logger.debug(f"  Scaling factor: ₹{scaling_factor_per_hour:.2f} per hour")
+            logger.debug(f"  Normalized time: ₹{normalized_time:.2f} (time-equivalent in price units)")
+            logger.debug(f"  Slope ratio (rise/run): {slope_ratio:.4f}")
             logger.debug(f"  Angle: {angle_degrees:.2f} degrees ({direction})")
             
             # Return "Yes" if absolute angle is 45 degrees or more (for both upward and downward slopes)
