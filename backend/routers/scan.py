@@ -154,7 +154,7 @@ def find_option_contract_from_master_stock(db: Session, stock_name: str, option_
     Find the correct option contract from master_stock table based on:
     - underlying_symbol matching stock_name
     - option_type matching (CE/PE)
-    - Strike price from option chain API (volume/OI based) or calculated fallback
+    - Strike price from option chain API (volume/OI based) - REQUIRED, no fallback
     - Expiry month: If current date > 17th, use next month's expiry; otherwise use current month
     
     Args:
@@ -165,7 +165,8 @@ def find_option_contract_from_master_stock(db: Session, stock_name: str, option_
         vwap_service: UpstoxService instance for API calls
         
     Returns:
-        symbol_name from master_stock table, or None if not found
+        symbol_name from master_stock table, or None if option chain unavailable or contract not found
+        (Trade will be marked as no_entry when None is returned)
     """
     try:
         import pytz
