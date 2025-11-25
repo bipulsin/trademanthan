@@ -1072,7 +1072,24 @@ async def close_all_open_trades():
                             # Use stored instrument_key directly - no lookup needed
                             logger.info(f"🔍 Fetching final LTP for {option_contract} using stored instrument_key: {instrument_key}")
                             
-                            option_quote = vwap_service.get_market_quote_by_key(instrument_key)
+                            # Retry logic: Try up to 3 times to fetch LTP
+                            max_retries = 3
+                            option_quote = None
+                            for retry in range(max_retries):
+                                try:
+                                    option_quote = vwap_service.get_market_quote_by_key(instrument_key)
+                                    if option_quote and 'last_price' in option_quote:
+                                        break  # Success, exit retry loop
+                                    elif retry < max_retries - 1:
+                                        logger.warning(f"⚠️ Retry {retry + 1}/{max_retries}: No last_price in quote for {option_contract}, retrying...")
+                                        time.sleep(1)  # Wait 1 second before retry
+                                except Exception as retry_error:
+                                    if retry < max_retries - 1:
+                                        logger.warning(f"⚠️ Retry {retry + 1}/{max_retries}: Error fetching LTP for {option_contract}: {retry_error}, retrying...")
+                                        time.sleep(1)  # Wait 1 second before retry
+                                    else:
+                                        raise  # Re-raise on final retry
+                            
                             if option_quote and 'last_price' in option_quote:
                                 raw_ltp = option_quote['last_price']
                                 
@@ -1155,7 +1172,25 @@ async def close_all_open_trades():
                                                             instrument_key = instrument.get('instrument_key')
                                                             if instrument_key:
                                                                 logger.info(f"🔍 Found instrument_key via lookup: {instrument_key}")
-                                                                option_quote = vwap_service.get_market_quote_by_key(instrument_key)
+                                                                
+                                                                # Retry logic: Try up to 3 times to fetch LTP
+                                                                max_retries = 3
+                                                                option_quote = None
+                                                                for retry in range(max_retries):
+                                                                    try:
+                                                                        option_quote = vwap_service.get_market_quote_by_key(instrument_key)
+                                                                        if option_quote and 'last_price' in option_quote:
+                                                                            break  # Success, exit retry loop
+                                                                        elif retry < max_retries - 1:
+                                                                            logger.warning(f"⚠️ Retry {retry + 1}/{max_retries}: No last_price in quote for {option_contract}, retrying...")
+                                                                            time.sleep(1)  # Wait 1 second before retry
+                                                                    except Exception as retry_error:
+                                                                        if retry < max_retries - 1:
+                                                                            logger.warning(f"⚠️ Retry {retry + 1}/{max_retries}: Error fetching LTP for {option_contract}: {retry_error}, retrying...")
+                                                                            time.sleep(1)  # Wait 1 second before retry
+                                                                        else:
+                                                                            raise  # Re-raise on final retry
+                                                                
                                                                 if option_quote and 'last_price' in option_quote:
                                                                     raw_ltp = option_quote['last_price']
                                                                     
@@ -1198,12 +1233,23 @@ async def close_all_open_trades():
                 # Update position for EOD exit
                 old_sell_price = position.sell_price or 0.0
                 if option_ltp and option_ltp > 0:
+                    # Successfully fetched current LTP - use it
                     position.sell_price = option_ltp
+                    logger.info(f"✅ Using fetched LTP: ₹{option_ltp:.2f} for {option_contract}")
                 else:
-                    # If can't fetch LTP, use last known sell_price
-                    if not position.sell_price or position.sell_price == 0:
-                        logger.warning(f"⚠️ No LTP available for {option_contract}, using buy_price as fallback")
+                    # API call failed or returned invalid data - try fallback options
+                    if old_sell_price and old_sell_price > 0:
+                        # Use last known sell_price from hourly updates (better than buy_price)
+                        position.sell_price = old_sell_price
+                        logger.warning(f"⚠️ Could not fetch current LTP for {option_contract}, using last known sell_price: ₹{old_sell_price:.2f}")
+                    elif position.buy_price and position.buy_price > 0:
+                        # Last resort: use buy_price (results in 0 P&L, but at least has a value)
                         position.sell_price = position.buy_price
+                        logger.error(f"🚨 CRITICAL: No LTP available and no previous sell_price for {option_contract}, using buy_price as fallback: ₹{position.buy_price:.2f} (P&L will be 0)")
+                    else:
+                        # Absolute worst case: no buy_price either
+                        logger.error(f"🚨 CRITICAL: No sell_price, no buy_price for {option_contract} - cannot set sell_price!")
+                        position.sell_price = 0.0
                 
                 exit_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
                 position.sell_time = now
