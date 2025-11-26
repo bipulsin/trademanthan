@@ -2137,14 +2137,24 @@ class UpstoxService:
             
             ist = pytz.timezone('Asia/Kolkata')
             
-            # Parse current candle
+            # Parse current candle (handle both string and numeric formats)
             current_timestamp_ms = current_candle_raw.get('timestamp', 0)
+            if isinstance(current_timestamp_ms, str):
+                try:
+                    current_timestamp_ms = float(current_timestamp_ms)
+                except (ValueError, TypeError):
+                    current_timestamp_ms = 0
             if current_timestamp_ms > 1e12:
                 current_timestamp_ms = current_timestamp_ms / 1000
             current_time = datetime.fromtimestamp(current_timestamp_ms, tz=ist)
             
-            # Parse previous candle
+            # Parse previous candle (handle both string and numeric formats)
             previous_timestamp_ms = previous_candle_raw.get('timestamp', 0)
+            if isinstance(previous_timestamp_ms, str):
+                try:
+                    previous_timestamp_ms = float(previous_timestamp_ms)
+                except (ValueError, TypeError):
+                    previous_timestamp_ms = 0
             if previous_timestamp_ms > 1e12:
                 previous_timestamp_ms = previous_timestamp_ms / 1000
             previous_time = datetime.fromtimestamp(previous_timestamp_ms, tz=ist)
