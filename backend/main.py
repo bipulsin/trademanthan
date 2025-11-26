@@ -109,7 +109,6 @@ async def lifespan(app: FastAPI):
         print("✅ Market Data Updater: STARTED", flush=True)
         print("   - Hourly updates (9:30 AM - 3:30 PM): Stock VWAP, Stock LTP, Option LTP", flush=True)
         print("   - Auto-close trades at 3:25 PM", flush=True)
-        print("   - End-of-day update (3:30 PM & 3:35 PM): Final day VWAP for ALL positions", flush=True)
         sys.stdout.flush()
     except Exception as e:
         print(f"❌ Market Data Updater: FAILED - {e}", flush=True)

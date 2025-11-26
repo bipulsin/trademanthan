@@ -50,25 +50,6 @@ class VWAPUpdater:
                 replace_existing=True
             )
             
-            # End-of-day VWAP update at 3:30 PM (market close)
-            # This updates ALL positions (including exited ones) with final day VWAP
-            self.scheduler.add_job(
-                update_end_of_day_vwap,
-                trigger=CronTrigger(hour=15, minute=30, timezone='Asia/Kolkata'),
-                id='vwap_update_eod',
-                name='End of Day VWAP Update',
-                replace_existing=True
-            )
-            
-            # Also update at 3:35 PM to ensure we have complete market data
-            self.scheduler.add_job(
-                update_end_of_day_vwap,
-                trigger=CronTrigger(hour=15, minute=35, timezone='Asia/Kolkata'),
-                id='vwap_update_eod_final',
-                name='Final End of Day VWAP Update',
-                replace_existing=True
-            )
-            
             # Close all open trades at 3:25 PM (before market close)
             self.scheduler.add_job(
                 close_all_open_trades,
