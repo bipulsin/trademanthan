@@ -40,7 +40,11 @@ def is_invalid_timestamp(timestamp):
     return timestamp_utc.date() <= epoch_date.date() or timestamp_utc.date() < min_valid_date.date()
 
 def calculate_previous_hour_time(alert_time):
-    """Calculate the previous hour time based on alert time"""
+    """Calculate the previous hour time based on alert time
+    
+    For alerts at :15 minutes (e.g., 12:15), the previous hour candle is at :15 minutes
+    of the previous hour (e.g., 11:15).
+    """
     ist = pytz.timezone('Asia/Kolkata')
     
     # Ensure alert_time is timezone-aware
@@ -49,9 +53,18 @@ def calculate_previous_hour_time(alert_time):
     elif alert_time.tzinfo != ist:
         alert_time = alert_time.astimezone(ist)
     
-    # Round down to the nearest hour, then subtract 1 hour
-    alert_hour = alert_time.replace(minute=0, second=0, microsecond=0)
-    previous_hour = alert_hour - timedelta(hours=1)
+    # For alerts at :15 minutes, previous hour is at :15 minutes of previous hour
+    # Round down to the nearest :15 minute mark, then subtract 1 hour
+    alert_minute = alert_time.minute
+    if alert_minute >= 15:
+        # Round down to :15
+        alert_rounded = alert_time.replace(minute=15, second=0, microsecond=0)
+    else:
+        # Round down to :00, then go back to previous hour :15
+        alert_rounded = alert_time.replace(minute=0, second=0, microsecond=0)
+        alert_rounded = alert_rounded - timedelta(hours=1) + timedelta(minutes=15)
+    
+    previous_hour = alert_rounded - timedelta(hours=1)
     
     return previous_hour
 

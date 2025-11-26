@@ -2097,17 +2097,31 @@ class UpstoxService:
             # Validate timestamp - if invalid (0 or before 2020), calculate previous hour from current time
             if timestamp_ms <= 0 or timestamp_ms < 1577836800:  # Before 2020-01-01
                 # Calculate previous hour time based on current time
-                # Round down to the nearest hour, then subtract 1 hour
-                current_hour = now.replace(minute=0, second=0, microsecond=0)
-                candle_time = current_hour - timedelta(hours=1)
+                # For alerts at :15 minutes, previous hour is at :15 minutes of previous hour
+                current_minute = now.minute
+                if current_minute >= 15:
+                    # Round down to :15
+                    current_rounded = now.replace(minute=15, second=0, microsecond=0)
+                else:
+                    # Round down to :00, then go back to previous hour :15
+                    current_rounded = now.replace(minute=0, second=0, microsecond=0)
+                    current_rounded = current_rounded - timedelta(hours=1) + timedelta(minutes=15)
+                
+                candle_time = current_rounded - timedelta(hours=1)
                 logger.warning(f"⚠️ Invalid timestamp in candle data for {stock_symbol}, calculating previous hour from current time: {candle_time.strftime('%Y-%m-%d %H:%M:%S')}")
             else:
                 candle_time = datetime.fromtimestamp(timestamp_ms, tz=ist)
                 # Validate the parsed time is reasonable (not in the future, not before 2020)
                 if candle_time > now or candle_time.year < 2020:
                     # Fallback: calculate previous hour from current time
-                    current_hour = now.replace(minute=0, second=0, microsecond=0)
-                    candle_time = current_hour - timedelta(hours=1)
+                    current_minute = now.minute
+                    if current_minute >= 15:
+                        current_rounded = now.replace(minute=15, second=0, microsecond=0)
+                    else:
+                        current_rounded = now.replace(minute=0, second=0, microsecond=0)
+                        current_rounded = current_rounded - timedelta(hours=1) + timedelta(minutes=15)
+                    
+                    candle_time = current_rounded - timedelta(hours=1)
                     logger.warning(f"⚠️ Parsed timestamp is invalid for {stock_symbol}, calculating previous hour from current time: {candle_time.strftime('%Y-%m-%d %H:%M:%S')}")
             
             logger.info(f"✅ Previous hour VWAP for {stock_symbol}: ₹{vwap:.2f} at {candle_time.strftime('%H:%M:%S')}")
