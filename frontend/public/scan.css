@@ -811,6 +811,16 @@ body {
     font-size: clamp(9px, 0.65vw, 11px) !important;
 }
 
+/* VWAP Slope / Candle Size Column - Vertical Stacking */
+.vwap-slope-col {
+    font-size: clamp(9px, 0.6vw, 11px) !important;
+    line-height: 1.4;
+    white-space: normal;
+    vertical-align: top;
+    padding-top: 6px;
+    padding-bottom: 6px;
+}
+
 .option-contract {
     font-size: clamp(9px, 0.65vw, 11px) !important;
 }
