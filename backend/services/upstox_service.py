@@ -2179,6 +2179,129 @@ class UpstoxService:
             traceback.print_exc()
             return None
     
+    def get_option_daily_candles_current_and_previous(self, instrument_key: str) -> Optional[Dict]:
+        """
+        Get aggregated daily candles for current day (up to current hour) and previous day (up to same hour)
+        
+        Args:
+            instrument_key: Option instrument key (e.g., "NSE_FO|RELIANCE25NOV1450CE")
+            
+        Returns:
+            Dict with 'current_day_candle' and 'previous_day_candle' or None
+            {
+                'current_day_candle': {
+                    'open': float,
+                    'high': float,
+                    'low': float,
+                    'close': float,
+                    'time': datetime
+                },
+                'previous_day_candle': {
+                    'open': float,
+                    'high': float,
+                    'low': float,
+                    'close': float,
+                    'time': datetime
+                }
+            }
+        """
+        try:
+            ist = pytz.timezone('Asia/Kolkata')
+            now = datetime.now(ist)
+            current_hour = now.hour
+            current_minute = now.minute
+            
+            # Fetch hourly candles for last 2 days
+            candles = self.get_historical_candles_by_instrument_key(
+                instrument_key,
+                interval="hours/1",
+                days_back=2
+            )
+            
+            if not candles or len(candles) < 1:
+                logger.warning(f"⚠️ Not enough candles for {instrument_key} to calculate daily candles")
+                return None
+            
+            # Group candles by date
+            current_day_candles = []
+            previous_day_candles = []
+            
+            for candle in candles:
+                timestamp_ms = candle.get('timestamp', 0)
+                if timestamp_ms > 1e12:
+                    timestamp_ms = timestamp_ms / 1000
+                candle_time = datetime.fromtimestamp(timestamp_ms, tz=ist)
+                candle_date = candle_time.date()
+                candle_hour = candle_time.hour
+                
+                today = now.date()
+                yesterday = today - timedelta(days=1)
+                
+                # Current day candles up to current hour
+                if candle_date == today and candle_hour <= current_hour:
+                    current_day_candles.append(candle)
+                # Previous day candles up to same hour
+                elif candle_date == yesterday and candle_hour <= current_hour:
+                    previous_day_candles.append(candle)
+            
+            # Aggregate current day candles
+            current_day_candle = None
+            if current_day_candles:
+                # Sort by timestamp
+                current_day_candles.sort(key=lambda x: x.get('timestamp', 0))
+                current_open = current_day_candles[0].get('open', 0)
+                current_close = current_day_candles[-1].get('close', 0)
+                current_high = max(c.get('high', 0) for c in current_day_candles)
+                current_low = min(c.get('low', 0) for c in current_day_candles)
+                
+                current_day_candle = {
+                    'open': current_open,
+                    'high': current_high,
+                    'low': current_low,
+                    'close': current_close,
+                    'time': now.replace(minute=0, second=0, microsecond=0)
+                }
+            
+            # Aggregate previous day candles
+            previous_day_candle = None
+            if previous_day_candles:
+                # Sort by timestamp
+                previous_day_candles.sort(key=lambda x: x.get('timestamp', 0))
+                previous_open = previous_day_candles[0].get('open', 0)
+                previous_close = previous_day_candles[-1].get('close', 0)
+                previous_high = max(c.get('high', 0) for c in previous_day_candles)
+                previous_low = min(c.get('low', 0) for c in previous_day_candles)
+                
+                # Use same hour as current time for previous day
+                previous_time = (now - timedelta(days=1)).replace(minute=0, second=0, microsecond=0)
+                
+                previous_day_candle = {
+                    'open': previous_open,
+                    'high': previous_high,
+                    'low': previous_low,
+                    'close': previous_close,
+                    'time': previous_time
+                }
+            
+            if not current_day_candle or not previous_day_candle:
+                logger.warning(f"⚠️ Could not aggregate daily candles for {instrument_key} (Current: {len(current_day_candles)} candles, Previous: {len(previous_day_candles)} candles)")
+                return None
+            
+            logger.info(f"✅ Fetched daily candles for {instrument_key}")
+            logger.info(f"   Current Day (up to {current_hour}:00): O={current_day_candle['open']:.2f}, H={current_day_candle['high']:.2f}, L={current_day_candle['low']:.2f}, C={current_day_candle['close']:.2f}")
+            logger.info(f"   Previous Day (up to {current_hour}:00): O={previous_day_candle['open']:.2f}, H={previous_day_candle['high']:.2f}, L={previous_day_candle['low']:.2f}, C={previous_day_candle['close']:.2f}")
+            
+            return {
+                'current_day_candle': current_day_candle,
+                'previous_day_candle': previous_day_candle
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error getting daily candles for {instrument_key}: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
     def check_api_health(self) -> Dict[str, any]:
         """
         Check if Upstox API is accessible and token is valid

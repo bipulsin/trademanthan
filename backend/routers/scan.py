@@ -673,7 +673,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                             # FETCH OPTION OHLC CANDLES (Current and Previous 1-hour)
                                             # ====================================================================
                                             try:
-                                                option_candles = vwap_service.get_option_candles_current_and_previous(instrument_key)
+                                                option_candles = vwap_service.get_option_daily_candles_current_and_previous(instrument_key)
                                                 if option_candles:
                                                     print(f"✅ Fetched option OHLC candles for {option_contract}")
                                                 else:
@@ -935,35 +935,35 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 else:
                     vwap_slope_reason = f"Missing VWAP data (Current: {'✅' if stock_vwap else '❌'}, Previous: {'✅' if stock_vwap_prev else '❌'})"
                 
-                # 2. CANDLE SIZE FILTER
+                # 2. CANDLE SIZE FILTER (Daily candles: current day vs previous day, up to current hour)
                 if option_candles:
                     try:
-                        current_candle = option_candles.get('current_candle', {})
-                        previous_candle = option_candles.get('previous_candle', {})
+                        current_day_candle = option_candles.get('current_day_candle', {})
+                        previous_day_candle = option_candles.get('previous_day_candle', {})
                         
-                        if current_candle and previous_candle:
-                            # Calculate candle size (High - Low)
-                            current_size = abs(current_candle.get('high', 0) - current_candle.get('low', 0))
-                            previous_size = abs(previous_candle.get('high', 0) - previous_candle.get('low', 0))
+                        if current_day_candle and previous_day_candle:
+                            # Calculate candle size (High - Low) for daily candles
+                            current_size = abs(current_day_candle.get('high', 0) - current_day_candle.get('low', 0))
+                            previous_size = abs(previous_day_candle.get('high', 0) - previous_day_candle.get('low', 0))
                             
                             if previous_size > 0:
                                 size_ratio = current_size / previous_size
                                 
-                                # Check if current candle is less than 7-8 times previous candle
+                                # Check if current day candle is less than 7-8 times previous day candle
                                 # Using 7.5 as threshold (middle of 7-8 range)
                                 if size_ratio < 7.5:
                                     candle_size_passed = True
-                                    candle_size_reason = f"Candle size OK: Current ({current_size:.2f}) < 7.5× Previous ({previous_size:.2f}), Ratio: {size_ratio:.2f}"
+                                    candle_size_reason = f"Daily candle size OK: Current Day ({current_size:.2f}) < 7.5× Previous Day ({previous_size:.2f}), Ratio: {size_ratio:.2f}"
                                 else:
-                                    candle_size_reason = f"Candle size too large: Current ({current_size:.2f}) >= 7.5× Previous ({previous_size:.2f}), Ratio: {size_ratio:.2f}"
+                                    candle_size_reason = f"Daily candle size too large: Current Day ({current_size:.2f}) >= 7.5× Previous Day ({previous_size:.2f}), Ratio: {size_ratio:.2f}"
                             else:
-                                candle_size_reason = "Previous candle size is zero (cannot calculate ratio)"
+                                candle_size_reason = "Previous day candle size is zero (cannot calculate ratio)"
                         else:
-                            candle_size_reason = "Missing candle data"
+                            candle_size_reason = "Missing daily candle data"
                     except Exception as candle_error:
-                        candle_size_reason = f"Error calculating candle size: {str(candle_error)}"
+                        candle_size_reason = f"Error calculating daily candle size: {str(candle_error)}"
                 else:
-                    candle_size_reason = "Option OHLC candles not available"
+                    candle_size_reason = "Option daily candles not available"
                 
                 # Determine trade entry based on:
                 # 1. Time check (must be before 3:00 PM)
@@ -999,18 +999,18 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     buy_time = current_time  # Use current system time, not alert time
                     sell_price = None  # BLANK initially - will be updated hourly by market data updater
                     
-                    # Stop Loss = Low price of previous option candle
+                    # Stop Loss = Low price of previous day candle of the stock options
                     stop_loss_price = None
-                    if option_candles and option_candles.get('previous_candle'):
-                        previous_candle_low = option_candles.get('previous_candle', {}).get('low')
-                        if previous_candle_low and previous_candle_low > 0:
-                            stop_loss_price = float(previous_candle_low)
-                            print(f"✅ Stop Loss set from previous candle low: ₹{stop_loss_price:.2f}")
+                    if option_candles and option_candles.get('previous_day_candle'):
+                        previous_day_candle_low = option_candles.get('previous_day_candle', {}).get('low')
+                        if previous_day_candle_low and previous_day_candle_low > 0:
+                            stop_loss_price = float(previous_day_candle_low)
+                            print(f"✅ Stop Loss set from previous day candle low: ₹{stop_loss_price:.2f}")
                         else:
-                            print(f"⚠️ Previous candle low not available, setting SL to 0.05")
+                            print(f"⚠️ Previous day candle low not available, setting SL to 0.05")
                             stop_loss_price = 0.05
                     else:
-                        print(f"⚠️ Previous candle data not available, setting SL to 0.05")
+                        print(f"⚠️ Previous day candle data not available, setting SL to 0.05")
                         stop_loss_price = 0.05
                     
                     status = 'bought'  # Trade entered
@@ -1154,8 +1154,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 
                 # Extract OHLC data from option_candles
                 option_candles_data = stock.get("option_candles")
-                current_candle = option_candles_data.get('current_candle', {}) if option_candles_data else {}
-                previous_candle = option_candles_data.get('previous_candle', {}) if option_candles_data else {}
+                current_day_candle = option_candles_data.get('current_day_candle', {}) if option_candles_data else {}
+                previous_day_candle = option_candles_data.get('previous_day_candle', {}) if option_candles_data else {}
                 
                 db_record = IntradayStockOption(
                     alert_time=triggered_datetime,
@@ -1171,17 +1171,17 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     option_strike=stock.get("otm1_strike", 0.0),
                     option_ltp=option_ltp_value,
                     option_vwap=stock.get("option_vwap", 0.0),
-                    # Option OHLC candles
-                    option_current_candle_open=current_candle.get('open'),
-                    option_current_candle_high=current_candle.get('high'),
-                    option_current_candle_low=current_candle.get('low'),
-                    option_current_candle_close=current_candle.get('close'),
-                    option_current_candle_time=current_candle.get('time'),
-                    option_previous_candle_open=previous_candle.get('open'),
-                    option_previous_candle_high=previous_candle.get('high'),
-                    option_previous_candle_low=previous_candle.get('low'),
-                    option_previous_candle_close=previous_candle.get('close'),
-                    option_previous_candle_time=previous_candle.get('time'),
+                    # Option daily OHLC candles (current day vs previous day)
+                    option_current_candle_open=current_day_candle.get('open'),
+                    option_current_candle_high=current_day_candle.get('high'),
+                    option_current_candle_low=current_day_candle.get('low'),
+                    option_current_candle_close=current_day_candle.get('close'),
+                    option_current_candle_time=current_day_candle.get('time'),
+                    option_previous_candle_open=previous_day_candle.get('open'),
+                    option_previous_candle_high=previous_day_candle.get('high'),
+                    option_previous_candle_low=previous_day_candle.get('low'),
+                    option_previous_candle_close=previous_day_candle.get('close'),
+                    option_previous_candle_time=previous_day_candle.get('time'),
                     qty=qty,
                     trade_date=trading_date,
                     status=status,

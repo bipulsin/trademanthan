@@ -223,36 +223,36 @@ async def update_vwap_for_all_open_positions():
                         except Exception as slope_error:
                             logger.warning(f"Error calculating VWAP slope for {stock_name}: {str(slope_error)}")
                     
-                    # Fetch option candles and check size
+                    # Fetch option daily candles and check size (current day vs previous day)
                     candle_size_passed = False
                     if no_entry_trade.instrument_key:
                         try:
-                            option_candles = vwap_service.get_option_candles_current_and_previous(no_entry_trade.instrument_key)
+                            option_candles = vwap_service.get_option_daily_candles_current_and_previous(no_entry_trade.instrument_key)
                             if option_candles:
-                                current_candle = option_candles.get('current_candle', {})
-                                previous_candle = option_candles.get('previous_candle', {})
+                                current_day_candle = option_candles.get('current_day_candle', {})
+                                previous_day_candle = option_candles.get('previous_day_candle', {})
                                 
-                                if current_candle and previous_candle:
-                                    current_size = abs(current_candle.get('high', 0) - current_candle.get('low', 0))
-                                    previous_size = abs(previous_candle.get('high', 0) - previous_candle.get('low', 0))
+                                if current_day_candle and previous_day_candle:
+                                    current_size = abs(current_day_candle.get('high', 0) - current_day_candle.get('low', 0))
+                                    previous_size = abs(previous_day_candle.get('high', 0) - previous_day_candle.get('low', 0))
                                     
                                     if previous_size > 0:
                                         size_ratio = current_size / previous_size
                                         candle_size_passed = (size_ratio < 7.5)
                                         
-                                        # Update database with candle data
-                                        no_entry_trade.option_current_candle_open = current_candle.get('open')
-                                        no_entry_trade.option_current_candle_high = current_candle.get('high')
-                                        no_entry_trade.option_current_candle_low = current_candle.get('low')
-                                        no_entry_trade.option_current_candle_close = current_candle.get('close')
-                                        no_entry_trade.option_current_candle_time = current_candle.get('time')
-                                        no_entry_trade.option_previous_candle_open = previous_candle.get('open')
-                                        no_entry_trade.option_previous_candle_high = previous_candle.get('high')
-                                        no_entry_trade.option_previous_candle_low = previous_candle.get('low')
-                                        no_entry_trade.option_previous_candle_close = previous_candle.get('close')
-                                        no_entry_trade.option_previous_candle_time = previous_candle.get('time')
+                                        # Update database with daily candle data
+                                        no_entry_trade.option_current_candle_open = current_day_candle.get('open')
+                                        no_entry_trade.option_current_candle_high = current_day_candle.get('high')
+                                        no_entry_trade.option_current_candle_low = current_day_candle.get('low')
+                                        no_entry_trade.option_current_candle_close = current_day_candle.get('close')
+                                        no_entry_trade.option_current_candle_time = current_day_candle.get('time')
+                                        no_entry_trade.option_previous_candle_open = previous_day_candle.get('open')
+                                        no_entry_trade.option_previous_candle_high = previous_day_candle.get('high')
+                                        no_entry_trade.option_previous_candle_low = previous_day_candle.get('low')
+                                        no_entry_trade.option_previous_candle_close = previous_day_candle.get('close')
+                                        no_entry_trade.option_previous_candle_time = previous_day_candle.get('time')
                         except Exception as candle_error:
-                            logger.warning(f"Error fetching option candles for {stock_name}: {str(candle_error)}")
+                            logger.warning(f"Error fetching option daily candles for {stock_name}: {str(candle_error)}")
                     
                     # Check index trends alignment
                     # Rules:
@@ -453,36 +453,36 @@ async def update_vwap_for_all_open_positions():
                         except Exception as slope_error:
                             logger.warning(f"Error calculating VWAP slope for {stock_name}: {str(slope_error)}")
                     
-                    # Fetch option candles and check size
+                    # Fetch option daily candles and check size (current day vs previous day)
                     candle_size_passed = False
                     if no_entry_trade.instrument_key:
                         try:
-                            option_candles = vwap_service.get_option_candles_current_and_previous(no_entry_trade.instrument_key)
+                            option_candles = vwap_service.get_option_daily_candles_current_and_previous(no_entry_trade.instrument_key)
                             if option_candles:
-                                current_candle = option_candles.get('current_candle', {})
-                                previous_candle = option_candles.get('previous_candle', {})
+                                current_day_candle = option_candles.get('current_day_candle', {})
+                                previous_day_candle = option_candles.get('previous_day_candle', {})
                                 
-                                if current_candle and previous_candle:
-                                    current_size = abs(current_candle.get('high', 0) - current_candle.get('low', 0))
-                                    previous_size = abs(previous_candle.get('high', 0) - previous_candle.get('low', 0))
+                                if current_day_candle and previous_day_candle:
+                                    current_size = abs(current_day_candle.get('high', 0) - current_day_candle.get('low', 0))
+                                    previous_size = abs(previous_day_candle.get('high', 0) - previous_day_candle.get('low', 0))
                                     
                                     if previous_size > 0:
                                         size_ratio = current_size / previous_size
                                         candle_size_passed = (size_ratio < 7.5)
                                         
-                                        # Update database with candle data
-                                        no_entry_trade.option_current_candle_open = current_candle.get('open')
-                                        no_entry_trade.option_current_candle_high = current_candle.get('high')
-                                        no_entry_trade.option_current_candle_low = current_candle.get('low')
-                                        no_entry_trade.option_current_candle_close = current_candle.get('close')
-                                        no_entry_trade.option_current_candle_time = current_candle.get('time')
-                                        no_entry_trade.option_previous_candle_open = previous_candle.get('open')
-                                        no_entry_trade.option_previous_candle_high = previous_candle.get('high')
-                                        no_entry_trade.option_previous_candle_low = previous_candle.get('low')
-                                        no_entry_trade.option_previous_candle_close = previous_candle.get('close')
-                                        no_entry_trade.option_previous_candle_time = previous_candle.get('time')
+                                        # Update database with daily candle data
+                                        no_entry_trade.option_current_candle_open = current_day_candle.get('open')
+                                        no_entry_trade.option_current_candle_high = current_day_candle.get('high')
+                                        no_entry_trade.option_current_candle_low = current_day_candle.get('low')
+                                        no_entry_trade.option_current_candle_close = current_day_candle.get('close')
+                                        no_entry_trade.option_current_candle_time = current_day_candle.get('time')
+                                        no_entry_trade.option_previous_candle_open = previous_day_candle.get('open')
+                                        no_entry_trade.option_previous_candle_high = previous_day_candle.get('high')
+                                        no_entry_trade.option_previous_candle_low = previous_day_candle.get('low')
+                                        no_entry_trade.option_previous_candle_close = previous_day_candle.get('close')
+                                        no_entry_trade.option_previous_candle_time = previous_day_candle.get('time')
                         except Exception as candle_error:
-                            logger.warning(f"Error fetching option candles for {stock_name}: {str(candle_error)}")
+                            logger.warning(f"Error fetching option daily candles for {stock_name}: {str(candle_error)}")
                     
                     # Check index trends alignment
                     # Rules:
