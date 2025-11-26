@@ -1481,14 +1481,14 @@ async def get_scheduler_status():
         status = {
             "health_monitor": {
                 "running": health_monitor.is_running,
-                "state": health_monitor.scheduler.state if health_monitor.scheduler else None,
+                "state": health_monitor.scheduler.state if health_monitor.scheduler and hasattr(health_monitor.scheduler, 'state') else None,
                 "jobs_count": len(health_monitor.scheduler.get_jobs()) if health_monitor.scheduler else 0
             },
             "vwap_updater": {
-                "running": vwap_updater.vwap_updater.is_running,
-                "state": vwap_updater.vwap_updater.scheduler.state if vwap_updater.vwap_updater.scheduler else None,
-                "jobs_count": len(vwap_updater.vwap_updater.scheduler.get_jobs()) if vwap_updater.vwap_updater.scheduler else 0,
-                "has_3_25pm_close_job": vwap_updater.vwap_updater.scheduler.get_job('close_all_trades_eod') is not None if vwap_updater.vwap_updater.scheduler else False
+                "running": vwap_updater.is_running,
+                "state": vwap_updater.scheduler.state if vwap_updater.scheduler and hasattr(vwap_updater.scheduler, 'state') else None,
+                "jobs_count": len(vwap_updater.scheduler.get_jobs()) if vwap_updater.scheduler else 0,
+                "has_3_25pm_close_job": vwap_updater.scheduler.get_job('close_all_trades_eod') is not None if vwap_updater.scheduler else False
             },
             "master_stock": {
                 "running": master_stock_scheduler.is_running
@@ -1499,8 +1499,8 @@ async def get_scheduler_status():
         }
         
         # Get next few jobs for VWAP updater
-        if vwap_updater.vwap_updater.scheduler:
-            jobs = vwap_updater.vwap_updater.scheduler.get_jobs()
+        if vwap_updater.scheduler:
+            jobs = vwap_updater.scheduler.get_jobs()
             status["vwap_updater"]["next_jobs"] = [
                 {"name": job.name, "next_run": str(job.next_run_time)} 
                 for job in sorted(jobs, key=lambda x: x.next_run_time if x.next_run_time else float('inf'))[:5]
@@ -1508,7 +1508,7 @@ async def get_scheduler_status():
         
         all_running = (
             health_monitor.is_running and 
-            vwap_updater.vwap_updater.is_running and
+            vwap_updater.is_running and
             master_stock_scheduler.is_running and
             instruments_scheduler.is_running
         )
