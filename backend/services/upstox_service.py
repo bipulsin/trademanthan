@@ -1408,7 +1408,7 @@ class UpstoxService:
             - Calculate time difference in hours: time_diff_hours = (time2 - time1) in hours
             - For 45-degree angle: rise (price_change) should equal run (time_diff) when properly scaled
             - Scale time to match price units: normalized_time = time_diff_hours * scaling_factor
-            - Scaling factor: 0.2% of starting price per hour (for visual chart matching)
+            - Scaling factor: 1% of starting price per hour (for visual chart matching)
             - Angle = arctan(|vwap_change| / normalized_time) * (180 / π)
             - Returns "Yes" if absolute angle >= 45 degrees
             
@@ -1456,10 +1456,11 @@ class UpstoxService:
             vwap_change_absolute = abs(vwap_change)
             
             # Calculate scaling factor to normalize time axis to match price axis
-            # For visual 45-degree angle: use 0.2% of starting price per hour as baseline
-            # This means: if price changes by 0.2% of starting price per hour = 45 degrees
+            # For visual 45-degree angle: use 1% of starting price per hour as baseline
+            # This means: if price changes by 1% of starting price per hour = 45 degrees
             # Scaling factor converts hours to price-equivalent units
-            scaling_factor_per_hour = vwap1 * 0.002  # 0.2% of starting price per hour
+            # Changed from 0.2% to 1% to produce more reasonable angles (0.2% was too small, causing angles >80°)
+            scaling_factor_per_hour = vwap1 * 0.01  # 1% of starting price per hour
             
             # Normalize time to price-equivalent units
             # This allows us to compare price_change (Y-axis) with normalized_time (X-axis)
