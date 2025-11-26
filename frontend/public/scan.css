@@ -760,9 +760,12 @@ body {
 }
 
 
-/* Stock VWAP Column Styles */
-.stock-vwap-col {
+/* Stock LTP / VWAP Combined Column Styles */
+.stock-ltp-vwap-col {
     vertical-align: middle;
+    line-height: 1.4;
+    white-space: normal;
+    text-align: center;
 }
 
 /* VWAP Slope / Candle Size Column - Vertical Stacking */

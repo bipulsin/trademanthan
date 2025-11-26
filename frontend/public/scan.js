@@ -674,8 +674,7 @@ function renderAlertGroup(alert, type) {
                     <tr>
                         <th>#</th>
                         <th>Stock Name</th>
-                        <th>Stock LTP</th>
-                        <th>Stock VWAP</th>
+                        <th>Stock LTP / VWAP</th>
                         <th>Slope/Size</th>
                         <th>Option Contract (OTM-1)</th>
                         <th>Qty</th>
@@ -833,11 +832,13 @@ function renderAlertGroup(alert, type) {
                             combinedFilterDisplay = parts.join('<br>');
                         }
                         
+                        // Combine Stock LTP and VWAP into single column (vertically stacked)
+                        const stockLtpVwapDisplay = '₹' + formatPrice(stock_ltp) + '<br>₹' + formatPrice(stock_vwap);
+                        
                         return '<tr>' +
                             '<td>' + (index + 1) + '</td>' +
                             '<td class="stock-name">' + escapeHtml(stock.stock_name) + '</td>' +
-                            '<td class="trigger-price">₹' + formatPrice(stock_ltp) + '</td>' +
-                            '<td class="stock-vwap-col">₹' + formatPrice(stock_vwap) + '</td>' +
+                            '<td class="stock-ltp-vwap-col">' + stockLtpVwapDisplay + '</td>' +
                             '<td class="vwap-slope-col">' + combinedFilterDisplay + '</td>' +
                             '<td class="option-contract">' + escapeHtml(stock.option_contract || 'N/A') + '</td>' +
                             '<td class="qty">' + (stock.qty || 0) + '</td>' +
