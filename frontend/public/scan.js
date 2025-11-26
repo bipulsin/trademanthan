@@ -779,8 +779,13 @@ function renderAlertGroup(alert, type) {
                             pnlDisplay = '<span style="color: #718096;">-</span>';
                         } else {
                             // Ensure pnl is a number, default to 0 if null/undefined
-                            const pnlValue = stock.pnl !== null && stock.pnl !== undefined ? stock.pnl : 0;
+                            // Handle both null/undefined and 0 values
+                            const pnlValue = (stock.pnl !== null && stock.pnl !== undefined) ? parseFloat(stock.pnl) : 0;
                             pnlDisplay = formatPNL(pnlValue);
+                            // If formatPNL returns empty or null, show 0.00
+                            if (!pnlDisplay || pnlDisplay.trim() === '') {
+                                pnlDisplay = '<span style="color: #718096;">₹0.00</span>';
+                            }
                         }
                         
                         // Format VWAP slope status with angle
