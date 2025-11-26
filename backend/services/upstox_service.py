@@ -2240,8 +2240,8 @@ class UpstoxService:
                 # Current day candles up to current hour
                 if candle_date == today and candle_hour <= current_hour:
                     current_day_candles.append(candle)
-                # Previous day candles up to same hour
-                elif candle_date == yesterday and candle_hour <= current_hour:
+                # Previous day candles - complete day (all hours)
+                elif candle_date == yesterday:
                     previous_day_candles.append(candle)
             
             # Aggregate current day candles
@@ -2289,7 +2289,7 @@ class UpstoxService:
             
             logger.info(f"✅ Fetched daily candles for {instrument_key}")
             logger.info(f"   Current Day (up to {current_hour}:00): O={current_day_candle['open']:.2f}, H={current_day_candle['high']:.2f}, L={current_day_candle['low']:.2f}, C={current_day_candle['close']:.2f}")
-            logger.info(f"   Previous Day (up to {current_hour}:00): O={previous_day_candle['open']:.2f}, H={previous_day_candle['high']:.2f}, L={previous_day_candle['low']:.2f}, C={previous_day_candle['close']:.2f}")
+            logger.info(f"   Previous Day (complete day): O={previous_day_candle['open']:.2f}, H={previous_day_candle['high']:.2f}, L={previous_day_candle['low']:.2f}, C={previous_day_candle['close']:.2f}")
             
             return {
                 'current_day_candle': current_day_candle,
