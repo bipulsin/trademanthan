@@ -838,7 +838,7 @@ function renderAlertGroup(alert, type) {
                             '<td class="stock-name">' + escapeHtml(stock.stock_name) + '</td>' +
                             '<td class="trigger-price">₹' + formatPrice(stock_ltp) + '</td>' +
                             '<td class="stock-vwap-col">₹' + formatPrice(stock_vwap) + '</td>' +
-                            '<td class="vwap-slope-col" style="font-size: 12px;">' + combinedFilterDisplay + '</td>' +
+                            '<td class="vwap-slope-col">' + combinedFilterDisplay + '</td>' +
                             '<td class="option-contract">' + escapeHtml(stock.option_contract || 'N/A') + '</td>' +
                             '<td class="qty">' + (stock.qty || 0) + '</td>' +
                             '<td class="buy-price">' + buyPriceDisplay + '</td>' +
