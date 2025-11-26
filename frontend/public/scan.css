@@ -150,7 +150,7 @@
     }
     
     .alert-section {
-        padding: 3px !important;
+        padding: 5px !important;
         border-radius: 0 !important;
         margin-left: 0 !important;
         margin-right: 0 !important;
@@ -468,7 +468,7 @@ body {
 .alert-section {
     background: white;
     border-radius: 12px;
-    padding: 15px;
+    padding: 5px;
     margin-bottom: 20px;
     box-shadow: var(--shadow);
     animation: slideIn 0.5s ease-out;
@@ -712,7 +712,7 @@ body {
     }
     
     .alert-section {
-        padding: 12px;
+        padding: 5px;
     }
     
     .alert-header h2 {
