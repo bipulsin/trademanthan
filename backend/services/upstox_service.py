@@ -1423,6 +1423,18 @@ class UpstoxService:
                 logger.warning("Invalid VWAP values (must be > 0)")
                 return "No"
             
+            # Ensure both datetimes are timezone-aware (IST)
+            ist = pytz.timezone('Asia/Kolkata')
+            if time1.tzinfo is None:
+                time1 = ist.localize(time1)
+            elif time1.tzinfo != ist:
+                time1 = time1.astimezone(ist)
+            
+            if time2.tzinfo is None:
+                time2 = ist.localize(time2)
+            elif time2.tzinfo != ist:
+                time2 = time2.astimezone(ist)
+            
             if time1 >= time2:
                 logger.warning("time1 must be earlier than time2")
                 return "No"
