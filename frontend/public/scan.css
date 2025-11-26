@@ -101,26 +101,10 @@
     display: none;
 }
 
-/* Desktop font sizes - only apply above 768px - fixed at 11px */
+/* Desktop - dynamic font sizes based on viewport */
 @media (min-width: 769px) {
-    .stocks-table td.stock-name,
-    .stocks-table td.trigger-price,
-    .stocks-table td.stock-vwap-col,
-    .stocks-table td.vwap-slope-col,
-    .stocks-table td.option-contract,
-    .stocks-table td.qty,
-    .stocks-table td.buy-price,
-    .stocks-table td.stop-loss,
-    .stocks-table td.sell-price {
-        font-size: 11px !important;
-    }
-    
-    .stocks-table td {
-        font-size: 11px !important;
-    }
-    
-    .stocks-table th {
-        font-size: 11px !important;
+    .stocks-table {
+        font-size: clamp(0.7rem, 1vw, 0.9rem);
     }
 }
 
@@ -556,12 +540,11 @@ body {
 }
 
 .stocks-table th {
-    padding: 8px 4px;
+    padding: 5px;
     text-align: left;
     font-weight: 600;
     color: var(--text-dark);
     border-bottom: 2px solid var(--border-color);
-    font-size: 11px;
     font-family: Arial, sans-serif;
     text-transform: uppercase;
     letter-spacing: 0.2px;
@@ -585,38 +568,24 @@ body {
 }
 
 .stocks-table td {
-    padding: 8px 4px;
+    padding: 5px;
     color: var(--text-medium);
-    font-size: 11px;
     font-family: Arial, sans-serif;
     font-weight: normal;
     white-space: nowrap;
 }
 
-/* Override font sizes for specific columns - use viewport-relative units for desktop */
-.stocks-table td.stock-name,
-.stocks-table td.trigger-price,
-.stocks-table td.stock-vwap-col,
-.stocks-table td.option-contract,
-.stocks-table td.qty,
-.stocks-table td.buy-price,
-.stocks-table td.stop-loss,
-.stocks-table td.sell-price {
-    font-size: clamp(9px, 0.65vw, 11px) !important;
-}
-
+/* Stock name and trigger price styles - no font-size override */
 .stock-name {
     font-weight: normal;
     color: var(--text-dark);
     font-family: Arial, sans-serif;
-    font-size: 11px !important;
 }
 
 .trigger-price {
     font-weight: normal;
     color: var(--success-color);
     font-family: Arial, sans-serif;
-    font-size: 11px !important;
 }
 
 .vwap-current {
@@ -762,21 +731,7 @@ body {
     
     .stocks-table th,
     .stocks-table td {
-        padding: 10px 6px;
-        font-size: 13px;
-        font-family: Arial, sans-serif;
-    }
-    
-    .stocks-table th {
-        font-size: 12px;
-        font-family: Arial, sans-serif;
-    }
-    
-    .trigger-price,
-    .vwap-current,
-    .vwap-previous,
-    .stock-name {
-        font-size: 14px;
+        padding: 5px;
         font-family: Arial, sans-serif;
     }
     
@@ -808,37 +763,15 @@ body {
 /* Stock VWAP Column Styles */
 .stock-vwap-col {
     vertical-align: middle;
-    font-size: 11px !important;
 }
 
 /* VWAP Slope / Candle Size Column - Vertical Stacking */
 .vwap-slope-col {
-    font-size: 11px !important;
     line-height: 1.4;
     white-space: normal;
     vertical-align: top;
-    padding-top: 6px;
-    padding-bottom: 6px;
-}
-
-.option-contract {
-    font-size: 11px !important;
-}
-
-.qty {
-    font-size: 11px !important;
-}
-
-.buy-price {
-    font-size: 11px !important;
-}
-
-.stop-loss {
-    font-size: 11px !important;
-}
-
-.sell-price {
-    font-size: 11px !important;
+    padding-top: 5px;
+    padding-bottom: 5px;
 }
 
 .hold-icon {
