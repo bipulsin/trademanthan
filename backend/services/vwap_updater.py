@@ -12,7 +12,7 @@ import pytz
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy import and_, or_, or_
 
 # Add parent directory to path for imports
 from backend.database import SessionLocal
@@ -78,23 +78,49 @@ class VWAPUpdater:
                 replace_existing=True
             )
             
-            # Special scan at 10:30 AM for stocks from 10:15 AM webhook alert
+            # Cycle-based VWAP slope calculations
+            # Cycle 1: 10:30 AM - Stocks from 10:15 AM webhook
             self.scheduler.add_job(
-                update_10_15_alert_stocks_at_10_30,
+                lambda: calculate_vwap_slope_for_cycle(1, datetime.now(pytz.timezone('Asia/Kolkata'))),
                 trigger=CronTrigger(hour=10, minute=30, timezone='Asia/Kolkata'),
-                id='update_10_15_stocks_10_30',
-                name='Update 10:15 AM Alert Stocks at 10:30 AM',
+                id='cycle_1_vwap_slope_10_30',
+                name='Cycle 1: VWAP Slope at 10:30 AM',
                 replace_existing=True
             )
             
-            # Additional evaluation at 10:30 AM to re-evaluate all existing entries
-            # This is especially useful for 10:15 AM alerts that may have failed filters
-            # due to insufficient historical data at alert time
+            # Cycle 2: 11:15 AM - Stocks from 11:15 AM webhook + No_Entry from 10:15 AM
             self.scheduler.add_job(
-                update_vwap_for_all_open_positions,
-                trigger=CronTrigger(hour=10, minute=30, timezone='Asia/Kolkata'),
-                id='vwap_update_10_30',
-                name='Evaluate All Entries at 10:30 AM',
+                lambda: calculate_vwap_slope_for_cycle(2, datetime.now(pytz.timezone('Asia/Kolkata'))),
+                trigger=CronTrigger(hour=11, minute=15, timezone='Asia/Kolkata'),
+                id='cycle_2_vwap_slope_11_15',
+                name='Cycle 2: VWAP Slope at 11:15 AM',
+                replace_existing=True
+            )
+            
+            # Cycle 3: 12:15 PM - Stocks from 12:15 PM webhook + No_Entry up to 11:15 AM
+            self.scheduler.add_job(
+                lambda: calculate_vwap_slope_for_cycle(3, datetime.now(pytz.timezone('Asia/Kolkata'))),
+                trigger=CronTrigger(hour=12, minute=15, timezone='Asia/Kolkata'),
+                id='cycle_3_vwap_slope_12_15',
+                name='Cycle 3: VWAP Slope at 12:15 PM',
+                replace_existing=True
+            )
+            
+            # Cycle 4: 13:15 PM - Stocks from 13:15 PM webhook + No_Entry up to 12:15 PM
+            self.scheduler.add_job(
+                lambda: calculate_vwap_slope_for_cycle(4, datetime.now(pytz.timezone('Asia/Kolkata'))),
+                trigger=CronTrigger(hour=13, minute=15, timezone='Asia/Kolkata'),
+                id='cycle_4_vwap_slope_13_15',
+                name='Cycle 4: VWAP Slope at 13:15 PM',
+                replace_existing=True
+            )
+            
+            # Cycle 5: 14:15 PM - Stocks from 14:15 PM webhook + No_Entry up to 13:15 PM
+            self.scheduler.add_job(
+                lambda: calculate_vwap_slope_for_cycle(5, datetime.now(pytz.timezone('Asia/Kolkata'))),
+                trigger=CronTrigger(hour=14, minute=15, timezone='Asia/Kolkata'),
+                id='cycle_5_vwap_slope_14_15',
+                name='Cycle 5: VWAP Slope at 14:15 PM',
                 replace_existing=True
             )
             
@@ -1006,6 +1032,240 @@ async def update_vwap_for_all_open_positions():
         
     except Exception as e:
         logger.error(f"Error in hourly market data update job: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime):
+    """
+    Calculate VWAP slope for stocks based on cycle-based logic
+    
+    Cycle Rules:
+    1. Cycle 1 (10:30 AM): Stocks from 10:15 AM webhook
+       - Previous VWAP: 10:15 AM (1-hour candle)
+       - Current VWAP: 10:30 AM (15-minute candle)
+    
+    2. Cycle 2 (11:15 AM): Stocks from 11:15 AM webhook + No_Entry from 10:15 AM
+       - Previous VWAP: 10:15 AM (1-hour candle)
+       - Current VWAP: 11:15 AM (1-hour candle)
+    
+    3. Cycle 3 (12:15 PM): Stocks from 12:15 PM webhook + No_Entry up to 11:15 AM
+       - Previous VWAP: 11:15 AM (1-hour candle)
+       - Current VWAP: 12:15 PM (1-hour candle)
+    
+    4. Cycle 4 (13:15 PM): Stocks from 13:15 PM webhook + No_Entry up to 12:15 PM
+       - Previous VWAP: 12:15 PM (1-hour candle)
+       - Current VWAP: 13:15 PM (1-hour candle)
+    
+    5. Cycle 5 (14:15 PM): Stocks from 14:15 PM webhook + No_Entry up to 13:15 PM
+       - Previous VWAP: 13:15 PM (1-hour candle)
+       - Current VWAP: 14:15 PM (1-hour candle)
+    
+    Args:
+        cycle_number: Cycle number (1-5)
+        cycle_time: Current cycle time (datetime, timezone-aware)
+    """
+    db = SessionLocal()
+    try:
+        ist = pytz.timezone('Asia/Kolkata')
+        now = cycle_time if cycle_time.tzinfo else ist.localize(cycle_time)
+        today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        logger.info(f"🔄 Starting Cycle {cycle_number} VWAP slope calculation at {now.strftime('%Y-%m-%d %H:%M:%S IST')}")
+        
+        # Import VWAP service
+        try:
+            from services.upstox_service import upstox_service
+            vwap_service = upstox_service
+        except ImportError:
+            logger.error("Could not import upstox_service")
+            return
+        
+        # Determine previous VWAP time and current VWAP time based on cycle
+        if cycle_number == 1:
+            # Cycle 1: 10:30 AM
+            prev_vwap_time = today.replace(hour=10, minute=15, second=0, microsecond=0)
+            current_vwap_time = today.replace(hour=10, minute=30, second=0, microsecond=0)
+            prev_interval = "hours/1"
+            current_interval = "minutes/15"
+            # Stocks from 10:15 AM webhook
+            target_alert_times = [today.replace(hour=10, minute=15, second=0, microsecond=0)]
+        elif cycle_number == 2:
+            # Cycle 2: 11:15 AM
+            prev_vwap_time = today.replace(hour=10, minute=15, second=0, microsecond=0)
+            current_vwap_time = today.replace(hour=11, minute=15, second=0, microsecond=0)
+            prev_interval = "hours/1"
+            current_interval = "hours/1"
+            # Stocks from 11:15 AM webhook + No_Entry from 10:15 AM
+            target_alert_times = [
+                today.replace(hour=10, minute=15, second=0, microsecond=0),
+                today.replace(hour=11, minute=15, second=0, microsecond=0)
+            ]
+        elif cycle_number == 3:
+            # Cycle 3: 12:15 PM
+            prev_vwap_time = today.replace(hour=11, minute=15, second=0, microsecond=0)
+            current_vwap_time = today.replace(hour=12, minute=15, second=0, microsecond=0)
+            prev_interval = "hours/1"
+            current_interval = "hours/1"
+            # Stocks from 12:15 PM webhook + No_Entry up to 11:15 AM
+            target_alert_times = [
+                today.replace(hour=10, minute=15, second=0, microsecond=0),
+                today.replace(hour=11, minute=15, second=0, microsecond=0),
+                today.replace(hour=12, minute=15, second=0, microsecond=0)
+            ]
+        elif cycle_number == 4:
+            # Cycle 4: 13:15 PM
+            prev_vwap_time = today.replace(hour=12, minute=15, second=0, microsecond=0)
+            current_vwap_time = today.replace(hour=13, minute=15, second=0, microsecond=0)
+            prev_interval = "hours/1"
+            current_interval = "hours/1"
+            # Stocks from 13:15 PM webhook + No_Entry up to 12:15 PM
+            target_alert_times = [
+                today.replace(hour=10, minute=15, second=0, microsecond=0),
+                today.replace(hour=11, minute=15, second=0, microsecond=0),
+                today.replace(hour=12, minute=15, second=0, microsecond=0),
+                today.replace(hour=13, minute=15, second=0, microsecond=0)
+            ]
+        elif cycle_number == 5:
+            # Cycle 5: 14:15 PM
+            prev_vwap_time = today.replace(hour=13, minute=15, second=0, microsecond=0)
+            current_vwap_time = today.replace(hour=14, minute=15, second=0, microsecond=0)
+            prev_interval = "hours/1"
+            current_interval = "hours/1"
+            # Stocks from 14:15 PM webhook + No_Entry up to 13:15 PM
+            target_alert_times = [
+                today.replace(hour=10, minute=15, second=0, microsecond=0),
+                today.replace(hour=11, minute=15, second=0, microsecond=0),
+                today.replace(hour=12, minute=15, second=0, microsecond=0),
+                today.replace(hour=13, minute=15, second=0, microsecond=0),
+                today.replace(hour=14, minute=15, second=0, microsecond=0)
+            ]
+        else:
+            logger.error(f"Invalid cycle number: {cycle_number}")
+            return
+        
+        # Query stocks that need VWAP slope calculation
+        # 1. Stocks from webhook alerts at target times (status can be anything initially)
+        # 2. No_Entry stocks from previous cycles
+        from datetime import timedelta
+        
+        alert_time_start = min(target_alert_times)
+        alert_time_end = max(target_alert_times) + timedelta(minutes=1)
+        
+        # Get stocks: (1) from webhook at target times, OR (2) No_Entry status
+        stocks_to_process = db.query(IntradayStockOption).filter(
+            and_(
+                IntradayStockOption.trade_date >= today,
+                IntradayStockOption.alert_time >= alert_time_start,
+                IntradayStockOption.alert_time < alert_time_end,
+                # Only process if status is 'no_entry' OR if it's a new webhook alert (status might be 'alert_received')
+                or_(
+                    IntradayStockOption.status == 'no_entry',
+                    IntradayStockOption.status == 'alert_received'
+                )
+            )
+        ).all()
+        
+        if not stocks_to_process:
+            logger.info(f"ℹ️ No stocks found for Cycle {cycle_number} VWAP slope calculation")
+            return
+        
+        logger.info(f"📋 Found {len(stocks_to_process)} stocks for Cycle {cycle_number} VWAP slope calculation")
+        
+        processed_count = 0
+        success_count = 0
+        
+        for trade in stocks_to_process:
+            try:
+                stock_name = trade.stock_name
+                
+                # Skip if already entered (status changed from no_entry)
+                if trade.status != 'no_entry' and trade.status != 'alert_received':
+                    logger.debug(f"⚪ Skipping {stock_name} - already entered (status: {trade.status})")
+                    continue
+                
+                # Get previous VWAP
+                prev_vwap_data = vwap_service.get_stock_vwap_from_candle_at_time(
+                    stock_name,
+                    prev_vwap_time,
+                    interval=prev_interval
+                )
+                
+                if not prev_vwap_data:
+                    logger.warning(f"⚠️ Could not get previous VWAP for {stock_name} at {prev_vwap_time.strftime('%H:%M')}")
+                    continue
+                
+                prev_vwap = prev_vwap_data.get('vwap', 0)
+                prev_vwap_time_actual = prev_vwap_data.get('time')
+                
+                # Get current VWAP
+                current_vwap_data = vwap_service.get_stock_vwap_from_candle_at_time(
+                    stock_name,
+                    current_vwap_time,
+                    interval=current_interval
+                )
+                
+                if not current_vwap_data:
+                    logger.warning(f"⚠️ Could not get current VWAP for {stock_name} at {current_vwap_time.strftime('%H:%M')}")
+                    continue
+                
+                current_vwap = current_vwap_data.get('vwap', 0)
+                current_vwap_time_actual = current_vwap_data.get('time')
+                
+                if prev_vwap <= 0 or current_vwap <= 0:
+                    logger.warning(f"⚠️ Invalid VWAP values for {stock_name} (prev: {prev_vwap}, current: {current_vwap})")
+                    continue
+                
+                # Calculate VWAP slope
+                slope_result = vwap_service.vwap_slope(
+                    vwap1=prev_vwap,
+                    time1=prev_vwap_time_actual,
+                    vwap2=current_vwap,
+                    time2=current_vwap_time_actual
+                )
+                
+                if isinstance(slope_result, dict):
+                    slope_status = slope_result.get("status", "No")
+                    slope_angle = slope_result.get("angle", 0.0)
+                    slope_direction = slope_result.get("direction", "flat")
+                    vwap_slope_passed = (slope_status == "Yes")
+                else:
+                    slope_status = slope_result if isinstance(slope_result, str) else "No"
+                    slope_angle = 0.0
+                    slope_direction = "flat"
+                    vwap_slope_passed = (slope_status == "Yes")
+                
+                # Update database with VWAP slope data
+                trade.stock_vwap_previous_hour = prev_vwap
+                trade.stock_vwap_previous_hour_time = prev_vwap_time_actual
+                trade.stock_vwap = current_vwap
+                
+                # Store VWAP slope results (if model has these fields)
+                if hasattr(trade, 'vwap_slope_status'):
+                    trade.vwap_slope_status = slope_status
+                if hasattr(trade, 'vwap_slope_angle'):
+                    trade.vwap_slope_angle = slope_angle
+                if hasattr(trade, 'vwap_slope_direction'):
+                    trade.vwap_slope_direction = slope_direction
+                
+                logger.info(f"✅ Cycle {cycle_number} - {stock_name}: VWAP slope {slope_angle:.2f}° ({slope_direction}) - {'PASS' if vwap_slope_passed else 'FAIL'}")
+                success_count += 1
+                
+            except Exception as e:
+                logger.error(f"❌ Error processing {trade.stock_name if trade else 'unknown'} in Cycle {cycle_number}: {str(e)}")
+                import traceback
+                traceback.print_exc()
+            
+            processed_count += 1
+        
+        db.commit()
+        logger.info(f"✅ Cycle {cycle_number} completed: {success_count}/{processed_count} stocks processed successfully")
+        
+    except Exception as e:
+        logger.error(f"❌ Error in Cycle {cycle_number} VWAP slope calculation: {str(e)}")
         import traceback
         traceback.print_exc()
         db.rollback()

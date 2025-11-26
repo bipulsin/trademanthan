@@ -2137,6 +2137,97 @@ class UpstoxService:
             logger.error(f"❌ Error getting previous hour VWAP for {stock_symbol}: {str(e)}")
             return None
     
+    def get_stock_vwap_from_candle_at_time(self, stock_symbol: str, target_time: datetime, interval: str = "hours/1") -> Optional[Dict]:
+        """
+        Get stock VWAP from a specific candle at a target time
+        
+        Args:
+            stock_symbol: Stock symbol (e.g., "RELIANCE")
+            target_time: Target datetime (timezone-aware)
+            interval: Candle interval ("hours/1" for 1-hour, "minutes/15" for 15-minute)
+            
+        Returns:
+            Dict with 'vwap', 'time' or None
+            {
+                'vwap': float,
+                'time': datetime (timezone-aware)
+            }
+        """
+        try:
+            instrument_key = self.get_instrument_key(stock_symbol)
+            if not instrument_key:
+                logger.warning(f"⚠️ Could not get instrument key for {stock_symbol}")
+                return None
+            
+            # Fetch candles
+            candles = self.get_historical_candles_by_instrument_key(
+                instrument_key,
+                interval=interval,
+                days_back=1
+            )
+            
+            if not candles or len(candles) == 0:
+                logger.warning(f"⚠️ No candles found for {stock_symbol}")
+                return None
+            
+            # Find candle that matches target time (within 5 minutes tolerance)
+            target_timestamp = target_time.timestamp()
+            best_match = None
+            min_diff = float('inf')
+            
+            for candle in candles:
+                timestamp_ms = candle.get('timestamp', 0)
+                if isinstance(timestamp_ms, str):
+                    try:
+                        timestamp_ms = float(timestamp_ms)
+                    except (ValueError, TypeError):
+                        continue
+                if timestamp_ms > 1e12:
+                    timestamp_ms = timestamp_ms / 1000
+                
+                candle_time = datetime.fromtimestamp(timestamp_ms, tz=target_time.tzinfo)
+                time_diff = abs((candle_time - target_time).total_seconds())
+                
+                if time_diff < min_diff and time_diff <= 300:  # 5 minutes tolerance
+                    min_diff = time_diff
+                    best_match = candle
+            
+            if not best_match:
+                logger.warning(f"⚠️ No matching candle found for {stock_symbol} at {target_time.strftime('%H:%M')}")
+                return None
+            
+            # Calculate VWAP from candle
+            high = best_match.get('high', 0)
+            low = best_match.get('low', 0)
+            close = best_match.get('close', 0)
+            volume = best_match.get('volume', 0)
+            
+            if volume > 0:
+                typical_price = (high + low + close) / 3
+                vwap = typical_price
+            else:
+                vwap = close
+            
+            # Get candle time
+            timestamp_ms = best_match.get('timestamp', 0)
+            if isinstance(timestamp_ms, str):
+                timestamp_ms = float(timestamp_ms)
+            if timestamp_ms > 1e12:
+                timestamp_ms = timestamp_ms / 1000
+            
+            candle_time = datetime.fromtimestamp(timestamp_ms, tz=target_time.tzinfo)
+            
+            logger.info(f"✅ VWAP for {stock_symbol} at {target_time.strftime('%H:%M')}: ₹{vwap:.2f} (from {interval} candle)")
+            
+            return {
+                'vwap': round(vwap, 2),
+                'time': candle_time
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error getting VWAP from candle for {stock_symbol}: {str(e)}")
+            return None
+    
     def get_option_candles_current_and_previous(self, instrument_key: str) -> Optional[Dict]:
         """
         Get current and previous 1-hour candles for an option contract

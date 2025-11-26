@@ -914,34 +914,14 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 vwap_slope_reason = ""
                 candle_size_reason = ""
                 
-                # 1. VWAP SLOPE FILTER
-                if stock_vwap and stock_vwap > 0 and stock_vwap_prev and stock_vwap_prev > 0 and stock_vwap_prev_time:
-                    try:
-                        # Use vwap_slope method to check if slope >= 45 degrees
-                        slope_result = vwap_service.vwap_slope(
-                            vwap1=stock_vwap_prev,
-                            time1=stock_vwap_prev_time,
-                            vwap2=stock_vwap,
-                            time2=triggered_datetime
-                        )
-                        
-                        # Handle new dictionary return format
-                        if isinstance(slope_result, dict):
-                            slope_status = slope_result.get("status", "No")
-                            slope_angle = slope_result.get("angle", 0.0)
-                            slope_direction = slope_result.get("direction", "flat")
-                            vwap_slope_passed = (slope_status == "Yes")
-                            vwap_slope_reason = f"VWAP slope {slope_angle:.2f}° ({slope_direction}) - {'>= 45°' if vwap_slope_passed else '< 45°'} (Previous: ₹{stock_vwap_prev:.2f} at {stock_vwap_prev_time.strftime('%H:%M')}, Current: ₹{stock_vwap:.2f})"
-                        else:
-                            # Backward compatibility: handle old string return format
-                            vwap_slope_passed = (slope_result == "Yes")
-                            vwap_slope_reason = f"VWAP slope {'>= 45°' if vwap_slope_passed else '< 45°'} (Previous: ₹{stock_vwap_prev:.2f} at {stock_vwap_prev_time.strftime('%H:%M')}, Current: ₹{stock_vwap:.2f})"
-                    except Exception as slope_error:
-                        vwap_slope_reason = f"Error calculating VWAP slope: {str(slope_error)}"
-                else:
-                    vwap_slope_reason = f"Missing VWAP data (Current: {'✅' if stock_vwap else '❌'}, Previous: {'✅' if stock_vwap_prev else '❌'})"
+                # 1. VWAP SLOPE FILTER - SKIP INITIAL CALCULATION
+                # VWAP slope will be calculated in cycle-based scheduler (10:30, 11:15, 12:15, 13:15, 14:15)
+                # For webhook alerts, we only store the alert data, VWAP slope will be calculated later
+                vwap_slope_reason = "VWAP slope will be calculated in cycle-based scheduler"
                 
                 # 2. CANDLE SIZE FILTER (Daily candles: current day vs previous day, up to current hour)
+                # Candle size is calculated ONLY when stock is received from webhook alert
+                # It will NOT be recalculated once status changes from No_Entry
                 if option_candles:
                     try:
                         current_day_candle = option_candles.get('current_day_candle', {})
@@ -980,11 +960,13 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 # Determine trade entry based on:
                 # 1. Time check (must be before 3:00 PM)
                 # 2. Index trends (must be aligned)
-                # 3. VWAP slope >= 45 degrees (SKIPPED for 10:15 AM alerts)
-                # 4. Current candle size < 7-8x previous candle (SKIPPED for 10:15 AM alerts)
+                # 3. VWAP slope >= 45 degrees (calculated in cycle-based scheduler, not here)
+                # 4. Current candle size < 7-8x previous candle (calculated here for webhook alerts)
                 # 5. Valid option data (option_ltp > 0, lot_size > 0)
-                # For 10:15 AM alerts, skip VWAP slope and candle size filters due to insufficient historical data
-                filters_passed = vwap_slope_passed and candle_size_passed if not is_10_15_alert else True
+                # NOTE: VWAP slope is NOT calculated here - it will be calculated in cycle-based scheduler
+                # For initial webhook processing, we only check candle size (if available)
+                # For 10:15 AM alerts, skip filters due to insufficient historical data
+                filters_passed = candle_size_passed if not is_10_15_alert else True
                 
                 if not is_after_3_00pm and can_enter_trade_by_index and filters_passed and option_ltp_value > 0 and lot_size > 0:
                     # Enter trade: Fetch current option LTP again, set buy_time to current system time, stop_loss from previous candle low
