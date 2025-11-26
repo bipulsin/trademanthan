@@ -1408,6 +1408,55 @@ async def manual_close_trades(db: Session = Depends(get_db)):
         }
 
 
+@router.post("/update-no-entry-trades")
+async def manually_update_no_entry_trades(db: Session = Depends(get_db)):
+    """
+    Manually trigger update for all 'no_entry' trades from today
+    This will:
+    - Fetch and update VWAP slope data
+    - Fetch and update candle size data  
+    - Re-evaluate entry conditions
+    - Update all hourly market data
+    """
+    try:
+        from backend.services.vwap_updater import update_vwap_for_all_open_positions
+        
+        logger.info("🔄 Manual trigger: Updating all 'no_entry' trades from today")
+        
+        # Call the update function which handles no_entry trades
+        await update_vwap_for_all_open_positions()
+        
+        # Count updated records
+        import pytz
+        ist = pytz.timezone('Asia/Kolkata')
+        now = datetime.now(ist)
+        today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        no_entry_count = db.query(IntradayStockOption).filter(
+            and_(
+                IntradayStockOption.trade_date >= today,
+                IntradayStockOption.status == 'no_entry',
+                IntradayStockOption.exit_reason == None
+            )
+        ).count()
+        
+        return {
+            "success": True,
+            "message": f"Update completed for all 'no_entry' trades from today",
+            "no_entry_trades_count": no_entry_count,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in manual update no_entry trades: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
 @router.get("/scheduler-status")
 async def get_scheduler_status():
     """Get status of all schedulers - verifies they are running"""
