@@ -111,15 +111,15 @@
     .stocks-table td.buy-price,
     .stocks-table td.stop-loss,
     .stocks-table td.sell-price {
-        font-size: clamp(9px, 0.65vw, 11px) !important;
+        font-size: clamp(9px, 0.6vw, 11px) !important;
     }
     
     .stocks-table td {
-        font-size: clamp(11px, 0.75vw, 13px);
+        font-size: clamp(11px, 0.7vw, 13px) !important;
     }
     
     .stocks-table th {
-        font-size: clamp(10px, 0.7vw, 12px);
+        font-size: clamp(10px, 0.65vw, 12px) !important;
     }
 }
 
@@ -560,7 +560,7 @@ body {
     font-weight: 600;
     color: var(--text-dark);
     border-bottom: 2px solid var(--border-color);
-    font-size: clamp(10px, 0.7vw, 12px);
+    font-size: clamp(10px, 0.65vw, 12px);
     font-family: Arial, sans-serif;
     text-transform: uppercase;
     letter-spacing: 0.2px;
@@ -586,7 +586,7 @@ body {
 .stocks-table td {
     padding: 8px 4px;
     color: var(--text-medium);
-    font-size: clamp(11px, 0.75vw, 13px);
+    font-size: clamp(11px, 0.7vw, 13px);
     font-family: Arial, sans-serif;
     font-weight: normal;
     white-space: nowrap;
@@ -608,14 +608,14 @@ body {
     font-weight: normal;
     color: var(--text-dark);
     font-family: Arial, sans-serif;
-    font-size: clamp(9px, 0.65vw, 11px) !important;
+    font-size: clamp(9px, 0.6vw, 11px) !important;
 }
 
 .trigger-price {
     font-weight: normal;
     color: var(--success-color);
     font-family: Arial, sans-serif;
-    font-size: clamp(9px, 0.65vw, 11px) !important;
+    font-size: clamp(9px, 0.6vw, 11px) !important;
 }
 
 .vwap-current {
