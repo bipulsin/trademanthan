@@ -927,8 +927,12 @@ function renderAlertGroup(alert, type) {
                             ${stock.vwap_slope_status || stock.candle_size_status ? `
                             <div class="stock-card-row" style="background: rgba(59, 130, 246, 0.1); padding: 4px 8px; border-radius: 4px; margin: 4px 0;">
                                 <div style="flex: 1; font-size: 11px; color: #93c5fd;">
-                                    ${stock.vwap_slope_status ? `<span style="color: ${stock.vwap_slope_status === 'Yes' ? '#10b981' : '#dc2626'}; font-weight: 600;">Slope: ${stock.vwap_slope_status === 'Yes' ? '✅' : '❌'}</span>` : ''}
-                                    ${stock.candle_size_status ? `<span style="color: ${stock.candle_size_status === 'Pass' ? '#10b981' : '#dc2626'}; font-weight: 600; margin-left: 8px;">Size: ${stock.candle_size_status === 'Pass' ? '✅' : '❌'} ${stock.candle_size_ratio ? '(' + stock.candle_size_ratio.toFixed(2) + '×)' : ''}</span>` : ''}
+                                    ${stock.vwap_slope_status ? (stock.vwap_slope_status === 'Skipped' ? 
+                                        `<span style="color: #f59e0b; font-weight: 600;">Slope: ⚠️ Skipped</span>` :
+                                        `<span style="color: ${stock.vwap_slope_status === 'Yes' ? '#10b981' : '#dc2626'}; font-weight: 600;">Slope: ${stock.vwap_slope_status === 'Yes' ? '✅' : '❌'}</span>`) : ''}
+                                    ${stock.candle_size_status ? (stock.candle_size_status === 'Skipped' ? 
+                                        `<span style="color: #f59e0b; font-weight: 600; margin-left: 8px;">Size: ⚠️ Skipped</span>` :
+                                        `<span style="color: ${stock.candle_size_status === 'Pass' ? '#10b981' : '#dc2626'}; font-weight: 600; margin-left: 8px;">Size: ${stock.candle_size_status === 'Pass' ? '✅' : '❌'} ${stock.candle_size_ratio ? '(' + stock.candle_size_ratio.toFixed(2) + '×)' : ''}</span>`) : ''}
                                 </div>
                             </div>
                             ` : ''}
