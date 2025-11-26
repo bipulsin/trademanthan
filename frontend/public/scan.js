@@ -819,6 +819,19 @@ function renderAlertGroup(alert, type) {
                             }
                         }
                         
+                        // Combine VWAP Slope and Candle Size into single display
+                        let combinedFilterDisplay = '-';
+                        if (vwapSlopeDisplay !== '-' || candleSizeDisplay !== '-') {
+                            const parts = [];
+                            if (vwapSlopeDisplay !== '-') {
+                                parts.push(vwapSlopeDisplay);
+                            }
+                            if (candleSizeDisplay !== '-') {
+                                parts.push(candleSizeDisplay);
+                            }
+                            combinedFilterDisplay = parts.join(' / ');
+                        }
+                        
                         return '<tr>' +
                             '<td>' + (index + 1) + '</td>' +
                             '<td class="stock-name">' + escapeHtml(stock.stock_name) + '</td>' +
