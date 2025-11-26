@@ -10,9 +10,9 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(os.path.dirname(script_dir))
 sys.path.insert(0, parent_dir)
 
-from database import SessionLocal
-from models.trading import IntradayStockOption
-from services.upstox_service import upstox_service
+from backend.database import SessionLocal
+from backend.models.trading import IntradayStockOption
+from backend.services.upstox_service import upstox_service
 from datetime import datetime
 import pytz
 import math
