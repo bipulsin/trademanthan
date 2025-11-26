@@ -7,16 +7,16 @@ import sys
 import os
 from pathlib import Path
 
-# Add backend directory to path (for relative imports)
-backend_dir = Path(__file__).parent.parent
-sys.path.insert(0, str(backend_dir))
+# Add project root to path
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
 
-# Change to backend directory (where services can be imported)
-os.chdir(backend_dir)
+# Change to project root directory
+os.chdir(project_root)
 
-# Now import using relative paths (as the services do)
-from database import SessionLocal
-from services.vwap_updater import update_vwap_for_all_open_positions
+# Import using absolute paths
+from backend.database import SessionLocal
+from backend.services.vwap_updater import update_vwap_for_all_open_positions
 import asyncio
 import pytz
 from datetime import datetime
