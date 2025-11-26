@@ -574,14 +574,14 @@ body {
     font-weight: normal;
     color: var(--text-dark);
     font-family: Arial, sans-serif;
-    font-size: 12px;
+    font-size: 10px;
 }
 
 .trigger-price {
     font-weight: normal;
     color: var(--success-color);
     font-family: Arial, sans-serif;
-    font-size: 14px;
+    font-size: 10px;
 }
 
 .vwap-current {
@@ -773,6 +773,27 @@ body {
 /* Stock VWAP Column Styles */
 .stock-vwap-col {
     vertical-align: middle;
+    font-size: 10px;
+}
+
+.option-contract {
+    font-size: 10px;
+}
+
+.qty {
+    font-size: 10px;
+}
+
+.buy-price {
+    font-size: 10px;
+}
+
+.stop-loss {
+    font-size: 10px;
+}
+
+.sell-price {
+    font-size: 10px;
 }
 
 .hold-icon {
