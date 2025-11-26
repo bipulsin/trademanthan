@@ -2238,7 +2238,15 @@ class UpstoxService:
             current_hour = now.hour
             current_minute = now.minute
             
-            # Fetch hourly candles for last 2 days
+            # Fetch 15-minute candles for current day (to find nearest candle)
+            # and hourly candles for previous day
+            current_day_candles_15min = self.get_historical_candles_by_instrument_key(
+                instrument_key,
+                interval="minutes/15",
+                days_back=1  # Just need today's data
+            )
+            
+            # Fetch hourly candles for last 2 days (for previous day aggregation)
             candles = self.get_historical_candles_by_instrument_key(
                 instrument_key,
                 interval="hours/1",
@@ -2300,9 +2308,9 @@ class UpstoxService:
                 if len(current_day_candles) == 0 and len(previous_day_candles) == 0:
                     logger.debug(f"Sample candle: date={candle_date}, hour={candle_hour}, today={today}, yesterday={yesterday}")
                 
-                # Current day candles up to current hour
+                # Current day hourly candles up to current hour (for open/close)
                 if candle_date == today and candle_hour <= current_hour:
-                    current_day_candles.append(candle)
+                    current_day_candles_hourly.append(candle)
                 # Previous day candles - complete day (all hours)
                 elif candle_date == yesterday:
                     previous_day_candles.append(candle)
