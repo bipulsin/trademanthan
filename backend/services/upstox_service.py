@@ -1378,7 +1378,7 @@ class UpstoxService:
             logger.error(f"Error calculating VWAP: {str(e)}")
             return 0.0
     
-    def vwap_slope(self, vwap1: float, time1: datetime, vwap2: float, time2: datetime) -> str:
+    def vwap_slope(self, vwap1: float, time1: datetime, vwap2: float, time2: datetime) -> dict:
         """
         Calculate the inclination (slope angle) in degrees between two VWAP points
         for the same stock on the same day.
@@ -1397,7 +1397,10 @@ class UpstoxService:
             time2: Timestamp of second VWAP (datetime object, should be later than time1)
         
         Returns:
-            "Yes" if absolute inclination is 45 degrees or more (either upward or downward), "No" otherwise
+            Dictionary with:
+            - "status": "Yes" if absolute inclination is 45 degrees or more, "No" otherwise
+            - "angle": float, angle in degrees
+            - "direction": "upward", "downward", or "flat"
         
         Formula:
             - Set first VWAP as origin: price_change_at_start = 0
@@ -1421,7 +1424,7 @@ class UpstoxService:
             # Validate inputs
             if vwap1 <= 0 or vwap2 <= 0:
                 logger.warning("Invalid VWAP values (must be > 0)")
-                return "No"
+                return {"status": "No", "angle": 0.0, "direction": "flat"}
             
             # Ensure both datetimes are timezone-aware (IST)
             ist = pytz.timezone('Asia/Kolkata')
@@ -1437,7 +1440,7 @@ class UpstoxService:
             
             if time1 >= time2:
                 logger.warning("time1 must be earlier than time2")
-                return "No"
+                return {"status": "No", "angle": 0.0, "direction": "flat"}
             
             # Calculate time difference in hours
             time_diff = time2 - time1
@@ -1445,7 +1448,7 @@ class UpstoxService:
             
             if time_diff_hours <= 0:
                 logger.warning("Invalid time difference")
-                return "No"
+                return {"status": "No", "angle": 0.0, "direction": "flat"}
             
             # Set first VWAP as origin (0)
             # Calculate price change from origin
@@ -1489,11 +1492,13 @@ class UpstoxService:
             logger.debug(f"  Slope ratio (rise/run): {slope_ratio:.4f}")
             logger.debug(f"  Angle: {angle_degrees:.2f} degrees ({direction})")
             
-            # Return "Yes" if absolute angle is 45 degrees or more (for both upward and downward slopes)
-            if angle_degrees >= 45.0:
-                return "Yes"
-            else:
-                return "No"
+            # Return dictionary with status, angle, and direction
+            status = "Yes" if angle_degrees >= 45.0 else "No"
+            return {
+                "status": status,
+                "angle": round(angle_degrees, 2),
+                "direction": direction
+            }
                 
         except Exception as e:
             logger.error(f"Error calculating VWAP slope: {str(e)}")

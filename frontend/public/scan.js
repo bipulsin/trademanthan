@@ -774,7 +774,7 @@ function renderAlertGroup(alert, type) {
                         const sellPriceDisplay = isNoEntry ? '-' : '₹' + formatPrice(stock.sell_price || 0);
                         const pnlDisplay = isNoEntry ? '-' : formatPNL(stock.pnl || 0);
                         
-                        // Format VWAP slope status
+                        // Format VWAP slope status with angle
                         let vwapSlopeDisplay = '-';
                         if (stock.vwap_slope_status) {
                             if (stock.vwap_slope_status === 'Skipped') {
@@ -782,7 +782,10 @@ function renderAlertGroup(alert, type) {
                             } else {
                                 const slopeColor = stock.vwap_slope_status === 'Yes' ? '#10b981' : '#dc2626';
                                 const slopeIcon = stock.vwap_slope_status === 'Yes' ? '✅' : '❌';
-                                vwapSlopeDisplay = `<span style="color: ${slopeColor}; font-weight: 600;">${slopeIcon} ${stock.vwap_slope_status}</span>`;
+                                const angleText = stock.vwap_slope_angle !== null && stock.vwap_slope_angle !== undefined 
+                                    ? ` (${stock.vwap_slope_angle}°${stock.vwap_slope_direction ? ' ' + stock.vwap_slope_direction : ''})` 
+                                    : '';
+                                vwapSlopeDisplay = `<span style="color: ${slopeColor}; font-weight: 600;">${slopeIcon} ${stock.vwap_slope_status}${angleText}</span>`;
                             }
                         }
                         

@@ -925,11 +925,17 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                             time2=triggered_datetime
                         )
                         
-                        if slope_result == "Yes":
-                            vwap_slope_passed = True
-                            vwap_slope_reason = f"VWAP slope >= 45° (Previous: ₹{stock_vwap_prev:.2f} at {stock_vwap_prev_time.strftime('%H:%M')}, Current: ₹{stock_vwap:.2f})"
+                        # Handle new dictionary return format
+                        if isinstance(slope_result, dict):
+                            slope_status = slope_result.get("status", "No")
+                            slope_angle = slope_result.get("angle", 0.0)
+                            slope_direction = slope_result.get("direction", "flat")
+                            vwap_slope_passed = (slope_status == "Yes")
+                            vwap_slope_reason = f"VWAP slope {slope_angle:.2f}° ({slope_direction}) - {'>= 45°' if vwap_slope_passed else '< 45°'} (Previous: ₹{stock_vwap_prev:.2f} at {stock_vwap_prev_time.strftime('%H:%M')}, Current: ₹{stock_vwap:.2f})"
                         else:
-                            vwap_slope_reason = f"VWAP slope < 45° (Previous: ₹{stock_vwap_prev:.2f} at {stock_vwap_prev_time.strftime('%H:%M')}, Current: ₹{stock_vwap:.2f})"
+                            # Backward compatibility: handle old string return format
+                            vwap_slope_passed = (slope_result == "Yes")
+                            vwap_slope_reason = f"VWAP slope {'>= 45°' if vwap_slope_passed else '< 45°'} (Previous: ₹{stock_vwap_prev:.2f} at {stock_vwap_prev_time.strftime('%H:%M')}, Current: ₹{stock_vwap:.2f})"
                     except Exception as slope_error:
                         vwap_slope_reason = f"Error calculating VWAP slope: {str(slope_error)}"
                 else:
