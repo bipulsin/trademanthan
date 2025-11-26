@@ -786,50 +786,35 @@ function renderAlertGroup(alert, type) {
                             }
                         }
                         
-                        // Format VWAP slope status with angle
-                        let vwapSlopeDisplay = '-';
-                        if (stock.vwap_slope_status) {
-                            if (stock.vwap_slope_status === 'Skipped') {
-                                vwapSlopeDisplay = `<span style="color: #f59e0b; font-weight: 600;">⚠️ Skipped</span>`;
-                            } else {
-                                const slopeColor = stock.vwap_slope_status === 'Yes' ? '#10b981' : '#dc2626';
-                                const statusText = stock.vwap_slope_status === 'Yes' ? 'Y' : 'N';
-                                let angleText = '';
-                                if (stock.vwap_slope_angle !== null && stock.vwap_slope_angle !== undefined) {
-                                    const direction = stock.vwap_slope_direction === 'upward' ? 'up' : (stock.vwap_slope_direction === 'downward' ? 'dn' : '');
-                                    angleText = ` ${stock.vwap_slope_angle}°${direction ? ' ' + direction : ''}`;
-                                }
-                                vwapSlopeDisplay = `<span style="color: ${slopeColor}; font-weight: 600;">${statusText}${angleText}</span>`;
-                            }
-                        }
-                        
-                        // Format candle size status
-                        let candleSizeDisplay = '-';
-                        if (stock.candle_size_status) {
-                            if (stock.candle_size_status === 'Skipped') {
-                                candleSizeDisplay = `<span style="color: #f59e0b; font-weight: 600;">⚠️ Skipped</span>`;
-                            } else if (stock.candle_size_ratio !== null && stock.candle_size_ratio !== undefined) {
-                                const sizeColor = stock.candle_size_status === 'Pass' ? '#10b981' : '#dc2626';
-                                const statusText = stock.candle_size_status === 'Pass' ? 'P' : 'F';
-                                const ratioText = `${stock.candle_size_ratio.toFixed(2)}x`;
-                                candleSizeDisplay = `<span style="color: ${sizeColor}; font-weight: 600;" title="Ratio: ${stock.candle_size_ratio.toFixed(2)}×">${statusText} ${ratioText}</span>`;
-                            } else {
-                                candleSizeDisplay = `<span style="color: #6b7280; font-weight: 600;">${stock.candle_size_status}</span>`;
-                            }
-                        }
-                        
-                        // Combine VWAP Slope and Candle Size into single display (vertically stacked)
+                        // Format VWAP slope and Candle Size combined display: "70°/1.83x"
                         let combinedFilterDisplay = '-';
-                        if (vwapSlopeDisplay !== '-' || candleSizeDisplay !== '-') {
-                            const parts = [];
-                            if (vwapSlopeDisplay !== '-') {
-                                parts.push(vwapSlopeDisplay);
+                        const parts = [];
+                        
+                        // Extract VWAP slope angle (rounded to whole number)
+                        if (stock.vwap_slope_status && stock.vwap_slope_status !== 'Skipped') {
+                            if (stock.vwap_slope_angle !== null && stock.vwap_slope_angle !== undefined) {
+                                const roundedAngle = Math.round(stock.vwap_slope_angle);
+                                const slopeColor = stock.vwap_slope_status === 'Yes' ? '#10b981' : '#dc2626';
+                                parts.push(`<span style="color: ${slopeColor}; font-weight: 600;">${roundedAngle}°</span>`);
                             }
-                            if (candleSizeDisplay !== '-') {
-                                parts.push(candleSizeDisplay);
+                        } else if (stock.vwap_slope_status === 'Skipped') {
+                            parts.push(`<span style="color: #f59e0b; font-weight: 600;">⚠️ Skipped</span>`);
+                        }
+                        
+                        // Extract candle size ratio
+                        if (stock.candle_size_status && stock.candle_size_status !== 'Skipped') {
+                            if (stock.candle_size_ratio !== null && stock.candle_size_ratio !== undefined) {
+                                const sizeColor = stock.candle_size_status === 'Pass' ? '#10b981' : '#dc2626';
+                                const ratioText = `${stock.candle_size_ratio.toFixed(2)}x`;
+                                parts.push(`<span style="color: ${sizeColor}; font-weight: 600;" title="Ratio: ${stock.candle_size_ratio.toFixed(2)}×">${ratioText}</span>`);
                             }
-                            // Display values vertically (one below the other)
-                            combinedFilterDisplay = parts.join('<br>');
+                        } else if (stock.candle_size_status === 'Skipped') {
+                            parts.push(`<span style="color: #f59e0b; font-weight: 600;">⚠️ Skipped</span>`);
+                        }
+                        
+                        // Combine with "/" separator: "70°/1.83x"
+                        if (parts.length > 0) {
+                            combinedFilterDisplay = parts.join(' / ');
                         }
                         
                         // Combine Stock LTP and VWAP into single column (vertically stacked)
