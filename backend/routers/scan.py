@@ -1083,7 +1083,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         print(f"      - Option Data: {'✅' if option_ltp_value > 0 and lot_size > 0 else '❌'} {'Valid' if option_ltp_value > 0 and lot_size > 0 else f'Missing (LTP: {option_ltp_value}, Qty: {lot_size})'}")
                         print(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
                         logger.info(f"🚫 NO ENTRY DECISION: {stock_name} | Time: {no_entry_time_str} | Reason: Index trends not aligned (NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend})")
-                    elif not vwap_slope_passed:
+                    elif not vwap_slope_passed and not is_10_15_alert:
                         print(f"🚫 NO ENTRY: {stock_name} - VWAP slope condition not met")
                         print(f"   ⏰ Decision Time: {no_entry_time_str}")
                         print(f"   📊 Entry Conditions:")
@@ -1094,7 +1094,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         print(f"      - Option Data: {'✅' if option_ltp_value > 0 and lot_size > 0 else '❌'} {'Valid' if option_ltp_value > 0 and lot_size > 0 else f'Missing (LTP: {option_ltp_value}, Qty: {lot_size})'}")
                         print(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
                         logger.info(f"🚫 NO ENTRY DECISION: {stock_name} | Time: {no_entry_time_str} | Reason: {vwap_slope_reason}")
-                    elif not candle_size_passed:
+                    elif not candle_size_passed and not is_10_15_alert:
                         print(f"🚫 NO ENTRY: {stock_name} - Candle size condition not met")
                         print(f"   ⏰ Decision Time: {no_entry_time_str}")
                         print(f"   📊 Entry Conditions:")
