@@ -570,18 +570,30 @@ body {
     white-space: nowrap;
 }
 
+/* Override font sizes for specific columns - use !important to override inline styles */
+.stocks-table td.stock-name,
+.stocks-table td.trigger-price,
+.stocks-table td.stock-vwap-col,
+.stocks-table td.option-contract,
+.stocks-table td.qty,
+.stocks-table td.buy-price,
+.stocks-table td.stop-loss,
+.stocks-table td.sell-price {
+    font-size: 10px !important;
+}
+
 .stock-name {
     font-weight: normal;
     color: var(--text-dark);
     font-family: Arial, sans-serif;
-    font-size: 10px;
+    font-size: 10px !important;
 }
 
 .trigger-price {
     font-weight: normal;
     color: var(--success-color);
     font-family: Arial, sans-serif;
-    font-size: 10px;
+    font-size: 10px !important;
 }
 
 .vwap-current {
@@ -773,27 +785,27 @@ body {
 /* Stock VWAP Column Styles */
 .stock-vwap-col {
     vertical-align: middle;
-    font-size: 10px;
+    font-size: 10px !important;
 }
 
 .option-contract {
-    font-size: 10px;
+    font-size: 10px !important;
 }
 
 .qty {
-    font-size: 10px;
+    font-size: 10px !important;
 }
 
 .buy-price {
-    font-size: 10px;
+    font-size: 10px !important;
 }
 
 .stop-loss {
-    font-size: 10px;
+    font-size: 10px !important;
 }
 
 .sell-price {
-    font-size: 10px;
+    font-size: 10px !important;
 }
 
 .hold-icon {
