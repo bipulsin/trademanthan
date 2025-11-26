@@ -1045,12 +1045,12 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     buy_time = None  # Don't set buy time since trade wasn't executed
                     sell_price = None  # No sell since trade wasn't executed
                     
-                    # Stop Loss = Low price of previous option candle (for analysis purposes)
+                    # Stop Loss = Low price of previous day candle (for analysis purposes)
                     stop_loss_price = None
-                    if option_candles and option_candles.get('previous_candle'):
-                        previous_candle_low = option_candles.get('previous_candle', {}).get('low')
-                        if previous_candle_low and previous_candle_low > 0:
-                            stop_loss_price = float(previous_candle_low)
+                    if option_candles and option_candles.get('previous_day_candle'):
+                        previous_day_candle_low = option_candles.get('previous_day_candle', {}).get('low')
+                        if previous_day_candle_low and previous_day_candle_low > 0:
+                            stop_loss_price = float(previous_day_candle_low)
                         else:
                             stop_loss_price = 0.05
                     else:
