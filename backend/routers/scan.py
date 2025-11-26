@@ -942,20 +942,26 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         previous_day_candle = option_candles.get('previous_day_candle', {})
                         
                         if current_day_candle and previous_day_candle:
-                            # Calculate candle size (High - Low) for daily candles
-                            current_size = abs(current_day_candle.get('high', 0) - current_day_candle.get('low', 0))
-                            previous_size = abs(previous_day_candle.get('high', 0) - previous_day_candle.get('low', 0))
+                            # Current day: High/Low from candles up to current time
+                            current_high = current_day_candle.get('high', 0)
+                            current_low = current_day_candle.get('low', 0)
+                            current_size = abs(current_high - current_low)
+                            
+                            # Previous day: Complete day High/Low
+                            previous_high = previous_day_candle.get('high', 0)
+                            previous_low = previous_day_candle.get('low', 0)
+                            previous_size = abs(previous_high - previous_low)
                             
                             if previous_size > 0:
                                 size_ratio = current_size / previous_size
                                 
-                                # Check if current day candle is less than 7-8 times previous day candle
+                                # Check if current day candle (up to current time) is less than 7-8 times previous day candle (complete day)
                                 # Using 7.5 as threshold (middle of 7-8 range)
                                 if size_ratio < 7.5:
                                     candle_size_passed = True
-                                    candle_size_reason = f"Daily candle size OK: Current Day ({current_size:.2f}) < 7.5× Previous Day ({previous_size:.2f}), Ratio: {size_ratio:.2f}"
+                                    candle_size_reason = f"Daily candle size OK: Current Day (up to {triggered_datetime.hour}:{triggered_datetime.minute:02d}) High={current_high:.2f}, Low={current_low:.2f}, Size={current_size:.2f} < 7.5× Previous Day (complete) High={previous_high:.2f}, Low={previous_low:.2f}, Size={previous_size:.2f}, Ratio: {size_ratio:.2f}"
                                 else:
-                                    candle_size_reason = f"Daily candle size too large: Current Day ({current_size:.2f}) >= 7.5× Previous Day ({previous_size:.2f}), Ratio: {size_ratio:.2f}"
+                                    candle_size_reason = f"Daily candle size too large: Current Day (up to {triggered_datetime.hour}:{triggered_datetime.minute:02d}) High={current_high:.2f}, Low={current_low:.2f}, Size={current_size:.2f} >= 7.5× Previous Day (complete) High={previous_high:.2f}, Low={previous_low:.2f}, Size={previous_size:.2f}, Ratio: {size_ratio:.2f}"
                             else:
                                 candle_size_reason = "Previous day candle size is zero (cannot calculate ratio)"
                         else:
