@@ -538,7 +538,7 @@ body {
     font-weight: 600;
     color: var(--text-dark);
     border-bottom: 2px solid var(--border-color);
-    font-size: 11px;
+    font-size: clamp(10px, 0.7vw, 12px);
     font-family: Arial, sans-serif;
     text-transform: uppercase;
     letter-spacing: 0.2px;
@@ -564,7 +564,7 @@ body {
 .stocks-table td {
     padding: 8px 4px;
     color: var(--text-medium);
-    font-size: 12px;
+    font-size: clamp(11px, 0.75vw, 13px);
     font-family: Arial, sans-serif;
     font-weight: normal;
     white-space: nowrap;
