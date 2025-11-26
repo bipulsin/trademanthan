@@ -2297,16 +2297,16 @@ class UpstoxService:
                 today = now.date()
                 yesterday = today - timedelta(days=1)
                 
-                # Debug logging for first few candles
-                if len(current_day_candles_hourly) == 0 and len(previous_day_candles) == 0:
-                    logger.debug(f"Sample candle: date={candle_date}, hour={candle_hour}, today={today}, yesterday={yesterday}")
-                
                 # Current day hourly candles up to current hour (for open/close)
                 if candle_date == today and candle_hour <= current_hour:
                     current_day_candles_hourly.append(candle)
                 # Previous day candles - complete day (all hours)
                 elif candle_date == yesterday:
                     previous_day_candles.append(candle)
+                
+                # Debug logging for first few candles to understand date matching
+                if len(current_day_candles_hourly) == 0 and len(previous_day_candles) < 3:
+                    logger.debug(f"Sample candle: date={candle_date}, hour={candle_hour}, today={today}, yesterday={yesterday}, matches_today={candle_date == today}, matches_yesterday={candle_date == yesterday}")
                 # Also check if candle is from today but hour is greater (shouldn't happen, but handle edge case)
                 elif candle_date == today and candle_hour > current_hour:
                     # Skip future candles
