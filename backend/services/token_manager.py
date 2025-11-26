@@ -55,6 +55,7 @@ def save_upstox_token(access_token: str, expires_at: Optional[int] = None) -> bo
 def load_upstox_token() -> Optional[str]:
     """
     Load Upstox access token from file or environment
+    Checks expiration before returning token
     
     Priority:
     1. Token file (most recent OAuth login)
@@ -62,8 +63,11 @@ def load_upstox_token() -> Optional[str]:
     3. None (token not configured)
     
     Returns:
-        Access token string or None
+        Access token string or None (if expired or not found)
     """
+    import base64
+    from datetime import datetime
+    
     try:
         # Try to load from token file first (most recent)
         if TOKEN_FILE.exists():
@@ -72,9 +76,44 @@ def load_upstox_token() -> Optional[str]:
             
             access_token = token_data.get("access_token")
             updated_at = token_data.get("updated_at")
+            stored_expires_at = token_data.get("expires_at")
             
             if access_token:
-                logger.info(f"✅ Loaded Upstox token from file (updated: {updated_at})")
+                # Check expiration
+                expires_at = stored_expires_at
+                
+                # If expires_at not stored, decode from JWT
+                if expires_at is None:
+                    try:
+                        parts = access_token.split('.')
+                        if len(parts) >= 2:
+                            payload = parts[1]
+                            # Add padding if needed
+                            padding = len(payload) % 4
+                            if padding:
+                                payload += '=' * (4 - padding)
+                            
+                            decoded = base64.urlsafe_b64decode(payload)
+                            jwt_data = json.loads(decoded)
+                            expires_at = jwt_data.get('exp')
+                            
+                            if expires_at:
+                                logger.info(f"✅ Decoded expiration from JWT: {datetime.fromtimestamp(expires_at).strftime('%Y-%m-%d %H:%M:%S')}")
+                    except Exception as jwt_error:
+                        logger.warning(f"⚠️ Could not decode JWT expiration: {jwt_error}")
+                
+                # Check if token is expired
+                if expires_at:
+                    now_timestamp = datetime.now().timestamp()
+                    if now_timestamp >= expires_at:
+                        logger.warning(f"⚠️ Upstox token expired at {datetime.fromtimestamp(expires_at).strftime('%Y-%m-%d %H:%M:%S')}, current time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                        return None
+                    else:
+                        time_until_expiry = (expires_at - now_timestamp) / 3600
+                        logger.info(f"✅ Loaded Upstox token from file (updated: {updated_at}, expires in {time_until_expiry:.1f} hours)")
+                else:
+                    logger.info(f"✅ Loaded Upstox token from file (updated: {updated_at}, expiration unknown)")
+                
                 return access_token
         
         # Fallback to environment variable

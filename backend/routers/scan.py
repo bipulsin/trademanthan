@@ -3061,6 +3061,25 @@ async def upstox_oauth_callback(code: str = None, state: str = None, error: str 
         if expires_in:
             from datetime import datetime, timedelta
             expires_at = int((datetime.now() + timedelta(seconds=expires_in)).timestamp())
+        else:
+            # If expires_in not provided, decode from JWT token
+            try:
+                import base64
+                parts = access_token.split('.')
+                if len(parts) >= 2:
+                    payload = parts[1]
+                    # Add padding if needed
+                    padding = len(payload) % 4
+                    if padding:
+                        payload += '=' * (4 - padding)
+                    
+                    decoded = base64.urlsafe_b64decode(payload)
+                    jwt_data = json.loads(decoded)
+                    expires_at = jwt_data.get('exp')
+                    if expires_at:
+                        logger.info(f"✅ Decoded expiration from JWT: {datetime.fromtimestamp(expires_at).strftime('%Y-%m-%d %H:%M:%S')}")
+            except Exception as jwt_error:
+                logger.warning(f"⚠️ Could not decode JWT expiration: {jwt_error}")
         
         # Save token using token manager (persistent storage)
         try:
