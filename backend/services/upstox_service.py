@@ -2239,10 +2239,11 @@ class UpstoxService:
             current_minute = now.minute
             
             # Fetch hourly candles for last 2 days (for current and previous day aggregation)
+            # Use days_back=3 to ensure we get today's candles even if market just opened
             candles = self.get_historical_candles_by_instrument_key(
                 instrument_key,
                 interval="hours/1",
-                days_back=2
+                days_back=3  # Increased to ensure we capture today's candles
             )
             
             if not candles or len(candles) < 1:
