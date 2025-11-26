@@ -2181,7 +2181,7 @@ class UpstoxService:
     
     def get_option_daily_candles_current_and_previous(self, instrument_key: str) -> Optional[Dict]:
         """
-        Get aggregated daily candles for current day (up to current hour) and previous day (up to same hour)
+        Get aggregated daily candles for current day (up to current hour) and previous day (complete day)
         
         Args:
             instrument_key: Option instrument key (e.g., "NSE_FO|RELIANCE25NOV1450CE")
