@@ -2431,7 +2431,7 @@ class UpstoxService:
                 }
             
             if not current_day_candle or not previous_day_candle:
-                logger.warning(f"⚠️ Could not aggregate daily candles for {instrument_key} (Current: {len(current_day_candles)} candles, Previous: {len(previous_day_candles)} candles)")
+                logger.warning(f"⚠️ Could not aggregate daily candles for {instrument_key} (Current: {len(current_day_candles_hourly)} hourly candles, Previous: {len(previous_day_candles)} candles)")
                 return None
             
             logger.info(f"✅ Fetched daily candles for {instrument_key}")
