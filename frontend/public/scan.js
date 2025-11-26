@@ -782,11 +782,13 @@ function renderAlertGroup(alert, type) {
                                 vwapSlopeDisplay = `<span style="color: #f59e0b; font-weight: 600;">⚠️ Skipped</span>`;
                             } else {
                                 const slopeColor = stock.vwap_slope_status === 'Yes' ? '#10b981' : '#dc2626';
-                                const slopeIcon = stock.vwap_slope_status === 'Yes' ? '✅' : '❌';
-                                const angleText = stock.vwap_slope_angle !== null && stock.vwap_slope_angle !== undefined 
-                                    ? ` (${stock.vwap_slope_angle}°${stock.vwap_slope_direction ? ' ' + stock.vwap_slope_direction : ''})` 
-                                    : '';
-                                vwapSlopeDisplay = `<span style="color: ${slopeColor}; font-weight: 600;">${slopeIcon} ${stock.vwap_slope_status}${angleText}</span>`;
+                                const statusText = stock.vwap_slope_status === 'Yes' ? 'Y' : 'N';
+                                let angleText = '';
+                                if (stock.vwap_slope_angle !== null && stock.vwap_slope_angle !== undefined) {
+                                    const direction = stock.vwap_slope_direction === 'upward' ? 'up' : (stock.vwap_slope_direction === 'downward' ? 'dn' : '');
+                                    angleText = ` ${stock.vwap_slope_angle}°${direction ? ' ' + direction : ''}`;
+                                }
+                                vwapSlopeDisplay = `<span style="color: ${slopeColor}; font-weight: 600;">${statusText}${angleText}</span>`;
                             }
                         }
                         
@@ -935,11 +937,13 @@ function renderAlertGroup(alert, type) {
                                         `<span style="color: #f59e0b; font-weight: 600;">Slope: ⚠️ Skipped</span>` :
                                         (() => {
                                             const slopeColor = stock.vwap_slope_status === 'Yes' ? '#10b981' : '#dc2626';
-                                            const slopeIcon = stock.vwap_slope_status === 'Yes' ? '✅' : '❌';
-                                            const angleText = stock.vwap_slope_angle !== null && stock.vwap_slope_angle !== undefined 
-                                                ? ` (${stock.vwap_slope_angle}°${stock.vwap_slope_direction ? ' ' + stock.vwap_slope_direction : ''})` 
-                                                : '';
-                                            return `<span style="color: ${slopeColor}; font-weight: 600;">Slope: ${slopeIcon} ${stock.vwap_slope_status}${angleText}</span>`;
+                                            const statusText = stock.vwap_slope_status === 'Yes' ? 'Y' : 'N';
+                                            let angleText = '';
+                                            if (stock.vwap_slope_angle !== null && stock.vwap_slope_angle !== undefined) {
+                                                const direction = stock.vwap_slope_direction === 'upward' ? 'up' : (stock.vwap_slope_direction === 'downward' ? 'dn' : '');
+                                                angleText = ` ${stock.vwap_slope_angle}°${direction ? ' ' + direction : ''}`;
+                                            }
+                                            return `<span style="color: ${slopeColor}; font-weight: 600;">Slope: ${statusText}${angleText}</span>`;
                                         })()) : ''}
                                     ${stock.candle_size_status ? (stock.candle_size_status === 'Skipped' ? 
                                         `<span style="color: #f59e0b; font-weight: 600; margin-left: 8px;">Size: ⚠️ Skipped</span>` :
