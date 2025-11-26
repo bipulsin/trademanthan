@@ -87,6 +87,17 @@ class VWAPUpdater:
                 replace_existing=True
             )
             
+            # Additional evaluation at 10:30 AM to re-evaluate all existing entries
+            # This is especially useful for 10:15 AM alerts that may have failed filters
+            # due to insufficient historical data at alert time
+            self.scheduler.add_job(
+                update_vwap_for_all_open_positions,
+                trigger=CronTrigger(hour=10, minute=30, timezone='Asia/Kolkata'),
+                id='vwap_update_10_30',
+                name='Evaluate All Entries at 10:30 AM',
+                replace_existing=True
+            )
+            
             self.scheduler.start()
             self.is_running = True
             logger.info("✅ Market Data Updater started - Hourly updates + EOD exits at 3:25 PM + EOD VWAP at 3:30 PM")
