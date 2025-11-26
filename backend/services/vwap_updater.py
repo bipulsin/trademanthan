@@ -1151,11 +1151,14 @@ async def close_all_open_trades():
         now = datetime.now(ist)
         today = now.date()
         
-        # Find all open positions for today (exit_reason is NULL or status != 'sold')
+        # Find all open positions for today
+        # CRITICAL: Only include trades that have NO exit_reason (not already exited)
+        # This ensures trades exited with VWAP cross, stop loss, or profit target are NOT overwritten
         open_positions = db.query(IntradayStockOption).filter(
             IntradayStockOption.trade_date == today,
-            IntradayStockOption.exit_reason.is_(None),
-            IntradayStockOption.status != 'sold'
+            IntradayStockOption.exit_reason.is_(None),  # Must be NULL - excludes all already-exited trades
+            IntradayStockOption.status != 'sold',  # Additional safety check
+            IntradayStockOption.status != 'no_entry'  # Exclude trades that were never entered
         ).all()
         
         if not open_positions:
