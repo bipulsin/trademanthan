@@ -676,8 +676,7 @@ function renderAlertGroup(alert, type) {
                         <th>Stock Name</th>
                         <th>Stock LTP</th>
                         <th>Stock VWAP</th>
-                        <th>VWAP Slope</th>
-                        <th>Candle Size</th>
+                        <th>VWAP Slope / Candle Size</th>
                         <th>Option Contract (OTM-1)</th>
                         <th>Qty</th>
                         <th>Buy Price</th>
@@ -825,8 +824,7 @@ function renderAlertGroup(alert, type) {
                             '<td class="stock-name">' + escapeHtml(stock.stock_name) + '</td>' +
                             '<td class="trigger-price">₹' + formatPrice(stock_ltp) + '</td>' +
                             '<td class="stock-vwap-col">₹' + formatPrice(stock_vwap) + '</td>' +
-                            '<td class="vwap-slope-col" style="font-size: 12px;">' + vwapSlopeDisplay + '</td>' +
-                            '<td class="candle-size-col" style="font-size: 12px;">' + candleSizeDisplay + '</td>' +
+                            '<td class="vwap-slope-col" style="font-size: 12px;">' + combinedFilterDisplay + '</td>' +
                             '<td class="option-contract">' + escapeHtml(stock.option_contract || 'N/A') + '</td>' +
                             '<td class="qty">' + (stock.qty || 0) + '</td>' +
                             '<td class="buy-price">' + buyPriceDisplay + '</td>' +
