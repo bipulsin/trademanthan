@@ -197,9 +197,10 @@ body {
 }
 
 .scan-container {
-    max-width: 1400px;
+    max-width: 100%;
     margin: 0 auto;
     padding: 20px;
+    overflow-x: auto;
 }
 
 /* Header Styles */
@@ -530,18 +531,18 @@ body {
 }
 
 .stocks-table th {
-    padding: 12px 8px;
+    padding: 8px 4px;
     text-align: left;
     font-weight: 600;
     color: var(--text-dark);
     border-bottom: 2px solid var(--border-color);
-    font-size: 13px;
+    font-size: 11px;
     font-family: Arial, sans-serif;
     text-transform: uppercase;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.2px;
     white-space: normal;
     word-wrap: break-word;
-    line-height: 1.3;
+    line-height: 1.2;
 }
 
 .stocks-table tbody tr {
@@ -559,9 +560,9 @@ body {
 }
 
 .stocks-table td {
-    padding: 12px 8px;
+    padding: 8px 4px;
     color: var(--text-medium);
-    font-size: 14px;
+    font-size: 12px;
     font-family: Arial, sans-serif;
     font-weight: normal;
     white-space: nowrap;
@@ -571,7 +572,7 @@ body {
     font-weight: normal;
     color: var(--text-dark);
     font-family: Arial, sans-serif;
-    font-size: 14px;
+    font-size: 12px;
 }
 
 .trigger-price {
