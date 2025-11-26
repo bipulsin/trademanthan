@@ -2064,8 +2064,13 @@ class UpstoxService:
                 # Fallback: use close price
                 vwap = close
             
-            # Parse timestamp
+            # Parse timestamp (handle both string and numeric formats)
             timestamp_ms = prev_candle.get('timestamp', 0)
+            if isinstance(timestamp_ms, str):
+                try:
+                    timestamp_ms = float(timestamp_ms)
+                except (ValueError, TypeError):
+                    timestamp_ms = 0
             if timestamp_ms > 1e12:
                 timestamp_ms = timestamp_ms / 1000
             
@@ -2228,6 +2233,12 @@ class UpstoxService:
             
             for candle in candles:
                 timestamp_ms = candle.get('timestamp', 0)
+                # Handle both string and numeric timestamp formats
+                if isinstance(timestamp_ms, str):
+                    try:
+                        timestamp_ms = float(timestamp_ms)
+                    except (ValueError, TypeError):
+                        continue  # Skip invalid timestamp
                 if timestamp_ms > 1e12:
                     timestamp_ms = timestamp_ms / 1000
                 candle_time = datetime.fromtimestamp(timestamp_ms, tz=ist)
