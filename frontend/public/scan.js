@@ -1372,10 +1372,18 @@ function formatPrice(price) {
 
 // Format PnL with color coding
 function formatPNL(pnl) {
-    if (!pnl) return '<span style="color: #718096;">0.00</span>';
+    // Handle null, undefined, or empty string
+    if (pnl === null || pnl === undefined || pnl === '') {
+        return '<span style="color: #718096;">₹0.00</span>';
+    }
     
     try {
         const pnlValue = parseFloat(pnl);
+        // Check if parseFloat returned NaN
+        if (isNaN(pnlValue)) {
+            return '<span style="color: #718096;">₹0.00</span>';
+        }
+        
         const formatted = pnlValue.toFixed(2);
         
         if (pnlValue > 0) {
@@ -1383,10 +1391,11 @@ function formatPNL(pnl) {
         } else if (pnlValue < 0) {
             return '<span style="color: #ef4444; font-weight: bold;">-₹' + Math.abs(formatted) + '</span>';
         } else {
+            // pnlValue is 0 - explicitly handle zero case
             return '<span style="color: #718096;">₹' + formatted + '</span>';
         }
     } catch (e) {
-        return '<span style="color: #718096;">0.00</span>';
+        return '<span style="color: #718096;">₹0.00</span>';
     }
 }
 
