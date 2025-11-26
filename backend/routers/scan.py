@@ -1473,10 +1473,10 @@ async def manually_update_no_entry_trades(db: Session = Depends(get_db)):
 async def get_scheduler_status():
     """Get status of all schedulers - verifies they are running"""
     try:
-        from services.health_monitor import health_monitor
-        from services import vwap_updater
-        from services.master_stock_scheduler import master_stock_scheduler
-        from services.instruments_downloader import instruments_scheduler
+        from backend.services.health_monitor import health_monitor
+        from backend.services.vwap_updater import vwap_updater
+        from backend.services.master_stock_scheduler import master_stock_scheduler
+        from backend.services.instruments_downloader import instruments_scheduler
         
         status = {
             "health_monitor": {
