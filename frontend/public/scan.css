@@ -106,6 +106,7 @@
     .stocks-table td.stock-name,
     .stocks-table td.trigger-price,
     .stocks-table td.stock-vwap-col,
+    .stocks-table td.vwap-slope-col,
     .stocks-table td.option-contract,
     .stocks-table td.qty,
     .stocks-table td.buy-price,

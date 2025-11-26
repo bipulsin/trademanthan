@@ -676,7 +676,7 @@ function renderAlertGroup(alert, type) {
                         <th>Stock Name</th>
                         <th>Stock LTP</th>
                         <th>Stock VWAP</th>
-                        <th>VWAP Slope / Candle Size</th>
+                        <th>Slope/Size</th>
                         <th>Option Contract (OTM-1)</th>
                         <th>Qty</th>
                         <th>Buy Price</th>
@@ -819,7 +819,7 @@ function renderAlertGroup(alert, type) {
                             }
                         }
                         
-                        // Combine VWAP Slope and Candle Size into single display
+                        // Combine VWAP Slope and Candle Size into single display (vertically stacked)
                         let combinedFilterDisplay = '-';
                         if (vwapSlopeDisplay !== '-' || candleSizeDisplay !== '-') {
                             const parts = [];
@@ -829,7 +829,8 @@ function renderAlertGroup(alert, type) {
                             if (candleSizeDisplay !== '-') {
                                 parts.push(candleSizeDisplay);
                             }
-                            combinedFilterDisplay = parts.join(' / ');
+                            // Display values vertically (one below the other)
+                            combinedFilterDisplay = parts.join('<br>');
                         }
                         
                         return '<tr>' +
