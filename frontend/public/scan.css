@@ -465,6 +465,8 @@ body {
     margin-bottom: 20px;
     box-shadow: var(--shadow);
     animation: slideIn 0.5s ease-out;
+    overflow-x: auto;
+    width: 100%;
 }
 
 @keyframes slideIn {
