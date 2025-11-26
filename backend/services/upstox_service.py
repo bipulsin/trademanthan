@@ -2316,16 +2316,15 @@ class UpstoxService:
                     # Skip older candles
                     pass
             
-            # Aggregate current day candles - use High/Low from all candles up to current time
-            # Previous day uses complete day High/Low
+            # For current day: Use real-time market quotes if hourly candles not available
+            # Previous day: Use aggregated hourly candles (complete day)
             current_day_candle = None
+            
             if current_day_candles_hourly:
-                # Sort by timestamp
+                # Use hourly candles if available
                 current_day_candles_hourly.sort(key=lambda x: x.get('timestamp', 0))
                 current_open = current_day_candles_hourly[0].get('open', 0)
                 current_close = current_day_candles_hourly[-1].get('close', 0)
-                
-                # Use High/Low aggregated from all hourly candles up to current time
                 current_high = max(c.get('high', 0) for c in current_day_candles_hourly)
                 current_low = min(c.get('low', 0) for c in current_day_candles_hourly)
                 
@@ -2336,6 +2335,34 @@ class UpstoxService:
                     'close': current_close,
                     'time': now.replace(minute=0, second=0, microsecond=0)
                 }
+            else:
+                # Fallback: Use real-time market quotes for current day High/Low
+                logger.info(f"📊 No hourly candles for current day, using real-time market quotes for {instrument_key}")
+                try:
+                    market_quote = self.get_market_quote_by_key(instrument_key)
+                    if market_quote:
+                        # Market quote contains OHLC for the current day
+                        ohlc = market_quote.get('ohlc', {})
+                        current_open = ohlc.get('open', 0) or market_quote.get('open_price', 0) or 0
+                        current_high = ohlc.get('high', 0) or market_quote.get('high_price', 0) or 0
+                        current_low = ohlc.get('low', 0) or market_quote.get('low_price', 0) or 0
+                        current_close = market_quote.get('last_price', 0) or ohlc.get('close', 0) or market_quote.get('close_price', 0) or 0
+                        
+                        if current_high > 0 and current_low > 0:
+                            current_day_candle = {
+                                'open': current_open,
+                                'high': current_high,
+                                'low': current_low,
+                                'close': current_close,
+                                'time': now
+                            }
+                            logger.info(f"✅ Using market quote OHLC for current day: O={current_open:.2f}, H={current_high:.2f}, L={current_low:.2f}, C={current_close:.2f}")
+                        else:
+                            logger.warning(f"⚠️ Market quote OHLC incomplete for {instrument_key}: H={current_high}, L={current_low}")
+                    else:
+                        logger.warning(f"⚠️ Could not fetch market quote for {instrument_key}")
+                except Exception as quote_error:
+                    logger.warning(f"⚠️ Error fetching market quote for {instrument_key}: {str(quote_error)}")
             
             # Aggregate previous day candles
             previous_day_candle = None
