@@ -777,17 +777,27 @@ function renderAlertGroup(alert, type) {
                         // Format VWAP slope status
                         let vwapSlopeDisplay = '-';
                         if (stock.vwap_slope_status) {
-                            const slopeColor = stock.vwap_slope_status === 'Yes' ? '#10b981' : '#dc2626';
-                            const slopeIcon = stock.vwap_slope_status === 'Yes' ? '✅' : '❌';
-                            vwapSlopeDisplay = `<span style="color: ${slopeColor}; font-weight: 600;">${slopeIcon} ${stock.vwap_slope_status}</span>`;
+                            if (stock.vwap_slope_status === 'Skipped') {
+                                vwapSlopeDisplay = `<span style="color: #f59e0b; font-weight: 600;">⚠️ Skipped</span>`;
+                            } else {
+                                const slopeColor = stock.vwap_slope_status === 'Yes' ? '#10b981' : '#dc2626';
+                                const slopeIcon = stock.vwap_slope_status === 'Yes' ? '✅' : '❌';
+                                vwapSlopeDisplay = `<span style="color: ${slopeColor}; font-weight: 600;">${slopeIcon} ${stock.vwap_slope_status}</span>`;
+                            }
                         }
                         
                         // Format candle size status
                         let candleSizeDisplay = '-';
-                        if (stock.candle_size_ratio !== null && stock.candle_size_ratio !== undefined) {
-                            const sizeColor = stock.candle_size_status === 'Pass' ? '#10b981' : '#dc2626';
-                            const sizeIcon = stock.candle_size_status === 'Pass' ? '✅' : '❌';
-                            candleSizeDisplay = `<span style="color: ${sizeColor}; font-weight: 600;" title="Ratio: ${stock.candle_size_ratio.toFixed(2)}×">${sizeIcon} ${stock.candle_size_status} (${stock.candle_size_ratio.toFixed(2)}×)</span>`;
+                        if (stock.candle_size_status) {
+                            if (stock.candle_size_status === 'Skipped') {
+                                candleSizeDisplay = `<span style="color: #f59e0b; font-weight: 600;">⚠️ Skipped</span>`;
+                            } else if (stock.candle_size_ratio !== null && stock.candle_size_ratio !== undefined) {
+                                const sizeColor = stock.candle_size_status === 'Pass' ? '#10b981' : '#dc2626';
+                                const sizeIcon = stock.candle_size_status === 'Pass' ? '✅' : '❌';
+                                candleSizeDisplay = `<span style="color: ${sizeColor}; font-weight: 600;" title="Ratio: ${stock.candle_size_ratio.toFixed(2)}×">${sizeIcon} ${stock.candle_size_status} (${stock.candle_size_ratio.toFixed(2)}×)</span>`;
+                            } else {
+                                candleSizeDisplay = `<span style="color: #6b7280; font-weight: 600;">${stock.candle_size_status}</span>`;
+                            }
                         }
                         
                         return '<tr>' +

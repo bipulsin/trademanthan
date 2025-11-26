@@ -1792,6 +1792,12 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                 candle_size_ratio = None
                 candle_size_status = None
                 
+                # Check if this is a 10:15 AM alert (filters are skipped)
+                alert_hour = record.alert_time.hour if record.alert_time else None
+                alert_minute = record.alert_time.minute if record.alert_time else None
+                is_10_15_alert = (alert_hour == 10 and alert_minute == 15)
+                
+                # Calculate VWAP slope if data is available
                 if record.stock_vwap and record.stock_vwap > 0 and record.stock_vwap_previous_hour and record.stock_vwap_previous_hour > 0 and record.stock_vwap_previous_hour_time:
                     try:
                         slope_result = vwap_service.vwap_slope(
@@ -1803,7 +1809,11 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                         vwap_slope_status = slope_result
                     except:
                         pass
+                elif is_10_15_alert:
+                    # For 10:15 AM alerts, show "Skipped" since filters are bypassed
+                    vwap_slope_status = "Skipped"
                 
+                # Calculate candle size if data is available
                 if record.option_current_candle_high and record.option_current_candle_low and record.option_previous_candle_high and record.option_previous_candle_low:
                     try:
                         current_size = abs(record.option_current_candle_high - record.option_current_candle_low)
@@ -1813,6 +1823,9 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                             candle_size_status = "Pass" if candle_size_ratio < 7.5 else "Fail"
                     except:
                         pass
+                elif is_10_15_alert:
+                    # For 10:15 AM alerts, show "Skipped" since filters are bypassed
+                    candle_size_status = "Skipped"
                 
                 grouped_bullish[alert_key]["stocks"].append({
                     "stock_name": record.stock_name,
@@ -1878,6 +1891,12 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                 candle_size_ratio = None
                 candle_size_status = None
                 
+                # Check if this is a 10:15 AM alert (filters are skipped)
+                alert_hour = record.alert_time.hour if record.alert_time else None
+                alert_minute = record.alert_time.minute if record.alert_time else None
+                is_10_15_alert = (alert_hour == 10 and alert_minute == 15)
+                
+                # Calculate VWAP slope if data is available
                 if record.stock_vwap and record.stock_vwap > 0 and record.stock_vwap_previous_hour and record.stock_vwap_previous_hour > 0 and record.stock_vwap_previous_hour_time:
                     try:
                         slope_result = vwap_service.vwap_slope(
@@ -1889,7 +1908,11 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                         vwap_slope_status = slope_result
                     except:
                         pass
+                elif is_10_15_alert:
+                    # For 10:15 AM alerts, show "Skipped" since filters are bypassed
+                    vwap_slope_status = "Skipped"
                 
+                # Calculate candle size if data is available
                 if record.option_current_candle_high and record.option_current_candle_low and record.option_previous_candle_high and record.option_previous_candle_low:
                     try:
                         current_size = abs(record.option_current_candle_high - record.option_current_candle_low)
@@ -1899,6 +1922,9 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                             candle_size_status = "Pass" if candle_size_ratio < 7.5 else "Fail"
                     except:
                         pass
+                elif is_10_15_alert:
+                    # For 10:15 AM alerts, show "Skipped" since filters are bypassed
+                    candle_size_status = "Skipped"
                 
                 grouped_bearish[alert_key]["stocks"].append({
                     "stock_name": record.stock_name,
