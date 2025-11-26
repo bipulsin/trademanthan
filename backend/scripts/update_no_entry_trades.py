@@ -8,7 +8,11 @@ import os
 from pathlib import Path
 
 # Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+# Change to project root directory
+os.chdir(project_root)
 
 from backend.database import SessionLocal
 from backend.services.vwap_updater import update_vwap_for_all_open_positions
