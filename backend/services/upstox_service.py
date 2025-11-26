@@ -2255,20 +2255,50 @@ class UpstoxService:
             
             for candle in candles:
                 timestamp_ms = candle.get('timestamp', 0)
-                # Handle both string and numeric timestamp formats
+                candle_time = None
+                
+                # Handle different timestamp formats
                 if isinstance(timestamp_ms, str):
-                    try:
-                        timestamp_ms = float(timestamp_ms)
-                    except (ValueError, TypeError):
-                        continue  # Skip invalid timestamp
-                if timestamp_ms > 1e12:
-                    timestamp_ms = timestamp_ms / 1000
-                candle_time = datetime.fromtimestamp(timestamp_ms, tz=ist)
+                    # Check if it's an ISO datetime string
+                    if 'T' in timestamp_ms or '+' in timestamp_ms or '-' in timestamp_ms[10:]:
+                        try:
+                            from dateutil import parser
+                            candle_time = parser.parse(timestamp_ms)
+                            if candle_time.tzinfo is None:
+                                candle_time = ist.localize(candle_time)
+                            elif candle_time.tzinfo != ist:
+                                candle_time = candle_time.astimezone(ist)
+                        except Exception as parse_error:
+                            logger.warning(f"Could not parse ISO timestamp {timestamp_ms}: {parse_error}")
+                            continue
+                    else:
+                        # Try to convert string to float
+                        try:
+                            timestamp_ms = float(timestamp_ms)
+                            if timestamp_ms > 1e12:
+                                timestamp_ms = timestamp_ms / 1000
+                            candle_time = datetime.fromtimestamp(timestamp_ms, tz=ist)
+                        except (ValueError, TypeError):
+                            logger.warning(f"Could not convert timestamp {timestamp_ms} to float")
+                            continue
+                else:
+                    # Numeric timestamp
+                    if timestamp_ms > 1e12:
+                        timestamp_ms = timestamp_ms / 1000
+                    candle_time = datetime.fromtimestamp(timestamp_ms, tz=ist)
+                
+                if not candle_time:
+                    continue
+                    
                 candle_date = candle_time.date()
                 candle_hour = candle_time.hour
                 
                 today = now.date()
                 yesterday = today - timedelta(days=1)
+                
+                # Debug logging for first few candles
+                if len(current_day_candles) == 0 and len(previous_day_candles) == 0:
+                    logger.debug(f"Sample candle: date={candle_date}, hour={candle_hour}, today={today}, yesterday={yesterday}")
                 
                 # Current day candles up to current hour
                 if candle_date == today and candle_hour <= current_hour:
@@ -2276,6 +2306,14 @@ class UpstoxService:
                 # Previous day candles - complete day (all hours)
                 elif candle_date == yesterday:
                     previous_day_candles.append(candle)
+                # Also check if candle is from today but hour is greater (shouldn't happen, but handle edge case)
+                elif candle_date == today and candle_hour > current_hour:
+                    # Skip future candles
+                    pass
+                # Check if candle is from an earlier date (might be from weekend/holiday)
+                elif candle_date < yesterday:
+                    # Skip older candles
+                    pass
             
             # Aggregate current day candles
             current_day_candle = None
