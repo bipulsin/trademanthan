@@ -2238,15 +2238,7 @@ class UpstoxService:
             current_hour = now.hour
             current_minute = now.minute
             
-            # Fetch 15-minute candles for current day (to find nearest candle)
-            # and hourly candles for previous day
-            current_day_candles_15min = self.get_historical_candles_by_instrument_key(
-                instrument_key,
-                interval="minutes/15",
-                days_back=1  # Just need today's data
-            )
-            
-            # Fetch hourly candles for last 2 days (for previous day aggregation)
+            # Fetch hourly candles for last 2 days (for current and previous day aggregation)
             candles = self.get_historical_candles_by_instrument_key(
                 instrument_key,
                 interval="hours/1",
@@ -2323,47 +2315,8 @@ class UpstoxService:
                     # Skip older candles
                     pass
             
-            # Find nearest 15-minute candle for current day High/Low
-            nearest_15min_candle = None
-            if current_day_candles_15min:
-                # Parse timestamps and find the nearest candle to current time
-                min_time_diff = float('inf')
-                for candle_15min in current_day_candles_15min:
-                    timestamp_ms = candle_15min.get('timestamp', 0)
-                    candle_time = None
-                    
-                    # Handle different timestamp formats
-                    if isinstance(timestamp_ms, str):
-                        if 'T' in timestamp_ms or '+' in timestamp_ms or '-' in timestamp_ms[10:]:
-                            try:
-                                from dateutil import parser
-                                candle_time = parser.parse(timestamp_ms)
-                                if candle_time.tzinfo is None:
-                                    candle_time = ist.localize(candle_time)
-                                elif candle_time.tzinfo != ist:
-                                    candle_time = candle_time.astimezone(ist)
-                            except Exception:
-                                continue
-                        else:
-                            try:
-                                timestamp_ms = float(timestamp_ms)
-                                if timestamp_ms > 1e12:
-                                    timestamp_ms = timestamp_ms / 1000
-                                candle_time = datetime.fromtimestamp(timestamp_ms, tz=ist)
-                            except (ValueError, TypeError):
-                                continue
-                    else:
-                        if timestamp_ms > 1e12:
-                            timestamp_ms = timestamp_ms / 1000
-                        candle_time = datetime.fromtimestamp(timestamp_ms, tz=ist)
-                    
-                    if candle_time and candle_time.date() == today and candle_time <= now:
-                        time_diff = abs((now - candle_time).total_seconds())
-                        if time_diff < min_time_diff:
-                            min_time_diff = time_diff
-                            nearest_15min_candle = candle_15min
-            
-            # Aggregate current day candles (for open/close from hourly candles)
+            # Aggregate current day candles - use High/Low from all candles up to current time
+            # Previous day uses complete day High/Low
             current_day_candle = None
             if current_day_candles_hourly:
                 # Sort by timestamp
@@ -2371,42 +2324,16 @@ class UpstoxService:
                 current_open = current_day_candles_hourly[0].get('open', 0)
                 current_close = current_day_candles_hourly[-1].get('close', 0)
                 
-                # Use High/Low from nearest 15-minute candle if available
-                if nearest_15min_candle:
-                    current_high = nearest_15min_candle.get('high', 0)
-                    current_low = nearest_15min_candle.get('low', 0)
-                    nearest_time = nearest_15min_candle.get('timestamp', 0)
-                    # Parse nearest_time to datetime if needed
-                    if isinstance(nearest_time, str):
-                        try:
-                            from dateutil import parser
-                            nearest_time_dt = parser.parse(nearest_time)
-                            if nearest_time_dt.tzinfo is None:
-                                nearest_time_dt = ist.localize(nearest_time_dt)
-                            elif nearest_time_dt.tzinfo != ist:
-                                nearest_time_dt = nearest_time_dt.astimezone(ist)
-                            nearest_time = nearest_time_dt
-                        except Exception:
-                            nearest_time = now
-                    elif isinstance(nearest_time, (int, float)):
-                        if nearest_time > 1e12:
-                            nearest_time = nearest_time / 1000
-                        nearest_time = datetime.fromtimestamp(nearest_time, tz=ist)
-                    else:
-                        nearest_time = now
-                else:
-                    # Fallback to aggregated high/low from hourly candles
-                    current_high = max(c.get('high', 0) for c in current_day_candles_hourly)
-                    current_low = min(c.get('low', 0) for c in current_day_candles_hourly)
-                    nearest_time = now
-                    logger.warning(f"⚠️ No 15-minute candle found for {instrument_key}, using aggregated hourly candles")
+                # Use High/Low aggregated from all hourly candles up to current time
+                current_high = max(c.get('high', 0) for c in current_day_candles_hourly)
+                current_low = min(c.get('low', 0) for c in current_day_candles_hourly)
                 
                 current_day_candle = {
                     'open': current_open,
                     'high': current_high,
                     'low': current_low,
                     'close': current_close,
-                    'time': nearest_time if nearest_15min_candle else now
+                    'time': now.replace(minute=0, second=0, microsecond=0)
                 }
             
             # Aggregate previous day candles
