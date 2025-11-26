@@ -101,7 +101,7 @@
     display: none;
 }
 
-/* Desktop font sizes - only apply above 768px - using fixed sizes for better readability */
+/* Desktop font sizes - only apply above 768px - fixed at 11px */
 @media (min-width: 769px) {
     .stocks-table td.stock-name,
     .stocks-table td.trigger-price,
@@ -112,15 +112,15 @@
     .stocks-table td.buy-price,
     .stocks-table td.stop-loss,
     .stocks-table td.sell-price {
-        font-size: 15px !important;
+        font-size: 11px !important;
     }
     
     .stocks-table td {
-        font-size: 15px !important;
+        font-size: 11px !important;
     }
     
     .stocks-table th {
-        font-size: 14px !important;
+        font-size: 11px !important;
     }
 }
 
@@ -561,7 +561,7 @@ body {
     font-weight: 600;
     color: var(--text-dark);
     border-bottom: 2px solid var(--border-color);
-    font-size: 14px;
+    font-size: 11px;
     font-family: Arial, sans-serif;
     text-transform: uppercase;
     letter-spacing: 0.2px;
@@ -587,7 +587,7 @@ body {
 .stocks-table td {
     padding: 8px 4px;
     color: var(--text-medium);
-    font-size: 15px;
+    font-size: 11px;
     font-family: Arial, sans-serif;
     font-weight: normal;
     white-space: nowrap;
@@ -609,14 +609,14 @@ body {
     font-weight: normal;
     color: var(--text-dark);
     font-family: Arial, sans-serif;
-    font-size: 15px !important;
+    font-size: 11px !important;
 }
 
 .trigger-price {
     font-weight: normal;
     color: var(--success-color);
     font-family: Arial, sans-serif;
-    font-size: 15px !important;
+    font-size: 11px !important;
 }
 
 .vwap-current {
@@ -808,12 +808,12 @@ body {
 /* Stock VWAP Column Styles */
 .stock-vwap-col {
     vertical-align: middle;
-    font-size: 15px !important;
+    font-size: 11px !important;
 }
 
 /* VWAP Slope / Candle Size Column - Vertical Stacking */
 .vwap-slope-col {
-    font-size: 15px !important;
+    font-size: 11px !important;
     line-height: 1.4;
     white-space: normal;
     vertical-align: top;
@@ -822,23 +822,23 @@ body {
 }
 
 .option-contract {
-    font-size: 15px !important;
+    font-size: 11px !important;
 }
 
 .qty {
-    font-size: 15px !important;
+    font-size: 11px !important;
 }
 
 .buy-price {
-    font-size: 15px !important;
+    font-size: 11px !important;
 }
 
 .stop-loss {
-    font-size: 15px !important;
+    font-size: 11px !important;
 }
 
 .sell-price {
-    font-size: 15px !important;
+    font-size: 11px !important;
 }
 
 .hold-icon {
