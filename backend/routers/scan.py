@@ -1850,6 +1850,8 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                 
                 # Calculate VWAP slope and candle size for display
                 vwap_slope_status = None
+                vwap_slope_angle = None
+                vwap_slope_direction = None
                 candle_size_ratio = None
                 candle_size_status = None
                 
@@ -1867,7 +1869,14 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                             vwap2=record.stock_vwap,
                             time2=record.alert_time
                         )
-                        vwap_slope_status = slope_result
+                        # Handle new dictionary return format
+                        if isinstance(slope_result, dict):
+                            vwap_slope_status = slope_result.get("status", "No")
+                            vwap_slope_angle = slope_result.get("angle", 0.0)
+                            vwap_slope_direction = slope_result.get("direction", "flat")
+                        else:
+                            # Backward compatibility: handle old string return format
+                            vwap_slope_status = slope_result
                     except:
                         pass
                 elif is_10_15_alert:
@@ -1917,6 +1926,8 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                     } if record.option_previous_candle_open else None,
                     # Entry filter status
                     "vwap_slope_status": vwap_slope_status,
+                    "vwap_slope_angle": vwap_slope_angle,
+                    "vwap_slope_direction": vwap_slope_direction,
                     "candle_size_ratio": candle_size_ratio,
                     "candle_size_status": candle_size_status,
                     "qty": record.qty or 0,
@@ -1949,6 +1960,8 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                 
                 # Calculate VWAP slope and candle size for display
                 vwap_slope_status = None
+                vwap_slope_angle = None
+                vwap_slope_direction = None
                 candle_size_ratio = None
                 candle_size_status = None
                 
@@ -1966,7 +1979,14 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                             vwap2=record.stock_vwap,
                             time2=record.alert_time
                         )
-                        vwap_slope_status = slope_result
+                        # Handle new dictionary return format
+                        if isinstance(slope_result, dict):
+                            vwap_slope_status = slope_result.get("status", "No")
+                            vwap_slope_angle = slope_result.get("angle", 0.0)
+                            vwap_slope_direction = slope_result.get("direction", "flat")
+                        else:
+                            # Backward compatibility: handle old string return format
+                            vwap_slope_status = slope_result
                     except:
                         pass
                 elif is_10_15_alert:
@@ -2016,6 +2036,8 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                     } if record.option_previous_candle_open else None,
                     # Entry filter status
                     "vwap_slope_status": vwap_slope_status,
+                    "vwap_slope_angle": vwap_slope_angle,
+                    "vwap_slope_direction": vwap_slope_direction,
                     "candle_size_ratio": candle_size_ratio,
                     "candle_size_status": candle_size_status,
                     "qty": record.qty or 0,
