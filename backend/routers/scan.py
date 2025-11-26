@@ -818,6 +818,13 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         alert_minute = triggered_datetime.minute
         is_after_3_00pm = (alert_hour > 15) or (alert_hour == 15 and alert_minute >= 0)
         
+        # Special handling for 10:15 AM alerts (first alert of the day)
+        # At 10:15 AM, market has only been open for 45 minutes, so:
+        # - Previous hour VWAP may not be available (9:15 AM was before market open)
+        # - Option candles may not be fully formed yet
+        # For 10:15 AM alerts, skip VWAP slope and candle size filters
+        is_10_15_alert = (alert_hour == 10 and alert_minute == 15)
+        
         if is_after_3_00pm:
             print(f"🚫 ALERT TIME {triggered_at_display} is at or after 3:00 PM - NO NEW TRADES ALLOWED")
         
@@ -961,10 +968,13 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 # Determine trade entry based on:
                 # 1. Time check (must be before 3:00 PM)
                 # 2. Index trends (must be aligned)
-                # 3. VWAP slope >= 45 degrees
-                # 4. Current candle size < 7-8x previous candle
+                # 3. VWAP slope >= 45 degrees (SKIPPED for 10:15 AM alerts)
+                # 4. Current candle size < 7-8x previous candle (SKIPPED for 10:15 AM alerts)
                 # 5. Valid option data (option_ltp > 0, lot_size > 0)
-                if not is_after_3_00pm and can_enter_trade_by_index and vwap_slope_passed and candle_size_passed and option_ltp_value > 0 and lot_size > 0:
+                # For 10:15 AM alerts, skip VWAP slope and candle size filters due to insufficient historical data
+                filters_passed = vwap_slope_passed and candle_size_passed if not is_10_15_alert else True
+                
+                if not is_after_3_00pm and can_enter_trade_by_index and filters_passed and option_ltp_value > 0 and lot_size > 0:
                     # Enter trade: Fetch current option LTP again, set buy_time to current system time, stop_loss from previous candle low
                     # IMPORTANT: sell_price remains NULL initially, will be populated by hourly updater
                     import pytz
@@ -1023,7 +1033,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     print(f"      - Stock VWAP: ₹{stock_vwap:.2f}")
                     print(f"      - Stock VWAP (Previous Hour): ₹{stock_vwap_prev:.2f if stock_vwap_prev else 'N/A'}")
                     print(f"      - Option Contract: {stock.get('option_contract', 'N/A')}")
-                    logger.info(f"✅ ENTRY DECISION: {stock_name} | Entry Time: {entry_time_str} | Alert Time: {alert_time_str} | Price: ₹{buy_price:.2f} | SL: ₹{stop_loss_price:.2f} | VWAP Slope: {vwap_slope_reason} | Candle Size: {candle_size_reason} | Indices: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
+                    filter_info = f"VWAP Slope: {'SKIPPED (10:15)' if is_10_15_alert else vwap_slope_reason} | Candle Size: {'SKIPPED (10:15)' if is_10_15_alert else candle_size_reason}"
+                    logger.info(f"✅ ENTRY DECISION: {stock_name} | Entry Time: {entry_time_str} | Alert Time: {alert_time_str} | Price: ₹{buy_price:.2f} | SL: ₹{stop_loss_price:.2f} | {filter_info} | Indices: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
                 else:
                     # No entry: Store qty, buy_price, and SL for reference, but don't execute trade
                     # This helps track what trades would have been if conditions were favorable
