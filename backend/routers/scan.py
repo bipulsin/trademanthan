@@ -3119,20 +3119,29 @@ async def upstox_oauth_callback(code: str = None, state: str = None, error: str 
 async def upstox_oauth_status():
     """
     Check Upstox OAuth authentication status
+    Tests both user profile and market data endpoints to ensure token works for all operations
     """
     try:
         # Check if upstox_service has a valid token
         if hasattr(vwap_service, 'access_token') and vwap_service.access_token:
-            # Try to make a test API call to verify token validity
-            test_url = "https://api.upstox.com/v2/user/profile"
+            # Test 1: User profile endpoint (basic auth check)
+            test_url_profile = "https://api.upstox.com/v2/user/profile"
             headers = {
                 "Accept": "application/json",
                 "Authorization": f"Bearer {vwap_service.access_token}"
             }
             
-            response = requests.get(test_url, headers=headers, timeout=5)
+            profile_response = requests.get(test_url_profile, headers=headers, timeout=5)
             
-            if response.status_code == 200:
+            # Test 2: Market data endpoint (critical for trading operations)
+            # Use NIFTY 50 index quote as it's always available
+            test_url_market = "https://api.upstox.com/v2/market-quote/quotes"
+            market_params = {"instrument_key": "NSE_INDEX|Nifty 50"}
+            market_response = requests.get(test_url_market, headers=headers, params=market_params, timeout=5)
+            
+            # Token is valid only if BOTH endpoints work
+            # Market data endpoint is more critical - if it fails, token is effectively expired
+            if profile_response.status_code == 200 and market_response.status_code == 200:
                 return JSONResponse(
                     status_code=200,
                     content={
@@ -3142,30 +3151,48 @@ async def upstox_oauth_status():
                     }
                 )
             else:
-                return JSONResponse(
-                    status_code=200,
-                    content={
-                        "status": "success",
-                        "authenticated": False,
-                        "message": "Upstox token is invalid or expired"
-                    }
-                )
+                # Check if it's a 401 (Unauthorized) which indicates token expiration
+                if market_response.status_code == 401 or profile_response.status_code == 401:
+                    logger.warning("⚠️ Upstox token expired (401 Unauthorized)")
+                    return JSONResponse(
+                        status_code=200,
+                        content={
+                            "status": "success",
+                            "authenticated": False,
+                            "message": "Upstox token is expired or invalid",
+                            "error_type": "token_expired"
+                        }
+                    )
+                else:
+                    logger.warning(f"⚠️ Upstox token check failed: Profile={profile_response.status_code}, Market={market_response.status_code}")
+                    return JSONResponse(
+                        status_code=200,
+                        content={
+                            "status": "success",
+                            "authenticated": False,
+                            "message": f"Upstox token check failed (Profile: {profile_response.status_code}, Market: {market_response.status_code})"
+                        }
+                    )
         else:
             return JSONResponse(
                 status_code=200,
                 content={
                     "status": "success",
                     "authenticated": False,
-                    "message": "No Upstox token configured"
+                    "message": "No Upstox token configured",
+                    "error_type": "token_expired"
                 }
             )
             
     except Exception as e:
+        logger.error(f"❌ Error checking Upstox token status: {str(e)}")
         return JSONResponse(
             status_code=500,
             content={
                 "status": "error",
-                "message": f"Failed to check status: {str(e)}"
+                "authenticated": False,
+                "message": f"Failed to check status: {str(e)}",
+                "error_type": "token_expired"
             }
         )
 
