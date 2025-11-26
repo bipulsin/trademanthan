@@ -954,35 +954,7 @@ function renderAlertGroup(alert, type) {
                                 </div>
                             </div>
                             
-                            <!-- Row 2: Entry Criteria (VWAP Slope & Candle Size) -->
-                            ${stock.vwap_slope_status || stock.candle_size_status ? `
-                            <div class="stock-card-row" style="background: rgba(59, 130, 246, 0.1); padding: 4px 8px; border-radius: 4px; margin: 4px 0;">
-                                <div style="flex: 1; font-size: 11px; color: #93c5fd;">
-                                    ${stock.vwap_slope_status ? (stock.vwap_slope_status === 'Skipped' ? 
-                                        `<span style="color: #f59e0b; font-weight: 600;">Slope: ⚠️ Skipped</span>` :
-                                        (() => {
-                                            const slopeColor = stock.vwap_slope_status === 'Yes' ? '#10b981' : '#dc2626';
-                                            const statusText = stock.vwap_slope_status === 'Yes' ? 'Y' : 'N';
-                                            let angleText = '';
-                                            if (stock.vwap_slope_angle !== null && stock.vwap_slope_angle !== undefined) {
-                                                const direction = stock.vwap_slope_direction === 'upward' ? 'up' : (stock.vwap_slope_direction === 'downward' ? 'dn' : '');
-                                                angleText = ` ${stock.vwap_slope_angle}°${direction ? ' ' + direction : ''}`;
-                                            }
-                                            return `<span style="color: ${slopeColor}; font-weight: 600;">Slope: ${statusText}${angleText}</span>`;
-                                        })()) : ''}
-                                    ${stock.candle_size_status ? (stock.candle_size_status === 'Skipped' ? 
-                                        `<span style="color: #f59e0b; font-weight: 600; margin-left: 8px;">Size: ⚠️ Skipped</span>` :
-                                        (() => {
-                                            const sizeColor = stock.candle_size_status === 'Pass' ? '#10b981' : '#dc2626';
-                                            const statusText = stock.candle_size_status === 'Pass' ? 'P' : 'F';
-                                            const ratioText = stock.candle_size_ratio ? ` ${stock.candle_size_ratio.toFixed(2)}x` : '';
-                                            return `<span style="color: ${sizeColor}; font-weight: 600; margin-left: 8px;">Size: ${statusText}${ratioText}</span>`;
-                                        })()) : ''}
-                                </div>
-                            </div>
-                            ` : ''}
-                            
-                            <!-- Row 3: Option Contract, Qty -->
+                            <!-- Row 2: Option Contract, Qty -->
                             <div class="stock-card-row">
                                 <div style="flex: 2;">
                                     <div class="stock-card-value" style="font-size: 12px;">${escapeHtml(stock.option_contract || 'N/A')}</div>
