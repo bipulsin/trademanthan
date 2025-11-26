@@ -772,7 +772,8 @@ function renderAlertGroup(alert, type) {
                         const buyPriceDisplay = isNoEntry ? '-' : '₹' + formatPrice(stock.buy_price);
                         const stopLossDisplay = isNoEntry ? '-' : '₹' + formatPrice(stock.stop_loss || 0);
                         const sellPriceDisplay = isNoEntry ? '-' : '₹' + formatPrice(stock.sell_price || 0);
-                        const pnlDisplay = isNoEntry ? '-' : formatPNL(stock.pnl || 0);
+                        // Always show PnL column, even for no_entry trades (show '-' or 0.00)
+                        const pnlDisplay = isNoEntry ? '<span style="color: #718096;">-</span>' : formatPNL(stock.pnl || 0);
                         
                         // Format VWAP slope status with angle
                         let vwapSlopeDisplay = '-';
