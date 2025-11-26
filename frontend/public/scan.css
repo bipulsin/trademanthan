@@ -112,15 +112,15 @@
     .stocks-table td.buy-price,
     .stocks-table td.stop-loss,
     .stocks-table td.sell-price {
-        font-size: clamp(12px, 0.9vw, 14px) !important;
+        font-size: clamp(14px, 1.1vw, 16px) !important;
     }
     
     .stocks-table td {
-        font-size: clamp(13px, 1vw, 15px) !important;
+        font-size: clamp(14px, 1.1vw, 16px) !important;
     }
     
     .stocks-table th {
-        font-size: clamp(12px, 0.9vw, 14px) !important;
+        font-size: clamp(13px, 1vw, 15px) !important;
     }
 }
 
@@ -561,7 +561,7 @@ body {
     font-weight: 600;
     color: var(--text-dark);
     border-bottom: 2px solid var(--border-color);
-    font-size: clamp(12px, 0.9vw, 14px);
+    font-size: clamp(13px, 1vw, 15px);
     font-family: Arial, sans-serif;
     text-transform: uppercase;
     letter-spacing: 0.2px;
@@ -587,7 +587,7 @@ body {
 .stocks-table td {
     padding: 8px 4px;
     color: var(--text-medium);
-    font-size: clamp(13px, 1vw, 15px);
+    font-size: clamp(14px, 1.1vw, 16px);
     font-family: Arial, sans-serif;
     font-weight: normal;
     white-space: nowrap;
@@ -609,14 +609,14 @@ body {
     font-weight: normal;
     color: var(--text-dark);
     font-family: Arial, sans-serif;
-    font-size: clamp(12px, 0.9vw, 14px) !important;
+    font-size: clamp(14px, 1.1vw, 16px) !important;
 }
 
 .trigger-price {
     font-weight: normal;
     color: var(--success-color);
     font-family: Arial, sans-serif;
-    font-size: clamp(12px, 0.9vw, 14px) !important;
+    font-size: clamp(14px, 1.1vw, 16px) !important;
 }
 
 .vwap-current {
@@ -808,12 +808,12 @@ body {
 /* Stock VWAP Column Styles */
 .stock-vwap-col {
     vertical-align: middle;
-    font-size: clamp(12px, 0.9vw, 14px) !important;
+    font-size: clamp(14px, 1.1vw, 16px) !important;
 }
 
 /* VWAP Slope / Candle Size Column - Vertical Stacking */
 .vwap-slope-col {
-    font-size: clamp(12px, 0.9vw, 14px) !important;
+    font-size: clamp(14px, 1.1vw, 16px) !important;
     line-height: 1.4;
     white-space: normal;
     vertical-align: top;
@@ -822,23 +822,23 @@ body {
 }
 
 .option-contract {
-    font-size: clamp(12px, 0.9vw, 14px) !important;
+    font-size: clamp(14px, 1.1vw, 16px) !important;
 }
 
 .qty {
-    font-size: clamp(12px, 0.9vw, 14px) !important;
+    font-size: clamp(14px, 1.1vw, 16px) !important;
 }
 
 .buy-price {
-    font-size: clamp(12px, 0.9vw, 14px) !important;
+    font-size: clamp(14px, 1.1vw, 16px) !important;
 }
 
 .stop-loss {
-    font-size: clamp(12px, 0.9vw, 14px) !important;
+    font-size: clamp(14px, 1.1vw, 16px) !important;
 }
 
 .sell-price {
-    font-size: clamp(12px, 0.9vw, 14px) !important;
+    font-size: clamp(14px, 1.1vw, 16px) !important;
 }
 
 .hold-icon {
