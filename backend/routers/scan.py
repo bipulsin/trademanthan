@@ -1402,6 +1402,42 @@ async def manual_close_trades(db: Session = Depends(get_db)):
         }
 
 
+@router.post("/trigger-cycle-vwap-slope")
+async def trigger_cycle_vwap_slope(cycle_number: int = Query(..., ge=1, le=5)):
+    """
+    Manually trigger VWAP slope calculation for a specific cycle
+    Useful for testing or reprocessing missed cycles
+    """
+    try:
+        from backend.services.vwap_updater import calculate_vwap_slope_for_cycle
+        from datetime import datetime
+        import pytz
+        
+        ist = pytz.timezone('Asia/Kolkata')
+        now = datetime.now(ist)
+        
+        logger.info(f"🔧 Manual trigger: Cycle {cycle_number} VWAP slope calculation")
+        
+        # Run the cycle calculation
+        await calculate_vwap_slope_for_cycle(cycle_number, now)
+        
+        return {
+            "success": True,
+            "message": f"Cycle {cycle_number} VWAP slope calculation completed",
+            "cycle_number": cycle_number,
+            "timestamp": now.isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error triggering cycle {cycle_number}: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "success": False,
+            "error": str(e),
+            "cycle_number": cycle_number
+        }
+
 @router.post("/update-no-entry-trades")
 async def manually_update_no_entry_trades(db: Session = Depends(get_db)):
     """
