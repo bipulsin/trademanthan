@@ -1170,11 +1170,14 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                                 IntradayStockOption.status == 'alert_received'
                             )
                         ),
-                        # Previous cycle: No_Entry stocks from 10:15 AM
+                        # Previous cycle: No_Entry OR alert_received stocks from 10:15 AM (not yet entered)
                         and_(
                             IntradayStockOption.alert_time >= target_alert_times[0],
                             IntradayStockOption.alert_time < target_alert_times[0] + timedelta(minutes=1),
-                            IntradayStockOption.status == 'no_entry'
+                            or_(
+                                IntradayStockOption.status == 'no_entry',
+                                IntradayStockOption.status == 'alert_received'
+                            )
                         )
                     )
                 )
@@ -1194,11 +1197,14 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                                 IntradayStockOption.status == 'alert_received'
                             )
                         ),
-                        # Previous cycles: No_Entry stocks up to 11:15 AM
+                        # Previous cycles: No_Entry OR alert_received stocks up to 11:15 AM (not yet entered)
                         and_(
                             IntradayStockOption.alert_time >= target_alert_times[0],
                             IntradayStockOption.alert_time < target_alert_times[2],
-                            IntradayStockOption.status == 'no_entry'
+                            or_(
+                                IntradayStockOption.status == 'no_entry',
+                                IntradayStockOption.status == 'alert_received'
+                            )
                         )
                     )
                 )
@@ -1218,11 +1224,14 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                                 IntradayStockOption.status == 'alert_received'
                             )
                         ),
-                        # Previous cycles: No_Entry stocks up to 12:15 PM
+                        # Previous cycles: No_Entry OR alert_received stocks up to 12:15 PM (not yet entered)
                         and_(
                             IntradayStockOption.alert_time >= target_alert_times[0],
                             IntradayStockOption.alert_time < target_alert_times[3],
-                            IntradayStockOption.status == 'no_entry'
+                            or_(
+                                IntradayStockOption.status == 'no_entry',
+                                IntradayStockOption.status == 'alert_received'
+                            )
                         )
                     )
                 )
