@@ -1084,9 +1084,11 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
         elif cycle_number == 2:
             # Cycle 2: 11:15 AM
             # Previous VWAP: Use 1-hour candle at 10:15 AM (1-hour candle closes at 10:00 AM, represents 9:00-10:00 AM)
-            # Use 1-hour candle closing at 10:00 AM, but query with time 10:15 AM (function will find closest match)
-            prev_vwap_time = today.replace(hour=10, minute=15, second=0, microsecond=0)
-            current_vwap_time = today.replace(hour=11, minute=15, second=0, microsecond=0)
+            # Query with actual candle close time (10:00 AM) but will record time as 10:15 AM
+            prev_vwap_time_query = today.replace(hour=10, minute=0, second=0, microsecond=0)  # Actual candle close time
+            prev_vwap_time = today.replace(hour=10, minute=15, second=0, microsecond=0)  # Time to record
+            current_vwap_time_query = today.replace(hour=11, minute=0, second=0, microsecond=0)  # Actual candle close time
+            current_vwap_time = today.replace(hour=11, minute=15, second=0, microsecond=0)  # Time to record
             prev_interval = "hours/1"  # Use 1-hour candle (closes at 10:00 AM)
             current_interval = "hours/1"  # Use 1-hour candle (closes at 11:00 AM)
             # Stocks from 11:15 AM webhook + No_Entry from 10:15 AM
@@ -1110,8 +1112,10 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
         elif cycle_number == 4:
             # Cycle 4: 13:15 PM
             # Previous VWAP: Use 1-hour candle at 12:15 PM (1-hour candle closes at 12:00 PM, represents 11:00 AM-12:00 PM)
-            prev_vwap_time = today.replace(hour=12, minute=15, second=0, microsecond=0)
-            current_vwap_time = today.replace(hour=13, minute=15, second=0, microsecond=0)
+            prev_vwap_time_query = today.replace(hour=12, minute=0, second=0, microsecond=0)  # Actual candle close time
+            prev_vwap_time = today.replace(hour=12, minute=15, second=0, microsecond=0)  # Time to record
+            current_vwap_time_query = today.replace(hour=13, minute=0, second=0, microsecond=0)  # Actual candle close time
+            current_vwap_time = today.replace(hour=13, minute=15, second=0, microsecond=0)  # Time to record
             prev_interval = "hours/1"  # Use 1-hour candle (closes at 12:00 PM)
             current_interval = "hours/1"  # Use 1-hour candle (closes at 13:00 PM)
             # Stocks from 13:15 PM webhook + No_Entry up to 12:15 PM
@@ -1124,8 +1128,10 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
         elif cycle_number == 5:
             # Cycle 5: 14:15 PM
             # Previous VWAP: Use 1-hour candle at 13:15 PM (1-hour candle closes at 13:00 PM, represents 12:00 PM-13:00 PM)
-            prev_vwap_time = today.replace(hour=13, minute=15, second=0, microsecond=0)
-            current_vwap_time = today.replace(hour=14, minute=15, second=0, microsecond=0)
+            prev_vwap_time_query = today.replace(hour=13, minute=0, second=0, microsecond=0)  # Actual candle close time
+            prev_vwap_time = today.replace(hour=13, minute=15, second=0, microsecond=0)  # Time to record
+            current_vwap_time_query = today.replace(hour=14, minute=0, second=0, microsecond=0)  # Actual candle close time
+            current_vwap_time = today.replace(hour=14, minute=15, second=0, microsecond=0)  # Time to record
             prev_interval = "hours/1"  # Use 1-hour candle (closes at 13:00 PM)
             current_interval = "hours/1"  # Use 1-hour candle (closes at 14:00 PM)
             # Stocks from 14:15 PM webhook + No_Entry up to 13:15 PM
@@ -1564,7 +1570,7 @@ async def close_all_open_trades():
                             option_quote = None
                             for retry in range(max_retries):
                                 try:
-                                    option_quote = vwap_service.get_market_quote_by_key(instrument_key)
+                            option_quote = vwap_service.get_market_quote_by_key(instrument_key)
                                     if option_quote and 'last_price' in option_quote:
                                         break  # Success, exit retry loop
                                     elif retry < max_retries - 1:
@@ -1665,7 +1671,7 @@ async def close_all_open_trades():
                                                                 option_quote = None
                                                                 for retry in range(max_retries):
                                                                     try:
-                                                                        option_quote = vwap_service.get_market_quote_by_key(instrument_key)
+                                                                option_quote = vwap_service.get_market_quote_by_key(instrument_key)
                                                                         if option_quote and 'last_price' in option_quote:
                                                                             break  # Success, exit retry loop
                                                                         elif retry < max_retries - 1:
