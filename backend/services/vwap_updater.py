@@ -1670,7 +1670,7 @@ async def close_all_open_trades():
                                                                 option_quote = None
                                                                 for retry in range(max_retries):
                                                                     try:
-                                                                option_quote = vwap_service.get_market_quote_by_key(instrument_key)
+                                                                        option_quote = vwap_service.get_market_quote_by_key(instrument_key)
                                                                         if option_quote and 'last_price' in option_quote:
                                                                             break  # Success, exit retry loop
                                                                         elif retry < max_retries - 1:
