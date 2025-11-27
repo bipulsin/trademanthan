@@ -1151,7 +1151,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 current_day_candle = option_candles_data.get('current_day_candle', {}) if option_candles_data else {}
                 previous_day_candle = option_candles_data.get('previous_day_candle', {}) if option_candles_data else {}
                 
-                # Calculate and save candle size ratio and status
+                # Calculate and save candle size ratio and status (use the same calculation as above)
                 saved_candle_size_ratio = None
                 saved_candle_size_status = None
                 if option_candles_data and current_day_candle and previous_day_candle:
@@ -1169,10 +1169,14 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                             saved_candle_size_status = "Pass" if saved_candle_size_ratio < 7.5 else "Fail"
                         else:
                             saved_candle_size_status = "Skipped"
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"Error calculating candle size for {stock_name}: {str(e)}")
+                        saved_candle_size_status = None
                 elif is_10_15_alert:
                     saved_candle_size_status = "Skipped"
+                else:
+                    # No candle data available
+                    saved_candle_size_status = None
                 
                 db_record = IntradayStockOption(
                     alert_time=triggered_datetime,
