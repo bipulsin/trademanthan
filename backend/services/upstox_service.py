@@ -2175,6 +2175,23 @@ class UpstoxService:
             best_match = None
             min_diff = float('inf')
             
+            # Debug: Log available candle times when looking for specific times
+            if interval == "hours/1" and target_time.minute == 15:
+                logger.debug(f"🔍 Looking for {interval} candle at {target_time.strftime('%H:%M')} for {stock_symbol}")
+                logger.debug(f"   Available candles: {len(candles)}")
+                for i, candle in enumerate(candles[:5]):  # Show first 5 candles
+                    timestamp_ms = candle.get('timestamp', 0)
+                    if isinstance(timestamp_ms, str):
+                        try:
+                            timestamp_ms = float(timestamp_ms)
+                        except (ValueError, TypeError):
+                            continue
+                    if timestamp_ms > 1e12:
+                        timestamp_ms = timestamp_ms / 1000
+                    candle_time = datetime.fromtimestamp(timestamp_ms, tz=target_time.tzinfo)
+                    time_diff = abs((candle_time - target_time).total_seconds())
+                    logger.debug(f"   Candle {i+1}: {candle_time.strftime('%Y-%m-%d %H:%M:%S')} (diff: {time_diff:.0f}s)")
+            
             for candle in candles:
                 timestamp_ms = candle.get('timestamp', 0)
                 if isinstance(timestamp_ms, str):
@@ -2193,7 +2210,27 @@ class UpstoxService:
                     best_match = candle
             
             if not best_match:
-                logger.warning(f"⚠️ No matching candle found for {stock_symbol} at {target_time.strftime('%H:%M')}")
+                logger.warning(f"⚠️ No matching candle found for {stock_symbol} at {target_time.strftime('%H:%M')} (interval: {interval})")
+                # Log the closest candle for debugging
+                if candles:
+                    closest_candle = None
+                    closest_diff = float('inf')
+                    for candle in candles:
+                        timestamp_ms = candle.get('timestamp', 0)
+                        if isinstance(timestamp_ms, str):
+                            try:
+                                timestamp_ms = float(timestamp_ms)
+                            except (ValueError, TypeError):
+                                continue
+                        if timestamp_ms > 1e12:
+                            timestamp_ms = timestamp_ms / 1000
+                        candle_time = datetime.fromtimestamp(timestamp_ms, tz=target_time.tzinfo)
+                        time_diff = abs((candle_time - target_time).total_seconds())
+                        if time_diff < closest_diff:
+                            closest_diff = time_diff
+                            closest_candle = candle_time
+                    if closest_candle:
+                        logger.warning(f"   Closest candle found at: {closest_candle.strftime('%Y-%m-%d %H:%M:%S')} (diff: {closest_diff:.0f}s)")
                 return None
             
             # Calculate VWAP from candle
