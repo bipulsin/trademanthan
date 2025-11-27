@@ -1506,6 +1506,64 @@ async def get_scheduler_status():
         return {"success": False, "error": str(e)}
 
 
+@router.post("/deploy-backend")
+async def deploy_backend():
+    """
+    Trigger backend deployment (git pull + restart)
+    This runs in background and returns immediately
+    """
+    import subprocess
+    import asyncio
+    
+    async def run_deployment():
+        try:
+            # Run deployment script in background
+            process = await asyncio.create_subprocess_exec(
+                '/home/ubuntu/trademanthan/backend/scripts/deploy_backend.sh',
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            # Don't wait for completion - return immediately
+            return {"success": True, "message": "Deployment started in background"}
+        except Exception as e:
+            logger.error(f"Error starting deployment: {e}")
+            return {"success": False, "error": str(e)}
+    
+    # Start deployment in background
+    asyncio.create_task(run_deployment())
+    
+    return {
+        "success": True,
+        "message": "Deployment initiated. Check /tmp/deploy_backend.log for progress.",
+        "status_endpoint": "/scan/deployment-status"
+    }
+
+@router.get("/deployment-status")
+async def get_deployment_status():
+    """Get the latest deployment status from log file"""
+    try:
+        log_file = "/tmp/deploy_backend.log"
+        if os.path.exists(log_file):
+            # Get last 20 lines
+            with open(log_file, 'r') as f:
+                lines = f.readlines()
+                recent_lines = lines[-20:] if len(lines) > 20 else lines
+                return {
+                    "success": True,
+                    "log": "".join(recent_lines),
+                    "total_lines": len(lines)
+                }
+        else:
+            return {
+                "success": False,
+                "message": "Deployment log not found"
+            }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
 @router.get("/health")
 async def health_check(db: Session = Depends(get_db)):
     """
