@@ -2194,20 +2194,54 @@ class UpstoxService:
             
             for candle in candles:
                 timestamp_ms = candle.get('timestamp', 0)
+                candle_time = None
+                
+                # Handle different timestamp formats
                 if isinstance(timestamp_ms, str):
+                    # Try parsing ISO format string (e.g., '2025-11-26T15:15:00+05:30')
                     try:
-                        timestamp_ms = float(timestamp_ms)
-                    except (ValueError, TypeError):
-                        continue
-                if timestamp_ms > 1e12:
-                    timestamp_ms = timestamp_ms / 1000
+                        from dateutil import parser
+                        candle_time = parser.parse(timestamp_ms)
+                        if candle_time.tzinfo is None:
+                            candle_time = target_time.tzinfo.localize(candle_time)
+                    except:
+                        # Try parsing as numeric string
+                        try:
+                            timestamp_ms = float(timestamp_ms)
+                            if timestamp_ms > 1e12:
+                                timestamp_ms = timestamp_ms / 1000
+                            candle_time = datetime.fromtimestamp(timestamp_ms, tz=target_time.tzinfo)
+                        except (ValueError, TypeError):
+                            continue
+                else:
+                    # Numeric timestamp
+                    if timestamp_ms > 1e12:
+                        timestamp_ms = timestamp_ms / 1000
+                    candle_time = datetime.fromtimestamp(timestamp_ms, tz=target_time.tzinfo)
                 
-                candle_time = datetime.fromtimestamp(timestamp_ms, tz=target_time.tzinfo)
-                time_diff = abs((candle_time - target_time).total_seconds())
+                if candle_time is None:
+                    continue
                 
-                if time_diff < min_diff and time_diff <= 300:  # 5 minutes tolerance
-                    min_diff = time_diff
-                    best_match = candle
+                # For hourly candles at :15 times, match by hour:minute
+                # Allow yesterday's candle if today's isn't available yet
+                time_match = (candle_time.hour == target_time.hour and 
+                             candle_time.minute == target_time.minute)
+                date_match = candle_time.date() == target_time.date()
+                
+                if time_match:
+                    time_diff = abs((candle_time - target_time).total_seconds())
+                    
+                    # Prefer same date, but allow yesterday's candle if today's isn't available
+                    if date_match:
+                        # Same date - use 5 minute tolerance
+                        if time_diff <= 300 and time_diff < min_diff:
+                            min_diff = time_diff
+                            best_match = candle
+                    else:
+                        # Different date - allow if within 24 hours (for yesterday's candle)
+                        if time_diff <= 86400 and time_diff < min_diff:  # 24 hours
+                            min_diff = time_diff
+                            best_match = candle
             
             if not best_match:
                 logger.warning(f"⚠️ No matching candle found for {stock_symbol} at {target_time.strftime('%H:%M')} (interval: {interval})")
