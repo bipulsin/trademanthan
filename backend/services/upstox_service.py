@@ -2217,14 +2217,31 @@ class UpstoxService:
                     closest_diff = float('inf')
                     for candle in candles:
                         timestamp_ms = candle.get('timestamp', 0)
+                        candle_time = None
+                        
+                        # Handle different timestamp formats (same logic as above)
                         if isinstance(timestamp_ms, str):
                             try:
-                                timestamp_ms = float(timestamp_ms)
-                            except (ValueError, TypeError):
-                                continue
-                        if timestamp_ms > 1e12:
-                            timestamp_ms = timestamp_ms / 1000
-                        candle_time = datetime.fromtimestamp(timestamp_ms, tz=target_time.tzinfo)
+                                from dateutil import parser
+                                candle_time = parser.parse(timestamp_ms)
+                                if candle_time.tzinfo is None:
+                                    candle_time = target_time.tzinfo.localize(candle_time)
+                            except:
+                                try:
+                                    timestamp_ms = float(timestamp_ms)
+                                    if timestamp_ms > 1e12:
+                                        timestamp_ms = timestamp_ms / 1000
+                                    candle_time = datetime.fromtimestamp(timestamp_ms, tz=target_time.tzinfo)
+                                except (ValueError, TypeError):
+                                    continue
+                        else:
+                            if timestamp_ms > 1e12:
+                                timestamp_ms = timestamp_ms / 1000
+                            candle_time = datetime.fromtimestamp(timestamp_ms, tz=target_time.tzinfo)
+                        
+                        if candle_time is None:
+                            continue
+                        
                         time_diff = abs((candle_time - target_time).total_seconds())
                         if time_diff < closest_diff:
                             closest_diff = time_diff
