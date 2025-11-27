@@ -1074,10 +1074,11 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
         # Determine previous VWAP time and current VWAP time based on cycle
         if cycle_number == 1:
             # Cycle 1: 10:30 AM
+            # Previous VWAP: Use 15-minute candle at 10:15 AM
             prev_vwap_time = today.replace(hour=10, minute=15, second=0, microsecond=0)
             current_vwap_time = today.replace(hour=10, minute=30, second=0, microsecond=0)
-            prev_interval = "hours/1"
-            current_interval = "minutes/15"
+            prev_interval = "minutes/15"  # Use 15-minute candle for 10:15 AM
+            current_interval = "minutes/15"  # Use 15-minute candle for 10:30 AM
             # Stocks from 10:15 AM webhook
             target_alert_times = [today.replace(hour=10, minute=15, second=0, microsecond=0)]
         elif cycle_number == 2:
