@@ -2181,16 +2181,31 @@ class UpstoxService:
                 logger.debug(f"   Available candles: {len(candles)}")
                 for i, candle in enumerate(candles[:5]):  # Show first 5 candles
                     timestamp_ms = candle.get('timestamp', 0)
+                    candle_time = None
+                    
+                    # Handle ISO format strings in debug logging too
                     if isinstance(timestamp_ms, str):
                         try:
-                            timestamp_ms = float(timestamp_ms)
-                        except (ValueError, TypeError):
-                            continue
-                    if timestamp_ms > 1e12:
-                        timestamp_ms = timestamp_ms / 1000
-                    candle_time = datetime.fromtimestamp(timestamp_ms, tz=target_time.tzinfo)
-                    time_diff = abs((candle_time - target_time).total_seconds())
-                    logger.debug(f"   Candle {i+1}: {candle_time.strftime('%Y-%m-%d %H:%M:%S')} (diff: {time_diff:.0f}s)")
+                            from dateutil import parser
+                            candle_time = parser.parse(timestamp_ms)
+                            if candle_time.tzinfo is None:
+                                candle_time = target_time.tzinfo.localize(candle_time)
+                        except:
+                            try:
+                                timestamp_ms = float(timestamp_ms)
+                                if timestamp_ms > 1e12:
+                                    timestamp_ms = timestamp_ms / 1000
+                                candle_time = datetime.fromtimestamp(timestamp_ms, tz=target_time.tzinfo)
+                            except (ValueError, TypeError):
+                                continue
+                    else:
+                        if timestamp_ms > 1e12:
+                            timestamp_ms = timestamp_ms / 1000
+                        candle_time = datetime.fromtimestamp(timestamp_ms, tz=target_time.tzinfo)
+                    
+                    if candle_time:
+                        time_diff = abs((candle_time - target_time).total_seconds())
+                        logger.debug(f"   Candle {i+1}: {candle_time.strftime('%Y-%m-%d %H:%M:%S')} (diff: {time_diff:.0f}s)")
             
             for candle in candles:
                 timestamp_ms = candle.get('timestamp', 0)
