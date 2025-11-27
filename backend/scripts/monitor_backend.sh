@@ -17,8 +17,8 @@ check_backend() {
         return 1
     fi
     
-    # Check if endpoint responds
-    if curl -s -f "$BACKEND_URL" > /dev/null 2>&1; then
+    # Check if endpoint responds (with timeout to prevent hanging)
+    if timeout 5 curl -s -f "$BACKEND_URL" > /dev/null 2>&1; then
         return 0
     fi
     
