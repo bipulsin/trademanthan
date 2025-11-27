@@ -52,8 +52,10 @@ class VWAPUpdater:
             
             # Cycle-based VWAP slope calculations
             # Cycle 1: 10:30 AM - Stocks from 10:15 AM webhook
+            async def run_cycle_1():
+                await calculate_vwap_slope_for_cycle(1, datetime.now(pytz.timezone('Asia/Kolkata')))
             self.scheduler.add_job(
-                lambda: calculate_vwap_slope_for_cycle(1, datetime.now(pytz.timezone('Asia/Kolkata'))),
+                run_cycle_1,
                 trigger=CronTrigger(hour=10, minute=30, timezone='Asia/Kolkata'),
                 id='cycle_1_vwap_slope_10_30',
                 name='Cycle 1: VWAP Slope at 10:30 AM',
@@ -61,8 +63,10 @@ class VWAPUpdater:
             )
             
             # Cycle 2: 11:15 AM - Stocks from 11:15 AM webhook + No_Entry from 10:15 AM
+            async def run_cycle_2():
+                await calculate_vwap_slope_for_cycle(2, datetime.now(pytz.timezone('Asia/Kolkata')))
             self.scheduler.add_job(
-                lambda: calculate_vwap_slope_for_cycle(2, datetime.now(pytz.timezone('Asia/Kolkata'))),
+                run_cycle_2,
                 trigger=CronTrigger(hour=11, minute=15, timezone='Asia/Kolkata'),
                 id='cycle_2_vwap_slope_11_15',
                 name='Cycle 2: VWAP Slope at 11:15 AM',
@@ -70,8 +74,10 @@ class VWAPUpdater:
             )
             
             # Cycle 3: 12:15 PM - Stocks from 12:15 PM webhook + No_Entry up to 11:15 AM
+            async def run_cycle_3():
+                await calculate_vwap_slope_for_cycle(3, datetime.now(pytz.timezone('Asia/Kolkata')))
             self.scheduler.add_job(
-                lambda: calculate_vwap_slope_for_cycle(3, datetime.now(pytz.timezone('Asia/Kolkata'))),
+                run_cycle_3,
                 trigger=CronTrigger(hour=12, minute=15, timezone='Asia/Kolkata'),
                 id='cycle_3_vwap_slope_12_15',
                 name='Cycle 3: VWAP Slope at 12:15 PM',
@@ -79,8 +85,10 @@ class VWAPUpdater:
             )
             
             # Cycle 4: 13:15 PM - Stocks from 13:15 PM webhook + No_Entry up to 12:15 PM
+            async def run_cycle_4():
+                await calculate_vwap_slope_for_cycle(4, datetime.now(pytz.timezone('Asia/Kolkata')))
             self.scheduler.add_job(
-                lambda: calculate_vwap_slope_for_cycle(4, datetime.now(pytz.timezone('Asia/Kolkata'))),
+                run_cycle_4,
                 trigger=CronTrigger(hour=13, minute=15, timezone='Asia/Kolkata'),
                 id='cycle_4_vwap_slope_13_15',
                 name='Cycle 4: VWAP Slope at 13:15 PM',
@@ -88,8 +96,10 @@ class VWAPUpdater:
             )
             
             # Cycle 5: 14:15 PM - Stocks from 14:15 PM webhook + No_Entry up to 13:15 PM
+            async def run_cycle_5():
+                await calculate_vwap_slope_for_cycle(5, datetime.now(pytz.timezone('Asia/Kolkata')))
             self.scheduler.add_job(
-                lambda: calculate_vwap_slope_for_cycle(5, datetime.now(pytz.timezone('Asia/Kolkata'))),
+                run_cycle_5,
                 trigger=CronTrigger(hour=14, minute=15, timezone='Asia/Kolkata'),
                 id='cycle_5_vwap_slope_14_15',
                 name='Cycle 5: VWAP Slope at 14:15 PM',
