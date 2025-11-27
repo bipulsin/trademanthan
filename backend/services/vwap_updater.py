@@ -1357,13 +1357,11 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 trade.stock_vwap_previous_hour_time = prev_vwap_time_actual
                 trade.stock_vwap = current_vwap
                 
-                # Store VWAP slope results (if model has these fields)
-                if hasattr(trade, 'vwap_slope_status'):
-                    trade.vwap_slope_status = slope_status
-                if hasattr(trade, 'vwap_slope_angle'):
-                    trade.vwap_slope_angle = slope_angle
-                if hasattr(trade, 'vwap_slope_direction'):
-                    trade.vwap_slope_direction = slope_direction
+                # Store VWAP slope results
+                trade.vwap_slope_status = slope_status
+                trade.vwap_slope_angle = slope_angle
+                trade.vwap_slope_direction = slope_direction
+                trade.vwap_slope_time = current_vwap_time_actual
                 
                 logger.info(f"✅ Cycle {cycle_number} - {stock_name}: VWAP slope {slope_angle:.2f}° ({slope_direction}) - {'PASS' if vwap_slope_passed else 'FAIL'}")
                 success_count += 1

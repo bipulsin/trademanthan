@@ -1936,8 +1936,15 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                 alert_minute = record.alert_time.minute if record.alert_time else None
                 is_10_15_alert = (alert_hour == 10 and alert_minute == 15)
                 
-                # Calculate VWAP slope if data is available
-                if record.stock_vwap and record.stock_vwap > 0 and record.stock_vwap_previous_hour and record.stock_vwap_previous_hour > 0 and record.stock_vwap_previous_hour_time:
+                # Use saved VWAP slope values if available (from cycle-based calculations)
+                # Otherwise, calculate on-the-fly from stock_vwap and stock_vwap_previous_hour
+                if hasattr(record, 'vwap_slope_angle') and record.vwap_slope_angle is not None:
+                    # Use saved values from cycle-based calculation
+                    vwap_slope_angle = record.vwap_slope_angle
+                    vwap_slope_status = getattr(record, 'vwap_slope_status', None)
+                    vwap_slope_direction = getattr(record, 'vwap_slope_direction', None)
+                elif record.stock_vwap and record.stock_vwap > 0 and record.stock_vwap_previous_hour and record.stock_vwap_previous_hour > 0 and record.stock_vwap_previous_hour_time:
+                    # Calculate VWAP slope on-the-fly if not saved yet
                     try:
                         slope_result = vwap_service.vwap_slope(
                             vwap1=record.stock_vwap_previous_hour,
@@ -2046,8 +2053,15 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                 alert_minute = record.alert_time.minute if record.alert_time else None
                 is_10_15_alert = (alert_hour == 10 and alert_minute == 15)
                 
-                # Calculate VWAP slope if data is available
-                if record.stock_vwap and record.stock_vwap > 0 and record.stock_vwap_previous_hour and record.stock_vwap_previous_hour > 0 and record.stock_vwap_previous_hour_time:
+                # Use saved VWAP slope values if available (from cycle-based calculations)
+                # Otherwise, calculate on-the-fly from stock_vwap and stock_vwap_previous_hour
+                if hasattr(record, 'vwap_slope_angle') and record.vwap_slope_angle is not None:
+                    # Use saved values from cycle-based calculation
+                    vwap_slope_angle = record.vwap_slope_angle
+                    vwap_slope_status = getattr(record, 'vwap_slope_status', None)
+                    vwap_slope_direction = getattr(record, 'vwap_slope_direction', None)
+                elif record.stock_vwap and record.stock_vwap > 0 and record.stock_vwap_previous_hour and record.stock_vwap_previous_hour > 0 and record.stock_vwap_previous_hour_time:
+                    # Calculate VWAP slope on-the-fly if not saved yet
                     try:
                         slope_result = vwap_service.vwap_slope(
                             vwap1=record.stock_vwap_previous_hour,

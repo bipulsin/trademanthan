@@ -48,6 +48,11 @@ class IntradayStockOption(Base):
     stock_vwap = Column(Float, nullable=True)
     stock_vwap_previous_hour = Column(Float, nullable=True)  # VWAP from previous 1-hour candle
     stock_vwap_previous_hour_time = Column(DateTime, nullable=True)  # Time of previous hour VWAP
+    # VWAP slope fields (calculated by cycle-based scheduler)
+    vwap_slope_angle = Column(Float, nullable=True)  # VWAP slope angle in degrees
+    vwap_slope_status = Column(String(20), nullable=True)  # 'Yes', 'No', 'Skipped'
+    vwap_slope_direction = Column(String(20), nullable=True)  # 'upward', 'downward', 'flat'
+    vwap_slope_time = Column(DateTime, nullable=True)  # Time when VWAP slope was calculated
     option_contract = Column(String(255), nullable=True)
     option_type = Column(String(10), nullable=True)  # 'CE' or 'PE'
     option_strike = Column(Float, nullable=True)
