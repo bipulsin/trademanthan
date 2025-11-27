@@ -1082,10 +1082,12 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
             target_alert_times = [today.replace(hour=10, minute=15, second=0, microsecond=0)]
         elif cycle_number == 2:
             # Cycle 2: 11:15 AM
+            # Previous VWAP: Use 1-hour candle closing at 10:00 AM (represents period up to 10:00 AM)
+            # But user wants VWAP at 10:15 AM, so use 15-minute candle at 10:15 AM instead
             prev_vwap_time = today.replace(hour=10, minute=15, second=0, microsecond=0)
             current_vwap_time = today.replace(hour=11, minute=15, second=0, microsecond=0)
-            prev_interval = "hours/1"
-            current_interval = "hours/1"
+            prev_interval = "minutes/15"  # Use 15-minute candle for 10:15 AM
+            current_interval = "hours/1"   # Use 1-hour candle for 11:15 AM (closes at 11:00)
             # Stocks from 11:15 AM webhook + No_Entry from 10:15 AM
             target_alert_times = [
                 today.replace(hour=10, minute=15, second=0, microsecond=0),
@@ -1105,10 +1107,11 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
             ]
         elif cycle_number == 4:
             # Cycle 4: 13:15 PM
+            # Previous VWAP: Use 15-minute candle at 12:15 PM
             prev_vwap_time = today.replace(hour=12, minute=15, second=0, microsecond=0)
             current_vwap_time = today.replace(hour=13, minute=15, second=0, microsecond=0)
-            prev_interval = "hours/1"
-            current_interval = "hours/1"
+            prev_interval = "minutes/15"  # Use 15-minute candle for 12:15 PM
+            current_interval = "hours/1"   # Use 1-hour candle for 13:15 PM (closes at 13:00)
             # Stocks from 13:15 PM webhook + No_Entry up to 12:15 PM
             target_alert_times = [
                 today.replace(hour=10, minute=15, second=0, microsecond=0),
@@ -1118,10 +1121,11 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
             ]
         elif cycle_number == 5:
             # Cycle 5: 14:15 PM
+            # Previous VWAP: Use 15-minute candle at 13:15 PM
             prev_vwap_time = today.replace(hour=13, minute=15, second=0, microsecond=0)
             current_vwap_time = today.replace(hour=14, minute=15, second=0, microsecond=0)
-            prev_interval = "hours/1"
-            current_interval = "hours/1"
+            prev_interval = "minutes/15"  # Use 15-minute candle for 13:15 PM
+            current_interval = "hours/1"   # Use 1-hour candle for 14:15 PM (closes at 14:00)
             # Stocks from 14:15 PM webhook + No_Entry up to 13:15 PM
             target_alert_times = [
                 today.replace(hour=10, minute=15, second=0, microsecond=0),
