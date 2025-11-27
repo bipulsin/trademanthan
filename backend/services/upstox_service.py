@@ -2313,12 +2313,31 @@ class UpstoxService:
             
             # Get candle time
             timestamp_ms = best_match.get('timestamp', 0)
-            if isinstance(timestamp_ms, str):
-                timestamp_ms = float(timestamp_ms)
-            if timestamp_ms > 1e12:
-                timestamp_ms = timestamp_ms / 1000
+            candle_time = None
             
-            candle_time = datetime.fromtimestamp(timestamp_ms, tz=target_time.tzinfo)
+            # Handle different timestamp formats
+            if isinstance(timestamp_ms, str):
+                # Try parsing ISO format string (e.g., '2025-11-26T15:15:00+05:30')
+                try:
+                    from dateutil import parser
+                    candle_time = parser.parse(timestamp_ms)
+                    if candle_time.tzinfo is None:
+                        candle_time = target_time.tzinfo.localize(candle_time)
+                except:
+                    # Try parsing as numeric string
+                    try:
+                        timestamp_ms = float(timestamp_ms)
+                        if timestamp_ms > 1e12:
+                            timestamp_ms = timestamp_ms / 1000
+                        candle_time = datetime.fromtimestamp(timestamp_ms, tz=target_time.tzinfo)
+                    except (ValueError, TypeError):
+                        # Fallback to using target_time if parsing fails
+                        candle_time = target_time
+            else:
+                # Numeric timestamp
+                if timestamp_ms > 1e12:
+                    timestamp_ms = timestamp_ms / 1000
+                candle_time = datetime.fromtimestamp(timestamp_ms, tz=target_time.tzinfo)
             
             logger.info(f"✅ VWAP for {stock_symbol} at {target_time.strftime('%H:%M')}: ₹{vwap:.2f} (from {interval} candle)")
             
