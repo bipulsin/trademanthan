@@ -1072,6 +1072,10 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 return
         
         # Determine previous VWAP time and current VWAP time based on cycle
+        # Initialize query time variables (will be set for Cycles 2-5)
+        prev_vwap_time_query = None
+        current_vwap_time_query = None
+        
         if cycle_number == 1:
             # Cycle 1: 10:30 AM
             # Previous VWAP: Use 15-minute candle at 10:15 AM
@@ -1305,32 +1309,38 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                     continue
                 
                 # Get previous VWAP
+                # For Cycles 2-5 with 1-hour candles, query at actual candle close time (:00), but record as :15
+                prev_vwap_query_time = prev_vwap_time_query if prev_vwap_time_query is not None else prev_vwap_time
                 prev_vwap_data = vwap_service.get_stock_vwap_from_candle_at_time(
                     stock_name,
-                    prev_vwap_time,
+                    prev_vwap_query_time,
                     interval=prev_interval
                 )
                 
                 if not prev_vwap_data:
-                    logger.warning(f"⚠️ Could not get previous VWAP for {stock_name} at {prev_vwap_time.strftime('%H:%M')}")
+                    logger.warning(f"⚠️ Could not get previous VWAP for {stock_name} at {prev_vwap_query_time.strftime('%H:%M')}")
                     continue
                 
                 prev_vwap = prev_vwap_data.get('vwap', 0)
-                prev_vwap_time_actual = prev_vwap_data.get('time')
+                # Use requested time (e.g., 10:15) instead of actual candle time (e.g., 10:00) for Cycles 2-5
+                prev_vwap_time_actual = prev_vwap_time if prev_vwap_time_query is not None else prev_vwap_data.get('time')
                 
                 # Get current VWAP
+                # For Cycles 2-5 with 1-hour candles, query at actual candle close time (:00), but record as :15
+                current_vwap_query_time = current_vwap_time_query if current_vwap_time_query is not None else current_vwap_time
                 current_vwap_data = vwap_service.get_stock_vwap_from_candle_at_time(
                     stock_name,
-                    current_vwap_time,
+                    current_vwap_query_time,
                     interval=current_interval
                 )
                 
                 if not current_vwap_data:
-                    logger.warning(f"⚠️ Could not get current VWAP for {stock_name} at {current_vwap_time.strftime('%H:%M')}")
+                    logger.warning(f"⚠️ Could not get current VWAP for {stock_name} at {current_vwap_query_time.strftime('%H:%M')}")
                     continue
                 
                 current_vwap = current_vwap_data.get('vwap', 0)
-                current_vwap_time_actual = current_vwap_data.get('time')
+                # Use requested time (e.g., 11:15) instead of actual candle time (e.g., 11:00) for Cycles 2-5
+                current_vwap_time_actual = current_vwap_time if current_vwap_time_query is not None else current_vwap_data.get('time')
                 
                 if prev_vwap <= 0 or current_vwap <= 0:
                     logger.warning(f"⚠️ Invalid VWAP values for {stock_name} (prev: {prev_vwap}, current: {current_vwap})")
