@@ -1,0 +1,34 @@
+# Cursor AI Assistant Rules for TradeManthan Project
+
+## Command Execution Guidelines
+
+### Timeout Requirements
+- ALWAYS use `timeout` command for potentially blocking operations:
+  - `tail -f` or `tail` on log files
+  - `grep` on large files
+  - `ssh` commands that might hang
+  - Any command that waits for output
+
+### Examples:
+```bash
+# ✅ CORRECT - with timeout
+timeout 5 tail -10 /tmp/uvicorn.log
+timeout 10 ssh ... "command"
+timeout 3 grep pattern file.log
+
+# ❌ WRONG - no timeout
+tail -10 /tmp/uvicorn.log
+ssh ... "command"
+grep pattern file.log
+```
+
+### Deployment Commands
+- Use the API endpoint `/scan/deploy-backend` for deployments (fast, non-blocking)
+- If using SSH directly, always include timeout wrapper
+- Never use `tail -f` without timeout in deployment scripts
+
+### Log Checking
+- Always use timeout when checking logs via SSH
+- Prefer API endpoints for status checks when available
+- Use `timeout 5` for quick log checks, `timeout 10` for longer operations
+

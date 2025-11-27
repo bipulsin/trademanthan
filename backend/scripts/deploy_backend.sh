@@ -61,6 +61,8 @@ for i in {1..15}; do
     sleep 1
     if check_backend_health; then
         log_message "✅ Backend is healthy and responding"
+        # Show last few lines of startup log (with timeout)
+        timeout 2 tail -5 /tmp/uvicorn.log 2>/dev/null || true
         exit 0
     fi
 done
@@ -68,5 +70,7 @@ done
 # If we get here, backend didn't start in time
 log_message "⚠️ Backend started but health check timed out"
 log_message "Check /tmp/uvicorn.log for details"
+# Show last few lines of log (with timeout)
+timeout 2 tail -10 /tmp/uvicorn.log 2>/dev/null || true
 exit 1
 
