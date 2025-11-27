@@ -1072,10 +1072,6 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 return
         
         # Determine previous VWAP time and current VWAP time based on cycle
-        # Initialize query time variables (will be set for Cycles 2-5)
-        prev_vwap_time_query = None
-        current_vwap_time_query = None
-        
         if cycle_number == 1:
             # Cycle 1: 10:30 AM
             # Previous VWAP: Use 15-minute candle at 10:15 AM
