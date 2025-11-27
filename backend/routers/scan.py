@@ -1513,29 +1513,31 @@ async def deploy_backend():
     This runs in background and returns immediately
     """
     import subprocess
-    import asyncio
+    from fastapi import BackgroundTasks
     
     async def run_deployment():
         try:
-            # Run deployment script in background
-            process = await asyncio.create_subprocess_exec(
-                '/home/ubuntu/trademanthan/backend/scripts/deploy_backend.sh',
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+            # Run deployment script in background (non-blocking)
+            script_path = "/home/ubuntu/trademanthan/backend/scripts/deploy_backend.sh"
+            subprocess.Popen(
+                ["/bin/bash", script_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True
             )
-            # Don't wait for completion - return immediately
-            return {"success": True, "message": "Deployment started in background"}
+            logger.info("✅ Backend deployment initiated")
         except Exception as e:
             logger.error(f"Error starting deployment: {e}")
-            return {"success": False, "error": str(e)}
     
     # Start deployment in background
-    asyncio.create_task(run_deployment())
+    background_tasks = BackgroundTasks()
+    background_tasks.add_task(run_deployment)
     
     return {
         "success": True,
         "message": "Deployment initiated. Check /tmp/deploy_backend.log for progress.",
-        "status_endpoint": "/scan/deployment-status"
+        "status_endpoint": "/scan/deployment-status",
+        "log_file": "/tmp/deploy_backend.log"
     }
 
 @router.get("/deployment-status")
