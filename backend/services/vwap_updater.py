@@ -1087,14 +1087,12 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
             target_alert_times = [today.replace(hour=10, minute=15, second=0, microsecond=0)]
         elif cycle_number == 2:
             # Cycle 2: 11:15 AM
-            # Previous VWAP: Use 1-hour candle at 10:15 AM (1-hour candle closes at 10:00 AM, represents 9:00-10:00 AM)
-            # Query with actual candle close time (10:00 AM) but will record time as 10:15 AM
-            prev_vwap_time_query = today.replace(hour=10, minute=0, second=0, microsecond=0)  # Actual candle close time
-            prev_vwap_time = today.replace(hour=10, minute=15, second=0, microsecond=0)  # Time to record
-            current_vwap_time_query = today.replace(hour=11, minute=0, second=0, microsecond=0)  # Actual candle close time
-            current_vwap_time = today.replace(hour=11, minute=15, second=0, microsecond=0)  # Time to record
-            prev_interval = "hours/1"  # Use 1-hour candle (closes at 10:00 AM)
-            current_interval = "hours/1"  # Use 1-hour candle (closes at 11:00 AM)
+            # Previous VWAP: Use 1-hour candle at 10:15 AM (1-hour candle closes at 10:15 AM, represents 9:15-10:15 AM)
+            # Market opens at 9:15 AM, so hourly candles form at :15 times
+            prev_vwap_time = today.replace(hour=10, minute=15, second=0, microsecond=0)
+            current_vwap_time = today.replace(hour=11, minute=15, second=0, microsecond=0)
+            prev_interval = "hours/1"  # Use 1-hour candle (closes at 10:15 AM)
+            current_interval = "hours/1"  # Use 1-hour candle (closes at 11:15 AM)
             # Stocks from 11:15 AM webhook + No_Entry from 10:15 AM
             target_alert_times = [
                 today.replace(hour=10, minute=15, second=0, microsecond=0),
@@ -1102,13 +1100,12 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
             ]
         elif cycle_number == 3:
             # Cycle 3: 12:15 PM
-            # Previous VWAP: Use 1-hour candle at 11:15 AM (1-hour candle closes at 11:00 AM, represents 10:00-11:00 AM)
-            prev_vwap_time_query = today.replace(hour=11, minute=0, second=0, microsecond=0)  # Actual candle close time
-            prev_vwap_time = today.replace(hour=11, minute=15, second=0, microsecond=0)  # Time to record
-            current_vwap_time_query = today.replace(hour=12, minute=0, second=0, microsecond=0)  # Actual candle close time
-            current_vwap_time = today.replace(hour=12, minute=15, second=0, microsecond=0)  # Time to record
-            prev_interval = "hours/1"  # Use 1-hour candle (closes at 11:00 AM)
-            current_interval = "hours/1"  # Use 1-hour candle (closes at 12:00 PM)
+            # Previous VWAP: Use 1-hour candle at 11:15 AM (1-hour candle closes at 11:15 AM, represents 10:15-11:15 AM)
+            # Market opens at 9:15 AM, so hourly candles form at :15 times
+            prev_vwap_time = today.replace(hour=11, minute=15, second=0, microsecond=0)
+            current_vwap_time = today.replace(hour=12, minute=15, second=0, microsecond=0)
+            prev_interval = "hours/1"  # Use 1-hour candle (closes at 11:15 AM)
+            current_interval = "hours/1"  # Use 1-hour candle (closes at 12:15 PM)
             # Stocks from 12:15 PM webhook + No_Entry up to 11:15 AM
             target_alert_times = [
                 today.replace(hour=10, minute=15, second=0, microsecond=0),
@@ -1117,13 +1114,12 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
             ]
         elif cycle_number == 4:
             # Cycle 4: 13:15 PM
-            # Previous VWAP: Use 1-hour candle at 12:15 PM (1-hour candle closes at 12:00 PM, represents 11:00 AM-12:00 PM)
-            prev_vwap_time_query = today.replace(hour=12, minute=0, second=0, microsecond=0)  # Actual candle close time
-            prev_vwap_time = today.replace(hour=12, minute=15, second=0, microsecond=0)  # Time to record
-            current_vwap_time_query = today.replace(hour=13, minute=0, second=0, microsecond=0)  # Actual candle close time
-            current_vwap_time = today.replace(hour=13, minute=15, second=0, microsecond=0)  # Time to record
-            prev_interval = "hours/1"  # Use 1-hour candle (closes at 12:00 PM)
-            current_interval = "hours/1"  # Use 1-hour candle (closes at 13:00 PM)
+            # Previous VWAP: Use 1-hour candle at 12:15 PM (1-hour candle closes at 12:15 PM, represents 11:15 AM-12:15 PM)
+            # Market opens at 9:15 AM, so hourly candles form at :15 times
+            prev_vwap_time = today.replace(hour=12, minute=15, second=0, microsecond=0)
+            current_vwap_time = today.replace(hour=13, minute=15, second=0, microsecond=0)
+            prev_interval = "hours/1"  # Use 1-hour candle (closes at 12:15 PM)
+            current_interval = "hours/1"  # Use 1-hour candle (closes at 13:15 PM)
             # Stocks from 13:15 PM webhook + No_Entry up to 12:15 PM
             target_alert_times = [
                 today.replace(hour=10, minute=15, second=0, microsecond=0),
@@ -1133,13 +1129,12 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
             ]
         elif cycle_number == 5:
             # Cycle 5: 14:15 PM
-            # Previous VWAP: Use 1-hour candle at 13:15 PM (1-hour candle closes at 13:00 PM, represents 12:00 PM-13:00 PM)
-            prev_vwap_time_query = today.replace(hour=13, minute=0, second=0, microsecond=0)  # Actual candle close time
-            prev_vwap_time = today.replace(hour=13, minute=15, second=0, microsecond=0)  # Time to record
-            current_vwap_time_query = today.replace(hour=14, minute=0, second=0, microsecond=0)  # Actual candle close time
-            current_vwap_time = today.replace(hour=14, minute=15, second=0, microsecond=0)  # Time to record
-            prev_interval = "hours/1"  # Use 1-hour candle (closes at 13:00 PM)
-            current_interval = "hours/1"  # Use 1-hour candle (closes at 14:00 PM)
+            # Previous VWAP: Use 1-hour candle at 13:15 PM (1-hour candle closes at 13:15 PM, represents 12:15 PM-13:15 PM)
+            # Market opens at 9:15 AM, so hourly candles form at :15 times
+            prev_vwap_time = today.replace(hour=13, minute=15, second=0, microsecond=0)
+            current_vwap_time = today.replace(hour=14, minute=15, second=0, microsecond=0)
+            prev_interval = "hours/1"  # Use 1-hour candle (closes at 13:15 PM)
+            current_interval = "hours/1"  # Use 1-hour candle (closes at 14:15 PM)
             # Stocks from 14:15 PM webhook + No_Entry up to 13:15 PM
             target_alert_times = [
                 today.replace(hour=10, minute=15, second=0, microsecond=0),
@@ -1309,38 +1304,34 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                     continue
                 
                 # Get previous VWAP
-                # For Cycles 2-5 with 1-hour candles, query at actual candle close time (:00), but record as :15
-                prev_vwap_query_time = prev_vwap_time_query if prev_vwap_time_query is not None else prev_vwap_time
+                # Market opens at 9:15 AM, so 1-hour candles form at :15 times (10:15, 11:15, etc.)
                 prev_vwap_data = vwap_service.get_stock_vwap_from_candle_at_time(
                     stock_name,
-                    prev_vwap_query_time,
+                    prev_vwap_time,
                     interval=prev_interval
                 )
                 
                 if not prev_vwap_data:
-                    logger.warning(f"⚠️ Could not get previous VWAP for {stock_name} at {prev_vwap_query_time.strftime('%H:%M')}")
+                    logger.warning(f"⚠️ Could not get previous VWAP for {stock_name} at {prev_vwap_time.strftime('%H:%M')}")
                     continue
                 
                 prev_vwap = prev_vwap_data.get('vwap', 0)
-                # Use requested time (e.g., 10:15) instead of actual candle time (e.g., 10:00) for Cycles 2-5
-                prev_vwap_time_actual = prev_vwap_time if prev_vwap_time_query is not None else prev_vwap_data.get('time')
+                prev_vwap_time_actual = prev_vwap_data.get('time')
                 
                 # Get current VWAP
-                # For Cycles 2-5 with 1-hour candles, query at actual candle close time (:00), but record as :15
-                current_vwap_query_time = current_vwap_time_query if current_vwap_time_query is not None else current_vwap_time
+                # Market opens at 9:15 AM, so 1-hour candles form at :15 times (10:15, 11:15, etc.)
                 current_vwap_data = vwap_service.get_stock_vwap_from_candle_at_time(
                     stock_name,
-                    current_vwap_query_time,
+                    current_vwap_time,
                     interval=current_interval
                 )
                 
                 if not current_vwap_data:
-                    logger.warning(f"⚠️ Could not get current VWAP for {stock_name} at {current_vwap_query_time.strftime('%H:%M')}")
+                    logger.warning(f"⚠️ Could not get current VWAP for {stock_name} at {current_vwap_time.strftime('%H:%M')}")
                     continue
                 
                 current_vwap = current_vwap_data.get('vwap', 0)
-                # Use requested time (e.g., 11:15) instead of actual candle time (e.g., 11:00) for Cycles 2-5
-                current_vwap_time_actual = current_vwap_time if current_vwap_time_query is not None else current_vwap_data.get('time')
+                current_vwap_time_actual = current_vwap_data.get('time')
                 
                 if prev_vwap <= 0 or current_vwap <= 0:
                     logger.warning(f"⚠️ Invalid VWAP values for {stock_name} (prev: {prev_vwap}, current: {current_vwap})")
