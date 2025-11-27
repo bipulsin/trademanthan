@@ -1251,11 +1251,14 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                                 IntradayStockOption.status == 'alert_received'
                             )
                         ),
-                        # Previous cycles: No_Entry stocks up to 13:15 PM
+                        # Previous cycles: No_Entry OR alert_received stocks up to 13:15 PM (not yet entered)
                         and_(
                             IntradayStockOption.alert_time >= target_alert_times[0],
                             IntradayStockOption.alert_time < target_alert_times[4],
-                            IntradayStockOption.status == 'no_entry'
+                            or_(
+                                IntradayStockOption.status == 'no_entry',
+                                IntradayStockOption.status == 'alert_received'
+                            )
                         )
                     )
                 )
