@@ -41,15 +41,6 @@ class VWAPUpdater:
                     replace_existing=True
                 )
             
-            # Also run at market open (9:15 AM) and mid-day (12:15 PM)
-            self.scheduler.add_job(
-                update_vwap_for_all_open_positions,
-                trigger=CronTrigger(hour=9, minute=30, timezone='Asia/Kolkata'),
-                id='vwap_update_market_open',
-                name='Update VWAP at Market Open',
-                replace_existing=True
-            )
-            
             # Close all open trades at 3:25 PM (before market close)
             self.scheduler.add_job(
                 close_all_open_trades,
