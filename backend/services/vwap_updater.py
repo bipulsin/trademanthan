@@ -1060,11 +1060,16 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
         
         # Import VWAP service
         try:
-            from services.upstox_service import upstox_service
+            from backend.services.upstox_service import upstox_service
             vwap_service = upstox_service
         except ImportError:
-            logger.error("Could not import upstox_service")
-            return
+            try:
+                # Fallback for different import paths
+                from services.upstox_service import upstox_service
+                vwap_service = upstox_service
+            except ImportError:
+                logger.error("Could not import upstox_service")
+                return
         
         # Determine previous VWAP time and current VWAP time based on cycle
         if cycle_number == 1:
