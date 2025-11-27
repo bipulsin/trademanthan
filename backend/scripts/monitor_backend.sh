@@ -12,8 +12,8 @@ log_message() {
 }
 
 check_backend() {
-    # Check if process is running
-    if ! pgrep -f "uvicorn main:app" > /dev/null; then
+    # Check if process is running (corrected to match actual process)
+    if ! pgrep -f "uvicorn backend.main:app" > /dev/null; then
         return 1
     fi
     
@@ -28,13 +28,14 @@ check_backend() {
 restart_backend() {
     log_message "Attempting to restart backend..."
     
-    # Kill any existing processes
-    pkill -f "uvicorn main:app" || true
+    # Kill any existing processes (corrected to match actual process)
+    pkill -f "uvicorn backend.main:app" || true
     sleep 2
     
-    # Start backend
+    # Start backend (corrected path)
     cd /home/ubuntu/trademanthan || exit 1
-    nohup python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 > /tmp/uvicorn.log 2>&1 &
+    source backend/venv/bin/activate
+    nohup python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 > /tmp/uvicorn.log 2>&1 &
     
     sleep 5
     
