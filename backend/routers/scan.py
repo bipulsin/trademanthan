@@ -1507,15 +1507,14 @@ async def get_scheduler_status():
 
 
 @router.post("/deploy-backend")
-async def deploy_backend():
+async def deploy_backend(background_tasks: BackgroundTasks):
     """
     Trigger backend deployment (git pull + restart)
     This runs in background and returns immediately
     """
     import subprocess
-    from fastapi import BackgroundTasks
     
-    async def run_deployment():
+    def run_deployment():
         try:
             # Run deployment script in background (non-blocking)
             script_path = "/home/ubuntu/trademanthan/backend/scripts/deploy_backend.sh"
@@ -1530,7 +1529,6 @@ async def deploy_backend():
             logger.error(f"Error starting deployment: {e}")
     
     # Start deployment in background
-    background_tasks = BackgroundTasks()
     background_tasks.add_task(run_deployment)
     
     return {
