@@ -53,6 +53,9 @@ class IntradayStockOption(Base):
     vwap_slope_status = Column(String(20), nullable=True)  # 'Yes', 'No', 'Skipped'
     vwap_slope_direction = Column(String(20), nullable=True)  # 'upward', 'downward', 'flat'
     vwap_slope_time = Column(DateTime, nullable=True)  # Time when VWAP slope was calculated
+    # Candle size fields (calculated when stock is received from webhook alert)
+    candle_size_ratio = Column(Float, nullable=True)  # Ratio of current day candle size to previous day candle size
+    candle_size_status = Column(String(20), nullable=True)  # 'Pass', 'Fail', 'Skipped'
     option_contract = Column(String(255), nullable=True)
     option_type = Column(String(10), nullable=True)  # 'CE' or 'PE'
     option_strike = Column(Float, nullable=True)

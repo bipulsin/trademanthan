@@ -1151,6 +1151,29 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 current_day_candle = option_candles_data.get('current_day_candle', {}) if option_candles_data else {}
                 previous_day_candle = option_candles_data.get('previous_day_candle', {}) if option_candles_data else {}
                 
+                # Calculate and save candle size ratio and status
+                saved_candle_size_ratio = None
+                saved_candle_size_status = None
+                if option_candles_data and current_day_candle and previous_day_candle:
+                    try:
+                        current_high = current_day_candle.get('high', 0)
+                        current_low = current_day_candle.get('low', 0)
+                        previous_high = previous_day_candle.get('high', 0)
+                        previous_low = previous_day_candle.get('low', 0)
+                        
+                        current_size = abs(current_high - current_low)
+                        previous_size = abs(previous_high - previous_low)
+                        
+                        if previous_size > 0:
+                            saved_candle_size_ratio = current_size / previous_size
+                            saved_candle_size_status = "Pass" if saved_candle_size_ratio < 7.5 else "Fail"
+                        else:
+                            saved_candle_size_status = "Skipped"
+                    except:
+                        pass
+                elif is_10_15_alert:
+                    saved_candle_size_status = "Skipped"
+                
                 db_record = IntradayStockOption(
                     alert_time=triggered_datetime,
                     alert_type=data_type,
@@ -1176,6 +1199,9 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     option_previous_candle_low=previous_day_candle.get('low'),
                     option_previous_candle_close=previous_day_candle.get('close'),
                     option_previous_candle_time=previous_day_candle.get('time'),
+                    # Candle size fields (calculated when stock is received from webhook)
+                    candle_size_ratio=saved_candle_size_ratio,
+                    candle_size_status=saved_candle_size_status,
                     qty=qty,
                     trade_date=trading_date,
                     status=status,
