@@ -1010,9 +1010,9 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                 if size_ratio < 7.5:
                                     candle_size_passed = True
                                     candle_size_reason = f"Daily candle size OK: Current Day (up to {triggered_datetime.hour}:{triggered_datetime.minute:02d}) High={current_high:.2f}, Low={current_low:.2f}, Size={current_size:.2f} < 7.5× Previous Day (complete) High={previous_high:.2f}, Low={previous_low:.2f}, Size={previous_size:.2f}, Ratio: {size_ratio:.2f}"
-                        else:
+                                else:
                                     candle_size_reason = f"Daily candle size too large: Current Day (up to {triggered_datetime.hour}:{triggered_datetime.minute:02d}) High={current_high:.2f}, Low={current_low:.2f}, Size={current_size:.2f} >= 7.5× Previous Day (complete) High={previous_high:.2f}, Low={previous_low:.2f}, Size={previous_size:.2f}, Ratio: {size_ratio:.2f}"
-                        else:
+                            else:
                                 candle_size_reason = "Previous day candle size is zero (cannot calculate ratio)"
                     else:
                             candle_size_reason = "Missing daily candle data"
