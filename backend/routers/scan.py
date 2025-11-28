@@ -87,22 +87,39 @@ def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: st
         # Handle dictionary format (Upstox API v2 returns dict with 'strikes' key)
         strike_list = None
         if isinstance(option_chain, dict):
+            print(f"📊 Option chain for {stock_name} is a dictionary with keys: {list(option_chain.keys())}")
             # Check if it has a 'strikes' key
             if 'strikes' in option_chain and isinstance(option_chain['strikes'], list):
                 strike_list = option_chain['strikes']
+                print(f"✅ Found 'strikes' key with {len(strike_list)} strikes")
             elif 'data' in option_chain and isinstance(option_chain['data'], dict):
                 # Nested data structure
+                print(f"📊 Found 'data' key with sub-keys: {list(option_chain['data'].keys())}")
                 if 'strikes' in option_chain['data'] and isinstance(option_chain['data']['strikes'], list):
                     strike_list = option_chain['data']['strikes']
+                    print(f"✅ Found 'strikes' in 'data' with {len(strike_list)} strikes")
                 else:
                     print(f"⚠️ Unexpected option chain structure for {stock_name}: {list(option_chain.get('data', {}).keys())}")
+                    # Try to find any list in the data structure
+                    for key, value in option_chain['data'].items():
+                        if isinstance(value, list) and len(value) > 0:
+                            print(f"   Found list in '{key}' with {len(value)} items, first item type: {type(value[0])}")
+                            if isinstance(value[0], dict):
+                                print(f"   First item keys: {list(value[0].keys())}")
                     return None
             else:
                 print(f"⚠️ Unexpected option chain structure for {stock_name}: {list(option_chain.keys())}")
+                # Try to find any list in the structure
+                for key, value in option_chain.items():
+                    if isinstance(value, list) and len(value) > 0:
+                        print(f"   Found list in '{key}' with {len(value)} items, first item type: {type(value[0])}")
+                        if isinstance(value[0], dict):
+                            print(f"   First item keys: {list(value[0].keys())}")
                 return None
         elif isinstance(option_chain, list):
             # Direct list format (legacy or different API version)
             strike_list = option_chain
+            print(f"✅ Option chain for {stock_name} is a direct list with {len(strike_list)} items")
         else:
             print(f"⚠️ Unexpected option chain type for {stock_name}: {type(option_chain)}")
             return None
