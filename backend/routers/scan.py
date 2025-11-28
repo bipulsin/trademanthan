@@ -3362,8 +3362,8 @@ async def upstox_oauth_status():
                     content={
                         "status": "success",
                         "authenticated": False,
-                            "message": "Upstox token is expired or invalid",
-                            "error_type": "token_expired"
+                        "message": "Upstox token is expired or invalid",
+                        "error_type": "token_expired"
                     }
                 )
         else:
@@ -3376,12 +3376,6 @@ async def upstox_oauth_status():
                     "message": f"Upstox token check failed (Profile: {profile_response.status_code}, Market: {market_response.status_code})"
                 }
             )
-        else:
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "status": "success",
-                    "authenticated": False,
                     "message": "No Upstox token configured",
                     "error_type": "token_expired"
                 }
