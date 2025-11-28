@@ -77,6 +77,7 @@ def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: st
         option_chain = vwap_service.get_option_chain(stock_name)
         
         if not option_chain:
+            logger.warning(f"No option chain data available for {stock_name}")
             print(f"No option chain data available for {stock_name}")
             return None
         
@@ -87,62 +88,81 @@ def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: st
         # Handle dictionary format (Upstox API v2 returns dict with 'strikes' key)
         strike_list = None
         if isinstance(option_chain, dict):
+            logger.info(f"📊 Option chain for {stock_name} is a dictionary with keys: {list(option_chain.keys())}")
             print(f"📊 Option chain for {stock_name} is a dictionary with keys: {list(option_chain.keys())}")
             # Check if it has a 'strikes' key
             if 'strikes' in option_chain and isinstance(option_chain['strikes'], list):
                 strike_list = option_chain['strikes']
+                logger.info(f"✅ Found 'strikes' key with {len(strike_list)} strikes")
                 print(f"✅ Found 'strikes' key with {len(strike_list)} strikes")
             elif 'data' in option_chain and isinstance(option_chain['data'], dict):
                 # Nested data structure
+                logger.info(f"📊 Found 'data' key with sub-keys: {list(option_chain['data'].keys())}")
                 print(f"📊 Found 'data' key with sub-keys: {list(option_chain['data'].keys())}")
                 if 'strikes' in option_chain['data'] and isinstance(option_chain['data']['strikes'], list):
                     strike_list = option_chain['data']['strikes']
+                    logger.info(f"✅ Found 'strikes' in 'data' with {len(strike_list)} strikes")
                     print(f"✅ Found 'strikes' in 'data' with {len(strike_list)} strikes")
                 else:
+                    logger.warning(f"⚠️ Unexpected option chain structure for {stock_name}: {list(option_chain.get('data', {}).keys())}")
                     print(f"⚠️ Unexpected option chain structure for {stock_name}: {list(option_chain.get('data', {}).keys())}")
                     # Try to find any list in the data structure
                     for key, value in option_chain['data'].items():
                         if isinstance(value, list) and len(value) > 0:
+                            logger.info(f"   Found list in '{key}' with {len(value)} items, first item type: {type(value[0])}")
                             print(f"   Found list in '{key}' with {len(value)} items, first item type: {type(value[0])}")
                             if isinstance(value[0], dict):
+                                logger.info(f"   First item keys: {list(value[0].keys())}")
                                 print(f"   First item keys: {list(value[0].keys())}")
                     return None
             else:
+                logger.warning(f"⚠️ Unexpected option chain structure for {stock_name}: {list(option_chain.keys())}")
                 print(f"⚠️ Unexpected option chain structure for {stock_name}: {list(option_chain.keys())}")
                 # Try to find any list in the structure
                 for key, value in option_chain.items():
                     if isinstance(value, list) and len(value) > 0:
+                        logger.info(f"   Found list in '{key}' with {len(value)} items, first item type: {type(value[0])}")
                         print(f"   Found list in '{key}' with {len(value)} items, first item type: {type(value[0])}")
                         if isinstance(value[0], dict):
+                            logger.info(f"   First item keys: {list(value[0].keys())}")
                             print(f"   First item keys: {list(value[0].keys())}")
                 return None
         elif isinstance(option_chain, list):
             # Direct list format (legacy or different API version)
             strike_list = option_chain
+            logger.info(f"✅ Option chain for {stock_name} is a direct list with {len(strike_list)} items")
             print(f"✅ Option chain for {stock_name} is a direct list with {len(strike_list)} items")
         else:
+            logger.warning(f"⚠️ Unexpected option chain type for {stock_name}: {type(option_chain)}")
             print(f"⚠️ Unexpected option chain type for {stock_name}: {type(option_chain)}")
             return None
         
         # Parse strikes from the list
+        logger.info(f"Parsing {len(strike_list)} strikes from option chain for {stock_name}")
+        print(f"Parsing {len(strike_list)} strikes from option chain for {stock_name}")
+        
         for strike_data in strike_list:
-            strike_price = strike_data.get('strike_price', 0)
-            
-            # Get option data based on option type
-            if option_type == 'CE':
-                option_data = strike_data.get('call_options', {}).get('market_data', {})
-            else:  # PE
-                option_data = strike_data.get('put_options', {}).get('market_data', {})
-            
-            if option_data:
-                strikes.append({
-                    'strike_price': float(strike_price),
-                    'volume': float(option_data.get('volume', 0)),
-                    'oi': float(option_data.get('oi', 0)),
-                    'ltp': float(option_data.get('ltp', 0))
-                })
+                strike_price = strike_data.get('strike_price', 0)
+                
+                # Get option data based on option type
+                if option_type == 'CE':
+                    option_data = strike_data.get('call_options', {}).get('market_data', {})
+                else:  # PE
+                    option_data = strike_data.get('put_options', {}).get('market_data', {})
+                
+                if option_data:
+                    strikes.append({
+                        'strike_price': float(strike_price),
+                        'volume': float(option_data.get('volume', 0)),
+                        'oi': float(option_data.get('oi', 0)),
+                        'ltp': float(option_data.get('ltp', 0))
+                    })
+        
+        logger.info(f"Found {len(strikes)} {option_type} options in chain for {stock_name}")
+        print(f"Found {len(strikes)} {option_type} options in chain for {stock_name}")
         
         if not strikes:
+            logger.warning(f"No {option_type} options found in chain for {stock_name}")
             print(f"No {option_type} options found in chain for {stock_name}")
             return None
         
@@ -157,7 +177,8 @@ def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: st
                 otm_strikes.append(strike)
         
         if not otm_strikes:
-            print(f"No OTM {option_type} strikes found for {stock_name}")
+            logger.warning(f"No OTM {option_type} strikes found for {stock_name} (stock LTP: {stock_ltp})")
+            print(f"No OTM {option_type} strikes found for {stock_name} (stock LTP: {stock_ltp})")
             return None
         
         # Sort by distance from LTP (closest first) to get OTM-1 to OTM-5
@@ -185,7 +206,10 @@ def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: st
         return selected
         
     except Exception as e:
+        logger.error(f"Error fetching option chain for {stock_name}: {str(e)}", exc_info=True)
         print(f"Error fetching option chain for {stock_name}: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
         return None
 
 # Helper function to process webhook data
@@ -986,11 +1010,11 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                 if size_ratio < 7.5:
                                     candle_size_passed = True
                                     candle_size_reason = f"Daily candle size OK: Current Day (up to {triggered_datetime.hour}:{triggered_datetime.minute:02d}) High={current_high:.2f}, Low={current_low:.2f}, Size={current_size:.2f} < 7.5× Previous Day (complete) High={previous_high:.2f}, Low={previous_low:.2f}, Size={previous_size:.2f}, Ratio: {size_ratio:.2f}"
-                                else:
-                                    candle_size_reason = f"Daily candle size too large: Current Day (up to {triggered_datetime.hour}:{triggered_datetime.minute:02d}) High={current_high:.2f}, Low={current_low:.2f}, Size={current_size:.2f} >= 7.5× Previous Day (complete) High={previous_high:.2f}, Low={previous_low:.2f}, Size={previous_size:.2f}, Ratio: {size_ratio:.2f}"
-                            else:
-                                candle_size_reason = "Previous day candle size is zero (cannot calculate ratio)"
                         else:
+                                    candle_size_reason = f"Daily candle size too large: Current Day (up to {triggered_datetime.hour}:{triggered_datetime.minute:02d}) High={current_high:.2f}, Low={current_low:.2f}, Size={current_size:.2f} >= 7.5× Previous Day (complete) High={previous_high:.2f}, Low={previous_low:.2f}, Size={previous_size:.2f}, Ratio: {size_ratio:.2f}"
+                        else:
+                                candle_size_reason = "Previous day candle size is zero (cannot calculate ratio)"
+                    else:
                             candle_size_reason = "Missing daily candle data"
                     except Exception as candle_error:
                         candle_size_reason = f"Error calculating daily candle size: {str(candle_error)}"
@@ -3333,22 +3357,22 @@ async def upstox_oauth_status():
                 # Check if it's a 401 (Unauthorized) which indicates token expiration
                 if market_response.status_code == 401 or profile_response.status_code == 401:
                     logger.warning("⚠️ Upstox token expired (401 Unauthorized)")
-                    return JSONResponse(
-                        status_code=200,
-                        content={
-                            "status": "success",
-                            "authenticated": False,
+                return JSONResponse(
+                    status_code=200,
+                    content={
+                        "status": "success",
+                        "authenticated": False,
                             "message": "Upstox token is expired or invalid",
                             "error_type": "token_expired"
-                        }
-                    )
-                else:
+                    }
+                )
+        else:
                     logger.warning(f"⚠️ Upstox token check failed: Profile={profile_response.status_code}, Market={market_response.status_code}")
-                    return JSONResponse(
-                        status_code=200,
-                        content={
-                            "status": "success",
-                            "authenticated": False,
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "status": "success",
+                    "authenticated": False,
                             "message": f"Upstox token check failed (Profile: {profile_response.status_code}, Market: {market_response.status_code})"
                         }
                     )
