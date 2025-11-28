@@ -81,26 +81,49 @@ def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: st
             return None
         
         # Parse option chain data
-        # Upstox returns a list of strikes with call and put options
+        # Upstox API returns a dictionary with 'strikes' key containing list of strike data
         strikes = []
         
-        if isinstance(option_chain, list):
-            for strike_data in option_chain:
-                strike_price = strike_data.get('strike_price', 0)
-                
-                # Get option data based on option type
-                if option_type == 'CE':
-                    option_data = strike_data.get('call_options', {}).get('market_data', {})
-                else:  # PE
-                    option_data = strike_data.get('put_options', {}).get('market_data', {})
-                
-                if option_data:
-                    strikes.append({
-                        'strike_price': float(strike_price),
-                        'volume': float(option_data.get('volume', 0)),
-                        'oi': float(option_data.get('oi', 0)),
-                        'ltp': float(option_data.get('ltp', 0))
-                    })
+        # Handle dictionary format (Upstox API v2 returns dict with 'strikes' key)
+        strike_list = None
+        if isinstance(option_chain, dict):
+            # Check if it has a 'strikes' key
+            if 'strikes' in option_chain and isinstance(option_chain['strikes'], list):
+                strike_list = option_chain['strikes']
+            elif 'data' in option_chain and isinstance(option_chain['data'], dict):
+                # Nested data structure
+                if 'strikes' in option_chain['data'] and isinstance(option_chain['data']['strikes'], list):
+                    strike_list = option_chain['data']['strikes']
+                else:
+                    print(f"⚠️ Unexpected option chain structure for {stock_name}: {list(option_chain.get('data', {}).keys())}")
+                    return None
+            else:
+                print(f"⚠️ Unexpected option chain structure for {stock_name}: {list(option_chain.keys())}")
+                return None
+        elif isinstance(option_chain, list):
+            # Direct list format (legacy or different API version)
+            strike_list = option_chain
+        else:
+            print(f"⚠️ Unexpected option chain type for {stock_name}: {type(option_chain)}")
+            return None
+        
+        # Parse strikes from the list
+        for strike_data in strike_list:
+            strike_price = strike_data.get('strike_price', 0)
+            
+            # Get option data based on option type
+            if option_type == 'CE':
+                option_data = strike_data.get('call_options', {}).get('market_data', {})
+            else:  # PE
+                option_data = strike_data.get('put_options', {}).get('market_data', {})
+            
+            if option_data:
+                strikes.append({
+                    'strike_price': float(strike_price),
+                    'volume': float(option_data.get('volume', 0)),
+                    'oi': float(option_data.get('oi', 0)),
+                    'ltp': float(option_data.get('ltp', 0))
+                })
         
         if not strikes:
             print(f"No {option_type} options found in chain for {stock_name}")
