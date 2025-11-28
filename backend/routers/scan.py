@@ -3367,16 +3367,6 @@ async def upstox_oauth_status():
                     }
                 )
         else:
-            logger.warning(f"⚠️ Upstox token check failed: Profile={profile_response.status_code}, Market={market_response.status_code}")
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "status": "success",
-                    "authenticated": False,
-                    "message": f"Upstox token check failed (Profile: {profile_response.status_code}, Market: {market_response.status_code})"
-                }
-            )
-        else:
             return JSONResponse(
                 status_code=200,
                 content={
