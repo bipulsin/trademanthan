@@ -1436,9 +1436,28 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 # Recalculate candle size for stocks that are still in "no_entry" status
                 # This ensures candle size is updated with latest data at each cycle
                 # Do this AFTER option contract determination so we have instrument_key
+                # IMPORTANT: For 10:15 AM alerts, candle size is initially skipped but should be calculated at 10:30 AM
                 candle_size_passed = False
                 candle_size_ratio = None
+                is_10_15_alert = trade.alert_time and trade.alert_time.hour == 10 and trade.alert_time.minute == 15
+                
+                # For 10:15 AM alerts at 10:30 AM (Cycle 1), always try to recalculate candle size
+                # For other cycles, only recalculate if instrument_key exists
                 if trade.instrument_key:
+                    # Always recalculate if instrument_key exists
+                    should_recalculate = True
+                elif is_10_15_alert and cycle_number == 1:
+                    # At 10:30 AM, try to get instrument_key and recalculate for 10:15 AM alerts
+                    # First, try to determine option contract if missing
+                    if not trade.option_contract or not trade.instrument_key:
+                        # This will be handled by the option contract retry logic above
+                        should_recalculate = False
+                    else:
+                        should_recalculate = True
+                else:
+                    should_recalculate = False
+                
+                if should_recalculate and trade.instrument_key:
                     try:
                         option_candles = vwap_service.get_option_daily_candles_current_and_previous(trade.instrument_key)
                         if option_candles:
@@ -1514,9 +1533,19 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                         elif both_bearish or opposite_directions:
                             can_enter_by_index = False
                     
-                    # Skip candle size check for 10:15 AM alerts
+                    # For 10:15 AM alerts, skip candle size check ONLY if we're at Cycle 1 (10:30 AM) and haven't recalculated yet
+                    # If candle size was recalculated at 10:30 AM, use the actual result
                     is_10_15_alert = trade.alert_time and trade.alert_time.hour == 10 and trade.alert_time.minute == 15
-                    candle_size_check_passed = candle_size_passed if not is_10_15_alert else True
+                    # If we're at Cycle 1 (10:30 AM) and candle size was recalculated, use the actual result
+                    # Otherwise, skip the check for 10:15 AM alerts
+                    if is_10_15_alert and cycle_number == 1 and candle_size_ratio is not None:
+                        # Candle size was recalculated at 10:30 AM, use actual result
+                        candle_size_check_passed = candle_size_passed
+                    elif is_10_15_alert:
+                        # Still skip for 10:15 AM alerts if not recalculated yet
+                        candle_size_check_passed = True
+                    else:
+                        candle_size_check_passed = candle_size_passed
                     
                     # Check if all entry conditions are met
                     if (is_before_3pm and 
@@ -1675,6 +1704,52 @@ async def update_10_15_alert_stocks_at_10_30():
                         logger.warning(f"   ⚠️ Error fetching option LTP: {str(opt_error)}")
                 elif option_contract:
                     logger.warning(f"   ⚠️ No instrument_key available for {stock_name} ({option_contract})")
+                
+                # ====================================================================
+                # RECALCULATE CANDLE SIZE FOR 10:15 AM STOCKS AT 10:30 AM
+                # ====================================================================
+                # At 10:30 AM, we have more market data, so recalculate candle size
+                # This was initially skipped at 10:15 AM due to insufficient data
+                if instrument_key:
+                    try:
+                        option_candles = vwap_service.get_option_daily_candles_current_and_previous(instrument_key)
+                        if option_candles:
+                            current_day_candle = option_candles.get('current_day_candle', {})
+                            previous_day_candle = option_candles.get('previous_day_candle', {})
+                            
+                            if current_day_candle and previous_day_candle:
+                                current_size = abs(current_day_candle.get('high', 0) - current_day_candle.get('low', 0))
+                                previous_size = abs(previous_day_candle.get('high', 0) - previous_day_candle.get('low', 0))
+                                
+                                if previous_size > 0:
+                                    candle_size_ratio = current_size / previous_size
+                                    candle_size_passed = (candle_size_ratio < 7.5)
+                                    
+                                    # Update database with daily candle data
+                                    stock_record.option_current_candle_open = current_day_candle.get('open')
+                                    stock_record.option_current_candle_high = current_day_candle.get('high')
+                                    stock_record.option_current_candle_low = current_day_candle.get('low')
+                                    stock_record.option_current_candle_close = current_day_candle.get('close')
+                                    stock_record.option_current_candle_time = current_day_candle.get('time')
+                                    stock_record.option_previous_candle_open = previous_day_candle.get('open')
+                                    stock_record.option_previous_candle_high = previous_day_candle.get('high')
+                                    stock_record.option_previous_candle_low = previous_day_candle.get('low')
+                                    stock_record.option_previous_candle_close = previous_day_candle.get('close')
+                                    stock_record.option_previous_candle_time = previous_day_candle.get('time')
+                                    
+                                    # Update candle size ratio and status
+                                    stock_record.candle_size_ratio = candle_size_ratio
+                                    stock_record.candle_size_status = "Pass" if candle_size_passed else "Fail"
+                                    
+                                    logger.info(f"   ✅ Candle size recalculated at 10:30 AM - Ratio: {candle_size_ratio:.2f}x - {'PASS' if candle_size_passed else 'FAIL'}")
+                                else:
+                                    stock_record.candle_size_status = "Skipped"
+                            else:
+                                logger.warning(f"   ⚠️ Missing candle data for {stock_name}")
+                    except Exception as candle_error:
+                        logger.warning(f"   ⚠️ Error recalculating candle size for {stock_name}: {str(candle_error)}")
+                else:
+                    logger.warning(f"   ⚠️ No instrument_key available for candle size recalculation for {stock_name}")
                 
                 # Save to historical_market_data table
                 historical_record = HistoricalMarketData(
