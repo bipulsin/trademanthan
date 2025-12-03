@@ -9,7 +9,12 @@ ACTION="${1:-status}"
 EC2_KEY="/Users/bipulsahay/TradeManthan/TradeM.pem"
 EC2_HOST="13.234.119.21"
 EC2_USER="ubuntu"
-SSH_TIMEOUT=10
+# Use longer timeout for restart operations
+if [ "$ACTION" = "restart" ]; then
+    SSH_TIMEOUT=20
+else
+    SSH_TIMEOUT=10
+fi
 SCRIPT_PATH="/home/ubuntu/trademanthan/backend/scripts/backend_control.sh"
 
 # Function to run SSH command with timeout using background process
