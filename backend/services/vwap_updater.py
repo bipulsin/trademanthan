@@ -1378,7 +1378,16 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                         stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
                         if stock_data and stock_data.get('ltp', 0) > 0:
                             stock_ltp = stock_data.get('ltp', 0)
-                            option_type = trade.option_type or 'PE'  # Default to PE for bearish
+                            # Determine option_type from alert_type if not set
+                            if trade.option_type:
+                                option_type = trade.option_type
+                            elif trade.alert_type == 'Bearish':
+                                option_type = 'PE'
+                            elif trade.alert_type == 'Bullish':
+                                option_type = 'CE'
+                            else:
+                                option_type = 'PE'  # Default to PE
+                            logger.info(f"🔄 Cycle {cycle_number} - {stock_name}: Using option_type {option_type} (from alert_type: {trade.alert_type})")
                             
                             # Try to find option contract
                             option_contract = find_option_contract_from_master_stock(

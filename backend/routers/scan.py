@@ -1259,6 +1259,13 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     # No candle data available
                     saved_candle_size_status = None
                 
+                # Ensure option_type is set correctly based on alert type if not already set
+                option_type_from_stock = stock.get("option_type", "")
+                if not option_type_from_stock:
+                    # Set option_type based on alert_type (Bearish = PE, Bullish = CE)
+                    option_type_from_stock = 'PE' if data_type == 'Bearish' else 'CE'
+                    print(f"⚠️ Option type not found in stock data for {stock_name}, setting to {option_type_from_stock} based on alert type {data_type}")
+                
                 db_record = IntradayStockOption(
                     alert_time=triggered_datetime,
                     alert_type=data_type,
@@ -1269,7 +1276,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     stock_vwap_previous_hour=stock.get("stock_vwap_previous_hour"),
                     stock_vwap_previous_hour_time=stock.get("stock_vwap_previous_hour_time"),
                     option_contract=stock.get("option_contract", ""),
-                    option_type=stock.get("option_type", ""),
+                    option_type=option_type_from_stock,
                     option_strike=stock.get("otm1_strike", 0.0),
                     option_ltp=option_ltp_value,
                     option_vwap=stock.get("option_vwap", 0.0),
