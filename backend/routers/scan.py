@@ -589,15 +589,32 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             instrument_key = None  # Will store Upstox instrument key (e.g., NSE_FO|104500) for future LTP fetches
             
             # Try to find option contract (may fail if token expired)
-            try:
-                option_contract = find_option_contract_from_master_stock(
-                    db, stock_name, forced_option_type, stock_ltp, vwap_service
-                )
-                if not option_contract:
-                    print(f"⚠️ No option contract found for {stock_name}")
-            except Exception as e:
-                print(f"⚠️ Option contract search failed for {stock_name} (token issue?): {str(e)}")
-                option_contract = None
+            # Retry up to 3 times to ensure option contract is determined
+            option_contract = None
+            max_retries = 3
+            for retry_attempt in range(1, max_retries + 1):
+                try:
+                    option_contract = find_option_contract_from_master_stock(
+                        db, stock_name, forced_option_type, stock_ltp, vwap_service
+                    )
+                    if option_contract:
+                        print(f"✅ Option contract found for {stock_name} (attempt {retry_attempt}): {option_contract}")
+                        break
+                    else:
+                        if retry_attempt < max_retries:
+                            print(f"⚠️ No option contract found for {stock_name} (attempt {retry_attempt}/{max_retries}), retrying...")
+                            import time
+                            time.sleep(1)  # Brief delay before retry
+                        else:
+                            print(f"⚠️ No option contract found for {stock_name} after {max_retries} attempts")
+                except Exception as e:
+                    if retry_attempt < max_retries:
+                        print(f"⚠️ Option contract search failed for {stock_name} (attempt {retry_attempt}/{max_retries}): {str(e)}, retrying...")
+                        import time
+                        time.sleep(1)  # Brief delay before retry
+                    else:
+                        print(f"⚠️ Option contract search failed for {stock_name} after {max_retries} attempts: {str(e)}")
+                        option_contract = None
             
             # Extract option strike and fetch option LTP if contract found
             if option_contract:
@@ -2074,6 +2091,29 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                     # For 10:15 AM alerts, show "Skipped" since filters are bypassed
                     candle_size_status = "Skipped"
                 
+                # Retry option contract determination if missing (only for recent records to avoid performance issues)
+                option_contract = record.option_contract or ""
+                # Only retry for records from today (not historical data)
+                is_today = record.trade_date and record.trade_date.date() == today.date()
+                if not option_contract and record.stock_ltp and record.stock_ltp > 0 and is_today:
+                    try:
+                        retry_contract = find_option_contract_from_master_stock(
+                            db, record.stock_name, record.option_type or 'CE', record.stock_ltp, vwap_service
+                        )
+                        if retry_contract:
+                            option_contract = retry_contract
+                            # Update database record
+                            record.option_contract = retry_contract
+                            # Commit immediately to persist the change
+                            try:
+                                db.commit()
+                                print(f"✅ Retried and found option contract for {record.stock_name}: {retry_contract}")
+                            except Exception as commit_error:
+                                db.rollback()
+                                print(f"⚠️ Failed to commit option contract for {record.stock_name}: {str(commit_error)}")
+                    except Exception as retry_error:
+                        print(f"⚠️ Retry option contract determination failed for {record.stock_name}: {str(retry_error)}")
+                
                 grouped_bullish[alert_key]["stocks"].append({
                     "stock_name": record.stock_name,
                     "trigger_price": record.stock_ltp or 0.0,
@@ -2081,7 +2121,7 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                     "stock_vwap": record.stock_vwap or 0.0,
                     "stock_vwap_previous_hour": record.stock_vwap_previous_hour,
                     "stock_vwap_previous_hour_time": record.stock_vwap_previous_hour_time.isoformat() if record.stock_vwap_previous_hour_time else None,
-                    "option_contract": record.option_contract or "",
+                    "option_contract": option_contract,
                     "option_type": record.option_type or "CE",
                     "otm1_strike": record.option_strike or 0.0,
                     "option_ltp": record.option_ltp or 0.0,
@@ -2191,6 +2231,29 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                     # For 10:15 AM alerts, show "Skipped" since filters are bypassed
                     candle_size_status = "Skipped"
                 
+                # Retry option contract determination if missing (only for recent records to avoid performance issues)
+                option_contract = record.option_contract or ""
+                # Only retry for records from today (not historical data)
+                is_today = record.trade_date and record.trade_date.date() == today.date()
+                if not option_contract and record.stock_ltp and record.stock_ltp > 0 and is_today:
+                    try:
+                        retry_contract = find_option_contract_from_master_stock(
+                            db, record.stock_name, record.option_type or 'PE', record.stock_ltp, vwap_service
+                        )
+                        if retry_contract:
+                            option_contract = retry_contract
+                            # Update database record
+                            record.option_contract = retry_contract
+                            # Commit immediately to persist the change
+                            try:
+                                db.commit()
+                                print(f"✅ Retried and found option contract for {record.stock_name}: {retry_contract}")
+                            except Exception as commit_error:
+                                db.rollback()
+                                print(f"⚠️ Failed to commit option contract for {record.stock_name}: {str(commit_error)}")
+                    except Exception as retry_error:
+                        print(f"⚠️ Retry option contract determination failed for {record.stock_name}: {str(retry_error)}")
+                
                 grouped_bearish[alert_key]["stocks"].append({
                     "stock_name": record.stock_name,
                     "trigger_price": record.stock_ltp or 0.0,
@@ -2198,7 +2261,7 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                     "stock_vwap": record.stock_vwap or 0.0,
                     "stock_vwap_previous_hour": record.stock_vwap_previous_hour,
                     "stock_vwap_previous_hour_time": record.stock_vwap_previous_hour_time.isoformat() if record.stock_vwap_previous_hour_time else None,
-                    "option_contract": record.option_contract or "",
+                    "option_contract": option_contract,
                     "option_type": record.option_type or "PE",
                     "otm1_strike": record.option_strike or 0.0,
                     "option_ltp": record.option_ltp or 0.0,
