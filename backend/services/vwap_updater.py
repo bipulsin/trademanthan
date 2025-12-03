@@ -1364,6 +1364,214 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 trade.vwap_slope_time = current_vwap_time_actual
                 
                 logger.info(f"✅ Cycle {cycle_number} - {stock_name}: VWAP slope {slope_angle:.2f}° ({slope_direction}) - {'PASS' if vwap_slope_passed else 'FAIL'}")
+                
+                # ====================================================================
+                # RETRY OPTION CONTRACT DETERMINATION IF MISSING
+                # ====================================================================
+                # If option contract was not determined initially, retry now
+                # This must be done BEFORE recalculating candle size, so we have instrument_key
+                if not trade.option_contract or not trade.instrument_key:
+                    try:
+                        from backend.routers.scan import find_option_contract_from_master_stock
+                        
+                        # Get current stock LTP
+                        stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
+                        if stock_data and stock_data.get('ltp', 0) > 0:
+                            stock_ltp = stock_data.get('ltp', 0)
+                            option_type = trade.option_type or 'PE'  # Default to PE for bearish
+                            
+                            # Try to find option contract
+                            option_contract = find_option_contract_from_master_stock(
+                                db, stock_name, option_type, stock_ltp, vwap_service
+                            )
+                            
+                            if option_contract:
+                                trade.option_contract = option_contract
+                                
+                                # Extract strike from contract name
+                                import re
+                                match = re.search(r'-(\d+\.?\d*)-(?:CE|PE)$', option_contract)
+                                if match:
+                                    trade.option_strike = float(match.group(1))
+                                
+                                # Fetch lot_size and instrument_key from master_stock table
+                                from backend.models.trading import MasterStock
+                                master_record = db.query(MasterStock).filter(
+                                    MasterStock.symbol_name == option_contract
+                                ).first()
+                                
+                                if master_record:
+                                    if master_record.lot_size:
+                                        trade.qty = int(master_record.lot_size)
+                                    
+                                    # Get instrument_key from instruments JSON
+                                    try:
+                                        from pathlib import Path
+                                        import json as json_lib
+                                        
+                                        instruments_path = Path(__file__).parent.parent.parent / "instruments.json"
+                                        if instruments_path.exists():
+                                            with open(instruments_path, 'r') as f:
+                                                instruments_data = json_lib.load(f)
+                                                
+                                            for instrument in instruments_data:
+                                                if instrument.get('symbol') == option_contract:
+                                                    trade.instrument_key = instrument.get('instrument_key')
+                                                    logger.info(f"✅ Cycle {cycle_number} - {stock_name}: Found instrument_key: {trade.instrument_key}")
+                                                    break
+                                    except Exception as inst_error:
+                                        logger.warning(f"Error fetching instrument_key for {option_contract}: {str(inst_error)}")
+                                
+                                logger.info(f"✅ Cycle {cycle_number} - {stock_name}: Option contract determined: {option_contract}")
+                            else:
+                                logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Could not determine option contract")
+                        else:
+                            logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Could not fetch stock LTP for option contract determination")
+                    except Exception as contract_error:
+                        logger.warning(f"Error retrying option contract determination for {stock_name}: {str(contract_error)}")
+                
+                # ====================================================================
+                # RECALCULATE CANDLE SIZE FOR NO_ENTRY STOCKS
+                # ====================================================================
+                # Recalculate candle size for stocks that are still in "no_entry" status
+                # This ensures candle size is updated with latest data at each cycle
+                # Do this AFTER option contract determination so we have instrument_key
+                candle_size_passed = False
+                candle_size_ratio = None
+                if trade.instrument_key:
+                    try:
+                        option_candles = vwap_service.get_option_daily_candles_current_and_previous(trade.instrument_key)
+                        if option_candles:
+                            current_day_candle = option_candles.get('current_day_candle', {})
+                            previous_day_candle = option_candles.get('previous_day_candle', {})
+                            
+                            if current_day_candle and previous_day_candle:
+                                current_size = abs(current_day_candle.get('high', 0) - current_day_candle.get('low', 0))
+                                previous_size = abs(previous_day_candle.get('high', 0) - previous_day_candle.get('low', 0))
+                                
+                                if previous_size > 0:
+                                    candle_size_ratio = current_size / previous_size
+                                    candle_size_passed = (candle_size_ratio < 7.5)
+                                    
+                                    # Update database with daily candle data
+                                    trade.option_current_candle_open = current_day_candle.get('open')
+                                    trade.option_current_candle_high = current_day_candle.get('high')
+                                    trade.option_current_candle_low = current_day_candle.get('low')
+                                    trade.option_current_candle_close = current_day_candle.get('close')
+                                    trade.option_current_candle_time = current_day_candle.get('time')
+                                    trade.option_previous_candle_open = previous_day_candle.get('open')
+                                    trade.option_previous_candle_high = previous_day_candle.get('high')
+                                    trade.option_previous_candle_low = previous_day_candle.get('low')
+                                    trade.option_previous_candle_close = previous_day_candle.get('close')
+                                    trade.option_previous_candle_time = previous_day_candle.get('time')
+                                    
+                                    # Update candle size ratio and status
+                                    trade.candle_size_ratio = candle_size_ratio
+                                    trade.candle_size_status = "Pass" if candle_size_passed else "Fail"
+                                    
+                                    logger.info(f"✅ Cycle {cycle_number} - {stock_name}: Candle size recalculated - Ratio: {candle_size_ratio:.2f}x - {'PASS' if candle_size_passed else 'FAIL'}")
+                                else:
+                                    trade.candle_size_status = "Skipped"
+                            else:
+                                logger.warning(f"⚠️ Missing candle data for {stock_name}")
+                    except Exception as candle_error:
+                        logger.warning(f"Error recalculating candle size for {stock_name}: {str(candle_error)}")
+                elif not trade.option_contract:
+                    # If still no instrument_key after retry, log warning
+                    logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: No instrument_key available for candle size calculation")
+                
+                # ====================================================================
+                # CHECK ENTRY CONDITIONS AND ENTER TRADE IF ALL MET
+                # ====================================================================
+                # After recalculating candle size and determining option contract,
+                # check if all entry conditions are met
+                if trade.status == 'no_entry' or trade.status == 'alert_received':
+                    # Check index trends
+                    index_trends = vwap_service.check_index_trends()
+                    nifty_trend = index_trends.get("nifty_trend", "unknown")
+                    banknifty_trend = index_trends.get("banknifty_trend", "unknown")
+                    
+                    # Check if time is before 3:00 PM
+                    is_before_3pm = now.hour < 15
+                    
+                    # Check index trends alignment
+                    option_type = trade.option_type or 'PE'
+                    can_enter_by_index = False
+                    both_bullish = (nifty_trend == "bullish" and banknifty_trend == "bullish")
+                    both_bearish = (nifty_trend == "bearish" and banknifty_trend == "bearish")
+                    opposite_directions = not both_bullish and not both_bearish
+                    
+                    if option_type == 'PE':
+                        # Bearish alert
+                        if both_bullish or both_bearish:
+                            can_enter_by_index = True
+                        elif opposite_directions:
+                            can_enter_by_index = False
+                    elif option_type == 'CE':
+                        # Bullish alert
+                        if both_bullish:
+                            can_enter_by_index = True
+                        elif both_bearish or opposite_directions:
+                            can_enter_by_index = False
+                    
+                    # Skip candle size check for 10:15 AM alerts
+                    is_10_15_alert = trade.alert_time and trade.alert_time.hour == 10 and trade.alert_time.minute == 15
+                    candle_size_check_passed = candle_size_passed if not is_10_15_alert else True
+                    
+                    # Check if all entry conditions are met
+                    if (is_before_3pm and 
+                        can_enter_by_index and 
+                        vwap_slope_passed and 
+                        candle_size_check_passed and 
+                        trade.option_contract and 
+                        trade.instrument_key):
+                        
+                        # Fetch current option LTP
+                        option_quote = vwap_service.get_market_quote_by_key(trade.instrument_key)
+                        if option_quote and option_quote.get('last_price', 0) > 0:
+                            current_option_ltp = float(option_quote.get('last_price', 0))
+                            
+                            # Enter the trade with CURRENT time and prices
+                            import math
+                            SL_LOSS_TARGET = 3100.0
+                            
+                            trade.buy_price = current_option_ltp
+                            trade.buy_time = now  # Use CURRENT time, not alert time
+                            trade.stock_ltp = stock_data.get('ltp', 0) if stock_data else trade.stock_ltp
+                            trade.stock_vwap = current_vwap
+                            trade.option_ltp = current_option_ltp
+                            trade.status = 'bought'
+                            trade.pnl = 0.0
+                            
+                            # Calculate stop loss
+                            qty = trade.qty or 0
+                            if qty > 0:
+                                calculated_sl = current_option_ltp - (SL_LOSS_TARGET / qty)
+                                trade.stop_loss = max(0.05, math.floor(calculated_sl / 0.10) * 0.10)
+                            
+                            entry_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
+                            alert_time_str = trade.alert_time.strftime('%H:%M:%S') if trade.alert_time else 'N/A'
+                            logger.info(f"✅ Cycle {cycle_number} - TRADE ENTERED: {stock_name} ({trade.option_contract})")
+                            logger.info(f"   Entry Time: {entry_time_str} (was 'no_entry' at alert time: {alert_time_str})")
+                            logger.info(f"   Buy Price: ₹{current_option_ltp:.2f} (current LTP)")
+                            logger.info(f"   VWAP Slope: ✅ >= 45° ({slope_angle:.2f}°)")
+                            logger.info(f"   Candle Size: ✅ Passed (Ratio: {candle_size_ratio:.2f}x)" if candle_size_ratio else "   Candle Size: ✅ Skipped (10:15 alert)")
+                            logger.info(f"   Index Trends: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
+                            print(f"✅ Cycle {cycle_number} - TRADE ENTERED: {stock_name} ({trade.option_contract})")
+                            print(f"   ⏰ Entry Time: {entry_time_str} (was 'no_entry' at alert time: {alert_time_str})")
+                            print(f"   📊 Entry Conditions:")
+                            print(f"      - Time Check: ✅ Before 3:00 PM")
+                            print(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
+                            print(f"      - VWAP Slope: ✅ >= 45° ({slope_angle:.2f}°)")
+                            print(f"      - Candle Size: ✅ {'Passed' if candle_size_check_passed else 'Skipped'}")
+                            print(f"      - Option Data: ✅ Valid")
+                            print(f"   💰 Trade Details:")
+                            print(f"      - Buy Price: ₹{current_option_ltp:.2f} (current LTP)")
+                            print(f"      - Quantity: {qty}")
+                            print(f"      - Stop Loss: ₹{trade.stop_loss:.2f}")
+                        else:
+                            logger.warning(f"⚠️ Cycle {cycle_number} - Could not fetch option LTP for {stock_name} - cannot enter")
+                
                 success_count += 1
                 
             except Exception as e:
