@@ -638,11 +638,11 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         
                         if master_record:
                             if master_record.lot_size:
-                            qty = int(master_record.lot_size)
-                            print(f"Fetched lot_size for {option_contract}: {qty}")
-                        
-                        # Fetch option LTP using instruments JSON
-                        try:
+                                qty = int(master_record.lot_size)
+                                print(f"Fetched lot_size for {option_contract}: {qty}")
+                            
+                            # Fetch option LTP using instruments JSON
+                            try:
                             # Load instruments JSON
                             from pathlib import Path
                             import json as json_lib
