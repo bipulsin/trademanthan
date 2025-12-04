@@ -643,15 +643,15 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                             
                             # Fetch option LTP using instruments JSON
                             try:
-                            # Load instruments JSON
-                            from pathlib import Path
-                            import json as json_lib
-                            
-                            instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
-                            
-                            if instruments_file.exists():
-                                with open(instruments_file, 'r') as f:
-                                    instruments_data = json_lib.load(f)
+                                # Load instruments JSON
+                                from pathlib import Path
+                                import json as json_lib
+                                
+                                instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
+                                
+                                if instruments_file.exists():
+                                    with open(instruments_file, 'r') as f:
+                                        instruments_data = json_lib.load(f)
                                 
                                 # Find the option contract in instruments data
                                 # Parse option contract format: STOCK-Nov2025-STRIKE-CE/PE
@@ -775,7 +775,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                 else:
                                     print(f"Could not find instrument key for {option_contract} in instruments JSON")
                                     option_candles = None
-                            else:
+                                else:
                                 print(f"Instruments JSON file not found")
                         except Exception as ltp_error:
                             print(f"Error fetching option LTP from instruments JSON: {str(ltp_error)}")
