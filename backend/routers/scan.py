@@ -556,81 +556,80 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             # Wrap entire enrichment in try-except to ensure stock is always added even if enrichment fails
             enrichment_successful = False
             try:
-            
-            # Initialize with defaults (will be saved even if API calls fail)
-            stock_ltp = trigger_price
-            stock_vwap = 0.0
-            
-            # Try to fetch both LTP and VWAP in a single call (optimized with fallback)
-            try:
-                stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
-                if stock_data:
-                    if stock_data.get('ltp') and stock_data['ltp'] > 0:
-                        stock_ltp = stock_data['ltp']
-                        print(f"✅ Stock LTP for {stock_name}: ₹{stock_ltp:.2f}")
-                    else:
-                        print(f"⚠️ Could not fetch LTP for {stock_name}, using trigger price: ₹{trigger_price}")
-                    
-                    if stock_data.get('vwap') and stock_data['vwap'] > 0:
-                        stock_vwap = stock_data['vwap']
-                        print(f"✅ Stock VWAP for {stock_name}: ₹{stock_vwap:.2f}")
-                    else:
-                        print(f"⚠️ Could not fetch VWAP for {stock_name} - will retry via hourly updater")
-                else:
-                    print(f"⚠️ Stock data fetch completely failed for {stock_name} - using defaults")
-                    stock_ltp = trigger_price
-            except Exception as e:
-                print(f"❌ Stock data fetch failed for {stock_name}: {str(e)} - Using trigger price")
-                import traceback
-                print(traceback.format_exc())
+                # Initialize with defaults (will be saved even if API calls fail)
                 stock_ltp = trigger_price
-            
-            # Initialize option-related fields with defaults
-            option_contract = None
-            option_strike = 0.0
-            qty = 0
-            option_ltp = 0.0
-            instrument_key = None  # Will store Upstox instrument key (e.g., NSE_FO|104500) for future LTP fetches
-            
-            # Try to find option contract (may fail if token expired)
-            # Retry up to 3 times to ensure option contract is determined
-            option_contract = None
-            max_retries = 3
-            for retry_attempt in range(1, max_retries + 1):
+                stock_vwap = 0.0
+                
+                # Try to fetch both LTP and VWAP in a single call (optimized with fallback)
                 try:
-                    option_contract = find_option_contract_from_master_stock(
-                        db, stock_name, forced_option_type, stock_ltp, vwap_service
-                    )
-                    if option_contract:
-                        print(f"✅ Option contract found for {stock_name} (attempt {retry_attempt}): {option_contract}")
-                        break
+                    stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
+                    if stock_data:
+                        if stock_data.get('ltp') and stock_data['ltp'] > 0:
+                            stock_ltp = stock_data['ltp']
+                            print(f"✅ Stock LTP for {stock_name}: ₹{stock_ltp:.2f}")
+                        else:
+                            print(f"⚠️ Could not fetch LTP for {stock_name}, using trigger price: ₹{trigger_price}")
+                        
+                        if stock_data.get('vwap') and stock_data['vwap'] > 0:
+                            stock_vwap = stock_data['vwap']
+                            print(f"✅ Stock VWAP for {stock_name}: ₹{stock_vwap:.2f}")
+                        else:
+                            print(f"⚠️ Could not fetch VWAP for {stock_name} - will retry via hourly updater")
                     else:
+                        print(f"⚠️ Stock data fetch completely failed for {stock_name} - using defaults")
+                        stock_ltp = trigger_price
+                except Exception as e:
+                    print(f"❌ Stock data fetch failed for {stock_name}: {str(e)} - Using trigger price")
+                    import traceback
+                    print(traceback.format_exc())
+                    stock_ltp = trigger_price
+                
+                # Initialize option-related fields with defaults
+                option_contract = None
+                option_strike = 0.0
+                qty = 0
+                option_ltp = 0.0
+                instrument_key = None  # Will store Upstox instrument key (e.g., NSE_FO|104500) for future LTP fetches
+                
+                # Try to find option contract (may fail if token expired)
+                # Retry up to 3 times to ensure option contract is determined
+                option_contract = None
+                max_retries = 3
+                for retry_attempt in range(1, max_retries + 1):
+                    try:
+                        option_contract = find_option_contract_from_master_stock(
+                            db, stock_name, forced_option_type, stock_ltp, vwap_service
+                        )
+                        if option_contract:
+                            print(f"✅ Option contract found for {stock_name} (attempt {retry_attempt}): {option_contract}")
+                            break
+                        else:
+                            if retry_attempt < max_retries:
+                                print(f"⚠️ No option contract found for {stock_name} (attempt {retry_attempt}/{max_retries}), retrying...")
+                                import time
+                                time.sleep(1)  # Brief delay before retry
+                            else:
+                                print(f"⚠️ No option contract found for {stock_name} after {max_retries} attempts")
+                    except Exception as e:
                         if retry_attempt < max_retries:
-                            print(f"⚠️ No option contract found for {stock_name} (attempt {retry_attempt}/{max_retries}), retrying...")
+                            print(f"⚠️ Option contract search failed for {stock_name} (attempt {retry_attempt}/{max_retries}): {str(e)}, retrying...")
                             import time
                             time.sleep(1)  # Brief delay before retry
                         else:
-                            print(f"⚠️ No option contract found for {stock_name} after {max_retries} attempts")
-                except Exception as e:
-                    if retry_attempt < max_retries:
-                        print(f"⚠️ Option contract search failed for {stock_name} (attempt {retry_attempt}/{max_retries}): {str(e)}, retrying...")
-                        import time
-                        time.sleep(1)  # Brief delay before retry
-                    else:
-                        print(f"⚠️ Option contract search failed for {stock_name} after {max_retries} attempts: {str(e)}")
-                        option_contract = None
-            
-            # Extract option strike and fetch option LTP if contract found
-            if option_contract:
-                import re
-                # Extract strike from format: STOCK-Nov2025-STRIKE-CE/PE
-                match = re.search(r'-(\d+\.?\d*)-(?:CE|PE)$', option_contract)
-                if match:
-                    option_strike = float(match.group(1))
-                    print(f"Extracted option strike: {option_strike} from {option_contract}")
+                            print(f"⚠️ Option contract search failed for {stock_name} after {max_retries} attempts: {str(e)}")
+                            option_contract = None
                 
-                # Fetch lot_size and security_id from master_stock table
-                try:
+                # Extract option strike and fetch option LTP if contract found
+                if option_contract:
+                    import re
+                    # Extract strike from format: STOCK-Nov2025-STRIKE-CE/PE
+                    match = re.search(r'-(\d+\.?\d*)-(?:CE|PE)$', option_contract)
+                    if match:
+                        option_strike = float(match.group(1))
+                        print(f"Extracted option strike: {option_strike} from {option_contract}")
+                    
+                    # Fetch lot_size and security_id from master_stock table
+                    try:
                     master_record = db.query(MasterStock).filter(
                         and_(
                             MasterStock.symbol_name == option_contract
@@ -786,33 +785,33 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         print(f"Could not find master record for {option_contract}")
                 except Exception as e:
                     print(f"Error fetching lot_size/option_ltp: {str(e)}")
-            
-            # ====================================================================
-            # FETCH PREVIOUS HOUR STOCK VWAP
-            # ====================================================================
-            stock_vwap_previous_hour = None
-            stock_vwap_previous_hour_time = None
-            if vwap_service and stock_name:
-                try:
-                    prev_vwap_data = vwap_service.get_stock_vwap_for_previous_hour(stock_name)
-                    if prev_vwap_data:
-                        stock_vwap_previous_hour = prev_vwap_data.get('vwap')
-                        stock_vwap_previous_hour_time = prev_vwap_data.get('time')
-                        print(f"✅ Fetched previous hour VWAP for {stock_name}: ₹{stock_vwap_previous_hour:.2f} at {stock_vwap_previous_hour_time.strftime('%H:%M:%S')}")
-                    else:
-                        print(f"⚠️ Could not fetch previous hour VWAP for {stock_name}")
-                except Exception as prev_vwap_error:
-                    print(f"⚠️ Error fetching previous hour VWAP: {str(prev_vwap_error)}")
-            
-            # Create enriched stock data
-            # GUARANTEED FIELDS (always available from Chartink):
-            # - stock_name, trigger_price, alert_time
-            # OPTIONAL FIELDS (may be missing if Upstox token expired):
-            # - stock_ltp, stock_vwap, option_contract, option_ltp, qty, instrument_key
-            # NEW FIELDS:
-            # - option_candles (current and previous OHLC)
-            # - stock_vwap_previous_hour, stock_vwap_previous_hour_time
-            enriched_stock = {
+                
+                # ====================================================================
+                # FETCH PREVIOUS HOUR STOCK VWAP
+                # ====================================================================
+                stock_vwap_previous_hour = None
+                stock_vwap_previous_hour_time = None
+                if vwap_service and stock_name:
+                    try:
+                        prev_vwap_data = vwap_service.get_stock_vwap_for_previous_hour(stock_name)
+                        if prev_vwap_data:
+                            stock_vwap_previous_hour = prev_vwap_data.get('vwap')
+                            stock_vwap_previous_hour_time = prev_vwap_data.get('time')
+                            print(f"✅ Fetched previous hour VWAP for {stock_name}: ₹{stock_vwap_previous_hour:.2f} at {stock_vwap_previous_hour_time.strftime('%H:%M:%S')}")
+                        else:
+                            print(f"⚠️ Could not fetch previous hour VWAP for {stock_name}")
+                    except Exception as prev_vwap_error:
+                        print(f"⚠️ Error fetching previous hour VWAP: {str(prev_vwap_error)}")
+                
+                # Create enriched stock data
+                # GUARANTEED FIELDS (always available from Chartink):
+                # - stock_name, trigger_price, alert_time
+                # OPTIONAL FIELDS (may be missing if Upstox token expired):
+                # - stock_ltp, stock_vwap, option_contract, option_ltp, qty, instrument_key
+                # NEW FIELDS:
+                # - option_candles (current and previous OHLC)
+                # - stock_vwap_previous_hour, stock_vwap_previous_hour_time
+                enriched_stock = {
                 "stock_name": stock_name,
                 "trigger_price": trigger_price,
                 "last_traded_price": stock_ltp,  # May be trigger_price if fetch failed
@@ -827,7 +826,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 "qty": qty,  # May be 0 if not found
                 "instrument_key": instrument_key,  # CRITICAL: Store instrument_key for each stock individually
                 "option_candles": option_candles if 'option_candles' in locals() else None  # Current and previous OHLC candles
-            }
+                }
             
                 enriched_stocks.append(enriched_stock)
                 enrichment_successful = True
