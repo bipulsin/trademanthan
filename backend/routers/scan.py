@@ -553,6 +553,10 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             
             print(f"Processing stock: {stock_name}")
             
+            # Wrap entire enrichment in try-except to ensure stock is always added even if enrichment fails
+            enrichment_successful = False
+            try:
+            
             # Initialize with defaults (will be saved even if API calls fail)
             stock_ltp = trigger_price
             stock_vwap = 0.0
@@ -825,13 +829,42 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 "option_candles": option_candles if 'option_candles' in locals() else None  # Current and previous OHLC candles
             }
             
-            enriched_stocks.append(enriched_stock)
+                enriched_stocks.append(enriched_stock)
+                enrichment_successful = True
+                
+                # Log what we got
+                if option_contract:
+                    print(f"✅ Enriched stock: {stock_name} - LTP: ₹{stock_ltp}, Option: {option_contract}, Qty: {qty}")
+                else:
+                    print(f"⚠️ Partial data for: {stock_name} - LTP: ₹{stock_ltp}, Option: N/A (token issue?)")
             
-            # Log what we got
-            if option_contract:
-                print(f"✅ Enriched stock: {stock_name} - LTP: ₹{stock_ltp}, Option: {option_contract}, Qty: {qty}")
-            else:
-                print(f"⚠️ Partial data for: {stock_name} - LTP: ₹{stock_ltp}, Option: N/A (token issue?)")
+            except Exception as enrichment_error:
+                # If enrichment fails completely, still create a minimal enriched_stock entry
+                # This ensures the stock is saved to database even if enrichment fails
+                print(f"❌ CRITICAL: Enrichment failed for {stock_name}: {str(enrichment_error)}")
+                print(f"   Creating minimal enriched_stock entry to ensure stock is saved...")
+                import traceback
+                traceback.print_exc()
+                
+                # Create minimal enriched stock with defaults
+                enriched_stock = {
+                    "stock_name": stock_name,
+                    "trigger_price": trigger_price,
+                    "last_traded_price": trigger_price,  # Use trigger price as fallback
+                    "stock_vwap": 0.0,
+                    "stock_vwap_previous_hour": None,
+                    "stock_vwap_previous_hour_time": None,
+                    "option_type": forced_option_type,  # Ensure option_type is set
+                    "option_contract": "",  # Will be retried later
+                    "otm1_strike": 0.0,
+                    "option_ltp": 0.0,
+                    "option_vwap": 0.0,
+                    "qty": 0,
+                    "instrument_key": None,
+                    "option_candles": None
+                }
+                enriched_stocks.append(enriched_stock)
+                print(f"   ✅ Created minimal entry for {stock_name} - will be saved with status 'alert_received'")
         
         processed_data["stocks"] = enriched_stocks
         print(f"Successfully processed {len(enriched_stocks)} stocks")
