@@ -630,14 +630,14 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     
                     # Fetch lot_size and security_id from master_stock table
                     try:
-                    master_record = db.query(MasterStock).filter(
-                        and_(
-                            MasterStock.symbol_name == option_contract
-                        )
-                    ).first()
-                    
-                    if master_record:
-                        if master_record.lot_size:
+                        master_record = db.query(MasterStock).filter(
+                            and_(
+                                MasterStock.symbol_name == option_contract
+                            )
+                        ).first()
+                        
+                        if master_record:
+                            if master_record.lot_size:
                             qty = int(master_record.lot_size)
                             print(f"Fetched lot_size for {option_contract}: {qty}")
                         
