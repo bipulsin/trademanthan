@@ -784,8 +784,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                 traceback.print_exc()
                         else:
                             print(f"Could not find master record for {option_contract}")
-                except Exception as e:
-                    print(f"Error fetching lot_size/option_ltp: {str(e)}")
+                    except Exception as e:
+                        print(f"Error fetching lot_size/option_ltp: {str(e)}")
                 
                 # ====================================================================
                 # FETCH PREVIOUS HOUR STOCK VWAP
