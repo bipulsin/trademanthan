@@ -652,19 +652,19 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                 if instruments_file.exists():
                                     with open(instruments_file, 'r') as f:
                                         instruments_data = json_lib.load(f)
-                                
-                                # Find the option contract in instruments data
-                                # Parse option contract format: STOCK-Nov2025-STRIKE-CE/PE
-                                # Example: IDFCFIRSTB-Nov2025-85-CE
-                                import re
-                                # datetime already imported at module level
-                                
-                                # Handle stocks with hyphens in symbol (e.g., BAJAJ-AUTO)
-                                match = re.match(r'^([A-Z-]+)-(\w{3})(\d{4})-(\d+\.?\d*?)-(CE|PE)$', option_contract)
-                                
-                                instrument_key = None
-                                
-                                if match:
+                                    
+                                    # Find the option contract in instruments data
+                                    # Parse option contract format: STOCK-Nov2025-STRIKE-CE/PE
+                                    # Example: IDFCFIRSTB-Nov2025-85-CE
+                                    import re
+                                    # datetime already imported at module level
+                                    
+                                    # Handle stocks with hyphens in symbol (e.g., BAJAJ-AUTO)
+                                    match = re.match(r'^([A-Z-]+)-(\w{3})(\d{4})-(\d+\.?\d*?)-(CE|PE)$', option_contract)
+                                    
+                                    instrument_key = None
+                                    
+                                    if match:
                                     symbol, month, year, strike, opt_type = match.groups()
                                     strike_value = float(strike)
                                     
@@ -742,8 +742,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                     if not instrument_key:
                                         print(f"❌ ERROR: Could not find instrument_key for {option_contract}")
                                         print(f"   Searched for: symbol={symbol}, type={opt_type}, strike={strike_value}, expiry={target_month}/{target_year}")
-                                
-                                if instrument_key:
+                                    
+                                    if instrument_key:
                                     print(f"Found instrument key for {option_contract}: {instrument_key}")
                                     
                                     # Fetch market quote using the instrument key
@@ -777,6 +777,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                         option_candles = None
                                 else:
                                     print(f"Instruments JSON file not found")
+                                    option_candles = None
                             except Exception as ltp_error:
                             print(f"Error fetching option LTP from instruments JSON: {str(ltp_error)}")
                             import traceback
