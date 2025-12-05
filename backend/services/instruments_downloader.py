@@ -206,7 +206,17 @@ class InstrumentsScheduler:
     """Scheduler for downloading Upstox instruments data"""
     
     def __init__(self):
-        self.scheduler = AsyncIOScheduler(timezone='Asia/Kolkata')
+        # Use default event loop policy for AsyncIOScheduler
+        import asyncio
+        try:
+            # Try to get existing event loop
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            # No event loop exists, create one
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        self.scheduler = AsyncIOScheduler(timezone='Asia/Kolkata', event_loop=loop)
         self.is_running = False
         
     def start(self):
