@@ -782,8 +782,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                 print(f"Error fetching option LTP from instruments JSON: {str(ltp_error)}")
                                 import traceback
                                 traceback.print_exc()
-                    else:
-                        print(f"Could not find master record for {option_contract}")
+                        else:
+                            print(f"Could not find master record for {option_contract}")
                 except Exception as e:
                     print(f"Error fetching lot_size/option_ltp: {str(e)}")
                 
