@@ -722,7 +722,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                                         if best_match is None or score < best_match_score:
                                                             best_match = inst
                                                             best_match_score = score
-                                    
+                                        
                                     # If no exact match found, use best match (but log warning)
                                     if not instrument_key and best_match:
                                         instrument_key = best_match.get('instrument_key')
@@ -775,7 +775,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                     else:
                                         print(f"Could not find instrument key for {option_contract} in instruments JSON")
                                         option_candles = None
-                                else:
+                                    else:
                                     print(f"Instruments JSON file not found")
                                     option_candles = None
                             except Exception as ltp_error:
