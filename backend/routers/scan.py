@@ -665,25 +665,25 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                     instrument_key = None
                                     
                                     if match:
-                                    symbol, month, year, strike, opt_type = match.groups()
-                                    strike_value = float(strike)
-                                    
-                                    # Parse month and construct target expiry date
-                                    month_map = {
-                                        'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
-                                        'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
-                                        'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
-                                    }
-                                    target_month = month_map.get(month[:3].capitalize(), 11)
-                                    target_year = int(year)
-                                    
-                                    # Search for matching option in NSE_FO segment
-                                    # CRITICAL: Must match exactly on underlying_symbol, instrument_type, segment, strike, and expiry
-                                    # This ensures each option contract gets its unique instrument_key
-                                    best_match = None
-                                    best_match_score = 0
-                                    
-                                    for inst in instruments_data:
+                                        symbol, month, year, strike, opt_type = match.groups()
+                                        strike_value = float(strike)
+                                        
+                                        # Parse month and construct target expiry date
+                                        month_map = {
+                                            'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
+                                            'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
+                                            'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
+                                        }
+                                        target_month = month_map.get(month[:3].capitalize(), 11)
+                                        target_year = int(year)
+                                        
+                                        # Search for matching option in NSE_FO segment
+                                        # CRITICAL: Must match exactly on underlying_symbol, instrument_type, segment, strike, and expiry
+                                        # This ensures each option contract gets its unique instrument_key
+                                        best_match = None
+                                        best_match_score = 0
+                                        
+                                        for inst in instruments_data:
                                         # Basic filters
                                         if (inst.get('underlying_symbol') == symbol and 
                                             inst.get('instrument_type') == opt_type and
