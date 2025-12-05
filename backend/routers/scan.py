@@ -772,12 +772,12 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                     else:
                                         print(f"vwap_service not available")
                                         option_candles = None
+                                    else:
+                                        print(f"Could not find instrument key for {option_contract} in instruments JSON")
+                                        option_candles = None
                                 else:
-                                    print(f"Could not find instrument key for {option_contract} in instruments JSON")
-                                    option_candles = None
-                                else:
-                                print(f"Instruments JSON file not found")
-                        except Exception as ltp_error:
+                                    print(f"Instruments JSON file not found")
+                            except Exception as ltp_error:
                             print(f"Error fetching option LTP from instruments JSON: {str(ltp_error)}")
                             import traceback
                             traceback.print_exc()
