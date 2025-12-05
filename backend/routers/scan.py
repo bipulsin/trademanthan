@@ -748,34 +748,34 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                         
                                         # Fetch market quote using the instrument key
                                         if vwap_service:
-                                        quote_data = vwap_service.get_market_quote_by_key(instrument_key)
-                                        if quote_data and quote_data.get('last_price'):
-                                            option_ltp = float(quote_data.get('last_price', 0))
-                                            print(f"✅ Fetched option LTP for {option_contract}: ₹{option_ltp}")
-                                            
-                                            # ====================================================================
-                                            # FETCH OPTION OHLC CANDLES (Current and Previous 1-hour)
-                                            # ====================================================================
-                                            try:
-                                                option_candles = vwap_service.get_option_daily_candles_current_and_previous(instrument_key)
-                                                if option_candles:
-                                                    print(f"✅ Fetched option OHLC candles for {option_contract}")
-                                                else:
-                                                    print(f"⚠️ Could not fetch option OHLC candles for {option_contract}")
+                                            quote_data = vwap_service.get_market_quote_by_key(instrument_key)
+                                            if quote_data and quote_data.get('last_price'):
+                                                option_ltp = float(quote_data.get('last_price', 0))
+                                                print(f"✅ Fetched option LTP for {option_contract}: ₹{option_ltp}")
+                                                
+                                                # ====================================================================
+                                                # FETCH OPTION OHLC CANDLES (Current and Previous 1-hour)
+                                                # ====================================================================
+                                                try:
+                                                    option_candles = vwap_service.get_option_daily_candles_current_and_previous(instrument_key)
+                                                    if option_candles:
+                                                        print(f"✅ Fetched option OHLC candles for {option_contract}")
+                                                    else:
+                                                        print(f"⚠️ Could not fetch option OHLC candles for {option_contract}")
+                                                        option_candles = None
+                                                except Exception as candle_error:
+                                                    print(f"⚠️ Error fetching option OHLC candles: {str(candle_error)}")
                                                     option_candles = None
-                                            except Exception as candle_error:
-                                                print(f"⚠️ Error fetching option OHLC candles: {str(candle_error)}")
+                                            else:
+                                                print(f"Could not fetch option LTP for {option_contract} - no quote data")
                                                 option_candles = None
                                         else:
-                                            print(f"Could not fetch option LTP for {option_contract} - no quote data")
+                                            print(f"vwap_service not available")
                                             option_candles = None
-                                    else:
-                                        print(f"vwap_service not available")
-                                        option_candles = None
                                     else:
                                         print(f"Could not find instrument key for {option_contract} in instruments JSON")
                                         option_candles = None
-                                    else:
+                                else:
                                     print(f"Instruments JSON file not found")
                                     option_candles = None
                             except Exception as ltp_error:
