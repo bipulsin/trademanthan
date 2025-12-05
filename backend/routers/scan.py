@@ -686,8 +686,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                         for inst in instruments_data:
                                             # Basic filters
                                             if (inst.get('underlying_symbol') == symbol and 
-                                            inst.get('instrument_type') == opt_type and
-                                            inst.get('segment') == 'NSE_FO'):
+                                                inst.get('instrument_type') == opt_type and
+                                                inst.get('segment') == 'NSE_FO'):
                                             
                                             # Check strike price - must match exactly (or very close for float precision)
                                             inst_strike = inst.get('strike_price', 0)
