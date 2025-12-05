@@ -684,8 +684,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                         best_match_score = 0
                                         
                                         for inst in instruments_data:
-                                        # Basic filters
-                                        if (inst.get('underlying_symbol') == symbol and 
+                                            # Basic filters
+                                            if (inst.get('underlying_symbol') == symbol and 
                                             inst.get('instrument_type') == opt_type and
                                             inst.get('segment') == 'NSE_FO'):
                                             
