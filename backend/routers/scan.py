@@ -744,10 +744,10 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                         print(f"   Searched for: symbol={symbol}, type={opt_type}, strike={strike_value}, expiry={target_month}/{target_year}")
                                     
                                     if instrument_key:
-                                    print(f"Found instrument key for {option_contract}: {instrument_key}")
-                                    
-                                    # Fetch market quote using the instrument key
-                                    if vwap_service:
+                                        print(f"Found instrument key for {option_contract}: {instrument_key}")
+                                        
+                                        # Fetch market quote using the instrument key
+                                        if vwap_service:
                                         quote_data = vwap_service.get_market_quote_by_key(instrument_key)
                                         if quote_data and quote_data.get('last_price'):
                                             option_ltp = float(quote_data.get('last_price', 0))
