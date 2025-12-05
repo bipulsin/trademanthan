@@ -206,17 +206,9 @@ class InstrumentsScheduler:
     """Scheduler for downloading Upstox instruments data"""
     
     def __init__(self):
-        # Use default event loop policy for AsyncIOScheduler
-        import asyncio
-        try:
-            # Try to get existing event loop
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            # No event loop exists, create one
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        self.scheduler = AsyncIOScheduler(timezone='Asia/Kolkata', event_loop=loop)
+        # AsyncIOScheduler creates its own event loop in a background thread
+        # Don't pass event_loop parameter - let it handle it automatically
+        self.scheduler = AsyncIOScheduler(timezone='Asia/Kolkata')
         self.is_running = False
         
     def start(self):
@@ -231,9 +223,15 @@ class InstrumentsScheduler:
                 replace_existing=True
             )
             
-            self.scheduler.start()
-            self.is_running = True
-            logger.info("Instruments Scheduler started - Daily download at 9:05 AM IST")
+            try:
+                self.scheduler.start()
+                self.is_running = True
+                logger.info("Instruments Scheduler started - Daily download at 9:05 AM IST")
+                print(f"✅ Instruments Scheduler started - Jobs: {len(self.scheduler.get_jobs())}", flush=True)
+            except Exception as e:
+                logger.error(f"❌ Failed to start Instruments Scheduler: {e}", exc_info=True)
+                print(f"❌ Failed to start Instruments Scheduler: {e}", flush=True)
+                raise
     
     def stop(self):
         """Stop the scheduler"""

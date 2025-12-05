@@ -24,17 +24,9 @@ class HealthMonitor:
     """Monitors system health and sends alerts on critical failures"""
     
     def __init__(self):
-        # Use default event loop policy for AsyncIOScheduler
-        import asyncio
-        try:
-            # Try to get existing event loop
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            # No event loop exists, create one
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        self.scheduler = AsyncIOScheduler(timezone='Asia/Kolkata', event_loop=loop)
+        # AsyncIOScheduler creates its own event loop in a background thread
+        # Don't pass event_loop parameter - let it handle it automatically
+        self.scheduler = AsyncIOScheduler(timezone='Asia/Kolkata')
         self.is_running = False
         
         # Track consecutive failures for each component
@@ -80,9 +72,15 @@ class HealthMonitor:
                 replace_existing=True
             )
             
-            self.scheduler.start()
-            self.is_running = True
-            logger.info("✅ Health Monitor started - Checking every 15 min from 9:15 AM to 3:45 PM")
+            try:
+                self.scheduler.start()
+                self.is_running = True
+                logger.info("✅ Health Monitor started - Checking every 15 min from 9:15 AM to 3:45 PM")
+                print(f"✅ Health Monitor scheduler started - Jobs: {len(self.scheduler.get_jobs())}", flush=True)
+            except Exception as e:
+                logger.error(f"❌ Failed to start Health Monitor scheduler: {e}", exc_info=True)
+                print(f"❌ Failed to start Health Monitor scheduler: {e}", flush=True)
+                raise
     
     def stop(self):
         """Stop the health monitor"""
