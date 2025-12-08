@@ -20,6 +20,38 @@ from backend.models.trading import IntradayStockOption, HistoricalMarketData
 
 logger = logging.getLogger(__name__)
 
+
+def historical_data_exists(db: Session, stock_name: str, scan_time: datetime, time_window_minutes: int = 2) -> bool:
+    """
+    Check if historical market data already exists for a stock at a specific time.
+    Uses a time window to account for slight timing differences between different schedulers.
+    
+    Args:
+        db: Database session
+        stock_name: Name of the stock
+        scan_time: The time to check for
+        time_window_minutes: Time window in minutes (default 2 minutes)
+    
+    Returns:
+        True if historical data exists within the time window, False otherwise
+    """
+    try:
+        time_window_start = scan_time - timedelta(minutes=time_window_minutes)
+        time_window_end = scan_time + timedelta(minutes=time_window_minutes)
+        
+        existing = db.query(HistoricalMarketData).filter(
+            and_(
+                HistoricalMarketData.stock_name == stock_name,
+                HistoricalMarketData.scan_date >= time_window_start,
+                HistoricalMarketData.scan_date <= time_window_end
+            )
+        ).first()
+        
+        return existing is not None
+    except Exception as e:
+        logger.warning(f"⚠️ Error checking existing historical data for {stock_name}: {str(e)}")
+        return False  # If check fails, allow save (fail-safe)
+
 class VWAPUpdater:
     """Scheduler for updating stock VWAP hourly during market hours"""
     
@@ -824,20 +856,25 @@ async def update_vwap_for_all_open_positions():
                 # SAVE HISTORICAL MARKET DATA
                 # ═══════════════════════════════════════════════════════════════
                 # Store historical snapshot of market data for analysis
+                # Check if data already exists to prevent duplicates (e.g., when cycle scheduler also runs)
                 try:
-                    historical_record = HistoricalMarketData(
-                        stock_name=stock_name,
-                        stock_vwap=new_vwap if new_vwap and new_vwap > 0 else None,
-                        stock_ltp=new_stock_ltp if new_stock_ltp and new_stock_ltp > 0 else None,
-                        option_contract=option_contract,
-                        option_instrument_key=position.instrument_key,
-                        option_ltp=new_option_ltp if new_option_ltp > 0 else None,
-                        scan_date=now,
-                        scan_time=now.strftime('%I:%M %p').lower()
-                    )
-                    db.add(historical_record)
-                    stocks_with_history_saved.add(stock_name)
-                    logger.debug(f"📊 Saved historical data for {stock_name} at {now.strftime('%H:%M:%S')}")
+                    if not historical_data_exists(db, stock_name, now):
+                        historical_record = HistoricalMarketData(
+                            stock_name=stock_name,
+                            stock_vwap=new_vwap if new_vwap and new_vwap > 0 else None,
+                            stock_ltp=new_stock_ltp if new_stock_ltp and new_stock_ltp > 0 else None,
+                            option_contract=option_contract,
+                            option_instrument_key=position.instrument_key,
+                            option_ltp=new_option_ltp if new_option_ltp > 0 else None,
+                            scan_date=now,
+                            scan_time=now.strftime('%I:%M %p').lower()
+                        )
+                        db.add(historical_record)
+                        stocks_with_history_saved.add(stock_name)
+                        logger.debug(f"📊 Saved historical data for {stock_name} at {now.strftime('%H:%M:%S')}")
+                    else:
+                        logger.debug(f"⏭️ Skipping duplicate historical data for {stock_name} at {now.strftime('%H:%M:%S')} (already exists)")
+                        stocks_with_history_saved.add(stock_name)  # Still mark as saved to avoid no_entry processing
                 except Exception as hist_error:
                     logger.warning(f"⚠️ Failed to save historical data for {stock_name}: {str(hist_error)}")
                     # Don't fail the entire update if historical save fails
@@ -1043,43 +1080,49 @@ async def update_vwap_for_all_open_positions():
                     stocks_with_history_saved.add(position.stock_name)
             
             if all_trades_for_history:
-            no_entry_trades_for_history = [t for t in all_trades_for_history if t.stock_name not in stocks_with_history_saved and t.status == 'no_entry']
-            if no_entry_trades_for_history:
-                logger.info(f"📊 Saving historical data for {len(no_entry_trades_for_history)} no_entry trades")
-                for trade in no_entry_trades_for_history:
-                    try:
-                        stock_name = trade.stock_name
-                        stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
-                        if stock_data:
-                            current_stock_ltp = stock_data.get('ltp', 0)
-                            current_stock_vwap = stock_data.get('vwap', 0)
-                            
-                            # Get option LTP if available
-                            current_option_ltp = None
-                            if trade.instrument_key:
-                                try:
-                                    option_quote = vwap_service.get_market_quote_by_key(trade.instrument_key)
-                                    if option_quote and option_quote.get('last_price', 0) > 0:
-                                        current_option_ltp = float(option_quote.get('last_price', 0))
-                                except:
+                no_entry_trades_for_history = [t for t in all_trades_for_history if t.stock_name not in stocks_with_history_saved and t.status == 'no_entry']
+                if no_entry_trades_for_history:
+                    logger.info(f"📊 Saving historical data for {len(no_entry_trades_for_history)} no_entry trades")
+                    for trade in no_entry_trades_for_history:
+                        try:
+                            stock_name = trade.stock_name
+                            stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
+                            if stock_data:
+                                current_stock_ltp = stock_data.get('ltp', 0)
+                                current_stock_vwap = stock_data.get('vwap', 0)
+                                
+                                # Get option LTP if available
+                                current_option_ltp = None
+                                if trade.instrument_key:
+                                    try:
+                                        option_quote = vwap_service.get_market_quote_by_key(trade.instrument_key)
+                                        if option_quote and option_quote.get('last_price', 0) > 0:
+                                            current_option_ltp = float(option_quote.get('last_price', 0))
+                                    except:
+                                        current_option_ltp = trade.option_ltp
+                                else:
                                     current_option_ltp = trade.option_ltp
-                            else:
-                                current_option_ltp = trade.option_ltp
-                            
-                            historical_record = HistoricalMarketData(
-                                stock_name=stock_name,
-                                stock_vwap=current_stock_vwap if current_stock_vwap > 0 else None,
-                                stock_ltp=current_stock_ltp if current_stock_ltp > 0 else None,
-                                option_contract=trade.option_contract,
-                                option_instrument_key=trade.instrument_key,
-                                option_ltp=current_option_ltp if current_option_ltp and current_option_ltp > 0 else None,
-                                scan_date=now,
-                                scan_time=now.strftime('%I:%M %p').lower()
-                            )
-                            db.add(historical_record)
-                            logger.debug(f"📊 Saved historical data for no_entry trade {stock_name} at {now.strftime('%H:%M:%S')}")
-                    except Exception as hist_error:
-                        logger.warning(f"⚠️ Failed to save historical data for no_entry trade {trade.stock_name}: {str(hist_error)}")
+                                
+                                # Check if historical data already exists to prevent duplicates
+                                if not historical_data_exists(db, stock_name, now):
+                                    historical_record = HistoricalMarketData(
+                                        stock_name=stock_name,
+                                        stock_vwap=current_stock_vwap if current_stock_vwap > 0 else None,
+                                        stock_ltp=current_stock_ltp if current_stock_ltp > 0 else None,
+                                        option_contract=trade.option_contract,
+                                        option_instrument_key=trade.instrument_key,
+                                        option_ltp=current_option_ltp if current_option_ltp and current_option_ltp > 0 else None,
+                                        scan_date=now,
+                                        scan_time=now.strftime('%I:%M %p').lower()
+                                    )
+                                    db.add(historical_record)
+                                    logger.debug(f"📊 Saved historical data for no_entry trade {stock_name} at {now.strftime('%H:%M:%S')}")
+                                else:
+                                    logger.debug(f"⏭️ Skipping duplicate historical data for no_entry trade {stock_name} at {now.strftime('%H:%M:%S')} (already exists)")
+                        except Exception as hist_error:
+                            logger.warning(f"⚠️ Failed to save historical data for no_entry trade {trade.stock_name}: {str(hist_error)}")
+        except Exception as e:
+            logger.warning(f"⚠️ Error saving historical data for no_entry trades: {str(e)}")
         
         # Commit all updates
         db.commit()
@@ -1742,18 +1785,22 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                     else:
                         current_option_ltp = trade.option_ltp
                     
-                    historical_record = HistoricalMarketData(
-                        stock_name=stock_name,
-                        stock_vwap=current_stock_vwap if current_stock_vwap > 0 else None,
-                        stock_ltp=current_stock_ltp if current_stock_ltp > 0 else None,
-                        option_contract=trade.option_contract,
-                        option_instrument_key=trade.instrument_key,
-                        option_ltp=current_option_ltp if current_option_ltp and current_option_ltp > 0 else None,
-                        scan_date=now,
-                        scan_time=now.strftime('%I:%M %p').lower()
-                    )
-                    db.add(historical_record)
-                    logger.debug(f"📊 Cycle {cycle_number} - Saved historical data for {stock_name} at {now.strftime('%H:%M:%S')}")
+                    # Check if historical data already exists to prevent duplicates (e.g., when hourly update also runs)
+                    if not historical_data_exists(db, stock_name, now):
+                        historical_record = HistoricalMarketData(
+                            stock_name=stock_name,
+                            stock_vwap=current_stock_vwap if current_stock_vwap > 0 else None,
+                            stock_ltp=current_stock_ltp if current_stock_ltp > 0 else None,
+                            option_contract=trade.option_contract,
+                            option_instrument_key=trade.instrument_key,
+                            option_ltp=current_option_ltp if current_option_ltp and current_option_ltp > 0 else None,
+                            scan_date=now,
+                            scan_time=now.strftime('%I:%M %p').lower()
+                        )
+                        db.add(historical_record)
+                        logger.debug(f"📊 Cycle {cycle_number} - Saved historical data for {stock_name} at {now.strftime('%H:%M:%S')}")
+                    else:
+                        logger.debug(f"⏭️ Cycle {cycle_number} - Skipping duplicate historical data for {stock_name} at {now.strftime('%H:%M:%S')} (already exists)")
                 except Exception as hist_error:
                     logger.warning(f"⚠️ Cycle {cycle_number} - Failed to save historical data for {stock_name}: {str(hist_error)}")
                     # Don't fail the entire cycle if historical save fails
@@ -1909,20 +1956,23 @@ async def update_10_15_alert_stocks_at_10_30():
                     logger.warning(f"   ⚠️ No instrument_key available for candle size recalculation for {stock_name}")
                 
                 # Save to historical_market_data table
-                historical_record = HistoricalMarketData(
-                    stock_name=stock_name,
-                    stock_vwap=stock_vwap if stock_vwap and stock_vwap > 0 else None,
-                    stock_ltp=stock_ltp if stock_ltp and stock_ltp > 0 else None,
-                    option_contract=option_contract,
-                    option_instrument_key=instrument_key,
-                    option_ltp=option_ltp if option_ltp and option_ltp > 0 else None,
-                    scan_date=now,
-                    scan_time=now.strftime('%I:%M %p').lower()
-                )
-                db.add(historical_record)
-                saved_count += 1
-                
-                logger.info(f"   ✅ Saved historical data for {stock_name} at 10:30 AM")
+                # Check if historical data already exists to prevent duplicates
+                if not historical_data_exists(db, stock_name, now):
+                    historical_record = HistoricalMarketData(
+                        stock_name=stock_name,
+                        stock_vwap=stock_vwap if stock_vwap and stock_vwap > 0 else None,
+                        stock_ltp=stock_ltp if stock_ltp and stock_ltp > 0 else None,
+                        option_contract=option_contract,
+                        option_instrument_key=instrument_key,
+                        option_ltp=option_ltp if option_ltp and option_ltp > 0 else None,
+                        scan_date=now,
+                        scan_time=now.strftime('%I:%M %p').lower()
+                    )
+                    db.add(historical_record)
+                    saved_count += 1
+                    logger.info(f"   ✅ Saved historical data for {stock_name} at 10:30 AM")
+                else:
+                    logger.debug(f"   ⏭️ Skipping duplicate historical data for {stock_name} at 10:30 AM (already exists)")
                 
             except Exception as e:
                 logger.error(f"   ❌ Error processing {stock_record.stock_name}: {str(e)}")
@@ -2195,18 +2245,22 @@ async def close_all_open_trades():
                     current_stock_ltp = stock_data.get('ltp', 0) if stock_data else (position.stock_ltp or 0)
                     current_stock_vwap = stock_data.get('vwap', 0) if stock_data else (position.stock_vwap or 0)
                     
-                    historical_record = HistoricalMarketData(
-                        stock_name=stock_name,
-                        stock_vwap=current_stock_vwap if current_stock_vwap > 0 else None,
-                        stock_ltp=current_stock_ltp if current_stock_ltp > 0 else None,
-                        option_contract=option_contract,
-                        option_instrument_key=position.instrument_key,
-                        option_ltp=option_ltp if option_ltp and option_ltp > 0 else (position.sell_price if position.sell_price else None),
-                        scan_date=now,
-                        scan_time=now.strftime('%I:%M %p').lower()
-                    )
-                    db.add(historical_record)
-                    logger.debug(f"📊 Saved historical data for {stock_name} at 15:25 PM (EOD)")
+                    # Check if historical data already exists to prevent duplicates
+                    if not historical_data_exists(db, stock_name, now):
+                        historical_record = HistoricalMarketData(
+                            stock_name=stock_name,
+                            stock_vwap=current_stock_vwap if current_stock_vwap > 0 else None,
+                            stock_ltp=current_stock_ltp if current_stock_ltp > 0 else None,
+                            option_contract=option_contract,
+                            option_instrument_key=position.instrument_key,
+                            option_ltp=option_ltp if option_ltp and option_ltp > 0 else (position.sell_price if position.sell_price else None),
+                            scan_date=now,
+                            scan_time=now.strftime('%I:%M %p').lower()
+                        )
+                        db.add(historical_record)
+                        logger.debug(f"📊 Saved historical data for {stock_name} at 15:25 PM (EOD)")
+                    else:
+                        logger.debug(f"⏭️ Skipping duplicate historical data for {stock_name} at 15:25 PM (already exists)")
                 except Exception as hist_error:
                     logger.warning(f"⚠️ Failed to save historical data for {stock_name} at 15:25 PM: {str(hist_error)}")
                 
