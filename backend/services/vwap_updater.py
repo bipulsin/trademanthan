@@ -1026,7 +1026,23 @@ async def update_vwap_for_all_open_positions():
         # ═══════════════════════════════════════════════════════════════
         # Save historical data for no_entry trades that weren't included in open_positions
         # This ensures we have historical data at every hourly update (9:15, 10:15, 11:15, etc.)
-        if 'all_trades_for_history' in locals() and 'stocks_with_history_saved' in locals():
+        try:
+            # Get all trades (including no_entry) for historical data saving
+            all_trades_for_history = db.query(IntradayStockOption).filter(
+                and_(
+                    IntradayStockOption.trade_date >= today,
+                    IntradayStockOption.trade_date < today + timedelta(days=1),
+                    IntradayStockOption.exit_reason == None  # Only include trades that haven't exited yet
+                )
+            ).all()
+            
+            # Track which stocks we've already saved historical data for (from open_positions)
+            stocks_with_history_saved = set()
+            for position in open_positions:
+                if hasattr(position, 'stock_name'):
+                    stocks_with_history_saved.add(position.stock_name)
+            
+            if all_trades_for_history:
             no_entry_trades_for_history = [t for t in all_trades_for_history if t.stock_name not in stocks_with_history_saved and t.status == 'no_entry']
             if no_entry_trades_for_history:
                 logger.info(f"📊 Saving historical data for {len(no_entry_trades_for_history)} no_entry trades")
