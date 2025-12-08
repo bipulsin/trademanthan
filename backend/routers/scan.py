@@ -1642,6 +1642,171 @@ async def manually_update_no_entry_trades(db: Session = Depends(get_db)):
             "timestamp": datetime.now().isoformat()
         }
 
+@router.post("/recalculate-all-today")
+async def recalculate_all_today_trades(db: Session = Depends(get_db)):
+    """
+    Recalculate VWAP slope and candle size for ALL today's trades
+    This processes trades regardless of status or alert_time
+    Useful for fixing missing VWAP slope/candle size data
+    """
+    try:
+        from backend.services.vwap_updater import calculate_vwap_slope_for_cycle
+        from backend.services.upstox_service import upstox_service
+        import pytz
+        from datetime import timedelta
+        
+        ist = pytz.timezone('Asia/Kolkata')
+        now = datetime.now(ist)
+        today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        logger.info(f"🔄 Manual trigger: Recalculating VWAP slope and candle size for ALL today's trades")
+        
+        # Get all trades for today
+        all_trades = db.query(IntradayStockOption).filter(
+            IntradayStockOption.trade_date >= today,
+            IntradayStockOption.trade_date < today + timedelta(days=1)
+        ).all()
+        
+        if not all_trades:
+            return {
+                "success": True,
+                "message": "No trades found for today",
+                "processed_count": 0,
+                "timestamp": now.isoformat()
+            }
+        
+        processed_count = 0
+        vwap_slope_updated = 0
+        candle_size_updated = 0
+        
+        for trade in all_trades:
+            try:
+                stock_name = trade.stock_name
+                updated = False
+                
+                # 1. Calculate VWAP slope if missing
+                if not trade.vwap_slope_angle or trade.vwap_slope_status is None:
+                    # Get current stock VWAP
+                    stock_data = upstox_service.get_stock_ltp_and_vwap(stock_name)
+                    if stock_data:
+                        current_vwap = stock_data.get('vwap', 0)
+                        
+                        # Get previous hour VWAP
+                        prev_vwap_data = upstox_service.get_stock_vwap_for_previous_hour(stock_name)
+                        if prev_vwap_data and current_vwap > 0:
+                            prev_vwap = prev_vwap_data.get('vwap', 0)
+                            prev_vwap_time = prev_vwap_data.get('time')
+                            
+                            if prev_vwap > 0 and prev_vwap_time:
+                                # Calculate VWAP slope
+                                slope_result = upstox_service.vwap_slope(
+                                    vwap1=prev_vwap,
+                                    time1=prev_vwap_time,
+                                    vwap2=current_vwap,
+                                    time2=now
+                                )
+                                
+                                if isinstance(slope_result, dict):
+                                    trade.vwap_slope_status = slope_result.get("status", "No")
+                                    trade.vwap_slope_angle = slope_result.get("angle", 0.0)
+                                    trade.vwap_slope_direction = slope_result.get("direction", "flat")
+                                else:
+                                    trade.vwap_slope_status = slope_result if isinstance(slope_result, str) else "No"
+                                    trade.vwap_slope_angle = 0.0
+                                    trade.vwap_slope_direction = "flat"
+                                
+                                trade.stock_vwap = current_vwap
+                                trade.stock_vwap_previous_hour = prev_vwap
+                                trade.stock_vwap_previous_hour_time = prev_vwap_time
+                                trade.vwap_slope_time = now
+                                vwap_slope_updated += 1
+                                updated = True
+                                logger.info(f"✅ Updated VWAP slope for {stock_name}: {trade.vwap_slope_angle:.2f}° ({trade.vwap_slope_status})")
+                
+                # 2. Calculate candle size if missing and instrument_key exists
+                if (not trade.candle_size_ratio or trade.candle_size_status is None) and trade.instrument_key:
+                    try:
+                        option_candles = upstox_service.get_option_daily_candles_current_and_previous(trade.instrument_key)
+                        if option_candles:
+                            current_day_candle = option_candles.get('current_day_candle', {})
+                            previous_day_candle = option_candles.get('previous_day_candle', {})
+                            
+                            if current_day_candle and previous_day_candle:
+                                current_size = abs(current_day_candle.get('high', 0) - current_day_candle.get('low', 0))
+                                previous_size = abs(previous_day_candle.get('high', 0) - previous_day_candle.get('low', 0))
+                                
+                                if previous_size > 0:
+                                    candle_size_ratio = current_size / previous_size
+                                    trade.candle_size_ratio = candle_size_ratio
+                                    trade.candle_size_status = "Pass" if candle_size_ratio < 7.5 else "Fail"
+                                    
+                                    # Update OHLC data
+                                    trade.option_current_candle_open = current_day_candle.get('open')
+                                    trade.option_current_candle_high = current_day_candle.get('high')
+                                    trade.option_current_candle_low = current_day_candle.get('low')
+                                    trade.option_current_candle_close = current_day_candle.get('close')
+                                    trade.option_current_candle_time = current_day_candle.get('time')
+                                    trade.option_previous_candle_open = previous_day_candle.get('open')
+                                    trade.option_previous_candle_high = previous_day_candle.get('high')
+                                    trade.option_previous_candle_low = previous_day_candle.get('low')
+                                    trade.option_previous_candle_close = previous_day_candle.get('close')
+                                    trade.option_previous_candle_time = previous_day_candle.get('time')
+                                    
+                                    candle_size_updated += 1
+                                    updated = True
+                                    logger.info(f"✅ Updated candle size for {stock_name}: {candle_size_ratio:.2f}x ({trade.candle_size_status})")
+                    except Exception as candle_error:
+                        logger.warning(f"Error calculating candle size for {stock_name}: {str(candle_error)}")
+                
+                # 3. Try to get instrument_key if missing but option_contract exists
+                if not trade.instrument_key and trade.option_contract:
+                    try:
+                        from pathlib import Path
+                        import json as json_lib
+                        
+                        instruments_path = Path(__file__).parent.parent.parent / "instruments.json"
+                        if instruments_path.exists():
+                            with open(instruments_path, 'r') as f:
+                                instruments_data = json_lib.load(f)
+                                
+                            for instrument in instruments_data:
+                                if instrument.get('symbol') == trade.option_contract:
+                                    trade.instrument_key = instrument.get('instrument_key')
+                                    logger.info(f"✅ Found instrument_key for {stock_name}: {trade.instrument_key}")
+                                    updated = True
+                                    break
+                    except Exception as inst_error:
+                        logger.warning(f"Error fetching instrument_key for {stock_name}: {str(inst_error)}")
+                
+                if updated:
+                    db.commit()
+                    processed_count += 1
+                    
+            except Exception as trade_error:
+                logger.error(f"Error processing trade {trade.stock_name}: {str(trade_error)}")
+                db.rollback()
+                continue
+        
+        return {
+            "success": True,
+            "message": f"Recalculation completed for today's trades",
+            "total_trades": len(all_trades),
+            "processed_count": processed_count,
+            "vwap_slope_updated": vwap_slope_updated,
+            "candle_size_updated": candle_size_updated,
+            "timestamp": now.isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in recalculate all today trades: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
 @router.get("/scheduler-status")
 async def get_scheduler_status():
     """Get status of all schedulers - verifies they are running"""
