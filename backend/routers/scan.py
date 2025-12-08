@@ -2291,11 +2291,31 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                     except:
                         pass
                 elif is_10_15_alert:
-                    # For 10:15 AM alerts, show "Skipped" since filters are bypassed
-                    vwap_slope_status = "Skipped"
+                    # For 10:15 AM alerts, Cycle 1 (10:30 AM) should recalculate VWAP slope
+                    # Only show "Skipped" if Cycle 1 hasn't run yet or failed to calculate
+                    # Check if saved values exist (Cycle 1 should have calculated them)
+                    if record.vwap_slope_status and record.vwap_slope_status != "Skipped":
+                        # Cycle 1 already calculated it - use saved value
+                        vwap_slope_status = record.vwap_slope_status
+                        vwap_slope_angle = record.vwap_slope_angle
+                        vwap_slope_direction = record.vwap_slope_direction
+                    else:
+                        # Not calculated yet - show "Skipped" only if before 10:30 AM
+                        if now.hour > 10 or (now.hour == 10 and now.minute >= 30):
+                            # After 10:30 AM - Cycle 1 should have run, but no data means it failed
+                            vwap_slope_status = "Skipped"
+                        else:
+                            # Before 10:30 AM - will be calculated in Cycle 1
+                            vwap_slope_status = "Skipped"
                 
                 # Calculate candle size if data is available
-                if record.option_current_candle_high and record.option_current_candle_low and record.option_previous_candle_high and record.option_previous_candle_low:
+                # For 10:15 AM alerts, Cycle 1 (10:30 AM) should have recalculated candle size
+                # Use saved values if available from Cycle 1
+                if record.candle_size_ratio is not None and record.candle_size_status:
+                    # Use saved values from Cycle 1 recalculation
+                    candle_size_ratio = record.candle_size_ratio
+                    candle_size_status = record.candle_size_status
+                elif record.option_current_candle_high and record.option_current_candle_low and record.option_previous_candle_high and record.option_previous_candle_low:
                     try:
                         current_size = abs(record.option_current_candle_high - record.option_current_candle_low)
                         previous_size = abs(record.option_previous_candle_high - record.option_previous_candle_low)
@@ -2305,8 +2325,14 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                     except:
                         pass
                 elif is_10_15_alert:
-                    # For 10:15 AM alerts, show "Skipped" since filters are bypassed
-                    candle_size_status = "Skipped"
+                    # For 10:15 AM alerts, Cycle 1 (10:30 AM) should recalculate candle size
+                    # Only show "Skipped" if Cycle 1 hasn't run yet or failed to calculate
+                    if now.hour > 10 or (now.hour == 10 and now.minute >= 30):
+                        # After 10:30 AM - Cycle 1 should have run, but no data means it failed
+                        candle_size_status = "Skipped"
+                    else:
+                        # Before 10:30 AM - will be calculated in Cycle 1
+                        candle_size_status = "Skipped"
                 
                 # Retry option contract determination if missing (only for recent records to avoid performance issues)
                 option_contract = record.option_contract or ""
@@ -2431,11 +2457,31 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                     except:
                         pass
                 elif is_10_15_alert:
-                    # For 10:15 AM alerts, show "Skipped" since filters are bypassed
-                    vwap_slope_status = "Skipped"
+                    # For 10:15 AM alerts, Cycle 1 (10:30 AM) should recalculate VWAP slope
+                    # Only show "Skipped" if Cycle 1 hasn't run yet or failed to calculate
+                    # Check if saved values exist (Cycle 1 should have calculated them)
+                    if record.vwap_slope_status and record.vwap_slope_status != "Skipped":
+                        # Cycle 1 already calculated it - use saved value
+                        vwap_slope_status = record.vwap_slope_status
+                        vwap_slope_angle = record.vwap_slope_angle
+                        vwap_slope_direction = record.vwap_slope_direction
+                    else:
+                        # Not calculated yet - show "Skipped" only if before 10:30 AM
+                        if now.hour > 10 or (now.hour == 10 and now.minute >= 30):
+                            # After 10:30 AM - Cycle 1 should have run, but no data means it failed
+                            vwap_slope_status = "Skipped"
+                        else:
+                            # Before 10:30 AM - will be calculated in Cycle 1
+                            vwap_slope_status = "Skipped"
                 
                 # Calculate candle size if data is available
-                if record.option_current_candle_high and record.option_current_candle_low and record.option_previous_candle_high and record.option_previous_candle_low:
+                # For 10:15 AM alerts, Cycle 1 (10:30 AM) should have recalculated candle size
+                # Use saved values if available from Cycle 1
+                if record.candle_size_ratio is not None and record.candle_size_status:
+                    # Use saved values from Cycle 1 recalculation
+                    candle_size_ratio = record.candle_size_ratio
+                    candle_size_status = record.candle_size_status
+                elif record.option_current_candle_high and record.option_current_candle_low and record.option_previous_candle_high and record.option_previous_candle_low:
                     try:
                         current_size = abs(record.option_current_candle_high - record.option_current_candle_low)
                         previous_size = abs(record.option_previous_candle_high - record.option_previous_candle_low)
@@ -2445,8 +2491,14 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                     except:
                         pass
                 elif is_10_15_alert:
-                    # For 10:15 AM alerts, show "Skipped" since filters are bypassed
-                    candle_size_status = "Skipped"
+                    # For 10:15 AM alerts, Cycle 1 (10:30 AM) should recalculate candle size
+                    # Only show "Skipped" if Cycle 1 hasn't run yet or failed to calculate
+                    if now.hour > 10 or (now.hour == 10 and now.minute >= 30):
+                        # After 10:30 AM - Cycle 1 should have run, but no data means it failed
+                        candle_size_status = "Skipped"
+                    else:
+                        # Before 10:30 AM - will be calculated in Cycle 1
+                        candle_size_status = "Skipped"
                 
                 # Retry option contract determination if missing (only for recent records to avoid performance issues)
                 option_contract = record.option_contract or ""
