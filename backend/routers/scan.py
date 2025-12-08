@@ -1684,8 +1684,28 @@ async def recalculate_all_today_trades(db: Session = Depends(get_db)):
                 stock_name = trade.stock_name
                 updated = False
                 
+                # 0. Try to get instrument_key first if missing but option_contract exists
+                if not trade.instrument_key and trade.option_contract:
+                    try:
+                        from pathlib import Path
+                        import json as json_lib
+                        
+                        instruments_path = Path(__file__).parent.parent.parent / "instruments.json"
+                        if instruments_path.exists():
+                            with open(instruments_path, 'r') as f:
+                                instruments_data = json_lib.load(f)
+                                
+                            for instrument in instruments_data:
+                                if instrument.get('symbol') == trade.option_contract:
+                                    trade.instrument_key = instrument.get('instrument_key')
+                                    logger.info(f"✅ Found instrument_key for {stock_name}: {trade.instrument_key}")
+                                    updated = True
+                                    break
+                    except Exception as inst_error:
+                        logger.warning(f"Error fetching instrument_key for {stock_name}: {str(inst_error)}")
+                
                 # 1. Calculate VWAP slope if missing
-                if not trade.vwap_slope_angle or trade.vwap_slope_status is None:
+                if trade.vwap_slope_angle is None or trade.vwap_slope_status is None:
                     # Get current stock VWAP
                     stock_data = upstox_service.get_stock_ltp_and_vwap(stock_name)
                     if stock_data:
@@ -1722,9 +1742,15 @@ async def recalculate_all_today_trades(db: Session = Depends(get_db)):
                                 vwap_slope_updated += 1
                                 updated = True
                                 logger.info(f"✅ Updated VWAP slope for {stock_name}: {trade.vwap_slope_angle:.2f}° ({trade.vwap_slope_status})")
+                            else:
+                                logger.warning(f"⚠️ Missing VWAP data for {stock_name}: prev_vwap={prev_vwap}, prev_time={prev_vwap_time}, current_vwap={current_vwap}")
+                        else:
+                            logger.warning(f"⚠️ Could not fetch previous hour VWAP for {stock_name}")
+                    else:
+                        logger.warning(f"⚠️ Could not fetch stock data for {stock_name}")
                 
                 # 2. Calculate candle size if missing and instrument_key exists
-                if (not trade.candle_size_ratio or trade.candle_size_status is None) and trade.instrument_key:
+                if (trade.candle_size_ratio is None or trade.candle_size_status is None) and trade.instrument_key:
                     try:
                         option_candles = upstox_service.get_option_daily_candles_current_and_previous(trade.instrument_key)
                         if option_candles:
@@ -1757,26 +1783,8 @@ async def recalculate_all_today_trades(db: Session = Depends(get_db)):
                                     logger.info(f"✅ Updated candle size for {stock_name}: {candle_size_ratio:.2f}x ({trade.candle_size_status})")
                     except Exception as candle_error:
                         logger.warning(f"Error calculating candle size for {stock_name}: {str(candle_error)}")
-                
-                # 3. Try to get instrument_key if missing but option_contract exists
-                if not trade.instrument_key and trade.option_contract:
-                    try:
-                        from pathlib import Path
-                        import json as json_lib
-                        
-                        instruments_path = Path(__file__).parent.parent.parent / "instruments.json"
-                        if instruments_path.exists():
-                            with open(instruments_path, 'r') as f:
-                                instruments_data = json_lib.load(f)
-                                
-                            for instrument in instruments_data:
-                                if instrument.get('symbol') == trade.option_contract:
-                                    trade.instrument_key = instrument.get('instrument_key')
-                                    logger.info(f"✅ Found instrument_key for {stock_name}: {trade.instrument_key}")
-                                    updated = True
-                                    break
-                    except Exception as inst_error:
-                        logger.warning(f"Error fetching instrument_key for {stock_name}: {str(inst_error)}")
+                elif trade.candle_size_ratio is None or trade.candle_size_status is None:
+                    logger.warning(f"⚠️ Cannot calculate candle size for {stock_name}: instrument_key={trade.instrument_key}, option_contract={trade.option_contract}")
                 
                 if updated:
                     db.commit()
