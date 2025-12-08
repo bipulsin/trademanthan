@@ -1452,21 +1452,54 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 candle_size_ratio = None
                 is_10_15_alert = trade.alert_time and trade.alert_time.hour == 10 and trade.alert_time.minute == 15
                 
-                # For 10:15 AM alerts at 10:30 AM (Cycle 1), always try to recalculate candle size
-                # For other cycles, only recalculate if instrument_key exists
+                # Try to recalculate candle size if:
+                # 1. instrument_key exists (always recalculate)
+                # 2. OR option_contract exists but instrument_key is missing (try to get instrument_key and recalculate)
+                # 3. OR it's a 10:15 AM alert at Cycle 1 (10:30 AM) - try to get instrument_key
+                should_recalculate = False
                 if trade.instrument_key:
                     # Always recalculate if instrument_key exists
                     should_recalculate = True
+                elif trade.option_contract and not trade.instrument_key:
+                    # Option contract exists but instrument_key is missing - try to get it
+                    try:
+                        from pathlib import Path
+                        import json as json_lib
+                        
+                        instruments_path = Path(__file__).parent.parent.parent / "instruments.json"
+                        if instruments_path.exists():
+                            with open(instruments_path, 'r') as f:
+                                instruments_data = json_lib.load(f)
+                                
+                            for instrument in instruments_data:
+                                if instrument.get('symbol') == trade.option_contract:
+                                    trade.instrument_key = instrument.get('instrument_key')
+                                    logger.info(f"✅ Cycle {cycle_number} - {stock_name}: Found instrument_key for candle size: {trade.instrument_key}")
+                                    should_recalculate = True
+                                    break
+                    except Exception as inst_error:
+                        logger.warning(f"Error fetching instrument_key for candle size calculation: {str(inst_error)}")
                 elif is_10_15_alert and cycle_number == 1:
                     # At 10:30 AM, try to get instrument_key and recalculate for 10:15 AM alerts
-                    # First, try to determine option contract if missing
-                    if not trade.option_contract or not trade.instrument_key:
-                        # This will be handled by the option contract retry logic above
-                        should_recalculate = False
-                    else:
-                        should_recalculate = True
-                else:
-                    should_recalculate = False
+                    if trade.option_contract:
+                        # Try to get instrument_key from instruments.json
+                        try:
+                            from pathlib import Path
+                            import json as json_lib
+                            
+                            instruments_path = Path(__file__).parent.parent.parent / "instruments.json"
+                            if instruments_path.exists():
+                                with open(instruments_path, 'r') as f:
+                                    instruments_data = json_lib.load(f)
+                                    
+                                for instrument in instruments_data:
+                                    if instrument.get('symbol') == trade.option_contract:
+                                        trade.instrument_key = instrument.get('instrument_key')
+                                        logger.info(f"✅ Cycle {cycle_number} - {stock_name}: Found instrument_key for 10:15 alert: {trade.instrument_key}")
+                                        should_recalculate = True
+                                        break
+                        except Exception as inst_error:
+                            logger.warning(f"Error fetching instrument_key for 10:15 alert: {str(inst_error)}")
                 
                 if should_recalculate and trade.instrument_key:
                     try:
