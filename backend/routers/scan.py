@@ -81,6 +81,10 @@ def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: st
             print(f"No option chain data available for {stock_name}")
             return None
         
+        # Debug: Log the structure of option_chain
+        logger.info(f"Option chain structure for {stock_name}: {type(option_chain)}, keys: {list(option_chain.keys()) if isinstance(option_chain, dict) else 'not a dict'}")
+        print(f"Option chain structure for {stock_name}: {type(option_chain)}, keys: {list(option_chain.keys()) if isinstance(option_chain, dict) else 'not a dict'}")
+        
         # Parse option chain data
         # Upstox API returns a dictionary with 'strikes' key containing list of strike data
         strikes = []

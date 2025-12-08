@@ -731,8 +731,20 @@ class UpstoxService:
                 data = response.json()
                 
                 if data.get('status') == 'success':
+                    option_data = data.get('data', {})
                     logger.info(f"Fetched option chain for {symbol}")
-                    return data.get('data', {})
+                    # Log the structure of the returned data
+                    if isinstance(option_data, dict):
+                        logger.info(f"Option chain data structure for {symbol}: keys={list(option_data.keys())}, empty={len(option_data) == 0}")
+                        if 'strikes' in option_data:
+                            logger.info(f"Found 'strikes' key with {len(option_data['strikes']) if isinstance(option_data['strikes'], list) else 'non-list'} items")
+                        else:
+                            logger.warning(f"No 'strikes' key in option chain data for {symbol}. Available keys: {list(option_data.keys())}")
+                    elif isinstance(option_data, list):
+                        logger.info(f"Option chain data is a list with {len(option_data)} items for {symbol}")
+                    else:
+                        logger.warning(f"Unexpected option chain data type for {symbol}: {type(option_data)}")
+                    return option_data
                 else:
                     logger.warning(f"No option chain data for {symbol}: {data}")
                     return None
