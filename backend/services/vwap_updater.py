@@ -381,11 +381,22 @@ async def update_vwap_for_all_open_positions():
             )
         ).all()
         
+        # Also get all trades (including no_entry) for historical data saving
+        all_trades_for_history = db.query(IntradayStockOption).filter(
+            and_(
+                IntradayStockOption.trade_date >= today,
+                IntradayStockOption.trade_date < today + timedelta(days=1),
+                IntradayStockOption.exit_reason == None  # Only include trades that haven't exited yet
+            )
+        ).all()
+        
         if not open_positions:
             logger.info("No open positions found to update")
-            return
-        
-        logger.info(f"Found {len(open_positions)} open positions to update")
+            # Still save historical data even if no open positions
+            if all_trades_for_history:
+                logger.info(f"Saving historical data for {len(all_trades_for_history)} trades (including no_entry)")
+        else:
+            logger.info(f"Found {len(open_positions)} open positions to update")
         
         # ═══════════════════════════════════════════════════════════════
         # RE-EVALUATE "no_entry" TRADES: Check if conditions are now met
@@ -825,6 +836,7 @@ async def update_vwap_for_all_open_positions():
                         scan_time=now.strftime('%I:%M %p').lower()
                     )
                     db.add(historical_record)
+                    stocks_with_history_saved.add(stock_name)
                     logger.debug(f"📊 Saved historical data for {stock_name} at {now.strftime('%H:%M:%S')}")
                 except Exception as hist_error:
                     logger.warning(f"⚠️ Failed to save historical data for {stock_name}: {str(hist_error)}")
@@ -1008,6 +1020,50 @@ async def update_vwap_for_all_open_positions():
                 import traceback
                 traceback.print_exc()
                 failed_count += 1
+        
+        # ═══════════════════════════════════════════════════════════════
+        # SAVE HISTORICAL MARKET DATA FOR NO_ENTRY TRADES
+        # ═══════════════════════════════════════════════════════════════
+        # Save historical data for no_entry trades that weren't included in open_positions
+        # This ensures we have historical data at every hourly update (9:15, 10:15, 11:15, etc.)
+        if 'all_trades_for_history' in locals() and 'stocks_with_history_saved' in locals():
+            no_entry_trades_for_history = [t for t in all_trades_for_history if t.stock_name not in stocks_with_history_saved and t.status == 'no_entry']
+            if no_entry_trades_for_history:
+                logger.info(f"📊 Saving historical data for {len(no_entry_trades_for_history)} no_entry trades")
+                for trade in no_entry_trades_for_history:
+                    try:
+                        stock_name = trade.stock_name
+                        stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
+                        if stock_data:
+                            current_stock_ltp = stock_data.get('ltp', 0)
+                            current_stock_vwap = stock_data.get('vwap', 0)
+                            
+                            # Get option LTP if available
+                            current_option_ltp = None
+                            if trade.instrument_key:
+                                try:
+                                    option_quote = vwap_service.get_market_quote_by_key(trade.instrument_key)
+                                    if option_quote and option_quote.get('last_price', 0) > 0:
+                                        current_option_ltp = float(option_quote.get('last_price', 0))
+                                except:
+                                    current_option_ltp = trade.option_ltp
+                            else:
+                                current_option_ltp = trade.option_ltp
+                            
+                            historical_record = HistoricalMarketData(
+                                stock_name=stock_name,
+                                stock_vwap=current_stock_vwap if current_stock_vwap > 0 else None,
+                                stock_ltp=current_stock_ltp if current_stock_ltp > 0 else None,
+                                option_contract=trade.option_contract,
+                                option_instrument_key=trade.instrument_key,
+                                option_ltp=current_option_ltp if current_option_ltp and current_option_ltp > 0 else None,
+                                scan_date=now,
+                                scan_time=now.strftime('%I:%M %p').lower()
+                            )
+                            db.add(historical_record)
+                            logger.debug(f"📊 Saved historical data for no_entry trade {stock_name} at {now.strftime('%H:%M:%S')}")
+                    except Exception as hist_error:
+                        logger.warning(f"⚠️ Failed to save historical data for no_entry trade {trade.stock_name}: {str(hist_error)}")
         
         # Commit all updates
         db.commit()
@@ -1645,6 +1701,47 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                         else:
                             logger.warning(f"⚠️ Cycle {cycle_number} - Could not fetch option LTP for {stock_name} - cannot enter")
                 
+                # ═══════════════════════════════════════════════════════════════
+                # SAVE HISTORICAL MARKET DATA FOR ALL TRADES PROCESSED IN CYCLE
+                # ═══════════════════════════════════════════════════════════════
+                # Store historical snapshot of market data for analysis
+                # This ensures we have data at every cycle run (10:30, 11:15, 12:15, 13:15, 14:15)
+                try:
+                    # Get current stock LTP and VWAP if not already fetched
+                    if not stock_data:
+                        stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
+                    
+                    current_stock_ltp = stock_data.get('ltp', 0) if stock_data else (trade.stock_ltp or 0)
+                    current_stock_vwap = current_vwap if current_vwap > 0 else (trade.stock_vwap or 0)
+                    
+                    # Get option LTP if available
+                    current_option_ltp = None
+                    if trade.instrument_key:
+                        try:
+                            option_quote = vwap_service.get_market_quote_by_key(trade.instrument_key)
+                            if option_quote and option_quote.get('last_price', 0) > 0:
+                                current_option_ltp = float(option_quote.get('last_price', 0))
+                        except:
+                            current_option_ltp = trade.option_ltp
+                    else:
+                        current_option_ltp = trade.option_ltp
+                    
+                    historical_record = HistoricalMarketData(
+                        stock_name=stock_name,
+                        stock_vwap=current_stock_vwap if current_stock_vwap > 0 else None,
+                        stock_ltp=current_stock_ltp if current_stock_ltp > 0 else None,
+                        option_contract=trade.option_contract,
+                        option_instrument_key=trade.instrument_key,
+                        option_ltp=current_option_ltp if current_option_ltp and current_option_ltp > 0 else None,
+                        scan_date=now,
+                        scan_time=now.strftime('%I:%M %p').lower()
+                    )
+                    db.add(historical_record)
+                    logger.debug(f"📊 Cycle {cycle_number} - Saved historical data for {stock_name} at {now.strftime('%H:%M:%S')}")
+                except Exception as hist_error:
+                    logger.warning(f"⚠️ Cycle {cycle_number} - Failed to save historical data for {stock_name}: {str(hist_error)}")
+                    # Don't fail the entire cycle if historical save fails
+                
                 success_count += 1
                 
             except Exception as e:
@@ -2072,6 +2169,30 @@ async def close_all_open_trades():
                 position.sell_time = now
                 position.exit_reason = 'time_based'
                 position.status = 'sold'
+                
+                # ═══════════════════════════════════════════════════════════════
+                # SAVE HISTORICAL MARKET DATA AT 15:25 PM (END OF DAY)
+                # ═══════════════════════════════════════════════════════════════
+                try:
+                    # Get current stock LTP and VWAP
+                    stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
+                    current_stock_ltp = stock_data.get('ltp', 0) if stock_data else (position.stock_ltp or 0)
+                    current_stock_vwap = stock_data.get('vwap', 0) if stock_data else (position.stock_vwap or 0)
+                    
+                    historical_record = HistoricalMarketData(
+                        stock_name=stock_name,
+                        stock_vwap=current_stock_vwap if current_stock_vwap > 0 else None,
+                        stock_ltp=current_stock_ltp if current_stock_ltp > 0 else None,
+                        option_contract=option_contract,
+                        option_instrument_key=position.instrument_key,
+                        option_ltp=option_ltp if option_ltp and option_ltp > 0 else (position.sell_price if position.sell_price else None),
+                        scan_date=now,
+                        scan_time=now.strftime('%I:%M %p').lower()
+                    )
+                    db.add(historical_record)
+                    logger.debug(f"📊 Saved historical data for {stock_name} at 15:25 PM (EOD)")
+                except Exception as hist_error:
+                    logger.warning(f"⚠️ Failed to save historical data for {stock_name} at 15:25 PM: {str(hist_error)}")
                 
                 # Calculate final P&L if not already set
                 if position.buy_price and position.qty and position.sell_price:
