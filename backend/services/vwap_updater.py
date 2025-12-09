@@ -1707,13 +1707,36 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                         candle_size_check_passed = candle_size_passed
                     
                     # Check if all entry conditions are met
-                    if (is_before_3pm and 
-                        can_enter_by_index and 
-                        vwap_slope_passed and 
-                        candle_size_check_passed and 
-                        trade.option_contract and 
-                        trade.instrument_key):
-                        
+                    # Log each condition for debugging
+                    conditions_status = {
+                        'time_before_3pm': is_before_3pm,
+                        'index_trends_aligned': can_enter_by_index,
+                        'vwap_slope_passed': vwap_slope_passed,
+                        'candle_size_passed': candle_size_check_passed,
+                        'has_option_contract': bool(trade.option_contract),
+                        'has_instrument_key': bool(trade.instrument_key)
+                    }
+                    
+                    all_conditions_met = (is_before_3pm and 
+                                        can_enter_by_index and 
+                                        vwap_slope_passed and 
+                                        candle_size_check_passed and 
+                                        trade.option_contract and 
+                                        trade.instrument_key)
+                    
+                    # Log which conditions passed/failed
+                    if not all_conditions_met:
+                        failed_conditions = [k for k, v in conditions_status.items() if not v]
+                        logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Entry conditions NOT met. Failed: {', '.join(failed_conditions)}")
+                        logger.info(f"   📊 Condition Details:")
+                        logger.info(f"      - Time Before 3PM: {'✅' if is_before_3pm else '❌'} ({now.strftime('%H:%M:%S')})")
+                        logger.info(f"      - Index Trends: {'✅' if can_enter_by_index else '❌'} (NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}, Option={option_type})")
+                        logger.info(f"      - VWAP Slope: {'✅' if vwap_slope_passed else '❌'} ({slope_angle:.2f}°)" if slope_angle else f"      - VWAP Slope: ❌ (not calculated)")
+                        logger.info(f"      - Candle Size: {'✅' if candle_size_check_passed else '❌'} (Ratio: {candle_size_ratio:.2f}x)" if candle_size_ratio else f"      - Candle Size: {'✅ Skipped (10:15 alert)' if is_10_15_alert else '❌ (not calculated)'}")
+                        logger.info(f"      - Option Contract: {'✅' if trade.option_contract else '❌'} ({trade.option_contract or 'Missing'})")
+                        logger.info(f"      - Instrument Key: {'✅' if trade.instrument_key else '❌'} ({trade.instrument_key or 'Missing'})")
+                    
+                    if all_conditions_met:
                         # Fetch current option LTP
                         option_quote = vwap_service.get_market_quote_by_key(trade.instrument_key)
                         if option_quote and option_quote.get('last_price', 0) > 0:
@@ -1758,7 +1781,24 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                             print(f"      - Quantity: {qty}")
                             print(f"      - Stop Loss: ₹{trade.stop_loss:.2f}")
                         else:
-                            logger.warning(f"⚠️ Cycle {cycle_number} - Could not fetch option LTP for {stock_name} - cannot enter")
+                            # Option LTP fetch failed - log detailed error
+                            logger.error(f"❌ Cycle {cycle_number} - {stock_name}: All conditions met BUT option LTP fetch FAILED - cannot enter")
+                            logger.error(f"   Instrument Key: {trade.instrument_key}")
+                            logger.error(f"   Option Contract: {trade.option_contract}")
+                            if option_quote:
+                                logger.error(f"   Option Quote Response: {option_quote}")
+                                logger.error(f"   Last Price in Response: {option_quote.get('last_price', 'NOT FOUND')}")
+                            else:
+                                logger.error(f"   Option Quote Response: None (API call returned None)")
+                            logger.error(f"   📊 All Other Conditions Were Met:")
+                            logger.error(f"      - Time Before 3PM: ✅ ({now.strftime('%H:%M:%S')})")
+                            logger.error(f"      - Index Trends: ✅ (NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend})")
+                            logger.error(f"      - VWAP Slope: ✅ ({slope_angle:.2f}°)" if slope_angle else f"      - VWAP Slope: ✅")
+                            logger.error(f"      - Candle Size: ✅ (Ratio: {candle_size_ratio:.2f}x)" if candle_size_ratio else f"      - Candle Size: ✅")
+                            logger.error(f"      - Option Contract: ✅ ({trade.option_contract})")
+                            logger.error(f"      - Instrument Key: ✅ ({trade.instrument_key})")
+                            print(f"❌ Cycle {cycle_number} - {stock_name}: Entry BLOCKED - Option LTP fetch failed")
+                            print(f"   All conditions passed but cannot fetch option price to enter trade")
                 
                 # ═══════════════════════════════════════════════════════════════
                 # SAVE HISTORICAL MARKET DATA FOR ALL TRADES PROCESSED IN CYCLE
