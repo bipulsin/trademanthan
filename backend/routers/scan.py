@@ -4540,3 +4540,98 @@ async def diagnose_bearish_trades(db: Session = Depends(get_db)):
             "message": f"Error: {str(e)}",
             "diagnostics": []
         }
+
+
+@router.get("/historical-market-data")
+async def get_historical_market_data(
+    date: str = Query(None, description="Date in YYYY-MM-DD format (defaults to today)"),
+    stock_name: str = Query(None, description="Filter by stock name"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get historical market data for a specific date (defaults to today)
+    Shows snapshots of market data captured at various times during the day
+    """
+    try:
+        import pytz
+        from datetime import timedelta
+        from backend.models.trading import HistoricalMarketData
+        
+        ist = pytz.timezone('Asia/Kolkata')
+        now = datetime.now(ist)
+        
+        # Parse date or use today
+        if date:
+            try:
+                target_date = datetime.strptime(date, '%Y-%m-%d')
+                target_date = ist.localize(target_date.replace(hour=0, minute=0, second=0, microsecond=0))
+            except ValueError:
+                return {
+                    "success": False,
+                    "message": "Invalid date format. Use YYYY-MM-DD",
+                    "data": []
+                }
+        else:
+            target_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        # Build query
+        query = db.query(HistoricalMarketData).filter(
+            HistoricalMarketData.scan_date >= target_date,
+            HistoricalMarketData.scan_date < target_date + timedelta(days=1)
+        )
+        
+        # Filter by stock name if provided
+        if stock_name:
+            query = query.filter(HistoricalMarketData.stock_name == stock_name.upper())
+        
+        # Order by scan_date (time) ascending
+        records = query.order_by(HistoricalMarketData.scan_date.asc()).all()
+        
+        # Format data
+        historical_data = []
+        for record in records:
+            historical_data.append({
+                "id": record.id,
+                "stock_name": record.stock_name,
+                "stock_vwap": float(record.stock_vwap) if record.stock_vwap else None,
+                "stock_ltp": float(record.stock_ltp) if record.stock_ltp else None,
+                "option_contract": record.option_contract,
+                "option_instrument_key": record.option_instrument_key,
+                "option_ltp": float(record.option_ltp) if record.option_ltp else None,
+                "scan_date": record.scan_date.strftime('%Y-%m-%d %H:%M:%S') if record.scan_date else None,
+                "scan_time": record.scan_time,
+                "created_at": record.created_at.strftime('%Y-%m-%d %H:%M:%S') if record.created_at else None
+            })
+        
+        # Group by stock for summary
+        stocks_summary = {}
+        for record in records:
+            stock = record.stock_name
+            if stock not in stocks_summary:
+                stocks_summary[stock] = {
+                    "stock_name": stock,
+                    "total_records": 0,
+                    "scan_times": []
+                }
+            stocks_summary[stock]["total_records"] += 1
+            if record.scan_time:
+                stocks_summary[stock]["scan_times"].append(record.scan_time)
+        
+        return {
+            "success": True,
+            "date": target_date.strftime('%Y-%m-%d'),
+            "total_records": len(historical_data),
+            "stocks_count": len(stocks_summary),
+            "stocks_summary": list(stocks_summary.values()),
+            "data": historical_data
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching historical market data: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "success": False,
+            "message": f"Error: {str(e)}",
+            "data": []
+        }
