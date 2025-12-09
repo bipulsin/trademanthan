@@ -4385,3 +4385,158 @@ async def get_scan_logs(lines: int = Query(100, ge=1, le=1000)):
             "message": f"Error reading logs: {str(e)}",
             "logs": []
         }
+
+
+@router.get("/diagnose-bearish-trades")
+async def diagnose_bearish_trades(db: Session = Depends(get_db)):
+    """
+    Diagnostic endpoint to check why bearish trades are not entering
+    Shows all today's bearish trades with their entry conditions status
+    """
+    try:
+        import pytz
+        from datetime import timedelta
+        from backend.services.upstox_service import upstox_service
+        
+        ist = pytz.timezone('Asia/Kolkata')
+        now = datetime.now(ist)
+        today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        # Get all bearish trades for today
+        bearish_trades = db.query(IntradayStockOption).filter(
+            IntradayStockOption.alert_type == 'Bearish',
+            IntradayStockOption.trade_date >= today,
+            IntradayStockOption.trade_date < today + timedelta(days=1)
+        ).all()
+        
+        diagnostics = []
+        
+        for trade in bearish_trades:
+            stock_name = trade.stock_name
+            
+            # Get current market data
+            stock_data = upstox_service.get_stock_ltp_and_vwap(stock_name)
+            current_stock_ltp = stock_data.get('ltp', 0) if stock_data else None
+            current_stock_vwap = stock_data.get('vwap', 0) if stock_data else None
+            
+            # Get index trends
+            index_trends = upstox_service.get_index_trends()
+            nifty_trend = index_trends.get("nifty_trend", "unknown")
+            banknifty_trend = index_trends.get("banknifty_trend", "unknown")
+            
+            # Check time condition
+            is_before_3pm = now.hour < 15
+            
+            # Check index trends alignment
+            option_type = trade.option_type or 'PE'
+            both_bullish = (nifty_trend == "bullish" and banknifty_trend == "bullish")
+            both_bearish = (nifty_trend == "bearish" and banknifty_trend == "bearish")
+            opposite_directions = not both_bullish and not both_bearish
+            
+            can_enter_by_index = False
+            if option_type == 'PE':  # Bearish alert
+                can_enter_by_index = both_bullish or both_bearish
+            
+            # Check VWAP slope
+            vwap_slope_passed = False
+            vwap_slope_angle = trade.vwap_slope_angle
+            if vwap_slope_angle is not None:
+                vwap_slope_passed = vwap_slope_angle >= 45.0
+            
+            # Check candle size
+            candle_size_passed = False
+            candle_size_ratio = trade.candle_size_ratio
+            if candle_size_ratio is not None:
+                candle_size_passed = candle_size_ratio < 7.5
+            elif trade.alert_time and trade.alert_time.hour == 10 and trade.alert_time.minute == 15:
+                candle_size_passed = True  # Skipped for 10:15 alerts
+            
+            # Check option data
+            has_option_contract = bool(trade.option_contract)
+            has_instrument_key = bool(trade.instrument_key)
+            
+            # Try to fetch option LTP
+            option_ltp_available = False
+            option_ltp_value = None
+            if trade.instrument_key:
+                try:
+                    option_quote = upstox_service.get_market_quote_by_key(trade.instrument_key)
+                    if option_quote and option_quote.get('last_price', 0) > 0:
+                        option_ltp_available = True
+                        option_ltp_value = float(option_quote.get('last_price', 0))
+                except Exception as e:
+                    pass
+            
+            # Determine if all conditions are met
+            all_conditions_met = (
+                is_before_3pm and
+                can_enter_by_index and
+                vwap_slope_passed and
+                candle_size_passed and
+                has_option_contract and
+                has_instrument_key and
+                option_ltp_available
+            )
+            
+            diagnostics.append({
+                "stock_name": stock_name,
+                "status": trade.status,
+                "alert_time": trade.alert_time.strftime("%H:%M:%S") if trade.alert_time else None,
+                "option_contract": trade.option_contract,
+                "instrument_key": trade.instrument_key,
+                "conditions": {
+                    "time_before_3pm": {
+                        "passed": is_before_3pm,
+                        "value": now.strftime("%H:%M:%S")
+                    },
+                    "index_trends_aligned": {
+                        "passed": can_enter_by_index,
+                        "nifty_trend": nifty_trend,
+                        "banknifty_trend": banknifty_trend,
+                        "option_type": option_type,
+                        "reason": "Both bullish" if both_bullish else ("Both bearish" if both_bearish else "Opposite directions")
+                    },
+                    "vwap_slope": {
+                        "passed": vwap_slope_passed,
+                        "angle": float(vwap_slope_angle) if vwap_slope_angle is not None else None,
+                        "status": trade.vwap_slope_status
+                    },
+                    "candle_size": {
+                        "passed": candle_size_passed,
+                        "ratio": float(candle_size_ratio) if candle_size_ratio is not None else None,
+                        "status": trade.candle_size_status
+                    },
+                    "has_option_contract": {
+                        "passed": has_option_contract,
+                        "value": trade.option_contract
+                    },
+                    "has_instrument_key": {
+                        "passed": has_instrument_key,
+                        "value": trade.instrument_key
+                    },
+                    "option_ltp_available": {
+                        "passed": option_ltp_available,
+                        "value": option_ltp_value
+                    }
+                },
+                "all_conditions_met": all_conditions_met,
+                "current_stock_ltp": float(current_stock_ltp) if current_stock_ltp else None,
+                "current_stock_vwap": float(current_stock_vwap) if current_stock_vwap else None
+            })
+        
+        return {
+            "success": True,
+            "timestamp": now.isoformat(),
+            "total_bearish_trades": len(bearish_trades),
+            "diagnostics": diagnostics
+        }
+        
+    except Exception as e:
+        logger.error(f"Error diagnosing bearish trades: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "success": False,
+            "message": f"Error: {str(e)}",
+            "diagnostics": []
+        }
