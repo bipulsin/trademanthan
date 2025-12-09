@@ -1424,8 +1424,45 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                     interval=prev_interval
                 )
                 
+                # Get current stock data for historical record (needed even if VWAP calculation fails)
+                stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
+                
                 if not prev_vwap_data:
                     logger.warning(f"⚠️ Could not get previous VWAP for {stock_name} at {prev_vwap_time.strftime('%H:%M')}")
+                    # Still save historical data even if VWAP slope cannot be calculated
+                    current_stock_ltp = stock_data.get('ltp', 0) if stock_data else (trade.stock_ltp or 0)
+                    current_stock_vwap = stock_data.get('vwap', 0) if stock_data else (trade.stock_vwap or 0)
+                    current_option_ltp = None
+                    if trade.instrument_key:
+                        try:
+                            option_quote = vwap_service.get_market_quote_by_key(trade.instrument_key)
+                            if option_quote and option_quote.get('last_price', 0) > 0:
+                                current_option_ltp = float(option_quote.get('last_price', 0))
+                        except:
+                            current_option_ltp = trade.option_ltp
+                    else:
+                        current_option_ltp = trade.option_ltp
+                    
+                    # Save historical data even when VWAP slope calculation fails
+                    try:
+                        if not historical_data_exists(db, stock_name, now):
+                            historical_record = HistoricalMarketData(
+                                stock_name=stock_name,
+                                stock_vwap=current_stock_vwap if current_stock_vwap > 0 else None,
+                                stock_ltp=current_stock_ltp if current_stock_ltp > 0 else None,
+                                option_contract=trade.option_contract,
+                                option_instrument_key=trade.instrument_key,
+                                option_ltp=current_option_ltp if current_option_ltp and current_option_ltp > 0 else None,
+                                scan_date=now,
+                                scan_time=now.strftime('%I:%M %p').lower()
+                            )
+                            db.add(historical_record)
+                            logger.debug(f"📊 Cycle {cycle_number} - Saved historical data for {stock_name} (VWAP calc failed) at {now.strftime('%H:%M:%S')}")
+                    except Exception as hist_error:
+                        logger.warning(f"⚠️ Cycle {cycle_number} - Failed to save historical data for {stock_name}: {str(hist_error)}")
+                    
+                    success_count += 1
+                    processed_count += 1
                     continue
                 
                 prev_vwap = prev_vwap_data.get('vwap', 0)
@@ -1441,6 +1478,40 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 
                 if not current_vwap_data:
                     logger.warning(f"⚠️ Could not get current VWAP for {stock_name} at {current_vwap_time.strftime('%H:%M')}")
+                    # Still save historical data even if VWAP slope cannot be calculated
+                    current_stock_ltp = stock_data.get('ltp', 0) if stock_data else (trade.stock_ltp or 0)
+                    current_stock_vwap = stock_data.get('vwap', 0) if stock_data else (trade.stock_vwap or 0)
+                    current_option_ltp = None
+                    if trade.instrument_key:
+                        try:
+                            option_quote = vwap_service.get_market_quote_by_key(trade.instrument_key)
+                            if option_quote and option_quote.get('last_price', 0) > 0:
+                                current_option_ltp = float(option_quote.get('last_price', 0))
+                        except:
+                            current_option_ltp = trade.option_ltp
+                    else:
+                        current_option_ltp = trade.option_ltp
+                    
+                    # Save historical data even when VWAP slope calculation fails
+                    try:
+                        if not historical_data_exists(db, stock_name, now):
+                            historical_record = HistoricalMarketData(
+                                stock_name=stock_name,
+                                stock_vwap=current_stock_vwap if current_stock_vwap > 0 else None,
+                                stock_ltp=current_stock_ltp if current_stock_ltp > 0 else None,
+                                option_contract=trade.option_contract,
+                                option_instrument_key=trade.instrument_key,
+                                option_ltp=current_option_ltp if current_option_ltp and current_option_ltp > 0 else None,
+                                scan_date=now,
+                                scan_time=now.strftime('%I:%M %p').lower()
+                            )
+                            db.add(historical_record)
+                            logger.debug(f"📊 Cycle {cycle_number} - Saved historical data for {stock_name} (VWAP calc failed) at {now.strftime('%H:%M:%S')}")
+                    except Exception as hist_error:
+                        logger.warning(f"⚠️ Cycle {cycle_number} - Failed to save historical data for {stock_name}: {str(hist_error)}")
+                    
+                    success_count += 1
+                    processed_count += 1
                     continue
                 
                 current_vwap = current_vwap_data.get('vwap', 0)
@@ -1448,6 +1519,40 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 
                 if prev_vwap <= 0 or current_vwap <= 0:
                     logger.warning(f"⚠️ Invalid VWAP values for {stock_name} (prev: {prev_vwap}, current: {current_vwap})")
+                    # Still save historical data even if VWAP values are invalid
+                    current_stock_ltp = stock_data.get('ltp', 0) if stock_data else (trade.stock_ltp or 0)
+                    current_stock_vwap = stock_data.get('vwap', 0) if stock_data else (trade.stock_vwap or 0)
+                    current_option_ltp = None
+                    if trade.instrument_key:
+                        try:
+                            option_quote = vwap_service.get_market_quote_by_key(trade.instrument_key)
+                            if option_quote and option_quote.get('last_price', 0) > 0:
+                                current_option_ltp = float(option_quote.get('last_price', 0))
+                        except:
+                            current_option_ltp = trade.option_ltp
+                    else:
+                        current_option_ltp = trade.option_ltp
+                    
+                    # Save historical data even when VWAP values are invalid
+                    try:
+                        if not historical_data_exists(db, stock_name, now):
+                            historical_record = HistoricalMarketData(
+                                stock_name=stock_name,
+                                stock_vwap=current_stock_vwap if current_stock_vwap > 0 else None,
+                                stock_ltp=current_stock_ltp if current_stock_ltp > 0 else None,
+                                option_contract=trade.option_contract,
+                                option_instrument_key=trade.instrument_key,
+                                option_ltp=current_option_ltp if current_option_ltp and current_option_ltp > 0 else None,
+                                scan_date=now,
+                                scan_time=now.strftime('%I:%M %p').lower()
+                            )
+                            db.add(historical_record)
+                            logger.debug(f"📊 Cycle {cycle_number} - Saved historical data for {stock_name} (invalid VWAP) at {now.strftime('%H:%M:%S')}")
+                    except Exception as hist_error:
+                        logger.warning(f"⚠️ Cycle {cycle_number} - Failed to save historical data for {stock_name}: {str(hist_error)}")
+                    
+                    success_count += 1
+                    processed_count += 1
                     continue
                 
                 # Calculate VWAP slope
@@ -1805,9 +1910,11 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 # ═══════════════════════════════════════════════════════════════
                 # Store historical snapshot of market data for analysis
                 # This ensures we have data at every cycle run (10:30, 11:15, 12:15, 13:15, 14:15)
+                # NOTE: Historical data is also saved earlier if VWAP calculation fails (before continue statements)
                 try:
                     # Get current stock LTP and VWAP if not already fetched
-                    if not stock_data:
+                    # stock_data should already be fetched earlier, but fetch again if needed
+                    if 'stock_data' not in locals() or not stock_data:
                         stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
                     
                     current_stock_ltp = stock_data.get('ltp', 0) if stock_data else (trade.stock_ltp or 0)
