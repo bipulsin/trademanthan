@@ -1115,28 +1115,28 @@ async def update_vwap_for_all_open_positions():
                                 
                                 # Check if historical data already exists to prevent duplicates
                                 if not historical_data_exists(db, stock_name, now):
-                                # Get VWAP slope from trade record if available
-                                vwap_slope_angle = trade.vwap_slope_angle if hasattr(trade, 'vwap_slope_angle') else None
-                                vwap_slope_status = trade.vwap_slope_status if hasattr(trade, 'vwap_slope_status') else None
-                                vwap_slope_direction = trade.vwap_slope_direction if hasattr(trade, 'vwap_slope_direction') else None
-                                vwap_slope_time = trade.vwap_slope_time if hasattr(trade, 'vwap_slope_time') else None
-                                
-                                historical_record = HistoricalMarketData(
-                                    stock_name=stock_name,
-                                    stock_vwap=current_stock_vwap if current_stock_vwap > 0 else None,
-                                    stock_ltp=current_stock_ltp if current_stock_ltp > 0 else None,
-                                    vwap_slope_angle=vwap_slope_angle,
-                                    vwap_slope_status=vwap_slope_status,
-                                    vwap_slope_direction=vwap_slope_direction,
-                                    vwap_slope_time=vwap_slope_time,
-                                    option_contract=trade.option_contract,
-                                    option_instrument_key=trade.instrument_key,
-                                    option_ltp=current_option_ltp if current_option_ltp and current_option_ltp > 0 else None,
-                                    scan_date=now,
-                                    scan_time=now.strftime('%I:%M %p').lower()
-                                )
-                                db.add(historical_record)
-                                logger.debug(f"📊 Saved historical data for no_entry trade {stock_name} at {now.strftime('%H:%M:%S')}")
+                                    # Get VWAP slope from trade record if available
+                                    vwap_slope_angle = trade.vwap_slope_angle if hasattr(trade, 'vwap_slope_angle') else None
+                                    vwap_slope_status = trade.vwap_slope_status if hasattr(trade, 'vwap_slope_status') else None
+                                    vwap_slope_direction = trade.vwap_slope_direction if hasattr(trade, 'vwap_slope_direction') else None
+                                    vwap_slope_time = trade.vwap_slope_time if hasattr(trade, 'vwap_slope_time') else None
+                                    
+                                    historical_record = HistoricalMarketData(
+                                        stock_name=stock_name,
+                                        stock_vwap=current_stock_vwap if current_stock_vwap > 0 else None,
+                                        stock_ltp=current_stock_ltp if current_stock_ltp > 0 else None,
+                                        vwap_slope_angle=vwap_slope_angle,
+                                        vwap_slope_status=vwap_slope_status,
+                                        vwap_slope_direction=vwap_slope_direction,
+                                        vwap_slope_time=vwap_slope_time,
+                                        option_contract=trade.option_contract,
+                                        option_instrument_key=trade.instrument_key,
+                                        option_ltp=current_option_ltp if current_option_ltp and current_option_ltp > 0 else None,
+                                        scan_date=now,
+                                        scan_time=now.strftime('%I:%M %p').lower()
+                                    )
+                                    db.add(historical_record)
+                                    logger.debug(f"📊 Saved historical data for no_entry trade {stock_name} at {now.strftime('%H:%M:%S')}")
                             else:
                                 logger.debug(f"⏭️ Skipping duplicate historical data for no_entry trade {stock_name} at {now.strftime('%H:%M:%S')} (already exists)")
                         except Exception as hist_error:
@@ -1294,124 +1294,48 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
         
         # Build query based on cycle number
         if cycle_number == 1:
-            # Cycle 1: Only stocks from 10:15 AM webhook
+            # Cycle 1: All stocks from 10:15 AM webhook (recalculate VWAP slope for all)
             stocks_to_process = db.query(IntradayStockOption).filter(
                 and_(
                     IntradayStockOption.trade_date >= today,
                     IntradayStockOption.alert_time >= target_alert_times[0],
-                    IntradayStockOption.alert_time < target_alert_times[0] + timedelta(minutes=1),
-                    or_(
-                        IntradayStockOption.status == 'no_entry',
-                        IntradayStockOption.status == 'alert_received'
-                    )
+                    IntradayStockOption.alert_time < target_alert_times[0] + timedelta(minutes=1)
                 )
             ).all()
         elif cycle_number == 2:
-            # Cycle 2: Stocks from 11:15 AM webhook + No_Entry from 10:15 AM
+            # Cycle 2: All stocks from today up to 11:15 AM (recalculate VWAP slope for all)
             stocks_to_process = db.query(IntradayStockOption).filter(
                 and_(
                     IntradayStockOption.trade_date >= today,
-                    or_(
-                        # Current cycle: stocks from 11:15 AM webhook
-                        and_(
-                            IntradayStockOption.alert_time >= target_alert_times[1],
-                            IntradayStockOption.alert_time < target_alert_times[1] + timedelta(minutes=1),
-                            or_(
-                                IntradayStockOption.status == 'no_entry',
-                                IntradayStockOption.status == 'alert_received'
-                            )
-                        ),
-                        # Previous cycle: No_Entry OR alert_received stocks from 10:15 AM (not yet entered)
-                        and_(
-                            IntradayStockOption.alert_time >= target_alert_times[0],
-                            IntradayStockOption.alert_time < target_alert_times[0] + timedelta(minutes=1),
-                            or_(
-                                IntradayStockOption.status == 'no_entry',
-                                IntradayStockOption.status == 'alert_received'
-                            )
-                        )
-                    )
+                    IntradayStockOption.alert_time >= target_alert_times[0],
+                    IntradayStockOption.alert_time < target_alert_times[1] + timedelta(minutes=1)
                 )
             ).all()
         elif cycle_number == 3:
-            # Cycle 3: Stocks from 12:15 PM webhook + No_Entry up to 11:15 AM
+            # Cycle 3: All stocks from today up to 12:15 PM (recalculate VWAP slope for all)
             stocks_to_process = db.query(IntradayStockOption).filter(
                 and_(
                     IntradayStockOption.trade_date >= today,
-                    or_(
-                        # Current cycle: stocks from 12:15 PM webhook
-                        and_(
-                            IntradayStockOption.alert_time >= target_alert_times[2],
-                            IntradayStockOption.alert_time < target_alert_times[2] + timedelta(minutes=1),
-                            or_(
-                                IntradayStockOption.status == 'no_entry',
-                                IntradayStockOption.status == 'alert_received'
-                            )
-                        ),
-                        # Previous cycles: No_Entry OR alert_received stocks up to 11:15 AM (not yet entered)
-                        and_(
-                            IntradayStockOption.alert_time >= target_alert_times[0],
-                            IntradayStockOption.alert_time < target_alert_times[2],
-                            or_(
-                                IntradayStockOption.status == 'no_entry',
-                                IntradayStockOption.status == 'alert_received'
-                            )
-                        )
-                    )
+                    IntradayStockOption.alert_time >= target_alert_times[0],
+                    IntradayStockOption.alert_time < target_alert_times[2] + timedelta(minutes=1)
                 )
             ).all()
         elif cycle_number == 4:
-            # Cycle 4: Stocks from 13:15 PM webhook + No_Entry up to 12:15 PM
+            # Cycle 4: All stocks from today up to 13:15 PM (recalculate VWAP slope for all)
             stocks_to_process = db.query(IntradayStockOption).filter(
                 and_(
                     IntradayStockOption.trade_date >= today,
-                    or_(
-                        # Current cycle: stocks from 13:15 PM webhook
-                        and_(
-                            IntradayStockOption.alert_time >= target_alert_times[3],
-                            IntradayStockOption.alert_time < target_alert_times[3] + timedelta(minutes=1),
-                            or_(
-                                IntradayStockOption.status == 'no_entry',
-                                IntradayStockOption.status == 'alert_received'
-                            )
-                        ),
-                        # Previous cycles: No_Entry OR alert_received stocks up to 12:15 PM (not yet entered)
-                        and_(
-                            IntradayStockOption.alert_time >= target_alert_times[0],
-                            IntradayStockOption.alert_time < target_alert_times[3],
-                            or_(
-                                IntradayStockOption.status == 'no_entry',
-                                IntradayStockOption.status == 'alert_received'
-                            )
-                        )
-                    )
+                    IntradayStockOption.alert_time >= target_alert_times[0],
+                    IntradayStockOption.alert_time < target_alert_times[3] + timedelta(minutes=1)
                 )
             ).all()
         elif cycle_number == 5:
-            # Cycle 5: Stocks from 14:15 PM webhook + No_Entry up to 13:15 PM
+            # Cycle 5: All stocks from today up to 14:15 PM (recalculate VWAP slope for all)
             stocks_to_process = db.query(IntradayStockOption).filter(
                 and_(
                     IntradayStockOption.trade_date >= today,
-                    or_(
-                        # Current cycle: stocks from 14:15 PM webhook
-                        and_(
-                            IntradayStockOption.alert_time >= target_alert_times[4],
-                            IntradayStockOption.alert_time < target_alert_times[4] + timedelta(minutes=1),
-                            or_(
-                                IntradayStockOption.status == 'no_entry',
-                                IntradayStockOption.status == 'alert_received'
-                            )
-                        ),
-                        # Previous cycles: No_Entry OR alert_received stocks up to 13:15 PM (not yet entered)
-                        and_(
-                            IntradayStockOption.alert_time >= target_alert_times[0],
-                            IntradayStockOption.alert_time < target_alert_times[4],
-                            or_(
-                                IntradayStockOption.status == 'no_entry',
-                                IntradayStockOption.status == 'alert_received'
-                            )
-                        )
-                    )
+                    IntradayStockOption.alert_time >= target_alert_times[0],
+                    IntradayStockOption.alert_time < target_alert_times[4] + timedelta(minutes=1)
                 )
             ).all()
         else:
@@ -1430,13 +1354,13 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
             try:
                 stock_name = trade.stock_name
                 
-                # VWAP slope should NOT be calculated if status is not No_Entry
-                # If status changed from No_Entry (already entered), skip VWAP slope calculation
-                if trade.status != 'no_entry' and trade.status != 'alert_received':
-                    logger.debug(f"⚪ Skipping {stock_name} - already entered (status: {trade.status}), VWAP slope not calculated for subsequent cycles")
-                    continue
+                # ALWAYS calculate VWAP slope in every cycle for all today's stocks
+                # This ensures VWAP slope is updated even if stock was already entered
                 
-                # Get previous VWAP
+                # Get current stock data first (needed for historical record)
+                stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
+                
+                # Try to get previous VWAP from candle API
                 # Market opens at 9:15 AM, so 1-hour candles form at :15 times (10:15, 11:15, etc.)
                 prev_vwap_data = vwap_service.get_stock_vwap_from_candle_at_time(
                     stock_name,
@@ -1444,8 +1368,24 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                     interval=prev_interval
                 )
                 
-                # Get current stock data for historical record (needed even if VWAP calculation fails)
-                stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
+                # If candle API fails, try using stored previous VWAP from database
+                if not prev_vwap_data and trade.stock_vwap_previous_hour and trade.stock_vwap_previous_hour > 0 and trade.stock_vwap_previous_hour_time:
+                    logger.info(f"🔄 Cycle {cycle_number} - {stock_name}: Using stored previous VWAP from database")
+                    prev_vwap_data = {
+                        'vwap': trade.stock_vwap_previous_hour,
+                        'time': trade.stock_vwap_previous_hour_time
+                    }
+                
+                # If still no previous VWAP, try alternative method
+                if not prev_vwap_data:
+                    try:
+                        # Try getting previous hour VWAP using alternative method
+                        alt_prev_vwap = vwap_service.get_stock_vwap_for_previous_hour(stock_name)
+                        if alt_prev_vwap and alt_prev_vwap.get('vwap', 0) > 0:
+                            prev_vwap_data = alt_prev_vwap
+                            logger.info(f"🔄 Cycle {cycle_number} - {stock_name}: Using alternative method for previous VWAP")
+                    except Exception as alt_error:
+                        logger.debug(f"Alternative previous VWAP method also failed for {stock_name}: {str(alt_error)}")
                 
                 if not prev_vwap_data:
                     logger.warning(f"⚠️ Could not get previous VWAP for {stock_name} at {prev_vwap_time.strftime('%H:%M')}")
@@ -1500,6 +1440,14 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                     current_vwap_time,
                     interval=current_interval
                 )
+                
+                # If candle API fails, try using current stock VWAP from real-time data
+                if not current_vwap_data and stock_data and stock_data.get('vwap', 0) > 0:
+                    logger.info(f"🔄 Cycle {cycle_number} - {stock_name}: Using real-time VWAP from stock_data")
+                    current_vwap_data = {
+                        'vwap': stock_data.get('vwap', 0),
+                        'time': now
+                    }
                 
                 if not current_vwap_data:
                     logger.warning(f"⚠️ Could not get current VWAP for {stock_name} at {current_vwap_time.strftime('%H:%M')}")
