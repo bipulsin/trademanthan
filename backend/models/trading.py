@@ -84,6 +84,7 @@ class IntradayStockOption(Base):
     exit_reason = Column(String(50), nullable=True)  # 'profit_target', 'stop_loss', 'time_based', 'stock_vwap_cross', 'manual'
     pnl = Column(Float, nullable=True)
     status = Column(String(50), default='alert_received')  # alert_received, bought, sold, cancelled
+    no_entry_reason = Column(String(255), nullable=True)  # Short description of why trade was not entered (e.g., "Index alignment", "VWAP slope", "Candle size", "Time >= 3PM", "Missing option data")
     
     # Metadata
     trade_date = Column(DateTime, nullable=False, index=True)  # Trading date (not created date)

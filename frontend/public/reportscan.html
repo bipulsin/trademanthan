@@ -1283,7 +1283,7 @@
                                         </td>
                                         <td>
                                             <span class="badge ${getStatusBadgeClass(trade.status)}">
-                                                ${formatStatus(trade.status, trade.exit_reason)}
+                                                ${formatStatus(trade.status, trade.exit_reason, trade.no_entry_reason)}
                                             </span>
                                         </td>
                                     </tr>
@@ -1315,7 +1315,7 @@
             return 'badge-secondary';
         }
 
-        function formatStatus(status, exitReason) {
+        function formatStatus(status, exitReason, noEntryReason) {
             // If trade is sold/exited, show exit reason
             if ((status === 'sold' || status.includes('exit')) && exitReason) {
                 const exitReasonMap = {
@@ -1326,6 +1326,11 @@
                     'manual': 'EXITED-MN'
                 };
                 return exitReasonMap[exitReason] || 'EXITED';
+            }
+            
+            // If trade is no_entry, show no entry reason
+            if (status === 'no_entry' && noEntryReason) {
+                return `NO ENTRY - ${noEntryReason}`;
             }
             
             // For other statuses, format normally

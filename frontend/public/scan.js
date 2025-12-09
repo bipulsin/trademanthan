@@ -872,7 +872,8 @@ function renderAlertGroup(alert, type) {
                         statusDisplay = '<span style="background: #f59e0b; color: black; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXT-TM</span>';
                     }
                     else if (isNoEntry) {
-                        statusDisplay = '<span style="color: #dc2626; font-weight: 700; font-size: 11px; white-space: nowrap;">No Entry</span>';
+                        const noEntryReason = stock.no_entry_reason ? ` - ${stock.no_entry_reason}` : '';
+                        statusDisplay = `<span style="color: #dc2626; font-weight: 700; font-size: 11px; white-space: nowrap;">No Entry${noEntryReason}</span>`;
                     } else if (stock.exit_reason === 'stop_loss') {
                         statusDisplay = '<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXD-SL</span>';
                     } else if (stock.exit_reason === 'profit_target') {

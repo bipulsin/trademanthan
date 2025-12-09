@@ -1170,10 +1170,12 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     
                     status = 'no_entry'  # Trade not entered
                     pnl = None  # No P&L since trade wasn't executed
+                    no_entry_reason = None  # Will be set based on which condition failed
                     
                     # Log reason for no entry with complete trade setup
                     no_entry_time_str = triggered_datetime.strftime('%Y-%m-%d %H:%M:%S IST')
                     if is_after_3_00pm:
+                        no_entry_reason = "Time >= 3PM"
                         print(f"🚫 NO ENTRY: {stock_name} - Alert time {triggered_at_display} is at or after 3:00 PM")
                         print(f"   ⏰ Decision Time: {no_entry_time_str}")
                         print(f"   📊 Entry Conditions:")
@@ -1185,6 +1187,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         print(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
                         logger.info(f"🚫 NO ENTRY DECISION: {stock_name} | Time: {no_entry_time_str} | Reason: Time >= 3:00 PM")
                     elif not can_enter_trade_by_index:
+                        no_entry_reason = "Index alignment"
                         print(f"⚠️ NO ENTRY: {stock_name} - Index trends not aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
                         print(f"   ⏰ Decision Time: {no_entry_time_str}")
                         print(f"   📊 Entry Conditions:")
@@ -1196,6 +1199,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         print(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
                         logger.info(f"🚫 NO ENTRY DECISION: {stock_name} | Time: {no_entry_time_str} | Reason: Index trends not aligned (NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend})")
                     elif not vwap_slope_passed and not is_10_15_alert:
+                        no_entry_reason = "VWAP slope"
                         print(f"🚫 NO ENTRY: {stock_name} - VWAP slope condition not met")
                         print(f"   ⏰ Decision Time: {no_entry_time_str}")
                         print(f"   📊 Entry Conditions:")
@@ -1207,6 +1211,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         print(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
                         logger.info(f"🚫 NO ENTRY DECISION: {stock_name} | Time: {no_entry_time_str} | Reason: {vwap_slope_reason}")
                     elif not candle_size_passed and not is_10_15_alert:
+                        no_entry_reason = "Candle size"
                         print(f"🚫 NO ENTRY: {stock_name} - Candle size condition not met")
                         print(f"   ⏰ Decision Time: {no_entry_time_str}")
                         print(f"   📊 Entry Conditions:")
@@ -1218,6 +1223,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         print(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
                         logger.info(f"🚫 NO ENTRY DECISION: {stock_name} | Time: {no_entry_time_str} | Reason: {candle_size_reason}")
                     elif option_ltp_value <= 0 or lot_size <= 0:
+                        no_entry_reason = "Missing option data"
                         print(f"⚠️ NO ENTRY: {stock_name} - Missing option data (option_ltp={option_ltp_value}, qty={lot_size})")
                         print(f"   ⏰ Decision Time: {no_entry_time_str}")
                         print(f"   📊 Entry Conditions:")
@@ -1233,6 +1239,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         stop_loss_price = None
                         logger.info(f"🚫 NO ENTRY DECISION: {stock_name} | Time: {no_entry_time_str} | Reason: Missing option data (LTP={option_ltp_value}, Qty={lot_size})")
                     else:
+                        no_entry_reason = "Unknown"
                         print(f"⚠️ NO ENTRY: {stock_name} - Unknown reason")
                         print(f"   ⏰ Decision Time: {no_entry_time_str}")
                         print(f"   📊 Entry Conditions:")
@@ -1340,7 +1347,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     sell_price=sell_price,
                     buy_time=buy_time,  # Will be set to triggered_datetime if trade was entered
                     exit_reason=None,
-                    pnl=pnl
+                    pnl=pnl,
+                    no_entry_reason=no_entry_reason if status == 'no_entry' else None
                 )
                 db.add(db_record)
                 saved_count += 1
@@ -2457,7 +2465,8 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                     "sell_price": record.sell_price or 0.0,
                     "exit_reason": record.exit_reason or None,
                     "pnl": record.pnl or 0.0,
-                    "status": record.status  # Include status to identify no_entry trades
+                    "status": record.status,  # Include status to identify no_entry trades
+                    "no_entry_reason": record.no_entry_reason or None  # Reason for no entry if status is no_entry
                 })
             
             bullish_alerts = list(grouped_bullish.values())
@@ -2623,7 +2632,8 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                     "sell_price": record.sell_price or 0.0,
                     "exit_reason": record.exit_reason or None,
                     "pnl": record.pnl or 0.0,
-                    "status": record.status  # Include status to identify no_entry trades
+                    "status": record.status,  # Include status to identify no_entry trades
+                    "no_entry_reason": record.no_entry_reason or None  # Reason for no entry if status is no_entry
                 })
             
             bearish_alerts = list(grouped_bearish.values())
