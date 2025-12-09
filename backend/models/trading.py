@@ -179,7 +179,7 @@ class UpstoxInstrument(Base):
 class HistoricalMarketData(Base):
     """
     Historical market data captured during hourly updates
-    Stores VWAP, LTP, and option prices for historical analysis
+    Stores VWAP, LTP, option prices, and VWAP slope for historical analysis
     """
     __tablename__ = "historical_market_data"
     
@@ -189,6 +189,12 @@ class HistoricalMarketData(Base):
     stock_name = Column(String(100), nullable=False, index=True)
     stock_vwap = Column(Float, nullable=True)  # Volume Weighted Average Price
     stock_ltp = Column(Float, nullable=True)  # Last Traded Price
+    
+    # VWAP slope fields (calculated by cycle-based scheduler)
+    vwap_slope_angle = Column(Float, nullable=True)  # VWAP slope angle in degrees
+    vwap_slope_status = Column(String(20), nullable=True)  # 'Yes', 'No', 'Skipped'
+    vwap_slope_direction = Column(String(20), nullable=True)  # 'upward', 'downward', 'flat'
+    vwap_slope_time = Column(DateTime, nullable=True)  # Time when VWAP slope was calculated
     
     # Option information
     option_contract = Column(String(255), nullable=True, index=True)  # Option contract name (e.g., RELIANCE-Nov2024-2500-CE)

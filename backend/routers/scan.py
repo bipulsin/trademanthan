@@ -1359,10 +1359,15 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     
                     # Check if historical data already exists for this stock at this time
                     if not historical_data_exists(db, stock_name, scan_datetime):
+                        # VWAP slope not calculated yet at webhook time (will be calculated in cycle scheduler)
                         historical_record = HistoricalMarketData(
                             stock_name=stock_name,
                             stock_vwap=stock.get("stock_vwap", 0.0) if stock.get("stock_vwap", 0.0) > 0 else None,
                             stock_ltp=stock.get("last_traded_price") or stock.get("trigger_price", 0.0) if (stock.get("last_traded_price") or stock.get("trigger_price", 0.0)) > 0 else None,
+                            vwap_slope_angle=None,
+                            vwap_slope_status=None,
+                            vwap_slope_direction=None,
+                            vwap_slope_time=None,
                             option_contract=stock.get("option_contract", ""),
                             option_instrument_key=stock_instrument_key,
                             option_ltp=option_ltp_value if option_ltp_value > 0 else None,
@@ -1417,10 +1422,15 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         from backend.services.vwap_updater import historical_data_exists
                         scan_datetime = triggered_datetime
                         if not historical_data_exists(db, stock_name, scan_datetime):
+                            # Minimal record - VWAP slope not available
                             historical_record = HistoricalMarketData(
                                 stock_name=stock_name,
                                 stock_vwap=None,
                                 stock_ltp=stock.get("trigger_price", 0.0) if stock.get("trigger_price", 0.0) > 0 else None,
+                                vwap_slope_angle=None,
+                                vwap_slope_status=None,
+                                vwap_slope_direction=None,
+                                vwap_slope_time=None,
                                 option_contract="",
                                 option_instrument_key=None,
                                 option_ltp=None,
@@ -4646,6 +4656,10 @@ async def get_historical_market_data(
                 "stock_name": record.stock_name,
                 "stock_vwap": float(record.stock_vwap) if record.stock_vwap else None,
                 "stock_ltp": float(record.stock_ltp) if record.stock_ltp else None,
+                "vwap_slope_angle": float(record.vwap_slope_angle) if record.vwap_slope_angle else None,
+                "vwap_slope_status": record.vwap_slope_status,
+                "vwap_slope_direction": record.vwap_slope_direction,
+                "vwap_slope_time": record.vwap_slope_time.strftime('%Y-%m-%d %H:%M:%S') if record.vwap_slope_time else None,
                 "option_contract": record.option_contract,
                 "option_instrument_key": record.option_instrument_key,
                 "option_ltp": float(record.option_ltp) if record.option_ltp else None,
