@@ -27,7 +27,7 @@ except ImportError:
     health_monitor = None  # Graceful degradation if not available
 from backend.services.upstox_service import upstox_service as vwap_service
 from backend.database import get_db
-from backend.models.trading import IntradayStockOption, MasterStock
+from backend.models.trading import IntradayStockOption, MasterStock, HistoricalMarketData
 from backend.config import settings
 
 router = APIRouter(prefix="/scan", tags=["scan"])
@@ -1346,6 +1346,37 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 saved_count += 1
                 print(f"   💾 Saved {stock_name} to database (status: {status})")
                 
+                # ═══════════════════════════════════════════════════════════════
+                # SAVE HISTORICAL MARKET DATA AT WEBHOOK TIME (10:15 AM, etc.)
+                # ═══════════════════════════════════════════════════════════════
+                # Save historical snapshot when webhook is received
+                # This captures the initial market state at alert time
+                try:
+                    from backend.services.vwap_updater import historical_data_exists
+                    
+                    # Use triggered_datetime as scan_date (the actual alert time)
+                    scan_datetime = triggered_datetime
+                    
+                    # Check if historical data already exists for this stock at this time
+                    if not historical_data_exists(db, stock_name, scan_datetime):
+                        historical_record = HistoricalMarketData(
+                            stock_name=stock_name,
+                            stock_vwap=stock.get("stock_vwap", 0.0) if stock.get("stock_vwap", 0.0) > 0 else None,
+                            stock_ltp=stock.get("last_traded_price") or stock.get("trigger_price", 0.0) if (stock.get("last_traded_price") or stock.get("trigger_price", 0.0)) > 0 else None,
+                            option_contract=stock.get("option_contract", ""),
+                            option_instrument_key=stock_instrument_key,
+                            option_ltp=option_ltp_value if option_ltp_value > 0 else None,
+                            scan_date=scan_datetime,
+                            scan_time=scan_datetime.strftime('%I:%M %p').lower()
+                        )
+                        db.add(historical_record)
+                        logger.debug(f"📊 Saved historical data for {stock_name} at webhook time {scan_datetime.strftime('%H:%M:%S')}")
+                    else:
+                        logger.debug(f"⏭️ Skipping duplicate historical data for {stock_name} at {scan_datetime.strftime('%H:%M:%S')} (already exists)")
+                except Exception as hist_error:
+                    logger.warning(f"⚠️ Failed to save historical data for {stock_name} at webhook time: {str(hist_error)}")
+                    # Don't fail webhook processing if historical save fails
+                
             except Exception as db_error:
                 failed_count += 1
                 print(f"❌ Error saving stock {stock_name} to database: {str(db_error)}")
@@ -1380,6 +1411,26 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     db.add(minimal_record)
                     saved_count += 1
                     print(f"   ✅ Minimal save successful for {stock_name}")
+                    
+                    # Save historical data even for minimal records
+                    try:
+                        from backend.services.vwap_updater import historical_data_exists
+                        scan_datetime = triggered_datetime
+                        if not historical_data_exists(db, stock_name, scan_datetime):
+                            historical_record = HistoricalMarketData(
+                                stock_name=stock_name,
+                                stock_vwap=None,
+                                stock_ltp=stock.get("trigger_price", 0.0) if stock.get("trigger_price", 0.0) > 0 else None,
+                                option_contract="",
+                                option_instrument_key=None,
+                                option_ltp=None,
+                                scan_date=scan_datetime,
+                                scan_time=scan_datetime.strftime('%I:%M %p').lower()
+                            )
+                            db.add(historical_record)
+                            logger.debug(f"📊 Saved minimal historical data for {stock_name} at webhook time {scan_datetime.strftime('%H:%M:%S')}")
+                    except Exception as hist_error:
+                        logger.warning(f"⚠️ Failed to save minimal historical data for {stock_name}: {str(hist_error)}")
                 except Exception as minimal_error:
                     print(f"   ❌ Even minimal save failed for {stock_name}: {str(minimal_error)}")
         
