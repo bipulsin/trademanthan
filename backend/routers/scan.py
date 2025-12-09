@@ -4420,7 +4420,7 @@ async def diagnose_bearish_trades(db: Session = Depends(get_db)):
             current_stock_vwap = stock_data.get('vwap', 0) if stock_data else None
             
             # Get index trends
-            index_trends = upstox_service.get_index_trends()
+            index_trends = upstox_service.check_index_trends()
             nifty_trend = index_trends.get("nifty_trend", "unknown")
             banknifty_trend = index_trends.get("banknifty_trend", "unknown")
             
