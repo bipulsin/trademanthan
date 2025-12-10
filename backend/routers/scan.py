@@ -1086,6 +1086,24 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 # For 10:15 AM alerts, skip filters due to insufficient historical data
                 filters_passed = candle_size_passed if not is_10_15_alert else True
                 
+                # Initialize no_entry_reason early (will be set if entry fails)
+                no_entry_reason = None
+                
+                # Check entry conditions in priority order to set appropriate reason
+                if is_after_3_00pm:
+                    no_entry_reason = "Time >= 3PM"
+                elif not can_enter_trade_by_index:
+                    no_entry_reason = "Index alignment"
+                elif not filters_passed and not is_10_15_alert:
+                    # filters_passed = candle_size_passed for non-10:15 alerts
+                    no_entry_reason = "Candle size"
+                elif option_ltp_value <= 0 or lot_size <= 0:
+                    no_entry_reason = "Missing option data"
+                elif is_10_15_alert:
+                    # For 10:15 AM alerts, filters are skipped but entry might still fail
+                    # Check if it's actually a no_entry (shouldn't happen, but just in case)
+                    no_entry_reason = None  # Will be set below if needed
+                
                 if not is_after_3_00pm and can_enter_trade_by_index and filters_passed and option_ltp_value > 0 and lot_size > 0:
                     # Enter trade: Fetch current option LTP again, set buy_time to current system time, stop_loss from previous candle low
                     # IMPORTANT: sell_price remains NULL initially, will be populated by hourly updater
@@ -1170,12 +1188,14 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     
                     status = 'no_entry'  # Trade not entered
                     pnl = None  # No P&L since trade wasn't executed
-                    no_entry_reason = None  # Will be set based on which condition failed
+                    # no_entry_reason already set above based on which condition failed
                     
                     # Log reason for no entry with complete trade setup
                     no_entry_time_str = triggered_datetime.strftime('%Y-%m-%d %H:%M:%S IST')
                     if is_after_3_00pm:
-                        no_entry_reason = "Time >= 3PM"
+                        # Already set above, but ensure it's set
+                        if not no_entry_reason:
+                            no_entry_reason = "Time >= 3PM"
                         print(f"🚫 NO ENTRY: {stock_name} - Alert time {triggered_at_display} is at or after 3:00 PM")
                         print(f"   ⏰ Decision Time: {no_entry_time_str}")
                         print(f"   📊 Entry Conditions:")
@@ -1187,7 +1207,9 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         print(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
                         logger.info(f"🚫 NO ENTRY DECISION: {stock_name} | Time: {no_entry_time_str} | Reason: Time >= 3:00 PM")
                     elif not can_enter_trade_by_index:
-                        no_entry_reason = "Index alignment"
+                        # Already set above, but ensure it's set
+                        if not no_entry_reason:
+                            no_entry_reason = "Index alignment"
                         print(f"⚠️ NO ENTRY: {stock_name} - Index trends not aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
                         print(f"   ⏰ Decision Time: {no_entry_time_str}")
                         print(f"   📊 Entry Conditions:")
@@ -1198,20 +1220,25 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         print(f"      - Option Data: {'✅' if option_ltp_value > 0 and lot_size > 0 else '❌'} {'Valid' if option_ltp_value > 0 and lot_size > 0 else f'Missing (LTP: {option_ltp_value}, Qty: {lot_size})'}")
                         print(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
                         logger.info(f"🚫 NO ENTRY DECISION: {stock_name} | Time: {no_entry_time_str} | Reason: Index trends not aligned (NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend})")
-                    elif not vwap_slope_passed and not is_10_15_alert:
-                        no_entry_reason = "VWAP slope"
-                        print(f"🚫 NO ENTRY: {stock_name} - VWAP slope condition not met")
+                    elif not filters_passed and not is_10_15_alert:
+                        # filters_passed = candle_size_passed for non-10:15 alerts
+                        # Already set above, but ensure it's set
+                        if not no_entry_reason:
+                            no_entry_reason = "Candle size"
+                        print(f"🚫 NO ENTRY: {stock_name} - Candle size condition not met")
                         print(f"   ⏰ Decision Time: {no_entry_time_str}")
                         print(f"   📊 Entry Conditions:")
                         print(f"      - Time Check: ✅ Before 3:00 PM ({triggered_at_display})")
                         print(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
-                        print(f"      - VWAP Slope: ❌ {vwap_slope_reason}")
-                        print(f"      - Candle Size: {'✅' if candle_size_passed else '❌'} {candle_size_reason}")
+                        print(f"      - VWAP Slope: ✅ {vwap_slope_reason}")
+                        print(f"      - Candle Size: ❌ {candle_size_reason}")
                         print(f"      - Option Data: {'✅' if option_ltp_value > 0 and lot_size > 0 else '❌'} {'Valid' if option_ltp_value > 0 and lot_size > 0 else f'Missing (LTP: {option_ltp_value}, Qty: {lot_size})'}")
                         print(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
-                        logger.info(f"🚫 NO ENTRY DECISION: {stock_name} | Time: {no_entry_time_str} | Reason: {vwap_slope_reason}")
-                    elif not candle_size_passed and not is_10_15_alert:
-                        no_entry_reason = "Candle size"
+                        logger.info(f"🚫 NO ENTRY DECISION: {stock_name} | Time: {no_entry_time_str} | Reason: {candle_size_reason}")
+                    elif option_ltp_value <= 0 or lot_size <= 0:
+                        # Already set above, but ensure it's set
+                        if not no_entry_reason:
+                            no_entry_reason = "Missing option data"
                         print(f"🚫 NO ENTRY: {stock_name} - Candle size condition not met")
                         print(f"   ⏰ Decision Time: {no_entry_time_str}")
                         print(f"   📊 Entry Conditions:")
@@ -1239,7 +1266,9 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         stop_loss_price = None
                         logger.info(f"🚫 NO ENTRY DECISION: {stock_name} | Time: {no_entry_time_str} | Reason: Missing option data (LTP={option_ltp_value}, Qty={lot_size})")
                     else:
-                        no_entry_reason = "Unknown"
+                        # If we reach here, all conditions passed but entry still failed - set unknown reason
+                        if not no_entry_reason:
+                            no_entry_reason = "Unknown"
                         print(f"⚠️ NO ENTRY: {stock_name} - Unknown reason")
                         print(f"   ⏰ Decision Time: {no_entry_time_str}")
                         print(f"   📊 Entry Conditions:")
