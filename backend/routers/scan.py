@@ -4879,20 +4879,62 @@ async def analyze_historical_vwap_slope(
                     row["latest_vwap_slope_direction"] = candle_size_data[stock]["vwap_slope_direction"]
         
         # Create formatted table for display
+        def format_cycle_data(cycle_data):
+            """Helper function to format cycle data for display"""
+            if not cycle_data:
+                return None
+            
+            vwap_angle = cycle_data.get("vwap_slope_angle")
+            vwap_status = cycle_data.get("vwap_slope_status")
+            vwap_direction = cycle_data.get("vwap_slope_direction")
+            
+            vwap_display = None
+            if vwap_angle is not None:
+                vwap_display = f"{vwap_angle:.2f}° ({vwap_status or 'N/A'})"
+            elif vwap_status:
+                vwap_display = vwap_status
+            else:
+                vwap_display = "N/A"
+            
+            return {
+                "vwap_slope": {
+                    "angle": vwap_angle,
+                    "status": vwap_status,
+                    "direction": vwap_direction,
+                    "display": vwap_display
+                },
+                "stock_vwap": cycle_data.get("stock_vwap"),
+                "stock_ltp": cycle_data.get("stock_ltp"),
+                "option_ltp": cycle_data.get("option_ltp")
+            }
+        
         formatted_table = []
         for row in table_data:
+            candle_ratio = row.get("candle_size_ratio")
+            candle_status = row.get("candle_size_status")
+            candle_display = None
+            if candle_ratio is not None:
+                candle_display = f"{candle_ratio:.2f}x ({candle_status or 'N/A'})"
+            elif candle_status:
+                candle_display = candle_status
+            else:
+                candle_display = "N/A"
+            
             stock_row = {
                 "stock_name": row["stock_name"],
-                "candle_size_ratio": row.get("candle_size_ratio"),
-                "candle_size_status": row.get("candle_size_status"),
-                "10:15 AM": self._format_cycle_data(row["cycles"].get("10:15 am")),
-                "10:30 AM": self._format_cycle_data(row["cycles"].get("10:30 am")),
-                "11:15 AM": self._format_cycle_data(row["cycles"].get("11:15 am")),
-                "12:15 PM": self._format_cycle_data(row["cycles"].get("12:15 pm")),
-                "01:15 PM": self._format_cycle_data(row["cycles"].get("01:15 pm")),
-                "02:15 PM": self._format_cycle_data(row["cycles"].get("02:15 pm")),
-                "03:15 PM": self._format_cycle_data(row["cycles"].get("03:15 pm")),
-                "03:25 PM": self._format_cycle_data(row["cycles"].get("03:25 pm"))
+                "candle_size": {
+                    "ratio": candle_ratio,
+                    "status": candle_status,
+                    "display": candle_display
+                },
+                "10:15 AM": format_cycle_data(row["cycles"].get("10:15 am")),
+                "10:30 AM": format_cycle_data(row["cycles"].get("10:30 am")),
+                "11:15 AM": format_cycle_data(row["cycles"].get("11:15 am")),
+                "12:15 PM": format_cycle_data(row["cycles"].get("12:15 pm")),
+                "01:15 PM": format_cycle_data(row["cycles"].get("01:15 pm")),
+                "02:15 PM": format_cycle_data(row["cycles"].get("02:15 pm")),
+                "03:15 PM": format_cycle_data(row["cycles"].get("03:15 pm")),
+                "03:25 PM": format_cycle_data(row["cycles"].get("03:25 pm"))
             }
             formatted_table.append(stock_row)
         
@@ -4903,23 +4945,6 @@ async def analyze_historical_vwap_slope(
             "cycle_times": cycle_times,
             "formatted_table": formatted_table,
             "detailed_data": table_data
-        }
-    
-    def _format_cycle_data(self, cycle_data):
-        """Helper function to format cycle data for display"""
-        if not cycle_data:
-            return None
-        
-        return {
-            "vwap_slope": {
-                "angle": cycle_data.get("vwap_slope_angle"),
-                "status": cycle_data.get("vwap_slope_status"),
-                "direction": cycle_data.get("vwap_slope_direction"),
-                "display": f"{cycle_data.get('vwap_slope_angle', 'N/A')}° ({cycle_data.get('vwap_slope_status', 'N/A')})" if cycle_data.get("vwap_slope_angle") else f"{cycle_data.get('vwap_slope_status', 'N/A')}"
-            },
-            "stock_vwap": cycle_data.get("stock_vwap"),
-            "stock_ltp": cycle_data.get("stock_ltp"),
-            "option_ltp": cycle_data.get("option_ltp")
         }
         
     except Exception as e:
