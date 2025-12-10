@@ -4866,24 +4866,60 @@ async def analyze_historical_vwap_slope(
                     "vwap_slope_direction": trade.vwap_slope_direction
                 }
         
-        # Merge candle size data into table
+        # Merge candle size data from trade records into table
         for row in table_data:
             stock = row["stock_name"]
             if stock in candle_size_data:
                 row["candle_size_ratio"] = candle_size_data[stock]["candle_size_ratio"]
                 row["candle_size_status"] = candle_size_data[stock]["candle_size_status"]
                 # Also add latest VWAP slope from trade record if not in historical
-                if not any(cycle.get("vwap_slope_angle") for cycle in row["cycles"].values() if cycle):
+                if not any(cycle and cycle.get("vwap_slope_angle") for cycle in row["cycles"].values()):
                     row["latest_vwap_slope_angle"] = candle_size_data[stock]["vwap_slope_angle"]
                     row["latest_vwap_slope_status"] = candle_size_data[stock]["vwap_slope_status"]
                     row["latest_vwap_slope_direction"] = candle_size_data[stock]["vwap_slope_direction"]
+        
+        # Create formatted table for display
+        formatted_table = []
+        for row in table_data:
+            stock_row = {
+                "stock_name": row["stock_name"],
+                "candle_size_ratio": row.get("candle_size_ratio"),
+                "candle_size_status": row.get("candle_size_status"),
+                "10:15 AM": self._format_cycle_data(row["cycles"].get("10:15 am")),
+                "10:30 AM": self._format_cycle_data(row["cycles"].get("10:30 am")),
+                "11:15 AM": self._format_cycle_data(row["cycles"].get("11:15 am")),
+                "12:15 PM": self._format_cycle_data(row["cycles"].get("12:15 pm")),
+                "01:15 PM": self._format_cycle_data(row["cycles"].get("01:15 pm")),
+                "02:15 PM": self._format_cycle_data(row["cycles"].get("02:15 pm")),
+                "03:15 PM": self._format_cycle_data(row["cycles"].get("03:15 pm")),
+                "03:25 PM": self._format_cycle_data(row["cycles"].get("03:25 pm"))
+            }
+            formatted_table.append(stock_row)
         
         return {
             "success": True,
             "date": target_date.strftime('%Y-%m-%d'),
             "total_stocks": len(table_data),
             "cycle_times": cycle_times,
-            "data": table_data
+            "formatted_table": formatted_table,
+            "detailed_data": table_data
+        }
+    
+    def _format_cycle_data(self, cycle_data):
+        """Helper function to format cycle data for display"""
+        if not cycle_data:
+            return None
+        
+        return {
+            "vwap_slope": {
+                "angle": cycle_data.get("vwap_slope_angle"),
+                "status": cycle_data.get("vwap_slope_status"),
+                "direction": cycle_data.get("vwap_slope_direction"),
+                "display": f"{cycle_data.get('vwap_slope_angle', 'N/A')}° ({cycle_data.get('vwap_slope_status', 'N/A')})" if cycle_data.get("vwap_slope_angle") else f"{cycle_data.get('vwap_slope_status', 'N/A')}"
+            },
+            "stock_vwap": cycle_data.get("stock_vwap"),
+            "stock_ltp": cycle_data.get("stock_ltp"),
+            "option_ltp": cycle_data.get("option_ltp")
         }
         
     except Exception as e:
