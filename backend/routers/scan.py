@@ -4728,3 +4728,169 @@ async def get_historical_market_data(
             "message": f"Error: {str(e)}",
             "data": []
         }
+
+
+@router.get("/analyze-historical-vwap-slope")
+async def analyze_historical_vwap_slope(
+    date: str = Query(None, description="Date in YYYY-MM-DD format (defaults to today)"),
+    stock_name: str = Query(None, description="Filter by stock name"),
+    db: Session = Depends(get_db)
+):
+    """
+    Analyze VWAP slope and candle size from historical_market_data table
+    Shows data for each stock at every relevant cycle time in tabular format
+    """
+    try:
+        import pytz
+        from datetime import timedelta
+        
+        ist = pytz.timezone('Asia/Kolkata')
+        now = datetime.now(ist)
+        
+        # Parse date or use today
+        if date:
+            try:
+                target_date = datetime.strptime(date, '%Y-%m-%d')
+                target_date = ist.localize(target_date.replace(hour=0, minute=0, second=0, microsecond=0))
+            except ValueError:
+                return {
+                    "success": False,
+                    "message": "Invalid date format. Use YYYY-MM-DD",
+                    "data": []
+                }
+        else:
+            target_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        # Query historical market data for the target date
+        query = db.query(HistoricalMarketData).filter(
+            HistoricalMarketData.scan_date >= target_date,
+            HistoricalMarketData.scan_date < target_date + timedelta(days=1)
+        )
+        
+        # Filter by stock name if provided
+        if stock_name:
+            query = query.filter(HistoricalMarketData.stock_name == stock_name.upper())
+        
+        # Order by stock_name, then scan_date (time) ascending
+        records = query.order_by(HistoricalMarketData.stock_name.asc(), HistoricalMarketData.scan_date.asc()).all()
+        
+        if not records:
+            return {
+                "success": True,
+                "message": f"No historical data found for {target_date.strftime('%Y-%m-%d')}",
+                "date": target_date.strftime('%Y-%m-%d'),
+                "data": []
+            }
+        
+        # Group data by stock and cycle time
+        analysis_data = {}
+        
+        # Define cycle times for reference
+        cycle_times = {
+            "10:15 am": "10:15 AM (Webhook)",
+            "10:30 am": "10:30 AM (Cycle 1)",
+            "11:15 am": "11:15 AM (Cycle 2)",
+            "12:15 pm": "12:15 PM (Cycle 3)",
+            "01:15 pm": "01:15 PM (Cycle 4)",
+            "02:15 pm": "02:15 PM (Cycle 5)",
+            "03:15 pm": "03:15 PM (Hourly Update)",
+            "03:25 pm": "03:25 PM (EOD)"
+        }
+        
+        for record in records:
+            stock = record.stock_name
+            scan_time = record.scan_time or "Unknown"
+            
+            if stock not in analysis_data:
+                analysis_data[stock] = {}
+            
+            # Use scan_time as key (e.g., "10:15 am", "10:30 am")
+            cycle_key = scan_time.lower() if scan_time else "unknown"
+            
+            analysis_data[stock][cycle_key] = {
+                "scan_time": scan_time,
+                "scan_date": record.scan_date.strftime('%Y-%m-%d %H:%M:%S') if record.scan_date else None,
+                "vwap_slope_angle": float(record.vwap_slope_angle) if record.vwap_slope_angle else None,
+                "vwap_slope_status": record.vwap_slope_status,
+                "vwap_slope_direction": record.vwap_slope_direction,
+                "vwap_slope_time": record.vwap_slope_time.strftime('%Y-%m-%d %H:%M:%S') if record.vwap_slope_time else None,
+                "stock_vwap": float(record.stock_vwap) if record.stock_vwap else None,
+                "stock_ltp": float(record.stock_ltp) if record.stock_ltp else None,
+                "option_ltp": float(record.option_ltp) if record.option_ltp else None,
+                "option_contract": record.option_contract
+            }
+        
+        # Format data for tabular display
+        table_data = []
+        cycle_order = ["10:15 am", "10:30 am", "11:15 am", "12:15 pm", "01:15 pm", "02:15 pm", "03:15 pm", "03:25 pm"]
+        
+        for stock in sorted(analysis_data.keys()):
+            stock_data = analysis_data[stock]
+            row = {
+                "stock_name": stock,
+                "cycles": {}
+            }
+            
+            for cycle_time in cycle_order:
+                if cycle_time in stock_data:
+                    cycle_info = stock_data[cycle_time]
+                    row["cycles"][cycle_time] = {
+                        "vwap_slope_angle": cycle_info["vwap_slope_angle"],
+                        "vwap_slope_status": cycle_info["vwap_slope_status"],
+                        "vwap_slope_direction": cycle_info["vwap_slope_direction"],
+                        "stock_vwap": cycle_info["stock_vwap"],
+                        "stock_ltp": cycle_info["stock_ltp"],
+                        "option_ltp": cycle_info["option_ltp"],
+                        "scan_time": cycle_info["scan_time"]
+                    }
+                else:
+                    row["cycles"][cycle_time] = None
+            
+            table_data.append(row)
+        
+        # Also get candle size data from intraday_stock_options for comparison
+        candle_size_data = {}
+        trades = db.query(IntradayStockOption).filter(
+            IntradayStockOption.trade_date >= target_date,
+            IntradayStockOption.trade_date < target_date + timedelta(days=1)
+        ).all()
+        
+        for trade in trades:
+            stock = trade.stock_name
+            if stock not in candle_size_data:
+                candle_size_data[stock] = {
+                    "candle_size_ratio": trade.candle_size_ratio,
+                    "candle_size_status": trade.candle_size_status,
+                    "vwap_slope_angle": trade.vwap_slope_angle,
+                    "vwap_slope_status": trade.vwap_slope_status,
+                    "vwap_slope_direction": trade.vwap_slope_direction
+                }
+        
+        # Merge candle size data into table
+        for row in table_data:
+            stock = row["stock_name"]
+            if stock in candle_size_data:
+                row["candle_size_ratio"] = candle_size_data[stock]["candle_size_ratio"]
+                row["candle_size_status"] = candle_size_data[stock]["candle_size_status"]
+                # Also add latest VWAP slope from trade record if not in historical
+                if not any(cycle.get("vwap_slope_angle") for cycle in row["cycles"].values() if cycle):
+                    row["latest_vwap_slope_angle"] = candle_size_data[stock]["vwap_slope_angle"]
+                    row["latest_vwap_slope_status"] = candle_size_data[stock]["vwap_slope_status"]
+                    row["latest_vwap_slope_direction"] = candle_size_data[stock]["vwap_slope_direction"]
+        
+        return {
+            "success": True,
+            "date": target_date.strftime('%Y-%m-%d'),
+            "total_stocks": len(table_data),
+            "cycle_times": cycle_times,
+            "data": table_data
+        }
+        
+    except Exception as e:
+        logger.error(f"Error analyzing historical VWAP slope: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "success": False,
+            "error": str(e)
+        }
