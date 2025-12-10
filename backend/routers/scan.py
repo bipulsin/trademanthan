@@ -1442,13 +1442,14 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         option_vwap=0.0,
                         qty=0,
                         trade_date=trading_date,
-                        status='alert_received',  # Minimal status
+                        status='alert_received',  # Minimal status - saved when enrichment fails
                         buy_price=None,
                         stop_loss=None,
                         sell_price=None,
                         buy_time=None,
                         exit_reason=None,
-                        pnl=None
+                        pnl=None,
+                        no_entry_reason="Enrichment failed"  # Reason for minimal save
                     )
                     db.add(minimal_record)
                     saved_count += 1
