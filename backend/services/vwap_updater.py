@@ -1447,13 +1447,51 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                     interval=prev_interval
                 )
                 
-                # If candle API fails, try using stored previous VWAP from database
-                if not prev_vwap_data and trade.stock_vwap_previous_hour and trade.stock_vwap_previous_hour > 0 and trade.stock_vwap_previous_hour_time:
-                    logger.info(f"🔄 Cycle {cycle_number} - {stock_name}: Using stored previous VWAP from database")
-                    prev_vwap_data = {
-                        'vwap': trade.stock_vwap_previous_hour,
-                        'time': trade.stock_vwap_previous_hour_time
-                    }
+                # Validate that the returned candle is from the correct date
+                # If it's from a different date (e.g., yesterday), treat it as a failure
+                if prev_vwap_data and prev_vwap_data.get('time'):
+                    candle_time = prev_vwap_data.get('time')
+                    # Ensure both are timezone-aware for comparison
+                    if candle_time.tzinfo is None:
+                        candle_time = ist.localize(candle_time)
+                    elif candle_time.tzinfo != ist:
+                        candle_time = candle_time.astimezone(ist)
+                    
+                    if prev_vwap_time.tzinfo is None:
+                        prev_vwap_time_tz = ist.localize(prev_vwap_time)
+                    elif prev_vwap_time.tzinfo != ist:
+                        prev_vwap_time_tz = prev_vwap_time.astimezone(ist)
+                    else:
+                        prev_vwap_time_tz = prev_vwap_time
+                    
+                    # Check if candle date matches target date
+                    if candle_time.date() != prev_vwap_time_tz.date():
+                        logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Candle date mismatch (got {candle_time.date()}, expected {prev_vwap_time_tz.date()}), treating as failure")
+                        prev_vwap_data = None
+                
+                # If candle API fails or returned wrong date, try using stored previous VWAP from database
+                # BUT only if the stored time is correct (not 20:15:00 which indicates wrong calculation)
+                if not prev_vwap_data:
+                    # Check if stored time is reasonable (should be around :15 minutes, not :15 hours)
+                    stored_time_valid = False
+                    if trade.stock_vwap_previous_hour and trade.stock_vwap_previous_hour > 0 and trade.stock_vwap_previous_hour_time:
+                        stored_time = trade.stock_vwap_previous_hour_time
+                        if stored_time.tzinfo is None:
+                            stored_time = ist.localize(stored_time)
+                        elif stored_time.tzinfo != ist:
+                            stored_time = stored_time.astimezone(ist)
+                        
+                        # Check if stored time hour is reasonable (should be < 16, i.e., before 4 PM)
+                        # If hour is 20 (8 PM), it's definitely wrong
+                        if stored_time.hour < 16 and stored_time.date() == prev_vwap_time_tz.date():
+                            stored_time_valid = True
+                    
+                    if stored_time_valid:
+                        logger.info(f"🔄 Cycle {cycle_number} - {stock_name}: Using stored previous VWAP from database")
+                        prev_vwap_data = {
+                            'vwap': trade.stock_vwap_previous_hour,
+                            'time': trade.stock_vwap_previous_hour_time
+                        }
                 
                 # If still no previous VWAP, try alternative method
                 if not prev_vwap_data:
