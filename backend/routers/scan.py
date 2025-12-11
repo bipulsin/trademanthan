@@ -851,6 +851,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 traceback.print_exc()
                 
                 # Create minimal enriched stock with defaults
+                # Mark enrichment as failed so we can set proper no_entry_reason later
                 enriched_stock = {
                     "stock_name": stock_name,
                     "trigger_price": trigger_price,
@@ -865,7 +866,9 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     "option_vwap": 0.0,
                     "qty": 0,
                     "instrument_key": None,
-                    "option_candles": None
+                    "option_candles": None,
+                    "_enrichment_failed": True,  # Flag to indicate enrichment failed
+                    "_enrichment_error": str(enrichment_error)  # Store error message
                 }
                 enriched_stocks.append(enriched_stock)
                 print(f"   ✅ Created minimal entry for {stock_name} - will be saved with status 'alert_received'")
