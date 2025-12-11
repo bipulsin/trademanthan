@@ -1092,8 +1092,15 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 # Initialize no_entry_reason early (will be set if entry fails)
                 no_entry_reason = None
                 
+                # Check if enrichment failed - this takes priority over other reasons
+                if stock.get("_enrichment_failed"):
+                    enrichment_error_msg = stock.get("_enrichment_error", "Unknown error")
+                    # Truncate error message to reasonable length
+                    if len(enrichment_error_msg) > 50:
+                        enrichment_error_msg = enrichment_error_msg[:47] + "..."
+                    no_entry_reason = f"Enrichment failed: {enrichment_error_msg}"
                 # Check entry conditions in priority order to set appropriate reason
-                if is_after_3_00pm:
+                elif is_after_3_00pm:
                     no_entry_reason = "Time >= 3PM"
                 elif not can_enter_trade_by_index:
                     no_entry_reason = "Index alignment"
