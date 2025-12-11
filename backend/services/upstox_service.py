@@ -1354,12 +1354,21 @@ class UpstoxService:
         Uses symbol_isin_mapping for proper ISIN codes
         """
         try:
-            from services.symbol_isin_mapping import get_instrument_key as get_isin_key
+            from backend.services.symbol_isin_mapping import get_instrument_key as get_isin_key
             return get_isin_key(symbol)
         except ImportError:
-            # Fallback if import fails
-            from symbol_isin_mapping import get_instrument_key as get_isin_key
-            return get_isin_key(symbol)
+            try:
+                # Fallback 1: Try without backend prefix
+                from services.symbol_isin_mapping import get_instrument_key as get_isin_key
+                return get_isin_key(symbol)
+            except ImportError:
+                # Fallback 2: Try direct import
+                try:
+                    from symbol_isin_mapping import get_instrument_key as get_isin_key
+                    return get_isin_key(symbol)
+                except ImportError:
+                    logger.error(f"❌ Could not import symbol_isin_mapping for {symbol}")
+                    return None
     
     def calculate_vwap(self, candle_data: List[Dict]) -> float:
         """
@@ -1614,7 +1623,11 @@ class UpstoxService:
             try:
                 from services.symbol_isin_mapping import is_symbol_supported
             except ImportError:
-                from symbol_isin_mapping import is_symbol_supported
+                try:
+                    from symbol_isin_mapping import is_symbol_supported
+                except ImportError:
+                    logger.warning("Could not import symbol_isin_mapping, using fallback")
+                    return True  # Assume symbol is supported if import fails
             
             # Check if symbol is supported
             if not is_symbol_supported(symbol):
