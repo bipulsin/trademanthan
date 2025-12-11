@@ -1811,7 +1811,8 @@ async def recalculate_all_today_trades(db: Session = Depends(get_db)):
                         current_vwap = stock_data.get('vwap', 0)
                         
                         # Get previous hour VWAP
-                        prev_vwap_data = upstox_service.get_stock_vwap_for_previous_hour(stock_name)
+                        # Pass alert_time as reference_time so previous hour is calculated correctly
+                        prev_vwap_data = upstox_service.get_stock_vwap_for_previous_hour(stock_name, reference_time=trade.alert_time)
                         if prev_vwap_data and current_vwap > 0:
                             prev_vwap = prev_vwap_data.get('vwap', 0)
                             prev_vwap_time = prev_vwap_data.get('time')
