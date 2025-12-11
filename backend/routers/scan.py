@@ -1171,7 +1171,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     print(f"      - Stop Loss: ₹{stop_loss_price:.2f} (previous candle low)")
                     print(f"      - Stock LTP: ₹{stock_ltp:.2f}")
                     print(f"      - Stock VWAP: ₹{stock_vwap:.2f}")
-                    print(f"      - Stock VWAP (Previous Hour): ₹{stock_vwap_prev:.2f if stock_vwap_prev else 'N/A'}")
+                    prev_vwap_str = f"₹{stock_vwap_prev:.2f}" if stock_vwap_prev else "N/A"
+                    print(f"      - Stock VWAP (Previous Hour): {prev_vwap_str}")
                     print(f"      - Option Contract: {stock.get('option_contract', 'N/A')}")
                     filter_info = f"VWAP Slope: {'SKIPPED (10:15)' if is_10_15_alert else vwap_slope_reason} | Candle Size: {'SKIPPED (10:15)' if is_10_15_alert else candle_size_reason}"
                     logger.info(f"✅ ENTRY DECISION: {stock_name} | Entry Time: {entry_time_str} | Alert Time: {alert_time_str} | Price: ₹{buy_price:.2f} | SL: ₹{stop_loss_price:.2f} | {filter_info} | Indices: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
