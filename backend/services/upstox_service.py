@@ -2057,12 +2057,14 @@ class UpstoxService:
         
         return 0.0
     
-    def get_stock_vwap_for_previous_hour(self, stock_symbol: str) -> Optional[Dict]:
+    def get_stock_vwap_for_previous_hour(self, stock_symbol: str, reference_time: datetime = None) -> Optional[Dict]:
         """
         Get stock VWAP for the previous 1-hour candle
         
         Args:
             stock_symbol: Stock symbol (e.g., "RELIANCE")
+            reference_time: Reference datetime to calculate previous hour from (default: current time)
+                            This should be the alert time or cycle time, not datetime.now()
             
         Returns:
             Dict with 'vwap', 'timestamp', 'time' or None
@@ -2118,37 +2120,47 @@ class UpstoxService:
                 timestamp_ms = timestamp_ms / 1000
             
             ist = pytz.timezone('Asia/Kolkata')
-            now = datetime.now(ist)
+            # Use reference_time if provided, otherwise use current time
+            if reference_time:
+                # Ensure reference_time is timezone-aware
+                if reference_time.tzinfo is None:
+                    ref_time = ist.localize(reference_time)
+                elif reference_time.tzinfo != ist:
+                    ref_time = reference_time.astimezone(ist)
+                else:
+                    ref_time = reference_time
+            else:
+                ref_time = datetime.now(ist)
             
-            # Validate timestamp - if invalid (0 or before 2020), calculate previous hour from current time
+            # Validate timestamp - if invalid (0 or before 2020), calculate previous hour from reference time
             if timestamp_ms <= 0 or timestamp_ms < 1577836800:  # Before 2020-01-01
-                # Calculate previous hour time based on current time
+                # Calculate previous hour time based on reference time (not current time!)
                 # For alerts at :15 minutes, previous hour is at :15 minutes of previous hour
-                current_minute = now.minute
-                if current_minute >= 15:
+                ref_minute = ref_time.minute
+                if ref_minute >= 15:
                     # Round down to :15
-                    current_rounded = now.replace(minute=15, second=0, microsecond=0)
+                    ref_rounded = ref_time.replace(minute=15, second=0, microsecond=0)
                 else:
                     # Round down to :00, then go back to previous hour :15
-                    current_rounded = now.replace(minute=0, second=0, microsecond=0)
-                    current_rounded = current_rounded - timedelta(hours=1) + timedelta(minutes=15)
+                    ref_rounded = ref_time.replace(minute=0, second=0, microsecond=0)
+                    ref_rounded = ref_rounded - timedelta(hours=1) + timedelta(minutes=15)
                 
-                candle_time = current_rounded - timedelta(hours=1)
-                logger.warning(f"⚠️ Invalid timestamp in candle data for {stock_symbol}, calculating previous hour from current time: {candle_time.strftime('%Y-%m-%d %H:%M:%S')}")
+                candle_time = ref_rounded - timedelta(hours=1)
+                logger.warning(f"⚠️ Invalid timestamp in candle data for {stock_symbol}, calculating previous hour from reference time {ref_time.strftime('%H:%M')}: {candle_time.strftime('%Y-%m-%d %H:%M:%S')}")
             else:
                 candle_time = datetime.fromtimestamp(timestamp_ms, tz=ist)
-                # Validate the parsed time is reasonable (not in the future, not before 2020)
-                if candle_time > now or candle_time.year < 2020:
-                    # Fallback: calculate previous hour from current time
-                    current_minute = now.minute
-                    if current_minute >= 15:
-                        current_rounded = now.replace(minute=15, second=0, microsecond=0)
+                # Validate the parsed time is reasonable (not in the future relative to ref_time, not before 2020)
+                if candle_time > ref_time or candle_time.year < 2020:
+                    # Fallback: calculate previous hour from reference time
+                    ref_minute = ref_time.minute
+                    if ref_minute >= 15:
+                        ref_rounded = ref_time.replace(minute=15, second=0, microsecond=0)
                     else:
-                        current_rounded = now.replace(minute=0, second=0, microsecond=0)
-                        current_rounded = current_rounded - timedelta(hours=1) + timedelta(minutes=15)
+                        ref_rounded = ref_time.replace(minute=0, second=0, microsecond=0)
+                        ref_rounded = ref_rounded - timedelta(hours=1) + timedelta(minutes=15)
                     
-                    candle_time = current_rounded - timedelta(hours=1)
-                    logger.warning(f"⚠️ Parsed timestamp is invalid for {stock_symbol}, calculating previous hour from current time: {candle_time.strftime('%Y-%m-%d %H:%M:%S')}")
+                    candle_time = ref_rounded - timedelta(hours=1)
+                    logger.warning(f"⚠️ Parsed timestamp is invalid for {stock_symbol}, calculating previous hour from reference time {ref_time.strftime('%H:%M')}: {candle_time.strftime('%Y-%m-%d %H:%M:%S')}")
             
             logger.info(f"✅ Previous hour VWAP for {stock_symbol}: ₹{vwap:.2f} at {candle_time.strftime('%H:%M:%S')}")
             

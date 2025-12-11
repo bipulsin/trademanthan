@@ -798,7 +798,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 stock_vwap_previous_hour_time = None
                 if vwap_service and stock_name:
                     try:
-                        prev_vwap_data = vwap_service.get_stock_vwap_for_previous_hour(stock_name)
+                        # Pass alert_time as reference_time so previous hour is calculated correctly
+                        prev_vwap_data = vwap_service.get_stock_vwap_for_previous_hour(stock_name, reference_time=alert_time)
                         if prev_vwap_data:
                             stock_vwap_previous_hour = prev_vwap_data.get('vwap')
                             stock_vwap_previous_hour_time = prev_vwap_data.get('time')

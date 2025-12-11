@@ -1459,7 +1459,8 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 if not prev_vwap_data:
                     try:
                         # Try getting previous hour VWAP using alternative method
-                        alt_prev_vwap = vwap_service.get_stock_vwap_for_previous_hour(stock_name)
+                        # Pass cycle_time as reference_time so it calculates previous hour correctly
+                        alt_prev_vwap = vwap_service.get_stock_vwap_for_previous_hour(stock_name, reference_time=now)
                         if alt_prev_vwap and alt_prev_vwap.get('vwap', 0) > 0:
                             prev_vwap_data = alt_prev_vwap
                             logger.info(f"🔄 Cycle {cycle_number} - {stock_name}: Using alternative method for previous VWAP")
