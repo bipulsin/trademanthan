@@ -958,9 +958,9 @@ async def update_vwap_for_all_open_positions():
                                                                     position.instrument_key = instrument_key
                                                                     logger.info(f"✅ Stored instrument_key {instrument_key} for future updates")
                                                                     break  # Found correct match, exit loop
-                                                    except (ValueError, TypeError) as exp_error:
-                                                        logger.warning(f"⚠️ Error parsing expiry for {option_contract}: {exp_error}")
-                                                        continue
+                                                except (ValueError, TypeError) as exp_error:
+                                                    logger.warning(f"⚠️ Error parsing expiry for {option_contract}: {exp_error}")
+                                                    continue
                         except Exception as e:
                             logger.warning(f"Could not fetch option LTP for {option_contract}: {str(e)}")
                 
