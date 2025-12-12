@@ -1879,8 +1879,8 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
     
     Cycle Rules:
     1. Cycle 1 (10:30 AM): Stocks from 10:15 AM webhook
-       - Previous VWAP: 10:15 AM (1-hour candle)
-       - Current VWAP: 10:30 AM (15-minute candle)
+       - Previous VWAP: 10:15 AM (1-hour candle, represents 9:15-10:15 AM)
+       - Current VWAP: 10:30 AM (15-minute candle or real-time VWAP as fallback)
     
     2. Cycle 2 (11:15 AM): Stocks from 11:15 AM webhook + No_Entry from 10:15 AM
        - Previous VWAP: 10:15 AM (1-hour candle)
@@ -1946,11 +1946,13 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
         # Determine previous VWAP time and current VWAP time based on cycle
         if cycle_number == 1:
             # Cycle 1: 10:30 AM
-            # Previous VWAP: Use 15-minute candle at 10:15 AM
+            # Previous VWAP: Use 1-hour candle at 10:15 AM (1-hour candle closes at 10:15 AM, represents 9:15-10:15 AM)
+            # Current VWAP: Use real-time VWAP or 15-minute candle at 10:30 AM
+            # Market opens at 9:15 AM, so hourly candles form at :15 times
             prev_vwap_time = today.replace(hour=10, minute=15, second=0, microsecond=0)
             current_vwap_time = today.replace(hour=10, minute=30, second=0, microsecond=0)
-            prev_interval = "minutes/15"  # Use 15-minute candle for 10:15 AM
-            current_interval = "minutes/15"  # Use 15-minute candle for 10:30 AM
+            prev_interval = "hours/1"  # Use 1-hour candle for 10:15 AM (more reliable than 15-minute)
+            current_interval = "minutes/15"  # Use 15-minute candle for 10:30 AM, fallback to real-time if unavailable
             # Stocks from 10:15 AM webhook
             target_alert_times = [today.replace(hour=10, minute=15, second=0, microsecond=0)]
         elif cycle_number == 2:
