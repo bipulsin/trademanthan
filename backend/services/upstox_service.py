@@ -2057,6 +2057,88 @@ class UpstoxService:
         
         return 0.0
     
+    def get_previous_trading_day_vwap(self, stock_symbol: str, reference_time: datetime = None) -> Optional[Dict]:
+        """
+        Get the previous trading day's daily VWAP (close price) as fallback for VWAP slope calculation
+        
+        Args:
+            stock_symbol: Stock symbol (e.g., "RELIANCE")
+            reference_time: Reference time to calculate previous trading day from (default: now)
+            
+        Returns:
+            Dict with 'vwap' and 'time' keys, or None if unavailable
+            {
+                'vwap': float,  # Previous trading day's close price (daily VWAP)
+                'time': datetime  # Previous trading day's date at market close (3:30 PM)
+            }
+        """
+        try:
+            ist = pytz.timezone('Asia/Kolkata')
+            
+            if reference_time is None:
+                reference_time = datetime.now(ist)
+            elif reference_time.tzinfo is None:
+                reference_time = ist.localize(reference_time)
+            
+            # Get the last trading date
+            last_trading_date = self.get_last_trading_date(reference_time)
+            
+            # If last trading date is same as reference date, go back one more day
+            if last_trading_date.date() >= reference_time.date():
+                # Go back one more day from last trading date
+                last_trading_date = last_trading_date - timedelta(days=1)
+                last_trading_date = self.get_last_trading_date(last_trading_date)
+            
+            # Fetch daily candle for the previous trading day
+            daily_candles = self.get_historical_candles(stock_symbol, interval="days/1", days_back=7)
+            
+            if not daily_candles or len(daily_candles) == 0:
+                logger.warning(f"⚠️ No daily candles available for {stock_symbol}")
+                return None
+            
+            # Find the candle for the previous trading day
+            target_date_str = last_trading_date.strftime('%Y-%m-%d')
+            previous_day_candle = None
+            
+            for candle in daily_candles:
+                candle_timestamp = candle.get('timestamp', '')
+                if target_date_str in candle_timestamp:
+                    previous_day_candle = candle
+                    break
+            
+            # If exact date not found, use the most recent daily candle (which should be previous trading day)
+            if not previous_day_candle and len(daily_candles) > 0:
+                # Sort by timestamp (most recent first)
+                daily_candles.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+                # Get the most recent candle (should be previous trading day)
+                previous_day_candle = daily_candles[0]
+                logger.info(f"📊 Using most recent daily candle for {stock_symbol} (date: {previous_day_candle.get('timestamp', 'unknown')})")
+            
+            if previous_day_candle:
+                # For daily candle, VWAP is typically the close price
+                daily_vwap = previous_day_candle.get('close', 0)
+                
+                if daily_vwap and daily_vwap > 0:
+                    # Set time to market close of previous trading day (3:30 PM)
+                    prev_day_close_time = last_trading_date.replace(hour=15, minute=30, second=0, microsecond=0)
+                    
+                    logger.info(f"✅ Previous trading day VWAP for {stock_symbol}: ₹{daily_vwap:.2f} (date: {last_trading_date.strftime('%Y-%m-%d')})")
+                    
+                    return {
+                        'vwap': daily_vwap,
+                        'time': prev_day_close_time
+                    }
+                else:
+                    logger.warning(f"⚠️ Invalid close price in daily candle for {stock_symbol}")
+                    return None
+            else:
+                logger.warning(f"⚠️ Could not find daily candle for previous trading day ({target_date_str}) for {stock_symbol}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"❌ Error fetching previous trading day VWAP for {stock_symbol}: {str(e)}")
+            return None
+    
     def get_stock_vwap_for_previous_hour(self, stock_symbol: str, reference_time: datetime = None) -> Optional[Dict]:
         """
         Get stock VWAP for the previous 1-hour candle

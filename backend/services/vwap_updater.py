@@ -2263,6 +2263,19 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                     except Exception as alt_error:
                         logger.debug(f"Alternative previous VWAP method also failed for {stock_name}: {str(alt_error)}")
                 
+                # Final fallback: Use previous trading day's daily VWAP (close price)
+                if not prev_vwap_data:
+                    try:
+                        logger.info(f"🔄 Cycle {cycle_number} - {stock_name}: Attempting fallback to previous trading day's daily VWAP")
+                        prev_day_vwap = vwap_service.get_previous_trading_day_vwap(stock_name, reference_time=now)
+                        if prev_day_vwap and prev_day_vwap.get('vwap', 0) > 0:
+                            prev_vwap_data = prev_day_vwap
+                            logger.info(f"✅ Cycle {cycle_number} - {stock_name}: Using previous trading day's daily VWAP (₹{prev_day_vwap.get('vwap', 0):.2f}) as fallback")
+                        else:
+                            logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Previous trading day VWAP fallback also failed")
+                    except Exception as fallback_error:
+                        logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Error in previous trading day VWAP fallback: {str(fallback_error)}")
+                
                 if not prev_vwap_data:
                     logger.warning(f"⚠️ Could not get previous VWAP for {stock_name} at {prev_vwap_time.strftime('%H:%M')}")
                     # Still save historical data even if VWAP slope cannot be calculated
