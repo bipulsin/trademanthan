@@ -890,133 +890,79 @@ async def update_vwap_for_all_open_positions():
                             logger.warning(f"⚠️ {stock_name}: No valid option quote returned")
                     except Exception as ltp_error:
                         logger.error(f"❌ {stock_name}: Error fetching option LTP: {str(ltp_error)}")
+                
+                # FALLBACK: Lookup instrument_key for old records that don't have it stored
+                if not option_contract or not position.instrument_key:
+                    logger.warning(f"⚠️ No stored instrument_key for {option_contract} - falling back to lookup")
+                    from pathlib import Path
+                    import json as json_lib
+                    
+                    instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
+                    
+                    if instruments_file.exists():
+                        try:
+                            with open(instruments_file, 'r') as f:
+                                instruments_data = json_lib.load(f)
                             
-                            # #region agent log
-                            try:
-                                os.makedirs(os.path.dirname(log_path), exist_ok=True)
-                                with open(log_path, 'a') as f:
-                                    api_response_log = json.dumps({
-                                        "id": f"log_api_response_{stock_name}_{int(now.timestamp())}",
-                                        "timestamp": int(now.timestamp() * 1000),
-                                        "location": "vwap_updater.py:805",
-                                        "message": "API response received",
-                                        "data": {
-                                            "stock_name": stock_name,
-                                            "option_contract": option_contract,
-                                            "instrument_key": instrument_key,
-                                            "has_quote": bool(option_quote),
-                                            "quote_type": type(option_quote).__name__ if option_quote else None,
-                                            "has_last_price": bool(option_quote and 'last_price' in option_quote),
-                                            "last_price_value": option_quote.get('last_price') if option_quote else None,
-                                            "quote_keys": list(option_quote.keys()) if isinstance(option_quote, dict) else None
-                                        },
-                                        "sessionId": "debug-session",
-                                        "runId": "sell-price-fix",
-                                        "hypothesisId": "API_RESPONSE"
-                                    }) + "\n"
-                                    f.write(api_response_log)
-                                    f.flush()
-                            except Exception as log_err:
-                                logger.error(f"❌ Failed to write API response log: {str(log_err)}")
-                            # #endregion
+                            # Find option contract in instruments data
+                            import re
+                            match = re.match(r'^([A-Z-]+)-(\w{3})(\d{4})-(\d+\.?\d*?)-(CE|PE)$', option_contract)
                             
-                            logger.info(f"   API Response: {option_quote}")
-                            logger.info(f"   API Response Type: {type(option_quote)}")
-                            if isinstance(option_quote, dict):
-                                logger.info(f"   API Response Keys: {list(option_quote.keys())}")
-                            
-                            if option_quote and 'last_price' in option_quote:
-                                option_ltp_data = option_quote['last_price']
-                                logger.info(f"🔍 Raw last_price from API: {option_ltp_data} (type: {type(option_ltp_data)})")
-                                if option_ltp_data and option_ltp_data > 0:
-                                    new_option_ltp = float(option_ltp_data)  # Ensure it's a float
-                                    logger.info(f"📥 [{now.strftime('%H:%M:%S')}] API returned option LTP: ₹{new_option_ltp:.2f} for {option_contract}")
-                                    logger.info(f"   Will update sell_price from {position.sell_price} to {new_option_ltp}")
-                                else:
-                                    logger.warning(f"⚠️ Invalid LTP data: {option_ltp_data} (type: {type(option_ltp_data)})")
-                                    logger.warning(f"   This will trigger fallback logic")
-                            else:
-                                logger.warning(f"⚠️ No last_price in quote data for {instrument_key}")
-                                logger.warning(f"   Quote is None: {option_quote is None}")
-                                if option_quote:
-                                    logger.warning(f"   Quote type: {type(option_quote)}")
-                                    if isinstance(option_quote, dict):
-                                        logger.warning(f"   Quote keys: {list(option_quote.keys())}")
-                                        logger.warning(f"   Full quote: {option_quote}")
-                                    else:
-                                        logger.warning(f"   Quote value: {str(option_quote)[:200]}")
-                                logger.warning(f"   This will trigger fallback logic - current sell_price={position.sell_price}, buy_price={position.buy_price}")
-                        else:
-                            # FALLBACK: Lookup instrument_key for old records that don't have it stored
-                            logger.warning(f"⚠️ No stored instrument_key for {option_contract} - falling back to lookup")
-                            from pathlib import Path
-                            import json as json_lib
-                            
-                            instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
-                            
-                            if instruments_file.exists():
-                                with open(instruments_file, 'r') as f:
-                                    instruments_data = json_lib.load(f)
+                            if match:
+                                symbol, month, year, strike, opt_type = match.groups()
+                                strike_value = float(strike)
                                 
-                                # Find option contract in instruments data
-                                import re
-                                match = re.match(r'^([A-Z-]+)-(\w{3})(\d{4})-(\d+\.?\d*?)-(CE|PE)$', option_contract)
+                                # Parse expiry month and year
+                                month_map = {
+                                    'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
+                                    'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
+                                    'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
+                                }
+                                target_month = month_map.get(month[:3].capitalize(), 11)
+                                target_year = int(year)
                                 
-                                if match:
-                                    symbol, month, year, strike, opt_type = match.groups()
-                                    strike_value = float(strike)
-                                    
-                                    # Parse expiry month and year
-                                    month_map = {
-                                        'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
-                                        'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
-                                        'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
-                                    }
-                                    target_month = month_map.get(month[:3].capitalize(), 11)
-                                    target_year = int(year)
-                                    
-                                    # Search for matching instrument - CRITICAL: Also check expiry month/year
-                                    for instrument in instruments_data:
-                                        if (instrument.get('underlying_symbol', '').upper() == symbol.upper() and
-                                            instrument.get('segment') == 'NSE_FO' and
-                                            instrument.get('instrument_type') == opt_type):
-                                            
-                                            # Check strike price match
-                                            inst_strike = float(instrument.get('strike_price', 0))
-                                            if abs(inst_strike - strike_value) < 0.01:
-                                                # CRITICAL: Check expiry month/year matches
-                                                expiry_timestamp = instrument.get('expiry')
-                                                if expiry_timestamp:
-                                                    try:
-                                                        # Convert timestamp (milliseconds) to datetime
-                                                        if expiry_timestamp > 1e12:
-                                                            expiry_timestamp = expiry_timestamp / 1000
-                                                        inst_expiry = datetime.fromtimestamp(expiry_timestamp, tz=pytz.UTC)
-                                                        
-                                                        # Check if expiry month/year matches
-                                                        if inst_expiry.year == target_year and inst_expiry.month == target_month:
-                                                            # Found the correct option - fetch its LTP
-                                                            instrument_key = instrument.get('instrument_key')
-                                                            if instrument_key:
-                                                                logger.info(f"🔍 [{now.strftime('%H:%M:%S')}] Found instrument_key via lookup: {instrument_key}")
-                                                                logger.info(f"   Strike: {inst_strike}, Type: {opt_type}, Expiry: {inst_expiry.strftime('%d-%b-%Y')}")
-                                                                
-                                                                option_quote = vwap_service.get_market_quote_by_key(instrument_key)
-                                                                
-                                                                if option_quote and 'last_price' in option_quote:
-                                                                    option_ltp_data = option_quote['last_price']
-                                                                    if option_ltp_data and option_ltp_data > 0:
-                                                                        new_option_ltp = option_ltp_data
-                                                                        logger.info(f"📥 [{now.strftime('%H:%M:%S')}] API returned option LTP: ₹{new_option_ltp:.2f} for {option_contract}")
-                                                                        # Update stored instrument_key for future updates
-                                                                        position.instrument_key = instrument_key
-                                                                        logger.info(f"✅ Stored instrument_key {instrument_key} for future updates")
-                                                                        break  # Found correct match, exit loop
+                                # Search for matching instrument - CRITICAL: Also check expiry month/year
+                                for instrument in instruments_data:
+                                    if (instrument.get('underlying_symbol', '').upper() == symbol.upper() and
+                                        instrument.get('segment') == 'NSE_FO' and
+                                        instrument.get('instrument_type') == opt_type):
+                                        
+                                        # Check strike price match
+                                        inst_strike = float(instrument.get('strike_price', 0))
+                                        if abs(inst_strike - strike_value) < 0.01:
+                                            # CRITICAL: Check expiry month/year matches
+                                            expiry_timestamp = instrument.get('expiry')
+                                            if expiry_timestamp:
+                                                try:
+                                                    # Convert timestamp (milliseconds) to datetime
+                                                    if expiry_timestamp > 1e12:
+                                                        expiry_timestamp = expiry_timestamp / 1000
+                                                    inst_expiry = datetime.fromtimestamp(expiry_timestamp, tz=pytz.UTC)
+                                                    
+                                                    # Check if expiry month/year matches
+                                                    if inst_expiry.year == target_year and inst_expiry.month == target_month:
+                                                        # Found the correct option - fetch its LTP
+                                                        instrument_key = instrument.get('instrument_key')
+                                                        if instrument_key:
+                                                            logger.info(f"🔍 [{now.strftime('%H:%M:%S')}] Found instrument_key via lookup: {instrument_key}")
+                                                            logger.info(f"   Strike: {inst_strike}, Type: {opt_type}, Expiry: {inst_expiry.strftime('%d-%b-%Y')}")
+                                                            
+                                                            option_quote = vwap_service.get_market_quote_by_key(instrument_key)
+                                                            
+                                                            if option_quote and 'last_price' in option_quote:
+                                                                option_ltp_data = option_quote['last_price']
+                                                                if option_ltp_data and option_ltp_data > 0:
+                                                                    new_option_ltp = option_ltp_data
+                                                                    logger.info(f"📥 [{now.strftime('%H:%M:%S')}] API returned option LTP: ₹{new_option_ltp:.2f} for {option_contract}")
+                                                                    # Update stored instrument_key for future updates
+                                                                    position.instrument_key = instrument_key
+                                                                    logger.info(f"✅ Stored instrument_key {instrument_key} for future updates")
+                                                                    break  # Found correct match, exit loop
                                                     except (ValueError, TypeError) as exp_error:
                                                         logger.warning(f"⚠️ Error parsing expiry for {option_contract}: {exp_error}")
                                                         continue
-                    except Exception as e:
-                        logger.warning(f"Could not fetch option LTP for {option_contract}: {str(e)}")
+                        except Exception as e:
+                            logger.warning(f"Could not fetch option LTP for {option_contract}: {str(e)}")
                 
                 # CRITICAL: If option LTP fetch fails, retry once before giving up
                 # This ensures we always have option LTP for sell_price updates and exit decisions
