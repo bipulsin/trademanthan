@@ -3852,6 +3852,7 @@ async def manually_update_vwap(db: Session = Depends(get_db)):
             and_(
                 IntradayStockOption.trade_date >= today,
                 IntradayStockOption.status != 'sold',
+                IntradayStockOption.status != 'no_entry',
                 IntradayStockOption.exit_reason == None  # No exit reason means still open
             )
         ).all()

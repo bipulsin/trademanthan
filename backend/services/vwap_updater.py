@@ -87,6 +87,18 @@ class VWAPUpdater:
             # Cycle-based VWAP slope calculations
             # Cycle 1: 10:30 AM - Stocks from 10:15 AM webhook
             async def run_cycle_1():
+                # #region agent log
+                # Log scheduler trigger
+                import json
+                import os
+                log_path = '/Users/bipulsahay/TradeManthan/.cursor/debug.log'
+                try:
+                    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+                    with open(log_path, 'a') as f:
+                        f.write(json.dumps({"id":f"log_scheduler_trigger_cycle1","timestamp":int(datetime.now(pytz.timezone('Asia/Kolkata')).timestamp()*1000),"location":"vwap_updater.py:89","message":"Scheduler triggered Cycle 1","data":{"scheduled":True},"sessionId":"debug-session","runId":"post-fix","hypothesisId":"SCHEDULER"}) + "\n")
+                except Exception as log_err:
+                    logger.error(f"Failed to write scheduler log: {str(log_err)}")
+                # #endregion
                 await calculate_vwap_slope_for_cycle(1, datetime.now(pytz.timezone('Asia/Kolkata')))
             self.scheduler.add_job(
                 run_cycle_1,
@@ -173,20 +185,99 @@ async def update_vwap_for_all_open_positions():
     
     These values are used for exit decisions (VWAP cross, stop loss, target, etc.)
     """
-    db = SessionLocal()
+    # CRITICAL: Log function entry IMMEDIATELY - use print as ultimate fallback
+    import sys
+    try:
+        import pytz as pytz_module
+        from datetime import datetime as dt_module
+        ist_temp = pytz_module.timezone('Asia/Kolkata')
+        now_temp = dt_module.now(ist_temp)
+        entry_msg = f"🚀 FUNCTION ENTRY: update_vwap_for_all_open_positions() called at {now_temp.strftime('%Y-%m-%d %H:%M:%S IST')}"
+        print(entry_msg, file=sys.stderr)  # Print to stderr as ultimate fallback
+        try:
+            logger.info(entry_msg)
+        except Exception:
+            pass  # If logger fails, print already captured it
+    except Exception as entry_err:
+        print(f"CRITICAL: Failed to log function entry: {entry_err}", file=sys.stderr)
+    
+    # #region agent log
+    import json as json_module
+    import os as os_module
+    log_path = '/Users/bipulsahay/TradeManthan/.cursor/debug.log'
+    try:
+        import pytz as pytz_module_inner
+        from datetime import datetime as dt_module_inner
+        ist_temp_inner = pytz_module_inner.timezone('Asia/Kolkata')
+        now_temp_inner = dt_module_inner.now(ist_temp_inner)
+        
+        os_module.makedirs(os_module.path.dirname(log_path), exist_ok=True)
+        with open(log_path, 'a') as f:
+            entry_log = json_module.dumps({
+                "id": f"log_hourly_update_entry_{int(now_temp_inner.timestamp())}",
+                "timestamp": int(now_temp_inner.timestamp() * 1000),
+                "location": "vwap_updater.py:176",
+                "message": "Hourly update function entry",
+                "data": {"function": "update_vwap_for_all_open_positions", "time": str(now_temp_inner)},
+                "sessionId": "debug-session",
+                "runId": "sell-price-fix",
+                "hypothesisId": "ENTRY"
+            }) + "\n"
+            f.write(entry_log)
+            f.flush()
+        try:
+            logger.info(f"✅ Debug log entry written to {log_path}")
+        except Exception:
+            pass
+    except Exception as log_err:
+        print(f"CRITICAL: Failed to write debug log entry: {log_err}", file=sys.stderr)
+        try:
+            logger.error(f"❌ Failed to write debug log entry: {str(log_err)}")
+            import traceback
+            logger.error(traceback.format_exc())
+        except Exception:
+            pass
+    # #endregion
+    
+    # CRITICAL: Verify database session can be created
+    try:
+        db = SessionLocal()
+        logger.info(f"✅ Database session created successfully")
+    except Exception as db_err:
+        import sys
+        error_msg = f"❌ CRITICAL: Failed to create database session: {str(db_err)}"
+        print(error_msg, file=sys.stderr)
+        logger.error(error_msg)
+        import traceback
+        logger.error(traceback.format_exc())
+        return
+    
     try:
         ist = pytz.timezone('Asia/Kolkata')
         now = datetime.now(ist)
         today = now.replace(hour=0, minute=0, second=0, microsecond=0)
         
+        # Make log_path available in function scope
+        import json as json_module
+        import os as os_module
+        log_path = '/Users/bipulsahay/TradeManthan/.cursor/debug.log'
+        
         logger.info(f"📊 Starting hourly market data update at {now.strftime('%Y-%m-%d %H:%M:%S IST')}")
+        logger.info(f"🔍 DEBUG: Function update_vwap_for_all_open_positions() called at {now.strftime('%Y-%m-%d %H:%M:%S IST')}")
+        logger.info(f"🔍 DEBUG: Database session active: {db.is_active if hasattr(db, 'is_active') else 'unknown'}")
         
         # Import VWAP service
         try:
             from services.upstox_service import upstox_service
             vwap_service = upstox_service
-        except ImportError:
-            logger.error("Could not import upstox_service")
+            logger.info(f"✅ VWAP service imported successfully")
+        except ImportError as import_err:
+            error_msg = f"❌ CRITICAL: Could not import upstox_service: {str(import_err)}"
+            logger.error(error_msg)
+            import sys
+            print(error_msg, file=sys.stderr)
+            import traceback
+            logger.error(traceback.format_exc())
             return
         
         # ═══════════════════════════════════════════════════════════════
@@ -650,18 +741,83 @@ async def update_vwap_for_all_open_positions():
             and_(
                 IntradayStockOption.trade_date >= today,
                 IntradayStockOption.status != 'sold',
+                IntradayStockOption.status != 'no_entry',  # exclude never-entered trades from hourly update
                 IntradayStockOption.exit_reason == None
             )
         ).all()
         
+        # #region agent log
+        try:
+            status_breakdown = {}
+            positions_detail = []
+            for pos in open_positions:
+                status = pos.status or 'unknown'
+                status_breakdown[status] = status_breakdown.get(status, 0) + 1
+                positions_detail.append({
+                    "stock_name": pos.stock_name,
+                    "status": pos.status,
+                    "sell_price": float(pos.sell_price) if pos.sell_price else None,
+                    "buy_price": float(pos.buy_price) if pos.buy_price else None,
+                    "pnl": float(pos.pnl) if pos.pnl else None,
+                    "has_instrument_key": bool(pos.instrument_key),
+                    "instrument_key": pos.instrument_key,
+                    "option_contract": pos.option_contract,
+                    "updated_at": str(pos.updated_at) if pos.updated_at else None
+                })
+            
+            os_module.makedirs(os_module.path.dirname(log_path), exist_ok=True)
+            with open(log_path, 'a') as f:
+                query_log = json_module.dumps({
+                    "id": f"log_open_positions_query_{int(now.timestamp())}",
+                    "timestamp": int(now.timestamp() * 1000),
+                    "location": "vwap_updater.py:730",
+                    "message": "Open positions query result",
+                    "data": {
+                        "total_count": len(open_positions),
+                        "status_breakdown": status_breakdown,
+                        "positions": positions_detail[:20]  # First 20 for detailed analysis
+                    },
+                    "sessionId": "debug-session",
+                    "runId": "sell-price-fix",
+                    "hypothesisId": "QUERY"
+                }) + "\n"
+                f.write(query_log)
+                f.flush()
+            
+            logger.info(f"🔍 DEBUG QUERY: Found {len(open_positions)} open positions. Status breakdown: {status_breakdown}")
+            logger.info(f"🔍 DEBUG QUERY: Positions without sell_price: {sum(1 for p in open_positions if not p.sell_price or p.sell_price == 0)}")
+            logger.info(f"🔍 DEBUG QUERY: Positions without instrument_key: {sum(1 for p in open_positions if not p.instrument_key)}")
+            logger.info(f"🔍 DEBUG QUERY: Sample positions: {positions_detail[:3]}")
+            
+            # CRITICAL: If no positions found, log this clearly
+            if len(open_positions) == 0:
+                logger.warning(f"⚠️ WARNING: No open positions found! Query returned 0 results.")
+                logger.warning(f"   Query filters: trade_date >= {today}, status != 'sold', exit_reason == None")
+        except Exception as log_err:
+            logger.error(f"❌ Failed to write query log: {str(log_err)}")
+            import traceback
+            logger.error(traceback.format_exc())
+        # #endregion
+        
         # Update each position
         updated_count = 0
         failed_count = 0
+        stocks_with_history_saved = set()
         
-        for position in open_positions:
+        logger.info(f"🔍 DEBUG: Starting to process {len(open_positions)} positions...")
+        
+        if len(open_positions) == 0:
+            logger.warning(f"⚠️ WARNING: No positions to process! This might indicate:")
+            logger.warning(f"   1. No trades were entered today")
+            logger.warning(f"   2. All trades have been sold/exited")
+            logger.warning(f"   3. Query filters are too restrictive")
+            logger.warning(f"   4. Database connection issue")
+        
+        for idx, position in enumerate(open_positions, 1):
             try:
                 stock_name = position.stock_name
                 option_contract = position.option_contract
+                logger.info(f"🔍 DEBUG: Processing position {idx}/{len(open_positions)}: {stock_name} (status={position.status}, sell_price={position.sell_price}, has_instrument_key={bool(position.instrument_key)})")
                 
                 # ═══════════════════════════════════════════════════════════════
                 # SAFETY CHECK: Ensure trade is in HOLD status (still open)
@@ -716,31 +872,80 @@ async def update_vwap_for_all_open_positions():
                 # 2. Fetch fresh Stock LTP (Last Traded Price)
                 new_stock_ltp = vwap_service.get_stock_ltp_from_market_quote(stock_name)
                 
-                # 3. Fetch fresh Option LTP (if option contract exists)
+                # 3. Fetch fresh Option LTP (if option contract exists) - SIMPLIFIED
                 new_option_ltp = 0.0
-                if option_contract:
+                if option_contract and position.instrument_key:
                     try:
-                        # PREFERRED: Use stored instrument_key from trade entry (more reliable)
                         instrument_key = position.instrument_key
+                        option_quote = vwap_service.get_market_quote_by_key(instrument_key)
                         
-                        if instrument_key:
-                            # Use stored instrument_key directly - no lookup needed
-                            logger.info(f"🔍 [{now.strftime('%H:%M:%S')}] Fetching option LTP for {option_contract}")
-                            logger.info(f"   Using stored Instrument Key: {instrument_key}")
+                        if option_quote and isinstance(option_quote, dict) and 'last_price' in option_quote:
+                            option_ltp_data = option_quote['last_price']
+                            if option_ltp_data and option_ltp_data > 0:
+                                new_option_ltp = float(option_ltp_data)
+                                logger.info(f"✅ [{now.strftime('%H:%M:%S')}] {stock_name}: Fetched option LTP ₹{new_option_ltp:.2f}")
+                            else:
+                                logger.warning(f"⚠️ {stock_name}: Invalid LTP data: {option_ltp_data}")
+                        else:
+                            logger.warning(f"⚠️ {stock_name}: No valid option quote returned")
+                    except Exception as ltp_error:
+                        logger.error(f"❌ {stock_name}: Error fetching option LTP: {str(ltp_error)}")
                             
-                            option_quote = vwap_service.get_market_quote_by_key(instrument_key)
+                            # #region agent log
+                            try:
+                                os.makedirs(os.path.dirname(log_path), exist_ok=True)
+                                with open(log_path, 'a') as f:
+                                    api_response_log = json.dumps({
+                                        "id": f"log_api_response_{stock_name}_{int(now.timestamp())}",
+                                        "timestamp": int(now.timestamp() * 1000),
+                                        "location": "vwap_updater.py:805",
+                                        "message": "API response received",
+                                        "data": {
+                                            "stock_name": stock_name,
+                                            "option_contract": option_contract,
+                                            "instrument_key": instrument_key,
+                                            "has_quote": bool(option_quote),
+                                            "quote_type": type(option_quote).__name__ if option_quote else None,
+                                            "has_last_price": bool(option_quote and 'last_price' in option_quote),
+                                            "last_price_value": option_quote.get('last_price') if option_quote else None,
+                                            "quote_keys": list(option_quote.keys()) if isinstance(option_quote, dict) else None
+                                        },
+                                        "sessionId": "debug-session",
+                                        "runId": "sell-price-fix",
+                                        "hypothesisId": "API_RESPONSE"
+                                    }) + "\n"
+                                    f.write(api_response_log)
+                                    f.flush()
+                            except Exception as log_err:
+                                logger.error(f"❌ Failed to write API response log: {str(log_err)}")
+                            # #endregion
                             
                             logger.info(f"   API Response: {option_quote}")
+                            logger.info(f"   API Response Type: {type(option_quote)}")
+                            if isinstance(option_quote, dict):
+                                logger.info(f"   API Response Keys: {list(option_quote.keys())}")
                             
                             if option_quote and 'last_price' in option_quote:
                                 option_ltp_data = option_quote['last_price']
+                                logger.info(f"🔍 Raw last_price from API: {option_ltp_data} (type: {type(option_ltp_data)})")
                                 if option_ltp_data and option_ltp_data > 0:
-                                    new_option_ltp = option_ltp_data
+                                    new_option_ltp = float(option_ltp_data)  # Ensure it's a float
                                     logger.info(f"📥 [{now.strftime('%H:%M:%S')}] API returned option LTP: ₹{new_option_ltp:.2f} for {option_contract}")
+                                    logger.info(f"   Will update sell_price from {position.sell_price} to {new_option_ltp}")
                                 else:
-                                    logger.warning(f"⚠️ Invalid LTP data: {option_ltp_data}")
+                                    logger.warning(f"⚠️ Invalid LTP data: {option_ltp_data} (type: {type(option_ltp_data)})")
+                                    logger.warning(f"   This will trigger fallback logic")
                             else:
-                                logger.warning(f"⚠️ No last_price in quote data for {instrument_key}: {option_quote}")
+                                logger.warning(f"⚠️ No last_price in quote data for {instrument_key}")
+                                logger.warning(f"   Quote is None: {option_quote is None}")
+                                if option_quote:
+                                    logger.warning(f"   Quote type: {type(option_quote)}")
+                                    if isinstance(option_quote, dict):
+                                        logger.warning(f"   Quote keys: {list(option_quote.keys())}")
+                                        logger.warning(f"   Full quote: {option_quote}")
+                                    else:
+                                        logger.warning(f"   Quote value: {str(option_quote)[:200]}")
+                                logger.warning(f"   This will trigger fallback logic - current sell_price={position.sell_price}, buy_price={position.buy_price}")
                         else:
                             # FALLBACK: Lookup instrument_key for old records that don't have it stored
                             logger.warning(f"⚠️ No stored instrument_key for {option_contract} - falling back to lookup")
@@ -813,31 +1018,76 @@ async def update_vwap_for_all_open_positions():
                     except Exception as e:
                         logger.warning(f"Could not fetch option LTP for {option_contract}: {str(e)}")
                 
-                # CRITICAL: Even if option LTP fetch fails, check VWAP cross using stock data
-                # If VWAP cross detected, exit with last known option price (sell_price)
+                # CRITICAL: If option LTP fetch fails, retry once before giving up
+                # This ensures we always have option LTP for sell_price updates and exit decisions
+                if new_option_ltp == 0 and option_contract and position.instrument_key:
+                    logger.warning(f"⚠️ Option LTP fetch FAILED for {stock_name} {option_contract} - RETRYING...")
+                    try:
+                        # Retry option LTP fetch
+                        option_quote_retry = vwap_service.get_market_quote_by_key(position.instrument_key)
+                        if option_quote_retry and 'last_price' in option_quote_retry:
+                            option_ltp_retry = option_quote_retry['last_price']
+                            if option_ltp_retry and option_ltp_retry > 0:
+                                new_option_ltp = option_ltp_retry
+                                logger.info(f"✅ Retry successful: Got option LTP ₹{new_option_ltp:.2f} for {stock_name}")
+                    except Exception as retry_error:
+                        logger.warning(f"⚠️ Retry also failed for {stock_name}: {str(retry_error)}")
+                
+                # CRITICAL: Even if option LTP fetch fails after retry, check VWAP cross using stock data
+                # If VWAP cross detected, we MUST fetch option LTP one more time before exiting
                 if new_option_ltp == 0:
-                    logger.warning(f"⚠️ Option LTP fetch FAILED for {stock_name} {option_contract}")
+                    logger.warning(f"⚠️ Option LTP fetch FAILED (after retry) for {stock_name} {option_contract}")
                     logger.warning(f"   new_vwap={new_vwap}, new_stock_ltp={new_stock_ltp}, option_type={position.option_type}")
                     
+                    # Check VWAP cross condition
+                    vwap_cross_detected = False
                     if new_vwap > 0 and new_stock_ltp > 0 and position.option_type:
                         if now.hour >= 11 and now.minute >= 15:
                             option_type = position.option_type
                             if (option_type == 'CE' and new_stock_ltp < new_vwap) or \
                                (option_type == 'PE' and new_stock_ltp > new_vwap):
+                                vwap_cross_detected = True
                                 logger.critical(f"🚨 VWAP CROSS DETECTED for {stock_name} but option LTP fetch FAILED!")
                                 logger.critical(f"   Stock LTP: ₹{new_stock_ltp:.2f}, VWAP: ₹{new_vwap:.2f}, Type: {option_type}")
-                                logger.critical(f"   Using last known sell_price: ₹{position.sell_price:.2f} for exit")
                                 
-                                # Use last known sell_price for exit
-                                if position.sell_price and position.sell_price > 0:
-                                    position.exit_reason = 'stock_vwap_cross'
-                                    position.sell_time = now
-                                    position.status = 'sold'
-                                    if position.buy_price and position.qty:
-                                        position.pnl = (position.sell_price - position.buy_price) * position.qty
-                                    logger.critical(f"✅ FORCED EXIT: {stock_name} on VWAP cross with last known price ₹{position.sell_price:.2f}, PnL=₹{position.pnl:.2f}")
-                                    updated_count += 1
-                                    # Don't continue - still update stock LTP/VWAP below for record keeping
+                                # CRITICAL: Try one final time to fetch option LTP before exiting
+                                if position.instrument_key:
+                                    try:
+                                        logger.critical(f"   🔄 Final attempt to fetch option LTP for exit...")
+                                        final_quote = vwap_service.get_market_quote_by_key(position.instrument_key)
+                                        if final_quote and 'last_price' in final_quote:
+                                            final_ltp = final_quote['last_price']
+                                            if final_ltp and final_ltp > 0:
+                                                new_option_ltp = final_ltp
+                                                logger.critical(f"   ✅ Final fetch successful: ₹{new_option_ltp:.2f}")
+                                    except Exception as final_error:
+                                        logger.error(f"   ❌ Final fetch also failed: {str(final_error)}")
+                                
+                                # If still no option LTP, use last known sell_price or buy_price as fallback
+                                if new_option_ltp == 0:
+                                    if position.sell_price and position.sell_price > 0:
+                                        new_option_ltp = position.sell_price
+                                        logger.critical(f"   Using last known sell_price: ₹{new_option_ltp:.2f} for exit")
+                                    elif position.buy_price and position.buy_price > 0:
+                                        new_option_ltp = position.buy_price
+                                        logger.critical(f"   ⚠️ Using buy_price as fallback: ₹{new_option_ltp:.2f} (P&L will be 0)")
+                                    else:
+                                        logger.error(f"   🚨 CRITICAL: No option price available for exit! Using 0.0")
+                                        new_option_ltp = 0.0
+                                
+                                # Exit with VWAP cross
+                                position.exit_reason = 'stock_vwap_cross'
+                                position.sell_time = now
+                                position.status = 'sold'
+                                position.sell_price = new_option_ltp  # CRITICAL: Always set sell_price
+                                if position.buy_price and position.qty:
+                                    position.pnl = (new_option_ltp - position.buy_price) * position.qty
+                                else:
+                                    position.pnl = 0.0
+                                logger.critical(f"✅ FORCED EXIT: {stock_name} on VWAP cross with price ₹{new_option_ltp:.2f}, PnL=₹{position.pnl:.2f}")
+                                updates_made.append(f"🚨 EXITED: stock_vwap_cross at ₹{new_option_ltp:.2f}")
+                                updated_count += 1
+                                # Continue to update stock LTP/VWAP below for record keeping
                 
                 # Update position with new values
                 updates_made = []
@@ -889,9 +1139,11 @@ async def update_vwap_for_all_open_positions():
                     logger.warning(f"⚠️ Failed to save historical data for {stock_name}: {str(hist_error)}")
                     # Don't fail the entire update if historical save fails
                 
+                # CRITICAL FIX: Always update sell_price and PnL for open positions
+                # Even if option LTP fetch failed, we should still update if we have any value
+                old_option_ltp = position.sell_price or 0.0
+                
                 if new_option_ltp > 0:
-                    old_option_ltp = position.sell_price or 0.0
-                    
                     # CRITICAL SANITY CHECKS
                     sanity_passed = True
                     
@@ -921,9 +1173,61 @@ async def update_vwap_for_all_open_positions():
                                     new_option_ltp = difference
                                     logger.error(f"   CORRECTED: Using ₹{new_option_ltp:.2f} as option LTP")
                     
-                    position.sell_price = new_option_ltp  # Update sell_price with current option price
+                    # Update sell_price with current option price
+                    # CRITICAL: Explicitly mark as modified to ensure SQLAlchemy tracks the change
+                    from sqlalchemy.orm.attributes import flag_modified
+                    from sqlalchemy import inspect
+                    
+                    old_sell_price = position.sell_price
+                    position.sell_price = new_option_ltp
+                    
+                    # CRITICAL: Ensure object is in session and tracked
+                    if position not in db:
+                        db.add(position)
+                        logger.warning(f"⚠️ Position {stock_name} was not in session - added it")
+                    
+                    # Explicitly mark as modified
+                    flag_modified(position, 'sell_price')
+                    
+                    # Verify the change is tracked
+                    insp = inspect(position)
+                    if insp.modified:
+                        logger.debug(f"🔍 Position {stock_name} is marked as modified in session")
+                        logger.debug(f"🔍 Modified attributes: {list(insp.modified.keys())}")
+                    else:
+                        logger.warning(f"⚠️ Position {stock_name} is NOT marked as modified after setting sell_price!")
+                    
                     updates_made.append(f"Option LTP: {old_option_ltp:.2f}→{new_option_ltp:.2f}")
                     logger.info(f"📌 {stock_name} Option LTP updated at {now.strftime('%H:%M:%S')}: ₹{old_option_ltp:.2f} → ₹{new_option_ltp:.2f}")
+                    logger.info(f"🔍 Flagged sell_price as modified for {stock_name}: {old_sell_price} → {new_option_ltp}")
+                    
+                    # #region agent log
+                    try:
+                        os_module.makedirs(os_module.path.dirname(log_path), exist_ok=True)
+                        with open(log_path, 'a') as f:
+                            sell_price_update_log = json_module.dumps({
+                                "id": f"log_sell_price_update_{stock_name}_{int(now.timestamp())}",
+                                "timestamp": int(now.timestamp() * 1000),
+                                "location": "vwap_updater.py:984",
+                                "message": "sell_price updated",
+                                "data": {
+                                    "stock_name": stock_name,
+                                    "old_sell_price": old_option_ltp,
+                                    "new_sell_price": new_option_ltp,
+                                    "option_contract": option_contract,
+                                    "position_id": position.id if hasattr(position, 'id') else None,
+                                    "in_session": position in db.session if hasattr(db, 'session') else "unknown"
+                                },
+                                "sessionId": "debug-session",
+                                "runId": "sell-price-fix",
+                                "hypothesisId": "SELL_PRICE_UPDATE"
+                            }) + "\n"
+                            f.write(sell_price_update_log)
+                            f.flush()
+                        logger.info(f"🔍 DEBUG: Updated sell_price for {stock_name}: {old_option_ltp:.2f} → {new_option_ltp:.2f}")
+                    except Exception as log_err:
+                        logger.error(f"❌ Failed to write sell_price update log: {str(log_err)}")
+                    # #endregion
                     
                     # Calculate and update unrealized P&L for open trades
                     if position.buy_price and position.qty:
@@ -931,136 +1235,216 @@ async def update_vwap_for_all_open_positions():
                         new_pnl = (new_option_ltp - position.buy_price) * position.qty
                         position.pnl = new_pnl
                         updates_made.append(f"P&L: ₹{old_pnl:.2f}→₹{new_pnl:.2f}")
-                        
-                        # CHECK ALL EXIT CONDITIONS INDEPENDENTLY
-                        # Then apply the highest priority exit
-                        # Priority: Stop Loss > VWAP Cross > Profit Target
-                        exit_conditions = {
-                            'stop_loss': False,
-                            'vwap_cross': False,
-                            'profit_target': False
-                        }
-                        
-                        # 1. CHECK STOP LOSS
-                        if position.stop_loss and new_option_ltp <= position.stop_loss:
-                            exit_conditions['stop_loss'] = True
-                            logger.info(f"🛑 STOP LOSS CONDITION MET for {stock_name}: LTP ₹{new_option_ltp:.2f} <= SL ₹{position.stop_loss:.2f}")
-                        
-                        # 2. CHECK VWAP CROSS (only after 11:15 AM)
-                        if now.hour >= 11 and now.minute >= 15:
-                            if new_vwap and new_vwap > 0 and new_stock_ltp and new_stock_ltp > 0:
-                                option_type = position.option_type or 'CE'
-                                logger.info(f"📊 VWAP CHECK for {stock_name} ({option_type}): Stock LTP=₹{new_stock_ltp:.2f}, VWAP=₹{new_vwap:.2f}")
-                                
-                                # CE: Exit if stock LTP falls below VWAP
-                                # PE: Exit if stock LTP rises above VWAP
-                                if (option_type == 'CE' and new_stock_ltp < new_vwap):
-                                    exit_conditions['vwap_cross'] = True
-                                    logger.info(f"📉 VWAP CROSS CONDITION MET for {stock_name} (CE): Stock LTP ₹{new_stock_ltp:.2f} < VWAP ₹{new_vwap:.2f}")
-                                elif (option_type == 'PE' and new_stock_ltp > new_vwap):
-                                    exit_conditions['vwap_cross'] = True
-                                    logger.info(f"📈 VWAP CROSS CONDITION MET for {stock_name} (PE): Stock LTP ₹{new_stock_ltp:.2f} > VWAP ₹{new_vwap:.2f}")
-                                else:
-                                    logger.info(f"✅ VWAP OK for {stock_name} - Stock {'>' if option_type == 'CE' else '<'} VWAP")
-                        
-                        # 3. CHECK PROFIT TARGET (1.5x buy price)
+                else:
+                    # Option LTP fetch failed - use buy_price as fallback if sell_price is NULL/0
+                    if (not position.sell_price or position.sell_price == 0) and position.buy_price:
+                        from sqlalchemy.orm.attributes import flag_modified
+                        position.sell_price = position.buy_price
+                        flag_modified(position, 'sell_price')
+                        logger.warning(f"⚠️ {stock_name}: Using buy_price ₹{position.buy_price:.2f} as sell_price fallback")
+                    
+                    # Update PnL if we have sell_price
+                    if position.buy_price and position.qty and position.sell_price:
+                        position.pnl = (position.sell_price - position.buy_price) * position.qty
+                        flag_modified(position, 'pnl')
+                    
+                    position.updated_at = now
+                    flag_modified(position, 'updated_at')
+                
+                # CHECK ALL EXIT CONDITIONS INDEPENDENTLY (ALWAYS CHECK, regardless of option LTP fetch success)
+                # Then apply the highest priority exit
+                # Priority: Stop Loss > VWAP Cross > Profit Target
+                # Only check if trade is still open (not already exited)
+                if position.exit_reason is None and position.status != 'sold':
+                    exit_conditions = {
+                        'stop_loss': False,
+                        'vwap_cross': False,
+                        'profit_target': False
+                    }
+                    
+                    # 1. CHECK STOP LOSS (requires option LTP)
+                    if new_option_ltp > 0 and position.stop_loss and new_option_ltp <= position.stop_loss:
+                        exit_conditions['stop_loss'] = True
+                        logger.info(f"🛑 STOP LOSS CONDITION MET for {stock_name}: LTP ₹{new_option_ltp:.2f} <= SL ₹{position.stop_loss:.2f}")
+                    
+                    # 2. CHECK VWAP CROSS (only after 11:15 AM) - ALWAYS CHECK using stock data
+                    # This works even if option LTP fetch failed
+                    if now.hour >= 11 and now.minute >= 15:
+                        if new_vwap and new_vwap > 0 and new_stock_ltp and new_stock_ltp > 0:
+                            option_type = position.option_type or 'CE'
+                            logger.info(f"📊 VWAP CHECK for {stock_name} ({option_type}): Stock LTP=₹{new_stock_ltp:.2f}, VWAP=₹{new_vwap:.2f}")
+                            
+                            # CE: Exit if stock LTP falls below VWAP
+                            # PE: Exit if stock LTP rises above VWAP
+                            if (option_type == 'CE' and new_stock_ltp < new_vwap):
+                                exit_conditions['vwap_cross'] = True
+                                logger.info(f"📉 VWAP CROSS CONDITION MET for {stock_name} (CE): Stock LTP ₹{new_stock_ltp:.2f} < VWAP ₹{new_vwap:.2f}")
+                            elif (option_type == 'PE' and new_stock_ltp > new_vwap):
+                                exit_conditions['vwap_cross'] = True
+                                logger.info(f"📈 VWAP CROSS CONDITION MET for {stock_name} (PE): Stock LTP ₹{new_stock_ltp:.2f} > VWAP ₹{new_vwap:.2f}")
+                            else:
+                                logger.info(f"✅ VWAP OK for {stock_name} - Stock {'>' if option_type == 'CE' else '<'} VWAP")
+                    
+                    # 3. CHECK PROFIT TARGET (1.5x buy price) - requires option LTP
+                    if new_option_ltp > 0 and position.buy_price:
                         profit_target = position.buy_price * 1.5
                         if new_option_ltp >= profit_target:
                             exit_conditions['profit_target'] = True
                             logger.info(f"🎯 PROFIT TARGET CONDITION MET for {stock_name}: LTP ₹{new_option_ltp:.2f} >= Target ₹{profit_target:.2f}")
+                    
+                    # APPLY THE HIGHEST PRIORITY EXIT CONDITION
+                    exit_triggered = False
+                    exit_reason_to_set = None
+                    
+                    if exit_conditions['stop_loss']:
+                        exit_triggered = True
+                        exit_reason_to_set = 'stop_loss'
+                        exit_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
+                        logger.warning(f"✅ APPLIED: STOP LOSS EXIT for {stock_name}")
+                        logger.info(f"🛑 EXIT DECISION: {stock_name} | Time: {exit_time_str} | Reason: Stop Loss | Option LTP: ₹{new_option_ltp:.2f} <= SL: ₹{position.stop_loss:.2f} | PnL: ₹{position.pnl:.2f}")
+                        print(f"🛑 EXIT DECISION: {stock_name} ({option_contract})")
+                        print(f"   ⏰ Exit Time: {exit_time_str}")
+                        print(f"   📊 Exit Conditions:")
+                        print(f"      - Stop Loss: ✅ Triggered (LTP: ₹{new_option_ltp:.2f} <= SL: ₹{position.stop_loss:.2f})")
+                        print(f"      - VWAP Cross: {'✅' if exit_conditions['vwap_cross'] else '❌'} {'Triggered' if exit_conditions['vwap_cross'] else 'Not Triggered'}")
+                        print(f"      - Profit Target: {'✅' if exit_conditions['profit_target'] else '❌'} {'Triggered' if exit_conditions['profit_target'] else 'Not Triggered'}")
+                        print(f"   💰 Exit Details:")
+                        print(f"      - Buy Price: ₹{position.buy_price:.2f}")
+                        print(f"      - Sell Price: ₹{new_option_ltp:.2f}")
+                        print(f"      - Quantity: {position.qty}")
+                        print(f"      - PnL: ₹{position.pnl:.2f}")
+                    
+                    elif exit_conditions['vwap_cross']:
+                        # CRITICAL: If option LTP fetch failed, try one more time before exiting
+                        exit_option_ltp = new_option_ltp
+                        if exit_option_ltp == 0 and position.instrument_key:
+                            try:
+                                logger.warning(f"⚠️ VWAP cross detected but option LTP is 0 - retrying fetch...")
+                                final_quote = vwap_service.get_market_quote_by_key(position.instrument_key)
+                                if final_quote and 'last_price' in final_quote:
+                                    final_ltp = final_quote['last_price']
+                                    if final_ltp and final_ltp > 0:
+                                        exit_option_ltp = final_ltp
+                                        logger.info(f"✅ Retry successful: Got option LTP ₹{exit_option_ltp:.2f} for VWAP cross exit")
+                            except Exception as final_error:
+                                logger.error(f"❌ Final fetch failed: {str(final_error)}")
                         
-                        # APPLY THE HIGHEST PRIORITY EXIT CONDITION
-                        exit_triggered = False
-                        exit_reason_to_set = None
+                        # Use exit_option_ltp (which may be retried value) or fallback to last known sell_price
+                        if exit_option_ltp == 0:
+                            if old_option_ltp > 0:
+                                exit_option_ltp = old_option_ltp
+                                logger.warning(f"⚠️ Using last known sell_price ₹{exit_option_ltp:.2f} for VWAP cross exit")
+                            elif position.buy_price > 0:
+                                exit_option_ltp = position.buy_price
+                                logger.error(f"🚨 CRITICAL: No option LTP available, using buy_price ₹{exit_option_ltp:.2f} (P&L will be 0)")
                         
-                        if exit_conditions['stop_loss']:
-                            exit_triggered = True
-                            exit_reason_to_set = 'stop_loss'
-                            exit_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
-                            logger.warning(f"✅ APPLIED: STOP LOSS EXIT for {stock_name}")
-                            logger.info(f"🛑 EXIT DECISION: {stock_name} | Time: {exit_time_str} | Reason: Stop Loss | Option LTP: ₹{new_option_ltp:.2f} <= SL: ₹{position.stop_loss:.2f} | PnL: ₹{position.pnl:.2f}")
-                            print(f"🛑 EXIT DECISION: {stock_name} ({option_contract})")
-                            print(f"   ⏰ Exit Time: {exit_time_str}")
-                            print(f"   📊 Exit Conditions:")
-                            print(f"      - Stop Loss: ✅ Triggered (LTP: ₹{new_option_ltp:.2f} <= SL: ₹{position.stop_loss:.2f})")
-                            print(f"      - VWAP Cross: {'✅' if exit_conditions['vwap_cross'] else '❌'} {'Triggered' if exit_conditions['vwap_cross'] else 'Not Triggered'}")
-                            print(f"      - Profit Target: {'✅' if exit_conditions['profit_target'] else '❌'} {'Triggered' if exit_conditions['profit_target'] else 'Not Triggered'}")
-                            print(f"      - Time Based: {'✅' if exit_conditions['time_based'] else '❌'} {'Triggered' if exit_conditions['time_based'] else 'Not Triggered'}")
-                            print(f"   💰 Exit Details:")
-                            print(f"      - Buy Price: ₹{position.buy_price:.2f}")
-                            print(f"      - Sell Price: ₹{new_option_ltp:.2f}")
-                            print(f"      - Quantity: {position.qty}")
-                            print(f"      - PnL: ₹{position.pnl:.2f}")
+                        # Update new_option_ltp for use in exit logic below
+                        new_option_ltp = exit_option_ltp
                         
-                        elif exit_conditions['vwap_cross']:
-                            exit_triggered = True
-                            exit_reason_to_set = 'stock_vwap_cross'
-                            exit_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
-                            logger.warning(f"✅ APPLIED: VWAP CROSS EXIT for {stock_name}")
-                            logger.info(f"📉 EXIT DECISION: {stock_name} | Time: {exit_time_str} | Reason: VWAP Cross | Stock LTP: ₹{new_stock_ltp:.2f}, VWAP: ₹{new_vwap:.2f} | PnL: ₹{position.pnl:.2f}")
-                            print(f"📉 EXIT DECISION: {stock_name} ({option_contract})")
-                            print(f"   ⏰ Exit Time: {exit_time_str}")
-                            print(f"   📊 Exit Conditions:")
-                            print(f"      - Stop Loss: {'✅' if exit_conditions['stop_loss'] else '❌'} {'Triggered' if exit_conditions['stop_loss'] else 'Not Triggered'}")
-                            print(f"      - VWAP Cross: ✅ Triggered (Stock LTP: ₹{new_stock_ltp:.2f} {'<' if option_type == 'CE' else '>'} VWAP: ₹{new_vwap:.2f})")
-                            print(f"      - Profit Target: {'✅' if exit_conditions['profit_target'] else '❌'} {'Triggered' if exit_conditions['profit_target'] else 'Not Triggered'}")
-                            print(f"      - Time Based: {'✅' if exit_conditions['time_based'] else '❌'} {'Triggered' if exit_conditions['time_based'] else 'Not Triggered'}")
-                            print(f"   💰 Exit Details:")
-                            print(f"      - Buy Price: ₹{position.buy_price:.2f}")
-                            print(f"      - Sell Price: ₹{new_option_ltp:.2f}")
-                            print(f"      - Quantity: {position.qty}")
-                            print(f"      - PnL: ₹{position.pnl:.2f}")
+                        exit_triggered = True
+                        exit_reason_to_set = 'stock_vwap_cross'
+                        exit_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
+                        logger.warning(f"✅ APPLIED: VWAP CROSS EXIT for {stock_name}")
+                        logger.info(f"📉 EXIT DECISION: {stock_name} | Time: {exit_time_str} | Reason: VWAP Cross | Stock LTP: ₹{new_stock_ltp:.2f}, VWAP: ₹{new_vwap:.2f} | PnL: ₹{position.pnl:.2f}")
+                        print(f"📉 EXIT DECISION: {stock_name} ({option_contract})")
+                        print(f"   ⏰ Exit Time: {exit_time_str}")
+                        print(f"   📊 Exit Conditions:")
+                        print(f"      - Stop Loss: {'✅' if exit_conditions['stop_loss'] else '❌'} {'Triggered' if exit_conditions['stop_loss'] else 'Not Triggered'}")
+                        print(f"      - VWAP Cross: ✅ Triggered (Stock LTP: ₹{new_stock_ltp:.2f} {'<' if option_type == 'CE' else '>'} VWAP: ₹{new_vwap:.2f})")
+                        print(f"      - Profit Target: {'✅' if exit_conditions['profit_target'] else '❌'} {'Triggered' if exit_conditions['profit_target'] else 'Not Triggered'}")
+                        print(f"   💰 Exit Details:")
+                        print(f"      - Buy Price: ₹{position.buy_price:.2f}")
+                        print(f"      - Sell Price: ₹{exit_option_ltp:.2f}")
+                        print(f"      - Quantity: {position.qty}")
+                        print(f"      - PnL: ₹{position.pnl:.2f}")
+                    
+                    elif exit_conditions['profit_target']:
+                        exit_triggered = True
+                        exit_reason_to_set = 'profit_target'
+                        exit_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
+                        profit_target = position.buy_price * 1.5
+                        logger.warning(f"✅ APPLIED: PROFIT TARGET EXIT for {stock_name}")
+                        logger.info(f"🎯 EXIT DECISION: {stock_name} | Time: {exit_time_str} | Reason: Profit Target | Option LTP: ₹{new_option_ltp:.2f} >= Target: ₹{profit_target:.2f} | PnL: ₹{position.pnl:.2f}")
+                        print(f"🎯 EXIT DECISION: {stock_name} ({option_contract})")
+                        print(f"   ⏰ Exit Time: {exit_time_str}")
+                        print(f"   📊 Exit Conditions:")
+                        print(f"      - Stop Loss: {'✅' if exit_conditions['stop_loss'] else '❌'} {'Triggered' if exit_conditions['stop_loss'] else 'Not Triggered'}")
+                        print(f"      - VWAP Cross: {'✅' if exit_conditions['vwap_cross'] else '❌'} {'Triggered' if exit_conditions['vwap_cross'] else 'Not Triggered'}")
+                        print(f"      - Profit Target: ✅ Triggered (LTP: ₹{new_option_ltp:.2f} >= Target: ₹{profit_target:.2f})")
+                        print(f"   💰 Exit Details:")
+                        print(f"      - Buy Price: ₹{position.buy_price:.2f}")
+                        print(f"      - Sell Price: ₹{new_option_ltp:.2f}")
+                        print(f"      - Quantity: {position.qty}")
+                        print(f"      - PnL: ₹{position.pnl:.2f}")
                         
-                        elif exit_conditions['profit_target']:
-                            exit_triggered = True
-                            exit_reason_to_set = 'profit_target'
-                            exit_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
-                            profit_target = position.buy_price * 1.5
-                            logger.warning(f"✅ APPLIED: PROFIT TARGET EXIT for {stock_name}")
-                            logger.info(f"🎯 EXIT DECISION: {stock_name} | Time: {exit_time_str} | Reason: Profit Target | Option LTP: ₹{new_option_ltp:.2f} >= Target: ₹{profit_target:.2f} | PnL: ₹{position.pnl:.2f}")
-                            print(f"🎯 EXIT DECISION: {stock_name} ({option_contract})")
-                            print(f"   ⏰ Exit Time: {exit_time_str}")
-                            print(f"   📊 Exit Conditions:")
-                            print(f"      - Stop Loss: {'✅' if exit_conditions['stop_loss'] else '❌'} {'Triggered' if exit_conditions['stop_loss'] else 'Not Triggered'}")
-                            print(f"      - VWAP Cross: {'✅' if exit_conditions['vwap_cross'] else '❌'} {'Triggered' if exit_conditions['vwap_cross'] else 'Not Triggered'}")
-                            print(f"      - Profit Target: ✅ Triggered (LTP: ₹{new_option_ltp:.2f} >= Target: ₹{profit_target:.2f})")
-                            print(f"      - Time Based: {'✅' if exit_conditions['time_based'] else '❌'} {'Triggered' if exit_conditions['time_based'] else 'Not Triggered'}")
-                            print(f"   💰 Exit Details:")
-                            print(f"      - Buy Price: ₹{position.buy_price:.2f}")
-                            print(f"      - Sell Price: ₹{new_option_ltp:.2f}")
-                            print(f"      - Quantity: {position.qty}")
-                            print(f"      - PnL: ₹{position.pnl:.2f}")
+                    # Set exit fields if any exit condition was triggered
+                    # ═══════════════════════════════════════════════════════════════
+                    # IMPORTANT: sell_time is ONLY set here, at the moment of exit
+                    # After this update:
+                    #   - exit_reason will be set → Trade excluded from future updates
+                    #   - sell_price is FROZEN at the current value (new_option_ltp)
+                    #   - sell_time is FROZEN at the current timestamp
+                    #   - No more updates will be applied to this trade
+                    # ═══════════════════════════════════════════════════════════════
+                    if exit_triggered and exit_reason_to_set:
+                        # CRITICAL: Ensure sell_price is ALWAYS set when exiting
+                        from sqlalchemy.orm.attributes import flag_modified
+                        if position.sell_price is None or position.sell_price == 0:
+                            if new_option_ltp > 0:
+                                position.sell_price = new_option_ltp
+                            elif old_option_ltp > 0:
+                                position.sell_price = old_option_ltp
+                                logger.warning(f"⚠️ Using last known sell_price ₹{old_option_ltp:.2f} for exit")
+                            elif position.buy_price > 0:
+                                position.sell_price = position.buy_price
+                                logger.error(f"🚨 CRITICAL: No option LTP available, using buy_price ₹{position.buy_price:.2f} (P&L will be 0)")
+                            else:
+                                position.sell_price = 0.0
+                                logger.error(f"🚨 CRITICAL: No sell_price, no buy_price - setting to 0.0")
+                            flag_modified(position, 'sell_price')  # Explicitly mark as modified
                         
-                        # Set exit fields if any exit condition was triggered
-                        # ═══════════════════════════════════════════════════════════════
-                        # IMPORTANT: sell_time is ONLY set here, at the moment of exit
-                        # After this update:
-                        #   - exit_reason will be set → Trade excluded from future updates
-                        #   - sell_price is FROZEN at the current value (new_option_ltp)
-                        #   - sell_time is FROZEN at the current timestamp
-                        #   - No more updates will be applied to this trade
-                        # ═══════════════════════════════════════════════════════════════
-                        if exit_triggered and exit_reason_to_set:
-                            position.exit_reason = exit_reason_to_set
-                            position.sell_time = now  # Set ONLY once at exit
-                            position.status = 'sold'
-                            # sell_price is already set to new_option_ltp above (line 252)
-                            updates_made.append(f"🚨 EXITED: {exit_reason_to_set} at ₹{new_option_ltp:.2f}")
-                            logger.critical(f"🔴 EXIT RECORDED for {stock_name}:")
-                            logger.critical(f"   Exit Reason: {exit_reason_to_set}")
-                            logger.critical(f"   Sell Price: ₹{position.sell_price:.2f}")
-                            logger.critical(f"   Option LTP (fetched): ₹{new_option_ltp:.2f}")
-                            logger.critical(f"   Sell Time: {now.strftime('%H:%M:%S')}")
-                            logger.critical(f"   Stock LTP: ₹{new_stock_ltp:.2f if new_stock_ltp else 0:.2f}, VWAP: ₹{new_vwap:.2f if new_vwap else 0:.2f}")
-                            logger.critical(f"   PnL: ₹{position.pnl:.2f}")
+                        position.exit_reason = exit_reason_to_set
+                        flag_modified(position, 'exit_reason')  # Explicitly mark as modified
+                        position.sell_time = now  # Set ONLY once at exit
+                        position.status = 'sold'
+                        
+                        # CRITICAL: Ensure PnL is ALWAYS calculated when exiting
+                        from sqlalchemy.orm.attributes import flag_modified
+                        if position.buy_price and position.qty and position.sell_price:
+                            position.pnl = (position.sell_price - position.buy_price) * position.qty
+                            flag_modified(position, 'pnl')  # Explicitly mark as modified
+                        elif position.buy_price and position.qty:
+                            # If sell_price is still 0, PnL will be negative (loss)
+                            position.pnl = (0 - position.buy_price) * position.qty
+                            flag_modified(position, 'pnl')  # Explicitly mark as modified
+                            logger.error(f"🚨 CRITICAL: PnL calculated with sell_price=0, result: ₹{position.pnl:.2f}")
+                        else:
+                            position.pnl = 0.0
+                            flag_modified(position, 'pnl')  # Explicitly mark as modified
+                            logger.error(f"🚨 CRITICAL: Cannot calculate PnL - missing buy_price or qty")
+                        
+                        flag_modified(position, 'status')  # Explicitly mark status change
+                        flag_modified(position, 'sell_time')  # Explicitly mark sell_time change
+                        
+                        updates_made.append(f"🚨 EXITED: {exit_reason_to_set} at ₹{position.sell_price:.2f}")
+                        logger.critical(f"🔴 EXIT RECORDED for {stock_name}:")
+                        logger.critical(f"   Exit Reason: {exit_reason_to_set}")
+                        logger.critical(f"   Sell Price: ₹{position.sell_price:.2f}")
+                        logger.critical(f"   Option LTP (fetched): ₹{new_option_ltp:.2f}")
+                        logger.critical(f"   Sell Time: {now.strftime('%H:%M:%S')}")
+                        logger.critical(f"   Stock LTP: ₹{new_stock_ltp:.2f if new_stock_ltp else 0:.2f}, VWAP: ₹{new_vwap:.2f if new_vwap else 0:.2f}")
+                        logger.critical(f"   PnL: ₹{position.pnl:.2f}")
+                
+                # SIMPLIFIED: Always update updated_at and count as updated
+                from sqlalchemy.orm.attributes import flag_modified
+                position.updated_at = now
+                flag_modified(position, 'updated_at')
+                updated_count += 1
                 
                 if updates_made:
-                    position.updated_at = now
                     logger.info(f"✅ {stock_name}: {', '.join(updates_made)}")
-                    updated_count += 1
                 else:
-                    logger.warning(f"⚠️ Could not fetch updated data for {stock_name}")
-                    failed_count += 1
+                    logger.info(f"✅ {stock_name}: Stock data updated (VWAP: ₹{new_vwap:.2f}, LTP: ₹{new_stock_ltp:.2f})")
                     
             except Exception as e:
                 logger.error(f"Error updating position for {position.stock_name}: {str(e)}")
@@ -1145,17 +1529,348 @@ async def update_vwap_for_all_open_positions():
             logger.warning(f"⚠️ Error saving historical data for no_entry trades: {str(e)}")
         
         # Commit all updates
-        db.commit()
+        # #region agent log
+        try:
+            # Check which positions have pending changes before commit
+            pending_changes = []
+            for pos in open_positions:
+                if pos in db.dirty:
+                    pending_changes.append({
+                        "stock_name": pos.stock_name,
+                        "sell_price": pos.sell_price,
+                        "status": pos.status
+                    })
+            
+            os_module.makedirs(os_module.path.dirname(log_path), exist_ok=True)
+            with open(log_path, 'a') as f:
+                pre_commit_log = json_module.dumps({
+                    "id": f"log_pre_commit_{int(now.timestamp())}",
+                    "timestamp": int(now.timestamp() * 1000),
+                    "location": "vwap_updater.py:1360",
+                    "message": "Before database commit",
+                    "data": {
+                        "updated_count": updated_count,
+                        "failed_count": failed_count,
+                        "total_positions": len(open_positions),
+                        "dirty_objects_count": len(db.dirty),
+                        "pending_changes": pending_changes[:10]  # First 10 for brevity
+                    },
+                    "sessionId": "debug-session",
+                    "runId": "sell-price-fix",
+                    "hypothesisId": "PRE_COMMIT"
+                }) + "\n"
+                f.write(pre_commit_log)
+                f.flush()
+            logger.info(f"🔍 DEBUG PRE-COMMIT: {len(db.dirty)} objects marked as dirty, {updated_count} positions updated")
+        except Exception as log_err:
+            logger.error(f"❌ Failed to write pre-commit log: {str(log_err)}")
+        # #endregion
+        
+        # SIMPLIFIED: Flush and commit all changes
+        try:
+            db.flush()
+            db.commit()
+            logger.info(f"✅ Committed {updated_count} position updates to database")
+            
+            # #region agent log
+            try:
+                os_module.makedirs(os_module.path.dirname(log_path), exist_ok=True)
+                with open(log_path, 'a') as f:
+                    commit_success_log = json_module.dumps({
+                        "id": f"log_commit_success_{int(now.timestamp())}",
+                        "timestamp": int(now.timestamp() * 1000),
+                        "location": "vwap_updater.py:1455",
+                        "message": "Database commit successful",
+                        "data": {
+                            "updated_count": updated_count,
+                            "failed_count": failed_count
+                        },
+                        "sessionId": "debug-session",
+                        "runId": "sell-price-fix",
+                        "hypothesisId": "COMMIT_SUCCESS"
+                    }) + "\n"
+                    f.write(commit_success_log)
+                    f.flush()
+            except Exception:
+                pass
+            # #endregion
+        except Exception as commit_err:
+            logger.error(f"❌ Database commit failed: {str(commit_err)}")
+            import traceback
+            traceback.print_exc()
+            
+            # #region agent log
+            try:
+                os_module.makedirs(os_module.path.dirname(log_path), exist_ok=True)
+                with open(log_path, 'a') as f:
+                    commit_fail_log = json_module.dumps({
+                        "id": f"log_commit_failed_{int(now.timestamp())}",
+                        "timestamp": int(now.timestamp() * 1000),
+                        "location": "vwap_updater.py:1470",
+                        "message": "Database commit failed",
+                        "data": {
+                            "error": str(commit_err),
+                            "updated_count": updated_count,
+                            "failed_count": failed_count
+                        },
+                        "sessionId": "debug-session",
+                        "runId": "sell-price-fix",
+                        "hypothesisId": "COMMIT_FAILED"
+                    }) + "\n"
+                    f.write(commit_fail_log)
+                    f.flush()
+            except Exception:
+                pass
+            # #endregion
+            
+            db.rollback()
+            raise
+        
+        # #region agent log
+        try:
+            # CRITICAL: Refresh all positions from database to see what's actually persisted
+            # After commit, objects in the session might be stale, so refresh them
+            for pos in open_positions:
+                try:
+                    db.refresh(pos)
+                except Exception:
+                    pass  # If refresh fails, continue
+            
+            # Verify sell_price was actually saved
+            verification_positions = db.query(IntradayStockOption).filter(
+                and_(
+                    IntradayStockOption.trade_date >= today,
+                    IntradayStockOption.status != 'sold',
+                    IntradayStockOption.exit_reason == None
+                )
+            ).all()
+            
+            sell_price_status = {}
+            for pos in verification_positions:
+                has_sell_price = pos.sell_price is not None and pos.sell_price > 0
+                sell_price_status[pos.stock_name] = {
+                    "has_sell_price": has_sell_price,
+                    "sell_price": float(pos.sell_price) if pos.sell_price else None,
+                    "status": pos.status,
+                    "buy_price": float(pos.buy_price) if pos.buy_price else None,
+                    "pnl": float(pos.pnl) if pos.pnl else None,
+                    "has_instrument_key": bool(pos.instrument_key),
+                    "updated_at": str(pos.updated_at) if pos.updated_at else None
+                }
+            
+            with_sell_price_count = sum(1 for v in sell_price_status.values() if v["has_sell_price"])
+            without_sell_price_count = sum(1 for v in sell_price_status.values() if not v["has_sell_price"])
+            
+            os_module.makedirs(os_module.path.dirname(log_path), exist_ok=True)
+            with open(log_path, 'a') as f:
+                post_commit_log = json_module.dumps({
+                    "id": f"log_post_commit_{int(now.timestamp())}",
+                    "timestamp": int(now.timestamp() * 1000),
+                    "location": "vwap_updater.py:1520",
+                    "message": "After database commit - verification",
+                    "data": {
+                        "sell_price_status": sell_price_status,
+                        "positions_with_sell_price": with_sell_price_count,
+                        "positions_without_sell_price": without_sell_price_count,
+                        "total_positions": len(sell_price_status)
+                    },
+                    "sessionId": "debug-session",
+                    "runId": "sell-price-fix",
+                    "hypothesisId": "POST_COMMIT"
+                }) + "\n"
+                f.write(post_commit_log)
+                f.flush()
+            
+            logger.info(f"🔍 DEBUG POST-COMMIT: {with_sell_price_count}/{len(sell_price_status)} positions have sell_price")
+            if without_sell_price_count > 0:
+                logger.warning(f"⚠️ POST-COMMIT WARNING: {without_sell_price_count} positions still missing sell_price!")
+                missing_details = [k for k, v in sell_price_status.items() if not v["has_sell_price"]]
+                logger.warning(f"   Missing sell_price: {missing_details[:5]}")
+        except Exception as log_err:
+            logger.error(f"❌ Failed to write post-commit log: {str(log_err)}")
+            import traceback
+            logger.error(traceback.format_exc())
+        # #endregion
         
         logger.info(f"📊 Hourly Update Complete: {updated_count} positions updated, {failed_count} failed")
         
+        # #region agent log - Final summary
+        try:
+            # Final verification query after all updates
+            final_positions = db.query(IntradayStockOption).filter(
+                and_(
+                    IntradayStockOption.trade_date >= today,
+                    IntradayStockOption.status != 'sold',
+                    IntradayStockOption.exit_reason == None
+                )
+            ).all()
+            
+            final_summary = {
+                "total_open_positions": len(final_positions),
+                "with_sell_price": sum(1 for p in final_positions if p.sell_price and p.sell_price > 0),
+                "without_sell_price": sum(1 for p in final_positions if not p.sell_price or p.sell_price == 0),
+                "without_instrument_key": sum(1 for p in final_positions if not p.instrument_key),
+                "positions_detail": [
+                    {
+                        "stock_name": p.stock_name,
+                        "status": p.status,
+                        "sell_price": float(p.sell_price) if p.sell_price else None,
+                        "has_instrument_key": bool(p.instrument_key)
+                    }
+                    for p in final_positions[:10]
+                ]
+            }
+            
+            os_module.makedirs(os_module.path.dirname(log_path), exist_ok=True)
+            with open(log_path, 'a') as f:
+                final_summary_log = json_module.dumps({
+                    "id": f"log_final_summary_{int(now.timestamp())}",
+                    "timestamp": int(now.timestamp() * 1000),
+                    "location": "vwap_updater.py:1430",
+                    "message": "Final summary after update",
+                    "data": final_summary,
+                    "sessionId": "debug-session",
+                    "runId": "sell-price-fix",
+                    "hypothesisId": "FINAL_SUMMARY"
+                }) + "\n"
+                f.write(final_summary_log)
+                f.flush()
+            
+            logger.info(f"🔍 DEBUG FINAL SUMMARY: {final_summary['with_sell_price']}/{final_summary['total_open_positions']} positions have sell_price")
+            logger.info(f"🔍 DEBUG FINAL SUMMARY: {final_summary['without_instrument_key']} positions missing instrument_key")
+            if final_summary['without_sell_price'] > 0:
+                logger.warning(f"⚠️ WARNING: {final_summary['without_sell_price']} positions still missing sell_price!")
+                for pos_detail in final_summary['positions_detail']:
+                    if not pos_detail['sell_price']:
+                        logger.warning(f"   - {pos_detail['stock_name']} (status={pos_detail['status']}, has_instrument_key={pos_detail['has_instrument_key']})")
+            
+            # CRITICAL: Direct database query to verify what's actually persisted
+            # Query fresh from database (new session) to see what's actually saved
+            verification_db = SessionLocal()
+            try:
+                verification_query = verification_db.query(IntradayStockOption).filter(
+                    and_(
+                        IntradayStockOption.trade_date >= today,
+                        IntradayStockOption.status != 'sold',
+                        IntradayStockOption.exit_reason == None
+                    )
+                ).all()
+                
+                verification_results = []
+                for vpos in verification_query:
+                    verification_results.append({
+                        "stock_name": vpos.stock_name,
+                        "status": vpos.status,
+                        "buy_price": float(vpos.buy_price) if vpos.buy_price else None,
+                        "sell_price": float(vpos.sell_price) if vpos.sell_price else None,
+                        "pnl": float(vpos.pnl) if vpos.pnl else None,
+                        "has_instrument_key": bool(vpos.instrument_key),
+                        "updated_at": str(vpos.updated_at) if vpos.updated_at else None
+                    })
+                
+                with_sell_price_verification = sum(1 for v in verification_results if v['sell_price'])
+                without_sell_price_verification = sum(1 for v in verification_results if not v['sell_price'])
+                
+                logger.info(f"🔍 DEBUG VERIFICATION QUERY: Fresh database query returned {len(verification_query)} positions")
+                logger.info(f"🔍 DEBUG VERIFICATION: Positions with sell_price: {with_sell_price_verification}")
+                logger.info(f"🔍 DEBUG VERIFICATION: Positions without sell_price: {without_sell_price_verification}")
+                if verification_results:
+                    logger.info(f"🔍 DEBUG VERIFICATION: Sample positions: {verification_results[:3]}")
+                
+                if without_sell_price_verification > 0:
+                    logger.error(f"🚨 CRITICAL: {without_sell_price_verification} positions still missing sell_price after commit!")
+                    missing_positions = [v for v in verification_results if not v['sell_price']]
+                    for missing in missing_positions[:5]:
+                        logger.error(f"   MISSING sell_price: {missing['stock_name']} - status={missing['status']}, has_instrument_key={missing['has_instrument_key']}, buy_price={missing['buy_price']}")
+                
+                # #region agent log
+                try:
+                    os_module.makedirs(os_module.path.dirname(log_path), exist_ok=True)
+                    with open(log_path, 'a') as f:
+                        verification_log = json_module.dumps({
+                            "id": f"log_verification_query_{int(now.timestamp())}",
+                            "timestamp": int(now.timestamp() * 1000),
+                            "location": "vwap_updater.py:1713",
+                            "message": "Fresh database verification query",
+                            "data": {
+                                "total_positions": len(verification_query),
+                                "with_sell_price": with_sell_price_verification,
+                                "without_sell_price": without_sell_price_verification,
+                                "positions": verification_results[:10]
+                            },
+                            "sessionId": "debug-session",
+                            "runId": "sell-price-fix",
+                            "hypothesisId": "VERIFICATION_QUERY"
+                        }) + "\n"
+                        f.write(verification_log)
+                        f.flush()
+                except Exception as verif_log_err:
+                    logger.error(f"❌ Failed to write verification query log: {str(verif_log_err)}")
+                # #endregion
+            finally:
+                verification_db.close()
+        except Exception as summary_err:
+            logger.error(f"❌ Failed to write final summary log: {str(summary_err)}")
+        # #endregion
+        
     except Exception as e:
-        logger.error(f"Error in hourly market data update job: {str(e)}")
+        logger.error(f"❌ CRITICAL ERROR in hourly market data update job: {str(e)}")
         import traceback
-        traceback.print_exc()
-        db.rollback()
+        error_trace = traceback.format_exc()
+        logger.error(error_trace)
+        
+        # #region agent log - Error logging
+        try:
+            import json as json_module
+            import os as os_module
+            log_path = '/Users/bipulsahay/TradeManthan/.cursor/debug.log'
+            os_module.makedirs(os_module.path.dirname(log_path), exist_ok=True)
+            with open(log_path, 'a') as f:
+                error_log = json_module.dumps({
+                    "id": f"log_function_error_{int(datetime.now(pytz.timezone('Asia/Kolkata')).timestamp())}",
+                    "timestamp": int(datetime.now(pytz.timezone('Asia/Kolkata')).timestamp() * 1000),
+                    "location": "vwap_updater.py:1666",
+                    "message": "Function error",
+                    "data": {
+                        "error": str(e),
+                        "traceback": error_trace[:500]  # First 500 chars of traceback
+                    },
+                    "sessionId": "debug-session",
+                    "runId": "sell-price-fix",
+                    "hypothesisId": "FUNCTION_ERROR"
+                }) + "\n"
+                f.write(error_log)
+                f.flush()
+        except Exception:
+            pass
+        # #endregion
+        
+        if db:
+            try:
+                db.rollback()
+            except Exception:
+                pass
     finally:
-        db.close()
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
+        
+        # CRITICAL: Log function exit with summary
+        try:
+            import pytz as pytz_module_exit
+            from datetime import datetime as dt_module_exit
+            ist_exit = pytz_module_exit.timezone('Asia/Kolkata')
+            now_exit = dt_module_exit.now(ist_exit)
+            exit_msg = f"🏁 FUNCTION EXIT: update_vwap_for_all_open_positions() completed at {now_exit.strftime('%Y-%m-%d %H:%M:%S IST')}"
+            print(exit_msg, file=sys.stderr)
+            try:
+                logger.info(exit_msg)
+            except Exception:
+                pass
+        except Exception:
+            print("🏁 FUNCTION EXIT: update_vwap_for_all_open_positions() completed (timestamp unavailable)", file=sys.stderr)
 
 
 async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime):
@@ -1192,6 +1907,26 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
         ist = pytz.timezone('Asia/Kolkata')
         now = cycle_time if cycle_time.tzinfo else ist.localize(cycle_time)
         today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        # #region agent log
+        # Log function entry immediately - CRITICAL: This must work
+        import json
+        import os
+        log_path = '/Users/bipulsahay/TradeManthan/.cursor/debug.log'
+        try:
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            # Write entry log
+            with open(log_path, 'a') as f:
+                entry_log = json.dumps({"id":f"log_cycle1_entry_{int(now.timestamp())}","timestamp":int(now.timestamp()*1000),"location":"vwap_updater.py:1190","message":"Cycle 1 - Function entry","data":{"cycle_number":cycle_number,"cycle_time":str(cycle_time),"now":str(now),"today":str(today)},"sessionId":"debug-session","runId":"post-fix","hypothesisId":"ENTRY"}) + "\n"
+                f.write(entry_log)
+                f.flush()  # Force write to disk
+            logger.info(f"📝 Debug log written to {log_path}")
+        except Exception as log_err:
+            logger.error(f"❌ CRITICAL: Failed to write debug log entry: {str(log_err)}")
+            import traceback
+            logger.error(traceback.format_exc())
+        # #endregion
         
         logger.info(f"🔄 Starting Cycle {cycle_number} VWAP slope calculation at {now.strftime('%Y-%m-%d %H:%M:%S IST')}")
         
@@ -1282,10 +2017,12 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
         
         # Query stocks that need VWAP slope calculation
         # Rules:
-        # 1. Stocks from webhook alerts at CURRENT cycle's alert time (if status is still 'alert_received' or 'no_entry')
-        # 2. No_Entry stocks from PREVIOUS cycles (up to previous cycle's alert time)
-        # 3. VWAP slope is NOT calculated if status is not No_Entry (already entered)
-        # 4. Candle size is only calculated when stock is received from webhook alert scan
+        # 1. Cycle 1 (10:30 AM): ALL stocks from 10:15 AM webhook (regardless of status)
+        #    - This ensures VWAP slope is calculated for all 10:15 AM records
+        # 2. Other cycles: Stocks from webhook alerts at CURRENT cycle's alert time (if status is still 'alert_received' or 'no_entry')
+        # 3. No_Entry stocks from PREVIOUS cycles (up to previous cycle's alert time)
+        # 4. For cycles 2-5: VWAP slope is NOT calculated if status is not No_Entry (already entered)
+        # 5. Candle size is only calculated when stock is received from webhook alert scan
         #    If status is No_Entry, candle size will not be recalculated in subsequent cycles
         from datetime import timedelta
         
@@ -1294,18 +2031,47 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
         
         # Build query based on cycle number
         if cycle_number == 1:
-            # Cycle 1: Only stocks from 10:15 AM webhook with status 'no_entry' or 'alert_received'
+            # #region agent log
+            # First, query ALL 10:15 AM records to see status breakdown
+            all_10_15_records = db.query(IntradayStockOption).filter(
+                and_(
+                    IntradayStockOption.trade_date >= today,
+                    IntradayStockOption.alert_time >= target_alert_times[0],
+                    IntradayStockOption.alert_time < target_alert_times[0] + timedelta(minutes=1)
+                )
+            ).all()
+            status_breakdown = {}
+            for r in all_10_15_records:
+                status_breakdown[r.status] = status_breakdown.get(r.status, 0) + 1
+            
+            # Log to application logger FIRST (always works)
+            logger.info(f"🔍 DEBUG Cycle 1: Found {len(all_10_15_records)} total 10:15 AM records. Status breakdown: {status_breakdown}")
+            
+            import json
+            import os
+            log_path = '/Users/bipulsahay/TradeManthan/.cursor/debug.log'
+            try:
+                # Ensure directory exists
+                os.makedirs(os.path.dirname(log_path), exist_ok=True)
+                with open(log_path, 'a') as f:
+                    f.write(json.dumps({"id":f"log_cycle1_{int(now.timestamp())}","timestamp":int(now.timestamp()*1000),"location":"vwap_updater.py:1296","message":"Cycle 1 - All 10:15 AM records status breakdown","data":{"total_records":len(all_10_15_records),"status_breakdown":status_breakdown,"cycle_number":1,"target_alert_time":str(target_alert_times[0])},"sessionId":"debug-session","runId":"post-fix","hypothesisId":"A"}) + "\n")
+                    f.flush()
+            except Exception as log_err:
+                logger.error(f"Failed to write debug log (hypothesis A): {str(log_err)}")
+            # #endregion
+            
+            # Cycle 1: ALL stocks from 10:15 AM webhook (regardless of status)
+            # This ensures VWAP slope is calculated for all 10:15 AM records at 10:30 AM
             stocks_to_process = db.query(IntradayStockOption).filter(
                 and_(
                     IntradayStockOption.trade_date >= today,
                     IntradayStockOption.alert_time >= target_alert_times[0],
-                    IntradayStockOption.alert_time < target_alert_times[0] + timedelta(minutes=1),
-                    or_(
-                        IntradayStockOption.status == 'no_entry',
-                        IntradayStockOption.status == 'alert_received'
-                    )
+                    IntradayStockOption.alert_time < target_alert_times[0] + timedelta(minutes=1)
                 )
             ).all()
+            
+            # Log query result to application logger
+            logger.info(f"🔍 DEBUG Cycle 1: Query returned {len(stocks_to_process)} stocks to process (should match {len(all_10_15_records)} total records)")
         elif cycle_number == 2:
             # Cycle 2: Stocks from 11:15 AM webhook + No_Entry from 10:15 AM
             stocks_to_process = db.query(IntradayStockOption).filter(
@@ -1418,10 +2184,32 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
             stocks_to_process = []
         
         if not stocks_to_process:
+            # #region agent log
+            # Log when no stocks found
+            import json
+            with open('/Users/bipulsahay/TradeManthan/.cursor/debug.log', 'a') as f:
+                f.write(json.dumps({"id":f"log_cycle1_no_stocks_{int(now.timestamp())}","timestamp":int(now.timestamp()*1000),"location":"vwap_updater.py:1436","message":"Cycle 1 - No stocks found","data":{"cycle_number":cycle_number,"target_alert_times":[str(t) for t in target_alert_times],"today":str(today)},"sessionId":"debug-session","runId":"post-fix","hypothesisId":"F"}) + "\n")
+            # #endregion
             logger.info(f"ℹ️ No stocks found for Cycle {cycle_number} VWAP slope calculation")
             return
         
         logger.info(f"📋 Found {len(stocks_to_process)} stocks for Cycle {cycle_number} VWAP slope calculation")
+        
+        # #region agent log
+        # Log status breakdown of stocks to process
+        process_status_breakdown = {}
+        for t in stocks_to_process:
+            process_status_breakdown[t.status] = process_status_breakdown.get(t.status, 0) + 1
+        import json
+        import os
+        log_path = '/Users/bipulsahay/TradeManthan/.cursor/debug.log'
+        try:
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            with open(log_path, 'a') as f:
+                f.write(json.dumps({"id":f"log_cycle1_process_{int(now.timestamp())}","timestamp":int(now.timestamp()*1000),"location":"vwap_updater.py:1424","message":"Cycle 1 - Stocks to process status breakdown","data":{"total_to_process":len(stocks_to_process),"status_breakdown":process_status_breakdown,"cycle_number":1},"sessionId":"debug-session","runId":"post-fix","hypothesisId":"B"}) + "\n")
+        except Exception as log_err:
+            logger.error(f"Failed to write debug log (hypothesis B): {str(log_err)}")
+        # #endregion
         
         processed_count = 0
         success_count = 0
@@ -1430,11 +2218,33 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
             try:
                 stock_name = trade.stock_name
                 
-                # VWAP slope should ONLY be calculated if status is 'no_entry' or 'alert_received'
-                # If status changed from No_Entry (already entered), skip VWAP slope calculation
-                if trade.status != 'no_entry' and trade.status != 'alert_received':
-                    logger.debug(f"⚪ Skipping {stock_name} - already entered (status: {trade.status}), VWAP slope not calculated for subsequent cycles")
-                    continue
+                # #region agent log
+                # Log each record being processed and its status
+                # Log to application logger FIRST
+                logger.info(f"🔍 DEBUG Cycle {cycle_number}: Processing {stock_name} (status: {trade.status}, alert_time: {trade.alert_time})")
+                
+                import json
+                import os
+                log_path = '/Users/bipulsahay/TradeManthan/.cursor/debug.log'
+                try:
+                    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+                    with open(log_path, 'a') as f:
+                        f.write(json.dumps({"id":f"log_cycle1_trade_{trade.id}","timestamp":int(now.timestamp()*1000),"location":"vwap_updater.py:1430","message":"Cycle 1 - Processing trade","data":{"stock_name":stock_name,"status":trade.status,"alert_time":str(trade.alert_time) if trade.alert_time else None,"cycle_number":1},"sessionId":"debug-session","runId":"post-fix","hypothesisId":"C"}) + "\n")
+                        f.flush()
+                except Exception as log_err:
+                    logger.error(f"Failed to write debug log (hypothesis C): {str(log_err)}")
+                # #endregion
+                
+                # For Cycle 1: Calculate VWAP slope for ALL records (including 'bought' status)
+                # For other cycles: Only calculate if status is 'no_entry' or 'alert_received'
+                if cycle_number == 1:
+                    # Cycle 1: Process ALL records regardless of status
+                    pass  # Continue processing
+                else:
+                    # Other cycles: Only process if status is 'no_entry' or 'alert_received'
+                    if trade.status != 'no_entry' and trade.status != 'alert_received':
+                        logger.debug(f"⚪ Skipping {stock_name} - already entered (status: {trade.status}), VWAP slope not calculated for subsequent cycles")
+                        continue
                 
                 # Get current stock data first (needed for historical record)
                 stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
@@ -1685,6 +2495,23 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 trade.vwap_slope_angle = slope_angle
                 trade.vwap_slope_direction = slope_direction
                 trade.vwap_slope_time = current_vwap_time_actual
+                
+                # #region agent log
+                # Log VWAP slope calculation result before commit
+                # Log to application logger FIRST
+                logger.info(f"🔍 DEBUG Cycle {cycle_number}: VWAP slope calculated for {stock_name} (status: {trade.status}) - Angle: {slope_angle:.2f}°, Status: {slope_status}, Direction: {slope_direction}")
+                
+                import json
+                import os
+                log_path = '/Users/bipulsahay/TradeManthan/.cursor/debug.log'
+                try:
+                    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+                    with open(log_path, 'a') as f:
+                        f.write(json.dumps({"id":f"log_vwap_slope_calc_{trade.id}","timestamp":int(now.timestamp()*1000),"location":"vwap_updater.py:1722","message":"VWAP slope calculated and stored","data":{"stock_name":stock_name,"status":trade.status,"vwap_slope_angle":slope_angle,"vwap_slope_status":slope_status,"vwap_slope_direction":slope_direction,"cycle_number":cycle_number},"sessionId":"debug-session","runId":"post-fix","hypothesisId":"D"}) + "\n")
+                        f.flush()
+                except Exception as log_err:
+                    logger.error(f"Failed to write debug log (hypothesis D): {str(log_err)}")
+                # #endregion
                 
                 logger.info(f"✅ Cycle {cycle_number} - {stock_name}: VWAP slope {slope_angle:.2f}° ({slope_direction}) - {'PASS' if vwap_slope_passed else 'FAIL'}")
                 
@@ -2066,16 +2893,74 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 success_count += 1
                 
             except Exception as e:
-                logger.error(f"❌ Error processing {trade.stock_name if trade else 'unknown'} in Cycle {cycle_number}: {str(e)}")
+                # #region agent log
+                # Log per-trade exception
+                import json
+                import traceback
+                error_trace = traceback.format_exc()
+                stock_name_for_log = trade.stock_name if trade else 'unknown'
+                trade_id_for_log = trade.id if trade else None
+                with open('/Users/bipulsahay/TradeManthan/.cursor/debug.log', 'a') as f:
+                    f.write(json.dumps({"id":f"log_cycle1_trade_exception_{trade_id_for_log}","timestamp":int(now.timestamp()*1000),"location":"vwap_updater.py:2119","message":"Cycle 1 - Exception processing trade","data":{"stock_name":stock_name_for_log,"trade_id":trade_id_for_log,"status":trade.status if trade else None,"cycle_number":cycle_number,"error":str(e),"traceback":error_trace},"sessionId":"debug-session","runId":"post-fix","hypothesisId":"H"}) + "\n")
+                # #endregion
+                logger.error(f"❌ Error processing {stock_name_for_log} in Cycle {cycle_number}: {str(e)}")
                 import traceback
                 traceback.print_exc()
             
             processed_count += 1
         
         db.commit()
+        
+        # #region agent log
+        # Log after commit and verify records were actually saved to database
+        import os
+        log_path = '/Users/bipulsahay/TradeManthan/.cursor/debug.log'
+        try:
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            # Verify by querying database after commit
+            if cycle_number == 1:
+                # Query all 10:15 AM records to see if VWAP slope was saved
+                from datetime import timedelta
+                verified_records = db.query(IntradayStockOption).filter(
+                    and_(
+                        IntradayStockOption.trade_date >= today,
+                        IntradayStockOption.alert_time >= target_alert_times[0],
+                        IntradayStockOption.alert_time < target_alert_times[0] + timedelta(minutes=1)
+                    )
+                ).all()
+                
+                vwap_slope_status_breakdown = {}
+                for r in verified_records:
+                    status_key = f"{r.status}_vwap_slope_{'calculated' if r.vwap_slope_angle is not None else 'not_calculated'}"
+                    vwap_slope_status_breakdown[status_key] = vwap_slope_status_breakdown.get(status_key, 0) + 1
+                
+                with open(log_path, 'a') as f:
+                    f.write(json.dumps({"id":f"log_cycle1_after_commit_{int(now.timestamp())}","timestamp":int(now.timestamp()*1000),"location":"vwap_updater.py:2174","message":"Cycle 1 - After commit verification","data":{"cycle_number":cycle_number,"commit_successful":True,"processed_count":processed_count,"success_count":success_count,"verified_total_records":len(verified_records),"vwap_slope_status_breakdown":vwap_slope_status_breakdown},"sessionId":"debug-session","runId":"post-fix","hypothesisId":"E"}) + "\n")
+                    f.flush()
+            else:
+                with open(log_path, 'a') as f:
+                    f.write(json.dumps({"id":f"log_cycle1_after_commit_{int(now.timestamp())}","timestamp":int(now.timestamp()*1000),"location":"vwap_updater.py:2174","message":"Cycle 1 - After commit","data":{"cycle_number":cycle_number,"commit_successful":True},"sessionId":"debug-session","runId":"post-fix","hypothesisId":"E"}) + "\n")
+                    f.flush()
+        except Exception as log_err:
+            logger.error(f"Failed to write verification log: {str(log_err)}")
+        # #endregion
+        
+        # Final summary log
+        if cycle_number == 1:
+            logger.info(f"🔍 DEBUG Cycle 1 FINAL SUMMARY: Processed {processed_count} stocks, Success: {success_count}")
+            logger.info(f"🔍 DEBUG Cycle 1: Expected to process ALL 10:15 AM records regardless of status")
+        
         logger.info(f"✅ Cycle {cycle_number} completed: {success_count}/{processed_count} stocks processed successfully")
         
     except Exception as e:
+        # #region agent log
+        # Log exception details
+        import json
+        import traceback
+        error_trace = traceback.format_exc()
+        with open('/Users/bipulsahay/TradeManthan/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"id":f"log_cycle1_exception_{int(datetime.now(pytz.timezone('Asia/Kolkata')).timestamp())}","timestamp":int(datetime.now(pytz.timezone('Asia/Kolkata')).timestamp()*1000),"location":"vwap_updater.py:2116","message":"Cycle 1 - Exception occurred","data":{"cycle_number":cycle_number,"error":str(e),"traceback":error_trace},"sessionId":"debug-session","runId":"post-fix","hypothesisId":"G"}) + "\n")
+        # #endregion
         logger.error(f"❌ Error in Cycle {cycle_number} VWAP slope calculation: {str(e)}")
         import traceback
         traceback.print_exc()
