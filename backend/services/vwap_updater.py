@@ -2551,12 +2551,12 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                         logger.warning(f"Error retrying option contract determination for {stock_name}: {str(contract_error)}")
                 
                 # ====================================================================
-                # RECALCULATE CANDLE SIZE FOR NO_ENTRY STOCKS
+                # RECALCULATE CANDLE SIZE FOR NO_ENTRY / ALERT_RECEIVED STOCKS
                 # ====================================================================
-                # Recalculate candle size for stocks that are still in "no_entry" status
-                # This ensures candle size is updated with latest data at each cycle
-                # Do this AFTER option contract determination so we have instrument_key
-                # IMPORTANT: For 10:15 AM alerts, candle size is initially skipped but should be calculated at 10:30 AM
+                # Recalculate candle size for stocks that are still in "no_entry" or
+                # "alert_received" status. This ensures candle size is updated with
+                # latest data at each cycle. Do this AFTER option contract determination
+                # so we have instrument_key.
                 candle_size_passed = False
                 candle_size_ratio = None
                 is_10_15_alert = trade.alert_time and trade.alert_time.hour == 10 and trade.alert_time.minute == 15
@@ -2686,19 +2686,11 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                         elif both_bearish or opposite_directions:
                             can_enter_by_index = False
                     
-                    # For 10:15 AM alerts, skip candle size check ONLY if we're at Cycle 1 (10:30 AM) and haven't recalculated yet
-                    # If candle size was recalculated at 10:30 AM, use the actual result
+                    # Apply candle size check uniformly for all alerts, including 10:15 AM.
+                    # If candle size could not be calculated (ratio is None), the check will fail,
+                    # and logs will clearly show that candle size was not calculated.
                     is_10_15_alert = trade.alert_time and trade.alert_time.hour == 10 and trade.alert_time.minute == 15
-                    # If we're at Cycle 1 (10:30 AM) and candle size was recalculated, use the actual result
-                    # Otherwise, skip the check for 10:15 AM alerts
-                    if is_10_15_alert and cycle_number == 1 and candle_size_ratio is not None:
-                        # Candle size was recalculated at 10:30 AM, use actual result
-                        candle_size_check_passed = candle_size_passed
-                    elif is_10_15_alert:
-                        # Still skip for 10:15 AM alerts if not recalculated yet
-                        candle_size_check_passed = True
-                    else:
-                        candle_size_check_passed = candle_size_passed
+                    candle_size_check_passed = candle_size_passed
                     
                     # Check if all entry conditions are met
                     # Log each condition for debugging
@@ -2726,7 +2718,7 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                         logger.info(f"      - Time Before 3PM: {'✅' if is_before_3pm else '❌'} ({now.strftime('%H:%M:%S')})")
                         logger.info(f"      - Index Trends: {'✅' if can_enter_by_index else '❌'} (NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}, Option={option_type})")
                         logger.info(f"      - VWAP Slope: {'✅' if vwap_slope_passed else '❌'} ({slope_angle:.2f}°)" if slope_angle else f"      - VWAP Slope: ❌ (not calculated)")
-                        logger.info(f"      - Candle Size: {'✅' if candle_size_check_passed else '❌'} (Ratio: {candle_size_ratio:.2f}x)" if candle_size_ratio else f"      - Candle Size: {'✅ Skipped (10:15 alert)' if is_10_15_alert else '❌ (not calculated)'}")
+                        logger.info(f"      - Candle Size: {'✅' if candle_size_check_passed else '❌'} (Ratio: {candle_size_ratio:.2f}x)" if candle_size_ratio is not None else "      - Candle Size: ❌ (not calculated)")
                         logger.info(f"      - Option Contract: {'✅' if trade.option_contract else '❌'} ({trade.option_contract or 'Missing'})")
                         logger.info(f"      - Instrument Key: {'✅' if trade.instrument_key else '❌'} ({trade.instrument_key or 'Missing'})")
                     
@@ -2760,7 +2752,7 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                             logger.info(f"   Entry Time: {entry_time_str} (was 'no_entry' at alert time: {alert_time_str})")
                             logger.info(f"   Buy Price: ₹{current_option_ltp:.2f} (current LTP)")
                             logger.info(f"   VWAP Slope: ✅ >= 45° ({slope_angle:.2f}°)")
-                            logger.info(f"   Candle Size: ✅ Passed (Ratio: {candle_size_ratio:.2f}x)" if candle_size_ratio else "   Candle Size: ✅ Skipped (10:15 alert)")
+                            logger.info(f"   Candle Size: ✅ Passed (Ratio: {candle_size_ratio:.2f}x)" if candle_size_ratio is not None else "   Candle Size: ❌ (not calculated)")
                             logger.info(f"   Index Trends: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
                             print(f"✅ Cycle {cycle_number} - TRADE ENTERED: {stock_name} ({trade.option_contract})")
                             print(f"   ⏰ Entry Time: {entry_time_str} (was 'no_entry' at alert time: {alert_time_str})")

@@ -940,11 +940,11 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         alert_minute = triggered_datetime.minute
         is_after_3_00pm = (alert_hour > 15) or (alert_hour == 15 and alert_minute >= 0)
         
-        # Special handling for 10:15 AM alerts (first alert of the day)
-        # At 10:15 AM, market has only been open for 45 minutes, so:
-        # - Previous hour VWAP may not be available (9:15 AM was before market open)
-        # - Option candles may not be fully formed yet
-        # For 10:15 AM alerts, skip VWAP slope and candle size filters
+        # Special handling flag for 10:15 AM alerts (first alert of the day)
+        # NOTE: Historically we skipped VWAP slope and candle size filters for 10:15 alerts.
+        # This behaviour has been CHANGED: 10:15 alerts will now go through the same
+        # candle size filter as other alerts so they are not "skipped by design".
+        # We still keep the flag for logging/analysis if needed.
         is_10_15_alert = (alert_hour == 10 and alert_minute == 15)
         
         if is_after_3_00pm:
@@ -1085,10 +1085,11 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 # 3. VWAP slope >= 45 degrees (calculated in cycle-based scheduler, not here)
                 # 4. Current candle size < 7-8x previous candle (calculated here for webhook alerts)
                 # 5. Valid option data (option_ltp > 0, lot_size > 0)
-                # NOTE: VWAP slope is NOT calculated here - it will be calculated in cycle-based scheduler
-                # For initial webhook processing, we only check candle size (if available)
-                # For 10:15 AM alerts, skip filters due to insufficient historical data
-                filters_passed = candle_size_passed if not is_10_15_alert else True
+                # NOTE: VWAP slope is NOT calculated here - it will be calculated in cycle-based scheduler.
+                # For webhook processing (including 10:15 AM alerts), we ALWAYS apply the candle size filter
+                # when data is available. If candle data is missing, candle_size_passed remains False and
+                # candle_size_reason will explain the issue.
+                filters_passed = candle_size_passed
                 
                 # Initialize no_entry_reason early (will be set if entry fails)
                 no_entry_reason = None
@@ -1105,15 +1106,12 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     no_entry_reason = "Time >= 3PM"
                 elif not can_enter_trade_by_index:
                     no_entry_reason = "Index alignment"
-                elif not filters_passed and not is_10_15_alert:
-                    # filters_passed = candle_size_passed for non-10:15 alerts
+                elif not filters_passed:
+                    # filters_passed = candle_size_passed
                     no_entry_reason = "Candle size"
                 elif option_ltp_value <= 0 or lot_size <= 0:
                     no_entry_reason = "Missing option data"
-                elif is_10_15_alert:
-                    # For 10:15 AM alerts, filters are skipped but entry might still fail
-                    # Check if it's actually a no_entry (shouldn't happen, but just in case)
-                    no_entry_reason = None  # Will be set below if needed
+                # No special skip behaviour for 10:15 alerts anymore – treat them like any other alert
                 
                 if not is_after_3_00pm and can_enter_trade_by_index and filters_passed and option_ltp_value > 0 and lot_size > 0:
                     # Enter trade: Fetch current option LTP again, set buy_time to current system time, stop_loss from previous candle low
