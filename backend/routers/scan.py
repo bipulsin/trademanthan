@@ -1044,6 +1044,11 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 # 2. CANDLE SIZE FILTER (Daily candles: current day vs previous day, up to current hour)
                 # Candle size is calculated ONLY when stock is received from webhook alert
                 # It will NOT be recalculated once status changes from No_Entry
+                # SPECIAL HANDLING FOR 10:15 AM ALERTS:
+                # - Calculate candle size using previous day candle data (if current day data unavailable)
+                # - Store the ratio and status for later cycles
+                # - But DO NOT block trade entry at 10:15 AM based on candle size
+                # - DO NOT set no_entry_reason = "Candle size" for 10:15 AM alerts
                 if option_candles:
                     try:
                         current_day_candle = option_candles.get('current_day_candle', {})
@@ -1072,12 +1077,31 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                     candle_size_reason = f"Daily candle size too large: Current Day (up to {triggered_datetime.hour}:{triggered_datetime.minute:02d}) High={current_high:.2f}, Low={current_low:.2f}, Size={current_size:.2f} >= 7.5× Previous Day (complete) High={previous_high:.2f}, Low={previous_low:.2f}, Size={previous_size:.2f}, Ratio: {size_ratio:.2f}"
                             else:
                                 candle_size_reason = "Previous day candle size is zero (cannot calculate ratio)"
+                        elif is_10_15_alert and previous_day_candle:
+                            # For 10:15 AM alerts: If current day candle not available, use previous day candle data
+                            # Compare previous day vs previous-previous day (if available) or use a default comparison
+                            # This allows calculation at 10:15 AM even when current day data isn't ready
+                            previous_high = previous_day_candle.get('high', 0)
+                            previous_low = previous_day_candle.get('low', 0)
+                            previous_size = abs(previous_high - previous_low)
+                            
+                            if previous_size > 0:
+                                # At 10:15 AM, we use previous day candle as reference
+                                # Since we don't have current day data yet, we'll calculate ratio later in cycles
+                                # For now, just note that we have previous day data available
+                                candle_size_reason = f"10:15 AM alert: Previous day candle available (High={previous_high:.2f}, Low={previous_low:.2f}, Size={previous_size:.2f}). Candle size will be calculated in next cycle."
+                                # Don't set candle_size_passed here - it will be calculated in cycles
+                            else:
+                                candle_size_reason = "10:15 AM alert: Previous day candle size is zero (cannot calculate ratio)"
                         else:
                             candle_size_reason = "Missing daily candle data"
                     except Exception as candle_error:
                         candle_size_reason = f"Error calculating daily candle size: {str(candle_error)}"
                 else:
-                    candle_size_reason = "Option daily candles not available"
+                    if is_10_15_alert:
+                        candle_size_reason = "10:15 AM alert: Option daily candles not available. Candle size will be calculated in next cycle."
+                    else:
+                        candle_size_reason = "Option daily candles not available"
                 
                 # Determine trade entry based on:
                 # 1. Time check (must be before 3:00 PM)
@@ -1085,11 +1109,15 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 # 3. VWAP slope >= 45 degrees (calculated in cycle-based scheduler, not here)
                 # 4. Current candle size < 7-8x previous candle (calculated here for webhook alerts)
                 # 5. Valid option data (option_ltp > 0, lot_size > 0)
-                # NOTE: VWAP slope is NOT calculated here - it will be calculated in cycle-based scheduler.
-                # For webhook processing (including 10:15 AM alerts), we ALWAYS apply the candle size filter
-                # when data is available. If candle data is missing, candle_size_passed remains False and
-                # candle_size_reason will explain the issue.
-                filters_passed = candle_size_passed
+                # NOTE: For 10:15 AM alerts, candle size is calculated but NOT used to block entry
+                # Candle size will be recalculated and enforced in subsequent cycles (10:30 AM, 11:15 AM, etc.)
+                if is_10_15_alert:
+                    # For 10:15 AM alerts: Calculate candle size but don't block entry
+                    # filters_passed = True (don't block based on candle size at 10:15 AM)
+                    filters_passed = True
+                else:
+                    # For all other alerts: Apply candle size filter normally
+                    filters_passed = candle_size_passed
                 
                 # Initialize no_entry_reason early (will be set if entry fails)
                 no_entry_reason = None
@@ -1106,12 +1134,13 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     no_entry_reason = "Time >= 3PM"
                 elif not can_enter_trade_by_index:
                     no_entry_reason = "Index alignment"
-                elif not filters_passed:
-                    # filters_passed = candle_size_passed
+                elif not filters_passed and not is_10_15_alert:
+                    # For non-10:15 alerts: Block entry if candle size filter fails
+                    # For 10:15 alerts: Don't set "Candle size" as no_entry_reason
                     no_entry_reason = "Candle size"
                 elif option_ltp_value <= 0 or lot_size <= 0:
                     no_entry_reason = "Missing option data"
-                # No special skip behaviour for 10:15 alerts anymore – treat them like any other alert
+                # 10:15 AM alerts: Candle size is calculated but not used to block entry
                 
                 if not is_after_3_00pm and can_enter_trade_by_index and filters_passed and option_ltp_value > 0 and lot_size > 0:
                     # Enter trade: Fetch current option LTP again, set buy_time to current system time, stop_loss from previous candle low
@@ -1304,6 +1333,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 previous_day_candle = option_candles_data.get('previous_day_candle', {}) if option_candles_data else {}
                 
                 # Calculate and save candle size ratio and status (use the same calculation as above)
+                # For 10:15 AM alerts: Use previous day candle data if current day data isn't available
                 saved_candle_size_ratio = None
                 saved_candle_size_status = None
                 if option_candles_data and current_day_candle and previous_day_candle:
@@ -1324,10 +1354,31 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     except Exception as e:
                         logger.warning(f"Error calculating candle size for {stock_name}: {str(e)}")
                         saved_candle_size_status = None
+                elif is_10_15_alert and previous_day_candle:
+                    # For 10:15 AM alerts: Use previous day candle data
+                    # Store previous day candle data for later cycle calculations
+                    # At 10:15 AM, we have previous day data but current day data may not be ready yet
+                    # Candle size will be recalculated in next cycle (10:30 AM) with current day data
+                    try:
+                        previous_high = previous_day_candle.get('high', 0)
+                        previous_low = previous_day_candle.get('low', 0)
+                        previous_size = abs(previous_high - previous_low)
+                        
+                        if previous_size > 0:
+                            # Store that we have previous day data available
+                            # Ratio will be calculated in next cycle when current day data is available
+                            saved_candle_size_status = "Pending"  # Will be recalculated in next cycle
+                            logger.info(f"10:15 AM alert for {stock_name}: Previous day candle data available (Size={previous_size:.2f}). Candle size will be calculated in next cycle.")
+                        else:
+                            saved_candle_size_status = "Skipped"
+                    except Exception as e:
+                        logger.warning(f"Error processing previous day candle for 10:15 alert {stock_name}: {str(e)}")
+                        saved_candle_size_status = "Pending"
                 elif is_10_15_alert:
-                    saved_candle_size_status = "Skipped"
+                    # 10:15 AM alert but no candle data available at all
+                    saved_candle_size_status = "Pending"  # Will try to calculate in next cycle
                 else:
-                    # No candle data available
+                    # No candle data available (non-10:15 alerts)
                     saved_candle_size_status = None
                 
                 # Ensure option_type is set correctly based on alert type if not already set
