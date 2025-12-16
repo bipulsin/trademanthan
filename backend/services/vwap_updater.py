@@ -1180,7 +1180,10 @@ async def update_vwap_for_all_open_positions():
                         old_pnl = position.pnl or 0.0
                         new_pnl = (new_option_ltp - position.buy_price) * position.qty
                         position.pnl = new_pnl
+                        # CRITICAL: Explicitly mark PnL as modified to ensure SQLAlchemy tracks the change
+                        flag_modified(position, 'pnl')
                         updates_made.append(f"P&L: ₹{old_pnl:.2f}→₹{new_pnl:.2f}")
+                        logger.debug(f"📊 {stock_name}: PnL updated to ₹{new_pnl:.2f} (Buy: ₹{position.buy_price:.2f}, Sell: ₹{new_option_ltp:.2f}, Qty: {position.qty})")
                 else:
                     # Option LTP fetch failed - use buy_price as fallback if sell_price is NULL/0
                     if (not position.sell_price or position.sell_price == 0) and position.buy_price:
