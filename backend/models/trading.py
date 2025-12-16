@@ -190,6 +190,8 @@ class HistoricalMarketData(Base):
     stock_name = Column(String(100), nullable=False, index=True)
     stock_vwap = Column(Float, nullable=True)  # Volume Weighted Average Price
     stock_ltp = Column(Float, nullable=True)  # Last Traded Price
+    stock_vwap_previous_hour = Column(Float, nullable=True)  # VWAP from previous 1-hour candle
+    stock_vwap_previous_hour_time = Column(DateTime, nullable=True)  # Time of previous hour VWAP
     
     # VWAP slope fields (calculated by cycle-based scheduler)
     vwap_slope_angle = Column(Float, nullable=True)  # VWAP slope angle in degrees
@@ -201,6 +203,7 @@ class HistoricalMarketData(Base):
     option_contract = Column(String(255), nullable=True, index=True)  # Option contract name (e.g., RELIANCE-Nov2024-2500-CE)
     option_instrument_key = Column(String(255), nullable=True, index=True)  # Upstox instrument key (e.g., NSE_FO|104500)
     option_ltp = Column(Float, nullable=True)  # Option Last Traded Price
+    option_vwap = Column(Float, nullable=True)  # Option VWAP
     
     # Timestamp
     scan_date = Column(DateTime, nullable=False, index=True)  # Date and time of the scan/update

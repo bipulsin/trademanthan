@@ -1446,10 +1446,17 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     # Check if historical data already exists for this stock at this time
                     if not historical_data_exists(db, stock_name, scan_datetime):
                         # VWAP slope not calculated yet at webhook time (will be calculated in cycle scheduler)
+                        # Get all available data from webhook enrichment
+                        stock_vwap_prev = stock.get("stock_vwap_previous_hour")
+                        stock_vwap_prev_time = stock.get("stock_vwap_previous_hour_time")
+                        option_vwap_value = stock.get("option_vwap", 0.0) if stock.get("option_vwap", 0.0) > 0 else None
+                        
                         historical_record = HistoricalMarketData(
                             stock_name=stock_name,
                             stock_vwap=stock.get("stock_vwap", 0.0) if stock.get("stock_vwap", 0.0) > 0 else None,
                             stock_ltp=stock.get("last_traded_price") or stock.get("trigger_price", 0.0) if (stock.get("last_traded_price") or stock.get("trigger_price", 0.0)) > 0 else None,
+                            stock_vwap_previous_hour=stock_vwap_prev if stock_vwap_prev and stock_vwap_prev > 0 else None,
+                            stock_vwap_previous_hour_time=stock_vwap_prev_time,
                             vwap_slope_angle=None,
                             vwap_slope_status=None,
                             vwap_slope_direction=None,
@@ -1457,6 +1464,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                             option_contract=stock.get("option_contract", ""),
                             option_instrument_key=stock_instrument_key,
                             option_ltp=option_ltp_value if option_ltp_value > 0 else None,
+                            option_vwap=option_vwap_value,
                             scan_date=scan_datetime,
                             scan_time=scan_datetime.strftime('%I:%M %p').lower()
                         )
@@ -1509,11 +1517,17 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         from backend.services.vwap_updater import historical_data_exists
                         scan_datetime = triggered_datetime
                         if not historical_data_exists(db, stock_name, scan_datetime):
-                            # Minimal record - VWAP slope not available
+                            # Minimal record - VWAP slope not available, but try to get any available data
+                            stock_vwap_prev = stock.get("stock_vwap_previous_hour") if stock else None
+                            stock_vwap_prev_time = stock.get("stock_vwap_previous_hour_time") if stock else None
+                            option_vwap_value = stock.get("option_vwap", 0.0) if stock and stock.get("option_vwap", 0.0) > 0 else None
+                            
                             historical_record = HistoricalMarketData(
                                 stock_name=stock_name,
                                 stock_vwap=None,
-                                stock_ltp=stock.get("trigger_price", 0.0) if stock.get("trigger_price", 0.0) > 0 else None,
+                                stock_ltp=stock.get("trigger_price", 0.0) if stock and stock.get("trigger_price", 0.0) > 0 else None,
+                                stock_vwap_previous_hour=stock_vwap_prev if stock_vwap_prev and stock_vwap_prev > 0 else None,
+                                stock_vwap_previous_hour_time=stock_vwap_prev_time,
                                 vwap_slope_angle=None,
                                 vwap_slope_status=None,
                                 vwap_slope_direction=None,
@@ -1521,6 +1535,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                 option_contract="",
                                 option_instrument_key=None,
                                 option_ltp=None,
+                                option_vwap=option_vwap_value,
                                 scan_date=scan_datetime,
                                 scan_time=scan_datetime.strftime('%I:%M %p').lower()
                             )

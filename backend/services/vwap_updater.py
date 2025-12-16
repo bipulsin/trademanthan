@@ -7,6 +7,7 @@ import logging
 import sys
 import os
 from datetime import datetime, timedelta
+import time
 from typing import List
 import pytz
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -1061,10 +1062,17 @@ async def update_vwap_for_all_open_positions():
                         vwap_slope_direction = position.vwap_slope_direction if hasattr(position, 'vwap_slope_direction') else None
                         vwap_slope_time = position.vwap_slope_time if hasattr(position, 'vwap_slope_time') else None
                         
+                        # Get all available data from position record
+                        stock_vwap_prev = position.stock_vwap_previous_hour if hasattr(position, 'stock_vwap_previous_hour') else None
+                        stock_vwap_prev_time = position.stock_vwap_previous_hour_time if hasattr(position, 'stock_vwap_previous_hour_time') else None
+                        option_vwap_value = position.option_vwap if hasattr(position, 'option_vwap') and position.option_vwap and position.option_vwap > 0 else None
+                        
                         historical_record = HistoricalMarketData(
                             stock_name=stock_name,
                             stock_vwap=new_vwap if new_vwap and new_vwap > 0 else None,
                             stock_ltp=new_stock_ltp if new_stock_ltp and new_stock_ltp > 0 else None,
+                            stock_vwap_previous_hour=stock_vwap_prev if stock_vwap_prev and stock_vwap_prev > 0 else None,
+                            stock_vwap_previous_hour_time=stock_vwap_prev_time,
                             vwap_slope_angle=vwap_slope_angle,
                             vwap_slope_status=vwap_slope_status,
                             vwap_slope_direction=vwap_slope_direction,
@@ -1072,6 +1080,7 @@ async def update_vwap_for_all_open_positions():
                             option_contract=option_contract,
                             option_instrument_key=position.instrument_key,
                             option_ltp=new_option_ltp if new_option_ltp > 0 else None,
+                            option_vwap=option_vwap_value,
                             scan_date=now,
                             scan_time=now.strftime('%I:%M %p').lower()
                         )
@@ -1465,10 +1474,17 @@ async def update_vwap_for_all_open_positions():
                                     vwap_slope_direction = trade.vwap_slope_direction if hasattr(trade, 'vwap_slope_direction') else None
                                     vwap_slope_time = trade.vwap_slope_time if hasattr(trade, 'vwap_slope_time') else None
                                     
+                                    # Get all available data from trade record
+                                    stock_vwap_prev = trade.stock_vwap_previous_hour if hasattr(trade, 'stock_vwap_previous_hour') else None
+                                    stock_vwap_prev_time = trade.stock_vwap_previous_hour_time if hasattr(trade, 'stock_vwap_previous_hour_time') else None
+                                    option_vwap_value = trade.option_vwap if hasattr(trade, 'option_vwap') and trade.option_vwap and trade.option_vwap > 0 else None
+                                    
                                     historical_record = HistoricalMarketData(
                                         stock_name=stock_name,
                                         stock_vwap=current_stock_vwap if current_stock_vwap > 0 else None,
                                         stock_ltp=current_stock_ltp if current_stock_ltp > 0 else None,
+                                        stock_vwap_previous_hour=stock_vwap_prev if stock_vwap_prev and stock_vwap_prev > 0 else None,
+                                        stock_vwap_previous_hour_time=stock_vwap_prev_time,
                                         vwap_slope_angle=vwap_slope_angle,
                                         vwap_slope_status=vwap_slope_status,
                                         vwap_slope_direction=vwap_slope_direction,
@@ -1476,6 +1492,7 @@ async def update_vwap_for_all_open_positions():
                                         option_contract=trade.option_contract,
                                         option_instrument_key=trade.instrument_key,
                                         option_ltp=current_option_ltp if current_option_ltp and current_option_ltp > 0 else None,
+                                        option_vwap=option_vwap_value,
                                         scan_date=now,
                                         scan_time=now.strftime('%I:%M %p').lower()
                                     )
@@ -2340,10 +2357,17 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                     try:
                         if not historical_data_exists(db, stock_name, now):
                             # VWAP slope not calculated yet (previous VWAP unavailable)
+                            # Get all available data from trade record
+                            stock_vwap_prev = trade.stock_vwap_previous_hour if hasattr(trade, 'stock_vwap_previous_hour') else None
+                            stock_vwap_prev_time = trade.stock_vwap_previous_hour_time if hasattr(trade, 'stock_vwap_previous_hour_time') else None
+                            option_vwap_value = trade.option_vwap if hasattr(trade, 'option_vwap') and trade.option_vwap and trade.option_vwap > 0 else None
+                            
                             historical_record = HistoricalMarketData(
                                 stock_name=stock_name,
                                 stock_vwap=current_stock_vwap if current_stock_vwap > 0 else None,
                                 stock_ltp=current_stock_ltp if current_stock_ltp > 0 else None,
+                                stock_vwap_previous_hour=stock_vwap_prev if stock_vwap_prev and stock_vwap_prev > 0 else None,
+                                stock_vwap_previous_hour_time=stock_vwap_prev_time,
                                 vwap_slope_angle=None,
                                 vwap_slope_status=None,
                                 vwap_slope_direction=None,
@@ -2351,6 +2375,7 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                                 option_contract=trade.option_contract,
                                 option_instrument_key=trade.instrument_key,
                                 option_ltp=current_option_ltp if current_option_ltp and current_option_ltp > 0 else None,
+                                option_vwap=option_vwap_value,
                                 scan_date=now,
                                 scan_time=now.strftime('%I:%M %p').lower()
                             )
@@ -2402,10 +2427,17 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                     try:
                         if not historical_data_exists(db, stock_name, now):
                             # VWAP slope not calculated yet (previous VWAP unavailable)
+                            # Get all available data from trade record
+                            stock_vwap_prev = trade.stock_vwap_previous_hour if hasattr(trade, 'stock_vwap_previous_hour') else None
+                            stock_vwap_prev_time = trade.stock_vwap_previous_hour_time if hasattr(trade, 'stock_vwap_previous_hour_time') else None
+                            option_vwap_value = trade.option_vwap if hasattr(trade, 'option_vwap') and trade.option_vwap and trade.option_vwap > 0 else None
+                            
                             historical_record = HistoricalMarketData(
                                 stock_name=stock_name,
                                 stock_vwap=current_stock_vwap if current_stock_vwap > 0 else None,
                                 stock_ltp=current_stock_ltp if current_stock_ltp > 0 else None,
+                                stock_vwap_previous_hour=stock_vwap_prev if stock_vwap_prev and stock_vwap_prev > 0 else None,
+                                stock_vwap_previous_hour_time=stock_vwap_prev_time,
                                 vwap_slope_angle=None,
                                 vwap_slope_status=None,
                                 vwap_slope_direction=None,
@@ -2413,6 +2445,7 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                                 option_contract=trade.option_contract,
                                 option_instrument_key=trade.instrument_key,
                                 option_ltp=current_option_ltp if current_option_ltp and current_option_ltp > 0 else None,
+                                option_vwap=option_vwap_value,
                                 scan_date=now,
                                 scan_time=now.strftime('%I:%M %p').lower()
                             )
@@ -2924,10 +2957,17 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                         vwap_slope_direction = trade.vwap_slope_direction if hasattr(trade, 'vwap_slope_direction') else None
                         vwap_slope_time = trade.vwap_slope_time if hasattr(trade, 'vwap_slope_time') else None
                         
+                        # Get all available data from trade record and API
+                        stock_vwap_prev = trade.stock_vwap_previous_hour if hasattr(trade, 'stock_vwap_previous_hour') else None
+                        stock_vwap_prev_time = trade.stock_vwap_previous_hour_time if hasattr(trade, 'stock_vwap_previous_hour_time') else None
+                        option_vwap_value = trade.option_vwap if hasattr(trade, 'option_vwap') and trade.option_vwap and trade.option_vwap > 0 else None
+                        
                         historical_record = HistoricalMarketData(
                             stock_name=stock_name,
                             stock_vwap=current_stock_vwap if current_stock_vwap > 0 else None,
                             stock_ltp=current_stock_ltp if current_stock_ltp > 0 else None,
+                            stock_vwap_previous_hour=stock_vwap_prev if stock_vwap_prev and stock_vwap_prev > 0 else None,
+                            stock_vwap_previous_hour_time=stock_vwap_prev_time,
                             vwap_slope_angle=vwap_slope_angle,
                             vwap_slope_status=vwap_slope_status,
                             vwap_slope_direction=vwap_slope_direction,
@@ -2935,6 +2975,7 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                             option_contract=trade.option_contract,
                             option_instrument_key=trade.instrument_key,
                             option_ltp=current_option_ltp if current_option_ltp and current_option_ltp > 0 else None,
+                            option_vwap=option_vwap_value,
                             scan_date=now,
                             scan_time=now.strftime('%I:%M %p').lower()
                         )
@@ -3163,10 +3204,17 @@ async def update_10_15_alert_stocks_at_10_30():
                     vwap_slope_direction = stock_record.vwap_slope_direction if hasattr(stock_record, 'vwap_slope_direction') else None
                     vwap_slope_time = stock_record.vwap_slope_time if hasattr(stock_record, 'vwap_slope_time') else None
                     
+                    # Get all available data from stock_record
+                    stock_vwap_prev = stock_record.stock_vwap_previous_hour if hasattr(stock_record, 'stock_vwap_previous_hour') else None
+                    stock_vwap_prev_time = stock_record.stock_vwap_previous_hour_time if hasattr(stock_record, 'stock_vwap_previous_hour_time') else None
+                    option_vwap_value = stock_record.option_vwap if hasattr(stock_record, 'option_vwap') and stock_record.option_vwap and stock_record.option_vwap > 0 else None
+                    
                     historical_record = HistoricalMarketData(
                         stock_name=stock_name,
                         stock_vwap=stock_vwap if stock_vwap and stock_vwap > 0 else None,
                         stock_ltp=stock_ltp if stock_ltp and stock_ltp > 0 else None,
+                        stock_vwap_previous_hour=stock_vwap_prev if stock_vwap_prev and stock_vwap_prev > 0 else None,
+                        stock_vwap_previous_hour_time=stock_vwap_prev_time,
                         vwap_slope_angle=vwap_slope_angle,
                         vwap_slope_status=vwap_slope_status,
                         vwap_slope_direction=vwap_slope_direction,
@@ -3174,6 +3222,7 @@ async def update_10_15_alert_stocks_at_10_30():
                         option_contract=option_contract,
                         option_instrument_key=instrument_key,
                         option_ltp=option_ltp if option_ltp and option_ltp > 0 else None,
+                        option_vwap=option_vwap_value,
                         scan_date=now,
                         scan_time=now.strftime('%I:%M %p').lower()
                     )
@@ -3462,10 +3511,17 @@ async def close_all_open_trades():
                         vwap_slope_direction = position.vwap_slope_direction if hasattr(position, 'vwap_slope_direction') else None
                         vwap_slope_time = position.vwap_slope_time if hasattr(position, 'vwap_slope_time') else None
                         
+                        # Get all available data from position record
+                        stock_vwap_prev = position.stock_vwap_previous_hour if hasattr(position, 'stock_vwap_previous_hour') else None
+                        stock_vwap_prev_time = position.stock_vwap_previous_hour_time if hasattr(position, 'stock_vwap_previous_hour_time') else None
+                        option_vwap_value = position.option_vwap if hasattr(position, 'option_vwap') and position.option_vwap and position.option_vwap > 0 else None
+                        
                         historical_record = HistoricalMarketData(
                             stock_name=stock_name,
                             stock_vwap=current_stock_vwap if current_stock_vwap > 0 else None,
                             stock_ltp=current_stock_ltp if current_stock_ltp > 0 else None,
+                            stock_vwap_previous_hour=stock_vwap_prev if stock_vwap_prev and stock_vwap_prev > 0 else None,
+                            stock_vwap_previous_hour_time=stock_vwap_prev_time,
                             vwap_slope_angle=vwap_slope_angle,
                             vwap_slope_status=vwap_slope_status,
                             vwap_slope_direction=vwap_slope_direction,
@@ -3473,6 +3529,7 @@ async def close_all_open_trades():
                             option_contract=option_contract,
                             option_instrument_key=position.instrument_key,
                             option_ltp=option_ltp if option_ltp and option_ltp > 0 else (position.sell_price if position.sell_price else None),
+                            option_vwap=option_vwap_value,
                             scan_date=now,
                             scan_time=now.strftime('%I:%M %p').lower()
                         )
