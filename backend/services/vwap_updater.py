@@ -2021,19 +2021,15 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
             # Log query result to application logger
             logger.info(f"🔍 DEBUG Cycle 1: Query returned {len(stocks_to_process)} stocks to process (should match {len(all_10_15_records)} total records)")
         elif cycle_number == 2:
-            # Cycle 2: Stocks from 11:15 AM webhook + No_Entry from 10:15 AM
+            # Cycle 2: Stocks from 11:15 AM webhook (ALL statuses for VWAP slope) + No_Entry from 10:15 AM
             stocks_to_process = db.query(IntradayStockOption).filter(
                 and_(
                     IntradayStockOption.trade_date >= today,
                     or_(
-                        # Current cycle: stocks from 11:15 AM webhook with status 'no_entry' or 'alert_received'
+                        # Current cycle: ALL stocks from 11:15 AM webhook (for VWAP slope calculation)
                         and_(
                             IntradayStockOption.alert_time >= target_alert_times[1],
-                            IntradayStockOption.alert_time < target_alert_times[1] + timedelta(minutes=1),
-                            or_(
-                                IntradayStockOption.status == 'no_entry',
-                                IntradayStockOption.status == 'alert_received'
-                            )
+                            IntradayStockOption.alert_time < target_alert_times[1] + timedelta(minutes=1)
                         ),
                         # Previous cycle: No_Entry OR alert_received stocks from 10:15 AM (not yet entered)
                         and_(
@@ -2048,19 +2044,15 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 )
             ).all()
         elif cycle_number == 3:
-            # Cycle 3: Stocks from 12:15 PM webhook + No_Entry up to 11:15 AM
+            # Cycle 3: Stocks from 12:15 PM webhook (ALL statuses for VWAP slope) + No_Entry up to 11:15 AM
             stocks_to_process = db.query(IntradayStockOption).filter(
                 and_(
                     IntradayStockOption.trade_date >= today,
                     or_(
-                        # Current cycle: stocks from 12:15 PM webhook with status 'no_entry' or 'alert_received'
+                        # Current cycle: ALL stocks from 12:15 PM webhook (for VWAP slope calculation)
                         and_(
                             IntradayStockOption.alert_time >= target_alert_times[2],
-                            IntradayStockOption.alert_time < target_alert_times[2] + timedelta(minutes=1),
-                            or_(
-                                IntradayStockOption.status == 'no_entry',
-                                IntradayStockOption.status == 'alert_received'
-                            )
+                            IntradayStockOption.alert_time < target_alert_times[2] + timedelta(minutes=1)
                         ),
                         # Previous cycles: No_Entry OR alert_received stocks up to 11:15 AM (not yet entered)
                         and_(
@@ -2075,19 +2067,15 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 )
             ).all()
         elif cycle_number == 4:
-            # Cycle 4: Stocks from 13:15 PM webhook + No_Entry up to 12:15 PM
+            # Cycle 4: Stocks from 13:15 PM webhook (ALL statuses for VWAP slope) + No_Entry up to 12:15 PM
             stocks_to_process = db.query(IntradayStockOption).filter(
                 and_(
                     IntradayStockOption.trade_date >= today,
                     or_(
-                        # Current cycle: stocks from 13:15 PM webhook with status 'no_entry' or 'alert_received'
+                        # Current cycle: ALL stocks from 13:15 PM webhook (for VWAP slope calculation)
                         and_(
                             IntradayStockOption.alert_time >= target_alert_times[3],
-                            IntradayStockOption.alert_time < target_alert_times[3] + timedelta(minutes=1),
-                            or_(
-                                IntradayStockOption.status == 'no_entry',
-                                IntradayStockOption.status == 'alert_received'
-                            )
+                            IntradayStockOption.alert_time < target_alert_times[3] + timedelta(minutes=1)
                         ),
                         # Previous cycles: No_Entry OR alert_received stocks up to 12:15 PM (not yet entered)
                         and_(
@@ -2102,19 +2090,15 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 )
             ).all()
         elif cycle_number == 5:
-            # Cycle 5: Stocks from 14:15 PM webhook + No_Entry up to 13:15 PM
+            # Cycle 5: Stocks from 14:15 PM webhook (ALL statuses for VWAP slope) + No_Entry up to 13:15 PM
             stocks_to_process = db.query(IntradayStockOption).filter(
                 and_(
                     IntradayStockOption.trade_date >= today,
                     or_(
-                        # Current cycle: stocks from 14:15 PM webhook with status 'no_entry' or 'alert_received'
+                        # Current cycle: ALL stocks from 14:15 PM webhook (for VWAP slope calculation)
                         and_(
                             IntradayStockOption.alert_time >= target_alert_times[4],
-                            IntradayStockOption.alert_time < target_alert_times[4] + timedelta(minutes=1),
-                            or_(
-                                IntradayStockOption.status == 'no_entry',
-                                IntradayStockOption.status == 'alert_received'
-                            )
+                            IntradayStockOption.alert_time < target_alert_times[4] + timedelta(minutes=1)
                         ),
                         # Previous cycles: No_Entry OR alert_received stocks up to 13:15 PM (not yet entered)
                         and_(
@@ -2183,16 +2167,16 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                     logger.error(f"Failed to write debug log (hypothesis C): {str(log_err)}")
                 # #endregion
                 
-                # For Cycle 1: Calculate VWAP slope for ALL records (including 'bought' status)
-                # For other cycles: Only calculate if status is 'no_entry' or 'alert_received'
+                # Calculate VWAP slope for ALL records regardless of status (informational)
+                # Entry decisions are only made for 'no_entry' or 'alert_received' status
+                # But VWAP slope should be calculated for all trades to display in frontend
                 if cycle_number == 1:
                     # Cycle 1: Process ALL records regardless of status
                     pass  # Continue processing
                 else:
-                    # Other cycles: Only process if status is 'no_entry' or 'alert_received'
-                    if trade.status != 'no_entry' and trade.status != 'alert_received':
-                        logger.debug(f"⚪ Skipping {stock_name} - already entered (status: {trade.status}), VWAP slope not calculated for subsequent cycles")
-                        continue
+                    # Other cycles: Calculate VWAP slope for ALL trades (including 'bought' and 'sold')
+                    # Entry decisions will be checked separately below for 'no_entry' and 'alert_received' only
+                    pass  # Continue processing for VWAP slope calculation
                 
                 # Get current stock data first (needed for historical record)
                 stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
