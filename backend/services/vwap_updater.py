@@ -2248,17 +2248,63 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                         logger.debug(f"Alternative previous VWAP method also failed for {stock_name}: {str(alt_error)}")
                 
                 # Final fallback: Use previous trading day's daily VWAP (close price)
+                # BUT: For Cycle 1 (10:30 AM), don't use this fallback because:
+                # - Previous day's close (3:30 PM) vs today's 10:30 AM is not a fair comparison
+                # - The time difference is too large (~19 hours) and not representative of intraday slope
+                # - Instead, we should use market open VWAP or skip calculation
                 if not prev_vwap_data:
-                    try:
-                        logger.info(f"🔄 Cycle {cycle_number} - {stock_name}: Attempting fallback to previous trading day's daily VWAP")
-                        prev_day_vwap = vwap_service.get_previous_trading_day_vwap(stock_name, reference_time=now)
-                        if prev_day_vwap and prev_day_vwap.get('vwap', 0) > 0:
-                            prev_vwap_data = prev_day_vwap
-                            logger.info(f"✅ Cycle {cycle_number} - {stock_name}: Using previous trading day's daily VWAP (₹{prev_day_vwap.get('vwap', 0):.2f}) as fallback")
-                        else:
-                            logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Previous trading day VWAP fallback also failed")
-                    except Exception as fallback_error:
-                        logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Error in previous trading day VWAP fallback: {str(fallback_error)}")
+                    if cycle_number == 1:
+                        # For Cycle 1: Try to get VWAP at market open (9:15 AM) as fallback
+                        try:
+                            logger.info(f"🔄 Cycle {cycle_number} - {stock_name}: Attempting to get market open VWAP (9:15 AM) as fallback for Cycle 1")
+                            market_open_time = today.replace(hour=9, minute=15, second=0, microsecond=0)
+                            market_open_vwap = vwap_service.get_stock_vwap_from_candle_at_time(
+                                stock_name,
+                                market_open_time,
+                                interval="hours/1"
+                            )
+                            if market_open_vwap and market_open_vwap.get('vwap', 0) > 0:
+                                # Validate date
+                                vwap_time = market_open_vwap.get('time')
+                                if vwap_time:
+                                    if vwap_time.tzinfo is None:
+                                        vwap_time = ist.localize(vwap_time)
+                                    elif vwap_time.tzinfo != ist:
+                                        vwap_time = vwap_time.astimezone(ist)
+                                    
+                                    if vwap_time.date() == today:
+                                        prev_vwap_data = market_open_vwap
+                                        logger.info(f"✅ Cycle {cycle_number} - {stock_name}: Using market open VWAP (9:15 AM, ₹{market_open_vwap.get('vwap', 0):.2f}) as fallback")
+                                    else:
+                                        logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Market open VWAP date mismatch")
+                                else:
+                                    prev_vwap_data = market_open_vwap
+                                    logger.info(f"✅ Cycle {cycle_number} - {stock_name}: Using market open VWAP (₹{market_open_vwap.get('vwap', 0):.2f}) as fallback")
+                        except Exception as market_open_error:
+                            logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Error getting market open VWAP: {str(market_open_error)}")
+                        
+                        # If still no data, try previous trading day as last resort (but log warning)
+                        if not prev_vwap_data:
+                            try:
+                                logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Using previous trading day VWAP as last resort (not ideal for Cycle 1)")
+                                prev_day_vwap = vwap_service.get_previous_trading_day_vwap(stock_name, reference_time=now)
+                                if prev_day_vwap and prev_day_vwap.get('vwap', 0) > 0:
+                                    prev_vwap_data = prev_day_vwap
+                                    logger.info(f"✅ Cycle {cycle_number} - {stock_name}: Using previous trading day's daily VWAP (₹{prev_day_vwap.get('vwap', 0):.2f}) as last resort")
+                            except Exception as fallback_error:
+                                logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Error in previous trading day VWAP fallback: {str(fallback_error)}")
+                    else:
+                        # For other cycles: Use previous trading day VWAP as fallback (acceptable)
+                        try:
+                            logger.info(f"🔄 Cycle {cycle_number} - {stock_name}: Attempting fallback to previous trading day's daily VWAP")
+                            prev_day_vwap = vwap_service.get_previous_trading_day_vwap(stock_name, reference_time=now)
+                            if prev_day_vwap and prev_day_vwap.get('vwap', 0) > 0:
+                                prev_vwap_data = prev_day_vwap
+                                logger.info(f"✅ Cycle {cycle_number} - {stock_name}: Using previous trading day's daily VWAP (₹{prev_day_vwap.get('vwap', 0):.2f}) as fallback")
+                            else:
+                                logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Previous trading day VWAP fallback also failed")
+                        except Exception as fallback_error:
+                            logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Error in previous trading day VWAP fallback: {str(fallback_error)}")
                 
                 if not prev_vwap_data:
                     logger.warning(f"⚠️ Could not get previous VWAP for {stock_name} at {prev_vwap_time.strftime('%H:%M')}")
@@ -2412,6 +2458,9 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                     continue
                 
                 # Calculate VWAP slope
+                # Log VWAP values before calculation for debugging
+                logger.info(f"🔍 Cycle {cycle_number} - {stock_name}: Calculating VWAP slope - Prev: ₹{prev_vwap:.2f} @ {prev_vwap_time_actual.strftime('%H:%M:%S') if prev_vwap_time_actual else 'N/A'}, Current: ₹{current_vwap:.2f} @ {current_vwap_time_actual.strftime('%H:%M:%S') if current_vwap_time_actual else 'N/A'}")
+                
                 slope_result = vwap_service.vwap_slope(
                     vwap1=prev_vwap,
                     time1=prev_vwap_time_actual,
@@ -2424,11 +2473,16 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                     slope_angle = slope_result.get("angle", 0.0)
                     slope_direction = slope_result.get("direction", "flat")
                     vwap_slope_passed = (slope_status == "Yes")
+                    
+                    # Log if angle is 0 to help diagnose
+                    if slope_angle == 0.0 and prev_vwap != current_vwap:
+                        logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: VWAP slope angle is 0.0 but VWAP values differ (prev: ₹{prev_vwap:.2f}, current: ₹{current_vwap:.2f})")
                 else:
                     slope_status = slope_result if isinstance(slope_result, str) else "No"
                     slope_angle = 0.0
                     slope_direction = "flat"
                     vwap_slope_passed = (slope_status == "Yes")
+                    logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: vwap_slope returned non-dict result: {type(slope_result)}")
                 
                 # Update database with VWAP slope data
                 trade.stock_vwap_previous_hour = prev_vwap
