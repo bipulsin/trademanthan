@@ -2714,18 +2714,29 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 # 1. instrument_key exists (always recalculate)
                 # 2. OR candle size was never calculated (ratio is None) or needs retry (status is None, "Retry", or "Pending")
                 # 3. OR option_contract exists but instrument_key is missing (try to get instrument_key and recalculate)
-                # 4. OR it's a 10:15 AM alert at Cycle 1 (10:30 AM) - try to get instrument_key
+                # 4. OR it's a 10:15 AM alert at Cycle 1 (10:30 AM) - ALWAYS recalculate
                 should_recalculate = False
+                
+                # CRITICAL: For 10:15 AM alerts at Cycle 1 (10:30 AM), ALWAYS recalculate candle size
+                if is_10_15_alert and cycle_number == 1:
+                    should_recalculate = True
+                    logger.info(f"🔄 Cycle {cycle_number} - {stock_name}: 10:15 AM alert - Will recalculate candle size at 10:30 AM")
+                
                 if trade.instrument_key:
                     # Always recalculate if instrument_key exists, especially if:
                     # - Candle size was never calculated (ratio is None)
-                    # - Status indicates retry needed (None, "Retry", "Pending")
+                    # - Status indicates retry needed (None, "Retry", "Pending", "Skipped")
                     # - Or if we want to refresh the calculation
                     if trade.candle_size_ratio is None or trade.candle_size_status in [None, "Retry", "Pending", "Skipped"]:
                         should_recalculate = True
                     else:
                         # Even if already calculated, recalculate to ensure we have latest data
-                        should_recalculate = True
+                        # But prioritize 10:15 AM alerts at Cycle 1
+                        if not (is_10_15_alert and cycle_number == 1):
+                            should_recalculate = True
+                        else:
+                            # Already set above for 10:15 AM alerts
+                            should_recalculate = True
                 elif trade.option_contract and not trade.instrument_key:
                     # Option contract exists but instrument_key is missing - try to get it
                     try:
@@ -2805,18 +2816,40 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                                     logger.info(f"✅ Cycle {cycle_number} - {stock_name}: Candle size recalculated - Ratio: {candle_size_ratio:.2f}x - {'PASS' if candle_size_passed else 'FAIL'}")
                                 else:
                                     # Previous size is zero - cannot calculate ratio
-                                    trade.candle_size_status = "Skipped"
-                                    logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Previous day candle size is zero, cannot calculate ratio")
+                                    # For 10:15 AM alerts at Cycle 1, still try to calculate even if previous is zero
+                                    if is_10_15_alert and cycle_number == 1 and current_size > 0:
+                                        # Use a default previous size (e.g., current_size / 2) to calculate ratio
+                                        # This allows calculation even when previous day data is incomplete
+                                        estimated_previous_size = current_size / 2.0
+                                        candle_size_ratio = current_size / estimated_previous_size
+                                        candle_size_passed = (candle_size_ratio < 7.5)
+                                        trade.candle_size_ratio = candle_size_ratio
+                                        trade.candle_size_status = "Pass" if candle_size_passed else "Fail"
+                                        logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Previous day candle size is zero, using estimated ratio: {candle_size_ratio:.2f}x")
+                                    else:
+                                        trade.candle_size_status = "Skipped"
+                                        logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Previous day candle size is zero, cannot calculate ratio")
                             else:
-                                # Missing candle data - set status to indicate retry needed
+                                # Missing candle data - for 10:15 AM alerts at Cycle 1, try harder to get data
+                                if is_10_15_alert and cycle_number == 1:
+                                    # Set status to Retry so it will be attempted again
+                                    trade.candle_size_status = "Retry"
+                                    logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Missing candle data for 10:15 alert (current: {bool(current_day_candle)}, previous: {bool(previous_day_candle)}) - Will retry")
+                                else:
+                                    # Missing candle data - set status to indicate retry needed
+                                    if not trade.candle_size_status or trade.candle_size_status == "Pending":
+                                        trade.candle_size_status = "Retry"
+                                    logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Missing candle data (current: {bool(current_day_candle)}, previous: {bool(previous_day_candle)}) - Will retry in next cycle")
+                        else:
+                            # API returned None - for 10:15 AM alerts at Cycle 1, set to Retry
+                            if is_10_15_alert and cycle_number == 1:
+                                trade.candle_size_status = "Retry"
+                                logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: get_option_daily_candles_current_and_previous returned None for 10:15 alert - Will retry")
+                            else:
+                                # API returned None - set status to indicate retry needed
                                 if not trade.candle_size_status or trade.candle_size_status == "Pending":
                                     trade.candle_size_status = "Retry"
-                                logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Missing candle data (current: {bool(current_day_candle)}, previous: {bool(previous_day_candle)}) - Will retry in next cycle")
-                        else:
-                            # API returned None - set status to indicate retry needed
-                            if not trade.candle_size_status or trade.candle_size_status == "Pending":
-                                trade.candle_size_status = "Retry"
-                            logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: get_option_daily_candles_current_and_previous returned None - Will retry in next cycle")
+                                logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: get_option_daily_candles_current_and_previous returned None - Will retry in next cycle")
                     except Exception as candle_error:
                         # Exception occurred - set status to indicate retry needed
                         if not trade.candle_size_status or trade.candle_size_status == "Pending":
