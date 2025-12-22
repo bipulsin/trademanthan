@@ -1111,10 +1111,15 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 # 5. Valid option data (option_ltp > 0, lot_size > 0)
                 # NOTE: For 10:15 AM alerts, candle size is calculated but NOT used to block entry
                 # Candle size will be recalculated and enforced in subsequent cycles (10:30 AM, 11:15 AM, etc.)
+                # CRITICAL: Don't block entry if candle size is "Skipped" or not calculated
                 if is_10_15_alert:
                     # For 10:15 AM alerts: Calculate candle size but don't block entry
                     # filters_passed = True (don't block based on candle size at 10:15 AM)
                     filters_passed = True
+                elif saved_candle_size_status in [None, "Skipped", ""]:
+                    # Candle size not calculated or skipped - don't block entry
+                    filters_passed = True
+                    logger.info(f"ℹ️ {stock_name}: Candle size status is '{saved_candle_size_status}' - Not blocking entry")
                 else:
                     # For all other alerts: Apply candle size filter normally
                     filters_passed = candle_size_passed
