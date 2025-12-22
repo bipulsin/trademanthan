@@ -429,9 +429,6 @@ async def update_vwap_for_all_open_positions():
                             current_option_ltp = float(option_quote.get('last_price', 0))
                             
                             # Enter the trade with CURRENT time and prices
-                            import math
-                            SL_LOSS_TARGET = 3100.0
-                            
                             no_entry_trade.buy_price = current_option_ltp
                             no_entry_trade.buy_time = now  # Use CURRENT time, not alert time
                             no_entry_trade.stock_ltp = current_stock_ltp
@@ -440,11 +437,27 @@ async def update_vwap_for_all_open_positions():
                             no_entry_trade.status = 'bought'
                             no_entry_trade.pnl = 0.0
                             
-                            # Calculate stop loss
-                            qty = no_entry_trade.qty or 0
-                            if qty > 0:
-                                calculated_sl = current_option_ltp - (SL_LOSS_TARGET / qty)
-                                no_entry_trade.stop_loss = max(0.05, math.floor(calculated_sl / 0.10) * 0.10)
+                            # Calculate stop loss: 5% lower than the open price of the current candle
+                            try:
+                                option_candles = vwap_service.get_option_candles_current_and_previous(no_entry_trade.instrument_key)
+                                if option_candles and option_candles.get('current_candle'):
+                                    current_candle_open = option_candles.get('current_candle', {}).get('open', 0)
+                                    if current_candle_open and current_candle_open > 0:
+                                        # Stop loss = 5% lower than candle open price
+                                        no_entry_trade.stop_loss = current_candle_open * 0.95
+                                        logger.info(f"   Stop Loss: ₹{no_entry_trade.stop_loss:.2f} (5% below candle open: ₹{current_candle_open:.2f})")
+                                    else:
+                                        # Fallback: 5% below buy price if candle open not available
+                                        no_entry_trade.stop_loss = current_option_ltp * 0.95
+                                        logger.warning(f"   Stop Loss: ₹{no_entry_trade.stop_loss:.2f} (5% below buy price, candle open not available)")
+                                else:
+                                    # Fallback: 5% below buy price if candles not available
+                                    no_entry_trade.stop_loss = current_option_ltp * 0.95
+                                    logger.warning(f"   Stop Loss: ₹{no_entry_trade.stop_loss:.2f} (5% below buy price, candles not available)")
+                            except Exception as sl_error:
+                                # Fallback: 5% below buy price if error
+                                no_entry_trade.stop_loss = current_option_ltp * 0.95
+                                logger.warning(f"   Stop Loss: ₹{no_entry_trade.stop_loss:.2f} (5% below buy price, error fetching candles: {str(sl_error)})")
                             
                             re_entry_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
                             alert_time_str = no_entry_trade.alert_time.strftime('%H:%M:%S') if no_entry_trade.alert_time else 'N/A'
@@ -670,9 +683,6 @@ async def update_vwap_for_all_open_positions():
                             current_option_ltp = float(option_quote.get('last_price', 0))
                             
                             # Enter the trade with CURRENT time and prices
-                            import math
-                            SL_LOSS_TARGET = 3100.0
-                            
                             no_entry_trade.buy_price = current_option_ltp
                             no_entry_trade.buy_time = now  # Use CURRENT time, not alert time
                             no_entry_trade.stock_ltp = current_stock_ltp
@@ -681,11 +691,27 @@ async def update_vwap_for_all_open_positions():
                             no_entry_trade.status = 'bought'
                             no_entry_trade.pnl = 0.0
                             
-                            # Calculate stop loss
-                            qty = no_entry_trade.qty or 0
-                            if qty > 0:
-                                calculated_sl = current_option_ltp - (SL_LOSS_TARGET / qty)
-                                no_entry_trade.stop_loss = max(0.05, math.floor(calculated_sl / 0.10) * 0.10)
+                            # Calculate stop loss: 5% lower than the open price of the current candle
+                            try:
+                                option_candles = vwap_service.get_option_candles_current_and_previous(no_entry_trade.instrument_key)
+                                if option_candles and option_candles.get('current_candle'):
+                                    current_candle_open = option_candles.get('current_candle', {}).get('open', 0)
+                                    if current_candle_open and current_candle_open > 0:
+                                        # Stop loss = 5% lower than candle open price
+                                        no_entry_trade.stop_loss = current_candle_open * 0.95
+                                        logger.info(f"   Stop Loss: ₹{no_entry_trade.stop_loss:.2f} (5% below candle open: ₹{current_candle_open:.2f})")
+                                    else:
+                                        # Fallback: 5% below buy price if candle open not available
+                                        no_entry_trade.stop_loss = current_option_ltp * 0.95
+                                        logger.warning(f"   Stop Loss: ₹{no_entry_trade.stop_loss:.2f} (5% below buy price, candle open not available)")
+                                else:
+                                    # Fallback: 5% below buy price if candles not available
+                                    no_entry_trade.stop_loss = current_option_ltp * 0.95
+                                    logger.warning(f"   Stop Loss: ₹{no_entry_trade.stop_loss:.2f} (5% below buy price, candles not available)")
+                            except Exception as sl_error:
+                                # Fallback: 5% below buy price if error
+                                no_entry_trade.stop_loss = current_option_ltp * 0.95
+                                logger.warning(f"   Stop Loss: ₹{no_entry_trade.stop_loss:.2f} (5% below buy price, error fetching candles: {str(sl_error)})")
                             
                             re_entry_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
                             alert_time_str = no_entry_trade.alert_time.strftime('%H:%M:%S') if no_entry_trade.alert_time else 'N/A'
@@ -2889,9 +2915,6 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                             current_option_ltp = float(option_quote.get('last_price', 0))
                             
                             # Enter the trade with CURRENT time and prices
-                            import math
-                            SL_LOSS_TARGET = 3100.0
-                            
                             trade.buy_price = current_option_ltp
                             trade.buy_time = now  # Use CURRENT time, not alert time
                             trade.stock_ltp = stock_data.get('ltp', 0) if stock_data else trade.stock_ltp
@@ -2900,11 +2923,27 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                             trade.status = 'bought'
                             trade.pnl = 0.0
                             
-                            # Calculate stop loss
-                            qty = trade.qty or 0
-                            if qty > 0:
-                                calculated_sl = current_option_ltp - (SL_LOSS_TARGET / qty)
-                                trade.stop_loss = max(0.05, math.floor(calculated_sl / 0.10) * 0.10)
+                            # Calculate stop loss: 5% lower than the open price of the current candle
+                            try:
+                                option_candles = vwap_service.get_option_candles_current_and_previous(trade.instrument_key)
+                                if option_candles and option_candles.get('current_candle'):
+                                    current_candle_open = option_candles.get('current_candle', {}).get('open', 0)
+                                    if current_candle_open and current_candle_open > 0:
+                                        # Stop loss = 5% lower than candle open price
+                                        trade.stop_loss = current_candle_open * 0.95
+                                        logger.info(f"   Stop Loss: ₹{trade.stop_loss:.2f} (5% below candle open: ₹{current_candle_open:.2f})")
+                                    else:
+                                        # Fallback: 5% below buy price if candle open not available
+                                        trade.stop_loss = current_option_ltp * 0.95
+                                        logger.warning(f"   Stop Loss: ₹{trade.stop_loss:.2f} (5% below buy price, candle open not available)")
+                                else:
+                                    # Fallback: 5% below buy price if candles not available
+                                    trade.stop_loss = current_option_ltp * 0.95
+                                    logger.warning(f"   Stop Loss: ₹{trade.stop_loss:.2f} (5% below buy price, candles not available)")
+                            except Exception as sl_error:
+                                # Fallback: 5% below buy price if error
+                                trade.stop_loss = current_option_ltp * 0.95
+                                logger.warning(f"   Stop Loss: ₹{trade.stop_loss:.2f} (5% below buy price, error fetching candles: {str(sl_error)})")
                             
                             entry_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
                             alert_time_str = trade.alert_time.strftime('%H:%M:%S') if trade.alert_time else 'N/A'

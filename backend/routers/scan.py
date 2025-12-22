@@ -1167,19 +1167,22 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     buy_time = current_time  # Use current system time, not alert time
                     sell_price = None  # BLANK initially - will be updated hourly by market data updater
                     
-                    # Stop Loss = Low price of previous day candle of the stock options
+                    # Stop Loss = 5% lower than the open price of the current candle
                     stop_loss_price = None
-                    if option_candles and option_candles.get('previous_day_candle'):
-                        previous_day_candle_low = option_candles.get('previous_day_candle', {}).get('low')
-                        if previous_day_candle_low and previous_day_candle_low > 0:
-                            stop_loss_price = float(previous_day_candle_low)
-                            print(f"✅ Stop Loss set from previous day candle low: ₹{stop_loss_price:.2f}")
+                    if option_candles and option_candles.get('current_day_candle'):
+                        current_day_candle_open = option_candles.get('current_day_candle', {}).get('open')
+                        if current_day_candle_open and current_day_candle_open > 0:
+                            # Stop loss = 5% lower than candle open price
+                            stop_loss_price = float(current_day_candle_open) * 0.95
+                            print(f"✅ Stop Loss set to 5% below current candle open: ₹{stop_loss_price:.2f} (candle open: ₹{current_day_candle_open:.2f})")
                         else:
-                            print(f"⚠️ Previous day candle low not available, setting SL to 0.05")
-                            stop_loss_price = 0.05
+                            # Fallback: 5% below buy price if candle open not available
+                            stop_loss_price = buy_price * 0.95
+                            print(f"⚠️ Current day candle open not available, setting SL to 5% below buy price: ₹{stop_loss_price:.2f}")
                     else:
-                        print(f"⚠️ Previous day candle data not available, setting SL to 0.05")
-                        stop_loss_price = 0.05
+                        # Fallback: 5% below buy price if candles not available
+                        stop_loss_price = buy_price * 0.95
+                        print(f"⚠️ Current day candle data not available, setting SL to 5% below buy price: ₹{stop_loss_price:.2f}")
                     
                     status = 'bought'  # Trade entered
                     pnl = 0.0
@@ -1221,9 +1224,11 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         if previous_day_candle_low and previous_day_candle_low > 0:
                             stop_loss_price = float(previous_day_candle_low)
                         else:
-                            stop_loss_price = 0.05
+                            # Fallback: 5% below buy price if candle data not available
+                        stop_loss_price = buy_price * 0.95 if buy_price else 0.05
                     else:
-                        stop_loss_price = 0.05
+                        # Fallback: 5% below buy price if candle data not available
+                        stop_loss_price = buy_price * 0.95 if buy_price else 0.05
                     
                     status = 'no_entry'  # Trade not entered
                     pnl = None  # No P&L since trade wasn't executed
