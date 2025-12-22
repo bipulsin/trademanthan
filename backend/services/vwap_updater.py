@@ -1096,6 +1096,11 @@ async def update_vwap_for_all_open_positions():
                 
                 # CRITICAL FIX: Always update sell_price and PnL for open positions
                 # Even if option LTP fetch failed, we should still update if we have any value
+                # BUT: Skip if trade has already exited (exit_reason is set)
+                if position.exit_reason is not None:
+                    logger.debug(f"⏭️ Skipping sell_price update for {stock_name} - already exited with reason: {position.exit_reason}")
+                    continue
+                
                 old_option_ltp = position.sell_price or 0.0
                 
                 if new_option_ltp > 0:
@@ -3281,6 +3286,10 @@ async def close_all_open_trades():
             IntradayStockOption.status != 'no_entry'  # Exclude trades that were never entered
         ).all()
         
+        # CRITICAL: Double-check each position to ensure it hasn't been exited
+        # This prevents race conditions where exit_reason was set but query still returned it
+        open_positions = [p for p in open_positions if p.exit_reason is None and p.status != 'sold']
+        
         if not open_positions:
             logger.info("✅ No open positions to close - all already exited")
             return
@@ -3292,6 +3301,16 @@ async def close_all_open_trades():
             try:
                 stock_name = position.stock_name
                 option_contract = position.option_contract
+                
+                # CRITICAL SAFETY CHECK: Verify trade hasn't been exited already
+                # Refresh from database to get latest state (prevents race conditions)
+                db.refresh(position)
+                if position.exit_reason is not None:
+                    logger.warning(f"⚠️ Skipping {stock_name} - already exited with reason: {position.exit_reason} (not overwriting)")
+                    continue
+                if position.status == 'sold':
+                    logger.warning(f"⚠️ Skipping {stock_name} - already sold (not overwriting)")
+                    continue
                 
                 # Skip if already no_entry (was never bought)
                 if position.status == 'no_entry':
@@ -3467,6 +3486,16 @@ async def close_all_open_trades():
                                                         continue
                     except Exception as e:
                         logger.warning(f"⚠️ Could not fetch final LTP for {option_contract}: {e}")
+                
+                # CRITICAL SAFETY CHECK: Verify trade hasn't been exited already
+                # Refresh from database to get latest state
+                db.refresh(position)
+                if position.exit_reason is not None:
+                    logger.warning(f"⚠️ Skipping {stock_name} - already exited with reason: {position.exit_reason} (not overwriting)")
+                    continue
+                if position.status == 'sold':
+                    logger.warning(f"⚠️ Skipping {stock_name} - already sold (not overwriting)")
+                    continue
                 
                 # Update position for EOD exit
                 old_sell_price = position.sell_price or 0.0
