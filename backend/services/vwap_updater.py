@@ -415,6 +415,15 @@ async def update_vwap_for_all_open_positions():
                             # Both indices bearish OR opposite directions → bullish alerts cannot enter
                             can_enter_by_index = False
                     
+                    # CRITICAL: Don't block entry if VWAP slope or candle size is "Skipped" or None/blank
+                    # Check stored status first
+                    if no_entry_trade.vwap_slope_status in [None, "Skipped", ""]:
+                        vwap_slope_passed = True  # Don't block if skipped/blank
+                        logger.info(f"ℹ️ {stock_name}: VWAP slope status is '{no_entry_trade.vwap_slope_status}' - Not blocking entry")
+                    if no_entry_trade.candle_size_status in [None, "Skipped", ""]:
+                        candle_size_passed = True  # Don't block if skipped/blank
+                        logger.info(f"ℹ️ {stock_name}: Candle size status is '{no_entry_trade.candle_size_status}' - Not blocking entry")
+                    
                     # Check if all entry conditions are met
                     if (is_before_3pm and 
                         can_enter_by_index and 
@@ -668,6 +677,15 @@ async def update_vwap_for_all_open_positions():
                         elif both_bearish or opposite_directions:
                             # Both indices bearish OR opposite directions → bullish alerts cannot enter
                             can_enter_by_index = False
+                    
+                    # CRITICAL: Don't block entry if VWAP slope or candle size is "Skipped" or None/blank
+                    # Check stored status first
+                    if no_entry_trade.vwap_slope_status in [None, "Skipped", ""]:
+                        vwap_slope_passed = True  # Don't block if skipped/blank
+                        logger.info(f"ℹ️ {stock_name}: VWAP slope status is '{no_entry_trade.vwap_slope_status}' - Not blocking entry")
+                    if no_entry_trade.candle_size_status in [None, "Skipped", ""]:
+                        candle_size_passed = True  # Don't block if skipped/blank
+                        logger.info(f"ℹ️ {stock_name}: Candle size status is '{no_entry_trade.candle_size_status}' - Not blocking entry")
                     
                     # Check if all entry conditions are met
                     if (is_before_3pm and 
@@ -2575,7 +2593,12 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                     slope_status = slope_result.get("status", "No")
                     slope_angle = slope_result.get("angle", 0.0)
                     slope_direction = slope_result.get("direction", "flat")
-                    vwap_slope_passed = (slope_status == "Yes")
+                    # CRITICAL: If status is "Skipped" or None/blank, don't block entry
+                    if slope_status in [None, "Skipped", ""]:
+                        vwap_slope_passed = True  # Don't block if skipped/blank
+                        logger.info(f"ℹ️ Cycle {cycle_number} - {stock_name}: VWAP slope status is '{slope_status}' - Not blocking entry")
+                    else:
+                        vwap_slope_passed = (slope_status == "Yes")
                     
                     # Log if angle is 0 to help diagnose
                     if slope_angle == 0.0 and prev_vwap != current_vwap:
@@ -2584,7 +2607,12 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                     slope_status = slope_result if isinstance(slope_result, str) else "No"
                     slope_angle = 0.0
                     slope_direction = "flat"
-                    vwap_slope_passed = (slope_status == "Yes")
+                    # CRITICAL: If status is "Skipped" or None/blank, don't block entry
+                    if slope_status in [None, "Skipped", ""]:
+                        vwap_slope_passed = True  # Don't block if skipped/blank
+                        logger.info(f"ℹ️ Cycle {cycle_number} - {stock_name}: VWAP slope status is '{slope_status}' - Not blocking entry")
+                    else:
+                        vwap_slope_passed = (slope_status == "Yes")
                     logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: vwap_slope returned non-dict result: {type(slope_result)}")
                 
                 # Update database with VWAP slope data
@@ -2704,11 +2732,16 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 is_10_15_alert = trade.alert_time and trade.alert_time.hour == 10 and trade.alert_time.minute == 15
                 
                 # If candle size was already calculated and stored, use that value
+                # CRITICAL: If status is "Skipped" or None/blank, don't block entry
                 if trade.candle_size_status == "Pass":
                     candle_size_passed = True
                 elif trade.candle_size_status == "Fail":
                     candle_size_passed = False
-                # Otherwise (None, "Retry", "Pending", "Skipped"), will be recalculated below
+                elif trade.candle_size_status in [None, "Skipped", ""]:
+                    # Don't block entry if candle size is skipped or not calculated
+                    candle_size_passed = True
+                    logger.info(f"ℹ️ Cycle {cycle_number} - {stock_name}: Candle size status is '{trade.candle_size_status}' - Not blocking entry")
+                # Otherwise ("Retry", "Pending"), will be recalculated below
                 
                 # Try to recalculate candle size if:
                 # 1. instrument_key exists (always recalculate)
@@ -2900,13 +2933,23 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                     # Entry decisions for 10:15 AM alerts are based on other conditions (time, index trends, VWAP slope)
                     is_10_15_alert = trade.alert_time and trade.alert_time.hour == 10 and trade.alert_time.minute == 15
                     
-                    if is_10_15_alert:
+                    # CRITICAL: Don't block entry if candle size is "Skipped" or None/blank
+                    if trade.candle_size_status in [None, "Skipped", ""]:
+                        # Candle size not calculated or skipped - don't block entry
+                        candle_size_check_passed = True
+                        logger.info(f"ℹ️ Cycle {cycle_number} - {stock_name}: Candle size status is '{trade.candle_size_status}' - Not blocking entry")
+                    elif is_10_15_alert:
                         # For 10:15 AM alerts: Don't block entry based on candle size
                         # Candle size is calculated and stored, but not used as a blocking condition
                         candle_size_check_passed = True
                     else:
                         # For all other alerts: Apply candle size check normally
                         candle_size_check_passed = candle_size_passed
+                    
+                    # CRITICAL: Check if stored VWAP slope status is "Skipped" or None/blank - don't block entry
+                    if trade.vwap_slope_status in [None, "Skipped", ""]:
+                        vwap_slope_passed = True  # Don't block if skipped/blank
+                        logger.info(f"ℹ️ Cycle {cycle_number} - {stock_name}: VWAP slope status is '{trade.vwap_slope_status}' - Not blocking entry")
                     
                     # Check if all entry conditions are met
                     # Log each condition for debugging
