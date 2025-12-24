@@ -2764,12 +2764,8 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                         should_recalculate = True
                     else:
                         # Even if already calculated, recalculate to ensure we have latest data
-                        # But prioritize 10:15 AM alerts at Cycle 1
-                        if not (is_10_15_alert and cycle_number == 1):
-                            should_recalculate = True
-                        else:
-                            # Already set above for 10:15 AM alerts
-                    should_recalculate = True
+                        # This ensures candle size is always up-to-date for all stocks in all cycles
+                        should_recalculate = True
                 elif trade.option_contract and not trade.instrument_key:
                     # Option contract exists but instrument_key is missing - try to get it
                     try:
