@@ -935,79 +935,79 @@ async def update_vwap_for_all_open_positions():
                             logger.warning(f"⚠️ {stock_name}: No valid option quote returned")
                     except Exception as ltp_error:
                         logger.error(f"❌ {stock_name}: Error fetching option LTP: {str(ltp_error)}")
-                
-                # FALLBACK: Lookup instrument_key for old records that don't have it stored
+                            
+                            # FALLBACK: Lookup instrument_key for old records that don't have it stored
                 if not option_contract or not position.instrument_key:
-                    logger.warning(f"⚠️ No stored instrument_key for {option_contract} - falling back to lookup")
-                    from pathlib import Path
-                    import json as json_lib
-                    
-                    instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
-                    
-                    if instruments_file.exists():
+                            logger.warning(f"⚠️ No stored instrument_key for {option_contract} - falling back to lookup")
+                            from pathlib import Path
+                            import json as json_lib
+                            
+                            instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
+                            
+                            if instruments_file.exists():
                         try:
-                            with open(instruments_file, 'r') as f:
-                                instruments_data = json_lib.load(f)
-                            
-                            # Find option contract in instruments data
-                            import re
-                            match = re.match(r'^([A-Z-]+)-(\w{3})(\d{4})-(\d+\.?\d*?)-(CE|PE)$', option_contract)
-                            
-                            if match:
-                                symbol, month, year, strike, opt_type = match.groups()
-                                strike_value = float(strike)
+                                with open(instruments_file, 'r') as f:
+                                    instruments_data = json_lib.load(f)
                                 
-                                # Parse expiry month and year
-                                month_map = {
-                                    'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
-                                    'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
-                                    'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
-                                }
-                                target_month = month_map.get(month[:3].capitalize(), 11)
-                                target_year = int(year)
+                                # Find option contract in instruments data
+                                import re
+                                match = re.match(r'^([A-Z-]+)-(\w{3})(\d{4})-(\d+\.?\d*?)-(CE|PE)$', option_contract)
                                 
-                                # Search for matching instrument - CRITICAL: Also check expiry month/year
-                                for instrument in instruments_data:
-                                    if (instrument.get('underlying_symbol', '').upper() == symbol.upper() and
-                                        instrument.get('segment') == 'NSE_FO' and
-                                        instrument.get('instrument_type') == opt_type):
-                                        
-                                        # Check strike price match
-                                        inst_strike = float(instrument.get('strike_price', 0))
-                                        if abs(inst_strike - strike_value) < 0.01:
-                                            # CRITICAL: Check expiry month/year matches
-                                            expiry_timestamp = instrument.get('expiry')
-                                            if expiry_timestamp:
-                                                try:
-                                                    # Convert timestamp (milliseconds) to datetime
-                                                    if expiry_timestamp > 1e12:
-                                                        expiry_timestamp = expiry_timestamp / 1000
-                                                    inst_expiry = datetime.fromtimestamp(expiry_timestamp, tz=pytz.UTC)
-                                                    
-                                                    # Check if expiry month/year matches
-                                                    if inst_expiry.year == target_year and inst_expiry.month == target_month:
-                                                        # Found the correct option - fetch its LTP
-                                                        instrument_key = instrument.get('instrument_key')
-                                                        if instrument_key:
-                                                            logger.info(f"🔍 [{now.strftime('%H:%M:%S')}] Found instrument_key via lookup: {instrument_key}")
-                                                            logger.info(f"   Strike: {inst_strike}, Type: {opt_type}, Expiry: {inst_expiry.strftime('%d-%b-%Y')}")
-                                                            
-                                                            option_quote = vwap_service.get_market_quote_by_key(instrument_key)
-                                                            
-                                                            if option_quote and 'last_price' in option_quote:
-                                                                option_ltp_data = option_quote['last_price']
-                                                                if option_ltp_data and option_ltp_data > 0:
-                                                                    new_option_ltp = option_ltp_data
-                                                                    logger.info(f"📥 [{now.strftime('%H:%M:%S')}] API returned option LTP: ₹{new_option_ltp:.2f} for {option_contract}")
-                                                                    # Update stored instrument_key for future updates
-                                                                    position.instrument_key = instrument_key
-                                                                    logger.info(f"✅ Stored instrument_key {instrument_key} for future updates")
-                                                                    break  # Found correct match, exit loop
-                                                except (ValueError, TypeError) as exp_error:
-                                                    logger.warning(f"⚠️ Error parsing expiry for {option_contract}: {exp_error}")
-                                                    continue
-                        except Exception as e:
-                            logger.warning(f"Could not fetch option LTP for {option_contract}: {str(e)}")
+                                if match:
+                                    symbol, month, year, strike, opt_type = match.groups()
+                                    strike_value = float(strike)
+                                    
+                                    # Parse expiry month and year
+                                    month_map = {
+                                        'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
+                                        'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
+                                        'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
+                                    }
+                                    target_month = month_map.get(month[:3].capitalize(), 11)
+                                    target_year = int(year)
+                                    
+                                    # Search for matching instrument - CRITICAL: Also check expiry month/year
+                                    for instrument in instruments_data:
+                                        if (instrument.get('underlying_symbol', '').upper() == symbol.upper() and
+                                            instrument.get('segment') == 'NSE_FO' and
+                                            instrument.get('instrument_type') == opt_type):
+                                            
+                                            # Check strike price match
+                                            inst_strike = float(instrument.get('strike_price', 0))
+                                            if abs(inst_strike - strike_value) < 0.01:
+                                                # CRITICAL: Check expiry month/year matches
+                                                expiry_timestamp = instrument.get('expiry')
+                                                if expiry_timestamp:
+                                                    try:
+                                                        # Convert timestamp (milliseconds) to datetime
+                                                        if expiry_timestamp > 1e12:
+                                                            expiry_timestamp = expiry_timestamp / 1000
+                                                        inst_expiry = datetime.fromtimestamp(expiry_timestamp, tz=pytz.UTC)
+                                                        
+                                                        # Check if expiry month/year matches
+                                                        if inst_expiry.year == target_year and inst_expiry.month == target_month:
+                                                            # Found the correct option - fetch its LTP
+                                                            instrument_key = instrument.get('instrument_key')
+                                                            if instrument_key:
+                                                                logger.info(f"🔍 [{now.strftime('%H:%M:%S')}] Found instrument_key via lookup: {instrument_key}")
+                                                                logger.info(f"   Strike: {inst_strike}, Type: {opt_type}, Expiry: {inst_expiry.strftime('%d-%b-%Y')}")
+                                                                
+                                                                option_quote = vwap_service.get_market_quote_by_key(instrument_key)
+                                                                
+                                                                if option_quote and 'last_price' in option_quote:
+                                                                    option_ltp_data = option_quote['last_price']
+                                                                    if option_ltp_data and option_ltp_data > 0:
+                                                                        new_option_ltp = option_ltp_data
+                                                                        logger.info(f"📥 [{now.strftime('%H:%M:%S')}] API returned option LTP: ₹{new_option_ltp:.2f} for {option_contract}")
+                                                                        # Update stored instrument_key for future updates
+                                                                        position.instrument_key = instrument_key
+                                                                        logger.info(f"✅ Stored instrument_key {instrument_key} for future updates")
+                                                                        break  # Found correct match, exit loop
+                                                    except (ValueError, TypeError) as exp_error:
+                                                        logger.warning(f"⚠️ Error parsing expiry for {option_contract}: {exp_error}")
+                                                        continue
+                    except Exception as e:
+                        logger.warning(f"Could not fetch option LTP for {option_contract}: {str(e)}")
                 
                 # CRITICAL: If option LTP fetch fails, retry once before giving up
                 # This ensures we always have option LTP for sell_price updates and exit decisions
@@ -2598,7 +2598,7 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                         vwap_slope_passed = True  # Don't block if skipped/blank
                         logger.info(f"ℹ️ Cycle {cycle_number} - {stock_name}: VWAP slope status is '{slope_status}' - Not blocking entry")
                     else:
-                        vwap_slope_passed = (slope_status == "Yes")
+                    vwap_slope_passed = (slope_status == "Yes")
                     
                     # Log if angle is 0 to help diagnose
                     if slope_angle == 0.0 and prev_vwap != current_vwap:
@@ -2612,7 +2612,7 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                         vwap_slope_passed = True  # Don't block if skipped/blank
                         logger.info(f"ℹ️ Cycle {cycle_number} - {stock_name}: VWAP slope status is '{slope_status}' - Not blocking entry")
                     else:
-                        vwap_slope_passed = (slope_status == "Yes")
+                    vwap_slope_passed = (slope_status == "Yes")
                     logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: vwap_slope returned non-dict result: {type(slope_result)}")
                 
                 # Update database with VWAP slope data
@@ -2720,12 +2720,12 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                         logger.warning(f"Error retrying option contract determination for {stock_name}: {str(contract_error)}")
                 
                 # ====================================================================
-                # RECALCULATE CANDLE SIZE FOR NO_ENTRY / ALERT_RECEIVED STOCKS
+                # RECALCULATE CANDLE SIZE FOR ALL STOCKS
                 # ====================================================================
-                # Recalculate candle size for stocks that are still in "no_entry" or
-                # "alert_received" status. This ensures candle size is updated with
-                # latest data at each cycle. Do this AFTER option contract determination
-                # so we have instrument_key.
+                # Recalculate candle size for ALL stocks in each cycle to ensure
+                # candle size is always up-to-date with latest data. This is especially
+                # important for stocks from 11:15 AM, 1:15 PM, and 2:15 PM alerts.
+                # Do this AFTER option contract determination so we have instrument_key.
                 # Initialize from database values (may be None if not calculated yet)
                 candle_size_passed = False
                 candle_size_ratio = trade.candle_size_ratio
@@ -2769,7 +2769,7 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                             should_recalculate = True
                         else:
                             # Already set above for 10:15 AM alerts
-                            should_recalculate = True
+                    should_recalculate = True
                 elif trade.option_contract and not trade.instrument_key:
                     # Option contract exists but instrument_key is missing - try to get it
                     try:
@@ -2859,8 +2859,8 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                                         trade.candle_size_ratio = candle_size_ratio
                                         trade.candle_size_status = "Pass" if candle_size_passed else "Fail"
                                         logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Previous day candle size is zero, using estimated ratio: {candle_size_ratio:.2f}x")
-                                    else:
-                                        trade.candle_size_status = "Skipped"
+                                else:
+                                    trade.candle_size_status = "Skipped"
                                         logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Previous day candle size is zero, cannot calculate ratio")
                             else:
                                 # Missing candle data - for 10:15 AM alerts at Cycle 1, try harder to get data
@@ -3041,7 +3041,7 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                             if is_10_15_alert:
                                 print(f"      - Candle Size: ✅ Calculated (Ratio: {candle_size_ratio:.2f}x) - Not blocking for 10:15 alert" if candle_size_ratio is not None else "      - Candle Size: ⚠️ Not calculated yet for 10:15 alert")
                             else:
-                                print(f"      - Candle Size: ✅ {'Passed' if candle_size_check_passed else 'Skipped'}")
+                            print(f"      - Candle Size: ✅ {'Passed' if candle_size_check_passed else 'Skipped'}")
                             print(f"      - Option Data: ✅ Valid")
                             print(f"   💰 Trade Details:")
                             print(f"      - Buy Price: ₹{current_option_ltp:.2f} (current LTP)")
@@ -3657,6 +3657,26 @@ async def close_all_open_trades():
                         # Absolute worst case: no buy_price either
                         logger.error(f"🚨 CRITICAL: No sell_price, no buy_price for {option_contract} - cannot set sell_price!")
                         position.sell_price = 0.0
+                
+                # FINAL SAFETY CHECK: Re-query from database by ID to get absolute latest state
+                # This prevents race conditions where exit_reason was set by another process between refresh() and here
+                fresh_position = db.query(IntradayStockOption).filter(
+                    IntradayStockOption.id == position.id
+                ).first()
+                
+                if not fresh_position:
+                    logger.warning(f"⚠️ FINAL CHECK: {stock_name} (ID: {position.id}) no longer exists in database - skipping")
+                    continue
+                
+                if fresh_position.exit_reason is not None:
+                    logger.warning(f"⚠️ FINAL CHECK: Skipping {stock_name} - exit_reason already set to '{fresh_position.exit_reason}' (NOT overwriting with time_based)")
+                    continue
+                if fresh_position.status == 'sold':
+                    logger.warning(f"⚠️ FINAL CHECK: Skipping {stock_name} - status already 'sold' (NOT overwriting)")
+                    continue
+                
+                # Use fresh_position for the rest of the operations
+                position = fresh_position
                 
                 exit_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
                 position.sell_time = now
