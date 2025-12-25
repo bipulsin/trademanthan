@@ -3070,10 +3070,6 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 # This ensures PnL is calculated and displayed in every cycle, not just at 3:25 PM
                 if trade.status == 'bought' and trade.exit_reason is None:
                     try:
-                        # Skip if trade has already exited
-                        if trade.exit_reason is not None:
-                            logger.debug(f"⏭️ Cycle {cycle_number} - Skipping sell_price/PnL update for {stock_name} - already exited")
-                        else:
                             # Fetch current option LTP
                             current_option_ltp_for_pnl = None
                             if trade.instrument_key:
@@ -3107,7 +3103,7 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                                     logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Cannot calculate PnL - missing buy_price or qty")
                             else:
                                 logger.debug(f"⏭️ Cycle {cycle_number} - {stock_name}: Option LTP not available for PnL update")
-                    except Exception as pnl_update_error:
+                        except Exception as pnl_update_error:
                         logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Error updating sell_price/PnL: {str(pnl_update_error)}")
                         # Don't fail the entire cycle if PnL update fails
                 
