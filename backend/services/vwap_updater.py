@@ -945,8 +945,8 @@ async def update_vwap_for_all_open_positions():
                             instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
                             
                             if instruments_file.exists():
-                        try:
-                                with open(instruments_file, 'r') as f:
+                                try:
+                                    with open(instruments_file, 'r') as f:
                                     instruments_data = json_lib.load(f)
                                 
                                 # Find option contract in instruments data
