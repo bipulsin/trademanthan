@@ -948,66 +948,66 @@ async def update_vwap_for_all_open_positions():
                                 try:
                                     with open(instruments_file, 'r') as f:
                                         instruments_data = json_lib.load(f)
-                                
-                                # Find option contract in instruments data
-                                import re
-                                match = re.match(r'^([A-Z-]+)-(\w{3})(\d{4})-(\d+\.?\d*?)-(CE|PE)$', option_contract)
-                                
-                                if match:
-                                    symbol, month, year, strike, opt_type = match.groups()
-                                    strike_value = float(strike)
                                     
-                                    # Parse expiry month and year
-                                    month_map = {
-                                        'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
-                                        'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
-                                        'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
-                                    }
-                                    target_month = month_map.get(month[:3].capitalize(), 11)
-                                    target_year = int(year)
+                                    # Find option contract in instruments data
+                                    import re
+                                    match = re.match(r'^([A-Z-]+)-(\w{3})(\d{4})-(\d+\.?\d*?)-(CE|PE)$', option_contract)
                                     
-                                    # Search for matching instrument - CRITICAL: Also check expiry month/year
-                                    for instrument in instruments_data:
-                                        if (instrument.get('underlying_symbol', '').upper() == symbol.upper() and
-                                            instrument.get('segment') == 'NSE_FO' and
-                                            instrument.get('instrument_type') == opt_type):
-                                            
-                                            # Check strike price match
-                                            inst_strike = float(instrument.get('strike_price', 0))
-                                            if abs(inst_strike - strike_value) < 0.01:
-                                                # CRITICAL: Check expiry month/year matches
-                                                expiry_timestamp = instrument.get('expiry')
-                                                if expiry_timestamp:
-                                                    try:
-                                                        # Convert timestamp (milliseconds) to datetime
-                                                        if expiry_timestamp > 1e12:
-                                                            expiry_timestamp = expiry_timestamp / 1000
-                                                        inst_expiry = datetime.fromtimestamp(expiry_timestamp, tz=pytz.UTC)
-                                                        
-                                                        # Check if expiry month/year matches
-                                                        if inst_expiry.year == target_year and inst_expiry.month == target_month:
-                                                            # Found the correct option - fetch its LTP
-                                                            instrument_key = instrument.get('instrument_key')
-                                                            if instrument_key:
-                                                                logger.info(f"🔍 [{now.strftime('%H:%M:%S')}] Found instrument_key via lookup: {instrument_key}")
-                                                                logger.info(f"   Strike: {inst_strike}, Type: {opt_type}, Expiry: {inst_expiry.strftime('%d-%b-%Y')}")
-                                                                
-                                                                option_quote = vwap_service.get_market_quote_by_key(instrument_key)
-                                                                
-                                                                if option_quote and 'last_price' in option_quote:
-                                                                    option_ltp_data = option_quote['last_price']
-                                                                    if option_ltp_data and option_ltp_data > 0:
-                                                                        new_option_ltp = option_ltp_data
-                                                                        logger.info(f"📥 [{now.strftime('%H:%M:%S')}] API returned option LTP: ₹{new_option_ltp:.2f} for {option_contract}")
-                                                                        # Update stored instrument_key for future updates
-                                                                        position.instrument_key = instrument_key
-                                                                        logger.info(f"✅ Stored instrument_key {instrument_key} for future updates")
-                                                                        break  # Found correct match, exit loop
-                                                    except (ValueError, TypeError) as exp_error:
-                                                        logger.warning(f"⚠️ Error parsing expiry for {option_contract}: {exp_error}")
-                                                        continue
-                    except Exception as e:
-                        logger.warning(f"Could not fetch option LTP for {option_contract}: {str(e)}")
+                                    if match:
+                                        symbol, month, year, strike, opt_type = match.groups()
+                                        strike_value = float(strike)
+                                        
+                                        # Parse expiry month and year
+                                        month_map = {
+                                            'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
+                                            'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
+                                            'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
+                                        }
+                                        target_month = month_map.get(month[:3].capitalize(), 11)
+                                        target_year = int(year)
+                                        
+                                        # Search for matching instrument - CRITICAL: Also check expiry month/year
+                                        for instrument in instruments_data:
+                                            if (instrument.get('underlying_symbol', '').upper() == symbol.upper() and
+                                                instrument.get('segment') == 'NSE_FO' and
+                                                instrument.get('instrument_type') == opt_type):
+                                                
+                                                # Check strike price match
+                                                inst_strike = float(instrument.get('strike_price', 0))
+                                                if abs(inst_strike - strike_value) < 0.01:
+                                                    # CRITICAL: Check expiry month/year matches
+                                                    expiry_timestamp = instrument.get('expiry')
+                                                    if expiry_timestamp:
+                                                        try:
+                                                            # Convert timestamp (milliseconds) to datetime
+                                                            if expiry_timestamp > 1e12:
+                                                                expiry_timestamp = expiry_timestamp / 1000
+                                                            inst_expiry = datetime.fromtimestamp(expiry_timestamp, tz=pytz.UTC)
+                                                            
+                                                            # Check if expiry month/year matches
+                                                            if inst_expiry.year == target_year and inst_expiry.month == target_month:
+                                                                # Found the correct option - fetch its LTP
+                                                                instrument_key = instrument.get('instrument_key')
+                                                                if instrument_key:
+                                                                    logger.info(f"🔍 [{now.strftime('%H:%M:%S')}] Found instrument_key via lookup: {instrument_key}")
+                                                                    logger.info(f"   Strike: {inst_strike}, Type: {opt_type}, Expiry: {inst_expiry.strftime('%d-%b-%Y')}")
+                                                                    
+                                                                    option_quote = vwap_service.get_market_quote_by_key(instrument_key)
+                                                                    
+                                                                    if option_quote and 'last_price' in option_quote:
+                                                                        option_ltp_data = option_quote['last_price']
+                                                                        if option_ltp_data and option_ltp_data > 0:
+                                                                            new_option_ltp = option_ltp_data
+                                                                            logger.info(f"📥 [{now.strftime('%H:%M:%S')}] API returned option LTP: ₹{new_option_ltp:.2f} for {option_contract}")
+                                                                            # Update stored instrument_key for future updates
+                                                                            position.instrument_key = instrument_key
+                                                                            logger.info(f"✅ Stored instrument_key {instrument_key} for future updates")
+                                                                            break  # Found correct match, exit loop
+                                                        except (ValueError, TypeError) as exp_error:
+                                                            logger.warning(f"⚠️ Error parsing expiry for {option_contract}: {exp_error}")
+                                                            continue
+                                except Exception as e:
+                                    logger.warning(f"Could not fetch option LTP for {option_contract}: {str(e)}")
                 
                 # CRITICAL: If option LTP fetch fails, retry once before giving up
                 # This ensures we always have option LTP for sell_price updates and exit decisions
