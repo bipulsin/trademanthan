@@ -3070,39 +3070,39 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 # This ensures PnL is calculated and displayed in every cycle, not just at 3:25 PM
                 if trade.status == 'bought' and trade.exit_reason is None:
                     try:
-                            # Fetch current option LTP
-                            current_option_ltp_for_pnl = None
-                            if trade.instrument_key:
-                                try:
-                                    option_quote = vwap_service.get_market_quote_by_key(trade.instrument_key)
-                                    if option_quote and option_quote.get('last_price', 0) > 0:
-                                        current_option_ltp_for_pnl = float(option_quote.get('last_price', 0))
-                                except Exception as quote_error:
-                                    logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Error fetching option LTP for PnL: {str(quote_error)}")
-                                    # Use existing sell_price or option_ltp as fallback
-                                    current_option_ltp_for_pnl = trade.sell_price or trade.option_ltp
+                        # Fetch current option LTP
+                        current_option_ltp_for_pnl = None
+                        if trade.instrument_key:
+                            try:
+                                option_quote = vwap_service.get_market_quote_by_key(trade.instrument_key)
+                                if option_quote and option_quote.get('last_price', 0) > 0:
+                                    current_option_ltp_for_pnl = float(option_quote.get('last_price', 0))
+                            except Exception as quote_error:
+                                logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Error fetching option LTP for PnL: {str(quote_error)}")
+                                # Use existing sell_price or option_ltp as fallback
+                                current_option_ltp_for_pnl = trade.sell_price or trade.option_ltp
+                        
+                        if current_option_ltp_for_pnl and current_option_ltp_for_pnl > 0:
+                            # Update sell_price
+                            old_sell_price = trade.sell_price or 0.0
+                            trade.sell_price = current_option_ltp_for_pnl
                             
-                            if current_option_ltp_for_pnl and current_option_ltp_for_pnl > 0:
-                                # Update sell_price
-                                old_sell_price = trade.sell_price or 0.0
-                                trade.sell_price = current_option_ltp_for_pnl
+                            # Calculate and update PnL
+                            if trade.buy_price and trade.qty:
+                                new_pnl = (current_option_ltp_for_pnl - trade.buy_price) * trade.qty
+                                old_pnl = trade.pnl or 0.0
+                                trade.pnl = new_pnl
                                 
-                                # Calculate and update PnL
-                                if trade.buy_price and trade.qty:
-                                    new_pnl = (current_option_ltp_for_pnl - trade.buy_price) * trade.qty
-                                    old_pnl = trade.pnl or 0.0
-                                    trade.pnl = new_pnl
-                                    
-                                    # Explicitly mark fields as modified to ensure SQLAlchemy tracks changes
-                                    from sqlalchemy.orm.attributes import flag_modified
-                                    flag_modified(trade, 'sell_price')
-                                    flag_modified(trade, 'pnl')
-                                    
-                                    logger.info(f"💰 Cycle {cycle_number} - {stock_name}: Updated sell_price ₹{old_sell_price:.2f}→₹{current_option_ltp_for_pnl:.2f}, PnL ₹{old_pnl:.2f}→₹{new_pnl:.2f}")
-                                else:
-                                    logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Cannot calculate PnL - missing buy_price or qty")
+                                # Explicitly mark fields as modified to ensure SQLAlchemy tracks changes
+                                from sqlalchemy.orm.attributes import flag_modified
+                                flag_modified(trade, 'sell_price')
+                                flag_modified(trade, 'pnl')
+                                
+                                logger.info(f"💰 Cycle {cycle_number} - {stock_name}: Updated sell_price ₹{old_sell_price:.2f}→₹{current_option_ltp_for_pnl:.2f}, PnL ₹{old_pnl:.2f}→₹{new_pnl:.2f}")
                             else:
-                                logger.debug(f"⏭️ Cycle {cycle_number} - {stock_name}: Option LTP not available for PnL update")
+                                logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Cannot calculate PnL - missing buy_price or qty")
+                        else:
+                            logger.debug(f"⏭️ Cycle {cycle_number} - {stock_name}: Option LTP not available for PnL update")
                     except Exception as pnl_update_error:
                         logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Error updating sell_price/PnL: {str(pnl_update_error)}")
                         # Don't fail the entire cycle if PnL update fails
