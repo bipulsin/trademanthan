@@ -184,16 +184,7 @@
             background: transparent;
             display: block;
             image-rendering: auto;
-            /* Remove white background - blend mode helps remove white pixels */
-            mix-blend-mode: multiply;
-            /* Fallback for browsers that don't support mix-blend-mode */
-        }
-        
-        /* Alternative blend mode if multiply doesn't work well */
-        @media (prefers-color-scheme: light) {
-            .bipul-sahay-image {
-                mix-blend-mode: darken;
-            }
+            /* Display image in original colors - no blend mode needed if image has transparent background */
         }
         
         /* Feature Cards in 2x2 Grid */
