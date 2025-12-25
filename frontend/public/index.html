@@ -145,10 +145,12 @@
             grid-column: 1 / 2;
             grid-row: 1 / 2;
             display: flex;
+            flex-direction: column;
             align-items: center;
-            justify-content: center;
+            justify-content: flex-start;
             padding: 0;
             background: transparent;
+            gap: 20px;
         }
         
         .logo-home-image {
@@ -159,6 +161,39 @@
             border: none;
             box-shadow: none;
             border-radius: 0;
+        }
+        
+        /* By Bipul Sahay Image Container */
+        .bipul-sahay-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            max-width: 280px;
+            padding: 15px;
+            background: transparent;
+            box-sizing: border-box;
+        }
+        
+        .bipul-sahay-image {
+            width: 100%;
+            max-width: 280px;
+            height: auto;
+            max-height: 120px;
+            object-fit: contain;
+            background: transparent;
+            display: block;
+            image-rendering: auto;
+            /* Remove white background - blend mode helps remove white pixels */
+            mix-blend-mode: multiply;
+            /* Fallback for browsers that don't support mix-blend-mode */
+        }
+        
+        /* Alternative blend mode if multiply doesn't work well */
+        @media (prefers-color-scheme: light) {
+            .bipul-sahay-image {
+                mix-blend-mode: darken;
+            }
         }
         
         /* Feature Cards in 2x2 Grid */
@@ -229,6 +264,16 @@
             .hero-image {
                 width: 300px;
             }
+            
+            .bipul-sahay-container {
+                max-width: 220px;
+                padding: 10px;
+            }
+            
+            .bipul-sahay-image {
+                max-width: 220px;
+                max-height: 100px;
+            }
         }
     </style>
 </head>
@@ -267,6 +312,9 @@
                         <!-- Logo (Top-Left) -->
                         <div class="logo-card-new">
                             <img src="tm_logo.png" alt="Trade Manthan Logo" class="logo-home-image">
+                            <div class="bipul-sahay-container">
+                                <img src="bipul_sahay.png" alt="by Bipul Sahay" class="bipul-sahay-image">
+                            </div>
                         </div>
                         
                         <!-- Feature Cards Grid (2x2 - 3 cards) -->
