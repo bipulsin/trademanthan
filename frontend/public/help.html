@@ -2037,55 +2037,194 @@ def perform_health_check():
                                      │
                                      ▼
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
-│  STEP 3: DATA ENRICHMENT                                                            │
+│  STEP 3: DATA ENRICHMENT & ENTRY CONDITIONS                                         │
 │  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
 │                                                                                     │
 │  📍 File: backend/routers/scan.py                                                   │
-│  📍 Function: enrich_stock_data(stocks: List[str], alert_type: str, db: Session)   │
+│  📍 Function: process_webhook_data() → enrich_stock_data()                         │
 │                                                                                     │
 │  ⚙️  For each stock in alert:                                                       │
-│     ├─ upstox_service.get_stock_ltp_from_market_quote(stock_name)                  │
-│     ├─ upstox_service.get_stock_vwap(stock_name)                                   │
-│     ├─ get_monthly_expiry(reference_date) - Determine option expiry                │
-│     ├─ upstox_service.get_option_chain(stock_name, expiry_date)                    │
-│     ├─ find_strike_from_option_chain() - Select OTM-1 to OTM-5 (highest liquidity) │
-│     ├─ get_lot_size_from_master(stock_name, option_contract, db)                   │
-│     └─ upstox_service.get_option_ltp(instrument_key)                               │
+│     ├─ upstox_service.get_stock_ltp_and_vwap(stock_name) → Current stock LTP/VWAP │
+│     ├─ upstox_service.get_stock_vwap_from_candle_at_time() → Previous hour VWAP   │
+│     ├─ Determine expiry month/year (18th cutoff logic)                             │
+│     ├─ upstox_service.get_option_chain() → Get option chain                        │
+│     ├─ find_strike_from_option_chain() → OTM-1 to OTM-5 (highest volume×OI)       │
+│     ├─ Query master_stock table → Find option contract & lot size                  │
+│     ├─ upstox_service.get_option_ltp() → Current option LTP                        │
+│     ├─ upstox_service.get_option_daily_candles_current_and_previous() → OHLC data │
+│     ├─ Calculate Candle Size: current_candle_size / previous_candle_size           │
+│     ├─ Calculate VWAP Slope: angle between prev_hour VWAP and current_hour VWAP   │
+│     └─ Store all data in database (even if no_entry)                               │
 │                                                                                     │
-│  📦 Returns enriched data with: stock_ltp, stock_vwap, option_contract,            │
-│     option_ltp, lot_size for each stock                                            │
+│  📦 Returns enriched data with: stock_ltp, stock_vwap, prev_vwap,                  │
+│     option_contract, option_ltp, lot_size, candle_size_ratio, vwap_slope           │
 │                                                                                     │
 └────────────────────────────────────┬────────────────────────────────────────────────┘
                                      │
                                      ▼
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
-│  STEP 4: TRADE ENTRY DECISION                                                       │
+│  STEP 4: TRADE ENTRY DECISION (Multiple Conditions)                                 │
 │  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
 │                                                                                     │
 │  📍 File: backend/routers/scan.py                                                   │
-│  📍 Function: process_webhook_data() [continued]                                    │
+│  📍 Function: process_webhook_data() [Entry Decision Logic]                        │
 │                                                                                     │
-│  🔀 DECISION BRANCH:                                                                 │
+│  ✅ ALL conditions must be met for entry:                                           │
 │                                                                                     │
-│  ✅ IF allow_trading = True (Trends Aligned):                                       │
+│  1️⃣  TIME CHECK: Alert time < 3:00 PM IST                                          │
+│  2️⃣  INDEX TRENDS: Must be aligned (both bullish OR both bearish)                 │
+│  3️⃣  VWAP SLOPE: >= 45 degrees (calculated from prev & current hour VWAP)         │
+│     └─ Special: If "Skipped" or blank, doesn't block entry                         │
+│  4️⃣  CANDLE SIZE: < 7.5× previous candle (current / previous ratio)                │
+│     └─ For 10:15 AM alerts: Calculated but doesn't block (updated at 10:30 AM)    │
+│     └─ Special: If "Skipped" or blank, doesn't block entry                         │
+│  5️⃣  OPTION DATA: Valid option LTP, lot size, instrument_key available            │
+│                                                                                     │
+│  🔀 ENTRY RESULT:                                                                    │
+│                                                                                     │
+│  ✅ IF ALL CONDITIONS MET:                                                          │
 │     ├─ status = 'bought'                                                            │
+│     ├─ Fetch FRESH option LTP at entry moment (not enrichment LTP)                │
+│     ├─ buy_price = Fresh option LTP (fetched at entry)                             │
+│     ├─ buy_time = Current system time (IST), NOT alert time                        │
+│     ├─ stop_loss = 5% below current candle open price (or buy_price if unavailable)│
 │     ├─ qty = lot_size                                                               │
-│     ├─ buy_price = option_ltp                                                       │
-│     ├─ buy_time = now                                                               │
-│     ├─ stop_loss = max(0.05, floor((buy_price - 3100/qty) / 0.10) * 0.10)          │
-│     │  └─ Rounds down to nearest 10 paise                                           │
-│     ├─ sell_price = None (blank, will update hourly)                               │
-│     └─ Trade is ENTERED and tracking begins                                        │
+│     ├─ sell_price = None (updated hourly starting next cycle)                      │
+│     ├─ pnl = 0.0                                                                    │
+│     └─ Trade tracking begins                                                        │
 │                                                                                     │
-│  ❌ ELSE (Opposite Trends):                                                          │
+│  ❌ IF ANY CONDITION FAILS:                                                          │
 │     ├─ status = 'no_entry'                                                          │
-│     ├─ qty = 0                                                                      │
-│     ├─ buy_price = None                                                             │
-│     ├─ stop_loss = None                                                             │
+│     ├─ buy_price = option_ltp (for reference only)                                 │
+│     ├─ buy_time = NULL (trade not executed)                                         │
+│     ├─ stop_loss = Previous option candle low (for reference)                      │
+│     ├─ qty = lot_size (for reference)                                               │
 │     ├─ sell_price = None                                                            │
-│     └─ Alert stored but NOT entered (permanent NO ENTRY)                           │
+│     ├─ pnl = None                                                                   │
+│     ├─ no_entry_reason = Specific reason (Time, Index, VWAP Slope, Candle Size)   │
+│     └─ Will be re-evaluated in next cycle (if conditions improve)                 │
 │                                                                                     │
-│  💾 Save to Database: IntradayStockOption model (database.py)                       │
+│  💾 Save to Database: IntradayStockOption + HistoricalMarketData (snapshot)        │
+│                                                                                     │
+└────────────────────────────────────┬────────────────────────────────────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│  STEP 4B: CYCLE-BASED VWAP SLOPE & CANDLE SIZE CALCULATION                          │
+│  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
+│                                                                                     │
+│  📍 File: backend/services/vwap_updater.py                                          │
+│  📍 Function: calculate_vwap_slope_for_cycle(cycle_number, cycle_time)             │
+│  📍 Schedule:                                                                       │
+│     • Cycle 1: 10:30 AM (for 10:15 AM alerts)                                       │
+│     • Cycle 2: 11:15 AM (for 11:15 AM alerts + retry 10:15)                         │
+│     • Cycle 3: 12:15 PM (for 12:15 PM alerts + retry previous)                      │
+│     • Cycle 4: 1:15 PM (for 1:15 PM alerts + retry previous)                        │
+│     • Cycle 5: 2:15 PM (for 2:15 PM alerts + retry previous)                        │
+│                                                                                     │
+│  ⚙️  For each cycle:                                                                 │
+│     1. Query stocks from current cycle's alert time (ALL statuses)                 │
+│     2. Query no_entry/alert_received stocks from previous cycles                   │
+│     3. For each stock:                                                              │
+│        ├─ Calculate VWAP Slope:                                                     │
+│        │  ├─ Get previous hour VWAP (from candle API or stored value)              │
+│        │  ├─ Get current hour VWAP                                                  │
+│        │  ├─ Calculate angle: vwap_slope(prev_vwap, prev_time, curr_vwap, curr_time)│
+│        │  └─ Store: vwap_slope_status ("Yes" if >=45°, "No" otherwise), angle, dir │
+│        │                                                                           │
+│        ├─ Recalculate Candle Size (for all stocks):                                │
+│        │  ├─ Get current day option candle (up to current hour)                     │
+│        │  ├─ Get previous day option candle                                         │
+│        │  ├─ Calculate ratio: current_size / previous_size                          │
+│        │  ├─ Store: candle_size_status ("Pass" if <7.5×, "Fail" otherwise), ratio │
+│        │  └─ For 10:15 AM at 10:30 AM: ALWAYS recalculates                         │
+│        │                                                                           │
+│        └─ Re-evaluate Entry (for no_entry trades only):                            │
+│           ├─ Check: Time < 3:00 PM?                                                 │
+│           ├─ Check: Index trends aligned?                                           │
+│           ├─ Check: VWAP slope >= 45°? (or skipped/blank)                          │
+│           ├─ Check: Candle size < 7.5×? (or skipped/blank, or 10:15 alert)        │
+│           └─ If ALL pass: ENTER TRADE                                               │
+│              ├─ Fetch fresh option LTP at entry moment                              │
+│              ├─ buy_price = Fresh LTP, buy_time = now, status = 'bought'           │
+│              ├─ stop_loss = 5% below candle open (or buy_price)                    │
+│              └─ Trade is now active!                                                │
+│                                                                                     │
+│  💾 Updates: vwap_slope_*, candle_size_*, HistoricalMarketData snapshot           │
+│                                                                                     │
+└────────────────────────────────────┬────────────────────────────────────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│  STEP 5: HOURLY MARKET DATA UPDATES (9:15 AM - 3:15 PM, Every Hour at :15)         │
+│  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
+│                                                                                     │
+│  📍 File: backend/services/vwap_updater.py                                          │
+│  📍 Function: update_vwap_for_all_open_positions()                                  │
+│  📍 Scheduler: VWAPUpdater.start() - APScheduler with CronTrigger                   │
+│                                                                                     │
+│  ⚙️  Process:                                                                        │
+│     1. Query all OPEN positions (status='bought', exit_reason=NULL)                │
+│     2. For each position:                                                           │
+│        ├─ upstox_service.get_stock_ltp_and_vwap() → Update stock_vwap, stock_ltp  │
+│        ├─ Fetch option LTP using stored instrument_key → Update sell_price        │
+│        ├─ Calculate PnL: (sell_price - buy_price) × qty                            │
+│        ├─ flag_modified(position, 'pnl') → Ensure PnL persistence                  │
+│        └─ Save snapshot to HistoricalMarketData                                    │
+│                                                                                     │
+│     3. Check Exit Conditions (for each open position):                             │
+│                                                                                     │
+│        🔴 STOP LOSS (Priority 1):                                                    │
+│           ├─ Condition: option_ltp <= stop_loss                                     │
+│           ├─ exit_reason = 'stop_loss'                                              │
+│           ├─ sell_price = Current option LTP (LOCKED)                              │
+│           ├─ sell_time = now (LOCKED)                                               │
+│           ├─ status = 'sold'                                                        │
+│           └─ Badge: 🛑 SL HIT                                                       │
+│                                                                                     │
+│        📉 VWAP CROSS (Priority 2 - After 11:15 AM):                                │
+│           ├─ For CE: stock_ltp < stock_vwap → Exit                                 │
+│           ├─ For PE: stock_ltp > stock_vwap → Exit                                 │
+│           ├─ exit_reason = 'stock_vwap_cross'                                       │
+│           ├─ sell_price = Current option LTP (LOCKED)                              │
+│           ├─ sell_time = now (LOCKED)                                               │
+│           ├─ status = 'sold'                                                        │
+│           └─ Badge: ✖ EXIT VWAP                                                     │
+│                                                                                     │
+│        🎯 PROFIT TARGET (Priority 3):                                                │
+│           ├─ Condition: option_ltp >= (buy_price × 1.5)                            │
+│           ├─ exit_reason = 'profit_target'                                          │
+│           ├─ sell_price = Current option LTP (LOCKED)                              │
+│           ├─ sell_time = now (LOCKED)                                               │
+│           ├─ status = 'sold'                                                        │
+│           └─ Badge: 🎯 TARGET                                                       │
+│                                                                                     │
+│  ⚠️  PROTECTION: Once exit_reason is set, position cannot be updated again!        │
+│                                                                                     │
+└────────────────────────────────────┬────────────────────────────────────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│  STEP 6: END-OF-DAY CLOSURE (3:25 PM)                                               │
+│  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
+│                                                                                     │
+│  📍 File: backend/services/vwap_updater.py                                          │
+│  📍 Function: close_all_open_trades()                                               │
+│  📍 Scheduler: CronTrigger(hour=15, minute=25, timezone='Asia/Kolkata')            │
+│                                                                                     │
+│  ⚙️  Process:                                                                        │
+│     1. Query positions with: status!='sold', exit_reason=NULL, status!='no_entry' │
+│     2. Final safety check: Re-query by ID to ensure exit_reason still NULL         │
+│     3. For each position:                                                           │
+│        ├─ Fetch current option LTP (with retry logic)                              │
+│        ├─ exit_reason = 'time_based'                                                │
+│        ├─ sell_price = Current option LTP (LOCKED)                                 │
+│        ├─ sell_time = 3:25 PM (LOCKED)                                              │
+│        ├─ status = 'sold'                                                           │
+│        ├─ pnl = (sell_price - buy_price) × qty                                      │
+│        └─ Save to HistoricalMarketData                                              │
+│                                                                                     │
+│  ⚠️  CRITICAL: Positions already exited (exit_reason set) are NOT overwritten!     │
 │                                                                                     │
 └────────────────────────────────────┬────────────────────────────────────────────────┘
                                      │
@@ -2116,58 +2255,12 @@ def perform_health_check():
                                      │
                                      ▼
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
-│  STEP 6: EXIT CONDITION CHECKS (Called after each hourly update)                   │
-│  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
-│                                                                                     │
-│  📍 File: backend/routers/scan.py                                                   │
-│  📍 Function: refresh_hourly_prices(db: Session)                                    │
-│  📍 Endpoint: GET /scan/refresh-hourly-prices                                       │
-│                                                                                     │
-│  🔍 EXIT CONDITIONS (Checked in Priority Order):                                    │
-│                                                                                     │
-│  1️⃣  TIME-BASED EXIT (Highest Priority)                                             │
-│     ├─ Condition: current_time >= 15:25 (3:25 PM IST)                              │
-│     ├─ exit_reason = 'time_based'                                                  │
-│     ├─ status = 'sold'                                                              │
-│     ├─ sell_price = current option LTP (LOCKED)                                    │
-│     ├─ sell_time = now (LOCKED)                                                    │
-│     └─ Badge: ⏰ TIME (Orange)                                                       │
-│                                                                                     │
-│  2️⃣  STOP LOSS HIT                                                                   │
-│     ├─ Condition: sell_price <= stop_loss                                          │
-│     ├─ exit_reason = 'stop_loss'                                                   │
-│     ├─ status = 'sold'                                                              │
-│     ├─ sell_price = LOCKED at trigger price                                        │
-│     ├─ sell_time = LOCKED at trigger time                                          │
-│     ├─ Loss capped at ~₹3,100                                                       │
-│     └─ Badge: 🛑 SL HIT (Red)                                                        │
-│                                                                                     │
-│  3️⃣  PROFIT TARGET HIT                                                               │
-│     ├─ Condition: sell_price >= (buy_price * 1.5)                                  │
-│     ├─ exit_reason = 'profit_target'                                               │
-│     ├─ status = 'sold'                                                              │
-│     ├─ sell_price = LOCKED at 50% gain                                             │
-│     ├─ sell_time = LOCKED at trigger time                                          │
-│     └─ Badge: 🎯 TARGET (Green)                                                      │
-│                                                                                     │
-│  4️⃣  VWAP CROSS (Visual Signal Only)                                                 │
-│     ├─ Condition: stock_ltp < stock_vwap                                           │
-│     ├─ Trade remains OPEN                                                           │
-│     ├─ No automatic exit                                                            │
-│     └─ Badge: ✖ EXIT (Red Pulsing Cross) - User advisory                            │
-│                                                                                     │
-│  ⚠️  PROTECTION: Once exit_reason is set, sell_price & sell_time are IMMUTABLE!     │
-│                                                                                     │
-└────────────────────────────────────┬────────────────────────────────────────────────┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────────────────┐
 │  STEP 7: END-OF-DAY VWAP UPDATE (3:30 PM & 3:35 PM)                                │
 │  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
 │                                                                                     │
 │  📍 File: backend/services/vwap_updater.py                                          │
 │  📍 Function: update_end_of_day_vwap()                                              │
-│  📍 Scheduler: VWAPUpdater.start() - Runs at 15:30 and 15:35 IST                   │
+│  📍 Scheduler: CronTrigger(hour=15, minute=30, timezone='Asia/Kolkata')            │
 │                                                                                     │
 │  ⚙️  Process:                                                                        │
 │     1. Query ALL positions from today (both open AND closed)                       │
@@ -2282,6 +2375,8 @@ def perform_health_check():
                             <td>
                                 • VWAPUpdater class<br>
                                 • update_vwap_for_all_open_positions()<br>
+                                • calculate_vwap_slope_for_cycle()<br>
+                                • close_all_open_trades()<br>
                                 • update_end_of_day_vwap()<br>
                                 • start_vwap_updater()<br>
                                 • stop_vwap_updater()
@@ -2373,8 +2468,8 @@ def perform_health_check():
                     </thead>
                     <tbody>
                         <tr>
-                            <td><code>SL_LOSS_TARGET</code></td>
-                            <td>₹3,100</td>
+                            <td><code>STOP_LOSS_CALCULATION</code></td>
+                            <td>5% below candle open price (or buy_price if unavailable)</td>
                             <td>backend/routers/scan.py</td>
                         </tr>
                         <tr>
@@ -2389,8 +2484,23 @@ def perform_health_check():
                         </tr>
                         <tr>
                             <td><code>HOURLY_UPDATE_TIMES</code></td>
-                            <td>9:30, 10:15, 11:15, 12:15, 1:15, 2:15, 3:15</td>
+                            <td>9:15, 10:15, 11:15, 12:15, 13:15, 14:15, 15:15</td>
                             <td>backend/services/vwap_updater.py</td>
+                        </tr>
+                        <tr>
+                            <td><code>CYCLE_TIMES</code></td>
+                            <td>10:30 AM, 11:15 AM, 12:15 PM, 1:15 PM, 2:15 PM</td>
+                            <td>backend/services/vwap_updater.py</td>
+                        </tr>
+                        <tr>
+                            <td><code>VWAP_SLOPE_THRESHOLD</code></td>
+                            <td>45 degrees (minimum angle for entry)</td>
+                            <td>backend/services/upstox_service.py</td>
+                        </tr>
+                        <tr>
+                            <td><code>CANDLE_SIZE_THRESHOLD</code></td>
+                            <td>7.5× (max ratio: current / previous candle)</td>
+                            <td>backend/routers/scan.py</td>
                         </tr>
                         <tr>
                             <td><code>EOD_VWAP_TIMES</code></td>
@@ -2408,8 +2518,13 @@ def perform_health_check():
                             <td>backend/routers/scan.py</td>
                         </tr>
                         <tr>
-                            <td><code>STOP_LOSS_ROUNDING</code></td>
-                            <td>0.10 (10 paise, rounded down)</td>
+                            <td><code>VWAP_SLOPE_THRESHOLD</code></td>
+                            <td>45 degrees (minimum angle for entry)</td>
+                            <td>backend/services/upstox_service.py</td>
+                        </tr>
+                        <tr>
+                            <td><code>CANDLE_SIZE_THRESHOLD</code></td>
+                            <td>7.5× (max ratio: current / previous candle)</td>
                             <td>backend/routers/scan.py</td>
                         </tr>
                     </tbody>
@@ -2442,7 +2557,19 @@ def perform_health_check():
                             <td><strong>Hourly Market Updates</strong></td>
                             <td>Hourly at :15 (9:15-3:15)</td>
                             <td>update_vwap_for_all_open_positions()</td>
-                            <td>Update VWAP, LTP, sell_price</td>
+                            <td>Update VWAP, LTP, sell_price, PnL; Check exit conditions (SL, VWAP Cross, Target)</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Cycle VWAP Slope & Candle Size</strong></td>
+                            <td>10:30 AM, 11:15 AM, 12:15 PM, 1:15 PM, 2:15 PM</td>
+                            <td>calculate_vwap_slope_for_cycle()</td>
+                            <td>Calculate VWAP slope, recalculate candle size, re-evaluate no_entry trades for entry</td>
+                        </tr>
+                        <tr>
+                            <td><strong>EOD Trade Closure</strong></td>
+                            <td>3:25 PM IST</td>
+                            <td>close_all_open_trades()</td>
+                            <td>Close all remaining open trades with time_based exit reason</td>
                         </tr>
                         <tr>
                             <td><strong>EOD VWAP Update</strong></td>
