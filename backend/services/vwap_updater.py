@@ -3111,6 +3111,47 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                                 logger.info(f"💰 Cycle {cycle_number} - {stock_name}: Updated sell_price ₹{old_sell_price:.2f}→₹{current_option_ltp_for_pnl:.2f}, PnL ₹{old_pnl:.2f}→₹{new_pnl:.2f}")
                             else:
                                 logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Cannot calculate PnL - missing buy_price or qty")
+                            
+                            # CHECK EXIT CONDITIONS: Stop Loss and VWAP Cross (only if still open)
+                            # Priority: Stop Loss > VWAP Cross
+                            if trade.exit_reason is None:
+                                exit_triggered = False
+                                
+                                # 1. CHECK STOP LOSS
+                                if trade.stop_loss and current_option_ltp_for_pnl <= trade.stop_loss:
+                                    exit_triggered = True
+                                    trade.exit_reason = 'stop_loss'
+                                    trade.sell_time = now
+                                    trade.status = 'sold'
+                                    # PnL already calculated above
+                                    flag_modified(trade, 'exit_reason')
+                                    flag_modified(trade, 'sell_time')
+                                    flag_modified(trade, 'status')
+                                    logger.warning(f"🛑 Cycle {cycle_number} - {stock_name}: STOP LOSS EXIT - LTP ₹{current_option_ltp_for_pnl:.2f} <= SL ₹{trade.stop_loss:.2f}, PnL: ₹{trade.pnl:.2f}")
+                                
+                                # 2. CHECK VWAP CROSS (only if stop loss not triggered and after 11:15 AM)
+                                elif now.hour >= 11 and (now.hour > 11 or now.minute >= 15):
+                                    # Get stock data for VWAP cross check
+                                    stock_data_for_exit = vwap_service.get_stock_ltp_and_vwap(stock_name)
+                                    if stock_data_for_exit:
+                                        stock_ltp_exit = stock_data_for_exit.get('ltp', 0)
+                                        stock_vwap_exit = stock_data_for_exit.get('vwap', 0)
+                                        
+                                        if stock_ltp_exit > 0 and stock_vwap_exit > 0:
+                                            option_type = trade.option_type or 'CE'
+                                            # CE: Exit if stock LTP falls below VWAP
+                                            # PE: Exit if stock LTP rises above VWAP
+                                            if (option_type == 'CE' and stock_ltp_exit < stock_vwap_exit) or \
+                                               (option_type == 'PE' and stock_ltp_exit > stock_vwap_exit):
+                                                exit_triggered = True
+                                                trade.exit_reason = 'stock_vwap_cross'
+                                                trade.sell_time = now
+                                                trade.status = 'sold'
+                                                # PnL already calculated above
+                                                flag_modified(trade, 'exit_reason')
+                                                flag_modified(trade, 'sell_time')
+                                                flag_modified(trade, 'status')
+                                                logger.warning(f"📉 Cycle {cycle_number} - {stock_name}: VWAP CROSS EXIT - Stock LTP ₹{stock_ltp_exit:.2f} {'<' if option_type == 'CE' else '>'} VWAP ₹{stock_vwap_exit:.2f}, PnL: ₹{trade.pnl:.2f}")
                         else:
                             logger.debug(f"⏭️ Cycle {cycle_number} - {stock_name}: Option LTP not available for PnL update")
                     except Exception as pnl_update_error:
