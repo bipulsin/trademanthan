@@ -1230,7 +1230,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                             stop_loss_price = float(previous_day_candle_low)
                         else:
                             # Fallback: 5% below buy price if candle data not available
-                        stop_loss_price = buy_price * 0.95 if buy_price else 0.05
+                            stop_loss_price = buy_price * 0.95 if buy_price else 0.05
                     else:
                         # Fallback: 5% below buy price if candle data not available
                         stop_loss_price = buy_price * 0.95 if buy_price else 0.05
