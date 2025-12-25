@@ -2855,9 +2855,9 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                                         trade.candle_size_ratio = candle_size_ratio
                                         trade.candle_size_status = "Pass" if candle_size_passed else "Fail"
                                         logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Previous day candle size is zero, using estimated ratio: {candle_size_ratio:.2f}x")
-                                else:
-                                    trade.candle_size_status = "Skipped"
-                                    logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Previous day candle size is zero, cannot calculate ratio")
+                                    else:
+                                        trade.candle_size_status = "Skipped"
+                                        logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Previous day candle size is zero, cannot calculate ratio")
                             else:
                                 # Missing candle data - for 10:15 AM alerts at Cycle 1, try harder to get data
                                 if is_10_15_alert and cycle_number == 1:
