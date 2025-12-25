@@ -950,10 +950,25 @@
             <!-- Recent Updates Banner -->
             <div class="success-box" style="margin-bottom: 30px;">
                 <h2 style="color: #059669; margin-bottom: 15px;">🎉 Recent Updates & Improvements</h2>
-                <p><strong>Latest enhancements to the system (November 2025):</strong></p>
+                
+                <p><strong>Latest enhancements to the system (December 2025):</strong></p>
+                <ul style="margin-left: 20px; margin-top: 10px;">
+                    <li>✅ <strong>Stop Loss Calculation (UPDATED):</strong> Now calculated as 5% below the current candle's open price (or buy_price if unavailable) instead of fixed formula</li>
+                    <li>✅ <strong>VWAP Slope Calculation:</strong> Cycle-based calculation at 10:30 AM, 11:15 AM, 12:15 PM, 1:15 PM, 2:15 PM for all stocks</li>
+                    <li>✅ <strong>VWAP Slope Fallback:</strong> Previous trading day's daily VWAP used as fallback when intraday VWAP unavailable</li>
+                    <li>✅ <strong>Candle Size Calculation:</strong> Always recalculated in cycles for all stocks (11:15 AM, 1:15 PM, 2:15 PM alerts)</li>
+                    <li>✅ <strong>10:15 AM Candle Size:</strong> Always recalculated at 10:30 AM (Cycle 1), no longer skipped by design</li>
+                    <li>✅ <strong>Non-Blocking Conditions:</strong> "Skipped" or blank VWAP slope and candle size don't block trade entry</li>
+                    <li>✅ <strong>VWAP Cross Exit:</strong> Now an actual exit condition (not just visual) - triggers automatic trade closure</li>
+                    <li>✅ <strong>Exit Reason Protection:</strong> Trades exited with VWAP cross, stop loss, or profit target won't be overwritten at 3:25 PM</li>
+                    <li>✅ <strong>PnL Calculation Fix:</strong> PnL now properly calculated and displayed in all cycles (not just at 3:25 PM)</li>
+                    <li>✅ <strong>Cycle-Based Processing:</strong> Systematic VWAP slope and candle size recalculation in 5 cycles throughout the day</li>
+                    <li>✅ <strong>Historical Data Storage:</strong> All market data snapshots saved to historical_market_data table at webhook and cycles</li>
+                </ul>
+                
+                <p style="margin-top: 15px;"><strong>Previous updates (November 2025):</strong></p>
                 <ul style="margin-left: 20px; margin-top: 10px;">
                     <li>✅ <strong>Hourly Sell Price Updates:</strong> Option LTP now refreshes every hour for accurate tracking</li>
-                    <li>✅ <strong>Stop Loss Rounding:</strong> SL now rounds down to nearest 10 paise for cleaner pricing</li>
                     <li>✅ <strong>Token Persistence:</strong> Upstox token survives server restarts (no daily re-login!)</li>
                     <li>✅ <strong>Bug Fixes:</strong> Fixed instruments data parsing, OHLC API interval, sell_time updates</li>
                     <li>✅ <strong>OHLC API Fix:</strong> Webhook failures resolved (interval changed from "day" to "1d")</li>
