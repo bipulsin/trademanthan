@@ -28,10 +28,10 @@ sleep 10
 if ps -p $BACKEND_PID > /dev/null 2>&1; then
     echo "✅ Backend is running (PID: $BACKEND_PID)"
     echo "Checking startup logs..."
-    tail -30 /tmp/uvicorn.log | grep -E 'STARTUP|Scheduler|Monitor|Updater|STARTED|✅|❌|COMPLETE|All Services'
+    timeout 2 tail -30 /tmp/uvicorn.log 2>/dev/null | grep -E 'STARTUP|Scheduler|Monitor|Updater|STARTED|✅|❌|COMPLETE|All Services' || true
 else
     echo "❌ Backend failed to start"
     echo "Last 50 lines of log:"
-    tail -50 /tmp/uvicorn.log
+    timeout 2 tail -50 /tmp/uvicorn.log 2>/dev/null || true
 fi
 
