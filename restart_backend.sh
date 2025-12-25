@@ -11,7 +11,7 @@ sleep 3
 
 # Pull latest code
 echo "Pulling latest code..."
-git pull origin main
+timeout 10 git pull origin main || echo "⚠️ Git pull had issues (continuing anyway)"
 
 # Activate venv and start backend
 echo "Starting backend..."
