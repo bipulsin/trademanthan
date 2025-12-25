@@ -3103,7 +3103,7 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                                     logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Cannot calculate PnL - missing buy_price or qty")
                             else:
                                 logger.debug(f"⏭️ Cycle {cycle_number} - {stock_name}: Option LTP not available for PnL update")
-                        except Exception as pnl_update_error:
+                    except Exception as pnl_update_error:
                         logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Error updating sell_price/PnL: {str(pnl_update_error)}")
                         # Don't fail the entire cycle if PnL update fails
                 
