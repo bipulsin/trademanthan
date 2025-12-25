@@ -2113,13 +2113,14 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 logger.error(f"Failed to write debug log (hypothesis A): {str(log_err)}")
             # #endregion
             
-            # Cycle 1: ALL stocks from 10:15 AM webhook (regardless of status)
+            # Cycle 1: ALL stocks from 10:15 AM webhook (regardless of status, but exclude exited trades)
             # This ensures VWAP slope is calculated for all 10:15 AM records at 10:30 AM
             stocks_to_process = db.query(IntradayStockOption).filter(
                 and_(
                     IntradayStockOption.trade_date >= today,
                     IntradayStockOption.alert_time >= target_alert_times[0],
-                    IntradayStockOption.alert_time < target_alert_times[0] + timedelta(minutes=1)
+                    IntradayStockOption.alert_time < target_alert_times[0] + timedelta(minutes=1),
+                    IntradayStockOption.exit_reason == None  # Exclude exited trades (stop loss, VWAP cross, etc.)
                 )
             ).all()
             
@@ -2130,6 +2131,7 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
             stocks_to_process = db.query(IntradayStockOption).filter(
                 and_(
                     IntradayStockOption.trade_date >= today,
+                    IntradayStockOption.exit_reason == None,  # Exclude exited trades (stop loss, VWAP cross, etc.)
                     or_(
                         # Current cycle: ALL stocks from 11:15 AM webhook (for VWAP slope calculation)
                         and_(
@@ -2153,6 +2155,7 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
             stocks_to_process = db.query(IntradayStockOption).filter(
                 and_(
                     IntradayStockOption.trade_date >= today,
+                    IntradayStockOption.exit_reason == None,  # Exclude exited trades (stop loss, VWAP cross, etc.)
                     or_(
                         # Current cycle: ALL stocks from 12:15 PM webhook (for VWAP slope calculation)
                         and_(
@@ -2176,6 +2179,7 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
             stocks_to_process = db.query(IntradayStockOption).filter(
                 and_(
                     IntradayStockOption.trade_date >= today,
+                    IntradayStockOption.exit_reason == None,  # Exclude exited trades (stop loss, VWAP cross, etc.)
                     or_(
                         # Current cycle: ALL stocks from 13:15 PM webhook (for VWAP slope calculation)
                         and_(
@@ -2199,6 +2203,7 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
             stocks_to_process = db.query(IntradayStockOption).filter(
                 and_(
                     IntradayStockOption.trade_date >= today,
+                    IntradayStockOption.exit_reason == None,  # Exclude exited trades (stop loss, VWAP cross, etc.)
                     or_(
                         # Current cycle: ALL stocks from 14:15 PM webhook (for VWAP slope calculation)
                         and_(
@@ -2254,6 +2259,11 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
         for trade in stocks_to_process:
             try:
                 stock_name = trade.stock_name
+                
+                # CRITICAL: Skip trades that have already exited (defense in depth - also filtered in query)
+                if trade.exit_reason is not None:
+                    logger.debug(f"⏭️ Cycle {cycle_number} - Skipping {stock_name} - already exited with reason: {trade.exit_reason}")
+                    continue
                 
                 # #region agent log
                 # Log each record being processed and its status
