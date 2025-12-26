@@ -3563,6 +3563,16 @@ async def close_all_open_trades():
                     logger.info(f"⚪ Skipping {stock_name} - never entered (no_entry)")
                     continue
                 
+                # CRITICAL: Skip trades that failed enrichment (they should never be marked as "sold")
+                if position.no_entry_reason and position.no_entry_reason.startswith('Enrichment failed'):
+                    logger.info(f"⚪ Skipping {stock_name} - enrichment failed (should not be marked as sold)")
+                    continue
+                
+                # CRITICAL: Skip trades that don't have buy_price or qty (never actually entered)
+                if position.buy_price is None or position.qty is None or position.qty == 0:
+                    logger.info(f"⚪ Skipping {stock_name} - no buy_price or qty=0 (never actually entered)")
+                    continue
+                
                 # Get current option LTP for final sell price
                 option_ltp = None
                 
