@@ -851,28 +851,101 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 import traceback
                 traceback.print_exc()
                 
+                # Try to find instrument_key from option_contract if it was found before exception
+                # This allows us to preserve option_contract and instrument_key even if enrichment failed
+                fallback_instrument_key = None
+                if option_contract:
+                    try:
+                        from pathlib import Path
+                        import json as json_lib
+                        import re
+                        
+                        instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
+                        if instruments_file.exists():
+                            with open(instruments_file, 'r') as f:
+                                instruments_data = json_lib.load(f)
+                            
+                            # Parse option contract format: STOCK-MonthYYYY-STRIKE-CE/PE
+                            match = re.match(r'^([A-Z-]+)-(\w{3})(\d{4})-(\d+\.?\d*?)-(CE|PE)$', option_contract)
+                            
+                            if match:
+                                symbol, month, year, strike, opt_type = match.groups()
+                                strike_value = float(strike)
+                                
+                                # Parse month
+                                month_map = {
+                                    'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
+                                    'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
+                                    'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
+                                }
+                                target_month = month_map.get(month[:3].capitalize(), None)
+                                target_year = int(year)
+                                
+                                if target_month:
+                                    # Search for matching instrument
+                                    best_match = None
+                                    best_match_score = float('inf')
+                                    
+                                    for inst in instruments_data:
+                                        if (inst.get('underlying_symbol') == symbol and 
+                                            inst.get('instrument_type') == opt_type and
+                                            inst.get('segment') == 'NSE_FO'):
+                                            
+                                            inst_strike = inst.get('strike_price', 0)
+                                            strike_diff = abs(inst_strike - strike_value)
+                                            
+                                            expiry_ms = inst.get('expiry', 0)
+                                            if expiry_ms:
+                                                if expiry_ms > 1e12:
+                                                    expiry_ms = expiry_ms / 1000
+                                                inst_expiry = datetime.fromtimestamp(expiry_ms)
+                                                
+                                                if inst_expiry.year == target_year and inst_expiry.month == target_month:
+                                                    score = strike_diff * 1000
+                                                    
+                                                    if strike_diff < 0.01:  # Exact match
+                                                        fallback_instrument_key = inst.get('instrument_key')
+                                                        print(f"   ✅ Found instrument_key for {option_contract}: {fallback_instrument_key}")
+                                                        break
+                                                    else:
+                                                        if best_match is None or score < best_match_score:
+                                                            best_match = inst
+                                                            best_match_score = score
+                                    
+                                    # Use best match if no exact match
+                                    if not fallback_instrument_key and best_match:
+                                        fallback_instrument_key = best_match.get('instrument_key')
+                                        print(f"   ⚠️ Using best match instrument_key for {option_contract}: {fallback_instrument_key}")
+                    except Exception as key_error:
+                        print(f"   ⚠️ Could not find instrument_key from option_contract: {str(key_error)}")
+                
                 # Create minimal enriched stock with defaults
                 # Mark enrichment as failed so we can set proper no_entry_reason later
+                # BUT preserve option_contract and instrument_key if they were found
                 enriched_stock = {
                     "stock_name": stock_name,
                     "trigger_price": trigger_price,
-                    "last_traded_price": trigger_price,  # Use trigger price as fallback
-                    "stock_vwap": 0.0,
-                    "stock_vwap_previous_hour": None,
-                    "stock_vwap_previous_hour_time": None,
+                    "last_traded_price": stock_ltp if 'stock_ltp' in locals() and stock_ltp else trigger_price,  # Preserve if available
+                    "stock_vwap": stock_vwap if 'stock_vwap' in locals() and stock_vwap else 0.0,  # Preserve if available
+                    "stock_vwap_previous_hour": stock_vwap_previous_hour if 'stock_vwap_previous_hour' in locals() else None,
+                    "stock_vwap_previous_hour_time": stock_vwap_previous_hour_time if 'stock_vwap_previous_hour_time' in locals() else None,
                     "option_type": forced_option_type,  # Ensure option_type is set
-                    "option_contract": "",  # Will be retried later
-                    "otm1_strike": 0.0,
-                    "option_ltp": 0.0,
+                    "option_contract": option_contract if option_contract else "",  # Preserve if found before exception
+                    "otm1_strike": option_strike if 'option_strike' in locals() and option_strike else 0.0,  # Preserve if available
+                    "option_ltp": option_ltp if 'option_ltp' in locals() and option_ltp else 0.0,  # Preserve if available
                     "option_vwap": 0.0,
-                    "qty": 0,
-                    "instrument_key": None,
+                    "qty": qty if 'qty' in locals() and qty else 0,  # Preserve if available
+                    "instrument_key": fallback_instrument_key or (instrument_key if 'instrument_key' in locals() and instrument_key else None),  # Use fallback or preserve if found
                     "option_candles": None,
                     "_enrichment_failed": True,  # Flag to indicate enrichment failed
                     "_enrichment_error": str(enrichment_error)  # Store error message
                 }
                 enriched_stocks.append(enriched_stock)
                 print(f"   ✅ Created minimal entry for {stock_name} - will be saved with status 'alert_received'")
+                if option_contract:
+                    print(f"   📝 Preserved option_contract: {option_contract}")
+                if fallback_instrument_key or ('instrument_key' in locals() and instrument_key):
+                    print(f"   📝 Preserved instrument_key: {fallback_instrument_key or instrument_key}")
         
         processed_data["stocks"] = enriched_stocks
         print(f"Successfully processed {len(enriched_stocks)} stocks")
