@@ -85,13 +85,19 @@ def main():
         print(f'  Alert Time:     {trade.alert_time.strftime("%Y-%m-%d %H:%M:%S IST") if trade.alert_time else "N/A"}')
         print(f'  Alert Type:     {trade.alert_type or "N/A"}')
         print(f'  Status:         {trade.status}')
+        print(f'  Exit Reason:    {trade.exit_reason or "N/A"}')
         print(f'  Option Type:    {trade.option_type or "N/A"}')
         print(f'  Option Contract: {trade.option_contract or "N/A"}')
         print(f'  Instrument Key: {trade.instrument_key or "N/A"}')
         print(f'  Qty:            {trade.qty or 0}')
         print(f'  Buy Price:      ₹{trade.buy_price:.2f}' if trade.buy_price else '  Buy Price:      N/A')
+        print(f'  Sell Price:     ₹{trade.sell_price:.2f}' if trade.sell_price else '  Sell Price:     N/A')
+        print(f'  Sell Time:      {trade.sell_time.strftime("%Y-%m-%d %H:%M:%S IST") if trade.sell_time else "N/A"}')
+        print(f'  PnL:            ₹{trade.pnl:.2f}' if trade.pnl else '  PnL:            N/A')
         print(f'  Stock LTP:      ₹{trade.stock_ltp:.2f}' if trade.stock_ltp else '  Stock LTP:      N/A')
         print(f'  Stock VWAP:     ₹{trade.stock_vwap:.2f}' if trade.stock_vwap else '  Stock VWAP:     N/A')
+        print(f'  Created At:     {trade.created_date_time.strftime("%Y-%m-%d %H:%M:%S IST") if trade.created_date_time else "N/A"}')
+        print(f'  Updated At:     {trade.updated_at.strftime("%Y-%m-%d %H:%M:%S IST") if trade.updated_at else "N/A"}')
         
         # Extract and show full error message
         error_msg = trade.no_entry_reason
