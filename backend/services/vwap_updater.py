@@ -3510,16 +3510,31 @@ async def close_all_open_trades():
         # Find all open positions for today
         # CRITICAL: Only include trades that have NO exit_reason (not already exited)
         # This ensures trades exited with VWAP cross, stop loss, or profit target are NOT overwritten
+        # CRITICAL: Exclude trades that failed enrichment (never actually entered)
         open_positions = db.query(IntradayStockOption).filter(
             IntradayStockOption.trade_date == today,
             IntradayStockOption.exit_reason.is_(None),  # Must be NULL - excludes all already-exited trades
             IntradayStockOption.status != 'sold',  # Additional safety check
-            IntradayStockOption.status != 'no_entry'  # Exclude trades that were never entered
+            IntradayStockOption.status != 'no_entry',  # Exclude trades that were never entered
+            # CRITICAL: Exclude trades that failed enrichment (they should never be marked as "sold")
+            ~IntradayStockOption.no_entry_reason.like('Enrichment failed%'),  # Exclude enrichment failures
+            IntradayStockOption.buy_price.isnot(None),  # Must have buy_price (actually entered)
+            IntradayStockOption.qty.isnot(None),  # Must have qty (actually entered)
+            IntradayStockOption.qty > 0  # Qty must be > 0 (actually entered)
         ).all()
         
-        # CRITICAL: Double-check each position to ensure it hasn't been exited
+        # CRITICAL: Double-check each position to ensure it hasn't been exited and was actually entered
         # This prevents race conditions where exit_reason was set but query still returned it
-        open_positions = [p for p in open_positions if p.exit_reason is None and p.status != 'sold']
+        # Also excludes trades that failed enrichment or never actually entered
+        open_positions = [
+            p for p in open_positions 
+            if p.exit_reason is None 
+            and p.status != 'sold'
+            and (p.no_entry_reason is None or not p.no_entry_reason.startswith('Enrichment failed'))
+            and p.buy_price is not None
+            and p.qty is not None
+            and p.qty > 0
+        ]
         
         if not open_positions:
             logger.info("✅ No open positions to close - all already exited")
