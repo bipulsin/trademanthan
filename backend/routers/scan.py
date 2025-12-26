@@ -557,395 +557,268 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             
             print(f"Processing stock: {stock_name}")
             
-            # Wrap entire enrichment in try-except to ensure stock is always added even if enrichment fails
-            enrichment_successful = False
+            # Initialize all fields with defaults - each activity is independent
+            stock_ltp = trigger_price
+            stock_vwap = 0.0
+            option_contract = None
+            option_strike = 0.0
+            qty = 0
+            option_ltp = 0.0
+            instrument_key = None
+            option_candles = None
+            stock_vwap_previous_hour = None
+            stock_vwap_previous_hour_time = None
+            
+            # ====================================================================
+            # ACTIVITY 1: Fetch Stock LTP and VWAP (Independent)
+            # ====================================================================
             try:
-                # Initialize with defaults (will be saved even if API calls fail)
-                stock_ltp = trigger_price
-                stock_vwap = 0.0
-                
-                # Try to fetch both LTP and VWAP in a single call (optimized with fallback)
-                try:
-                    stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
-                    if stock_data:
-                        if stock_data.get('ltp') and stock_data['ltp'] > 0:
-                            stock_ltp = stock_data['ltp']
-                            print(f"✅ Stock LTP for {stock_name}: ₹{stock_ltp:.2f}")
-                        else:
-                            print(f"⚠️ Could not fetch LTP for {stock_name}, using trigger price: ₹{trigger_price}")
-                        
-                        if stock_data.get('vwap') and stock_data['vwap'] > 0:
-                            stock_vwap = stock_data['vwap']
-                            print(f"✅ Stock VWAP for {stock_name}: ₹{stock_vwap:.2f}")
-                        else:
-                            print(f"⚠️ Could not fetch VWAP for {stock_name} - will retry via hourly updater")
+                stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
+                if stock_data:
+                    if stock_data.get('ltp') and stock_data['ltp'] > 0:
+                        stock_ltp = stock_data['ltp']
+                        print(f"✅ Stock LTP for {stock_name}: ₹{stock_ltp:.2f}")
                     else:
-                        print(f"⚠️ Stock data fetch completely failed for {stock_name} - using defaults")
-                        stock_ltp = trigger_price
-                except Exception as e:
-                    print(f"❌ Stock data fetch failed for {stock_name}: {str(e)} - Using trigger price")
-                    import traceback
-                    print(traceback.format_exc())
-                    stock_ltp = trigger_price
-                
-                # Initialize option-related fields with defaults
-                option_contract = None
-                option_strike = 0.0
-                qty = 0
-                option_ltp = 0.0
-                instrument_key = None  # Will store Upstox instrument key (e.g., NSE_FO|104500) for future LTP fetches
-                
-                # Try to find option contract (may fail if token expired)
-                # Retry up to 3 times to ensure option contract is determined
-                option_contract = None
-                max_retries = 3
-                for retry_attempt in range(1, max_retries + 1):
-                    try:
-                        option_contract = find_option_contract_from_master_stock(
-                            db, stock_name, forced_option_type, stock_ltp, vwap_service
-                        )
-                        if option_contract:
-                            print(f"✅ Option contract found for {stock_name} (attempt {retry_attempt}): {option_contract}")
-                            break
-                        else:
-                            if retry_attempt < max_retries:
-                                print(f"⚠️ No option contract found for {stock_name} (attempt {retry_attempt}/{max_retries}), retrying...")
-                                import time
-                                time.sleep(1)  # Brief delay before retry
-                            else:
-                                print(f"⚠️ No option contract found for {stock_name} after {max_retries} attempts")
-                    except Exception as e:
+                        print(f"⚠️ Could not fetch LTP for {stock_name}, using trigger price: ₹{trigger_price}")
+                    
+                    if stock_data.get('vwap') and stock_data['vwap'] > 0:
+                        stock_vwap = stock_data['vwap']
+                        print(f"✅ Stock VWAP for {stock_name}: ₹{stock_vwap:.2f}")
+                    else:
+                        print(f"⚠️ Could not fetch VWAP for {stock_name} - will retry via hourly updater")
+                else:
+                    print(f"⚠️ Stock data fetch completely failed for {stock_name} - using defaults")
+            except Exception as e:
+                print(f"❌ Stock data fetch failed for {stock_name}: {str(e)} - Using trigger price")
+                import traceback
+                traceback.print_exc()
+            
+            # ====================================================================
+            # ACTIVITY 2: Find Option Contract (Independent)
+            # ====================================================================
+            max_retries = 3
+            for retry_attempt in range(1, max_retries + 1):
+                try:
+                    option_contract = find_option_contract_from_master_stock(
+                        db, stock_name, forced_option_type, stock_ltp, vwap_service
+                    )
+                    if option_contract:
+                        print(f"✅ Option contract found for {stock_name} (attempt {retry_attempt}): {option_contract}")
+                        break
+                    else:
                         if retry_attempt < max_retries:
-                            print(f"⚠️ Option contract search failed for {stock_name} (attempt {retry_attempt}/{max_retries}): {str(e)}, retrying...")
+                            print(f"⚠️ No option contract found for {stock_name} (attempt {retry_attempt}/{max_retries}), retrying...")
                             import time
                             time.sleep(1)  # Brief delay before retry
                         else:
-                            print(f"⚠️ Option contract search failed for {stock_name} after {max_retries} attempts: {str(e)}")
-                            option_contract = None
-                
-                # Extract option strike and fetch option LTP if contract found
-                if option_contract:
+                            print(f"⚠️ No option contract found for {stock_name} after {max_retries} attempts")
+                except Exception as e:
+                    if retry_attempt < max_retries:
+                        print(f"⚠️ Option contract search failed for {stock_name} (attempt {retry_attempt}/{max_retries}): {str(e)}, retrying...")
+                        import time
+                        time.sleep(1)  # Brief delay before retry
+                    else:
+                        print(f"⚠️ Option contract search failed for {stock_name} after {max_retries} attempts: {str(e)}")
+                        option_contract = None
+            
+            # ====================================================================
+            # ACTIVITY 3: Extract Option Strike (Independent - requires option_contract)
+            # ====================================================================
+            if option_contract:
+                try:
                     import re
-                    # Extract strike from format: STOCK-Nov2025-STRIKE-CE/PE
                     match = re.search(r'-(\d+\.?\d*)-(?:CE|PE)$', option_contract)
                     if match:
                         option_strike = float(match.group(1))
-                        print(f"Extracted option strike: {option_strike} from {option_contract}")
+                        print(f"✅ Extracted option strike: {option_strike} from {option_contract}")
+                except Exception as e:
+                    print(f"⚠️ Error extracting option strike from {option_contract}: {str(e)}")
+            
+            # ====================================================================
+            # ACTIVITY 4: Fetch Lot Size from Master Stock (Independent - requires option_contract)
+            # ====================================================================
+            if option_contract:
+                try:
+                    master_record = db.query(MasterStock).filter(
+                        and_(
+                            MasterStock.symbol_name == option_contract
+                        )
+                    ).first()
                     
-                    # Fetch lot_size and security_id from master_stock table
-                    try:
-                        master_record = db.query(MasterStock).filter(
-                            and_(
-                                MasterStock.symbol_name == option_contract
-                            )
-                        ).first()
+                    if master_record and master_record.lot_size:
+                        qty = int(master_record.lot_size)
+                        print(f"✅ Fetched lot_size for {option_contract}: {qty}")
+                    else:
+                        print(f"⚠️ Could not find master record or lot_size for {option_contract}")
+                except Exception as e:
+                    print(f"⚠️ Error fetching lot_size for {option_contract}: {str(e)}")
+            
+            # ====================================================================
+            # ACTIVITY 5: Find Instrument Key from instruments.json (Independent - requires option_contract)
+            # ====================================================================
+            if option_contract:
+                try:
+                    from pathlib import Path
+                    import json as json_lib
+                    import re
+                    
+                    instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
+                    
+                    if not instruments_file.exists():
+                        print(f"⚠️ Instruments JSON file not found: {instruments_file}")
+                    else:
+                        with open(instruments_file, 'r') as f:
+                            instruments_data = json_lib.load(f)
                         
-                        if master_record:
-                            if master_record.lot_size:
-                                qty = int(master_record.lot_size)
-                                print(f"Fetched lot_size for {option_contract}: {qty}")
+                        # Parse option contract format: STOCK-MonthYYYY-STRIKE-CE/PE
+                        match = re.match(r'^([A-Z-]+)-(\w{3})(\d{4})-(\d+\.?\d*?)-(CE|PE)$', option_contract)
+                        
+                        if match:
+                            symbol, month, year, strike, opt_type = match.groups()
+                            strike_value = float(strike)
                             
-                            # Fetch option LTP using instruments JSON
-                            try:
-                                # Load instruments JSON
-                                from pathlib import Path
-                                import json as json_lib
+                            # Parse month
+                            month_map = {
+                                'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
+                                'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
+                                'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
+                            }
+                            target_month = month_map.get(month[:3].capitalize(), None)
+                            target_year = int(year)
+                            
+                            if target_month:
+                                # Search for matching option in NSE_FO segment
+                                best_match = None
+                                best_match_score = float('inf')
                                 
-                                instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
+                                for inst in instruments_data:
+                                    if (inst.get('underlying_symbol') == symbol and 
+                                        inst.get('instrument_type') == opt_type and
+                                        inst.get('segment') == 'NSE_FO'):
+                                        
+                                        inst_strike = inst.get('strike_price', 0)
+                                        strike_diff = abs(inst_strike - strike_value)
+                                        
+                                        expiry_ms = inst.get('expiry', 0)
+                                        if expiry_ms:
+                                            if expiry_ms > 1e12:
+                                                expiry_ms = expiry_ms / 1000
+                                            inst_expiry = datetime.fromtimestamp(expiry_ms)
+                                            
+                                            if inst_expiry.year == target_year and inst_expiry.month == target_month:
+                                                score = strike_diff * 1000
+                                                
+                                                if strike_diff < 0.01:  # Exact match
+                                                    instrument_key = inst.get('instrument_key')
+                                                    trading_symbol = inst.get('trading_symbol', 'Unknown')
+                                                    print(f"✅ Found EXACT match for {option_contract}:")
+                                                    print(f"   Instrument Key: {instrument_key}")
+                                                    print(f"   Trading Symbol: {trading_symbol}")
+                                                    print(f"   Strike: {inst_strike} (requested: {strike_value}, diff: {strike_diff:.4f})")
+                                                    print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
+                                                    break
+                                                else:
+                                                    if best_match is None or score < best_match_score:
+                                                        best_match = inst
+                                                        best_match_score = score
                                 
-                                if instruments_file.exists():
-                                    with open(instruments_file, 'r') as f:
-                                        instruments_data = json_lib.load(f)
-                                    
-                                    # Find the option contract in instruments data
-                                    # Parse option contract format: STOCK-Nov2025-STRIKE-CE/PE
-                                    # Example: IDFCFIRSTB-Nov2025-85-CE
-                                    import re
-                                    # datetime already imported at module level
-                                    
-                                    # Handle stocks with hyphens in symbol (e.g., BAJAJ-AUTO)
-                                    match = re.match(r'^([A-Z-]+)-(\w{3})(\d{4})-(\d+\.?\d*?)-(CE|PE)$', option_contract)
-                                    
-                                    instrument_key = None
-                                    
-                                    if match:
-                                        symbol, month, year, strike, opt_type = match.groups()
-                                        strike_value = float(strike)
-                                        
-                                        # Parse month and construct target expiry date
-                                        month_map = {
-                                            'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
-                                            'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
-                                            'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
-                                        }
-                                        target_month = month_map.get(month[:3].capitalize(), 11)
-                                        target_year = int(year)
-                                        
-                                        # Search for matching option in NSE_FO segment
-                                        # CRITICAL: Must match exactly on underlying_symbol, instrument_type, segment, strike, and expiry
-                                        # This ensures each option contract gets its unique instrument_key
-                                        best_match = None
-                                        best_match_score = 0
-                                        
-                                        for inst in instruments_data:
-                                            # Basic filters
-                                            if (inst.get('underlying_symbol') == symbol and 
-                                                inst.get('instrument_type') == opt_type and
-                                                inst.get('segment') == 'NSE_FO'):
-                                                
-                                                # Check strike price - must match exactly (or very close for float precision)
-                                                inst_strike = inst.get('strike_price', 0)
-                                                strike_diff = abs(inst_strike - strike_value)
-                                                
-                                                # Check expiry date - must match exact date, not just month/year
-                                                expiry_ms = inst.get('expiry', 0)
-                                                if expiry_ms:
-                                                    # Handle both millisecond and second timestamps
-                                                    if expiry_ms > 1e12:
-                                                        expiry_ms = expiry_ms / 1000
-                                                    inst_expiry = datetime.fromtimestamp(expiry_ms)
-                                                    
-                                                    # Calculate match score (lower is better)
-                                                    # Priority: exact strike match > exact expiry date match
-                                                    score = strike_diff * 1000  # Strike difference weighted heavily
-                                                    
-                                                    # Check if expiry year and month match
-                                                    if inst_expiry.year == target_year and inst_expiry.month == target_month:
-                                                        # Prefer exact strike match
-                                                        if strike_diff < 0.01:  # Exact match (within 1 paise)
-                                                            instrument_key = inst.get('instrument_key')
-                                                            trading_symbol = inst.get('trading_symbol', 'Unknown')
-                                                            print(f"✅ Found EXACT match for {option_contract}:")
-                                                            print(f"   Instrument Key: {instrument_key}")
-                                                            print(f"   Trading Symbol: {trading_symbol}")
-                                                            print(f"   Strike: {inst_strike} (requested: {strike_value}, diff: {strike_diff:.4f})")
-                                                            print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
-                                                            break  # Found exact match, exit loop
-                                                        else:
-                                                            # Track best match if no exact match found yet
-                                                            if best_match is None or score < best_match_score:
-                                                                best_match = inst
-                                                                best_match_score = score
-                                        
-                                    # If no exact match found, use best match (but log warning)
-                                    if not instrument_key and best_match:
-                                        instrument_key = best_match.get('instrument_key')
-                                        inst_strike = best_match.get('strike_price', 0)
-                                        expiry_ms = best_match.get('expiry', 0)
-                                        if expiry_ms > 1e12:
-                                            expiry_ms = expiry_ms / 1000
-                                        inst_expiry = datetime.fromtimestamp(expiry_ms)
-                                        trading_symbol = best_match.get('trading_symbol', 'Unknown')
-                                        print(f"⚠️ WARNING: Using BEST MATCH (not exact) for {option_contract}:")
-                                        print(f"   Instrument Key: {instrument_key}")
-                                        print(f"   Trading Symbol: {trading_symbol}")
-                                        print(f"   Strike: {inst_strike} (requested: {strike_value}, diff: {abs(inst_strike - strike_value):.4f})")
-                                        print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
-                                        print(f"   ⚠️ This may not be the correct instrument!")
-                                    
-                                    if not instrument_key:
-                                        print(f"❌ ERROR: Could not find instrument_key for {option_contract}")
-                                        print(f"   Searched for: symbol={symbol}, type={opt_type}, strike={strike_value}, expiry={target_month}/{target_year}")
-                                    
-                                    if instrument_key:
-                                        print(f"Found instrument key for {option_contract}: {instrument_key}")
-                                        
-                                        # Fetch market quote using the instrument key
-                                        if vwap_service:
-                                            quote_data = vwap_service.get_market_quote_by_key(instrument_key)
-                                            if quote_data and quote_data.get('last_price'):
-                                                option_ltp = float(quote_data.get('last_price', 0))
-                                                print(f"✅ Fetched option LTP for {option_contract}: ₹{option_ltp}")
-                                                
-                                                # ====================================================================
-                                                # FETCH OPTION OHLC CANDLES (Current and Previous 1-hour)
-                                                # ====================================================================
-                                                try:
-                                                    option_candles = vwap_service.get_option_daily_candles_current_and_previous(instrument_key)
-                                                    if option_candles:
-                                                        print(f"✅ Fetched option OHLC candles for {option_contract}")
-                                                    else:
-                                                        print(f"⚠️ Could not fetch option OHLC candles for {option_contract}")
-                                                        option_candles = None
-                                                except Exception as candle_error:
-                                                    print(f"⚠️ Error fetching option OHLC candles: {str(candle_error)}")
-                                                    option_candles = None
-                                            else:
-                                                print(f"Could not fetch option LTP for {option_contract} - no quote data")
-                                                option_candles = None
-                                        else:
-                                            print(f"vwap_service not available")
-                                            option_candles = None
-                                    else:
-                                        print(f"Could not find instrument key for {option_contract} in instruments JSON")
-                                        option_candles = None
-                                else:
-                                    print(f"Instruments JSON file not found")
-                                    option_candles = None
-                            except Exception as ltp_error:
-                                print(f"Error fetching option LTP from instruments JSON: {str(ltp_error)}")
-                                import traceback
-                                traceback.print_exc()
+                                # Use best match if no exact match
+                                if not instrument_key and best_match:
+                                    instrument_key = best_match.get('instrument_key')
+                                    inst_strike = best_match.get('strike_price', 0)
+                                    expiry_ms = best_match.get('expiry', 0)
+                                    if expiry_ms > 1e12:
+                                        expiry_ms = expiry_ms / 1000
+                                    inst_expiry = datetime.fromtimestamp(expiry_ms)
+                                    trading_symbol = best_match.get('trading_symbol', 'Unknown')
+                                    print(f"⚠️ WARNING: Using BEST MATCH (not exact) for {option_contract}:")
+                                    print(f"   Instrument Key: {instrument_key}")
+                                    print(f"   Trading Symbol: {trading_symbol}")
+                                    print(f"   Strike: {inst_strike} (requested: {strike_value}, diff: {abs(inst_strike - strike_value):.4f})")
+                                    print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
+                                    print(f"   ⚠️ This may not be the correct instrument!")
+                                
+                                if not instrument_key:
+                                    print(f"❌ ERROR: Could not find instrument_key for {option_contract}")
+                                    print(f"   Searched for: symbol={symbol}, type={opt_type}, strike={strike_value}, expiry={target_month}/{target_year}")
                         else:
-                            print(f"Could not find master record for {option_contract}")
-                    except Exception as e:
-                        print(f"Error fetching lot_size/option_ltp: {str(e)}")
-                
-                # ====================================================================
-                # FETCH PREVIOUS HOUR STOCK VWAP
-                # ====================================================================
-                stock_vwap_previous_hour = None
-                stock_vwap_previous_hour_time = None
-                if vwap_service and stock_name:
-                    try:
-                        # Pass alert_time as reference_time so previous hour is calculated correctly
-                        prev_vwap_data = vwap_service.get_stock_vwap_for_previous_hour(stock_name, reference_time=alert_time)
-                        if prev_vwap_data:
-                            stock_vwap_previous_hour = prev_vwap_data.get('vwap')
-                            stock_vwap_previous_hour_time = prev_vwap_data.get('time')
-                            print(f"✅ Fetched previous hour VWAP for {stock_name}: ₹{stock_vwap_previous_hour:.2f} at {stock_vwap_previous_hour_time.strftime('%H:%M:%S')}")
-                        else:
-                            print(f"⚠️ Could not fetch previous hour VWAP for {stock_name}")
-                    except Exception as prev_vwap_error:
-                        print(f"⚠️ Error fetching previous hour VWAP: {str(prev_vwap_error)}")
-                
-                # Create enriched stock data
-                # GUARANTEED FIELDS (always available from Chartink):
-                # - stock_name, trigger_price, alert_time
-                # OPTIONAL FIELDS (may be missing if Upstox token expired):
-                # - stock_ltp, stock_vwap, option_contract, option_ltp, qty, instrument_key
-                # NEW FIELDS:
-                # - option_candles (current and previous OHLC)
-                # - stock_vwap_previous_hour, stock_vwap_previous_hour_time
-                enriched_stock = {
+                            print(f"⚠️ Could not parse option contract format: {option_contract}")
+                except Exception as e:
+                    print(f"⚠️ Error finding instrument_key for {option_contract}: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+            
+            # ====================================================================
+            # ACTIVITY 6: Fetch Option LTP (Independent - requires instrument_key)
+            # ====================================================================
+            if instrument_key and vwap_service:
+                try:
+                    quote_data = vwap_service.get_market_quote_by_key(instrument_key)
+                    if quote_data and quote_data.get('last_price'):
+                        option_ltp = float(quote_data.get('last_price', 0))
+                        print(f"✅ Fetched option LTP for {option_contract}: ₹{option_ltp}")
+                    else:
+                        print(f"⚠️ Could not fetch option LTP for {option_contract} - no quote data")
+                except Exception as e:
+                    print(f"⚠️ Error fetching option LTP for {option_contract}: {str(e)}")
+            
+            # ====================================================================
+            # ACTIVITY 7: Fetch Option Candles (Independent - requires instrument_key)
+            # ====================================================================
+            if instrument_key and vwap_service:
+                try:
+                    option_candles = vwap_service.get_option_daily_candles_current_and_previous(instrument_key)
+                    if option_candles:
+                        print(f"✅ Fetched option OHLC candles for {option_contract}")
+                    else:
+                        print(f"⚠️ Could not fetch option OHLC candles for {option_contract}")
+                except Exception as e:
+                    print(f"⚠️ Error fetching option OHLC candles for {option_contract}: {str(e)}")
+            
+            # ====================================================================
+            # ACTIVITY 8: Fetch Previous Hour VWAP (Independent)
+            # ====================================================================
+            if vwap_service and stock_name:
+                try:
+                    prev_vwap_data = vwap_service.get_stock_vwap_for_previous_hour(stock_name, reference_time=alert_time)
+                    if prev_vwap_data:
+                        stock_vwap_previous_hour = prev_vwap_data.get('vwap')
+                        stock_vwap_previous_hour_time = prev_vwap_data.get('time')
+                        print(f"✅ Fetched previous hour VWAP for {stock_name}: ₹{stock_vwap_previous_hour:.2f} at {stock_vwap_previous_hour_time.strftime('%H:%M:%S')}")
+                    else:
+                        print(f"⚠️ Could not fetch previous hour VWAP for {stock_name}")
+                except Exception as e:
+                    print(f"⚠️ Error fetching previous hour VWAP for {stock_name}: {str(e)}")
+            
+            # ====================================================================
+            # CREATE ENRICHED STOCK DATA (Always created with whatever data we have)
+            # ====================================================================
+            enriched_stock = {
                 "stock_name": stock_name,
                 "trigger_price": trigger_price,
-                "last_traded_price": stock_ltp,  # May be trigger_price if fetch failed
-                "stock_vwap": stock_vwap,  # May be 0.0 if fetch failed
-                "stock_vwap_previous_hour": stock_vwap_previous_hour,  # Previous hour VWAP
-                "stock_vwap_previous_hour_time": stock_vwap_previous_hour_time,  # Previous hour VWAP time
+                "last_traded_price": stock_ltp,
+                "stock_vwap": stock_vwap,
+                "stock_vwap_previous_hour": stock_vwap_previous_hour,
+                "stock_vwap_previous_hour_time": stock_vwap_previous_hour_time,
                 "option_type": forced_option_type,
-                "option_contract": option_contract or "",  # May be empty if not found
-                "otm1_strike": option_strike,  # May be 0.0 if not found
-                "option_ltp": option_ltp,  # May be 0.0 if fetch failed
+                "option_contract": option_contract or "",
+                "otm1_strike": option_strike,
+                "option_ltp": option_ltp,
                 "option_vwap": 0.0,  # Not used
-                "qty": qty,  # May be 0 if not found
-                "instrument_key": instrument_key,  # CRITICAL: Store instrument_key for each stock individually
-                "option_candles": option_candles if 'option_candles' in locals() else None  # Current and previous OHLC candles
-                }
+                "qty": qty,
+                "instrument_key": instrument_key,
+                "option_candles": option_candles,
+                "_enrichment_failed": False  # No exception occurred, all activities completed independently
+            }
             
-                enriched_stocks.append(enriched_stock)
-                enrichment_successful = True
-                
-                # Log what we got
-                if option_contract:
-                    print(f"✅ Enriched stock: {stock_name} - LTP: ₹{stock_ltp}, Option: {option_contract}, Qty: {qty}")
-                else:
-                    print(f"⚠️ Partial data for: {stock_name} - LTP: ₹{stock_ltp}, Option: N/A (token issue?)")
+            enriched_stocks.append(enriched_stock)
+            enrichment_successful = True
             
-            except Exception as enrichment_error:
-                # If enrichment fails completely, still create a minimal enriched_stock entry
-                # This ensures the stock is saved to database even if enrichment fails
-                print(f"❌ CRITICAL: Enrichment failed for {stock_name}: {str(enrichment_error)}")
-                print(f"   Creating minimal enriched_stock entry to ensure stock is saved...")
-                import traceback
-                traceback.print_exc()
-                
-                # Try to find instrument_key from option_contract if it was found before exception
-                # This allows us to preserve option_contract and instrument_key even if enrichment failed
-                fallback_instrument_key = None
-                if option_contract:
-                    try:
-                        from pathlib import Path
-                        import json as json_lib
-                        import re
-                        
-                        instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
-                        if instruments_file.exists():
-                            with open(instruments_file, 'r') as f:
-                                instruments_data = json_lib.load(f)
-                            
-                            # Parse option contract format: STOCK-MonthYYYY-STRIKE-CE/PE
-                            match = re.match(r'^([A-Z-]+)-(\w{3})(\d{4})-(\d+\.?\d*?)-(CE|PE)$', option_contract)
-                            
-                            if match:
-                                symbol, month, year, strike, opt_type = match.groups()
-                                strike_value = float(strike)
-                                
-                                # Parse month
-                                month_map = {
-                                    'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
-                                    'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
-                                    'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
-                                }
-                                target_month = month_map.get(month[:3].capitalize(), None)
-                                target_year = int(year)
-                                
-                                if target_month:
-                                    # Search for matching instrument
-                                    best_match = None
-                                    best_match_score = float('inf')
-                                    
-                                    for inst in instruments_data:
-                                        if (inst.get('underlying_symbol') == symbol and 
-                                            inst.get('instrument_type') == opt_type and
-                                            inst.get('segment') == 'NSE_FO'):
-                                            
-                                            inst_strike = inst.get('strike_price', 0)
-                                            strike_diff = abs(inst_strike - strike_value)
-                                            
-                                            expiry_ms = inst.get('expiry', 0)
-                                            if expiry_ms:
-                                                if expiry_ms > 1e12:
-                                                    expiry_ms = expiry_ms / 1000
-                                                inst_expiry = datetime.fromtimestamp(expiry_ms)
-                                                
-                                                if inst_expiry.year == target_year and inst_expiry.month == target_month:
-                                                    score = strike_diff * 1000
-                                                    
-                                                    if strike_diff < 0.01:  # Exact match
-                                                        fallback_instrument_key = inst.get('instrument_key')
-                                                        print(f"   ✅ Found instrument_key for {option_contract}: {fallback_instrument_key}")
-                                                        break
-                                                    else:
-                                                        if best_match is None or score < best_match_score:
-                                                            best_match = inst
-                                                            best_match_score = score
-                                    
-                                    # Use best match if no exact match
-                                    if not fallback_instrument_key and best_match:
-                                        fallback_instrument_key = best_match.get('instrument_key')
-                                        print(f"   ⚠️ Using best match instrument_key for {option_contract}: {fallback_instrument_key}")
-                    except Exception as key_error:
-                        print(f"   ⚠️ Could not find instrument_key from option_contract: {str(key_error)}")
-                
-                # Create minimal enriched stock with defaults
-                # Mark enrichment as failed so we can set proper no_entry_reason later
-                # BUT preserve option_contract and instrument_key if they were found
-                enriched_stock = {
-                    "stock_name": stock_name,
-                    "trigger_price": trigger_price,
-                    "last_traded_price": stock_ltp if 'stock_ltp' in locals() and stock_ltp else trigger_price,  # Preserve if available
-                    "stock_vwap": stock_vwap if 'stock_vwap' in locals() and stock_vwap else 0.0,  # Preserve if available
-                    "stock_vwap_previous_hour": stock_vwap_previous_hour if 'stock_vwap_previous_hour' in locals() else None,
-                    "stock_vwap_previous_hour_time": stock_vwap_previous_hour_time if 'stock_vwap_previous_hour_time' in locals() else None,
-                    "option_type": forced_option_type,  # Ensure option_type is set
-                    "option_contract": option_contract if option_contract else "",  # Preserve if found before exception
-                    "otm1_strike": option_strike if 'option_strike' in locals() and option_strike else 0.0,  # Preserve if available
-                    "option_ltp": option_ltp if 'option_ltp' in locals() and option_ltp else 0.0,  # Preserve if available
-                    "option_vwap": 0.0,
-                    "qty": qty if 'qty' in locals() and qty else 0,  # Preserve if available
-                    "instrument_key": fallback_instrument_key or (instrument_key if 'instrument_key' in locals() and instrument_key else None),  # Use fallback or preserve if found
-                    "option_candles": None,
-                    "_enrichment_failed": True,  # Flag to indicate enrichment failed
-                    "_enrichment_error": str(enrichment_error)  # Store error message
-                }
-                enriched_stocks.append(enriched_stock)
-                print(f"   ✅ Created minimal entry for {stock_name} - will be saved with status 'alert_received'")
-                if option_contract:
-                    print(f"   📝 Preserved option_contract: {option_contract}")
-                if fallback_instrument_key or ('instrument_key' in locals() and instrument_key):
-                    print(f"   📝 Preserved instrument_key: {fallback_instrument_key or instrument_key}")
+            # Log what we got
+            if option_contract:
+                print(f"✅ Enriched stock: {stock_name} - LTP: ₹{stock_ltp}, Option: {option_contract}, Qty: {qty}, Instrument Key: {instrument_key or 'N/A'}")
+            else:
+                print(f"⚠️ Partial data for: {stock_name} - LTP: ₹{stock_ltp}, Option: N/A")
         
         processed_data["stocks"] = enriched_stocks
         print(f"Successfully processed {len(enriched_stocks)} stocks")
