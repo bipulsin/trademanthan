@@ -1130,9 +1130,12 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 # Check if enrichment failed - this takes priority over other reasons
                 if stock.get("_enrichment_failed"):
                     enrichment_error_msg = stock.get("_enrichment_error", "Unknown error")
-                    # Truncate error message to reasonable length
-                    if len(enrichment_error_msg) > 50:
-                        enrichment_error_msg = enrichment_error_msg[:47] + "..."
+                    # Store full error message (up to 255 chars to fit database field)
+                    # Database field is String(255), so we can store up to 255 chars
+                    # Reserve 20 chars for "Enrichment failed: " prefix
+                    max_error_length = 255 - len("Enrichment failed: ")
+                    if len(enrichment_error_msg) > max_error_length:
+                        enrichment_error_msg = enrichment_error_msg[:max_error_length-3] + "..."
                     no_entry_reason = f"Enrichment failed: {enrichment_error_msg}"
                 # Check entry conditions in priority order to set appropriate reason
                 elif is_after_3_00pm:
