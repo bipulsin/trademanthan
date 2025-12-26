@@ -115,6 +115,16 @@ def main():
         # Additional diagnostics
         print(f'  Diagnostics:')
         
+        # Check status inconsistency
+        if trade.status == 'sold' and not trade.buy_price:
+            print(f'    ⚠️  STATUS INCONSISTENCY: Status is "sold" but no buy_price set!')
+            print(f'    💡  This trade likely failed enrichment but was marked as "sold" later (possibly by 3:25 PM closure)')
+            print(f'    💡  This is a bug - trades that failed enrichment should not be marked as "sold"')
+        
+        if trade.status == 'sold' and trade.exit_reason:
+            print(f'    ⚠️  Trade was marked as "sold" with exit_reason: {trade.exit_reason}')
+            print(f'    💡  This suggests the trade was closed by the end-of-day process despite enrichment failure')
+        
         # Check if it's a token issue
         if 'token' in error_msg.lower() or '401' in error_msg or 'unauthorized' in error_msg.lower():
             print(f'    ⚠️  Likely Upstox API token expired or invalid')
