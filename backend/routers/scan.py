@@ -769,20 +769,20 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                     
                                     # Use best match if no exact match
                                     if not instrument_key and best_match:
-                                    instrument_key = best_match.get('instrument_key')
-                                    inst_strike = best_match.get('strike_price', 0)
-                                    expiry_ms = best_match.get('expiry', 0)
-                                    if expiry_ms > 1e12:
-                                        expiry_ms = expiry_ms / 1000
-                                    inst_expiry = datetime.fromtimestamp(expiry_ms)
-                                    trading_symbol = best_match.get('trading_symbol', 'Unknown')
-                                    print(f"⚠️ WARNING: Using BEST MATCH (not exact) for {option_contract}:")
-                                    print(f"   Instrument Key: {instrument_key}")
-                                    print(f"   Trading Symbol: {trading_symbol}")
-                                    print(f"   Strike: {inst_strike} (requested: {strike_value}, diff: {abs(inst_strike - strike_value):.4f})")
-                                    print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
-                                    print(f"   ⚠️ This may not be the correct instrument!")
-                                
+                                        instrument_key = best_match.get('instrument_key')
+                                        inst_strike = best_match.get('strike_price', 0)
+                                        expiry_ms = best_match.get('expiry', 0)
+                                        if expiry_ms > 1e12:
+                                            expiry_ms = expiry_ms / 1000
+                                        inst_expiry = datetime.fromtimestamp(expiry_ms)
+                                        trading_symbol = best_match.get('trading_symbol', 'Unknown')
+                                        print(f"⚠️ WARNING: Using BEST MATCH (not exact) for {option_contract}:")
+                                        print(f"   Instrument Key: {instrument_key}")
+                                        print(f"   Trading Symbol: {trading_symbol}")
+                                        print(f"   Strike: {inst_strike} (requested: {strike_value}, diff: {abs(inst_strike - strike_value):.4f})")
+                                        print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
+                                        print(f"   ⚠️ This may not be the correct instrument!")
+                                    
                                     if not instrument_key:
                                         print(f"❌ ERROR: Could not find instrument_key for {option_contract}")
                                         print(f"   Searched for: symbol={symbol}, type={opt_type}, strike={strike_value}, expiry={target_month}/{target_year}")
