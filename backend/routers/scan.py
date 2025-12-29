@@ -666,27 +666,43 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     
                     if not instruments_file.exists():
                         print(f"⚠️ Instruments JSON file not found: {instruments_file}")
+                        logger.error(f"Instruments JSON file not found: {instruments_file}")
                     else:
-                        with open(instruments_file, 'r') as f:
-                            instruments_data = json_lib.load(f)
+                        print(f"📂 Loading instruments from: {instruments_file}")
+                        try:
+                            with open(instruments_file, 'r') as f:
+                                instruments_data = json_lib.load(f)
+                            print(f"✅ Loaded {len(instruments_data)} instruments from file")
+                        except Exception as file_error:
+                            print(f"❌ ERROR: Failed to read instruments file: {str(file_error)}")
+                            logger.error(f"Failed to read instruments file for {stock_name}: {str(file_error)}")
+                            import traceback
+                            traceback.print_exc()
+                            instruments_data = []  # Set to empty list to prevent further processing
                         
-                        # Parse option contract format: STOCK-MonthYYYY-STRIKE-CE/PE
-                        match = re.match(r'^([A-Z-]+)-(\w{3})(\d{4})-(\d+\.?\d*?)-(CE|PE)$', option_contract)
-                        
-                        if match:
-                            symbol, month, year, strike, opt_type = match.groups()
-                            strike_value = float(strike)
+                        if not instruments_data:
+                            print(f"⚠️ Instruments data is empty - cannot search for {option_contract}")
+                            logger.warning(f"Instruments data is empty for {stock_name} - cannot find instrument_key")
+                        else:
+                            # Parse option contract format: STOCK-MonthYYYY-STRIKE-CE/PE
+                            match = re.match(r'^([A-Z-]+)-(\w{3})(\d{4})-(\d+\.?\d*?)-(CE|PE)$', option_contract)
                             
-                            # Parse month
-                            month_map = {
-                                'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
-                                'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
-                                'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
-                            }
-                            target_month = month_map.get(month[:3].capitalize(), None)
-                            target_year = int(year)
-                            
-                            if target_month:
+                            if match:
+                                symbol, month, year, strike, opt_type = match.groups()
+                                strike_value = float(strike)
+                                
+                                print(f"🔍 Searching for instrument_key: symbol={symbol}, month={month}, year={year}, strike={strike_value}, type={opt_type}")
+                                
+                                # Parse month
+                                month_map = {
+                                    'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
+                                    'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
+                                    'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
+                                }
+                                target_month = month_map.get(month[:3].capitalize(), None)
+                                target_year = int(year)
+                                
+                                if target_month:
                                 # Search for matching option in NSE_FO segment
                                 best_match = None
                                 best_match_score = float('inf')
@@ -738,13 +754,33 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                     print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
                                     print(f"   ⚠️ This may not be the correct instrument!")
                                 
-                                if not instrument_key:
-                                    print(f"❌ ERROR: Could not find instrument_key for {option_contract}")
-                                    print(f"   Searched for: symbol={symbol}, type={opt_type}, strike={strike_value}, expiry={target_month}/{target_year}")
-                        else:
-                            print(f"⚠️ Could not parse option contract format: {option_contract}")
+                                    if not instrument_key:
+                                        print(f"❌ ERROR: Could not find instrument_key for {option_contract}")
+                                        print(f"   Searched for: symbol={symbol}, type={opt_type}, strike={strike_value}, expiry={target_month}/{target_year}")
+                                        logger.error(f"Could not find instrument_key for {stock_name} ({option_contract}): symbol={symbol}, type={opt_type}, strike={strike_value}, expiry={target_month}/{target_year}")
+                                        
+                                        # Debug: Count how many instruments match the symbol and type
+                                        symbol_type_matches = [inst for inst in instruments_data 
+                                                             if inst.get('underlying_symbol') == symbol 
+                                                             and inst.get('instrument_type') == opt_type
+                                                             and inst.get('segment') == 'NSE_FO']
+                                        print(f"   📊 Found {len(symbol_type_matches)} instruments with symbol={symbol} and type={opt_type}")
+                                        
+                                        # Show some examples
+                                        if symbol_type_matches:
+                                            print(f"   Examples (first 3):")
+                                            for inst in symbol_type_matches[:3]:
+                                                expiry_ms = inst.get('expiry', 0)
+                                                if expiry_ms > 1e12:
+                                                    expiry_ms = expiry_ms / 1000
+                                                expiry_dt = datetime.fromtimestamp(expiry_ms) if expiry_ms else None
+                                                print(f"      - Strike: {inst.get('strike_price', 0)}, Expiry: {expiry_dt.strftime('%d %b %Y') if expiry_dt else 'N/A'}")
+                            else:
+                                print(f"⚠️ Could not parse option contract format: {option_contract}")
+                                logger.warning(f"Could not parse option contract format for {stock_name}: {option_contract}")
                 except Exception as e:
-                    print(f"⚠️ Error finding instrument_key for {option_contract}: {str(e)}")
+                    print(f"❌ ERROR: Exception finding instrument_key for {option_contract}: {str(e)}")
+                    logger.error(f"Exception finding instrument_key for {stock_name} ({option_contract}): {str(e)}", exc_info=True)
                     import traceback
                     traceback.print_exc()
             
