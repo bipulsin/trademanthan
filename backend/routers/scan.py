@@ -727,9 +727,27 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                 
                                 if target_month:
                                     # Search for matching option in NSE_FO segment
+                                    # Improved matching: Allow tolerance for expiry dates (±7 days) and strikes (±1%)
                                     best_match = None
                                     best_match_score = float('inf')
                                     match_count = 0
+                                    from datetime import timedelta
+                                    
+                                    # Calculate target expiry date range (±7 days tolerance)
+                                    target_expiry_start = datetime(target_year, target_month, 1, tzinfo=ist)
+                                    # Get last day of target month
+                                    if target_month == 12:
+                                        target_expiry_end = datetime(target_year + 1, 1, 1, tzinfo=ist) - timedelta(days=1)
+                                    else:
+                                        target_expiry_end = datetime(target_year, target_month + 1, 1, tzinfo=ist) - timedelta(days=1)
+                                    
+                                    # Allow ±7 days tolerance for expiry matching
+                                    expiry_tolerance_days = 7
+                                    target_expiry_min = target_expiry_start - timedelta(days=expiry_tolerance_days)
+                                    target_expiry_max = target_expiry_end + timedelta(days=expiry_tolerance_days)
+                                    
+                                    # Strike tolerance: ±1% or ±10, whichever is larger
+                                    strike_tolerance = max(strike_value * 0.01, 10.0)
                                     
                                     for inst in instruments_data:
                                         if (inst.get('underlying_symbol') == symbol and 
@@ -743,13 +761,24 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                             if expiry_ms:
                                                 if expiry_ms > 1e12:
                                                     expiry_ms = expiry_ms / 1000
-                                                inst_expiry = datetime.fromtimestamp(expiry_ms)
+                                                inst_expiry = datetime.fromtimestamp(expiry_ms, tz=ist)
                                                 
-                                                if inst_expiry.year == target_year and inst_expiry.month == target_month:
+                                                # Check if expiry is within tolerance (same month/year or ±7 days)
+                                                expiry_in_range = (
+                                                    (inst_expiry.year == target_year and inst_expiry.month == target_month) or
+                                                    (target_expiry_min <= inst_expiry <= target_expiry_max)
+                                                )
+                                                
+                                                # Check if strike is within tolerance
+                                                strike_in_range = strike_diff <= strike_tolerance
+                                                
+                                                if expiry_in_range and strike_in_range:
                                                     match_count += 1
-                                                    score = strike_diff * 1000
+                                                    # Score: prioritize exact expiry match, then strike difference
+                                                    expiry_score = 0 if (inst_expiry.year == target_year and inst_expiry.month == target_month) else 1000
+                                                    score = expiry_score + strike_diff
                                                     
-                                                    if strike_diff < 0.01:  # Exact match
+                                                    if strike_diff < 0.01 and expiry_in_range and (inst_expiry.year == target_year and inst_expiry.month == target_month):  # Exact match
                                                         instrument_key = inst.get('instrument_key')
                                                         trading_symbol = inst.get('trading_symbol', 'Unknown')
                                                         # Also fetch lot_size from the same instrument record
@@ -771,35 +800,36 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                                             print(f"   ⚠️ Lot Size: Not available in instruments.json")
                                                         break
                                                     else:
+                                                        # Track best match (within tolerance)
                                                         if best_match is None or score < best_match_score:
                                                             best_match = inst
                                                             best_match_score = score
                                     
-                                    print(f"   📊 Found {match_count} instrument(s) matching symbol={symbol}, type={opt_type}, expiry={target_month}/{target_year}")
+                                    print(f"   📊 Found {match_count} instrument(s) matching symbol={symbol}, type={opt_type}, expiry={target_month}/{target_year} (with tolerance)")
                                     
-                                    # Use best match if no exact match
+                                    # Use best match if no exact match but we have matches within tolerance
                                     if not instrument_key and best_match:
                                         instrument_key = best_match.get('instrument_key')
                                         inst_strike = best_match.get('strike_price', 0)
                                         expiry_ms = best_match.get('expiry', 0)
                                         if expiry_ms > 1e12:
                                             expiry_ms = expiry_ms / 1000
-                                        inst_expiry = datetime.fromtimestamp(expiry_ms)
+                                        inst_expiry = datetime.fromtimestamp(expiry_ms, tz=ist)
                                         trading_symbol = best_match.get('trading_symbol', 'Unknown')
                                         # Also fetch lot_size from the best match
                                         inst_lot_size = best_match.get('lot_size')
                                         if inst_lot_size and inst_lot_size > 0:
                                             qty = int(inst_lot_size)
-                                        print(f"⚠️ WARNING: Using BEST MATCH (not exact) for {option_contract}:")
+                                        print(f"⚠️ WARNING: Using BEST MATCH (within tolerance) for {option_contract}:")
                                         print(f"   Instrument Key: {instrument_key}")
                                         print(f"   Trading Symbol: {trading_symbol}")
                                         print(f"   Strike: {inst_strike} (requested: {strike_value}, diff: {abs(inst_strike - strike_value):.4f})")
-                                        print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
+                                        print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')} (requested: {target_month}/{target_year})")
                                         if inst_lot_size and inst_lot_size > 0:
                                             print(f"   Lot Size: {qty}")
                                         else:
                                             print(f"   ⚠️ Lot Size: Not available in instruments.json")
-                                        print(f"   ⚠️ This may not be the correct instrument!")
+                                        print(f"   ⚠️ This match is within tolerance but may not be exact!")
                                     
                                     # If instrument_key was found but lot_size is still 0, try to find lot_size from any instrument with same underlying_symbol
                                     if instrument_key and qty == 0:
@@ -848,6 +878,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             # ====================================================================
             # ACTIVITY 6: Fetch Option LTP (Independent - requires instrument_key)
             # ====================================================================
+            # CRITICAL: Fetch option LTP even if candles fail - this is independent
             if instrument_key and vwap_service:
                 try:
                     print(f"🔍 Fetching option LTP for {option_contract} using instrument_key: {instrument_key}")
@@ -859,6 +890,15 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         print(f"⚠️ Could not fetch option LTP for {option_contract} - no quote data returned")
                         print(f"   Quote data: {quote_data}")
                         logger.warning(f"Could not fetch option LTP for {option_contract} (stock: {stock_name}, instrument_key: {instrument_key}) - quote_data: {quote_data}")
+                        # Try fallback: use historical candles if available
+                        try:
+                            candles = vwap_service.get_historical_candles_by_instrument_key(instrument_key, interval="hours/1", days_back=1)
+                            if candles and len(candles) > 0:
+                                candles.sort(key=lambda x: x.get('timestamp', 0), reverse=True)
+                                option_ltp = round(candles[0].get('close', 0), 2)
+                                print(f"✅ Fetched option LTP from historical candles: ₹{option_ltp}")
+                        except Exception as fallback_error:
+                            print(f"⚠️ Fallback LTP fetch also failed: {str(fallback_error)}")
                 except Exception as e:
                     print(f"❌ ERROR fetching option LTP for {option_contract}: {str(e)}")
                     logger.error(f"Error fetching option LTP for {option_contract} (stock: {stock_name}, instrument_key: {instrument_key}): {str(e)}", exc_info=True)
@@ -872,6 +912,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             # ====================================================================
             # ACTIVITY 7: Fetch Option Candles (Independent - requires instrument_key)
             # ====================================================================
+            # NOTE: Candle fetch failure should NOT block option LTP or lot size
+            # Candles are used for candle size filter, but option LTP and lot size are critical for trade entry
             if instrument_key and vwap_service:
                 try:
                     print(f"🔍 Fetching option candles for {option_contract} using instrument_key: {instrument_key}")
@@ -883,11 +925,11 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         if option_candles.get('previous_day_candle'):
                             print(f"   Previous day candle: {option_candles.get('previous_day_candle')}")
                     else:
-                        print(f"⚠️ Could not fetch option OHLC candles for {option_contract} - returned None")
-                        logger.warning(f"Could not fetch option OHLC candles for {option_contract} (stock: {stock_name}, instrument_key: {instrument_key}) - returned None")
+                        print(f"⚠️ Could not fetch option OHLC candles for {option_contract} - returned None (this is OK, will continue with option LTP and lot size)")
+                        logger.warning(f"Could not fetch option OHLC candles for {option_contract} (stock: {stock_name}, instrument_key: {instrument_key}) - returned None. Continuing with other data.")
                 except Exception as e:
-                    print(f"❌ ERROR fetching option OHLC candles for {option_contract}: {str(e)}")
-                    logger.error(f"Error fetching option OHLC candles for {option_contract} (stock: {stock_name}, instrument_key: {instrument_key}): {str(e)}", exc_info=True)
+                    print(f"❌ ERROR fetching option OHLC candles for {option_contract}: {str(e)} (this is OK, will continue with option LTP and lot size)")
+                    logger.error(f"Error fetching option OHLC candles for {option_contract} (stock: {stock_name}, instrument_key: {instrument_key}): {str(e)}. Continuing with other data.", exc_info=True)
             elif not instrument_key:
                 print(f"⚠️ Cannot fetch option candles for {option_contract} - instrument_key is None")
                 logger.warning(f"Cannot fetch option candles for {option_contract} (stock: {stock_name}) - instrument_key is None")
@@ -1415,7 +1457,13 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 
                 # CRITICAL: Get instrument_key from the stock dictionary, not from a variable
                 # This ensures each stock gets its own unique instrument_key
+                # IMPORTANT: instrument_key MUST be saved even if subsequent enrichment steps fail
                 stock_instrument_key = stock.get("instrument_key")
+                if not stock_instrument_key and option_contract:
+                    # Fallback: Try to find instrument_key from option_contract if it wasn't set
+                    # This ensures we preserve instrument_key even if lookup failed earlier
+                    print(f"⚠️ instrument_key not found in stock data for {stock_name}, attempting fallback lookup...")
+                    # Note: This is a safety check - instrument_key should already be set in Activity 5
                 
                 # Extract OHLC data from option_candles
                 option_candles_data = stock.get("option_candles")

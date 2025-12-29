@@ -89,16 +89,23 @@ class VWAPUpdater:
             # Cycle 1: 10:30 AM - Stocks from 10:15 AM webhook
             async def run_cycle_1():
                 # #region agent log
-                # Log scheduler trigger
+                # Log scheduler trigger (optional debug log - skip if path unavailable)
                 import json
                 import os
-                log_path = '/Users/bipulsahay/TradeManthan/.cursor/debug.log'
+                from pathlib import Path
                 try:
-                    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+                    # Use project root or /tmp as fallback
+                    project_root = Path(__file__).parent.parent.parent
+                    log_dir = project_root / '.cursor'
+                    if not log_dir.exists():
+                        log_dir = Path('/tmp')
+                    log_path = log_dir / 'debug.log'
+                    os.makedirs(os.path.dirname(str(log_path)), exist_ok=True)
                     with open(log_path, 'a') as f:
                         f.write(json.dumps({"id":f"log_scheduler_trigger_cycle1","timestamp":int(datetime.now(pytz.timezone('Asia/Kolkata')).timestamp()*1000),"location":"vwap_updater.py:89","message":"Scheduler triggered Cycle 1","data":{"scheduled":True},"sessionId":"debug-session","runId":"post-fix","hypothesisId":"SCHEDULER"}) + "\n")
                 except Exception as log_err:
-                    logger.error(f"Failed to write scheduler log: {str(log_err)}")
+                    # Silently skip debug log if it fails (non-critical)
+                    pass
                 # #endregion
                 await calculate_vwap_slope_for_cycle(1, datetime.now(pytz.timezone('Asia/Kolkata')))
             self.scheduler.add_job(
@@ -205,14 +212,20 @@ async def update_vwap_for_all_open_positions():
     # #region agent log
     import json as json_module
     import os as os_module
-    log_path = '/Users/bipulsahay/TradeManthan/.cursor/debug.log'
+    from pathlib import Path
     try:
+        # Use project root or /tmp as fallback
+        project_root = Path(__file__).parent.parent.parent
+        log_dir = project_root / '.cursor'
+        if not log_dir.exists():
+            log_dir = Path('/tmp')
+        log_path = log_dir / 'debug.log'
         import pytz as pytz_module_inner
         from datetime import datetime as dt_module_inner
         ist_temp_inner = pytz_module_inner.timezone('Asia/Kolkata')
         now_temp_inner = dt_module_inner.now(ist_temp_inner)
         
-        os_module.makedirs(os_module.path.dirname(log_path), exist_ok=True)
+        os_module.makedirs(os_module.path.dirname(str(log_path)), exist_ok=True)
         with open(log_path, 'a') as f:
             entry_log = json_module.dumps({
                 "id": f"log_hourly_update_entry_{int(now_temp_inner.timestamp())}",
@@ -258,10 +271,19 @@ async def update_vwap_for_all_open_positions():
         now = datetime.now(ist)
         today = now.replace(hour=0, minute=0, second=0, microsecond=0)
         
-        # Make log_path available in function scope
+        # Make log_path available in function scope (optional debug log)
         import json as json_module
         import os as os_module
-        log_path = '/Users/bipulsahay/TradeManthan/.cursor/debug.log'
+        from pathlib import Path
+        try:
+            # Use project root or /tmp as fallback
+            project_root = Path(__file__).parent.parent.parent
+            log_dir = project_root / '.cursor'
+            if not log_dir.exists():
+                log_dir = Path('/tmp')
+            log_path = log_dir / 'debug.log'
+        except Exception:
+            log_path = None  # Skip debug logging if path unavailable
         
         logger.info(f"📊 Starting hourly market data update at {now.strftime('%Y-%m-%d %H:%M:%S IST')}")
         logger.info(f"🔍 DEBUG: Function update_vwap_for_all_open_positions() called at {now.strftime('%Y-%m-%d %H:%M:%S IST')}")
@@ -1874,9 +1896,16 @@ async def update_vwap_for_all_open_positions():
         try:
             import json as json_module
             import os as os_module
-            log_path = '/Users/bipulsahay/TradeManthan/.cursor/debug.log'
-            os_module.makedirs(os_module.path.dirname(log_path), exist_ok=True)
-            with open(log_path, 'a') as f:
+            # Use dynamic path for debug log
+            from pathlib import Path
+            project_root = Path(__file__).parent.parent.parent
+            log_dir = project_root / '.cursor'
+            if not log_dir.exists():
+                log_dir = Path('/tmp')
+            log_path = log_dir / 'debug.log'
+            try:
+                os_module.makedirs(os_module.path.dirname(str(log_path)), exist_ok=True)
+                with open(log_path, 'a') as f:
                 error_log = json_module.dumps({
                     "id": f"log_function_error_{int(datetime.now(pytz.timezone('Asia/Kolkata')).timestamp())}",
                     "timestamp": int(datetime.now(pytz.timezone('Asia/Kolkata')).timestamp() * 1000),
@@ -1963,10 +1992,16 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
         # Log function entry immediately - CRITICAL: This must work
         import json
         import os
-        log_path = '/Users/bipulsahay/TradeManthan/.cursor/debug.log'
+        # Use dynamic path for debug log (optional - skip if unavailable)
+        from pathlib import Path
         try:
+            project_root = Path(__file__).parent.parent.parent
+            log_dir = project_root / '.cursor'
+            if not log_dir.exists():
+                log_dir = Path('/tmp')
+            log_path = log_dir / 'debug.log'
             # Ensure directory exists
-            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            os.makedirs(os.path.dirname(str(log_path)), exist_ok=True)
             # Write entry log
             with open(log_path, 'a') as f:
                 entry_log = json.dumps({"id":f"log_cycle1_entry_{int(now.timestamp())}","timestamp":int(now.timestamp()*1000),"location":"vwap_updater.py:1190","message":"Cycle 1 - Function entry","data":{"cycle_number":cycle_number,"cycle_time":str(cycle_time),"now":str(now),"today":str(today)},"sessionId":"debug-session","runId":"post-fix","hypothesisId":"ENTRY"}) + "\n"
@@ -2102,10 +2137,16 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
             
             import json
             import os
-            log_path = '/Users/bipulsahay/TradeManthan/.cursor/debug.log'
+            from pathlib import Path
             try:
+                # Use dynamic path for debug log
+                project_root = Path(__file__).parent.parent.parent
+                log_dir = project_root / '.cursor'
+                if not log_dir.exists():
+                    log_dir = Path('/tmp')
+                log_path = log_dir / 'debug.log'
                 # Ensure directory exists
-                os.makedirs(os.path.dirname(log_path), exist_ok=True)
+                os.makedirs(os.path.dirname(str(log_path)), exist_ok=True)
                 with open(log_path, 'a') as f:
                     f.write(json.dumps({"id":f"log_cycle1_{int(now.timestamp())}","timestamp":int(now.timestamp()*1000),"location":"vwap_updater.py:1296","message":"Cycle 1 - All 10:15 AM records status breakdown","data":{"total_records":len(all_10_15_records),"status_breakdown":status_breakdown,"cycle_number":1,"target_alert_time":str(target_alert_times[0])},"sessionId":"debug-session","runId":"post-fix","hypothesisId":"A"}) + "\n")
                     f.flush()
@@ -2227,9 +2268,16 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
         
         if not stocks_to_process:
             # #region agent log
-            # Log when no stocks found
+            # Log when no stocks found (optional debug log)
             import json
-            with open('/Users/bipulsahay/TradeManthan/.cursor/debug.log', 'a') as f:
+            from pathlib import Path
+            try:
+                project_root = Path(__file__).parent.parent.parent
+                log_dir = project_root / '.cursor'
+                if not log_dir.exists():
+                    log_dir = Path('/tmp')
+                log_path = log_dir / 'debug.log'
+                with open(log_path, 'a') as f:
                 f.write(json.dumps({"id":f"log_cycle1_no_stocks_{int(now.timestamp())}","timestamp":int(now.timestamp()*1000),"location":"vwap_updater.py:1436","message":"Cycle 1 - No stocks found","data":{"cycle_number":cycle_number,"target_alert_times":[str(t) for t in target_alert_times],"today":str(today)},"sessionId":"debug-session","runId":"post-fix","hypothesisId":"F"}) + "\n")
             # #endregion
             logger.info(f"ℹ️ No stocks found for Cycle {cycle_number} VWAP slope calculation")
@@ -2244,9 +2292,15 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
             process_status_breakdown[t.status] = process_status_breakdown.get(t.status, 0) + 1
         import json
         import os
-        log_path = '/Users/bipulsahay/TradeManthan/.cursor/debug.log'
+        from pathlib import Path
         try:
-            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            # Use dynamic path for debug log
+            project_root = Path(__file__).parent.parent.parent
+            log_dir = project_root / '.cursor'
+            if not log_dir.exists():
+                log_dir = Path('/tmp')
+            log_path = log_dir / 'debug.log'
+            os.makedirs(os.path.dirname(str(log_path)), exist_ok=True)
             with open(log_path, 'a') as f:
                 f.write(json.dumps({"id":f"log_cycle1_process_{int(now.timestamp())}","timestamp":int(now.timestamp()*1000),"location":"vwap_updater.py:1424","message":"Cycle 1 - Stocks to process status breakdown","data":{"total_to_process":len(stocks_to_process),"status_breakdown":process_status_breakdown,"cycle_number":1},"sessionId":"debug-session","runId":"post-fix","hypothesisId":"B"}) + "\n")
         except Exception as log_err:
@@ -2272,7 +2326,13 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 
                 import json
                 import os
-                log_path = '/Users/bipulsahay/TradeManthan/.cursor/debug.log'
+                # Use dynamic path for debug log
+                from pathlib import Path
+                project_root = Path(__file__).parent.parent.parent
+                log_dir = project_root / '.cursor'
+                if not log_dir.exists():
+                    log_dir = Path('/tmp')
+                log_path = log_dir / 'debug.log'
                 try:
                     os.makedirs(os.path.dirname(log_path), exist_ok=True)
                     with open(log_path, 'a') as f:
@@ -2643,7 +2703,13 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 
                 import json
                 import os
-                log_path = '/Users/bipulsahay/TradeManthan/.cursor/debug.log'
+                # Use dynamic path for debug log
+                from pathlib import Path
+                project_root = Path(__file__).parent.parent.parent
+                log_dir = project_root / '.cursor'
+                if not log_dir.exists():
+                    log_dir = Path('/tmp')
+                log_path = log_dir / 'debug.log'
                 try:
                     os.makedirs(os.path.dirname(log_path), exist_ok=True)
                     with open(log_path, 'a') as f:
@@ -3233,7 +3299,15 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 error_trace = traceback.format_exc()
                 stock_name_for_log = trade.stock_name if trade else 'unknown'
                 trade_id_for_log = trade.id if trade else None
-                with open('/Users/bipulsahay/TradeManthan/.cursor/debug.log', 'a') as f:
+                # Use dynamic path for debug log
+                from pathlib import Path
+                project_root = Path(__file__).parent.parent.parent
+                log_dir = project_root / '.cursor'
+                if not log_dir.exists():
+                    log_dir = Path('/tmp')
+                log_path = log_dir / 'debug.log'
+                try:
+                    with open(log_path, 'a') as f:
                     f.write(json.dumps({"id":f"log_cycle1_trade_exception_{trade_id_for_log}","timestamp":int(now.timestamp()*1000),"location":"vwap_updater.py:2119","message":"Cycle 1 - Exception processing trade","data":{"stock_name":stock_name_for_log,"trade_id":trade_id_for_log,"status":trade.status if trade else None,"cycle_number":cycle_number,"error":str(e),"traceback":error_trace},"sessionId":"debug-session","runId":"post-fix","hypothesisId":"H"}) + "\n")
                 # #endregion
                 logger.error(f"❌ Error processing {stock_name_for_log} in Cycle {cycle_number}: {str(e)}")
@@ -3247,9 +3321,15 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
         # #region agent log
         # Log after commit and verify records were actually saved to database
         import os
-        log_path = '/Users/bipulsahay/TradeManthan/.cursor/debug.log'
+        from pathlib import Path
         try:
-            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            # Use dynamic path for debug log
+            project_root = Path(__file__).parent.parent.parent
+            log_dir = project_root / '.cursor'
+            if not log_dir.exists():
+                log_dir = Path('/tmp')
+            log_path = log_dir / 'debug.log'
+            os.makedirs(os.path.dirname(str(log_path)), exist_ok=True)
             # Verify by querying database after commit
             if cycle_number == 1:
                 # Query all 10:15 AM records to see if VWAP slope was saved

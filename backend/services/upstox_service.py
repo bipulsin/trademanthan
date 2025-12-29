@@ -2753,9 +2753,82 @@ class UpstoxService:
                     'time': previous_time
                 }
             
-            if not current_day_candle or not previous_day_candle:
-                logger.warning(f"⚠️ Could not aggregate daily candles for {instrument_key} (Current: {len(current_day_candles_hourly)} hourly candles, Previous: {len(previous_day_candles)} candles)")
+            # Handle cases where candles are unavailable (newly listed options, market hours, etc.)
+            # Return partial data if at least one candle is available, or use market quotes as fallback
+            if not current_day_candle and not previous_day_candle:
+                # No candles at all - try to use market quotes as fallback
+                logger.warning(f"⚠️ No candles available for {instrument_key} (Current: {len(current_day_candles_hourly)} hourly candles, Previous: {len(previous_day_candles)} candles) - attempting market quote fallback")
+                try:
+                    market_quote = self.get_market_quote_by_key(instrument_key)
+                    if market_quote:
+                        ohlc = market_quote.get('ohlc', {})
+                        current_open = ohlc.get('open', 0) or market_quote.get('open_price', 0) or 0
+                        current_high = ohlc.get('high', 0) or market_quote.get('high_price', 0) or 0
+                        current_low = ohlc.get('low', 0) or market_quote.get('low_price', 0) or 0
+                        current_close = market_quote.get('last_price', 0) or ohlc.get('close', 0) or market_quote.get('close_price', 0) or 0
+                        
+                        if current_high > 0 and current_low > 0:
+                            # Use market quote for current day, previous day will be None
+                            current_day_candle = {
+                                'open': current_open,
+                                'high': current_high,
+                                'low': current_low,
+                                'close': current_close,
+                                'time': now
+                            }
+                            logger.info(f"✅ Using market quote OHLC for current day (no candles): O={current_open:.2f}, H={current_high:.2f}, L={current_low:.2f}, C={current_close:.2f}")
+                            # Return partial data - previous day will be None but that's OK
+                            return {
+                                'current_day_candle': current_day_candle,
+                                'previous_day_candle': None  # No previous day data available
+                            }
+                        else:
+                            logger.warning(f"⚠️ Market quote OHLC incomplete for {instrument_key}: H={current_high}, L={current_low}")
+                    else:
+                        logger.warning(f"⚠️ Could not fetch market quote for {instrument_key}")
+                except Exception as quote_error:
+                    logger.warning(f"⚠️ Error fetching market quote fallback for {instrument_key}: {str(quote_error)}")
+                
+                # If all fallbacks fail, return None but log that this is expected for newly listed options
+                logger.warning(f"⚠️ Could not aggregate daily candles for {instrument_key} - candles unavailable and market quote fallback failed. This may be normal for newly listed options or during market hours.")
                 return None
+            elif not current_day_candle:
+                # Current day missing but previous day available - use market quote for current day
+                logger.info(f"📊 No current day candles for {instrument_key}, using market quote fallback")
+                try:
+                    market_quote = self.get_market_quote_by_key(instrument_key)
+                    if market_quote:
+                        ohlc = market_quote.get('ohlc', {})
+                        current_open = ohlc.get('open', 0) or market_quote.get('open_price', 0) or 0
+                        current_high = ohlc.get('high', 0) or market_quote.get('high_price', 0) or 0
+                        current_low = ohlc.get('low', 0) or market_quote.get('low_price', 0) or 0
+                        current_close = market_quote.get('last_price', 0) or ohlc.get('close', 0) or market_quote.get('close_price', 0) or 0
+                        
+                        if current_high > 0 and current_low > 0:
+                            current_day_candle = {
+                                'open': current_open,
+                                'high': current_high,
+                                'low': current_low,
+                                'close': current_close,
+                                'time': now
+                            }
+                            logger.info(f"✅ Using market quote OHLC for current day: O={current_open:.2f}, H={current_high:.2f}, L={current_low:.2f}, C={current_close:.2f}")
+                        else:
+                            logger.warning(f"⚠️ Market quote OHLC incomplete for {instrument_key}: H={current_high}, L={current_low}")
+                            return None
+                    else:
+                        logger.warning(f"⚠️ Could not fetch market quote for {instrument_key}")
+                        return None
+                except Exception as quote_error:
+                    logger.warning(f"⚠️ Error fetching market quote for {instrument_key}: {str(quote_error)}")
+                    return None
+            elif not previous_day_candle:
+                # Previous day missing but current day available - this is OK, return partial data
+                logger.info(f"📊 No previous day candles for {instrument_key}, but current day available - returning partial data")
+                return {
+                    'current_day_candle': current_day_candle,
+                    'previous_day_candle': None  # Previous day unavailable
+                }
             
             logger.info(f"✅ Fetched daily candles for {instrument_key}")
             logger.info(f"   Current Day (up to {current_hour}:00): O={current_day_candle['open']:.2f}, H={current_day_candle['high']:.2f}, L={current_day_candle['low']:.2f}, C={current_day_candle['close']:.2f}")
