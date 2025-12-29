@@ -1516,7 +1516,9 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 
             except Exception as db_error:
                 failed_count += 1
-                print(f"❌ Error saving stock {stock_name} to database: {str(db_error)}")
+                error_msg = str(db_error)
+                print(f"❌ Error saving stock {stock_name} to database: {error_msg}")
+                logger.error(f"Database save error for {stock_name}: {error_msg}", exc_info=True)
                 import traceback
                 traceback.print_exc()
                 
@@ -1529,6 +1531,13 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     preserved_instrument_key = stock.get("instrument_key") if stock else None
                     preserved_stock_ltp = stock.get("last_traded_price") or stock.get("trigger_price", 0.0) if stock else 0.0
                     preserved_stock_vwap = stock.get("stock_vwap", 0.0) if stock else 0.0
+                    
+                    # Create a more descriptive error message
+                    # Truncate error message to fit in database field (255 chars)
+                    max_error_length = 255 - len("Database save failed: ")
+                    if len(error_msg) > max_error_length:
+                        error_msg = error_msg[:max_error_length-3] + "..."
+                    db_error_reason = f"Database save failed: {error_msg}"
                     
                     minimal_record = IntradayStockOption(
                         alert_time=triggered_datetime,
@@ -1552,7 +1561,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         exit_reason=None,
                         pnl=None,
                         instrument_key=preserved_instrument_key,
-                        no_entry_reason="Enrichment failed"  # Reason for minimal save (database error during save)
+                        no_entry_reason=db_error_reason  # More descriptive reason: database save error
                     )
                     db.add(minimal_record)
                     saved_count += 1
