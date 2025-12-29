@@ -1906,7 +1906,7 @@ async def update_vwap_for_all_open_positions():
             try:
                 os_module.makedirs(os_module.path.dirname(str(log_path)), exist_ok=True)
                 with open(log_path, 'a') as f:
-                error_log = json_module.dumps({
+                    error_log = json_module.dumps({
                     "id": f"log_function_error_{int(datetime.now(pytz.timezone('Asia/Kolkata')).timestamp())}",
                     "timestamp": int(datetime.now(pytz.timezone('Asia/Kolkata')).timestamp() * 1000),
                     "location": "vwap_updater.py:1666",
