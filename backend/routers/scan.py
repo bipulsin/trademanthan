@@ -793,6 +793,16 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             # ====================================================================
             # CREATE ENRICHED STOCK DATA (Always created with whatever data we have)
             # ====================================================================
+            # Check if enrichment is truly failed: option_contract found but instrument_key missing
+            # This is critical because without instrument_key, we can't fetch option LTP or candles
+            enrichment_failed = False
+            enrichment_error_msg = None
+            
+            if option_contract and not instrument_key:
+                enrichment_failed = True
+                enrichment_error_msg = f"Could not find instrument_key for option contract {option_contract}"
+                print(f"❌ ENRICHMENT FAILED for {stock_name}: {enrichment_error_msg}")
+            
             enriched_stock = {
                 "stock_name": stock_name,
                 "trigger_price": trigger_price,
@@ -808,7 +818,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 "qty": qty,
                 "instrument_key": instrument_key,
                 "option_candles": option_candles,
-                "_enrichment_failed": False  # No exception occurred, all activities completed independently
+                "_enrichment_failed": enrichment_failed,
+                "_enrichment_error": enrichment_error_msg
             }
             
             enriched_stocks.append(enriched_stock)
@@ -1442,30 +1453,38 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 traceback.print_exc()
                 
                 # Try to save with minimal data as last resort
+                # Preserve any data that was successfully fetched before the database error
                 try:
                     print(f"   🔄 Attempting minimal save for {stock_name}...")
+                    # Preserve option_contract and instrument_key if they were found
+                    preserved_option_contract = stock.get("option_contract", "") if stock else ""
+                    preserved_instrument_key = stock.get("instrument_key") if stock else None
+                    preserved_stock_ltp = stock.get("last_traded_price") or stock.get("trigger_price", 0.0) if stock else 0.0
+                    preserved_stock_vwap = stock.get("stock_vwap", 0.0) if stock else 0.0
+                    
                     minimal_record = IntradayStockOption(
                         alert_time=triggered_datetime,
                         alert_type=data_type,
                         scan_name=processed_data.get("scan_name", "Unknown"),
                         stock_name=stock_name,
-                        stock_ltp=stock.get("trigger_price", 0.0),
-                        stock_vwap=0.0,
-                        option_contract="",
+                        stock_ltp=preserved_stock_ltp,
+                        stock_vwap=preserved_stock_vwap,
+                        option_contract=preserved_option_contract,
                         option_type=forced_option_type,
-                        option_strike=0.0,
-                        option_ltp=0.0,
+                        option_strike=stock.get("otm1_strike", 0.0) if stock else 0.0,
+                        option_ltp=stock.get("option_ltp", 0.0) if stock else 0.0,
                         option_vwap=0.0,
-                        qty=0,
+                        qty=stock.get("qty", 0) if stock else 0,
                         trade_date=trading_date,
-                        status='alert_received',  # Minimal status - saved when enrichment fails
+                        status='alert_received',  # Minimal status - saved when database save fails
                         buy_price=None,
                         stop_loss=None,
                         sell_price=None,
                         buy_time=None,
                         exit_reason=None,
                         pnl=None,
-                        no_entry_reason="Enrichment failed"  # Reason for minimal save
+                        instrument_key=preserved_instrument_key,
+                        no_entry_reason="Enrichment failed"  # Reason for minimal save (database error during save)
                     )
                     db.add(minimal_record)
                     saved_count += 1
