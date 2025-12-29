@@ -1907,22 +1907,22 @@ async def update_vwap_for_all_open_positions():
                 os_module.makedirs(os_module.path.dirname(str(log_path)), exist_ok=True)
                 with open(log_path, 'a') as f:
                     error_log = json_module.dumps({
-                    "id": f"log_function_error_{int(datetime.now(pytz.timezone('Asia/Kolkata')).timestamp())}",
-                    "timestamp": int(datetime.now(pytz.timezone('Asia/Kolkata')).timestamp() * 1000),
-                    "location": "vwap_updater.py:1666",
-                    "message": "Function error",
-                    "data": {
-                        "error": str(e),
-                        "traceback": error_trace[:500]  # First 500 chars of traceback
-                    },
-                    "sessionId": "debug-session",
-                    "runId": "sell-price-fix",
-                    "hypothesisId": "FUNCTION_ERROR"
-                }) + "\n"
-                f.write(error_log)
-                f.flush()
-        except Exception:
-            pass
+                        "id": f"log_function_error_{int(datetime.now(pytz.timezone('Asia/Kolkata')).timestamp())}",
+                        "timestamp": int(datetime.now(pytz.timezone('Asia/Kolkata')).timestamp() * 1000),
+                        "location": "vwap_updater.py:1666",
+                        "message": "Function error",
+                        "data": {
+                            "error": str(e),
+                            "traceback": error_trace[:500]  # First 500 chars of traceback
+                        },
+                        "sessionId": "debug-session",
+                        "runId": "sell-price-fix",
+                        "hypothesisId": "FUNCTION_ERROR"
+                    }) + "\n"
+                    f.write(error_log)
+                    f.flush()
+            except Exception:
+                pass
         # #endregion
         
         if db:
