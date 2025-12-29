@@ -1923,6 +1923,8 @@ async def update_vwap_for_all_open_positions():
                     f.flush()
             except Exception:
                 pass
+        except Exception:
+            pass
         # #endregion
         
         if db:
