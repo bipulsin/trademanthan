@@ -668,17 +668,42 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         print(f"⚠️ Instruments JSON file not found: {instruments_file}")
                         logger.error(f"Instruments JSON file not found: {instruments_file}")
                     else:
-                        print(f"📂 Loading instruments from: {instruments_file}")
-                        try:
-                            with open(instruments_file, 'r') as f:
-                                instruments_data = json_lib.load(f)
-                            print(f"✅ Loaded {len(instruments_data)} instruments from file")
-                        except Exception as file_error:
-                            print(f"❌ ERROR: Failed to read instruments file: {str(file_error)}")
-                            logger.error(f"Failed to read instruments file for {stock_name}: {str(file_error)}")
-                            import traceback
-                            traceback.print_exc()
-                            instruments_data = []  # Set to empty list to prevent further processing
+                        # CRITICAL: Retry logic ensures we can read the file even if there are transient issues
+                        # The file age doesn't matter - as long as instruments match, they will be found
+                        max_retries = 3
+                        instruments_data = None
+                        
+                        for retry in range(1, max_retries + 1):
+                            try:
+                                print(f"📂 Loading instruments from: {instruments_file} (attempt {retry}/{max_retries})")
+                                with open(instruments_file, 'r') as f:
+                                    instruments_data = json_lib.load(f)
+                                print(f"✅ Loaded {len(instruments_data)} instruments from file")
+                                break  # Success - exit retry loop
+                            except (json_lib.JSONDecodeError, IOError, OSError) as file_error:
+                                if retry < max_retries:
+                                    import time
+                                    wait_time = retry * 0.5  # Exponential backoff: 0.5s, 1s, 1.5s
+                                    print(f"⚠️ Failed to read instruments file (attempt {retry}/{max_retries}): {str(file_error)}")
+                                    print(f"   Retrying in {wait_time}s...")
+                                    time.sleep(wait_time)
+                                else:
+                                    print(f"❌ ERROR: Failed to read instruments file after {max_retries} attempts: {str(file_error)}")
+                                    logger.error(f"Failed to read instruments file for {stock_name} after {max_retries} attempts: {str(file_error)}")
+                                    import traceback
+                                    traceback.print_exc()
+                                    instruments_data = []  # Set to empty list to prevent further processing
+                            except Exception as file_error:
+                                # For other exceptions, don't retry
+                                print(f"❌ ERROR: Unexpected error reading instruments file: {str(file_error)}")
+                                logger.error(f"Unexpected error reading instruments file for {stock_name}: {str(file_error)}")
+                                import traceback
+                                traceback.print_exc()
+                                instruments_data = []
+                                break
+                        
+                        if instruments_data is None:
+                            instruments_data = []  # Ensure it's set to empty list if all retries failed
                         
                         if not instruments_data:
                             print(f"⚠️ Instruments data is empty - cannot search for {option_contract}")
@@ -703,43 +728,47 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                 target_year = int(year)
                                 
                                 if target_month:
-                                # Search for matching option in NSE_FO segment
-                                best_match = None
-                                best_match_score = float('inf')
-                                
-                                for inst in instruments_data:
-                                    if (inst.get('underlying_symbol') == symbol and 
-                                        inst.get('instrument_type') == opt_type and
-                                        inst.get('segment') == 'NSE_FO'):
-                                        
-                                        inst_strike = inst.get('strike_price', 0)
-                                        strike_diff = abs(inst_strike - strike_value)
-                                        
-                                        expiry_ms = inst.get('expiry', 0)
-                                        if expiry_ms:
-                                            if expiry_ms > 1e12:
-                                                expiry_ms = expiry_ms / 1000
-                                            inst_expiry = datetime.fromtimestamp(expiry_ms)
+                                    # Search for matching option in NSE_FO segment
+                                    best_match = None
+                                    best_match_score = float('inf')
+                                    match_count = 0
+                                    
+                                    for inst in instruments_data:
+                                        if (inst.get('underlying_symbol') == symbol and 
+                                            inst.get('instrument_type') == opt_type and
+                                            inst.get('segment') == 'NSE_FO'):
                                             
-                                            if inst_expiry.year == target_year and inst_expiry.month == target_month:
-                                                score = strike_diff * 1000
+                                            inst_strike = inst.get('strike_price', 0)
+                                            strike_diff = abs(inst_strike - strike_value)
+                                            
+                                            expiry_ms = inst.get('expiry', 0)
+                                            if expiry_ms:
+                                                if expiry_ms > 1e12:
+                                                    expiry_ms = expiry_ms / 1000
+                                                inst_expiry = datetime.fromtimestamp(expiry_ms)
                                                 
-                                                if strike_diff < 0.01:  # Exact match
-                                                    instrument_key = inst.get('instrument_key')
-                                                    trading_symbol = inst.get('trading_symbol', 'Unknown')
-                                                    print(f"✅ Found EXACT match for {option_contract}:")
-                                                    print(f"   Instrument Key: {instrument_key}")
-                                                    print(f"   Trading Symbol: {trading_symbol}")
-                                                    print(f"   Strike: {inst_strike} (requested: {strike_value}, diff: {strike_diff:.4f})")
-                                                    print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
-                                                    break
-                                                else:
-                                                    if best_match is None or score < best_match_score:
-                                                        best_match = inst
-                                                        best_match_score = score
-                                
-                                # Use best match if no exact match
-                                if not instrument_key and best_match:
+                                                if inst_expiry.year == target_year and inst_expiry.month == target_month:
+                                                    match_count += 1
+                                                    score = strike_diff * 1000
+                                                    
+                                                    if strike_diff < 0.01:  # Exact match
+                                                        instrument_key = inst.get('instrument_key')
+                                                        trading_symbol = inst.get('trading_symbol', 'Unknown')
+                                                        print(f"✅ Found EXACT match for {option_contract}:")
+                                                        print(f"   Instrument Key: {instrument_key}")
+                                                        print(f"   Trading Symbol: {trading_symbol}")
+                                                        print(f"   Strike: {inst_strike} (requested: {strike_value}, diff: {strike_diff:.4f})")
+                                                        print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
+                                                        break
+                                                    else:
+                                                        if best_match is None or score < best_match_score:
+                                                            best_match = inst
+                                                            best_match_score = score
+                                    
+                                    print(f"   📊 Found {match_count} instrument(s) matching symbol={symbol}, type={opt_type}, expiry={target_month}/{target_year}")
+                                    
+                                    # Use best match if no exact match
+                                    if not instrument_key and best_match:
                                     instrument_key = best_match.get('instrument_key')
                                     inst_strike = best_match.get('strike_price', 0)
                                     expiry_ms = best_match.get('expiry', 0)
@@ -768,13 +797,16 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                         
                                         # Show some examples
                                         if symbol_type_matches:
-                                            print(f"   Examples (first 3):")
-                                            for inst in symbol_type_matches[:3]:
+                                            print(f"   Examples (first 5):")
+                                            for inst in symbol_type_matches[:5]:
                                                 expiry_ms = inst.get('expiry', 0)
                                                 if expiry_ms > 1e12:
                                                     expiry_ms = expiry_ms / 1000
                                                 expiry_dt = datetime.fromtimestamp(expiry_ms) if expiry_ms else None
-                                                print(f"      - Strike: {inst.get('strike_price', 0)}, Expiry: {expiry_dt.strftime('%d %b %Y') if expiry_dt else 'N/A'}")
+                                                print(f"      - Strike: {inst.get('strike_price', 0)}, Expiry: {expiry_dt.strftime('%d %b %Y') if expiry_dt else 'N/A'}, Key: {inst.get('instrument_key', 'N/A')}")
+                                else:
+                                    print(f"⚠️ Could not parse month from option contract: {option_contract} (month: {month})")
+                                    logger.warning(f"Could not parse month from option contract for {stock_name}: {option_contract} (month: {month})")
                             else:
                                 print(f"⚠️ Could not parse option contract format: {option_contract}")
                                 logger.warning(f"Could not parse option contract format for {stock_name}: {option_contract}")
