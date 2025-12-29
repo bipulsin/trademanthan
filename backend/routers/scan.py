@@ -631,8 +631,12 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     if match:
                         option_strike = float(match.group(1))
                         print(f"✅ Extracted option strike: {option_strike} from {option_contract}")
+                    else:
+                        print(f"⚠️ Could not extract option strike from {option_contract} - regex did not match")
+                        logger.warning(f"Could not extract option strike from {option_contract} for {stock_name}")
                 except Exception as e:
-                    print(f"⚠️ Error extracting option strike from {option_contract}: {str(e)}")
+                    print(f"❌ ERROR extracting option strike from {option_contract}: {str(e)}")
+                    logger.error(f"Error extracting option strike from {option_contract} for {stock_name}: {str(e)}", exc_info=True)
             
             # ====================================================================
             # ACTIVITY 4: Fetch Lot Size from Master Stock (Independent - requires option_contract)
@@ -649,9 +653,14 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         qty = int(master_record.lot_size)
                         print(f"✅ Fetched lot_size for {option_contract}: {qty}")
                     else:
-                        print(f"⚠️ Could not find master record or lot_size for {option_contract}")
+                        if master_record:
+                            print(f"⚠️ Master record found for {option_contract} but lot_size is None or 0")
+                        else:
+                            print(f"⚠️ Could not find master record for {option_contract} in master_stock table")
+                        logger.warning(f"Could not fetch lot_size for {option_contract} (stock: {stock_name}) - master_record: {master_record is not None}, lot_size: {master_record.lot_size if master_record else 'N/A'}")
                 except Exception as e:
-                    print(f"⚠️ Error fetching lot_size for {option_contract}: {str(e)}")
+                    print(f"❌ ERROR fetching lot_size for {option_contract}: {str(e)}")
+                    logger.error(f"Error fetching lot_size for {option_contract} (stock: {stock_name}): {str(e)}", exc_info=True)
             
             # ====================================================================
             # ACTIVITY 5: Find Instrument Key from instruments.json (Independent - requires option_contract)
@@ -821,27 +830,50 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             # ====================================================================
             if instrument_key and vwap_service:
                 try:
+                    print(f"🔍 Fetching option LTP for {option_contract} using instrument_key: {instrument_key}")
                     quote_data = vwap_service.get_market_quote_by_key(instrument_key)
                     if quote_data and quote_data.get('last_price'):
                         option_ltp = float(quote_data.get('last_price', 0))
                         print(f"✅ Fetched option LTP for {option_contract}: ₹{option_ltp}")
                     else:
-                        print(f"⚠️ Could not fetch option LTP for {option_contract} - no quote data")
+                        print(f"⚠️ Could not fetch option LTP for {option_contract} - no quote data returned")
+                        print(f"   Quote data: {quote_data}")
+                        logger.warning(f"Could not fetch option LTP for {option_contract} (stock: {stock_name}, instrument_key: {instrument_key}) - quote_data: {quote_data}")
                 except Exception as e:
-                    print(f"⚠️ Error fetching option LTP for {option_contract}: {str(e)}")
+                    print(f"❌ ERROR fetching option LTP for {option_contract}: {str(e)}")
+                    logger.error(f"Error fetching option LTP for {option_contract} (stock: {stock_name}, instrument_key: {instrument_key}): {str(e)}", exc_info=True)
+            elif not instrument_key:
+                print(f"⚠️ Cannot fetch option LTP for {option_contract} - instrument_key is None")
+                logger.warning(f"Cannot fetch option LTP for {option_contract} (stock: {stock_name}) - instrument_key is None")
+            elif not vwap_service:
+                print(f"⚠️ Cannot fetch option LTP for {option_contract} - vwap_service is None")
+                logger.warning(f"Cannot fetch option LTP for {option_contract} (stock: {stock_name}) - vwap_service is None")
             
             # ====================================================================
             # ACTIVITY 7: Fetch Option Candles (Independent - requires instrument_key)
             # ====================================================================
             if instrument_key and vwap_service:
                 try:
+                    print(f"🔍 Fetching option candles for {option_contract} using instrument_key: {instrument_key}")
                     option_candles = vwap_service.get_option_daily_candles_current_and_previous(instrument_key)
                     if option_candles:
                         print(f"✅ Fetched option OHLC candles for {option_contract}")
+                        if option_candles.get('current_day_candle'):
+                            print(f"   Current day candle: {option_candles.get('current_day_candle')}")
+                        if option_candles.get('previous_day_candle'):
+                            print(f"   Previous day candle: {option_candles.get('previous_day_candle')}")
                     else:
-                        print(f"⚠️ Could not fetch option OHLC candles for {option_contract}")
+                        print(f"⚠️ Could not fetch option OHLC candles for {option_contract} - returned None")
+                        logger.warning(f"Could not fetch option OHLC candles for {option_contract} (stock: {stock_name}, instrument_key: {instrument_key}) - returned None")
                 except Exception as e:
-                    print(f"⚠️ Error fetching option OHLC candles for {option_contract}: {str(e)}")
+                    print(f"❌ ERROR fetching option OHLC candles for {option_contract}: {str(e)}")
+                    logger.error(f"Error fetching option OHLC candles for {option_contract} (stock: {stock_name}, instrument_key: {instrument_key}): {str(e)}", exc_info=True)
+            elif not instrument_key:
+                print(f"⚠️ Cannot fetch option candles for {option_contract} - instrument_key is None")
+                logger.warning(f"Cannot fetch option candles for {option_contract} (stock: {stock_name}) - instrument_key is None")
+            elif not vwap_service:
+                print(f"⚠️ Cannot fetch option candles for {option_contract} - vwap_service is None")
+                logger.warning(f"Cannot fetch option candles for {option_contract} (stock: {stock_name}) - vwap_service is None")
             
             # ====================================================================
             # ACTIVITY 8: Fetch Previous Hour VWAP (Independent)
