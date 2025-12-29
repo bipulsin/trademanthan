@@ -639,28 +639,17 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     logger.error(f"Error extracting option strike from {option_contract} for {stock_name}: {str(e)}", exc_info=True)
             
             # ====================================================================
-            # ACTIVITY 4: Fetch Lot Size from Master Stock (Independent - requires option_contract)
+            # ACTIVITY 4: Fetch Lot Size from instruments.json (Independent - requires option_contract)
+            # NOTE: Lot size is now fetched in ACTIVITY 5 when we find instrument_key
+            # This activity is kept for backward compatibility but lot_size should be
+            # fetched from instruments.json in Activity 5, not from master_stock table
             # ====================================================================
-            if option_contract:
-                try:
-                    master_record = db.query(MasterStock).filter(
-                        and_(
-                            MasterStock.symbol_name == option_contract
-                        )
-                    ).first()
-                    
-                    if master_record and master_record.lot_size:
-                        qty = int(master_record.lot_size)
-                        print(f"✅ Fetched lot_size for {option_contract}: {qty}")
-                    else:
-                        if master_record:
-                            print(f"⚠️ Master record found for {option_contract} but lot_size is None or 0")
-                        else:
-                            print(f"⚠️ Could not find master record for {option_contract} in master_stock table")
-                        logger.warning(f"Could not fetch lot_size for {option_contract} (stock: {stock_name}) - master_record: {master_record is not None}, lot_size: {master_record.lot_size if master_record else 'N/A'}")
-                except Exception as e:
-                    print(f"❌ ERROR fetching lot_size for {option_contract}: {str(e)}")
-                    logger.error(f"Error fetching lot_size for {option_contract} (stock: {stock_name}): {str(e)}", exc_info=True)
+            # Lot size is now fetched from instruments.json in Activity 5 when instrument_key is found
+            # This ensures we use the same data source and don't depend on master_stock table
+            # If lot_size wasn't found in Activity 5, it will remain 0 (default)
+            if option_contract and qty == 0:
+                print(f"⚠️ Lot size not found in instruments.json for {option_contract}, qty remains 0")
+                logger.warning(f"Lot size not found in instruments.json for {option_contract} (stock: {stock_name})")
             
             # ====================================================================
             # ACTIVITY 5: Find Instrument Key from instruments.json (Independent - requires option_contract)
@@ -763,11 +752,23 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                                     if strike_diff < 0.01:  # Exact match
                                                         instrument_key = inst.get('instrument_key')
                                                         trading_symbol = inst.get('trading_symbol', 'Unknown')
-                                                        print(f"✅ Found EXACT match for {option_contract}:")
-                                                        print(f"   Instrument Key: {instrument_key}")
-                                                        print(f"   Trading Symbol: {trading_symbol}")
-                                                        print(f"   Strike: {inst_strike} (requested: {strike_value}, diff: {strike_diff:.4f})")
-                                                        print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
+                                                        # Also fetch lot_size from the same instrument record
+                                                        inst_lot_size = inst.get('lot_size')
+                                                        if inst_lot_size and inst_lot_size > 0:
+                                                            qty = int(inst_lot_size)
+                                                            print(f"✅ Found EXACT match for {option_contract}:")
+                                                            print(f"   Instrument Key: {instrument_key}")
+                                                            print(f"   Trading Symbol: {trading_symbol}")
+                                                            print(f"   Strike: {inst_strike} (requested: {strike_value}, diff: {strike_diff:.4f})")
+                                                            print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
+                                                            print(f"   Lot Size: {qty}")
+                                                        else:
+                                                            print(f"✅ Found EXACT match for {option_contract}:")
+                                                            print(f"   Instrument Key: {instrument_key}")
+                                                            print(f"   Trading Symbol: {trading_symbol}")
+                                                            print(f"   Strike: {inst_strike} (requested: {strike_value}, diff: {strike_diff:.4f})")
+                                                            print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
+                                                            print(f"   ⚠️ Lot Size: Not available in instruments.json")
                                                         break
                                                     else:
                                                         if best_match is None or score < best_match_score:
@@ -785,12 +786,31 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                             expiry_ms = expiry_ms / 1000
                                         inst_expiry = datetime.fromtimestamp(expiry_ms)
                                         trading_symbol = best_match.get('trading_symbol', 'Unknown')
+                                        # Also fetch lot_size from the best match
+                                        inst_lot_size = best_match.get('lot_size')
+                                        if inst_lot_size and inst_lot_size > 0:
+                                            qty = int(inst_lot_size)
                                         print(f"⚠️ WARNING: Using BEST MATCH (not exact) for {option_contract}:")
                                         print(f"   Instrument Key: {instrument_key}")
                                         print(f"   Trading Symbol: {trading_symbol}")
                                         print(f"   Strike: {inst_strike} (requested: {strike_value}, diff: {abs(inst_strike - strike_value):.4f})")
                                         print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
+                                        if inst_lot_size and inst_lot_size > 0:
+                                            print(f"   Lot Size: {qty}")
+                                        else:
+                                            print(f"   ⚠️ Lot Size: Not available in instruments.json")
                                         print(f"   ⚠️ This may not be the correct instrument!")
+                                    
+                                    # If instrument_key was found but lot_size is still 0, try to find lot_size from any instrument with same underlying_symbol
+                                    if instrument_key and qty == 0:
+                                        print(f"⚠️ Instrument key found but lot_size not available, searching for lot_size from other {symbol} instruments...")
+                                        for inst in instruments_data:
+                                            if (inst.get('underlying_symbol') == symbol and 
+                                                inst.get('segment') == 'NSE_FO' and
+                                                inst.get('lot_size') and inst.get('lot_size') > 0):
+                                                qty = int(inst.get('lot_size'))
+                                                print(f"✅ Found lot_size from another {symbol} instrument: {qty}")
+                                                break
                                     
                                     if not instrument_key:
                                         print(f"❌ ERROR: Could not find instrument_key for {option_contract}")
@@ -812,7 +832,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                                 if expiry_ms > 1e12:
                                                     expiry_ms = expiry_ms / 1000
                                                 expiry_dt = datetime.fromtimestamp(expiry_ms) if expiry_ms else None
-                                                print(f"      - Strike: {inst.get('strike_price', 0)}, Expiry: {expiry_dt.strftime('%d %b %Y') if expiry_dt else 'N/A'}, Key: {inst.get('instrument_key', 'N/A')}")
+                                                print(f"      - Strike: {inst.get('strike_price', 0)}, Expiry: {expiry_dt.strftime('%d %b %Y') if expiry_dt else 'N/A'}, Key: {inst.get('instrument_key', 'N/A')}, Lot Size: {inst.get('lot_size', 'N/A')}")
                                 else:
                                     print(f"⚠️ Could not parse month from option contract: {option_contract} (month: {month})")
                                     logger.warning(f"Could not parse month from option contract for {stock_name}: {option_contract} (month: {month})")
