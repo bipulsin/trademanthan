@@ -1155,6 +1155,11 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 vwap_slope_reason = ""
                 candle_size_reason = ""
                 
+                # Initialize saved_candle_size_status early to avoid UnboundLocalError
+                # This will be calculated later, but we need it initialized here for the filter logic
+                saved_candle_size_status = None
+                saved_candle_size_ratio = None
+                
                 # 1. VWAP SLOPE FILTER - SKIP INITIAL CALCULATION
                 # VWAP slope will be calculated in cycle-based scheduler (10:30, 11:15, 12:15, 13:15, 14:15)
                 # For webhook alerts, we only store the alert data, VWAP slope will be calculated later
