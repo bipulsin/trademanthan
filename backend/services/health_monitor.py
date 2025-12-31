@@ -378,41 +378,30 @@ Generated: {now.strftime('%Y-%m-%d %H:%M:%S IST')}
             return False
     
     def send_telegram_message(self, message: str) -> bool:
-        """Send Telegram message via Telegram Bot API"""
+        """Send Telegram message via CallMeBot API"""
         try:
-            telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-            telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
+            telegram_username = os.getenv("TELEGRAM_USERNAME")  # Format: bipulsahay (without @)
+            telegram_apikey = os.getenv("TELEGRAM_APIKEY")  # From CallMeBot registration
             
-            if not telegram_bot_token or not telegram_chat_id:
+            if not telegram_username or not telegram_apikey:
                 logger.debug("Telegram not configured, skipping")
                 return False
             
-            # Telegram API URL
-            url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
+            # Truncate message to 1000 chars (CallMeBot limit)
+            if len(message) > 1000:
+                message = message[:997] + "..."
             
-            # Prepare message payload
-            # Telegram supports markdown, so we can format the message nicely
-            payload = {
-                "chat_id": telegram_chat_id,
-                "text": message,
-                "parse_mode": "Markdown"  # Enable markdown formatting
-            }
-            
-            # Encode payload as JSON
-            import json
-            data = json.dumps(payload).encode('utf-8')
-            
-            # Create request
-            req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+            # Build API URL - CallMeBot Telegram API
+            url = f"https://api.callmebot.com/text.php?user={telegram_username}&text={urllib.parse.quote(message)}&apikey={telegram_apikey}"
             
             # Send request
-            response = urllib.request.urlopen(req, timeout=10)
+            response = urllib.request.urlopen(url, timeout=10)
             
             if response.status == 200:
-                logger.info(f"✅ Telegram alert sent to chat_id {telegram_chat_id}")
+                logger.info(f"✅ Telegram alert sent to @{telegram_username}")
                 return True
             else:
-                logger.warning(f"Telegram API returned status {response.status}")
+                logger.warning(f"Telegram CallMeBot API returned status {response.status}")
                 return False
                 
         except Exception as e:
