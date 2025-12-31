@@ -44,10 +44,21 @@ class HealthMonitor:
     def start(self):
         """Start the health monitor scheduler"""
         if not self.is_running:
-            # Health check every 15 minutes during market hours (9:15 AM - 3:45 PM)
-            # Schedule: 9:15, 9:30, 9:45, 10:00, ..., 15:30, 15:45
-            for hour in range(9, 16):
-                for minute in [15, 30, 45]:
+            # Health check every 15 minutes during market hours (9:05 AM - 3:30 PM)
+            # Schedule: 9:05, 9:20, 9:35, 9:50, 10:05, 10:20, ..., 15:05, 15:20, 15:30
+            # Pattern: Start at 9:05, then every 15 minutes until 15:30 (3:30 PM)
+            for hour in range(9, 16):  # 9 AM to 3 PM
+                if hour == 9:
+                    # 9 AM: Start at 9:05, then 9:20, 9:35, 9:50
+                    minutes = [5, 20, 35, 50]
+                elif hour == 15:
+                    # 3 PM: Only 15:05, 15:20, 15:30 (stops at 3:30 PM)
+                    minutes = [5, 20, 30]
+                else:
+                    # Other hours: 05, 20, 35, 50
+                    minutes = [5, 20, 35, 50]
+                
+                for minute in minutes:
                     self.scheduler.add_job(
                         self.perform_health_check,
                         trigger=CronTrigger(hour=hour, minute=minute, timezone='Asia/Kolkata'),
@@ -58,19 +69,6 @@ class HealthMonitor:
                         misfire_grace_time=300,  # Allow running up to 5 minutes after scheduled time
                         coalesce=True  # Combine multiple missed runs into one
                     )
-            
-            # Add hourly checks from 10:00 AM onwards (10:00, 11:00, 12:00, 13:00, 14:00, 15:00)
-            for hour in range(10, 16):
-                self.scheduler.add_job(
-                    self.perform_health_check,
-                    trigger=CronTrigger(hour=hour, minute=0, timezone='Asia/Kolkata'),
-                    id=f'health_check_{hour}_0',
-                    name=f'Health Check {hour:02d}:00',
-                    replace_existing=True,
-                    max_instances=1,
-                    misfire_grace_time=300,  # Allow running up to 5 minutes after scheduled time
-                    coalesce=True  # Combine multiple missed runs into one
-                )
             
             # Daily health report at 4:00 PM (after market close)
             self.scheduler.add_job(
