@@ -45,7 +45,9 @@ class MasterStockScheduler:
                 trigger=CronTrigger(hour=9, minute=0, timezone='Asia/Kolkata'),
                 id='master_stock_daily_download',
                 name='Download Master Stock Data',
-                replace_existing=True
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=300  # 5 minutes grace time for daily downloads
             )
             
             try:

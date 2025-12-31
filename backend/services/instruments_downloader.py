@@ -220,7 +220,9 @@ class InstrumentsScheduler:
                 trigger=CronTrigger(hour=9, minute=5, timezone='Asia/Kolkata'),
                 id='instruments_daily_download',
                 name='Download Upstox Instruments',
-                replace_existing=True
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=300  # 5 minutes grace time for daily downloads
             )
             
             try:

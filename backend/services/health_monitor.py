@@ -26,6 +26,7 @@ class HealthMonitor:
     def __init__(self):
         # AsyncIOScheduler creates its own event loop in a background thread
         # Don't pass event_loop parameter - let it handle it automatically
+        # AsyncIOScheduler runs async jobs concurrently by default
         self.scheduler = AsyncIOScheduler(timezone='Asia/Kolkata')
         self.is_running = False
         
@@ -60,7 +61,9 @@ class HealthMonitor:
                     trigger=CronTrigger(hour=hour, minute=0, timezone='Asia/Kolkata'),
                     id=f'health_check_{hour}_0',
                     name=f'Health Check {hour:02d}:00',
-                    replace_existing=True
+                    replace_existing=True,
+                    max_instances=1,
+                    misfire_grace_time=60
                 )
             
             # Daily health report at 4:00 PM (after market close)
@@ -69,7 +72,9 @@ class HealthMonitor:
                 trigger=CronTrigger(hour=16, minute=0, timezone='Asia/Kolkata'),
                 id='daily_health_report',
                 name='Daily Health Report',
-                replace_existing=True
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=60
             )
             
             try:

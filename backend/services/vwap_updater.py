@@ -59,6 +59,8 @@ class VWAPUpdater:
     def __init__(self):
         # AsyncIOScheduler creates its own event loop in a background thread
         # Don't pass event_loop parameter - let it handle it automatically
+        # AsyncIOScheduler runs async jobs concurrently by default
+        # We configure jobs individually with misfire_grace_time to handle timing issues
         self.scheduler = AsyncIOScheduler(timezone='Asia/Kolkata')
         self.is_running = False
         
@@ -73,7 +75,9 @@ class VWAPUpdater:
                     trigger=CronTrigger(hour=hour, minute=15, timezone='Asia/Kolkata'),
                     id=f'vwap_update_{hour}',
                     name=f'Update VWAP {hour:02d}:15',
-                    replace_existing=True
+                    replace_existing=True,
+                    max_instances=1,
+                    misfire_grace_time=60
                 )
             
             # Close all open trades at 3:25 PM (before market close)
@@ -82,7 +86,9 @@ class VWAPUpdater:
                 trigger=CronTrigger(hour=15, minute=25, timezone='Asia/Kolkata'),
                 id='close_all_trades_eod',
                 name='Close All Open Trades at 3:25 PM',
-                replace_existing=True
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=60
             )
             
             # Cycle-based VWAP slope calculations
@@ -113,7 +119,9 @@ class VWAPUpdater:
                 trigger=CronTrigger(hour=10, minute=30, timezone='Asia/Kolkata'),
                 id='cycle_1_vwap_slope_10_30',
                 name='Cycle 1: VWAP Slope at 10:30 AM',
-                replace_existing=True
+                replace_existing=True,
+                max_instances=1,  # Only one instance running at a time
+                misfire_grace_time=60  # Allow running up to 60 seconds after scheduled time
             )
             
             # Cycle 2: 11:15 AM - Stocks from 11:15 AM webhook + No_Entry from 10:15 AM
@@ -124,7 +132,9 @@ class VWAPUpdater:
                 trigger=CronTrigger(hour=11, minute=15, timezone='Asia/Kolkata'),
                 id='cycle_2_vwap_slope_11_15',
                 name='Cycle 2: VWAP Slope at 11:15 AM',
-                replace_existing=True
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=60
             )
             
             # Cycle 3: 12:15 PM - Stocks from 12:15 PM webhook + No_Entry up to 11:15 AM
@@ -135,7 +145,9 @@ class VWAPUpdater:
                 trigger=CronTrigger(hour=12, minute=15, timezone='Asia/Kolkata'),
                 id='cycle_3_vwap_slope_12_15',
                 name='Cycle 3: VWAP Slope at 12:15 PM',
-                replace_existing=True
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=60
             )
             
             # Cycle 4: 13:15 PM - Stocks from 13:15 PM webhook + No_Entry up to 12:15 PM
@@ -146,7 +158,9 @@ class VWAPUpdater:
                 trigger=CronTrigger(hour=13, minute=15, timezone='Asia/Kolkata'),
                 id='cycle_4_vwap_slope_13_15',
                 name='Cycle 4: VWAP Slope at 13:15 PM',
-                replace_existing=True
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=60
             )
             
             # Cycle 5: 14:15 PM - Stocks from 14:15 PM webhook + No_Entry up to 13:15 PM
@@ -157,7 +171,9 @@ class VWAPUpdater:
                 trigger=CronTrigger(hour=14, minute=15, timezone='Asia/Kolkata'),
                 id='cycle_5_vwap_slope_14_15',
                 name='Cycle 5: VWAP Slope at 14:15 PM',
-                replace_existing=True
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=60
             )
             
             self.scheduler.start()
