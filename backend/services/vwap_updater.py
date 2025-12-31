@@ -3160,8 +3160,17 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 # ═══════════════════════════════════════════════════════════════
                 # UPDATE SELL_PRICE AND PNL FOR BOUGHT TRADES IN THIS CYCLE
                 # ═══════════════════════════════════════════════════════════════
+                # CRITICAL: Only update trades that are still OPEN (status='bought', exit_reason=None)
+                # NEVER update trades that have already exited (status='sold' or exit_reason is set)
                 # For trades that are already in 'bought' status, update sell_price and PnL
                 # This ensures PnL is calculated and displayed in every cycle, not just at 3:25 PM
+                # CRITICAL SAFETY CHECK: Re-check exit_reason and status to prevent updating exited trades
+                if trade.exit_reason is not None:
+                    logger.debug(f"⏭️ Cycle {cycle_number} - {stock_name}: Skipping sell_price/PnL update - already exited with reason: {trade.exit_reason}")
+                    continue
+                if trade.status == 'sold':
+                    logger.debug(f"⏭️ Cycle {cycle_number} - {stock_name}: Skipping sell_price/PnL update - status is 'sold'")
+                    continue
                 if trade.status == 'bought' and trade.exit_reason is None:
                     try:
                         # Fetch current option LTP
