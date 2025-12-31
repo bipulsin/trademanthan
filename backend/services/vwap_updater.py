@@ -1257,25 +1257,39 @@ async def update_vwap_for_all_open_positions():
                     
                     # CRITICAL: Calculate and update unrealized P&L for open trades
                     # This MUST happen whenever sell_price is updated
-                    if position.buy_price and position.qty and new_option_ltp > 0:
-                        old_pnl = position.pnl or 0.0
-                        new_pnl = (new_option_ltp - position.buy_price) * position.qty
-                        position.pnl = new_pnl
-                        # CRITICAL: Explicitly mark PnL as modified to ensure SQLAlchemy tracks the change
-                        flag_modified(position, 'pnl')
-                        updates_made.append(f"P&L: ₹{old_pnl:.2f}→₹{new_pnl:.2f}")
-                        logger.info(f"📊 {stock_name}: PnL updated to ₹{new_pnl:.2f} (Buy: ₹{position.buy_price:.2f}, Sell: ₹{new_option_ltp:.2f}, Qty: {position.qty})")
-                    else:
+                    # Use new_option_ltp if > 0, otherwise fallback to position.sell_price if available
+                    pnl_calculated = False
+                    if position.buy_price and position.qty:
+                        if new_option_ltp > 0:
+                            # Use fetched option LTP for PnL calculation
+                            old_pnl = position.pnl or 0.0
+                            new_pnl = (new_option_ltp - position.buy_price) * position.qty
+                            position.pnl = new_pnl
+                            flag_modified(position, 'pnl')
+                            updates_made.append(f"P&L: ₹{old_pnl:.2f}→₹{new_pnl:.2f}")
+                            logger.info(f"📊 {stock_name}: PnL updated to ₹{new_pnl:.2f} (Buy: ₹{position.buy_price:.2f}, Sell: ₹{new_option_ltp:.2f}, Qty: {position.qty})")
+                            pnl_calculated = True
+                        elif position.sell_price and position.sell_price > 0:
+                            # Fallback: Use existing sell_price if new_option_ltp is 0 or negative
+                            old_pnl = position.pnl or 0.0
+                            new_pnl = (position.sell_price - position.buy_price) * position.qty
+                            position.pnl = new_pnl
+                            flag_modified(position, 'pnl')
+                            updates_made.append(f"P&L: ₹{old_pnl:.2f}→₹{new_pnl:.2f} (using sell_price)")
+                            logger.info(f"📊 {stock_name}: PnL updated to ₹{new_pnl:.2f} (Buy: ₹{position.buy_price:.2f}, Sell: ₹{position.sell_price:.2f}, Qty: {position.qty}) - using sell_price fallback")
+                            pnl_calculated = True
+                    
+                    if not pnl_calculated:
                         # Log why PnL was not calculated
                         missing = []
                         if not position.buy_price:
                             missing.append("buy_price")
                         if not position.qty:
                             missing.append("qty")
-                        if new_option_ltp <= 0:
-                            missing.append("new_option_ltp > 0")
+                        if new_option_ltp <= 0 and (not position.sell_price or position.sell_price <= 0):
+                            missing.append("option_ltp or sell_price")
                         logger.warning(f"⚠️ {stock_name}: PnL NOT calculated - missing: {', '.join(missing) if missing else 'unknown reason'}")
-                        logger.warning(f"   buy_price: {position.buy_price}, qty: {position.qty}, new_option_ltp: {new_option_ltp}")
+                        logger.warning(f"   buy_price: {position.buy_price}, qty: {position.qty}, new_option_ltp: {new_option_ltp}, sell_price: {position.sell_price}")
                 else:
                     # Option LTP fetch failed - use buy_price as fallback if sell_price is NULL/0
                     if (not position.sell_price or position.sell_price == 0) and position.buy_price:
