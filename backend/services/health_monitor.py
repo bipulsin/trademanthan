@@ -26,13 +26,10 @@ class HealthMonitor:
     def __init__(self):
         # AsyncIOScheduler creates its own event loop in a background thread
         # Don't pass event_loop parameter - let it handle it automatically
-        # AsyncIOScheduler runs async jobs concurrently by default
-        # Configure with max_workers to allow concurrent execution of multiple jobs
+        # AsyncIOScheduler runs async jobs concurrently by default using asyncio
+        # Jobs are configured with misfire_grace_time and coalesce to prevent blocking
         # This ensures health checks don't block other scheduled jobs
-        self.scheduler = AsyncIOScheduler(
-            timezone='Asia/Kolkata',
-            max_workers=10  # Allow up to 10 concurrent async jobs
-        )
+        self.scheduler = AsyncIOScheduler(timezone='Asia/Kolkata')
         self.is_running = False
         
         # Track consecutive failures for each component
