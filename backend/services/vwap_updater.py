@@ -1969,6 +1969,270 @@ async def update_vwap_for_all_open_positions():
             print("🏁 FUNCTION EXIT: update_vwap_for_all_open_positions() completed (timestamp unavailable)", file=sys.stderr)
 
 
+def calculate_vwap_slope_for_trade(trade: IntradayStockOption, db: Session, vwap_service) -> bool:
+    """
+    Calculate and update VWAP slope for a trade immediately after it's saved to database.
+    This is called from webhook processing to ensure VWAP slope is calculated right away.
+    
+    Args:
+        trade: The trade record (IntradayStockOption)
+        db: Database session
+        vwap_service: Upstox service instance
+        
+    Returns:
+        bool: True if VWAP slope was calculated successfully, False otherwise
+    """
+    try:
+        from sqlalchemy.orm.attributes import flag_modified
+        import pytz
+        
+        ist = pytz.timezone('Asia/Kolkata')
+        now = datetime.now(ist)
+        stock_name = trade.stock_name
+        
+        # Determine previous VWAP time based on alert_time
+        if not trade.alert_time:
+            logger.warning(f"⚠️ Cannot calculate VWAP slope for {stock_name}: alert_time is None")
+            return False
+        
+        alert_time = trade.alert_time
+        if alert_time.tzinfo is None:
+            alert_time = ist.localize(alert_time)
+        elif alert_time.tzinfo != ist:
+            alert_time = alert_time.astimezone(ist)
+        
+        alert_hour = alert_time.hour
+        alert_minute = alert_time.minute
+        today = alert_time.date()
+        
+        # Market opens at 9:15 AM, so hourly candles form at :15 times
+        # Previous VWAP: 1 hour before alert time (at :15 minutes)
+        # For 10:15 AM alert: Previous = 9:15 AM (market open)
+        # For 11:15 AM alert: Previous = 10:15 AM
+        # For 12:15 PM alert: Previous = 11:15 AM
+        # etc.
+        
+        if alert_hour == 10 and alert_minute == 15:
+            # 10:15 AM alert: Previous VWAP is 9:15 AM (market open)
+            prev_vwap_time = today.replace(hour=9, minute=15, second=0, microsecond=0)
+            current_vwap_time = today.replace(hour=10, minute=15, second=0, microsecond=0)
+        elif alert_hour >= 11 and alert_minute == 15:
+            # 11:15 AM onwards: Previous VWAP is 1 hour before
+            prev_vwap_time = today.replace(hour=alert_hour - 1, minute=15, second=0, microsecond=0)
+            current_vwap_time = today.replace(hour=alert_hour, minute=15, second=0, microsecond=0)
+        else:
+            # For other times, try to use stored stock_vwap_previous_hour if available
+            if trade.stock_vwap_previous_hour and trade.stock_vwap_previous_hour_time:
+                prev_vwap_time = trade.stock_vwap_previous_hour_time
+                current_vwap_time = alert_time
+            else:
+                logger.warning(f"⚠️ Cannot determine previous VWAP time for {stock_name} (alert_time: {alert_time.strftime('%H:%M')})")
+                return False
+        
+        # Ensure timezone-aware
+        if prev_vwap_time.tzinfo is None:
+            prev_vwap_time = ist.localize(prev_vwap_time)
+        elif prev_vwap_time.tzinfo != ist:
+            prev_vwap_time = prev_vwap_time.astimezone(ist)
+        
+        if current_vwap_time.tzinfo is None:
+            current_vwap_time = ist.localize(current_vwap_time)
+        elif current_vwap_time.tzinfo != ist:
+            current_vwap_time = current_vwap_time.astimezone(ist)
+        
+        prev_interval = "hours/1"
+        current_interval = "hours/1"
+        
+        # Try to get previous VWAP from candle API
+        prev_vwap_data = vwap_service.get_stock_vwap_from_candle_at_time(
+            stock_name,
+            prev_vwap_time,
+            interval=prev_interval
+        )
+        
+        # Validate date
+        if prev_vwap_data and prev_vwap_data.get('time'):
+            candle_time = prev_vwap_data.get('time')
+            if candle_time.tzinfo is None:
+                candle_time = ist.localize(candle_time)
+            elif candle_time.tzinfo != ist:
+                candle_time = candle_time.astimezone(ist)
+            
+            if candle_time.date() != prev_vwap_time.date():
+                logger.warning(f"⚠️ {stock_name}: Candle date mismatch, treating as failure")
+                prev_vwap_data = None
+        
+        # Try alternative method if candle API failed
+        if not prev_vwap_data:
+            try:
+                alt_prev_vwap = vwap_service.get_stock_vwap_for_previous_hour(stock_name, reference_time=alert_time)
+                if alt_prev_vwap and alt_prev_vwap.get('vwap', 0) > 0:
+                    prev_vwap_data = alt_prev_vwap
+                    logger.info(f"🔄 {stock_name}: Using alternative method for previous VWAP")
+            except Exception as alt_error:
+                logger.debug(f"Alternative previous VWAP method failed for {stock_name}: {str(alt_error)}")
+        
+        if not prev_vwap_data:
+            logger.warning(f"⚠️ Could not get previous VWAP for {stock_name} at {prev_vwap_time.strftime('%H:%M')}")
+            return False
+        
+        prev_vwap = prev_vwap_data.get('vwap', 0)
+        prev_vwap_time_actual = prev_vwap_data.get('time')
+        
+        # Get current VWAP
+        current_vwap_data = vwap_service.get_stock_vwap_from_candle_at_time(
+            stock_name,
+            current_vwap_time,
+            interval=current_interval
+        )
+        
+        # If candle API fails, use stored stock_vwap if available
+        if not current_vwap_data and trade.stock_vwap and trade.stock_vwap > 0:
+            current_vwap_data = {
+                'vwap': trade.stock_vwap,
+                'time': alert_time
+            }
+        
+        if not current_vwap_data:
+            logger.warning(f"⚠️ Could not get current VWAP for {stock_name} at {current_vwap_time.strftime('%H:%M')}")
+            return False
+        
+        current_vwap = current_vwap_data.get('vwap', 0)
+        current_vwap_time_actual = current_vwap_data.get('time')
+        
+        if prev_vwap <= 0 or current_vwap <= 0:
+            logger.warning(f"⚠️ Invalid VWAP values for {stock_name} (prev: {prev_vwap}, current: {current_vwap})")
+            return False
+        
+        # Calculate VWAP slope
+        slope_result = vwap_service.vwap_slope(
+            vwap1=prev_vwap,
+            time1=prev_vwap_time_actual,
+            vwap2=current_vwap,
+            time2=current_vwap_time_actual
+        )
+        
+        if isinstance(slope_result, dict):
+            slope_status = slope_result.get("status", "No")
+            slope_angle = slope_result.get("angle", 0.0)
+            slope_direction = slope_result.get("direction", "flat")
+        else:
+            slope_status = slope_result if isinstance(slope_result, str) else "No"
+            slope_angle = 0.0
+            slope_direction = "flat"
+        
+        # Update database with VWAP slope data
+        trade.stock_vwap_previous_hour = prev_vwap
+        trade.stock_vwap_previous_hour_time = prev_vwap_time_actual
+        trade.stock_vwap = current_vwap
+        trade.vwap_slope_status = slope_status
+        trade.vwap_slope_angle = slope_angle
+        trade.vwap_slope_direction = slope_direction
+        trade.vwap_slope_time = current_vwap_time_actual
+        
+        flag_modified(trade, 'stock_vwap_previous_hour')
+        flag_modified(trade, 'stock_vwap_previous_hour_time')
+        flag_modified(trade, 'stock_vwap')
+        flag_modified(trade, 'vwap_slope_status')
+        flag_modified(trade, 'vwap_slope_angle')
+        flag_modified(trade, 'vwap_slope_direction')
+        flag_modified(trade, 'vwap_slope_time')
+        
+        logger.info(f"✅ {stock_name}: VWAP slope calculated - Angle: {slope_angle:.2f}°, Status: {slope_status}, Direction: {slope_direction}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Error calculating VWAP slope for {trade.stock_name if trade else 'unknown'}: {str(e)}")
+        import traceback
+        logger.debug(traceback.format_exc())
+        return False
+
+
+def recalculate_candle_size_for_trade(trade: IntradayStockOption, db: Session, vwap_service) -> bool:
+    """
+    Recalculate and update candle size for a trade immediately after it's saved to database.
+    This is called from webhook processing to ensure candle size is calculated right away.
+    
+    Args:
+        trade: The trade record (IntradayStockOption)
+        db: Database session
+        vwap_service: Upstox service instance
+        
+    Returns:
+        bool: True if candle size was calculated successfully, False otherwise
+    """
+    try:
+        from sqlalchemy.orm.attributes import flag_modified
+        
+        stock_name = trade.stock_name
+        
+        # Only recalculate if instrument_key exists
+        if not trade.instrument_key:
+            logger.debug(f"⚠️ {stock_name}: Cannot recalculate candle size - instrument_key missing")
+            return False
+        
+        # Fetch option candles
+        option_candles = vwap_service.get_option_daily_candles_current_and_previous(trade.instrument_key)
+        if not option_candles:
+            logger.warning(f"⚠️ {stock_name}: Could not fetch option candles for candle size calculation")
+            return False
+        
+        current_day_candle = option_candles.get('current_day_candle', {})
+        previous_day_candle = option_candles.get('previous_day_candle', {})
+        
+        if current_day_candle and previous_day_candle:
+            current_size = abs(current_day_candle.get('high', 0) - current_day_candle.get('low', 0))
+            previous_size = abs(previous_day_candle.get('high', 0) - previous_day_candle.get('low', 0))
+            
+            if previous_size > 0:
+                candle_size_ratio = current_size / previous_size
+                candle_size_passed = (candle_size_ratio < 7.5)
+                
+                # Update database with daily candle data
+                trade.option_current_candle_open = current_day_candle.get('open')
+                trade.option_current_candle_high = current_day_candle.get('high')
+                trade.option_current_candle_low = current_day_candle.get('low')
+                trade.option_current_candle_close = current_day_candle.get('close')
+                trade.option_current_candle_time = current_day_candle.get('time')
+                trade.option_previous_candle_open = previous_day_candle.get('open')
+                trade.option_previous_candle_high = previous_day_candle.get('high')
+                trade.option_previous_candle_low = previous_day_candle.get('low')
+                trade.option_previous_candle_close = previous_day_candle.get('close')
+                trade.option_previous_candle_time = previous_day_candle.get('time')
+                
+                # Update candle size ratio and status
+                trade.candle_size_ratio = candle_size_ratio
+                trade.candle_size_status = "Pass" if candle_size_passed else "Fail"
+                
+                flag_modified(trade, 'option_current_candle_open')
+                flag_modified(trade, 'option_current_candle_high')
+                flag_modified(trade, 'option_current_candle_low')
+                flag_modified(trade, 'option_current_candle_close')
+                flag_modified(trade, 'option_current_candle_time')
+                flag_modified(trade, 'option_previous_candle_open')
+                flag_modified(trade, 'option_previous_candle_high')
+                flag_modified(trade, 'option_previous_candle_low')
+                flag_modified(trade, 'option_previous_candle_close')
+                flag_modified(trade, 'option_previous_candle_time')
+                flag_modified(trade, 'candle_size_ratio')
+                flag_modified(trade, 'candle_size_status')
+                
+                logger.info(f"✅ {stock_name}: Candle size recalculated - Ratio: {candle_size_ratio:.2f}x - {'PASS' if candle_size_passed else 'FAIL'}")
+                return True
+            else:
+                logger.warning(f"⚠️ {stock_name}: Previous day candle size is zero, cannot calculate ratio")
+                return False
+        else:
+            logger.warning(f"⚠️ {stock_name}: Missing candle data (current: {bool(current_day_candle)}, previous: {bool(previous_day_candle)})")
+            return False
+            
+    except Exception as e:
+        logger.error(f"❌ Error recalculating candle size for {trade.stock_name if trade else 'unknown'}: {str(e)}")
+        import traceback
+        logger.debug(traceback.format_exc())
+        return False
+
+
 async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime):
     """
     Calculate VWAP slope for stocks based on cycle-based logic
