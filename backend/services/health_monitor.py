@@ -381,9 +381,8 @@ Generated: {now.strftime('%Y-%m-%d %H:%M:%S IST')}
         """Send Telegram message via CallMeBot API"""
         try:
             telegram_username = os.getenv("TELEGRAM_USERNAME")  # Format: bipulsahay (without @)
-            telegram_apikey = os.getenv("TELEGRAM_APIKEY")  # From CallMeBot registration
             
-            if not telegram_username or not telegram_apikey:
+            if not telegram_username:
                 logger.debug("Telegram not configured, skipping")
                 return False
             
@@ -391,8 +390,9 @@ Generated: {now.strftime('%Y-%m-%d %H:%M:%S IST')}
             if len(message) > 1000:
                 message = message[:997] + "..."
             
-            # Build API URL - CallMeBot Telegram API
-            url = f"https://api.callmebot.com/text.php?user={telegram_username}&text={urllib.parse.quote(message)}&apikey={telegram_apikey}"
+            # Build API URL - CallMeBot Telegram API (no API key needed)
+            # Format: https://api.callmebot.com/text.php?user=@bipulsahay&text=<message>
+            url = f"https://api.callmebot.com/text.php?user=@{telegram_username}&text={urllib.parse.quote(message)}"
             
             # Send request
             response = urllib.request.urlopen(url, timeout=10)
