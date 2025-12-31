@@ -27,7 +27,12 @@ class HealthMonitor:
         # AsyncIOScheduler creates its own event loop in a background thread
         # Don't pass event_loop parameter - let it handle it automatically
         # AsyncIOScheduler runs async jobs concurrently by default
-        self.scheduler = AsyncIOScheduler(timezone='Asia/Kolkata')
+        # Configure with max_workers to allow concurrent execution of multiple jobs
+        # This ensures health checks don't block other scheduled jobs
+        self.scheduler = AsyncIOScheduler(
+            timezone='Asia/Kolkata',
+            max_workers=10  # Allow up to 10 concurrent async jobs
+        )
         self.is_running = False
         
         # Track consecutive failures for each component
@@ -51,7 +56,10 @@ class HealthMonitor:
                         trigger=CronTrigger(hour=hour, minute=minute, timezone='Asia/Kolkata'),
                         id=f'health_check_{hour}_{minute}',
                         name=f'Health Check {hour:02d}:{minute:02d}',
-                        replace_existing=True
+                        replace_existing=True,
+                        max_instances=1,
+                        misfire_grace_time=300,  # Allow running up to 5 minutes after scheduled time
+                        coalesce=True  # Combine multiple missed runs into one
                     )
             
             # Add hourly checks from 10:00 AM onwards (10:00, 11:00, 12:00, 13:00, 14:00, 15:00)
@@ -63,7 +71,8 @@ class HealthMonitor:
                     name=f'Health Check {hour:02d}:00',
                     replace_existing=True,
                     max_instances=1,
-                    misfire_grace_time=60
+                    misfire_grace_time=300,  # Allow running up to 5 minutes after scheduled time
+                    coalesce=True  # Combine multiple missed runs into one
                 )
             
             # Daily health report at 4:00 PM (after market close)
@@ -74,7 +83,8 @@ class HealthMonitor:
                 name='Daily Health Report',
                 replace_existing=True,
                 max_instances=1,
-                misfire_grace_time=60
+                misfire_grace_time=300,  # Allow running up to 5 minutes after scheduled time
+                coalesce=True  # Combine multiple missed runs into one
             )
             
             try:

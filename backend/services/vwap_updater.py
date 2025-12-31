@@ -60,8 +60,12 @@ class VWAPUpdater:
         # AsyncIOScheduler creates its own event loop in a background thread
         # Don't pass event_loop parameter - let it handle it automatically
         # AsyncIOScheduler runs async jobs concurrently by default
-        # We configure jobs individually with misfire_grace_time to handle timing issues
-        self.scheduler = AsyncIOScheduler(timezone='Asia/Kolkata')
+        # Configure with max_workers to allow concurrent execution of multiple jobs
+        # This ensures jobs don't block each other even if one takes longer
+        self.scheduler = AsyncIOScheduler(
+            timezone='Asia/Kolkata',
+            max_workers=10  # Allow up to 10 concurrent async jobs
+        )
         self.is_running = False
         
     def start(self):
@@ -77,7 +81,8 @@ class VWAPUpdater:
                     name=f'Update VWAP {hour:02d}:15',
                     replace_existing=True,
                     max_instances=1,
-                    misfire_grace_time=60
+                    misfire_grace_time=300,  # Allow running up to 5 minutes after scheduled time
+                    coalesce=True  # Combine multiple missed runs into one
                 )
             
             # Close all open trades at 3:25 PM (before market close)
@@ -88,7 +93,8 @@ class VWAPUpdater:
                 name='Close All Open Trades at 3:25 PM',
                 replace_existing=True,
                 max_instances=1,
-                misfire_grace_time=60
+                misfire_grace_time=300,  # Allow running up to 5 minutes after scheduled time
+                coalesce=True  # Combine multiple missed runs into one
             )
             
             # Cycle-based VWAP slope calculations
@@ -121,7 +127,8 @@ class VWAPUpdater:
                 name='Cycle 1: VWAP Slope at 10:30 AM',
                 replace_existing=True,
                 max_instances=1,  # Only one instance running at a time
-                misfire_grace_time=60  # Allow running up to 60 seconds after scheduled time
+                misfire_grace_time=300,  # Allow running up to 5 minutes after scheduled time (increased from 60)
+                coalesce=True  # Combine multiple missed runs into one
             )
             
             # Cycle 2: 11:15 AM - Stocks from 11:15 AM webhook + No_Entry from 10:15 AM
@@ -134,7 +141,8 @@ class VWAPUpdater:
                 name='Cycle 2: VWAP Slope at 11:15 AM',
                 replace_existing=True,
                 max_instances=1,
-                misfire_grace_time=60
+                misfire_grace_time=300,  # Allow running up to 5 minutes after scheduled time
+                coalesce=True  # Combine multiple missed runs into one
             )
             
             # Cycle 3: 12:15 PM - Stocks from 12:15 PM webhook + No_Entry up to 11:15 AM
@@ -147,7 +155,8 @@ class VWAPUpdater:
                 name='Cycle 3: VWAP Slope at 12:15 PM',
                 replace_existing=True,
                 max_instances=1,
-                misfire_grace_time=60
+                misfire_grace_time=300,  # Allow running up to 5 minutes after scheduled time
+                coalesce=True  # Combine multiple missed runs into one
             )
             
             # Cycle 4: 13:15 PM - Stocks from 13:15 PM webhook + No_Entry up to 12:15 PM
@@ -160,7 +169,8 @@ class VWAPUpdater:
                 name='Cycle 4: VWAP Slope at 13:15 PM',
                 replace_existing=True,
                 max_instances=1,
-                misfire_grace_time=60
+                misfire_grace_time=300,  # Allow running up to 5 minutes after scheduled time
+                coalesce=True  # Combine multiple missed runs into one
             )
             
             # Cycle 5: 14:15 PM - Stocks from 14:15 PM webhook + No_Entry up to 13:15 PM
@@ -173,7 +183,8 @@ class VWAPUpdater:
                 name='Cycle 5: VWAP Slope at 14:15 PM',
                 replace_existing=True,
                 max_instances=1,
-                misfire_grace_time=60
+                misfire_grace_time=300,  # Allow running up to 5 minutes after scheduled time
+                coalesce=True  # Combine multiple missed runs into one
             )
             
             self.scheduler.start()
