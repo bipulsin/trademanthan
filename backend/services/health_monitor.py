@@ -377,8 +377,50 @@ Generated: {now.strftime('%Y-%m-%d %H:%M:%S IST')}
             logger.warning(f"Could not send WhatsApp alert: {str(e)}")
             return False
     
+    def send_telegram_message(self, message: str) -> bool:
+        """Send Telegram message via Telegram Bot API"""
+        try:
+            telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+            telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
+            
+            if not telegram_bot_token or not telegram_chat_id:
+                logger.debug("Telegram not configured, skipping")
+                return False
+            
+            # Telegram API URL
+            url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
+            
+            # Prepare message payload
+            # Telegram supports markdown, so we can format the message nicely
+            payload = {
+                "chat_id": telegram_chat_id,
+                "text": message,
+                "parse_mode": "Markdown"  # Enable markdown formatting
+            }
+            
+            # Encode payload as JSON
+            import json
+            data = json.dumps(payload).encode('utf-8')
+            
+            # Create request
+            req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+            
+            # Send request
+            response = urllib.request.urlopen(req, timeout=10)
+            
+            if response.status == 200:
+                logger.info(f"✅ Telegram alert sent to chat_id {telegram_chat_id}")
+                return True
+            else:
+                logger.warning(f"Telegram API returned status {response.status}")
+                return False
+                
+        except Exception as e:
+            logger.warning(f"Could not send Telegram alert: {str(e)}")
+            return False
+    
     async def send_critical_alert(self, subject: str, message: str):
-        """Send critical alert via email + WhatsApp + logging"""
+        """Send critical alert via email + WhatsApp + Telegram + logging"""
         
         # Always log to console/journald
         logger.critical("=" * 60)
@@ -441,15 +483,24 @@ This is an automated alert. Please check the system immediately.
         whatsapp_message = f"🚨 *TradeManthan Alert*\n\n*{subject}*\n\n{message}\n\n_Time: {datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%H:%M IST')}_"
         whatsapp_sent = self.send_whatsapp_message(whatsapp_message)
         
+        # Try to send Telegram alert
+        # Format message with markdown for Telegram
+        telegram_message = f"🚨 *TradeManthan Alert*\n\n*{subject}*\n\n{message}\n\n_Time: {datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%H:%M IST')}_"
+        telegram_sent = self.send_telegram_message(telegram_message)
+        
         # Log notification status
-        if email_sent and whatsapp_sent:
-            logger.info("✅ Alerts sent via Email + WhatsApp")
-        elif email_sent:
-            logger.info("✅ Alert sent via Email (WhatsApp not configured/failed)")
-        elif whatsapp_sent:
-            logger.info("✅ Alert sent via WhatsApp (Email failed)")
+        sent_channels = []
+        if email_sent:
+            sent_channels.append("Email")
+        if whatsapp_sent:
+            sent_channels.append("WhatsApp")
+        if telegram_sent:
+            sent_channels.append("Telegram")
+        
+        if sent_channels:
+            logger.info(f"✅ Alerts sent via: {', '.join(sent_channels)}")
         else:
-            logger.warning("⚠️ Alert sent via logs only (Email and WhatsApp failed)")
+            logger.warning("⚠️ Alert sent via logs only (Email, WhatsApp, and Telegram failed/not configured)")
     
     def record_webhook_success(self):
         """Record successful webhook processing"""
