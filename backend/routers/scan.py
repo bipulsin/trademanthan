@@ -1582,13 +1582,12 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 # This ensures calculations happen immediately, not waiting for cycle scheduler
                 try:
                     from backend.services.vwap_updater import calculate_vwap_slope_for_trade, recalculate_candle_size_for_trade
-                    from backend.services.upstox_service import upstox_service as vwap_service_import
                     
                     # Flush to ensure trade is in database with ID
                     db.flush()
                     
-                    # Calculate VWAP slope
-                    vwap_slope_calculated = calculate_vwap_slope_for_trade(db_record, db, vwap_service_import)
+                    # Calculate VWAP slope (vwap_service is already imported at module level)
+                    vwap_slope_calculated = calculate_vwap_slope_for_trade(db_record, db, vwap_service)
                     if vwap_slope_calculated:
                         print(f"   ✅ VWAP slope calculated for {stock_name}")
                     else:
@@ -1596,7 +1595,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     
                     # Recalculate candle size if instrument_key is available
                     if db_record.instrument_key:
-                        candle_size_calculated = recalculate_candle_size_for_trade(db_record, db, vwap_service_import)
+                        candle_size_calculated = recalculate_candle_size_for_trade(db_record, db, vwap_service)
                         if candle_size_calculated:
                             print(f"   ✅ Candle size recalculated for {stock_name}")
                 except Exception as calc_error:
