@@ -4170,6 +4170,17 @@ async def manually_update_vwap(db: Session = Depends(get_db)):
                     position.sell_price = new_option_ltp
                     update_info["option_ltp"] = {"old": round(old_option_ltp, 2), "new": round(new_option_ltp, 2)}
                     updates_made.append(f"Option LTP: {old_option_ltp:.2f}→{new_option_ltp:.2f}")
+                    
+                    # CRITICAL: Calculate and update PnL whenever sell_price is updated
+                    if position.buy_price and position.qty:
+                        old_pnl = position.pnl or 0.0
+                        new_pnl = (new_option_ltp - position.buy_price) * position.qty
+                        position.pnl = new_pnl
+                        from sqlalchemy.orm.attributes import flag_modified
+                        flag_modified(position, 'pnl')
+                        update_info["pnl"] = {"old": round(old_pnl, 2), "new": round(new_pnl, 2)}
+                        updates_made.append(f"P&L: ₹{old_pnl:.2f}→₹{new_pnl:.2f}")
+                        logger.info(f"📊 {stock_name}: PnL updated to ₹{new_pnl:.2f} (Buy: ₹{position.buy_price:.2f}, Sell: ₹{new_option_ltp:.2f}, Qty: {position.qty})")
                 
                 if updates_made:
                     position.updated_at = now
