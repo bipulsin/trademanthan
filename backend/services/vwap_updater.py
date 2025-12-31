@@ -3164,6 +3164,11 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 # NEVER update trades that have already exited (status='sold' or exit_reason is set)
                 # For trades that are already in 'bought' status, update sell_price and PnL
                 # This ensures PnL is calculated and displayed in every cycle, not just at 3:25 PM
+                # CRITICAL SAFETY CHECK: Refresh from database to get latest state before checking
+                try:
+                    db.refresh(trade)  # Get latest state from database to prevent race conditions
+                except Exception:
+                    pass  # If refresh fails, continue with current state
                 # CRITICAL SAFETY CHECK: Re-check exit_reason and status to prevent updating exited trades
                 if trade.exit_reason is not None:
                     logger.debug(f"⏭️ Cycle {cycle_number} - {stock_name}: Skipping sell_price/PnL update - already exited with reason: {trade.exit_reason}")
