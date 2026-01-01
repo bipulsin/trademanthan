@@ -2744,9 +2744,21 @@ async def manual_stock_entry(request: Request, db: Session = Depends(get_db)):
                 # process_webhook_data returns JSONResponse, extract the data
                 if isinstance(bearish_result, JSONResponse):
                     try:
-                        result_data = json.loads(bearish_result.body.decode())
-                        bearish_count = result_data.get('saved_to_database', 0)
-                    except (json.JSONDecodeError, AttributeError) as decode_error:
+                        # JSONResponse stores content directly - access it
+                        if hasattr(bearish_result, 'body') and bearish_result.body:
+                            # body is bytes, decode it
+                            result_data = json.loads(bearish_result.body.decode('utf-8'))
+                            bearish_count = result_data.get('saved_to_database', 0)
+                        elif hasattr(bearish_result, 'body') and callable(bearish_result.body):
+                            # body is a callable (async generator), this shouldn't happen but handle it
+                            logger.warning("Bearish result body is callable, using fallback count")
+                            if bearish_result.status_code == 200:
+                                bearish_count = len([s.strip() for s in bearish_stocks_str.split(",") if s.strip()])
+                        else:
+                            # Fallback: count stocks if status is 200
+                            if bearish_result.status_code == 200:
+                                bearish_count = len([s.strip() for s in bearish_stocks_str.split(",") if s.strip()])
+                    except (json.JSONDecodeError, AttributeError, UnicodeDecodeError, TypeError) as decode_error:
                         logger.warning(f"Could not decode bearish result: {str(decode_error)}")
                         # If we can't decode, check if it was successful by status code
                         if bearish_result.status_code == 200:
