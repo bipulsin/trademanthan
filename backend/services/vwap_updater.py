@@ -3913,8 +3913,10 @@ async def close_all_open_trades():
         # CRITICAL: Only include trades that have NO exit_reason (not already exited)
         # This ensures trades exited with VWAP cross, stop loss, or profit target are NOT overwritten
         # CRITICAL: Exclude trades that failed enrichment (never actually entered)
+        # NOTE: trade_date is stored as datetime, so we need to compare dates properly
+        from sqlalchemy import func
         open_positions = db.query(IntradayStockOption).filter(
-            IntradayStockOption.trade_date == today,
+            func.date(IntradayStockOption.trade_date) == today,
             IntradayStockOption.exit_reason.is_(None),  # Must be NULL - excludes all already-exited trades
             IntradayStockOption.status != 'sold',  # Additional safety check
             IntradayStockOption.status != 'no_entry',  # Exclude trades that were never entered
