@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, func, desc, text
+from sqlalchemy import and_, func, desc, text, or_
 from starlette.requests import ClientDisconnect
 import json
 import os
