@@ -2590,6 +2590,181 @@ async def receive_chartink_webhook(request: Request, db: Session = Depends(get_d
     data = await request.json()
     return await process_webhook_data(data, db, forced_type=None)  # Auto-detect
 
+
+@router.post("/manual-entry")
+async def manual_stock_entry(request: Request, db: Session = Depends(get_db)):
+    """
+    Manual stock entry endpoint for processing stocks when webhook fails
+    
+    Expected JSON format:
+    {
+        "bullishStocks": "RELIANCE,TCS,INFY",
+        "bearishStocks": "ADANIENT,ADANIPORTS",
+        "alertTime": "11:15",
+        "alertDate": "2026-01-01" (optional, defaults to today)
+    }
+    """
+    try:
+        data = await request.json()
+        
+        bullish_stocks_str = data.get("bullishStocks", "").strip()
+        bearish_stocks_str = data.get("bearishStocks", "").strip()
+        alert_time_str = data.get("alertTime", "").strip()
+        alert_date_str = data.get("alertDate", "").strip()
+        
+        # Validate inputs
+        if not bullish_stocks_str and not bearish_stocks_str:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "status": "error",
+                    "message": "At least one stock list (Bullish or Bearish) must be provided"
+                }
+            )
+        
+        if not alert_time_str:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "status": "error",
+                    "message": "Alert time is required"
+                }
+            )
+        
+        # Parse alert time and date
+        import pytz
+        from dateutil import parser
+        
+        ist = pytz.timezone('Asia/Kolkata')
+        now = datetime.now(ist)
+        
+        # Parse date (default to today if not provided)
+        if alert_date_str:
+            try:
+                alert_date = datetime.strptime(alert_date_str, '%Y-%m-%d').date()
+                trading_date = datetime.combine(alert_date, datetime.min.time()).replace(tzinfo=ist)
+            except ValueError:
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "status": "error",
+                        "message": f"Invalid date format. Expected YYYY-MM-DD, got: {alert_date_str}"
+                    }
+                )
+        else:
+            trading_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            alert_date = trading_date.date()
+        
+        # Parse time (format: HH:MM)
+        try:
+            time_parts = alert_time_str.split(':')
+            if len(time_parts) != 2:
+                raise ValueError("Invalid time format")
+            hour = int(time_parts[0])
+            minute = int(time_parts[1])
+            
+            if not (0 <= hour <= 23) or not (0 <= minute <= 59):
+                raise ValueError("Invalid time values")
+            
+            # Create datetime for triggered_at
+            triggered_datetime = trading_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            
+            # Format time for display (12-hour format)
+            if hour == 0:
+                time_display = f"12:{minute:02d} AM"
+            elif hour < 12:
+                time_display = f"{hour}:{minute:02d} AM"
+            elif hour == 12:
+                time_display = f"12:{minute:02d} PM"
+            else:
+                time_display = f"{hour-12}:{minute:02d} PM"
+            
+        except (ValueError, IndexError) as e:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "status": "error",
+                    "message": f"Invalid time format. Expected HH:MM (24-hour format), got: {alert_time_str}"
+                }
+            )
+        
+        # Process bullish stocks if provided
+        bullish_result = None
+        bullish_count = 0
+        if bullish_stocks_str:
+            stock_list = [s.strip() for s in bullish_stocks_str.split(",") if s.strip()]
+            trigger_prices_str = ",".join(["0.0"] * len(stock_list))  # Trigger prices not provided, use 0.0
+            
+            webhook_data = {
+                "stocks": ",".join(stock_list),
+                "trigger_prices": trigger_prices_str,
+                "triggered_at": time_display.lower(),
+                "scan_name": "Manual Entry - Bullish",
+                "alert_name": "Manual Entry - Bullish"
+            }
+            
+            try:
+                bullish_result = await process_webhook_data(webhook_data, db, forced_type='bullish')
+                if isinstance(bullish_result, JSONResponse):
+                    result_data = json.loads(bullish_result.body.decode())
+                    bullish_count = result_data.get('saved_to_database', 0)
+            except Exception as e:
+                logger.error(f"Error processing bullish stocks: {str(e)}")
+                import traceback
+                logger.error(traceback.format_exc())
+        
+        # Process bearish stocks if provided
+        bearish_result = None
+        bearish_count = 0
+        if bearish_stocks_str:
+            stock_list = [s.strip() for s in bearish_stocks_str.split(",") if s.strip()]
+            trigger_prices_str = ",".join(["0.0"] * len(stock_list))  # Trigger prices not provided, use 0.0
+            
+            webhook_data = {
+                "stocks": ",".join(stock_list),
+                "trigger_prices": trigger_prices_str,
+                "triggered_at": time_display.lower(),
+                "scan_name": "Manual Entry - Bearish",
+                "alert_name": "Manual Entry - Bearish"
+            }
+            
+            try:
+                bearish_result = await process_webhook_data(webhook_data, db, forced_type='bearish')
+                if isinstance(bearish_result, JSONResponse):
+                    result_data = json.loads(bearish_result.body.decode())
+                    bearish_count = result_data.get('saved_to_database', 0)
+            except Exception as e:
+                logger.error(f"Error processing bearish stocks: {str(e)}")
+                import traceback
+                logger.error(traceback.format_exc())
+        
+        total_processed = bullish_count + bearish_count
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "success",
+                "message": f"Successfully processed {total_processed} stock(s)",
+                "bullish_count": bullish_count,
+                "bearish_count": bearish_count,
+                "processed_count": total_processed,
+                "alert_time": triggered_datetime.isoformat(),
+                "timestamp": datetime.now(ist).isoformat()
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in manual stock entry: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "message": f"Failed to process manual entry: {str(e)}"
+            }
+        )
+
 @router.get("/latest")
 async def get_latest_webhook_data(db: Session = Depends(get_db)):
     """
