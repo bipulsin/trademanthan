@@ -2608,9 +2608,70 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
             try:
                 stock_name = trade.stock_name
                 
+                # ═══════════════════════════════════════════════════════════════
+                # SAVE HISTORICAL MARKET DATA FOR ALL TRADES (REGARDLESS OF STATUS)
+                # This must be done FIRST, before any continue statements, to ensure
+                # historical data is captured for all webhook alerts in each cycle
+                # ═══════════════════════════════════════════════════════════════
+                try:
+                    # Get current stock data
+                    stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
+                    current_stock_ltp = stock_data.get('ltp', 0) if stock_data else (trade.stock_ltp or 0)
+                    current_stock_vwap = stock_data.get('vwap', 0) if stock_data else (trade.stock_vwap or 0)
+                    
+                    # Get option LTP if available
+                    current_option_ltp = None
+                    if trade.instrument_key:
+                        try:
+                            option_quote = vwap_service.get_market_quote_by_key(trade.instrument_key)
+                            if option_quote and option_quote.get('last_price', 0) > 0:
+                                current_option_ltp = float(option_quote.get('last_price', 0))
+                        except:
+                            current_option_ltp = trade.option_ltp
+                    else:
+                        current_option_ltp = trade.option_ltp
+                    
+                    # Check if historical data already exists to prevent duplicates
+                    if not historical_data_exists(db, stock_name, now):
+                        # Get all available data from trade record and API
+                        stock_vwap_prev = trade.stock_vwap_previous_hour if hasattr(trade, 'stock_vwap_previous_hour') else None
+                        stock_vwap_prev_time = trade.stock_vwap_previous_hour_time if hasattr(trade, 'stock_vwap_previous_hour_time') else None
+                        option_vwap_value = trade.option_vwap if hasattr(trade, 'option_vwap') and trade.option_vwap and trade.option_vwap > 0 else None
+                        vwap_slope_angle = trade.vwap_slope_angle if hasattr(trade, 'vwap_slope_angle') else None
+                        vwap_slope_status = trade.vwap_slope_status if hasattr(trade, 'vwap_slope_status') else None
+                        vwap_slope_direction = trade.vwap_slope_direction if hasattr(trade, 'vwap_slope_direction') else None
+                        vwap_slope_time = trade.vwap_slope_time if hasattr(trade, 'vwap_slope_time') else None
+                        
+                        historical_record = HistoricalMarketData(
+                            stock_name=stock_name,
+                            stock_vwap=current_stock_vwap if current_stock_vwap > 0 else None,
+                            stock_ltp=current_stock_ltp if current_stock_ltp > 0 else None,
+                            stock_vwap_previous_hour=stock_vwap_prev if stock_vwap_prev and stock_vwap_prev > 0 else None,
+                            stock_vwap_previous_hour_time=stock_vwap_prev_time,
+                            vwap_slope_angle=vwap_slope_angle,
+                            vwap_slope_status=vwap_slope_status,
+                            vwap_slope_direction=vwap_slope_direction,
+                            vwap_slope_time=vwap_slope_time,
+                            option_contract=trade.option_contract,
+                            option_instrument_key=trade.instrument_key,
+                            option_ltp=current_option_ltp if current_option_ltp and current_option_ltp > 0 else None,
+                            option_vwap=option_vwap_value,
+                            scan_date=now,
+                            scan_time=now.strftime('%I:%M %p').lower()
+                        )
+                        db.add(historical_record)
+                        logger.debug(f"📊 Cycle {cycle_number} - Saved historical data for {stock_name} (status: {trade.status}) at {now.strftime('%H:%M:%S')}")
+                    else:
+                        logger.debug(f"⏭️ Cycle {cycle_number} - Skipping duplicate historical data for {stock_name} at {now.strftime('%H:%M:%S')} (already exists)")
+                except Exception as hist_error:
+                    logger.warning(f"⚠️ Cycle {cycle_number} - Failed to save historical data for {stock_name}: {str(hist_error)}")
+                    # Don't fail the entire cycle if historical save fails
+                
                 # CRITICAL: Skip trades that have already exited (defense in depth - also filtered in query)
+                # NOTE: Historical data is already saved above, so we can skip VWAP slope calculation for exited trades
                 if trade.exit_reason is not None:
-                    logger.debug(f"⏭️ Cycle {cycle_number} - Skipping {stock_name} - already exited with reason: {trade.exit_reason}")
+                    logger.debug(f"⏭️ Cycle {cycle_number} - Skipping VWAP slope calculation for {stock_name} - already exited with reason: {trade.exit_reason}")
+                    processed_count += 1
                     continue
                 
                 # #region agent log
@@ -3543,69 +3604,11 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                         # Don't fail the entire cycle if PnL update fails
                 
                 # ═══════════════════════════════════════════════════════════════
-                # SAVE HISTORICAL MARKET DATA FOR ALL TRADES PROCESSED IN CYCLE
+                # NOTE: Historical data is already saved at the beginning of the loop
+                # (before any continue statements) to ensure it's captured for ALL trades
+                # regardless of status. The VWAP slope values will be updated in the trade
+                # record below, and will be reflected in the next cycle's historical data save.
                 # ═══════════════════════════════════════════════════════════════
-                # Store historical snapshot of market data for analysis
-                # This ensures we have data at every cycle run (10:30, 11:15, 12:15, 13:15, 14:15)
-                # NOTE: Historical data is also saved earlier if VWAP calculation fails (before continue statements)
-                try:
-                    # Get current stock LTP and VWAP if not already fetched
-                    # stock_data should already be fetched earlier, but fetch again if needed
-                    if 'stock_data' not in locals() or not stock_data:
-                        stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
-                    
-                    current_stock_ltp = stock_data.get('ltp', 0) if stock_data else (trade.stock_ltp or 0)
-                    current_stock_vwap = current_vwap if current_vwap > 0 else (trade.stock_vwap or 0)
-                    
-                    # Get option LTP if available
-                    current_option_ltp = None
-                    if trade.instrument_key:
-                        try:
-                            option_quote = vwap_service.get_market_quote_by_key(trade.instrument_key)
-                            if option_quote and option_quote.get('last_price', 0) > 0:
-                                current_option_ltp = float(option_quote.get('last_price', 0))
-                        except:
-                            current_option_ltp = trade.option_ltp
-                    else:
-                        current_option_ltp = trade.option_ltp
-                    
-                    # Check if historical data already exists to prevent duplicates (e.g., when hourly update also runs)
-                    if not historical_data_exists(db, stock_name, now):
-                        # Get VWAP slope data from trade record (if calculated)
-                        vwap_slope_angle = trade.vwap_slope_angle if hasattr(trade, 'vwap_slope_angle') else None
-                        vwap_slope_status = trade.vwap_slope_status if hasattr(trade, 'vwap_slope_status') else None
-                        vwap_slope_direction = trade.vwap_slope_direction if hasattr(trade, 'vwap_slope_direction') else None
-                        vwap_slope_time = trade.vwap_slope_time if hasattr(trade, 'vwap_slope_time') else None
-                        
-                        # Get all available data from trade record and API
-                        stock_vwap_prev = trade.stock_vwap_previous_hour if hasattr(trade, 'stock_vwap_previous_hour') else None
-                        stock_vwap_prev_time = trade.stock_vwap_previous_hour_time if hasattr(trade, 'stock_vwap_previous_hour_time') else None
-                        option_vwap_value = trade.option_vwap if hasattr(trade, 'option_vwap') and trade.option_vwap and trade.option_vwap > 0 else None
-                        
-                        historical_record = HistoricalMarketData(
-                            stock_name=stock_name,
-                            stock_vwap=current_stock_vwap if current_stock_vwap > 0 else None,
-                            stock_ltp=current_stock_ltp if current_stock_ltp > 0 else None,
-                            stock_vwap_previous_hour=stock_vwap_prev if stock_vwap_prev and stock_vwap_prev > 0 else None,
-                            stock_vwap_previous_hour_time=stock_vwap_prev_time,
-                            vwap_slope_angle=vwap_slope_angle,
-                            vwap_slope_status=vwap_slope_status,
-                            vwap_slope_direction=vwap_slope_direction,
-                            vwap_slope_time=vwap_slope_time,
-                            option_contract=trade.option_contract,
-                            option_instrument_key=trade.instrument_key,
-                            option_ltp=current_option_ltp if current_option_ltp and current_option_ltp > 0 else None,
-                            option_vwap=option_vwap_value,
-                            scan_date=now,
-                            scan_time=now.strftime('%I:%M %p').lower()
-                        )
-                        db.add(historical_record)
-                        logger.debug(f"📊 Cycle {cycle_number} - Saved historical data for {stock_name} at {now.strftime('%H:%M:%S')} (VWAP slope: {vwap_slope_angle:.2f}°)" if vwap_slope_angle else f"📊 Cycle {cycle_number} - Saved historical data for {stock_name} at {now.strftime('%H:%M:%S')}")
-                    else:
-                        logger.debug(f"⏭️ Cycle {cycle_number} - Skipping duplicate historical data for {stock_name} at {now.strftime('%H:%M:%S')} (already exists)")
-                except Exception as hist_error:
-                    logger.warning(f"⚠️ Cycle {cycle_number} - Failed to save historical data for {stock_name}: {str(hist_error)}")
-                    # Don't fail the entire cycle if historical save fails
                 
                 success_count += 1
                 
