@@ -2389,7 +2389,7 @@ async def health_check(db: Session = Depends(get_db)):
         )
 
 @router.post("/chartink-webhook-bullish")
-async def receive_bullish_webhook(request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+async def receive_bullish_webhook(request: Request, db: Session = Depends(get_db)):
     """
     Dedicated endpoint for Bullish alerts from Chartink.com
     All alerts received here will be treated as BULLISH with CALL options.
@@ -2415,33 +2415,43 @@ async def receive_bullish_webhook(request: Request, background_tasks: Background
         print(f"📥 Received bullish webhook at {datetime.now().isoformat()}")
         print(f"📦 Payload: {json.dumps(data, indent=2)}")
         
-        # Respond immediately to prevent timeout
-        response_data = {
-            "status": "accepted",
-            "message": "Bullish webhook received and queued for processing",
-            "alert_type": "bullish",
-            "timestamp": datetime.now().isoformat()
-        }
-        
-        # Process in background to avoid blocking
-        # Wrap background task with error handling to ensure exceptions are logged
-        async def process_with_error_handling():
-            try:
-                await process_webhook_data(data, db, 'bullish')
-            except Exception as bg_error:
-                logger.error(f"❌ CRITICAL: Background task failed for bullish webhook: {str(bg_error)}")
-                logger.error(f"   Stock names in webhook: {data.get('stocks', 'N/A')}")
-                import traceback
-                logger.error(f"   Traceback: {traceback.format_exc()}")
-                print(f"❌ CRITICAL: Background task failed for bullish webhook: {str(bg_error)}")
-                traceback.print_exc()
-                # Track webhook failure
-                if health_monitor:
-                    health_monitor.record_webhook_failure()
-        
-        background_tasks.add_task(process_with_error_handling)
-        
-        return JSONResponse(content=response_data, status_code=202)
+        # Process SYNCHRONOUSLY for reliability - webhooks are critical and must be processed
+        # Synchronous processing ensures data is saved before response is sent
+        # FastAPI's async nature means this won't block other requests significantly
+        try:
+            result = await process_webhook_data(data, db, 'bullish')
+            # Track webhook success
+            if health_monitor:
+                health_monitor.record_webhook_success()
+            
+            # Return the result from process_webhook_data
+            if isinstance(result, JSONResponse):
+                return result
+            else:
+                return JSONResponse(content={
+                    "status": "success",
+                    "message": "Bullish webhook processed successfully",
+                    "alert_type": "bullish",
+                    "timestamp": datetime.now().isoformat()
+                }, status_code=200)
+        except Exception as e:
+            logger.error(f"❌ CRITICAL: Failed to process bullish webhook: {str(e)}")
+            logger.error(f"   Stock names in webhook: {data.get('stocks', 'N/A')}")
+            import traceback
+            logger.error(f"   Traceback: {traceback.format_exc()}")
+            print(f"❌ CRITICAL: Failed to process bullish webhook: {str(e)}")
+            traceback.print_exc()
+            # Track webhook failure
+            if health_monitor:
+                health_monitor.record_webhook_failure()
+            
+            # Return error response but still acknowledge receipt
+            return JSONResponse(content={
+                "status": "error",
+                "message": f"Webhook received but processing failed: {str(e)}",
+                "alert_type": "bullish",
+                "timestamp": datetime.now().isoformat()
+            }, status_code=500)
         
     except ClientDisconnect:
         logger.error("⚠️ Client disconnected before webhook data could be read (bullish). Chartink timeout likely due to slow processing.")
@@ -2467,7 +2477,7 @@ async def receive_bullish_webhook(request: Request, background_tasks: Background
         )
 
 @router.post("/chartink-webhook-bearish")
-async def receive_bearish_webhook(request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+async def receive_bearish_webhook(request: Request, db: Session = Depends(get_db)):
     """
     Dedicated endpoint for Bearish alerts from Chartink.com
     All alerts received here will be treated as BEARISH with PUT options.
@@ -2493,33 +2503,43 @@ async def receive_bearish_webhook(request: Request, background_tasks: Background
         print(f"📥 Received bearish webhook at {datetime.now().isoformat()}")
         print(f"📦 Payload: {json.dumps(data, indent=2)}")
         
-        # Respond immediately to prevent timeout
-        response_data = {
-            "status": "accepted",
-            "message": "Bearish webhook received and queued for processing",
-            "alert_type": "bearish",
-            "timestamp": datetime.now().isoformat()
-        }
-        
-        # Process in background to avoid blocking
-        # Wrap background task with error handling to ensure exceptions are logged
-        async def process_with_error_handling():
-            try:
-                await process_webhook_data(data, db, 'bearish')
-            except Exception as bg_error:
-                logger.error(f"❌ CRITICAL: Background task failed for bearish webhook: {str(bg_error)}")
-                logger.error(f"   Stock names in webhook: {data.get('stocks', 'N/A')}")
-                import traceback
-                logger.error(f"   Traceback: {traceback.format_exc()}")
-                print(f"❌ CRITICAL: Background task failed for bearish webhook: {str(bg_error)}")
-                traceback.print_exc()
-                # Track webhook failure
-                if health_monitor:
-                    health_monitor.record_webhook_failure()
-        
-        background_tasks.add_task(process_with_error_handling)
-        
-        return JSONResponse(content=response_data, status_code=202)
+        # Process SYNCHRONOUSLY for reliability - webhooks are critical and must be processed
+        # Synchronous processing ensures data is saved before response is sent
+        # FastAPI's async nature means this won't block other requests significantly
+        try:
+            result = await process_webhook_data(data, db, 'bearish')
+            # Track webhook success
+            if health_monitor:
+                health_monitor.record_webhook_success()
+            
+            # Return the result from process_webhook_data
+            if isinstance(result, JSONResponse):
+                return result
+            else:
+                return JSONResponse(content={
+                    "status": "success",
+                    "message": "Bearish webhook processed successfully",
+                    "alert_type": "bearish",
+                    "timestamp": datetime.now().isoformat()
+                }, status_code=200)
+        except Exception as e:
+            logger.error(f"❌ CRITICAL: Failed to process bearish webhook: {str(e)}")
+            logger.error(f"   Stock names in webhook: {data.get('stocks', 'N/A')}")
+            import traceback
+            logger.error(f"   Traceback: {traceback.format_exc()}")
+            print(f"❌ CRITICAL: Failed to process bearish webhook: {str(e)}")
+            traceback.print_exc()
+            # Track webhook failure
+            if health_monitor:
+                health_monitor.record_webhook_failure()
+            
+            # Return error response but still acknowledge receipt
+            return JSONResponse(content={
+                "status": "error",
+                "message": f"Webhook received but processing failed: {str(e)}",
+                "alert_type": "bearish",
+                "timestamp": datetime.now().isoformat()
+            }, status_code=500)
         
     except ClientDisconnect:
         logger.error("⚠️ Client disconnected before webhook data could be read (bearish). Chartink timeout likely due to slow processing.")
