@@ -2412,7 +2412,22 @@ async def receive_bullish_webhook(request: Request, background_tasks: Background
         }
         
         # Process in background to avoid blocking
-        background_tasks.add_task(process_webhook_data, data, db, 'bullish')
+        # Wrap background task with error handling to ensure exceptions are logged
+        async def process_with_error_handling():
+            try:
+                await process_webhook_data(data, db, 'bullish')
+            except Exception as bg_error:
+                logger.error(f"❌ CRITICAL: Background task failed for bullish webhook: {str(bg_error)}")
+                logger.error(f"   Stock names in webhook: {data.get('stocks', 'N/A')}")
+                import traceback
+                logger.error(f"   Traceback: {traceback.format_exc()}")
+                print(f"❌ CRITICAL: Background task failed for bullish webhook: {str(bg_error)}")
+                traceback.print_exc()
+                # Track webhook failure
+                if health_monitor:
+                    health_monitor.record_webhook_failure()
+        
+        background_tasks.add_task(process_with_error_handling)
         
         return JSONResponse(content=response_data, status_code=202)
         
@@ -2475,7 +2490,22 @@ async def receive_bearish_webhook(request: Request, background_tasks: Background
         }
         
         # Process in background to avoid blocking
-        background_tasks.add_task(process_webhook_data, data, db, 'bearish')
+        # Wrap background task with error handling to ensure exceptions are logged
+        async def process_with_error_handling():
+            try:
+                await process_webhook_data(data, db, 'bearish')
+            except Exception as bg_error:
+                logger.error(f"❌ CRITICAL: Background task failed for bearish webhook: {str(bg_error)}")
+                logger.error(f"   Stock names in webhook: {data.get('stocks', 'N/A')}")
+                import traceback
+                logger.error(f"   Traceback: {traceback.format_exc()}")
+                print(f"❌ CRITICAL: Background task failed for bearish webhook: {str(bg_error)}")
+                traceback.print_exc()
+                # Track webhook failure
+                if health_monitor:
+                    health_monitor.record_webhook_failure()
+        
+        background_tasks.add_task(process_with_error_handling)
         
         return JSONResponse(content=response_data, status_code=202)
         
