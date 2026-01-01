@@ -2705,13 +2705,24 @@ async def manual_stock_entry(request: Request, db: Session = Depends(get_db)):
             
             try:
                 bullish_result = await process_webhook_data(webhook_data, db, forced_type='bullish')
+                # process_webhook_data returns JSONResponse, extract the data
                 if isinstance(bullish_result, JSONResponse):
-                    result_data = json.loads(bullish_result.body.decode())
-                    bullish_count = result_data.get('saved_to_database', 0)
+                    try:
+                        result_data = json.loads(bullish_result.body.decode())
+                        bullish_count = result_data.get('saved_to_database', 0)
+                    except (json.JSONDecodeError, AttributeError) as decode_error:
+                        logger.warning(f"Could not decode bullish result: {str(decode_error)}")
+                        # If we can't decode, check if it was successful by status code
+                        if bullish_result.status_code == 200:
+                            bullish_count = len([s.strip() for s in bullish_stocks_str.split(",") if s.strip()])
+                else:
+                    # If not JSONResponse, assume success and count stocks
+                    bullish_count = len([s.strip() for s in bullish_stocks_str.split(",") if s.strip()])
             except Exception as e:
                 logger.error(f"Error processing bullish stocks: {str(e)}")
                 import traceback
                 logger.error(traceback.format_exc())
+                # Don't fail the entire request if one type fails
         
         # Process bearish stocks if provided
         bearish_result = None
@@ -2730,13 +2741,24 @@ async def manual_stock_entry(request: Request, db: Session = Depends(get_db)):
             
             try:
                 bearish_result = await process_webhook_data(webhook_data, db, forced_type='bearish')
+                # process_webhook_data returns JSONResponse, extract the data
                 if isinstance(bearish_result, JSONResponse):
-                    result_data = json.loads(bearish_result.body.decode())
-                    bearish_count = result_data.get('saved_to_database', 0)
+                    try:
+                        result_data = json.loads(bearish_result.body.decode())
+                        bearish_count = result_data.get('saved_to_database', 0)
+                    except (json.JSONDecodeError, AttributeError) as decode_error:
+                        logger.warning(f"Could not decode bearish result: {str(decode_error)}")
+                        # If we can't decode, check if it was successful by status code
+                        if bearish_result.status_code == 200:
+                            bearish_count = len([s.strip() for s in bearish_stocks_str.split(",") if s.strip()])
+                else:
+                    # If not JSONResponse, assume success and count stocks
+                    bearish_count = len([s.strip() for s in bearish_stocks_str.split(",") if s.strip()])
             except Exception as e:
                 logger.error(f"Error processing bearish stocks: {str(e)}")
                 import traceback
                 logger.error(traceback.format_exc())
+                # Don't fail the entire request if one type fails
         
         total_processed = bullish_count + bearish_count
         
