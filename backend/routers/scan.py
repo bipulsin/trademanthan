@@ -1776,12 +1776,24 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         data_dir = os.path.join(os.path.dirname(__file__), "..", "scan_data")
         os.makedirs(data_dir, exist_ok=True)
         
-        # Save bullish and bearish data separately
-        with open(os.path.join(data_dir, "bullish_data.json"), "w") as f:
-            json.dump(bullish_data, f, indent=2)
+        # Helper function to serialize datetime objects
+        def json_serializer(obj):
+            if isinstance(obj, datetime):
+                return obj.isoformat()
+            raise TypeError(f"Type {type(obj)} not serializable")
         
-        with open(os.path.join(data_dir, "bearish_data.json"), "w") as f:
-            json.dump(bearish_data, f, indent=2)
+        # Save bullish and bearish data separately
+        try:
+            with open(os.path.join(data_dir, "bullish_data.json"), "w") as f:
+                json.dump(bullish_data, f, indent=2, default=json_serializer)
+        except Exception as save_error:
+            logger.warning(f"Failed to save bullish_data.json: {str(save_error)}")
+        
+        try:
+            with open(os.path.join(data_dir, "bearish_data.json"), "w") as f:
+                json.dump(bearish_data, f, indent=2, default=json_serializer)
+        except Exception as save_error:
+            logger.warning(f"Failed to save bearish_data.json: {str(save_error)}")
         
         # Track webhook success
         if health_monitor:
