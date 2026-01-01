@@ -2004,6 +2004,91 @@ async def manually_update_no_entry_trades(db: Session = Depends(get_db)):
             "timestamp": datetime.now().isoformat()
         }
 
+@router.post("/recalculate-vwap-slope-today")
+async def recalculate_vwap_slope_today(db: Session = Depends(get_db)):
+    """
+    Recalculate VWAP slope for ALL today's trades that are missing it
+    This is a backfill endpoint to fix missing VWAP slope calculations
+    Useful when cycles didn't run or calculations failed
+    """
+    try:
+        from backend.services.vwap_updater import calculate_vwap_slope_for_trade
+        from backend.services.upstox_service import upstox_service
+        import pytz
+        from datetime import timedelta
+        
+        ist = pytz.timezone('Asia/Kolkata')
+        now = datetime.now(ist)
+        today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        logger.info(f"🔄 Backfill: Recalculating VWAP slope for today's trades")
+        
+        # Get all trades for today that are missing VWAP slope
+        trades_to_fix = db.query(IntradayStockOption).filter(
+            IntradayStockOption.trade_date >= today,
+            IntradayStockOption.trade_date < today + timedelta(days=1),
+            or_(
+                IntradayStockOption.vwap_slope_angle.is_(None),
+                IntradayStockOption.vwap_slope_status.is_(None)
+            )
+        ).all()
+        
+        if not trades_to_fix:
+            return {
+                "success": True,
+                "message": "All trades already have VWAP slope calculated",
+                "processed_count": 0,
+                "timestamp": now.isoformat()
+            }
+        
+        processed_count = 0
+        success_count = 0
+        failed_count = 0
+        
+        for trade in trades_to_fix:
+            try:
+                stock_name = trade.stock_name
+                logger.info(f"🔄 Calculating VWAP slope for {stock_name} (alert_time: {trade.alert_time})")
+                
+                # Use the calculate_vwap_slope_for_trade function
+                result = calculate_vwap_slope_for_trade(trade, db, upstox_service)
+                
+                if result:
+                    db.commit()
+                    success_count += 1
+                    logger.info(f"✅ Successfully calculated VWAP slope for {stock_name}")
+                else:
+                    failed_count += 1
+                    logger.warning(f"⚠️ Failed to calculate VWAP slope for {stock_name}")
+                
+                processed_count += 1
+            except Exception as e:
+                failed_count += 1
+                logger.error(f"❌ Error calculating VWAP slope for {trade.stock_name}: {str(e)}")
+                import traceback
+                logger.error(traceback.format_exc())
+                db.rollback()
+        
+        return {
+            "success": True,
+            "message": f"VWAP slope recalculation completed",
+            "total_trades": len(trades_to_fix),
+            "processed_count": processed_count,
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "timestamp": now.isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in VWAP slope backfill: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
 @router.post("/recalculate-all-today")
 async def recalculate_all_today_trades(db: Session = Depends(get_db)):
     """
