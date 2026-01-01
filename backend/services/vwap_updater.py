@@ -2036,19 +2036,36 @@ def calculate_vwap_slope_for_trade(trade: IntradayStockOption, db: Session, vwap
         # For 12:15 PM alert: Previous = 11:15 AM
         # etc.
         
+        # Determine previous and current VWAP times
+        # For immediate calculation at webhook time, use current time (now) as time2
+        # For cycle-based calculation, use the cycle time
         if alert_hour == 10 and alert_minute == 15:
             # 10:15 AM alert: Previous VWAP is 9:15 AM (market open)
             prev_vwap_time = today.replace(hour=9, minute=15, second=0, microsecond=0)
-            current_vwap_time = today.replace(hour=10, minute=15, second=0, microsecond=0)
+            # Use current time (now) for immediate calculation, or alert_time + 15 min for cycle
+            # This ensures time1 < time2
+            if now.hour == alert_hour and now.minute <= alert_minute + 5:
+                # Webhook just received, use alert_time + small buffer
+                current_vwap_time = alert_time.replace(second=30)  # Add 30 seconds to ensure time1 < time2
+            else:
+                # Cycle calculation or later, use current time
+                current_vwap_time = now.replace(second=0, microsecond=0)
         elif alert_hour >= 11 and alert_minute == 15:
             # 11:15 AM onwards: Previous VWAP is 1 hour before
             prev_vwap_time = today.replace(hour=alert_hour - 1, minute=15, second=0, microsecond=0)
-            current_vwap_time = today.replace(hour=alert_hour, minute=15, second=0, microsecond=0)
+            # Use current time for calculation
+            if now.hour == alert_hour and now.minute <= alert_minute + 5:
+                # Webhook just received, use alert_time + small buffer
+                current_vwap_time = alert_time.replace(second=30)  # Add 30 seconds to ensure time1 < time2
+            else:
+                # Cycle calculation or later, use current time
+                current_vwap_time = now.replace(second=0, microsecond=0)
         else:
             # For other times, try to use stored stock_vwap_previous_hour if available
             if trade.stock_vwap_previous_hour and trade.stock_vwap_previous_hour_time:
                 prev_vwap_time = trade.stock_vwap_previous_hour_time
-                current_vwap_time = alert_time
+                # Use current time to ensure time1 < time2
+                current_vwap_time = now.replace(second=0, microsecond=0)
             else:
                 logger.warning(f"⚠️ Cannot determine previous VWAP time for {stock_name} (alert_time: {alert_time.strftime('%H:%M')})")
                 return False
@@ -2127,6 +2144,23 @@ def calculate_vwap_slope_for_trade(trade: IntradayStockOption, db: Session, vwap
         if prev_vwap <= 0 or current_vwap <= 0:
             logger.warning(f"⚠️ Invalid VWAP values for {stock_name} (prev: {prev_vwap}, current: {current_vwap})")
             return False
+        
+        # Validate time ordering before calculating slope
+        # Ensure time1 is earlier than time2
+        if prev_vwap_time_actual >= current_vwap_time_actual:
+            logger.warning(f"⚠️ {stock_name}: Invalid time ordering (prev_time: {prev_vwap_time_actual}, current_time: {current_vwap_time_actual}). Using current time as time2.")
+            # Use current time (now) as time2 if alert_time is same as prev_time
+            current_vwap_time_actual = now
+            # Re-fetch current VWAP at current time
+            try:
+                current_stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
+                if current_stock_data and current_stock_data.get('vwap', 0) > 0:
+                    current_vwap = current_stock_data.get('vwap', 0)
+                    logger.info(f"🔄 {stock_name}: Using real-time VWAP (₹{current_vwap:.2f}) for slope calculation")
+                else:
+                    logger.warning(f"⚠️ {stock_name}: Could not get real-time VWAP, using stored value")
+            except Exception as realtime_error:
+                logger.warning(f"⚠️ {stock_name}: Error fetching real-time VWAP: {str(realtime_error)}")
         
         # Calculate VWAP slope
         slope_result = vwap_service.vwap_slope(
@@ -2959,6 +2993,21 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 
                 current_vwap = current_vwap_data.get('vwap', 0)
                 current_vwap_time_actual = current_vwap_data.get('time')
+                
+                # Validate time ordering - ensure time1 < time2
+                if prev_vwap_time_actual >= current_vwap_time_actual:
+                    logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Invalid time ordering (prev_time: {prev_vwap_time_actual}, current_time: {current_vwap_time_actual}). Using cycle time as time2.")
+                    # Use cycle time (now) as time2 and re-fetch current VWAP
+                    current_vwap_time_actual = now
+                    try:
+                        current_stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
+                        if current_stock_data and current_stock_data.get('vwap', 0) > 0:
+                            current_vwap = current_stock_data.get('vwap', 0)
+                            logger.info(f"🔄 Cycle {cycle_number} - {stock_name}: Using real-time VWAP (₹{current_vwap:.2f}) for slope calculation")
+                        else:
+                            logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Could not get real-time VWAP, using stored value")
+                    except Exception as realtime_error:
+                        logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Error fetching real-time VWAP: {str(realtime_error)}")
                 
                 if prev_vwap <= 0 or current_vwap <= 0:
                     logger.warning(f"⚠️ Invalid VWAP values for {stock_name} (prev: {prev_vwap}, current: {current_vwap})")

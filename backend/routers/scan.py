@@ -1569,7 +1569,10 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     buy_time=buy_time,  # Will be set to triggered_datetime if trade was entered
                     exit_reason=None,
                     pnl=pnl,
-                    no_entry_reason=no_entry_reason if status == 'no_entry' else None
+                    no_entry_reason=no_entry_reason if status == 'no_entry' else None,
+                    # Save previous VWAP if it was fetched (from Activity 8)
+                    stock_vwap_previous_hour=stock_vwap_previous_hour if stock_vwap_previous_hour and stock_vwap_previous_hour > 0 else None,
+                    stock_vwap_previous_hour_time=stock_vwap_previous_hour_time if stock_vwap_previous_hour_time else None
                 )
                 db.add(db_record)
                 saved_count += 1
