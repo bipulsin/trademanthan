@@ -2472,7 +2472,8 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
             # Log query result to application logger
             logger.info(f"🔍 DEBUG Cycle 1: Query returned {len(stocks_to_process)} stocks to process (should match {len(all_10_15_records)} total records)")
         elif cycle_number == 2:
-            # Cycle 2: Stocks from 11:15 AM webhook (ALL statuses for VWAP slope) + No_Entry from 10:15 AM
+            # Cycle 2: Stocks from 11:15 AM webhook (ALL statuses for VWAP slope) + ALL stocks from 10:15 AM (for VWAP slope update)
+            # CRITICAL: Include ALL 10:15 AM trades (not just no_entry) to ensure VWAP slope is calculated/updated for all of them
             stocks_to_process = db.query(IntradayStockOption).filter(
                 and_(
                     IntradayStockOption.trade_date >= today,
@@ -2483,14 +2484,10 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                             IntradayStockOption.alert_time >= target_alert_times[1],
                             IntradayStockOption.alert_time < target_alert_times[1] + timedelta(minutes=1)
                         ),
-                        # Previous cycle: No_Entry OR alert_received stocks from 10:15 AM (not yet entered)
+                        # Previous cycle: ALL stocks from 10:15 AM (for VWAP slope calculation/update, regardless of status)
                         and_(
                             IntradayStockOption.alert_time >= target_alert_times[0],
-                            IntradayStockOption.alert_time < target_alert_times[0] + timedelta(minutes=1),
-                            or_(
-                                IntradayStockOption.status == 'no_entry',
-                                IntradayStockOption.status == 'alert_received'
-                            )
+                            IntradayStockOption.alert_time < target_alert_times[0] + timedelta(minutes=1)
                         )
                     )
                 )
