@@ -3002,6 +3002,16 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 trade.vwap_slope_direction = slope_direction
                 trade.vwap_slope_time = current_vwap_time_actual
                 
+                # CRITICAL: Explicitly flag fields as modified to ensure SQLAlchemy tracks changes
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(trade, 'stock_vwap_previous_hour')
+                flag_modified(trade, 'stock_vwap_previous_hour_time')
+                flag_modified(trade, 'stock_vwap')
+                flag_modified(trade, 'vwap_slope_status')
+                flag_modified(trade, 'vwap_slope_angle')
+                flag_modified(trade, 'vwap_slope_direction')
+                flag_modified(trade, 'vwap_slope_time')
+                
                 # #region agent log
                 # Log VWAP slope calculation result before commit
                 # Log to application logger FIRST
