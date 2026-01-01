@@ -3910,40 +3910,22 @@ async def close_all_open_trades():
         today = now.date()
         
         # Find all open positions for today
-        # CRITICAL: Only include trades that have NO exit_reason (not already exited)
-        # This ensures trades exited with VWAP cross, stop loss, or profit target are NOT overwritten
-        # CRITICAL: Exclude trades that failed enrichment (never actually entered)
-        # NOTE: trade_date is stored as datetime (e.g., 2025-12-31 00:00:00), but SQLAlchemy handles
-        # date comparison correctly when comparing datetime to date
-        from sqlalchemy import or_
+        # SIMPLIFIED: Only check for HOLD/bought trades (status='bought' and exit_reason=None)
+        # This ensures only actively held trades are closed, excluding:
+        # - Already exited trades (exit_reason is not None or status='sold')
+        # - Never entered trades (status='no_entry')
+        # NOTE: trade_date is stored as datetime (e.g., 2025-12-31 00:00:00)
         open_positions = db.query(IntradayStockOption).filter(
             IntradayStockOption.trade_date >= datetime.combine(today, datetime.min.time()),
             IntradayStockOption.trade_date < datetime.combine(today, datetime.min.time()) + timedelta(days=1),
-            IntradayStockOption.exit_reason.is_(None),  # Must be NULL - excludes all already-exited trades
-            IntradayStockOption.status != 'sold',  # Additional safety check
-            IntradayStockOption.status != 'no_entry',  # Exclude trades that were never entered
-            # CRITICAL: Exclude trades that failed enrichment (they should never be marked as "sold")
-            # NOTE: Must handle NULL no_entry_reason explicitly - NULL LIKE 'pattern' returns NULL, not False
-            or_(
-                IntradayStockOption.no_entry_reason.is_(None),  # Include trades with no_entry_reason = NULL
-                ~IntradayStockOption.no_entry_reason.like('Enrichment failed%')  # Include trades that don't start with "Enrichment failed"
-            ),
-            IntradayStockOption.buy_price.isnot(None),  # Must have buy_price (actually entered)
-            IntradayStockOption.qty.isnot(None),  # Must have qty (actually entered)
-            IntradayStockOption.qty > 0  # Qty must be > 0 (actually entered)
+            IntradayStockOption.status == 'bought',  # Only HOLD/bought trades
+            IntradayStockOption.exit_reason.is_(None)  # Only trades that haven't exited yet
         ).all()
         
-        # CRITICAL: Double-check each position to ensure it hasn't been exited and was actually entered
-        # This prevents race conditions where exit_reason was set but query still returned it
-        # Also excludes trades that failed enrichment or never actually entered
+        # Double-check each position to prevent race conditions
         open_positions = [
             p for p in open_positions 
-            if p.exit_reason is None 
-            and p.status != 'sold'
-            and (p.no_entry_reason is None or not p.no_entry_reason.startswith('Enrichment failed'))
-            and p.buy_price is not None
-            and p.qty is not None
-            and p.qty > 0
+            if p.status == 'bought' and p.exit_reason is None
         ]
         
         if not open_positions:
