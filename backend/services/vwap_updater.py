@@ -3915,6 +3915,7 @@ async def close_all_open_trades():
         # CRITICAL: Exclude trades that failed enrichment (never actually entered)
         # NOTE: trade_date is stored as datetime (e.g., 2025-12-31 00:00:00), but SQLAlchemy handles
         # date comparison correctly when comparing datetime to date
+        from sqlalchemy import or_
         open_positions = db.query(IntradayStockOption).filter(
             IntradayStockOption.trade_date >= datetime.combine(today, datetime.min.time()),
             IntradayStockOption.trade_date < datetime.combine(today, datetime.min.time()) + timedelta(days=1),
@@ -3922,7 +3923,11 @@ async def close_all_open_trades():
             IntradayStockOption.status != 'sold',  # Additional safety check
             IntradayStockOption.status != 'no_entry',  # Exclude trades that were never entered
             # CRITICAL: Exclude trades that failed enrichment (they should never be marked as "sold")
-            ~IntradayStockOption.no_entry_reason.like('Enrichment failed%'),  # Exclude enrichment failures
+            # NOTE: Must handle NULL no_entry_reason explicitly - NULL LIKE 'pattern' returns NULL, not False
+            or_(
+                IntradayStockOption.no_entry_reason.is_(None),  # Include trades with no_entry_reason = NULL
+                ~IntradayStockOption.no_entry_reason.like('Enrichment failed%')  # Include trades that don't start with "Enrichment failed"
+            ),
             IntradayStockOption.buy_price.isnot(None),  # Must have buy_price (actually entered)
             IntradayStockOption.qty.isnot(None),  # Must have qty (actually entered)
             IntradayStockOption.qty > 0  # Qty must be > 0 (actually entered)
