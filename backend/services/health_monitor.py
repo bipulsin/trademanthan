@@ -14,7 +14,7 @@ from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 import pytz
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
 
@@ -24,12 +24,9 @@ class HealthMonitor:
     """Monitors system health and sends alerts on critical failures"""
     
     def __init__(self):
-        # AsyncIOScheduler creates its own event loop in a background thread
-        # Don't pass event_loop parameter - let it handle it automatically
-        # AsyncIOScheduler runs async jobs concurrently by default using asyncio
-        # Jobs are configured with misfire_grace_time and coalesce to prevent blocking
-        # This ensures health checks don't block other scheduled jobs
-        self.scheduler = AsyncIOScheduler(timezone='Asia/Kolkata')
+        # BackgroundScheduler runs jobs synchronously in background threads
+        # This ensures jobs run sequentially and don't interfere with webhook processing
+        self.scheduler = BackgroundScheduler(timezone='Asia/Kolkata')
         self.is_running = False
         
         # Track consecutive failures for each component
@@ -44,31 +41,25 @@ class HealthMonitor:
     def start(self):
         """Start the health monitor scheduler"""
         if not self.is_running:
-            # Health check every 15 minutes during market hours (9:05 AM - 3:30 PM)
-            # Schedule: 9:05, 9:20, 9:35, 9:50, 10:05, 10:20, ..., 15:05, 15:20, 15:30
-            # Pattern: Start at 9:05, then every 15 minutes until 15:30 (3:30 PM)
-            for hour in range(9, 16):  # 9 AM to 3 PM
-                if hour == 9:
-                    # 9 AM: Start at 9:05, then 9:20, 9:35, 9:50
-                    minutes = [5, 20, 35, 50]
-                elif hour == 15:
-                    # 3 PM: Only 15:05, 15:20, 15:30 (stops at 3:30 PM)
-                    minutes = [5, 20, 30]
-                else:
-                    # Other hours: 05, 20, 35, 50
-                    minutes = [5, 20, 35, 50]
-                
-                for minute in minutes:
-                    self.scheduler.add_job(
-                        self.perform_health_check,
-                        trigger=CronTrigger(hour=hour, minute=minute, timezone='Asia/Kolkata'),
-                        id=f'health_check_{hour}_{minute}',
-                        name=f'Health Check {hour:02d}:{minute:02d}',
-                        replace_existing=True,
-                        max_instances=1,
-                        misfire_grace_time=300,  # Allow running up to 5 minutes after scheduled time
-                        coalesce=True  # Combine multiple missed runs into one
-                    )
+            # Health check every 30 minutes starting from 8:39 AM until 4:09 PM
+            # Schedule: 8:39, 9:09, 9:39, 10:09, 10:39, 11:09, 11:39, 12:09, 12:39, 13:09, 13:39, 14:09, 14:39, 15:09, 15:39, 16:09
+            # Pattern: Start at 8:39, then every 30 minutes until 16:09 (4:09 PM)
+            health_check_times = [
+                (8, 39), (9, 9), (9, 39), (10, 9), (10, 39), (11, 9), (11, 39), (12, 9),
+                (12, 39), (13, 9), (13, 39), (14, 9), (14, 39), (15, 9), (15, 39), (16, 9)
+            ]
+            
+            for hour, minute in health_check_times:
+                self.scheduler.add_job(
+                    self.perform_health_check,
+                    trigger=CronTrigger(hour=hour, minute=minute, timezone='Asia/Kolkata'),
+                    id=f'health_check_{hour}_{minute}',
+                    name=f'Health Check {hour:02d}:{minute:02d}',
+                    replace_existing=True,
+                    max_instances=1,
+                    misfire_grace_time=300,  # Allow running up to 5 minutes after scheduled time
+                    coalesce=True  # Combine multiple missed runs into one
+                )
             
             # Daily health report at 4:00 PM (after market close)
             self.scheduler.add_job(
@@ -85,7 +76,7 @@ class HealthMonitor:
             try:
                 self.scheduler.start()
                 self.is_running = True
-                logger.info("✅ Health Monitor started - Checking every 15 min from 9:15 AM to 3:45 PM")
+                logger.info("✅ Health Monitor started - Checking every 30 min from 8:39 AM to 4:09 PM")
                 print(f"✅ Health Monitor scheduler started - Jobs: {len(self.scheduler.get_jobs())}", flush=True)
             except Exception as e:
                 logger.error(f"❌ Failed to start Health Monitor scheduler: {e}", exc_info=True)
@@ -99,7 +90,7 @@ class HealthMonitor:
             self.is_running = False
             logger.info("Health Monitor stopped")
     
-    async def perform_health_check(self):
+    def perform_health_check(self):
         """Perform comprehensive health check"""
         try:
             from database import SessionLocal
@@ -196,12 +187,12 @@ class HealthMonitor:
             
             # Send alert if critical issues detected
             if issues:
-                await self.handle_health_issues(issues, now)
+                self.handle_health_issues(issues, now)
             
         except Exception as e:
             logger.error(f"Health check failed: {str(e)}")
     
-    async def handle_health_issues(self, issues: List[str], check_time: datetime):
+    def handle_health_issues(self, issues: List[str], check_time: datetime):
         """Handle detected health issues with appropriate responses"""
         
         critical_issues = [issue for issue in issues if "❌" in issue]
@@ -218,7 +209,7 @@ class HealthMonitor:
         if self.webhook_failures >= self.MAX_CONSECUTIVE_FAILURES:
             alert_key = "webhook_failures"
             if alert_key not in self.alert_sent_for:
-                await self.send_critical_alert(
+                self.send_critical_alert(
                     "⚠️ WEBHOOK FAILURES DETECTED",
                     f"No webhooks processed for {self.webhook_failures} consecutive checks.\n" +
                     "Possible issues:\n" +
@@ -232,7 +223,7 @@ class HealthMonitor:
         if self.api_token_failures >= self.MAX_CONSECUTIVE_FAILURES:
             alert_key = "api_token_failures"
             if alert_key not in self.alert_sent_for:
-                await self.send_critical_alert(
+                self.send_critical_alert(
                     "❌ UPSTOX TOKEN EXPIRED",
                     f"Upstox API token has been failing for {self.api_token_failures} consecutive checks.\n\n" +
                     "ACTION REQUIRED:\n" +
@@ -249,7 +240,7 @@ class HealthMonitor:
         if self.api_token_failures == 0 and "api_token_failures" in self.alert_sent_for:
             self.alert_sent_for.remove("api_token_failures")
     
-    async def send_daily_health_report(self):
+    def send_daily_health_report(self):
         """Send daily health report at 4 PM after market close"""
         try:
             from database import SessionLocal
@@ -321,7 +312,7 @@ Generated: {now.strftime('%Y-%m-%d %H:%M:%S IST')}
             alert_email = os.getenv("ALERT_EMAIL")
             if alert_email and is_weekday and total_alerts > 0:
                 # Normal trading day - send summary
-                await self.send_critical_alert(
+                self.send_critical_alert(
                     f"📊 TradeManthan Daily Report - {today.strftime('%b %d, %Y')}",
                     report
                 )
@@ -329,7 +320,7 @@ Generated: {now.strftime('%Y-%m-%d %H:%M:%S IST')}
             # Only send critical alert if NO webhooks AND consecutive failures
             # This helps avoid false alarms on single-day holidays
             if total_alerts == 0 and is_weekday and self.webhook_failures >= 2:
-                await self.send_critical_alert(
+                self.send_critical_alert(
                     "⚠️ NO WEBHOOKS - Multiple Days",
                     f"No webhook alerts received on {today.strftime('%B %d, %Y')} (weekday).\n\n" +
                     f"This is the {self.webhook_failures}th consecutive check without data.\n\n" +
@@ -408,7 +399,7 @@ Generated: {now.strftime('%Y-%m-%d %H:%M:%S IST')}
             logger.warning(f"Could not send Telegram alert: {str(e)}")
             return False
     
-    async def send_critical_alert(self, subject: str, message: str):
+    def send_critical_alert(self, subject: str, message: str):
         """Send critical alert via email + WhatsApp + Telegram + logging"""
         
         # Always log to console/journald
@@ -542,7 +533,7 @@ class WebhookRetryQueue:
         })
         logger.info(f"Added webhook to retry queue (attempt {attempt}/{self.max_retries})")
     
-    async def retry_all(self, process_function):
+    def retry_all(self, process_function):
         """Retry all failed webhooks"""
         if not self.queue:
             return
@@ -558,7 +549,15 @@ class WebhookRetryQueue:
                 continue
             
             try:
-                await process_function(item['data'])
+                # Handle both sync and async process functions
+                import asyncio
+                if asyncio.iscoroutinefunction(process_function):
+                    # If async, run in event loop
+                    loop = asyncio.get_event_loop()
+                    loop.run_until_complete(process_function(item['data']))
+                else:
+                    # If sync, call directly
+                    process_function(item['data'])
                 logger.info(f"✅ Webhook retry successful on attempt {item['attempt']}")
             except Exception as e:
                 logger.error(f"Webhook retry failed (attempt {item['attempt']}): {str(e)}")

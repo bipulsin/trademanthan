@@ -10,7 +10,7 @@ import io
 from datetime import datetime, timedelta
 from typing import List, Dict
 import pytz
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
 from sqlalchemy import delete
@@ -31,9 +31,9 @@ class MasterStockScheduler:
     """Scheduler for downloading and updating master stock data"""
     
     def __init__(self):
-        # AsyncIOScheduler creates its own event loop in a background thread
-        # Don't pass event_loop parameter - let it handle it automatically
-        self.scheduler = AsyncIOScheduler(timezone='Asia/Kolkata')
+        # BackgroundScheduler runs jobs synchronously in background threads
+        # This ensures jobs run sequentially and don't interfere with webhook processing
+        self.scheduler = BackgroundScheduler(timezone='Asia/Kolkata')
         self.is_running = False
         
     def start(self):
@@ -103,7 +103,7 @@ def get_target_expiry_month() -> datetime:
     return target_year, target_month
 
 
-async def download_and_update_master_stock():
+def download_and_update_master_stock():
     """
     Download scrip master CSV from Dhan API
     Filter and update database with NSE OPTSTK monthly options

@@ -88,12 +88,12 @@ async def lifespan(app: FastAPI):
         import traceback
         traceback.print_exc()
     
-    # Start health monitor (checks every 15 min during market hours)
-    try:
-        print("Starting Health Monitor...", flush=True)
-        sys.stdout.flush()
-        start_health_monitor()
-        print("✅ Health Monitor: STARTED (Every 15 min, 9:15 AM - 3:45 PM IST)", flush=True)
+    # Start health monitor (checks every 30 min from 8:39 AM to 4:09 PM)
+        try:
+            print("Starting Health Monitor...", flush=True)
+            sys.stdout.flush()
+            start_health_monitor()
+            print("✅ Health Monitor: STARTED (Every 30 min, 8:39 AM - 4:09 PM IST)", flush=True)
         sys.stdout.flush()
     except Exception as e:
         print(f"❌ Health Monitor: FAILED - {e}", flush=True)

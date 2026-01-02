@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 import time
 from typing import List
 import pytz
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, or_
@@ -57,12 +57,9 @@ class VWAPUpdater:
     """Scheduler for updating stock VWAP hourly during market hours"""
     
     def __init__(self):
-        # AsyncIOScheduler creates its own event loop in a background thread
-        # Don't pass event_loop parameter - let it handle it automatically
-        # AsyncIOScheduler runs async jobs concurrently by default using asyncio
-        # Jobs are configured with misfire_grace_time and coalesce to prevent blocking
-        # This ensures jobs don't block each other even if one takes longer
-        self.scheduler = AsyncIOScheduler(timezone='Asia/Kolkata')
+        # BackgroundScheduler runs jobs synchronously in background threads
+        # This ensures jobs run sequentially and don't interfere with webhook processing
+        self.scheduler = BackgroundScheduler(timezone='Asia/Kolkata')
         self.is_running = False
         
     def start(self):
@@ -96,7 +93,7 @@ class VWAPUpdater:
             
             # Cycle-based VWAP slope calculations
             # Cycle 1: 10:30 AM - Stocks from 10:15 AM webhook
-            async def run_cycle_1():
+            def run_cycle_1():
                 # #region agent log
                 # Log scheduler trigger (optional debug log - skip if path unavailable)
                 import json
@@ -116,7 +113,8 @@ class VWAPUpdater:
                     # Silently skip debug log if it fails (non-critical)
                     pass
                 # #endregion
-                await calculate_vwap_slope_for_cycle(1, datetime.now(pytz.timezone('Asia/Kolkata')))
+                import asyncio
+                asyncio.run(calculate_vwap_slope_for_cycle(1, datetime.now(pytz.timezone('Asia/Kolkata'))))
             self.scheduler.add_job(
                 run_cycle_1,
                 trigger=CronTrigger(hour=10, minute=30, timezone='Asia/Kolkata'),
@@ -129,8 +127,9 @@ class VWAPUpdater:
             )
             
             # Cycle 2: 11:15 AM - Stocks from 11:15 AM webhook + No_Entry from 10:15 AM
-            async def run_cycle_2():
-                await calculate_vwap_slope_for_cycle(2, datetime.now(pytz.timezone('Asia/Kolkata')))
+            def run_cycle_2():
+                import asyncio
+                asyncio.run(calculate_vwap_slope_for_cycle(2, datetime.now(pytz.timezone('Asia/Kolkata'))))
             self.scheduler.add_job(
                 run_cycle_2,
                 trigger=CronTrigger(hour=11, minute=15, timezone='Asia/Kolkata'),
@@ -143,8 +142,9 @@ class VWAPUpdater:
             )
             
             # Cycle 3: 12:15 PM - Stocks from 12:15 PM webhook + No_Entry up to 11:15 AM
-            async def run_cycle_3():
-                await calculate_vwap_slope_for_cycle(3, datetime.now(pytz.timezone('Asia/Kolkata')))
+            def run_cycle_3():
+                import asyncio
+                asyncio.run(calculate_vwap_slope_for_cycle(3, datetime.now(pytz.timezone('Asia/Kolkata'))))
             self.scheduler.add_job(
                 run_cycle_3,
                 trigger=CronTrigger(hour=12, minute=15, timezone='Asia/Kolkata'),
@@ -157,8 +157,9 @@ class VWAPUpdater:
             )
             
             # Cycle 4: 13:15 PM - Stocks from 13:15 PM webhook + No_Entry up to 12:15 PM
-            async def run_cycle_4():
-                await calculate_vwap_slope_for_cycle(4, datetime.now(pytz.timezone('Asia/Kolkata')))
+            def run_cycle_4():
+                import asyncio
+                asyncio.run(calculate_vwap_slope_for_cycle(4, datetime.now(pytz.timezone('Asia/Kolkata'))))
             self.scheduler.add_job(
                 run_cycle_4,
                 trigger=CronTrigger(hour=13, minute=15, timezone='Asia/Kolkata'),
@@ -171,8 +172,9 @@ class VWAPUpdater:
             )
             
             # Cycle 5: 14:15 PM - Stocks from 14:15 PM webhook + No_Entry up to 13:15 PM
-            async def run_cycle_5():
-                await calculate_vwap_slope_for_cycle(5, datetime.now(pytz.timezone('Asia/Kolkata')))
+            def run_cycle_5():
+                import asyncio
+                asyncio.run(calculate_vwap_slope_for_cycle(5, datetime.now(pytz.timezone('Asia/Kolkata'))))
             self.scheduler.add_job(
                 run_cycle_5,
                 trigger=CronTrigger(hour=14, minute=15, timezone='Asia/Kolkata'),
@@ -205,7 +207,7 @@ class VWAPUpdater:
         )
 
 
-async def update_vwap_for_all_open_positions():
+def update_vwap_for_all_open_positions():
     """
     Update Stock VWAP, Stock LTP, and Option LTP for all open positions (not yet sold)
     This runs hourly during market hours
@@ -3754,7 +3756,7 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
         db.close()
 
 
-async def update_10_15_alert_stocks_at_10_30():
+def update_10_15_alert_stocks_at_10_30():
     """
     Special scan at 10:30 AM for stocks that were alerted at 10:15 AM
     Fetches Stock LTP, Stock VWAP, and Option LTP and stores in historical_market_data table
@@ -3941,7 +3943,7 @@ async def update_10_15_alert_stocks_at_10_30():
         db.close()
 
 
-async def close_all_open_trades():
+def close_all_open_trades():
     """
     Close all open trades at 3:25 PM (before market close)
     Sets exit_reason = 'time_based', status = 'sold', sell_time = now
@@ -4331,7 +4333,7 @@ async def close_all_open_trades():
         db.close()
 
 
-async def update_end_of_day_vwap():
+def update_end_of_day_vwap():
     """
     Update Stock VWAP with end-of-day (complete trading day) VWAP at market close
     

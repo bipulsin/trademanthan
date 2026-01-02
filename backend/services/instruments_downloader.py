@@ -11,7 +11,7 @@ import os
 from datetime import datetime
 import logging
 from pathlib import Path
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 logger = logging.getLogger(__name__)
@@ -183,7 +183,7 @@ class InstrumentsDownloader:
 instruments_downloader = InstrumentsDownloader()
 
 
-async def download_daily_instruments():
+def download_daily_instruments():
     """Function to be called by scheduler for daily download"""
     try:
         logger.info("Starting daily instruments download at {}".format(datetime.now()))
@@ -206,9 +206,9 @@ class InstrumentsScheduler:
     """Scheduler for downloading Upstox instruments data"""
     
     def __init__(self):
-        # AsyncIOScheduler creates its own event loop in a background thread
-        # Don't pass event_loop parameter - let it handle it automatically
-        self.scheduler = AsyncIOScheduler(timezone='Asia/Kolkata')
+        # BackgroundScheduler runs jobs synchronously in background threads
+        # This ensures jobs run sequentially and don't interfere with webhook processing
+        self.scheduler = BackgroundScheduler(timezone='Asia/Kolkata')
         self.is_running = False
         
     def start(self):
