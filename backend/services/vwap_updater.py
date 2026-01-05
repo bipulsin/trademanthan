@@ -2055,8 +2055,9 @@ def calculate_vwap_slope_for_trade(trade: IntradayStockOption, db: Session, vwap
                 current_vwap_time = now.replace(second=0, microsecond=0)
         elif alert_hour >= 11 and alert_minute == 15:
             # 11:15 AM onwards: Previous VWAP is 1 hour before
-            # Convert date to datetime first
-            prev_vwap_time = datetime.combine(today, datetime.min.time()).replace(hour=alert_hour - 1, minute=15, second=0, microsecond=0)
+            # Convert date to datetime first - use datetime.combine with time object
+            from datetime import time as dt_time
+            prev_vwap_time = datetime.combine(today, dt_time(alert_hour - 1, 15, 0))
             # Use current time for calculation
             if now.hour == alert_hour and now.minute <= alert_minute + 5:
                 # Webhook just received, use alert_time + small buffer
