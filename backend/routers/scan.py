@@ -1542,10 +1542,18 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     option_type_from_stock = 'PE' if data_type == 'Bearish' else 'CE'
                     print(f"⚠️ Option type not found in stock data for {stock_name}, setting to {option_type_from_stock} based on alert type {data_type}")
                 
+                # Safely get scan_name from processed_data (handle case where processed_data might be None)
+                scan_name_for_record = ""
+                if processed_data and isinstance(processed_data, dict):
+                    scan_name_for_record = processed_data.get("scan_name", "")
+                elif data and isinstance(data, dict):
+                    # Fallback to original data if processed_data is not available
+                    scan_name_for_record = data.get("scan_name", "")
+                
                 db_record = IntradayStockOption(
                     alert_time=triggered_datetime,
                     alert_type=data_type,
-                    scan_name=processed_data.get("scan_name", ""),
+                    scan_name=scan_name_for_record,
                     stock_name=stock_name,
                     stock_ltp=stock.get("last_traded_price") or stock.get("trigger_price", 0.0),
                     stock_vwap=stock.get("stock_vwap", 0.0),
@@ -1682,10 +1690,18 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         error_msg = error_msg[:max_error_length-3] + "..."
                     db_error_reason = f"Database save failed: {error_msg}"
                     
+                    # Safely get scan_name from processed_data (handle case where processed_data might be None)
+                    scan_name_value = "Unknown"
+                    if processed_data and isinstance(processed_data, dict):
+                        scan_name_value = processed_data.get("scan_name", "Unknown")
+                    elif data and isinstance(data, dict):
+                        # Fallback to original data if processed_data is not available
+                        scan_name_value = data.get("scan_name", "Unknown")
+                    
                     minimal_record = IntradayStockOption(
                         alert_time=triggered_datetime,
                         alert_type=data_type,
-                        scan_name=processed_data.get("scan_name", "Unknown"),
+                        scan_name=scan_name_value,
                         stock_name=stock_name,
                         stock_ltp=preserved_stock_ltp,
                         stock_vwap=preserved_stock_vwap,
