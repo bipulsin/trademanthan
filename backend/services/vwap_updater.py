@@ -2043,8 +2043,9 @@ def calculate_vwap_slope_for_trade(trade: IntradayStockOption, db: Session, vwap
         # For cycle-based calculation, use the cycle time
         if alert_hour == 10 and alert_minute == 15:
             # 10:15 AM alert: Previous VWAP is 9:15 AM (market open)
-            # Convert date to datetime first
-            prev_vwap_time = datetime.combine(today, datetime.min.time()).replace(hour=9, minute=15, second=0, microsecond=0)
+            # Convert date to datetime first - use datetime.combine with time object
+            from datetime import time as dt_time
+            prev_vwap_time = datetime.combine(today, dt_time(9, 15, 0))
             # Use current time (now) for immediate calculation, or alert_time + 15 min for cycle
             # This ensures time1 < time2
             if now.hour == alert_hour and now.minute <= alert_minute + 5:
