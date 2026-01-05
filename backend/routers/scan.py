@@ -1682,6 +1682,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     preserved_instrument_key = stock.get("instrument_key") if stock else None
                     preserved_stock_ltp = stock.get("last_traded_price") or stock.get("trigger_price", 0.0) if stock else 0.0
                     preserved_stock_vwap = stock.get("stock_vwap", 0.0) if stock else 0.0
+                    preserved_stock_vwap_previous_hour = stock.get("stock_vwap_previous_hour") if stock else None
+                    preserved_stock_vwap_previous_hour_time = stock.get("stock_vwap_previous_hour_time") if stock else None
                     
                     # Create a more descriptive error message
                     # Truncate error message to fit in database field (255 chars)
@@ -1705,6 +1707,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         stock_name=stock_name,
                         stock_ltp=preserved_stock_ltp,
                         stock_vwap=preserved_stock_vwap,
+                        stock_vwap_previous_hour=preserved_stock_vwap_previous_hour,
+                        stock_vwap_previous_hour_time=preserved_stock_vwap_previous_hour_time,
                         option_contract=preserved_option_contract,
                         option_type=forced_option_type,
                         option_strike=stock.get("otm1_strike", 0.0) if stock else 0.0,
@@ -1725,6 +1729,33 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     db.add(minimal_record)
                     saved_count += 1
                     print(f"   ✅ Minimal save successful for {stock_name}")
+                    
+                    # ═══════════════════════════════════════════════════════════════
+                    # CALCULATE VWAP SLOPE AND CANDLE SIZE FOR MINIMAL RECORD
+                    # ═══════════════════════════════════════════════════════════════
+                    # Even for minimal records, try to calculate VWAP slope and candle size
+                    # This ensures these values are populated even if the initial save failed
+                    try:
+                        from backend.services.vwap_updater import calculate_vwap_slope_for_trade, recalculate_candle_size_for_trade
+                        
+                        # Flush to ensure minimal_record is in database with ID
+                        db.flush()
+                        
+                        # Calculate VWAP slope for minimal record
+                        vwap_slope_calculated = calculate_vwap_slope_for_trade(minimal_record, db, vwap_service)
+                        if vwap_slope_calculated:
+                            print(f"   ✅ VWAP slope calculated for minimal record {stock_name}")
+                        else:
+                            print(f"   ⚠️ VWAP slope calculation skipped for minimal record {stock_name} (will be calculated in cycle)")
+                        
+                        # Recalculate candle size if instrument_key is available
+                        if minimal_record.instrument_key:
+                            candle_size_calculated = recalculate_candle_size_for_trade(minimal_record, db, vwap_service)
+                            if candle_size_calculated:
+                                print(f"   ✅ Candle size recalculated for minimal record {stock_name}")
+                    except Exception as calc_error:
+                        logger.warning(f"⚠️ Error calculating VWAP slope/candle size for minimal record {stock_name}: {str(calc_error)}")
+                        # Don't fail the minimal save if calculation fails
                     
                     # Save historical data even for minimal records
                     try:
