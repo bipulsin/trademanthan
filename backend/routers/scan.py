@@ -5856,3 +5856,148 @@ async def insert_jan6_index_prices(db: Session = Depends(get_db)):
             "success": False,
             "error": str(e)
         }
+
+
+@router.post("/insert-jan6-index-prices-330pm")
+async def insert_jan6_index_prices_330pm(db: Session = Depends(get_db)):
+    """
+    One-time endpoint to insert index prices for January 6th, 2026 at 3:30 PM
+    NIFTY50: Open=26189.70, Close/LTP=26178.70, Trend=bearish
+    BANKNIFTY: Open=59957.80, Close/LTP=60118.40, Trend=bullish
+    """
+    try:
+        import pytz
+        from models.trading import IndexPrice
+        
+        ist = pytz.timezone('Asia/Kolkata')
+        price_time = ist.localize(datetime(2026, 1, 6, 15, 30, 0))
+        
+        results = {}
+        
+        # NIFTY50 data
+        nifty_open = 26189.70
+        nifty_close = 26178.70
+        nifty_ltp = 26178.70
+        nifty_change = nifty_ltp - nifty_open  # -11.00
+        nifty_change_percent = (nifty_change / nifty_open * 100) if nifty_open > 0 else 0  # -0.042%
+        nifty_trend = 'bearish'  # LTP < Open
+        
+        # Check if NIFTY50 record already exists
+        existing_nifty = db.query(IndexPrice).filter(
+            IndexPrice.index_name == 'NIFTY50',
+            IndexPrice.price_time == price_time
+        ).first()
+        
+        if existing_nifty:
+            # Update existing record
+            existing_nifty.ltp = nifty_ltp
+            existing_nifty.day_open = nifty_open
+            existing_nifty.close_price = nifty_close
+            existing_nifty.trend = nifty_trend
+            existing_nifty.change = nifty_change
+            existing_nifty.change_percent = nifty_change_percent
+            existing_nifty.is_special_time = True
+            existing_nifty.is_market_open = True
+            results["nifty50"] = "updated"
+            logger.info(f"✅ Updated existing NIFTY50 record (ID: {existing_nifty.id})")
+        else:
+            # Insert new NIFTY50 record
+            nifty_price = IndexPrice(
+                index_name='NIFTY50',
+                instrument_key='NSE_INDEX|Nifty 50',
+                ltp=nifty_ltp,
+                day_open=nifty_open,
+                close_price=nifty_close,
+                trend=nifty_trend,
+                change=nifty_change,
+                change_percent=nifty_change_percent,
+                price_time=price_time,
+                is_market_open=True,
+                is_special_time=True
+            )
+            db.add(nifty_price)
+            results["nifty50"] = "inserted"
+            logger.info(f"✅ Inserted NIFTY50: Open=₹{nifty_open:.2f}, Close=₹{nifty_close:.2f}, Trend={nifty_trend} at {price_time.strftime('%Y-%m-%d %H:%M:%S IST')}")
+        
+        # BANKNIFTY data
+        banknifty_open = 59957.80
+        banknifty_close = 60118.40
+        banknifty_ltp = 60118.40
+        banknifty_change = banknifty_ltp - banknifty_open  # 160.60
+        banknifty_change_percent = (banknifty_change / banknifty_open * 100) if banknifty_open > 0 else 0  # 0.268%
+        banknifty_trend = 'bullish'  # LTP > Open
+        
+        # Check if BANKNIFTY record already exists
+        existing_banknifty = db.query(IndexPrice).filter(
+            IndexPrice.index_name == 'BANKNIFTY',
+            IndexPrice.price_time == price_time
+        ).first()
+        
+        if existing_banknifty:
+            # Update existing record
+            existing_banknifty.ltp = banknifty_ltp
+            existing_banknifty.day_open = banknifty_open
+            existing_banknifty.close_price = banknifty_close
+            existing_banknifty.trend = banknifty_trend
+            existing_banknifty.change = banknifty_change
+            existing_banknifty.change_percent = banknifty_change_percent
+            existing_banknifty.is_special_time = True
+            existing_banknifty.is_market_open = True
+            results["banknifty"] = "updated"
+            logger.info(f"✅ Updated existing BANKNIFTY record (ID: {existing_banknifty.id})")
+        else:
+            # Insert new BANKNIFTY record
+            banknifty_price = IndexPrice(
+                index_name='BANKNIFTY',
+                instrument_key='NSE_INDEX|Nifty Bank',
+                ltp=banknifty_ltp,
+                day_open=banknifty_open,
+                close_price=banknifty_close,
+                trend=banknifty_trend,
+                change=banknifty_change,
+                change_percent=banknifty_change_percent,
+                price_time=price_time,
+                is_market_open=True,
+                is_special_time=True
+            )
+            db.add(banknifty_price)
+            results["banknifty"] = "inserted"
+            logger.info(f"✅ Inserted BANKNIFTY: Open=₹{banknifty_open:.2f}, Close=₹{banknifty_close:.2f}, Trend={banknifty_trend} at {price_time.strftime('%Y-%m-%d %H:%M:%S IST')}")
+        
+        # Commit changes
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": "Index prices inserted/updated for January 6th, 2026 at 3:30 PM",
+            "price_time": price_time.strftime('%Y-%m-%d %H:%M:%S IST'),
+            "prices": {
+                "NIFTY50": {
+                    "open": nifty_open,
+                    "close": nifty_close,
+                    "ltp": nifty_ltp,
+                    "trend": nifty_trend,
+                    "change": nifty_change,
+                    "change_percent": round(nifty_change_percent, 3)
+                },
+                "BANKNIFTY": {
+                    "open": banknifty_open,
+                    "close": banknifty_close,
+                    "ltp": banknifty_ltp,
+                    "trend": banknifty_trend,
+                    "change": banknifty_change,
+                    "change_percent": round(banknifty_change_percent, 3)
+                }
+            },
+            "results": results
+        }
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error inserting index prices: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "success": False,
+            "error": str(e)
+        }
