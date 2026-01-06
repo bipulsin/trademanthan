@@ -929,10 +929,10 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                             print(f"   Current day candle: {option_candles.get('current_day_candle')}")
                         if option_candles.get('previous_day_candle'):
                             print(f"   Previous day candle: {option_candles.get('previous_day_candle')}")
-                                                    else:
+                    else:
                         print(f"⚠️ Could not fetch option OHLC candles for {option_contract} - returned None (this is OK, will continue with option LTP and lot size)")
                         logger.warning(f"Could not fetch option OHLC candles for {option_contract} (stock: {stock_name}, instrument_key: {instrument_key}) - returned None. Continuing with other data.")
-                    except Exception as e:
+                except Exception as e:
                     print(f"❌ ERROR fetching option OHLC candles for {option_contract}: {str(e)} (this is OK, will continue with option LTP and lot size)")
                     logger.error(f"Error fetching option OHLC candles for {option_contract} (stock: {stock_name}, instrument_key: {instrument_key}): {str(e)}. Continuing with other data.", exc_info=True)
             elif not instrument_key:
