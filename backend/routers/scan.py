@@ -1890,6 +1890,7 @@ async def manual_start_schedulers():
         from services.vwap_updater import start_vwap_updater, vwap_updater
         from services.master_stock_scheduler import start_scheduler, master_stock_scheduler
         from services.instruments_downloader import start_instruments_scheduler, instruments_scheduler
+        from services.index_price_scheduler import start_index_price_scheduler, index_price_scheduler
         
         results = {}
         
@@ -1924,6 +1925,14 @@ async def manual_start_schedulers():
             logger.info("✅ Instruments Scheduler manually started")
         else:
             results["instruments"] = "already_running"
+        
+        # Start Index Price Scheduler
+        if not index_price_scheduler.is_running:
+            start_index_price_scheduler()
+            results["index_price"] = "started"
+            logger.info("✅ Index Price Scheduler manually started")
+        else:
+            results["index_price"] = "already_running"
         
         return {
             "success": True,
@@ -2323,6 +2332,7 @@ async def get_scheduler_status():
         from backend.services.vwap_updater import vwap_updater
         from backend.services.master_stock_scheduler import master_stock_scheduler
         from backend.services.instruments_downloader import instruments_scheduler
+        from backend.services.index_price_scheduler import index_price_scheduler
         
         status = {
             "health_monitor": {
@@ -2337,10 +2347,16 @@ async def get_scheduler_status():
                 "has_3_25pm_close_job": vwap_updater.scheduler.get_job('close_all_trades_eod') is not None if vwap_updater.scheduler else False
             },
             "master_stock": {
-                "running": master_stock_scheduler.is_running
+                "running": master_stock_scheduler.is_running,
+                "jobs_count": len(master_stock_scheduler.scheduler.get_jobs()) if master_stock_scheduler.scheduler else 0
             },
             "instruments": {
-                "running": instruments_scheduler.is_running
+                "running": instruments_scheduler.is_running,
+                "jobs_count": len(instruments_scheduler.scheduler.get_jobs()) if instruments_scheduler.scheduler else 0
+            },
+            "index_price": {
+                "running": index_price_scheduler.is_running,
+                "jobs_count": len(index_price_scheduler.scheduler.get_jobs()) if index_price_scheduler.scheduler else 0
             }
         }
         
@@ -2352,16 +2368,27 @@ async def get_scheduler_status():
                 for job in sorted(jobs, key=lambda x: x.next_run_time if x.next_run_time else float('inf'))[:5]
             ]
         
+        # Calculate total jobs across all schedulers
+        total_jobs = (
+            status["health_monitor"]["jobs_count"] +
+            status["vwap_updater"]["jobs_count"] +
+            status["master_stock"]["jobs_count"] +
+            status["instruments"]["jobs_count"] +
+            status["index_price"]["jobs_count"]
+        )
+        
         all_running = (
             health_monitor.is_running and 
             vwap_updater.is_running and
             master_stock_scheduler.is_running and
-            instruments_scheduler.is_running
+            instruments_scheduler.is_running and
+            index_price_scheduler.is_running
         )
         
         return {
             "success": True, 
             "all_schedulers_running": all_running,
+            "total_jobs": total_jobs,
             "schedulers": status
         }
         

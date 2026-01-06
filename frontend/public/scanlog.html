@@ -813,26 +813,39 @@
                 const response = await fetch(`${API_BASE_URL}/scan/scheduler-status`);
                 const data = await response.json();
                 
-                const totalJobs = data.schedulers.vwap_updater.jobs_count + data.schedulers.health_monitor.jobs_count;
+                // Use total_jobs from backend if available, otherwise calculate from all schedulers
+                const totalJobs = data.total_jobs || (
+                    (data.schedulers.health_monitor?.jobs_count || 0) +
+                    (data.schedulers.vwap_updater?.jobs_count || 0) +
+                    (data.schedulers.master_stock?.jobs_count || 0) +
+                    (data.schedulers.instruments?.jobs_count || 0) +
+                    (data.schedulers.index_price?.jobs_count || 0)
+                );
                 
-                // If ALL schedulers running AND all jobs present (39 total expected)
-                if (data.success && data.all_schedulers_running && totalJobs >= 39) {
-                    // All schedulers running with all jobs
+                // Count running schedulers
+                const runningCount = [
+                    data.schedulers.health_monitor?.running,
+                    data.schedulers.vwap_updater?.running,
+                    data.schedulers.master_stock?.running,
+                    data.schedulers.instruments?.running,
+                    data.schedulers.index_price?.running
+                ].filter(Boolean).length;
+                
+                const totalSchedulers = 5; // health_monitor, vwap_updater, master_stock, instruments, index_price
+                
+                // If ALL schedulers running AND jobs are present
+                if (data.success && data.all_schedulers_running && totalJobs > 0) {
+                    // All schedulers running with jobs
                     updateSchedulerStatus('active', `Schedulers: Active (${totalJobs} jobs)`);
                     document.getElementById('start-schedulers-btn').style.display = 'none';
                 } else {
-                    // Even if 1 job missing or 1 scheduler stopped → show as inactive
-                    const runningCount = [
-                        data.schedulers.health_monitor.running,
-                        data.schedulers.vwap_updater.running,
-                        data.schedulers.master_stock.running,
-                        data.schedulers.instruments.running
-                    ].filter(Boolean).length;
-                    
-                    if (totalJobs < 39) {
-                        updateSchedulerStatus('inactive', `Schedulers: Missing Jobs (${totalJobs}/39)`);
+                    // Show status based on what's missing
+                    if (runningCount < totalSchedulers) {
+                        updateSchedulerStatus('inactive', `Schedulers: ${runningCount}/${totalSchedulers} Running`);
+                    } else if (totalJobs === 0) {
+                        updateSchedulerStatus('inactive', `Schedulers: No Jobs Found`);
                     } else {
-                        updateSchedulerStatus('inactive', `Schedulers: ${runningCount}/4 Running`);
+                        updateSchedulerStatus('inactive', `Schedulers: ${totalJobs} Jobs`);
                     }
                     document.getElementById('start-schedulers-btn').style.display = 'inline-block';
                 }
