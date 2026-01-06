@@ -913,18 +913,18 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             elif not vwap_service:
                 print(f"⚠️ Cannot fetch option LTP for {option_contract} - vwap_service is None")
                 logger.warning(f"Cannot fetch option LTP for {option_contract} (stock: {stock_name}) - vwap_service is None")
-                                                
-                                                # ====================================================================
+            
+            # ====================================================================
             # ACTIVITY 7: Fetch Option Candles (Independent - requires instrument_key)
-                                                # ====================================================================
+            # ====================================================================
             # NOTE: Candle fetch failure should NOT block option LTP or lot size
             # Candles are used for candle size filter, but option LTP and lot size are critical for trade entry
             if instrument_key and vwap_service:
-                                                try:
+                try:
                     print(f"🔍 Fetching option candles for {option_contract} using instrument_key: {instrument_key}")
-                                                    option_candles = vwap_service.get_option_daily_candles_current_and_previous(instrument_key)
-                                                    if option_candles:
-                                                        print(f"✅ Fetched option OHLC candles for {option_contract}")
+                    option_candles = vwap_service.get_option_daily_candles_current_and_previous(instrument_key)
+                    if option_candles:
+                        print(f"✅ Fetched option OHLC candles for {option_contract}")
                         if option_candles.get('current_day_candle'):
                             print(f"   Current day candle: {option_candles.get('current_day_candle')}")
                         if option_candles.get('previous_day_candle'):
