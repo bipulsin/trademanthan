@@ -2802,7 +2802,7 @@ async def manual_stock_entry(request: Request, db: Session = Depends(get_db)):
     }
     """
     try:
-    data = await request.json()
+        data = await request.json()
         
         bullish_stocks_str = data.get("bullishStocks", "").strip()
         bearish_stocks_str = data.get("bearishStocks", "").strip()
