@@ -2954,6 +2954,17 @@ class UpstoxService:
                         'timestamp': timestamp
                     }
             
+            elif response.status_code == 409:
+                # Conflict - API unavailable (likely after market hours)
+                logger.warning(f"⚠️ API health check: HTTP 409 Conflict (API unavailable)")
+                return {
+                    'api_accessible': False,
+                    'token_valid': True,  # Token might be valid, but API is unavailable
+                    'response_time_ms': response_time,
+                    'message': 'API unavailable (409 Conflict) - likely after market hours',
+                    'timestamp': timestamp
+                }
+            
             elif response.status_code == 401:
                 logger.warning(f"⚠️ API health check: Token expired")
                 return {
