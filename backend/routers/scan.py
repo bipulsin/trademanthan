@@ -808,7 +808,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                                     # Track best match (within tolerance)
                                                     if best_match is None or score < best_match_score:
                                                         best_match = inst
-                                                                best_match_score = score
+                                                        best_match_score = score
                                         
                                     print(f"   📊 Found {match_count} instrument(s) matching symbol={symbol}, type={opt_type}, expiry={target_month}/{target_year} (with tolerance)")
                                     
