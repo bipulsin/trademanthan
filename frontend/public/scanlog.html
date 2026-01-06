@@ -447,6 +447,25 @@
             gap: 8px;
         }
 
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            transition: all 0.3s ease;
+        }
+
+        .status-dot.active {
+            background: #28a745;
+            box-shadow: 0 0 8px rgba(40, 167, 69, 0.6);
+        }
+
+        .status-dot.inactive {
+            background: #dc3545;
+            box-shadow: 0 0 8px rgba(220, 53, 69, 0.6);
+            animation: blink 1s infinite;
+        }
+
 
         .filter-bar {
             background: rgba(255, 255, 255, 0.05);
@@ -692,9 +711,7 @@
                             <i class="fas fa-chart-bar"></i> Trading Report
                         </a>
                         <a href="scanlog.html" class="logs-link">
-                    <a href="manual-entry.html" class="manual-link">
-                        <i class="fas fa-edit"></i> Manual Entry
-                    </a>                            <i class="fas fa-file-alt"></i> Scan Logs
+                            <i class="fas fa-file-alt"></i> Scan Logs
                         </a>
                         <a href="help.html" class="help-link">
                             <i class="fas fa-question-circle"></i> Help Guide
@@ -1102,9 +1119,7 @@
                 <span>Trading Report</span>
             </a>
             <a href="scanlog.html" class="logs-link">
-                    <a href="manual-entry.html" class="manual-link">
-                        <i class="fas fa-edit"></i> Manual Entry
-                    </a>                <i class="fas fa-file-alt"></i>
+                <i class="fas fa-file-alt"></i>
                 <span>Scan Logs</span>
             </a>
             <a href="help.html" class="help-link">
