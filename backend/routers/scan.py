@@ -584,59 +584,59 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             # ====================================================================
             # ACTIVITY 1: Fetch Stock LTP and VWAP (Independent)
             # ====================================================================
-            try:
-                stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
-                if stock_data:
-                    if stock_data.get('ltp') and stock_data['ltp'] > 0:
-                        stock_ltp = stock_data['ltp']
-                        print(f"✅ Stock LTP for {stock_name}: ₹{stock_ltp:.2f}")
+                try:
+                    stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
+                    if stock_data:
+                        if stock_data.get('ltp') and stock_data['ltp'] > 0:
+                            stock_ltp = stock_data['ltp']
+                            print(f"✅ Stock LTP for {stock_name}: ₹{stock_ltp:.2f}")
+                        else:
+                            print(f"⚠️ Could not fetch LTP for {stock_name}, using trigger price: ₹{trigger_price}")
+                        
+                        if stock_data.get('vwap') and stock_data['vwap'] > 0:
+                            stock_vwap = stock_data['vwap']
+                            print(f"✅ Stock VWAP for {stock_name}: ₹{stock_vwap:.2f}")
+                        else:
+                            print(f"⚠️ Could not fetch VWAP for {stock_name} - will retry via hourly updater")
                     else:
-                        print(f"⚠️ Could not fetch LTP for {stock_name}, using trigger price: ₹{trigger_price}")
-                    
-                    if stock_data.get('vwap') and stock_data['vwap'] > 0:
-                        stock_vwap = stock_data['vwap']
-                        print(f"✅ Stock VWAP for {stock_name}: ₹{stock_vwap:.2f}")
-                    else:
-                        print(f"⚠️ Could not fetch VWAP for {stock_name} - will retry via hourly updater")
-                else:
-                    print(f"⚠️ Stock data fetch completely failed for {stock_name} - using defaults")
-            except Exception as e:
-                print(f"❌ Stock data fetch failed for {stock_name}: {str(e)} - Using trigger price")
-                import traceback
+                        print(f"⚠️ Stock data fetch completely failed for {stock_name} - using defaults")
+                except Exception as e:
+                    print(f"❌ Stock data fetch failed for {stock_name}: {str(e)} - Using trigger price")
+                    import traceback
                 traceback.print_exc()
             
             # ====================================================================
             # ACTIVITY 2: Find Option Contract (Independent)
             # ====================================================================
-            max_retries = 3
-            for retry_attempt in range(1, max_retries + 1):
-                try:
-                    option_contract = find_option_contract_from_master_stock(
-                        db, stock_name, forced_option_type, stock_ltp, vwap_service
-                    )
-                    if option_contract:
-                        print(f"✅ Option contract found for {stock_name} (attempt {retry_attempt}): {option_contract}")
-                        break
-                    else:
+                max_retries = 3
+                for retry_attempt in range(1, max_retries + 1):
+                    try:
+                        option_contract = find_option_contract_from_master_stock(
+                            db, stock_name, forced_option_type, stock_ltp, vwap_service
+                        )
+                        if option_contract:
+                            print(f"✅ Option contract found for {stock_name} (attempt {retry_attempt}): {option_contract}")
+                            break
+                        else:
+                            if retry_attempt < max_retries:
+                                print(f"⚠️ No option contract found for {stock_name} (attempt {retry_attempt}/{max_retries}), retrying...")
+                                import time
+                                time.sleep(1)  # Brief delay before retry
+                            else:
+                                print(f"⚠️ No option contract found for {stock_name} after {max_retries} attempts")
+                    except Exception as e:
                         if retry_attempt < max_retries:
-                            print(f"⚠️ No option contract found for {stock_name} (attempt {retry_attempt}/{max_retries}), retrying...")
+                            print(f"⚠️ Option contract search failed for {stock_name} (attempt {retry_attempt}/{max_retries}): {str(e)}, retrying...")
                             import time
                             time.sleep(1)  # Brief delay before retry
                         else:
-                            print(f"⚠️ No option contract found for {stock_name} after {max_retries} attempts")
-                except Exception as e:
-                    if retry_attempt < max_retries:
-                        print(f"⚠️ Option contract search failed for {stock_name} (attempt {retry_attempt}/{max_retries}): {str(e)}, retrying...")
-                        import time
-                        time.sleep(1)  # Brief delay before retry
-                    else:
-                        print(f"⚠️ Option contract search failed for {stock_name} after {max_retries} attempts: {str(e)}")
-                        option_contract = None
-            
+                            print(f"⚠️ Option contract search failed for {stock_name} after {max_retries} attempts: {str(e)}")
+                            option_contract = None
+                
             # ====================================================================
             # ACTIVITY 3: Extract Option Strike (Independent - requires option_contract)
             # ====================================================================
-            if option_contract:
+                if option_contract:
                 try:
                     import re
                     match = re.search(r'-(\d+\.?\d*)-(?:CE|PE)$', option_contract)
@@ -668,12 +668,12 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             # ====================================================================
             if option_contract:
                 try:
-                    from pathlib import Path
-                    import json as json_lib
+                                from pathlib import Path
+                                import json as json_lib
                     import re
-                    
-                    instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
-                    
+                                
+                                instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
+                                
                     if not instruments_file.exists():
                         print(f"⚠️ Instruments JSON file not found: {instruments_file}")
                         logger.error(f"Instruments JSON file not found: {instruments_file}")
@@ -686,8 +686,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         for retry in range(1, max_retries + 1):
                             try:
                                 print(f"📂 Loading instruments from: {instruments_file} (attempt {retry}/{max_retries})")
-                                with open(instruments_file, 'r') as f:
-                                    instruments_data = json_lib.load(f)
+                                    with open(instruments_file, 'r') as f:
+                                        instruments_data = json_lib.load(f)
                                 print(f"✅ Loaded {len(instruments_data)} instruments from file")
                                 break  # Success - exit retry loop
                             except (json_lib.JSONDecodeError, IOError, OSError) as file_error:
@@ -720,27 +720,27 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                             logger.warning(f"Instruments data is empty for {stock_name} - cannot find instrument_key")
                         else:
                             # Parse option contract format: STOCK-MonthYYYY-STRIKE-CE/PE
-                            match = re.match(r'^([A-Z-]+)-(\w{3})(\d{4})-(\d+\.?\d*?)-(CE|PE)$', option_contract)
-                            
-                            if match:
-                                symbol, month, year, strike, opt_type = match.groups()
-                                strike_value = float(strike)
-                                
+                                    match = re.match(r'^([A-Z-]+)-(\w{3})(\d{4})-(\d+\.?\d*?)-(CE|PE)$', option_contract)
+                                    
+                                    if match:
+                                        symbol, month, year, strike, opt_type = match.groups()
+                                        strike_value = float(strike)
+                                        
                                 print(f"🔍 Searching for instrument_key: symbol={symbol}, month={month}, year={year}, strike={strike_value}, type={opt_type}")
                                 
                                 # Parse month
-                                month_map = {
-                                    'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
-                                    'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
-                                    'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
-                                }
+                                        month_map = {
+                                            'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
+                                            'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
+                                            'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
+                                        }
                                 target_month = month_map.get(month[:3].capitalize(), None)
-                                target_year = int(year)
-                                
+                                        target_year = int(year)
+                                        
                                 if target_month:
-                                    # Search for matching option in NSE_FO segment
+                                        # Search for matching option in NSE_FO segment
                                     # Improved matching: Allow tolerance for expiry dates (±7 days) and strikes (±1%)
-                                    best_match = None
+                                        best_match = None
                                     best_match_score = float('inf')
                                     match_count = 0
                                     from datetime import timedelta
@@ -760,19 +760,19 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                     
                                     # Strike tolerance: ±1% or ±10, whichever is larger
                                     strike_tolerance = max(strike_value * 0.01, 10.0)
-                                    
-                                    for inst in instruments_data:
-                                        if (inst.get('underlying_symbol') == symbol and 
-                                            inst.get('instrument_type') == opt_type and
-                                            inst.get('segment') == 'NSE_FO'):
-                                            
-                                            inst_strike = inst.get('strike_price', 0)
-                                            strike_diff = abs(inst_strike - strike_value)
-                                            
-                                            expiry_ms = inst.get('expiry', 0)
-                                            if expiry_ms:
-                                                if expiry_ms > 1e12:
-                                                    expiry_ms = expiry_ms / 1000
+                                        
+                                        for inst in instruments_data:
+                                            if (inst.get('underlying_symbol') == symbol and 
+                                                inst.get('instrument_type') == opt_type and
+                                                inst.get('segment') == 'NSE_FO'):
+                                                
+                                                inst_strike = inst.get('strike_price', 0)
+                                                strike_diff = abs(inst_strike - strike_value)
+                                                
+                                                expiry_ms = inst.get('expiry', 0)
+                                                if expiry_ms:
+                                                    if expiry_ms > 1e12:
+                                                        expiry_ms = expiry_ms / 1000
                                                 inst_expiry = datetime.fromtimestamp(expiry_ms, tz=ist)
                                                 
                                                 # Check if expiry is within tolerance (same month/year or ±7 days)
@@ -791,8 +791,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                                     score = expiry_score + strike_diff
                                                     
                                                     if strike_diff < 0.01 and expiry_in_range and (inst_expiry.year == target_year and inst_expiry.month == target_month):  # Exact match
-                                                        instrument_key = inst.get('instrument_key')
-                                                        trading_symbol = inst.get('trading_symbol', 'Unknown')
+                                                            instrument_key = inst.get('instrument_key')
+                                                            trading_symbol = inst.get('trading_symbol', 'Unknown')
                                                         # Also fetch lot_size from the same instrument record
                                                         inst_lot_size = inst.get('lot_size')
                                                         if inst_lot_size and inst_lot_size > 0:
@@ -813,10 +813,10 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                                         break
                                                     else:
                                                         # Track best match (within tolerance)
-                                                        if best_match is None or score < best_match_score:
-                                                            best_match = inst
-                                                            best_match_score = score
-                                    
+                                                            if best_match is None or score < best_match_score:
+                                                                best_match = inst
+                                                                best_match_score = score
+                                        
                                     print(f"   📊 Found {match_count} instrument(s) matching symbol={symbol}, type={opt_type}, expiry={target_month}/{target_year} (with tolerance)")
                                     
                                     # Use best match if no exact match but we have matches within tolerance
@@ -894,10 +894,10 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             if instrument_key and vwap_service:
                 try:
                     print(f"🔍 Fetching option LTP for {option_contract} using instrument_key: {instrument_key}")
-                    quote_data = vwap_service.get_market_quote_by_key(instrument_key)
-                    if quote_data and quote_data.get('last_price'):
-                        option_ltp = float(quote_data.get('last_price', 0))
-                        print(f"✅ Fetched option LTP for {option_contract}: ₹{option_ltp}")
+                                            quote_data = vwap_service.get_market_quote_by_key(instrument_key)
+                                            if quote_data and quote_data.get('last_price'):
+                                                option_ltp = float(quote_data.get('last_price', 0))
+                                                print(f"✅ Fetched option LTP for {option_contract}: ₹{option_ltp}")
                     else:
                         print(f"⚠️ Could not fetch option LTP for {option_contract} - no quote data returned")
                         print(f"   Quote data: {quote_data}")
@@ -920,26 +920,26 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             elif not vwap_service:
                 print(f"⚠️ Cannot fetch option LTP for {option_contract} - vwap_service is None")
                 logger.warning(f"Cannot fetch option LTP for {option_contract} (stock: {stock_name}) - vwap_service is None")
-            
-            # ====================================================================
+                                                
+                                                # ====================================================================
             # ACTIVITY 7: Fetch Option Candles (Independent - requires instrument_key)
-            # ====================================================================
+                                                # ====================================================================
             # NOTE: Candle fetch failure should NOT block option LTP or lot size
             # Candles are used for candle size filter, but option LTP and lot size are critical for trade entry
             if instrument_key and vwap_service:
-                try:
+                                                try:
                     print(f"🔍 Fetching option candles for {option_contract} using instrument_key: {instrument_key}")
-                    option_candles = vwap_service.get_option_daily_candles_current_and_previous(instrument_key)
-                    if option_candles:
-                        print(f"✅ Fetched option OHLC candles for {option_contract}")
+                                                    option_candles = vwap_service.get_option_daily_candles_current_and_previous(instrument_key)
+                                                    if option_candles:
+                                                        print(f"✅ Fetched option OHLC candles for {option_contract}")
                         if option_candles.get('current_day_candle'):
                             print(f"   Current day candle: {option_candles.get('current_day_candle')}")
                         if option_candles.get('previous_day_candle'):
                             print(f"   Previous day candle: {option_candles.get('previous_day_candle')}")
-                    else:
+                                                    else:
                         print(f"⚠️ Could not fetch option OHLC candles for {option_contract} - returned None (this is OK, will continue with option LTP and lot size)")
                         logger.warning(f"Could not fetch option OHLC candles for {option_contract} (stock: {stock_name}, instrument_key: {instrument_key}) - returned None. Continuing with other data.")
-                except Exception as e:
+                    except Exception as e:
                     print(f"❌ ERROR fetching option OHLC candles for {option_contract}: {str(e)} (this is OK, will continue with option LTP and lot size)")
                     logger.error(f"Error fetching option OHLC candles for {option_contract} (stock: {stock_name}, instrument_key: {instrument_key}): {str(e)}. Continuing with other data.", exc_info=True)
             elif not instrument_key:
@@ -948,19 +948,19 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             elif not vwap_service:
                 print(f"⚠️ Cannot fetch option candles for {option_contract} - vwap_service is None")
                 logger.warning(f"Cannot fetch option candles for {option_contract} (stock: {stock_name}) - vwap_service is None")
-            
-            # ====================================================================
+                
+                # ====================================================================
             # ACTIVITY 8: Fetch Previous Hour VWAP (Independent)
-            # ====================================================================
-            if vwap_service and stock_name:
-                try:
+                # ====================================================================
+                if vwap_service and stock_name:
+                    try:
                     prev_vwap_data = vwap_service.get_stock_vwap_for_previous_hour(stock_name, reference_time=triggered_datetime)
-                    if prev_vwap_data:
-                        stock_vwap_previous_hour = prev_vwap_data.get('vwap')
-                        stock_vwap_previous_hour_time = prev_vwap_data.get('time')
-                        print(f"✅ Fetched previous hour VWAP for {stock_name}: ₹{stock_vwap_previous_hour:.2f} at {stock_vwap_previous_hour_time.strftime('%H:%M:%S')}")
-                    else:
-                        print(f"⚠️ Could not fetch previous hour VWAP for {stock_name}")
+                        if prev_vwap_data:
+                            stock_vwap_previous_hour = prev_vwap_data.get('vwap')
+                            stock_vwap_previous_hour_time = prev_vwap_data.get('time')
+                            print(f"✅ Fetched previous hour VWAP for {stock_name}: ₹{stock_vwap_previous_hour:.2f} at {stock_vwap_previous_hour_time.strftime('%H:%M:%S')}")
+                        else:
+                            print(f"⚠️ Could not fetch previous hour VWAP for {stock_name}")
                 except Exception as e:
                     print(f"⚠️ Error fetching previous hour VWAP for {stock_name}: {str(e)}")
             
@@ -977,7 +977,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 enrichment_error_msg = f"Could not find instrument_key for option contract {option_contract}"
                 print(f"❌ ENRICHMENT FAILED for {stock_name}: {enrichment_error_msg}")
             
-            enriched_stock = {
+                enriched_stock = {
                 "stock_name": stock_name,
                 "trigger_price": trigger_price,
                 "last_traded_price": stock_ltp,
@@ -994,15 +994,15 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 "option_candles": option_candles,
                 "_enrichment_failed": enrichment_failed,
                 "_enrichment_error": enrichment_error_msg
-            }
+                }
             
-            enriched_stocks.append(enriched_stock)
-            enrichment_successful = True
-            
-            # Log what we got
-            if option_contract:
+                enriched_stocks.append(enriched_stock)
+                enrichment_successful = True
+                
+                # Log what we got
+                if option_contract:
                 print(f"✅ Enriched stock: {stock_name} - LTP: ₹{stock_ltp}, Option: {option_contract}, Qty: {qty}, Instrument Key: {instrument_key or 'N/A'}")
-            else:
+                else:
                 print(f"⚠️ Partial data for: {stock_name} - LTP: ₹{stock_ltp}, Option: N/A")
         
         processed_data["stocks"] = enriched_stocks
@@ -1236,8 +1236,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 else:
                     if is_10_15_alert:
                         candle_size_reason = "10:15 AM alert: Option daily candles not available. Candle size will be calculated in next cycle."
-                    else:
-                        candle_size_reason = "Option daily candles not available"
+                else:
+                    candle_size_reason = "Option daily candles not available"
                 
                 # Determine trade entry based on:
                 # 1. Time check (must be before 3:00 PM)
@@ -1525,7 +1525,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                             saved_candle_size_status = "Pending"  # Will be recalculated in next cycle
                             logger.info(f"10:15 AM alert for {stock_name}: Previous day candle data available (Size={previous_size:.2f}). Candle size will be calculated in next cycle.")
                         else:
-                            saved_candle_size_status = "Skipped"
+                    saved_candle_size_status = "Skipped"
                     except Exception as e:
                         logger.warning(f"Error processing previous day candle for 10:15 alert {stock_name}: {str(e)}")
                         saved_candle_size_status = "Pending"
@@ -1843,13 +1843,13 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         
         # Save bullish and bearish data separately
         try:
-            with open(os.path.join(data_dir, "bullish_data.json"), "w") as f:
+        with open(os.path.join(data_dir, "bullish_data.json"), "w") as f:
                 json.dump(bullish_data, f, indent=2, default=json_serializer)
         except Exception as save_error:
             logger.warning(f"Failed to save bullish_data.json: {str(save_error)}")
         
         try:
-            with open(os.path.join(data_dir, "bearish_data.json"), "w") as f:
+        with open(os.path.join(data_dir, "bearish_data.json"), "w") as f:
                 json.dump(bearish_data, f, indent=2, default=json_serializer)
         except Exception as save_error:
             logger.warning(f"Failed to save bearish_data.json: {str(save_error)}")
@@ -2575,8 +2575,8 @@ async def receive_bullish_webhook(request: Request, db: Session = Depends(get_db
                 return JSONResponse(content={
                     "status": "success",
                     "message": "Bullish webhook processed successfully",
-                    "alert_type": "bullish",
-                    "timestamp": datetime.now().isoformat()
+            "alert_type": "bullish",
+            "timestamp": datetime.now().isoformat()
                 }, status_code=200)
         except Exception as e:
             logger.error(f"❌ CRITICAL: Failed to process bullish webhook: {str(e)}")
@@ -2663,8 +2663,8 @@ async def receive_bearish_webhook(request: Request, db: Session = Depends(get_db
                 return JSONResponse(content={
                     "status": "success",
                     "message": "Bearish webhook processed successfully",
-                    "alert_type": "bearish",
-                    "timestamp": datetime.now().isoformat()
+            "alert_type": "bearish",
+            "timestamp": datetime.now().isoformat()
                 }, status_code=200)
         except Exception as e:
             logger.error(f"❌ CRITICAL: Failed to process bearish webhook: {str(e)}")
@@ -2809,7 +2809,7 @@ async def manual_stock_entry(request: Request, db: Session = Depends(get_db)):
     }
     """
     try:
-        data = await request.json()
+    data = await request.json()
         
         bullish_stocks_str = data.get("bullishStocks", "").strip()
         bearish_stocks_str = data.get("bearishStocks", "").strip()
@@ -3918,47 +3918,64 @@ async def refresh_current_vwap():
         )
 
 @router.get("/index-prices")
-async def get_index_prices():
+async def get_index_prices(db: Session = Depends(get_db)):
     """
-    Get current NIFTY and BANKNIFTY prices with trends using real-time market quotes
-    Only fetches during market hours (9 AM - 4 PM) to avoid unnecessary API calls
+    Get current NIFTY and BANKNIFTY prices with trends
+    - During market hours (9:15 AM - 3:30 PM): Fetches from Upstox API (real-time)
+    - Before 9:15 AM or after 3:30 PM: Returns last stored price from database
     """
     try:
-        # Check if during market hours (9 AM - 4 PM)
+        from services.index_price_scheduler import index_price_scheduler
+        
+        # Check if during market hours (9:15 AM - 3:30 PM)
         import pytz
         ist = pytz.timezone('Asia/Kolkata')
         current_time = datetime.now(ist)
         current_hour = current_time.hour
+        current_minute = current_time.minute
         
-        # If after market hours, fetch closing prices from OHLC (doesn't update live quotes)
-        if current_hour < 9 or current_hour > 16:
-            logger.info(f"⏰ After market hours ({current_hour}:00) - fetching closing prices")
+        # Check if market is open (9:15 AM - 3:30 PM)
+        market_open = (current_hour > 9 or (current_hour == 9 and current_minute >= 15)) and \
+                     (current_hour < 15 or (current_hour == 15 and current_minute <= 30))
+        
+        # If market is closed, fetch from database
+        if not market_open:
+            logger.info(f"⏰ Market closed ({current_time.strftime('%H:%M:%S IST')}) - fetching stored prices from database")
             
-            # Get OHLC data which contains closing prices
-            nifty_quote = vwap_service.get_market_quote_by_key(vwap_service.NIFTY50_KEY)
-            banknifty_quote = vwap_service.get_market_quote_by_key(vwap_service.BANKNIFTY_KEY)
+            # Get latest stored prices from database
+            from services.index_price_scheduler import index_price_scheduler
+            nifty_stored = index_price_scheduler.get_latest_stored_price('NIFTY50', db)
+            banknifty_stored = index_price_scheduler.get_latest_stored_price('BANKNIFTY', db)
             
-            # Process NIFTY closing data
-            nifty_close = 0
-            nifty_open = 0
-            nifty_trend = 'unknown'
-            if nifty_quote:
-                ohlc = nifty_quote.get('ohlc', {})
-                nifty_close = float(ohlc.get('close', 0)) if ohlc.get('close') else float(nifty_quote.get('last_price', 0))
-                nifty_open = float(ohlc.get('open', 0))
-                if nifty_close > 0 and nifty_open > 0:
-                    nifty_trend = 'bullish' if nifty_close > nifty_open else 'bearish' if nifty_close < nifty_open else 'neutral'
+            # Process NIFTY data from database
+            if nifty_stored:
+                nifty_close = nifty_stored.get('close_price', nifty_stored.get('ltp', 0))
+                nifty_open = nifty_stored.get('day_open', 0)
+                nifty_trend = nifty_stored.get('trend', 'unknown')
+                nifty_change = nifty_stored.get('change', 0)
+                nifty_change_percent = nifty_stored.get('change_percent', 0)
+            else:
+                # Fallback if no stored data
+                nifty_close = 0
+                nifty_open = 0
+                nifty_trend = 'unknown'
+                nifty_change = 0
+                nifty_change_percent = 0
             
-            # Process BANKNIFTY closing data
-            banknifty_close = 0
-            banknifty_open = 0
-            banknifty_trend = 'unknown'
-            if banknifty_quote:
-                ohlc = banknifty_quote.get('ohlc', {})
-                banknifty_close = float(ohlc.get('close', 0)) if ohlc.get('close') else float(banknifty_quote.get('last_price', 0))
-                banknifty_open = float(ohlc.get('open', 0))
-                if banknifty_close > 0 and banknifty_open > 0:
-                    banknifty_trend = 'bullish' if banknifty_close > banknifty_open else 'bearish' if banknifty_close < banknifty_open else 'neutral'
+            # Process BANKNIFTY data from database
+            if banknifty_stored:
+                banknifty_close = banknifty_stored.get('close_price', banknifty_stored.get('ltp', 0))
+                banknifty_open = banknifty_stored.get('day_open', 0)
+                banknifty_trend = banknifty_stored.get('trend', 'unknown')
+                banknifty_change = banknifty_stored.get('change', 0)
+                banknifty_change_percent = banknifty_stored.get('change_percent', 0)
+            else:
+                # Fallback if no stored data
+                banknifty_close = 0
+                banknifty_open = 0
+                banknifty_trend = 'unknown'
+                banknifty_change = 0
+                banknifty_change_percent = 0
             
             return JSONResponse(
                 status_code=200,
@@ -3971,8 +3988,8 @@ async def get_index_prices():
                             "close_price": nifty_close,
                             "day_open": nifty_open,
                             "trend": nifty_trend,
-                            "change": nifty_close - nifty_open if nifty_close > 0 and nifty_open > 0 else 0,
-                            "change_percent": ((nifty_close - nifty_open) / nifty_open * 100) if nifty_open > 0 else 0,
+                            "change": nifty_change,
+                            "change_percent": nifty_change_percent,
                             "market_status": "Closed"
                         },
                         "banknifty": {
@@ -3981,14 +3998,14 @@ async def get_index_prices():
                             "close_price": banknifty_close,
                             "day_open": banknifty_open,
                             "trend": banknifty_trend,
-                            "change": banknifty_close - banknifty_open if banknifty_close > 0 and banknifty_open > 0 else 0,
-                            "change_percent": ((banknifty_close - banknifty_open) / banknifty_open * 100) if banknifty_open > 0 else 0,
+                            "change": banknifty_change,
+                            "change_percent": banknifty_change_percent,
                             "market_status": "Closed"
                         },
                         "timestamp": datetime.now().isoformat(),
-                        "data_source": "closing_prices",
+                        "data_source": "database",
                         "market_status": "closed",
-                        "message": "Market closed - showing closing prices"
+                        "message": "Market closed - showing last stored prices from database"
                     }
                 }
             )

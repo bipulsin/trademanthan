@@ -20,6 +20,7 @@ from backend.services.master_stock_scheduler import start_scheduler, stop_schedu
 from backend.services.instruments_downloader import start_instruments_scheduler, stop_instruments_scheduler
 from backend.services.health_monitor import start_health_monitor, stop_health_monitor
 from backend.services.vwap_updater import start_vwap_updater, stop_vwap_updater
+from backend.services.index_price_scheduler import start_index_price_scheduler, stop_index_price_scheduler
 
 load_dotenv()
 
@@ -116,6 +117,21 @@ async def lifespan(app: FastAPI):
         import traceback
         traceback.print_exc()
     
+    # Start index price scheduler (every 5 minutes during market hours, stores at 9:15 AM and 3:30 PM)
+    try:
+        print("Starting Index Price Scheduler...", flush=True)
+        sys.stdout.flush()
+        start_index_price_scheduler()
+        print("✅ Index Price Scheduler: STARTED (Every 5 min, 9:15 AM - 3:30 PM IST)", flush=True)
+        print("   - Fetches NIFTY50 and BANKNIFTY prices every 5 minutes during market hours", flush=True)
+        print("   - Stores prices at 9:15 AM (market open) and 3:30 PM (market close)", flush=True)
+        sys.stdout.flush()
+    except Exception as e:
+        print(f"❌ Index Price Scheduler: FAILED - {e}", flush=True)
+        sys.stdout.flush()
+        import traceback
+        traceback.print_exc()
+    
     print("=" * 60, flush=True)
     print("✅ STARTUP COMPLETE - All Services Active", flush=True)
     print("=" * 60, flush=True)
@@ -155,6 +171,13 @@ async def lifespan(app: FastAPI):
         print("✅ Market Data updater stopped", flush=True)
     except Exception as e:
         print(f"⚠️ Error stopping Market Data updater: {e}", flush=True)
+    
+    # Stop index price scheduler
+    try:
+        stop_index_price_scheduler()
+        print("✅ Index price scheduler stopped", flush=True)
+    except Exception as e:
+        print(f"⚠️ Error stopping index price scheduler: {e}", flush=True)
     
     print("✅ Shutdown complete", flush=True)
 

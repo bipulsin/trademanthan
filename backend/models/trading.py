@@ -216,3 +216,39 @@ class HistoricalMarketData(Base):
         return f"<HistoricalMarketData(id={self.id}, stock='{self.stock_name}', option='{self.option_contract}', time='{self.scan_date}')>"
 
 
+class IndexPrice(Base):
+    """
+    Stores NIFTY50 and BANKNIFTY index prices
+    Updated every 5 minutes during market hours (9:15 AM - 3:30 PM)
+    Special storage at 9:15 AM (market open) and 3:30 PM (market close)
+    """
+    __tablename__ = "index_prices"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Index information
+    index_name = Column(String(50), nullable=False, index=True)  # 'NIFTY50' or 'BANKNIFTY'
+    instrument_key = Column(String(100), nullable=False, index=True)  # 'NSE_INDEX|Nifty 50' or 'NSE_INDEX|Nifty Bank'
+    
+    # Price data
+    ltp = Column(Float, nullable=False)  # Last Traded Price
+    day_open = Column(Float, nullable=True)  # Day's opening price
+    close_price = Column(Float, nullable=True)  # Closing price (for 3:30 PM records)
+    
+    # Trend information
+    trend = Column(String(20), nullable=True)  # 'bullish', 'bearish', 'neutral'
+    change = Column(Float, nullable=True)  # Change from open
+    change_percent = Column(Float, nullable=True)  # Percentage change from open
+    
+    # Timestamp
+    price_time = Column(DateTime, nullable=False, index=True)  # Time when price was captured
+    is_market_open = Column(Boolean, default=True)  # Whether market was open at this time
+    is_special_time = Column(Boolean, default=False)  # True for 9:15 AM and 3:30 PM records
+    
+    # Metadata
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    
+    def __repr__(self):
+        return f"<IndexPrice(id={self.id}, index='{self.index_name}', price={self.ltp}, time='{self.price_time}')>"
+
+
