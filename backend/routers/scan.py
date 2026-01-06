@@ -2549,8 +2549,8 @@ async def receive_bullish_webhook(request: Request, db: Session = Depends(get_db
     }
     """
     try:
-        # Try to read JSON body with timeout protection
-        data = await asyncio.wait_for(request.json(), timeout=2.0)
+        # Try to read JSON body with timeout protection (increased timeout to reduce client disconnect errors)
+        data = await asyncio.wait_for(request.json(), timeout=5.0)
         
         # Enhanced logging: Log full payload for debugging
         stocks_count = len(data.get('stocks', '').split(',')) if isinstance(data.get('stocks'), str) else len(data.get('stocks', []))
@@ -2637,8 +2637,8 @@ async def receive_bearish_webhook(request: Request, db: Session = Depends(get_db
     }
     """
     try:
-        # Try to read JSON body with timeout protection
-        data = await asyncio.wait_for(request.json(), timeout=2.0)
+        # Try to read JSON body with timeout protection (increased timeout to reduce client disconnect errors)
+        data = await asyncio.wait_for(request.json(), timeout=5.0)
         
         # Enhanced logging: Log full payload for debugging
         stocks_count = len(data.get('stocks', '').split(',')) if isinstance(data.get('stocks'), str) else len(data.get('stocks', []))
@@ -2732,8 +2732,8 @@ async def receive_chartink_webhook(request: Request, db: Session = Depends(get_d
     }
     """
     try:
-        # Try to read JSON body with timeout protection
-        data = await asyncio.wait_for(request.json(), timeout=2.0)
+        # Try to read JSON body with timeout protection (increased timeout to reduce client disconnect errors)
+        data = await asyncio.wait_for(request.json(), timeout=5.0)
         
         # Enhanced logging: Log full payload for debugging
         stocks_count = len(data.get('stocks', '').split(',')) if isinstance(data.get('stocks'), str) else len(data.get('stocks', []))

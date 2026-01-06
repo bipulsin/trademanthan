@@ -1231,7 +1231,22 @@ def update_vwap_for_all_open_positions():
                     from sqlalchemy import inspect
                     
                     old_sell_price = position.sell_price
-                    position.sell_price = new_option_ltp
+                    # CRITICAL: Ensure sell_price is always set to a valid value (not 0)
+                    # If new_option_ltp is 0, use old_sell_price or buy_price as fallback
+                    if new_option_ltp > 0:
+                        position.sell_price = new_option_ltp
+                    elif old_sell_price and old_sell_price > 0:
+                        # Keep existing sell_price if new one is invalid
+                        position.sell_price = old_sell_price
+                        logger.warning(f"⚠️ {stock_name}: Option LTP is 0, keeping existing sell_price ₹{old_sell_price:.2f}")
+                    elif position.buy_price and position.buy_price > 0:
+                        # Use buy_price as last resort
+                        position.sell_price = position.buy_price
+                        logger.warning(f"⚠️ {stock_name}: Option LTP is 0 and no existing sell_price, using buy_price ₹{position.buy_price:.2f} as fallback")
+                    else:
+                        # Absolute last resort: set to 0.01 to ensure it's not NULL
+                        position.sell_price = 0.01
+                        logger.error(f"🚨 {stock_name}: CRITICAL - No valid price available, setting sell_price to 0.01")
                     
                     # CRITICAL: Ensure object is in session and tracked
                     if position not in db:
@@ -2374,65 +2389,68 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 return
         
         # Determine previous VWAP time and current VWAP time based on cycle
+        # CRITICAL: Ensure all datetime objects are timezone-aware
         if cycle_number == 1:
             # Cycle 1: 10:30 AM
             # Previous VWAP: Use 1-hour candle at 10:15 AM (1-hour candle closes at 10:15 AM, represents 9:15-10:15 AM)
             # Current VWAP: Use real-time VWAP or 15-minute candle at 10:30 AM
             # Market opens at 9:15 AM, so hourly candles form at :15 times
-            prev_vwap_time = today.replace(hour=10, minute=15, second=0, microsecond=0)
-            current_vwap_time = today.replace(hour=10, minute=30, second=0, microsecond=0)
+            prev_vwap_time = ist.localize(today.replace(hour=10, minute=15, second=0, microsecond=0)) if today.tzinfo is None else today.replace(hour=10, minute=15, second=0, microsecond=0)
+            current_vwap_time = ist.localize(today.replace(hour=10, minute=30, second=0, microsecond=0)) if today.tzinfo is None else today.replace(hour=10, minute=30, second=0, microsecond=0)
             prev_interval = "hours/1"  # Use 1-hour candle for 10:15 AM (more reliable than 15-minute)
             current_interval = "minutes/15"  # Use 15-minute candle for 10:30 AM, fallback to real-time if unavailable
             # Stocks from 10:15 AM webhook
-            target_alert_times = [today.replace(hour=10, minute=15, second=0, microsecond=0)]
+            # CRITICAL: Ensure timezone-aware datetime
+            alert_time_10_15 = ist.localize(today.replace(hour=10, minute=15, second=0, microsecond=0)) if today.tzinfo is None else today.replace(hour=10, minute=15, second=0, microsecond=0)
+            target_alert_times = [alert_time_10_15]
         elif cycle_number == 2:
             # Cycle 2: 11:15 AM
             # Previous VWAP: Use 1-hour candle at 10:15 AM (1-hour candle closes at 10:15 AM, represents 9:15-10:15 AM)
             # Market opens at 9:15 AM, so hourly candles form at :15 times
-            prev_vwap_time = today.replace(hour=10, minute=15, second=0, microsecond=0)
-            current_vwap_time = today.replace(hour=11, minute=15, second=0, microsecond=0)
+            prev_vwap_time = ist.localize(today.replace(hour=10, minute=15, second=0, microsecond=0)) if today.tzinfo is None else today.replace(hour=10, minute=15, second=0, microsecond=0)
+            current_vwap_time = ist.localize(today.replace(hour=11, minute=15, second=0, microsecond=0)) if today.tzinfo is None else today.replace(hour=11, minute=15, second=0, microsecond=0)
             prev_interval = "hours/1"  # Use 1-hour candle (closes at 10:15 AM)
             current_interval = "hours/1"  # Use 1-hour candle (closes at 11:15 AM)
             # Stocks from 11:15 AM webhook + No_Entry from 10:15 AM
-            target_alert_times = [
-                today.replace(hour=10, minute=15, second=0, microsecond=0),
-                today.replace(hour=11, minute=15, second=0, microsecond=0)
-            ]
+            # CRITICAL: Ensure timezone-aware datetimes
+            alert_time_10_15 = ist.localize(today.replace(hour=10, minute=15, second=0, microsecond=0)) if today.tzinfo is None else today.replace(hour=10, minute=15, second=0, microsecond=0)
+            alert_time_11_15 = ist.localize(today.replace(hour=11, minute=15, second=0, microsecond=0)) if today.tzinfo is None else today.replace(hour=11, minute=15, second=0, microsecond=0)
+            target_alert_times = [alert_time_10_15, alert_time_11_15]
         elif cycle_number == 3:
             # Cycle 3: 12:15 PM
             # Previous VWAP: Use 1-hour candle at 11:15 AM (1-hour candle closes at 11:15 AM, represents 10:15-11:15 AM)
             # Market opens at 9:15 AM, so hourly candles form at :15 times
-            prev_vwap_time = today.replace(hour=11, minute=15, second=0, microsecond=0)
-            current_vwap_time = today.replace(hour=12, minute=15, second=0, microsecond=0)
+            prev_vwap_time = ist.localize(today.replace(hour=11, minute=15, second=0, microsecond=0)) if today.tzinfo is None else today.replace(hour=11, minute=15, second=0, microsecond=0)
+            current_vwap_time = ist.localize(today.replace(hour=12, minute=15, second=0, microsecond=0)) if today.tzinfo is None else today.replace(hour=12, minute=15, second=0, microsecond=0)
             prev_interval = "hours/1"  # Use 1-hour candle (closes at 11:15 AM)
             current_interval = "hours/1"  # Use 1-hour candle (closes at 12:15 PM)
             # Stocks from 12:15 PM webhook + No_Entry up to 11:15 AM
-            target_alert_times = [
-                today.replace(hour=10, minute=15, second=0, microsecond=0),
-                today.replace(hour=11, minute=15, second=0, microsecond=0),
-                today.replace(hour=12, minute=15, second=0, microsecond=0)
-            ]
+            # CRITICAL: Ensure timezone-aware datetimes
+            alert_time_10_15 = ist.localize(today.replace(hour=10, minute=15, second=0, microsecond=0)) if today.tzinfo is None else today.replace(hour=10, minute=15, second=0, microsecond=0)
+            alert_time_11_15 = ist.localize(today.replace(hour=11, minute=15, second=0, microsecond=0)) if today.tzinfo is None else today.replace(hour=11, minute=15, second=0, microsecond=0)
+            alert_time_12_15 = ist.localize(today.replace(hour=12, minute=15, second=0, microsecond=0)) if today.tzinfo is None else today.replace(hour=12, minute=15, second=0, microsecond=0)
+            target_alert_times = [alert_time_10_15, alert_time_11_15, alert_time_12_15]
         elif cycle_number == 4:
             # Cycle 4: 13:15 PM
             # Previous VWAP: Use 1-hour candle at 12:15 PM (1-hour candle closes at 12:15 PM, represents 11:15 AM-12:15 PM)
             # Market opens at 9:15 AM, so hourly candles form at :15 times
-            prev_vwap_time = today.replace(hour=12, minute=15, second=0, microsecond=0)
-            current_vwap_time = today.replace(hour=13, minute=15, second=0, microsecond=0)
+            prev_vwap_time = ist.localize(today.replace(hour=12, minute=15, second=0, microsecond=0)) if today.tzinfo is None else today.replace(hour=12, minute=15, second=0, microsecond=0)
+            current_vwap_time = ist.localize(today.replace(hour=13, minute=15, second=0, microsecond=0)) if today.tzinfo is None else today.replace(hour=13, minute=15, second=0, microsecond=0)
             prev_interval = "hours/1"  # Use 1-hour candle (closes at 12:15 PM)
             current_interval = "hours/1"  # Use 1-hour candle (closes at 13:15 PM)
             # Stocks from 13:15 PM webhook + No_Entry up to 12:15 PM
-            target_alert_times = [
-                today.replace(hour=10, minute=15, second=0, microsecond=0),
-                today.replace(hour=11, minute=15, second=0, microsecond=0),
-                today.replace(hour=12, minute=15, second=0, microsecond=0),
-                today.replace(hour=13, minute=15, second=0, microsecond=0)
-            ]
+            # CRITICAL: Ensure timezone-aware datetimes
+            alert_time_10_15 = ist.localize(today.replace(hour=10, minute=15, second=0, microsecond=0)) if today.tzinfo is None else today.replace(hour=10, minute=15, second=0, microsecond=0)
+            alert_time_11_15 = ist.localize(today.replace(hour=11, minute=15, second=0, microsecond=0)) if today.tzinfo is None else today.replace(hour=11, minute=15, second=0, microsecond=0)
+            alert_time_12_15 = ist.localize(today.replace(hour=12, minute=15, second=0, microsecond=0)) if today.tzinfo is None else today.replace(hour=12, minute=15, second=0, microsecond=0)
+            alert_time_13_15 = ist.localize(today.replace(hour=13, minute=15, second=0, microsecond=0)) if today.tzinfo is None else today.replace(hour=13, minute=15, second=0, microsecond=0)
+            target_alert_times = [alert_time_10_15, alert_time_11_15, alert_time_12_15, alert_time_13_15]
         elif cycle_number == 5:
             # Cycle 5: 14:15 PM
             # Previous VWAP: Use 1-hour candle at 13:15 PM (1-hour candle closes at 13:15 PM, represents 12:15 PM-13:15 PM)
             # Market opens at 9:15 AM, so hourly candles form at :15 times
-            prev_vwap_time = today.replace(hour=13, minute=15, second=0, microsecond=0)
-            current_vwap_time = today.replace(hour=14, minute=15, second=0, microsecond=0)
+            prev_vwap_time = ist.localize(today.replace(hour=13, minute=15, second=0, microsecond=0)) if today.tzinfo is None else today.replace(hour=13, minute=15, second=0, microsecond=0)
+            current_vwap_time = ist.localize(today.replace(hour=14, minute=15, second=0, microsecond=0)) if today.tzinfo is None else today.replace(hour=14, minute=15, second=0, microsecond=0)
             prev_interval = "hours/1"  # Use 1-hour candle (closes at 13:15 PM)
             current_interval = "hours/1"  # Use 1-hour candle (closes at 14:15 PM)
             # Stocks from 14:15 PM webhook + No_Entry up to 13:15 PM
@@ -4311,7 +4329,17 @@ def close_all_open_trades():
                     print(f"      - Buy Time: {position.buy_time.strftime('%H:%M:%S') if position.buy_time else 'N/A'}")
                     print(f"      - Sell Price: ₹{position.sell_price:.2f}")
                     print(f"      - Quantity: {position.qty}")
-                    print(f"      - Hold Duration: {((now - position.buy_time).total_seconds() / 60):.0f} minutes" if position.buy_time else "N/A")
+                    # CRITICAL: Ensure both datetimes are timezone-aware before subtraction
+                    if position.buy_time:
+                        buy_time_tz = position.buy_time
+                        if buy_time_tz.tzinfo is None:
+                            buy_time_tz = ist.localize(buy_time_tz)
+                        elif buy_time_tz.tzinfo != ist:
+                            buy_time_tz = buy_time_tz.astimezone(ist)
+                        hold_duration_minutes = ((now - buy_time_tz).total_seconds() / 60)
+                        print(f"      - Hold Duration: {hold_duration_minutes:.0f} minutes")
+                    else:
+                        print(f"      - Hold Duration: N/A")
                     print(f"      - PnL: ₹{position.pnl:.2f}")
                 else:
                     logger.warning(f"⚠️ Could not calculate P&L for {stock_name}")
