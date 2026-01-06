@@ -720,18 +720,18 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                             logger.warning(f"Instruments data is empty for {stock_name} - cannot find instrument_key")
                         else:
                             # Parse option contract format: STOCK-MonthYYYY-STRIKE-CE/PE
-                                    match = re.match(r'^([A-Z-]+)-(\w{3})(\d{4})-(\d+\.?\d*?)-(CE|PE)$', option_contract)
-                                    
-                                    if match:
-                                        symbol, month, year, strike, opt_type = match.groups()
-                                        strike_value = float(strike)
-                                        
+                            match = re.match(r'^([A-Z-]+)-(\w{3})(\d{4})-(\d+\.?\d*?)-(CE|PE)$', option_contract)
+                            
+                            if match:
+                                symbol, month, year, strike, opt_type = match.groups()
+                                strike_value = float(strike)
+                                
                                 print(f"🔍 Searching for instrument_key: symbol={symbol}, month={month}, year={year}, strike={strike_value}, type={opt_type}")
                                 
                                 # Parse month
-                                        month_map = {
-                                            'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
-                                            'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
+                                month_map = {
+                                    'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
+                                    'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
                                             'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
                                         }
                                 target_month = month_map.get(month[:3].capitalize(), None)
