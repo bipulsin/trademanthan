@@ -2454,13 +2454,13 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
             prev_interval = "hours/1"  # Use 1-hour candle (closes at 13:15 PM)
             current_interval = "hours/1"  # Use 1-hour candle (closes at 14:15 PM)
             # Stocks from 14:15 PM webhook + No_Entry up to 13:15 PM
-            target_alert_times = [
-                today.replace(hour=10, minute=15, second=0, microsecond=0),
-                today.replace(hour=11, minute=15, second=0, microsecond=0),
-                today.replace(hour=12, minute=15, second=0, microsecond=0),
-                today.replace(hour=13, minute=15, second=0, microsecond=0),
-                today.replace(hour=14, minute=15, second=0, microsecond=0)
-            ]
+            # CRITICAL: Ensure timezone-aware datetimes
+            alert_time_10_15 = ist.localize(today.replace(hour=10, minute=15, second=0, microsecond=0)) if today.tzinfo is None else today.replace(hour=10, minute=15, second=0, microsecond=0)
+            alert_time_11_15 = ist.localize(today.replace(hour=11, minute=15, second=0, microsecond=0)) if today.tzinfo is None else today.replace(hour=11, minute=15, second=0, microsecond=0)
+            alert_time_12_15 = ist.localize(today.replace(hour=12, minute=15, second=0, microsecond=0)) if today.tzinfo is None else today.replace(hour=12, minute=15, second=0, microsecond=0)
+            alert_time_13_15 = ist.localize(today.replace(hour=13, minute=15, second=0, microsecond=0)) if today.tzinfo is None else today.replace(hour=13, minute=15, second=0, microsecond=0)
+            alert_time_14_15 = ist.localize(today.replace(hour=14, minute=15, second=0, microsecond=0)) if today.tzinfo is None else today.replace(hour=14, minute=15, second=0, microsecond=0)
+            target_alert_times = [alert_time_10_15, alert_time_11_15, alert_time_12_15, alert_time_13_15, alert_time_14_15]
         else:
             logger.error(f"Invalid cycle number: {cycle_number}")
             return
@@ -2845,7 +2845,8 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                         # For Cycle 1: Try to get VWAP at market open (9:15 AM) as fallback
                         try:
                             logger.info(f"🔄 Cycle {cycle_number} - {stock_name}: Attempting to get market open VWAP (9:15 AM) as fallback for Cycle 1")
-                            market_open_time = today.replace(hour=9, minute=15, second=0, microsecond=0)
+                            # CRITICAL: Ensure timezone-aware datetime
+                            market_open_time = ist.localize(today.replace(hour=9, minute=15, second=0, microsecond=0)) if today.tzinfo is None else today.replace(hour=9, minute=15, second=0, microsecond=0)
                             market_open_vwap = vwap_service.get_stock_vwap_from_candle_at_time(
                                 stock_name,
                                 market_open_time,
