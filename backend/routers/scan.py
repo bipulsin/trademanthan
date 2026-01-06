@@ -668,12 +668,12 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             # ====================================================================
             if option_contract:
                 try:
-                                from pathlib import Path
-                                import json as json_lib
+                    from pathlib import Path
+                    import json as json_lib
                     import re
-                                
-                                instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
-                                
+                    
+                    instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
+                    
                     if not instruments_file.exists():
                         print(f"⚠️ Instruments JSON file not found: {instruments_file}")
                         logger.error(f"Instruments JSON file not found: {instruments_file}")
@@ -686,8 +686,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         for retry in range(1, max_retries + 1):
                             try:
                                 print(f"📂 Loading instruments from: {instruments_file} (attempt {retry}/{max_retries})")
-                                    with open(instruments_file, 'r') as f:
-                                        instruments_data = json_lib.load(f)
+                                with open(instruments_file, 'r') as f:
+                                    instruments_data = json_lib.load(f)
                                 print(f"✅ Loaded {len(instruments_data)} instruments from file")
                                 break  # Success - exit retry loop
                             except (json_lib.JSONDecodeError, IOError, OSError) as file_error:
