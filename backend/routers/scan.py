@@ -570,8 +570,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             print(f"Processing stock: {stock_name}")
             
             # Initialize all fields with defaults - each activity is independent
-                stock_ltp = trigger_price
-                stock_vwap = 0.0
+            stock_ltp = trigger_price
+            stock_vwap = 0.0
             option_contract = None
             option_strike = 0.0
             qty = 0
@@ -584,59 +584,59 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             # ====================================================================
             # ACTIVITY 1: Fetch Stock LTP and VWAP (Independent)
             # ====================================================================
-                try:
-                    stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
-                    if stock_data:
-                        if stock_data.get('ltp') and stock_data['ltp'] > 0:
-                            stock_ltp = stock_data['ltp']
-                            print(f"✅ Stock LTP for {stock_name}: ₹{stock_ltp:.2f}")
-                        else:
-                            print(f"⚠️ Could not fetch LTP for {stock_name}, using trigger price: ₹{trigger_price}")
-                        
-                        if stock_data.get('vwap') and stock_data['vwap'] > 0:
-                            stock_vwap = stock_data['vwap']
-                            print(f"✅ Stock VWAP for {stock_name}: ₹{stock_vwap:.2f}")
-                        else:
-                            print(f"⚠️ Could not fetch VWAP for {stock_name} - will retry via hourly updater")
+            try:
+                stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
+                if stock_data:
+                    if stock_data.get('ltp') and stock_data['ltp'] > 0:
+                        stock_ltp = stock_data['ltp']
+                        print(f"✅ Stock LTP for {stock_name}: ₹{stock_ltp:.2f}")
                     else:
-                        print(f"⚠️ Stock data fetch completely failed for {stock_name} - using defaults")
-                except Exception as e:
-                    print(f"❌ Stock data fetch failed for {stock_name}: {str(e)} - Using trigger price")
-                    import traceback
+                        print(f"⚠️ Could not fetch LTP for {stock_name}, using trigger price: ₹{trigger_price}")
+                    
+                    if stock_data.get('vwap') and stock_data['vwap'] > 0:
+                        stock_vwap = stock_data['vwap']
+                        print(f"✅ Stock VWAP for {stock_name}: ₹{stock_vwap:.2f}")
+                    else:
+                        print(f"⚠️ Could not fetch VWAP for {stock_name} - will retry via hourly updater")
+                else:
+                    print(f"⚠️ Stock data fetch completely failed for {stock_name} - using defaults")
+            except Exception as e:
+                print(f"❌ Stock data fetch failed for {stock_name}: {str(e)} - Using trigger price")
+                import traceback
                 traceback.print_exc()
             
             # ====================================================================
             # ACTIVITY 2: Find Option Contract (Independent)
             # ====================================================================
-                max_retries = 3
-                for retry_attempt in range(1, max_retries + 1):
-                    try:
-                        option_contract = find_option_contract_from_master_stock(
-                            db, stock_name, forced_option_type, stock_ltp, vwap_service
-                        )
-                        if option_contract:
-                            print(f"✅ Option contract found for {stock_name} (attempt {retry_attempt}): {option_contract}")
-                            break
-                        else:
-                            if retry_attempt < max_retries:
-                                print(f"⚠️ No option contract found for {stock_name} (attempt {retry_attempt}/{max_retries}), retrying...")
-                                import time
-                                time.sleep(1)  # Brief delay before retry
-                            else:
-                                print(f"⚠️ No option contract found for {stock_name} after {max_retries} attempts")
-                    except Exception as e:
+            max_retries = 3
+            for retry_attempt in range(1, max_retries + 1):
+                try:
+                    option_contract = find_option_contract_from_master_stock(
+                        db, stock_name, forced_option_type, stock_ltp, vwap_service
+                    )
+                    if option_contract:
+                        print(f"✅ Option contract found for {stock_name} (attempt {retry_attempt}): {option_contract}")
+                        break
+                    else:
                         if retry_attempt < max_retries:
-                            print(f"⚠️ Option contract search failed for {stock_name} (attempt {retry_attempt}/{max_retries}): {str(e)}, retrying...")
+                            print(f"⚠️ No option contract found for {stock_name} (attempt {retry_attempt}/{max_retries}), retrying...")
                             import time
                             time.sleep(1)  # Brief delay before retry
                         else:
-                            print(f"⚠️ Option contract search failed for {stock_name} after {max_retries} attempts: {str(e)}")
-                            option_contract = None
-                
+                            print(f"⚠️ No option contract found for {stock_name} after {max_retries} attempts")
+                except Exception as e:
+                    if retry_attempt < max_retries:
+                        print(f"⚠️ Option contract search failed for {stock_name} (attempt {retry_attempt}/{max_retries}): {str(e)}, retrying...")
+                        import time
+                        time.sleep(1)  # Brief delay before retry
+                    else:
+                        print(f"⚠️ Option contract search failed for {stock_name} after {max_retries} attempts: {str(e)}")
+                        option_contract = None
+            
             # ====================================================================
             # ACTIVITY 3: Extract Option Strike (Independent - requires option_contract)
             # ====================================================================
-                if option_contract:
+            if option_contract:
                 try:
                     import re
                     match = re.search(r'-(\d+\.?\d*)-(?:CE|PE)$', option_contract)
@@ -668,12 +668,12 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             # ====================================================================
             if option_contract:
                 try:
-                                from pathlib import Path
-                                import json as json_lib
+                    from pathlib import Path
+                    import json as json_lib
                     import re
-                                
-                                instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
-                                
+                    
+                    instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
+                    
                     if not instruments_file.exists():
                         print(f"⚠️ Instruments JSON file not found: {instruments_file}")
                         logger.error(f"Instruments JSON file not found: {instruments_file}")
@@ -686,8 +686,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         for retry in range(1, max_retries + 1):
                             try:
                                 print(f"📂 Loading instruments from: {instruments_file} (attempt {retry}/{max_retries})")
-                                    with open(instruments_file, 'r') as f:
-                                        instruments_data = json_lib.load(f)
+                                with open(instruments_file, 'r') as f:
+                                    instruments_data = json_lib.load(f)
                                 print(f"✅ Loaded {len(instruments_data)} instruments from file")
                                 break  # Success - exit retry loop
                             except (json_lib.JSONDecodeError, IOError, OSError) as file_error:
