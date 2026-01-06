@@ -94,10 +94,22 @@ async def start_strategy(
             config_path = os.path.join(algos_path, "config", "config.yaml")
             
             # Read paper trading setting from config file instead of request
-            import yaml
-            with open(config_path, 'r') as f:
-                config = yaml.safe_load(f)
-            paper_trading_from_config = config.get('paper_trading', {}).get('enabled', False)
+            try:
+                import yaml
+            except ImportError:
+                logging.warning("⚠️ PyYAML not installed. Paper trading setting will default to False. Install with: pip install pyyaml")
+                paper_trading_from_config = False
+            else:
+                try:
+                    with open(config_path, 'r') as f:
+                        config = yaml.safe_load(f)
+                    paper_trading_from_config = config.get('paper_trading', {}).get('enabled', False)
+                except FileNotFoundError:
+                    logging.warning(f"⚠️ Config file not found: {config_path}. Paper trading setting will default to False.")
+                    paper_trading_from_config = False
+                except Exception as e:
+                    logging.warning(f"⚠️ Error reading config file: {e}. Paper trading setting will default to False.")
+                    paper_trading_from_config = False
             
             strategy = SuperTrendOptionsStrategy(
                 config_path=config_path,

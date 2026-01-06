@@ -77,7 +77,8 @@ def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: st
         option_chain = vwap_service.get_option_chain(stock_name)
         
         if not option_chain:
-            logger.warning(f"No option chain data available for {stock_name}")
+            # Log as debug instead of warning - this is expected for some stocks that don't have options
+            logger.debug(f"No option chain data available for {stock_name} (stock may not have options trading)")
             print(f"No option chain data available for {stock_name}")
             return None
         
