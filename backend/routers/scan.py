@@ -720,27 +720,27 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                             logger.warning(f"Instruments data is empty for {stock_name} - cannot find instrument_key")
                         else:
                             # Parse option contract format: STOCK-MonthYYYY-STRIKE-CE/PE
-                                    match = re.match(r'^([A-Z-]+)-(\w{3})(\d{4})-(\d+\.?\d*?)-(CE|PE)$', option_contract)
-                                    
-                                    if match:
-                                        symbol, month, year, strike, opt_type = match.groups()
-                                        strike_value = float(strike)
-                                        
+                            match = re.match(r'^([A-Z-]+)-(\w{3})(\d{4})-(\d+\.?\d*?)-(CE|PE)$', option_contract)
+                            
+                            if match:
+                                symbol, month, year, strike, opt_type = match.groups()
+                                strike_value = float(strike)
+                                
                                 print(f"🔍 Searching for instrument_key: symbol={symbol}, month={month}, year={year}, strike={strike_value}, type={opt_type}")
                                 
                                 # Parse month
-                                        month_map = {
-                                            'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
-                                            'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
-                                            'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
-                                        }
+                                month_map = {
+                                    'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
+                                    'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
+                                    'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
+                                }
                                 target_month = month_map.get(month[:3].capitalize(), None)
-                                        target_year = int(year)
-                                        
+                                target_year = int(year)
+                                
                                 if target_month:
-                                        # Search for matching option in NSE_FO segment
+                                    # Search for matching option in NSE_FO segment
                                     # Improved matching: Allow tolerance for expiry dates (±7 days) and strikes (±1%)
-                                        best_match = None
+                                    best_match = None
                                     best_match_score = float('inf')
                                     match_count = 0
                                     from datetime import timedelta
@@ -760,56 +760,56 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                     
                                     # Strike tolerance: ±1% or ±10, whichever is larger
                                     strike_tolerance = max(strike_value * 0.01, 10.0)
-                                        
-                                        for inst in instruments_data:
-                                            if (inst.get('underlying_symbol') == symbol and 
-                                                inst.get('instrument_type') == opt_type and
-                                                inst.get('segment') == 'NSE_FO'):
-                                                
-                                                inst_strike = inst.get('strike_price', 0)
-                                                strike_diff = abs(inst_strike - strike_value)
-                                                
-                                                expiry_ms = inst.get('expiry', 0)
-                                                if expiry_ms:
-                                                    if expiry_ms > 1e12:
-                                                        expiry_ms = expiry_ms / 1000
-                                            inst_expiry = datetime.fromtimestamp(expiry_ms, tz=ist)
+                                    
+                                    for inst in instruments_data:
+                                        if (inst.get('underlying_symbol') == symbol and 
+                                            inst.get('instrument_type') == opt_type and
+                                            inst.get('segment') == 'NSE_FO'):
                                             
-                                            # Check if expiry is within tolerance (same month/year or ±7 days)
-                                            expiry_in_range = (
-                                                (inst_expiry.year == target_year and inst_expiry.month == target_month) or
-                                                (target_expiry_min <= inst_expiry <= target_expiry_max)
-                                            )
+                                            inst_strike = inst.get('strike_price', 0)
+                                            strike_diff = abs(inst_strike - strike_value)
                                             
-                                            # Check if strike is within tolerance
-                                            strike_in_range = strike_diff <= strike_tolerance
-                                            
-                                            if expiry_in_range and strike_in_range:
-                                                match_count += 1
-                                                # Score: prioritize exact expiry match, then strike difference
-                                                expiry_score = 0 if (inst_expiry.year == target_year and inst_expiry.month == target_month) else 1000
-                                                score = expiry_score + strike_diff
+                                            expiry_ms = inst.get('expiry', 0)
+                                            if expiry_ms:
+                                                if expiry_ms > 1e12:
+                                                    expiry_ms = expiry_ms / 1000
+                                                inst_expiry = datetime.fromtimestamp(expiry_ms, tz=ist)
                                                 
-                                                if strike_diff < 0.01 and expiry_in_range and (inst_expiry.year == target_year and inst_expiry.month == target_month):  # Exact match
-                                                            instrument_key = inst.get('instrument_key')
-                                                            trading_symbol = inst.get('trading_symbol', 'Unknown')
-                                                    # Also fetch lot_size from the same instrument record
-                                                    inst_lot_size = inst.get('lot_size')
-                                                    if inst_lot_size and inst_lot_size > 0:
-                                                        qty = int(inst_lot_size)
-                                                            print(f"✅ Found EXACT match for {option_contract}:")
-                                                            print(f"   Instrument Key: {instrument_key}")
-                                                            print(f"   Trading Symbol: {trading_symbol}")
-                                                            print(f"   Strike: {inst_strike} (requested: {strike_value}, diff: {strike_diff:.4f})")
-                                                            print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
-                                                    print(f"   Lot Size: {qty if inst_lot_size and inst_lot_size > 0 else 'Not available'}")
-                                                    break
-                                                        else:
-                                                    # Track best match (within tolerance)
-                                                            if best_match is None or score < best_match_score:
-                                                                best_match = inst
-                                                                best_match_score = score
-                                        
+                                                # Check if expiry is within tolerance (same month/year or ±7 days)
+                                                expiry_in_range = (
+                                                    (inst_expiry.year == target_year and inst_expiry.month == target_month) or
+                                                    (target_expiry_min <= inst_expiry <= target_expiry_max)
+                                                )
+                                                
+                                                # Check if strike is within tolerance
+                                                strike_in_range = strike_diff <= strike_tolerance
+                                                
+                                                if expiry_in_range and strike_in_range:
+                                                    match_count += 1
+                                                    # Score: prioritize exact expiry match, then strike difference
+                                                    expiry_score = 0 if (inst_expiry.year == target_year and inst_expiry.month == target_month) else 1000
+                                                    score = expiry_score + strike_diff
+                                                    
+                                                    if strike_diff < 0.01 and expiry_in_range and (inst_expiry.year == target_year and inst_expiry.month == target_month):  # Exact match
+                                                        instrument_key = inst.get('instrument_key')
+                                                        trading_symbol = inst.get('trading_symbol', 'Unknown')
+                                                        # Also fetch lot_size from the same instrument record
+                                                        inst_lot_size = inst.get('lot_size')
+                                                        if inst_lot_size and inst_lot_size > 0:
+                                                            qty = int(inst_lot_size)
+                                                        print(f"✅ Found EXACT match for {option_contract}:")
+                                                        print(f"   Instrument Key: {instrument_key}")
+                                                        print(f"   Trading Symbol: {trading_symbol}")
+                                                        print(f"   Strike: {inst_strike} (requested: {strike_value}, diff: {strike_diff:.4f})")
+                                                        print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
+                                                        print(f"   Lot Size: {qty if inst_lot_size and inst_lot_size > 0 else 'Not available'}")
+                                                        break
+                                                    else:
+                                                        # Track best match (within tolerance)
+                                                        if best_match is None or score < best_match_score:
+                                                            best_match = inst
+                                                            best_match_score = score
+                                    
                                     print(f"   📊 Found {match_count} instrument(s) matching symbol={symbol}, type={opt_type}, expiry={target_month}/{target_year} (with tolerance)")
                                     
                                     # Use best match if no exact match but we have matches within tolerance
@@ -887,10 +887,10 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             if instrument_key and vwap_service:
                 try:
                     print(f"🔍 Fetching option LTP for {option_contract} using instrument_key: {instrument_key}")
-                                            quote_data = vwap_service.get_market_quote_by_key(instrument_key)
-                                            if quote_data and quote_data.get('last_price'):
-                                                option_ltp = float(quote_data.get('last_price', 0))
-                                                print(f"✅ Fetched option LTP for {option_contract}: ₹{option_ltp}")
+                    quote_data = vwap_service.get_market_quote_by_key(instrument_key)
+                    if quote_data and quote_data.get('last_price'):
+                        option_ltp = float(quote_data.get('last_price', 0))
+                        print(f"✅ Fetched option LTP for {option_contract}: ₹{option_ltp}")
                     else:
                         print(f"⚠️ Could not fetch option LTP for {option_contract} - no quote data returned")
                         print(f"   Quote data: {quote_data}")
