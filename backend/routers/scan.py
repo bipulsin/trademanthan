@@ -1229,8 +1229,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 else:
                     if is_10_15_alert:
                         candle_size_reason = "10:15 AM alert: Option daily candles not available. Candle size will be calculated in next cycle."
-                else:
-                    candle_size_reason = "Option daily candles not available"
+                    else:
+                        candle_size_reason = "Option daily candles not available"
                 
                 # Determine trade entry based on:
                 # 1. Time check (must be before 3:00 PM)
