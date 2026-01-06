@@ -804,10 +804,10 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                                     print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
                                                     print(f"   Lot Size: {qty if inst_lot_size and inst_lot_size > 0 else 'Not available'}")
                                                     break
-                                                    else:
-                                                        # Track best match (within tolerance)
-                                                            if best_match is None or score < best_match_score:
-                                                                best_match = inst
+                                                else:
+                                                    # Track best match (within tolerance)
+                                                    if best_match is None or score < best_match_score:
+                                                        best_match = inst
                                                                 best_match_score = score
                                         
                                     print(f"   📊 Found {match_count} instrument(s) matching symbol={symbol}, type={opt_type}, expiry={target_month}/{target_year} (with tolerance)")
