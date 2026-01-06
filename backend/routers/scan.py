@@ -586,23 +586,23 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             # ====================================================================
             try:
                 stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
-                    if stock_data:
-                        if stock_data.get('ltp') and stock_data['ltp'] > 0:
-                            stock_ltp = stock_data['ltp']
-                            print(f"✅ Stock LTP for {stock_name}: ₹{stock_ltp:.2f}")
-                        else:
-                            print(f"⚠️ Could not fetch LTP for {stock_name}, using trigger price: ₹{trigger_price}")
-                        
-                        if stock_data.get('vwap') and stock_data['vwap'] > 0:
-                            stock_vwap = stock_data['vwap']
-                            print(f"✅ Stock VWAP for {stock_name}: ₹{stock_vwap:.2f}")
-                        else:
-                            print(f"⚠️ Could not fetch VWAP for {stock_name} - will retry via hourly updater")
+                if stock_data:
+                    if stock_data.get('ltp') and stock_data['ltp'] > 0:
+                        stock_ltp = stock_data['ltp']
+                        print(f"✅ Stock LTP for {stock_name}: ₹{stock_ltp:.2f}")
                     else:
-                        print(f"⚠️ Stock data fetch completely failed for {stock_name} - using defaults")
-                except Exception as e:
-                    print(f"❌ Stock data fetch failed for {stock_name}: {str(e)} - Using trigger price")
-                    import traceback
+                        print(f"⚠️ Could not fetch LTP for {stock_name}, using trigger price: ₹{trigger_price}")
+                    
+                    if stock_data.get('vwap') and stock_data['vwap'] > 0:
+                        stock_vwap = stock_data['vwap']
+                        print(f"✅ Stock VWAP for {stock_name}: ₹{stock_vwap:.2f}")
+                    else:
+                        print(f"⚠️ Could not fetch VWAP for {stock_name} - will retry via hourly updater")
+                else:
+                    print(f"⚠️ Stock data fetch completely failed for {stock_name} - using defaults")
+            except Exception as e:
+                print(f"❌ Stock data fetch failed for {stock_name}: {str(e)} - Using trigger price")
+                import traceback
                 traceback.print_exc()
             
             # ====================================================================
