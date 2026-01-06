@@ -584,8 +584,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             # ====================================================================
             # ACTIVITY 1: Fetch Stock LTP and VWAP (Independent)
             # ====================================================================
-                try:
-                    stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
+            try:
+                stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
                     if stock_data:
                         if stock_data.get('ltp') and stock_data['ltp'] > 0:
                             stock_ltp = stock_data['ltp']
