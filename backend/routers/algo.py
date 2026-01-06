@@ -26,9 +26,13 @@ from backend.utils.log_manager import log_manager
 try:
     from strategy.supertrend_options_strategy import SuperTrendOptionsStrategy
 except ImportError as e:
-    logging.error(f"Failed to import strategy: {e}")
-    logging.error(f"Python path: {sys.path}")
-    logging.error(f"Algos path: {algos_path}")
+    # Only log as warning if it's not a missing dependency issue
+    if 'yaml' not in str(e).lower():
+        logging.error(f"Failed to import strategy: {e}")
+        logging.error(f"Python path: {sys.path}")
+        logging.error(f"Algos path: {algos_path}")
+    else:
+        logging.warning(f"Strategy import skipped (missing dependency): {e}")
     SuperTrendOptionsStrategy = None
 
 router = APIRouter(tags=["algorithmic-trading"])
