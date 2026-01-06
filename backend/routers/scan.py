@@ -732,15 +732,15 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                 month_map = {
                                     'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
                                     'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
-                                            'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
-                                        }
+                                    'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
+                                }
                                 target_month = month_map.get(month[:3].capitalize(), None)
-                                        target_year = int(year)
-                                        
+                                target_year = int(year)
+                                
                                 if target_month:
-                                        # Search for matching option in NSE_FO segment
+                                    # Search for matching option in NSE_FO segment
                                     # Improved matching: Allow tolerance for expiry dates (±7 days) and strikes (±1%)
-                                        best_match = None
+                                    best_match = None
                                     best_match_score = float('inf')
                                     match_count = 0
                                     from datetime import timedelta
@@ -760,8 +760,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                     
                                     # Strike tolerance: ±1% or ±10, whichever is larger
                                     strike_tolerance = max(strike_value * 0.01, 10.0)
-                                        
-                                        for inst in instruments_data:
+                                    
+                                    for inst in instruments_data:
                                             if (inst.get('underlying_symbol') == symbol and 
                                                 inst.get('instrument_type') == opt_type and
                                                 inst.get('segment') == 'NSE_FO'):
