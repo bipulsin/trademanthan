@@ -762,41 +762,41 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                     strike_tolerance = max(strike_value * 0.01, 10.0)
                                     
                                     for inst in instruments_data:
-                                            if (inst.get('underlying_symbol') == symbol and 
-                                                inst.get('instrument_type') == opt_type and
-                                                inst.get('segment') == 'NSE_FO'):
+                                        if (inst.get('underlying_symbol') == symbol and 
+                                            inst.get('instrument_type') == opt_type and
+                                            inst.get('segment') == 'NSE_FO'):
+                                            
+                                            inst_strike = inst.get('strike_price', 0)
+                                            strike_diff = abs(inst_strike - strike_value)
+                                            
+                                            expiry_ms = inst.get('expiry', 0)
+                                            if expiry_ms:
+                                                if expiry_ms > 1e12:
+                                                    expiry_ms = expiry_ms / 1000
+                                            inst_expiry = datetime.fromtimestamp(expiry_ms, tz=ist)
+                                            
+                                            # Check if expiry is within tolerance (same month/year or ±7 days)
+                                            expiry_in_range = (
+                                                (inst_expiry.year == target_year and inst_expiry.month == target_month) or
+                                                (target_expiry_min <= inst_expiry <= target_expiry_max)
+                                            )
+                                            
+                                            # Check if strike is within tolerance
+                                            strike_in_range = strike_diff <= strike_tolerance
+                                            
+                                            if expiry_in_range and strike_in_range:
+                                                match_count += 1
+                                                # Score: prioritize exact expiry match, then strike difference
+                                                expiry_score = 0 if (inst_expiry.year == target_year and inst_expiry.month == target_month) else 1000
+                                                score = expiry_score + strike_diff
                                                 
-                                                inst_strike = inst.get('strike_price', 0)
-                                                strike_diff = abs(inst_strike - strike_value)
-                                                
-                                                expiry_ms = inst.get('expiry', 0)
-                                                if expiry_ms:
-                                                    if expiry_ms > 1e12:
-                                                        expiry_ms = expiry_ms / 1000
-                                                inst_expiry = datetime.fromtimestamp(expiry_ms, tz=ist)
-                                                
-                                                # Check if expiry is within tolerance (same month/year or ±7 days)
-                                                expiry_in_range = (
-                                                    (inst_expiry.year == target_year and inst_expiry.month == target_month) or
-                                                    (target_expiry_min <= inst_expiry <= target_expiry_max)
-                                                )
-                                                
-                                                # Check if strike is within tolerance
-                                                strike_in_range = strike_diff <= strike_tolerance
-                                                
-                                                if expiry_in_range and strike_in_range:
-                                                    match_count += 1
-                                                    # Score: prioritize exact expiry match, then strike difference
-                                                    expiry_score = 0 if (inst_expiry.year == target_year and inst_expiry.month == target_month) else 1000
-                                                    score = expiry_score + strike_diff
-                                                    
-                                                    if strike_diff < 0.01 and expiry_in_range and (inst_expiry.year == target_year and inst_expiry.month == target_month):  # Exact match
-                                                            instrument_key = inst.get('instrument_key')
-                                                            trading_symbol = inst.get('trading_symbol', 'Unknown')
-                                                        # Also fetch lot_size from the same instrument record
-                                                        inst_lot_size = inst.get('lot_size')
-                                                        if inst_lot_size and inst_lot_size > 0:
-                                                            qty = int(inst_lot_size)
+                                                if strike_diff < 0.01 and expiry_in_range and (inst_expiry.year == target_year and inst_expiry.month == target_month):  # Exact match
+                                                    instrument_key = inst.get('instrument_key')
+                                                    trading_symbol = inst.get('trading_symbol', 'Unknown')
+                                                    # Also fetch lot_size from the same instrument record
+                                                    inst_lot_size = inst.get('lot_size')
+                                                    if inst_lot_size and inst_lot_size > 0:
+                                                        qty = int(inst_lot_size)
                                                             print(f"✅ Found EXACT match for {option_contract}:")
                                                             print(f"   Instrument Key: {instrument_key}")
                                                             print(f"   Trading Symbol: {trading_symbol}")
