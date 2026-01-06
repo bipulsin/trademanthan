@@ -5129,7 +5129,7 @@ async def get_scan_logs(lines: int = Query(100, ge=1, le=10000, description="Num
     Get the last N lines from the application log file
     
     Args:
-        lines: Number of lines to return (default 100, max 1000)
+        lines: Number of lines to return (default 100, max 10000)
     
     Returns:
         JSON with log lines
