@@ -749,7 +749,7 @@
 
         <div class="filter-bar">
             <label>Lines:</label>
-            <input type="number" id="lines-input" value="100" min="10" max="1000" step="10">
+            <input type="number" id="lines-input" value="100" min="10" max="10000" step="10">
             
             <label>Filter Level:</label>
             <select id="level-filter" onchange="applyFilter()">
@@ -962,10 +962,10 @@
                 if (isNaN(lines) || lines < 1) {
                     lines = 100;
                     document.getElementById('lines-input').value = 100;
-                } else if (lines > 1000) {
-                    lines = 1000;
-                    document.getElementById('lines-input').value = 1000;
-                    displayError('Maximum 1000 lines allowed. Showing 1000 lines.');
+                } else if (lines > 10000) {
+                    lines = 10000;
+                    document.getElementById('lines-input').value = 10000;
+                    displayError('Maximum 10000 lines allowed. Showing 10000 lines.');
                 }
                 
                 const response = await fetch(`${API_BASE_URL}/scan/logs?lines=${lines}`);
@@ -1088,9 +1088,9 @@
             let value = parseInt(this.value);
             if (isNaN(value) || value < 1) {
                 this.value = 100;
-            } else if (value > 1000) {
-                this.value = 1000;
-                alert('Maximum 1000 lines allowed. Value adjusted to 1000.');
+            } else if (value > 10000) {
+                this.value = 10000;
+                alert('Maximum 10000 lines allowed. Value adjusted to 10000.');
             }
             refreshLogs();
         });
@@ -1098,8 +1098,8 @@
         // Also validate on input to prevent invalid values
         document.getElementById('lines-input').addEventListener('input', function() {
             let value = parseInt(this.value);
-            if (!isNaN(value) && value > 1000) {
-                this.value = 1000;
+            if (!isNaN(value) && value > 10000) {
+                this.value = 10000;
             }
         });
 
