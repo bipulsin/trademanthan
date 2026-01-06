@@ -797,20 +797,13 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                                     inst_lot_size = inst.get('lot_size')
                                                     if inst_lot_size and inst_lot_size > 0:
                                                         qty = int(inst_lot_size)
-                                                            print(f"✅ Found EXACT match for {option_contract}:")
-                                                            print(f"   Instrument Key: {instrument_key}")
-                                                            print(f"   Trading Symbol: {trading_symbol}")
-                                                            print(f"   Strike: {inst_strike} (requested: {strike_value}, diff: {strike_diff:.4f})")
-                                                            print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
-                                                            print(f"   Lot Size: {qty}")
-                                                        else:
-                                                            print(f"✅ Found EXACT match for {option_contract}:")
-                                                            print(f"   Instrument Key: {instrument_key}")
-                                                            print(f"   Trading Symbol: {trading_symbol}")
-                                                            print(f"   Strike: {inst_strike} (requested: {strike_value}, diff: {strike_diff:.4f})")
-                                                            print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
-                                                            print(f"   ⚠️ Lot Size: Not available in instruments.json")
-                                                        break
+                                                    print(f"✅ Found EXACT match for {option_contract}:")
+                                                    print(f"   Instrument Key: {instrument_key}")
+                                                    print(f"   Trading Symbol: {trading_symbol}")
+                                                    print(f"   Strike: {inst_strike} (requested: {strike_value}, diff: {strike_diff:.4f})")
+                                                    print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
+                                                    print(f"   Lot Size: {qty if inst_lot_size and inst_lot_size > 0 else 'Not available'}")
+                                                    break
                                                     else:
                                                         # Track best match (within tolerance)
                                                             if best_match is None or score < best_match_score:
