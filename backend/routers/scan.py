@@ -887,10 +887,10 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             if instrument_key and vwap_service:
                 try:
                     print(f"🔍 Fetching option LTP for {option_contract} using instrument_key: {instrument_key}")
-                                            quote_data = vwap_service.get_market_quote_by_key(instrument_key)
-                                            if quote_data and quote_data.get('last_price'):
-                                                option_ltp = float(quote_data.get('last_price', 0))
-                                                print(f"✅ Fetched option LTP for {option_contract}: ₹{option_ltp}")
+                    quote_data = vwap_service.get_market_quote_by_key(instrument_key)
+                    if quote_data and quote_data.get('last_price'):
+                        option_ltp = float(quote_data.get('last_price', 0))
+                        print(f"✅ Fetched option LTP for {option_contract}: ₹{option_ltp}")
                     else:
                         print(f"⚠️ Could not fetch option LTP for {option_contract} - no quote data returned")
                         print(f"   Quote data: {quote_data}")
