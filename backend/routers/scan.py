@@ -1836,13 +1836,13 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         
         # Save bullish and bearish data separately
         try:
-        with open(os.path.join(data_dir, "bullish_data.json"), "w") as f:
+            with open(os.path.join(data_dir, "bullish_data.json"), "w") as f:
                 json.dump(bullish_data, f, indent=2, default=json_serializer)
         except Exception as save_error:
             logger.warning(f"Failed to save bullish_data.json: {str(save_error)}")
         
         try:
-        with open(os.path.join(data_dir, "bearish_data.json"), "w") as f:
+            with open(os.path.join(data_dir, "bearish_data.json"), "w") as f:
                 json.dump(bearish_data, f, indent=2, default=json_serializer)
         except Exception as save_error:
             logger.warning(f"Failed to save bearish_data.json: {str(save_error)}")
