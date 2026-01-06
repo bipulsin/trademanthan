@@ -994,9 +994,9 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 
                 # Log what we got
                 if option_contract:
-                print(f"✅ Enriched stock: {stock_name} - LTP: ₹{stock_ltp}, Option: {option_contract}, Qty: {qty}, Instrument Key: {instrument_key or 'N/A'}")
+                    print(f"✅ Enriched stock: {stock_name} - LTP: ₹{stock_ltp}, Option: {option_contract}, Qty: {qty}, Instrument Key: {instrument_key or 'N/A'}")
                 else:
-                print(f"⚠️ Partial data for: {stock_name} - LTP: ₹{stock_ltp}, Option: N/A")
+                    print(f"⚠️ Partial data for: {stock_name} - LTP: ₹{stock_ltp}, Option: N/A")
         
         processed_data["stocks"] = enriched_stocks
         print(f"Successfully processed {len(enriched_stocks)} stocks")
