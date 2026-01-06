@@ -5124,7 +5124,7 @@ async def get_daily_trades(
 
 
 @router.get("/logs")
-async def get_scan_logs(lines: int = Query(100, ge=1, le=1000)):
+async def get_scan_logs(lines: int = Query(100, ge=1, le=1000, description="Number of log lines to retrieve (1-1000)")):
     """
     Get the last N lines from the application log file
     

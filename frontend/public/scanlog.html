@@ -956,8 +956,26 @@
             try {
                 updateStatus('active', 'Fetching logs...');
                 
-                const lines = document.getElementById('lines-input').value;
+                let lines = parseInt(document.getElementById('lines-input').value);
+                
+                // Validate lines input - enforce backend limit
+                if (isNaN(lines) || lines < 1) {
+                    lines = 100;
+                    document.getElementById('lines-input').value = 100;
+                } else if (lines > 1000) {
+                    lines = 1000;
+                    document.getElementById('lines-input').value = 1000;
+                    displayError('Maximum 1000 lines allowed. Showing 1000 lines.');
+                }
+                
                 const response = await fetch(`${API_BASE_URL}/scan/logs?lines=${lines}`);
+                
+                // Check if response is OK
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({ message: `HTTP ${response.status}: ${response.statusText}` }));
+                    throw new Error(errorData.detail || errorData.message || `HTTP ${response.status}`);
+                }
+                
                 const data = await response.json();
 
                 if (data.success && data.logs) {
@@ -1065,9 +1083,24 @@
             return div.innerHTML;
         }
 
-        // Listen for lines input changes
+        // Listen for lines input changes with validation
         document.getElementById('lines-input').addEventListener('change', function() {
+            let value = parseInt(this.value);
+            if (isNaN(value) || value < 1) {
+                this.value = 100;
+            } else if (value > 1000) {
+                this.value = 1000;
+                alert('Maximum 1000 lines allowed. Value adjusted to 1000.');
+            }
             refreshLogs();
+        });
+        
+        // Also validate on input to prevent invalid values
+        document.getElementById('lines-input').addEventListener('input', function() {
+            let value = parseInt(this.value);
+            if (!isNaN(value) && value > 1000) {
+                this.value = 1000;
+            }
         });
 
         // Mobile drawer functions
