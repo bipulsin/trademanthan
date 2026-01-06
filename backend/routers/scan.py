@@ -1836,13 +1836,13 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         
         # Save bullish and bearish data separately
         try:
-        with open(os.path.join(data_dir, "bullish_data.json"), "w") as f:
+            with open(os.path.join(data_dir, "bullish_data.json"), "w") as f:
                 json.dump(bullish_data, f, indent=2, default=json_serializer)
         except Exception as save_error:
             logger.warning(f"Failed to save bullish_data.json: {str(save_error)}")
         
         try:
-        with open(os.path.join(data_dir, "bearish_data.json"), "w") as f:
+            with open(os.path.join(data_dir, "bearish_data.json"), "w") as f:
                 json.dump(bearish_data, f, indent=2, default=json_serializer)
         except Exception as save_error:
             logger.warning(f"Failed to save bearish_data.json: {str(save_error)}")
@@ -2829,7 +2829,7 @@ async def manual_stock_entry(request: Request, db: Session = Depends(get_db)):
     }
     """
     try:
-    data = await request.json()
+        data = await request.json()
         
         bullish_stocks_str = data.get("bullishStocks", "").strip()
         bearish_stocks_str = data.get("bearishStocks", "").strip()
@@ -3976,9 +3976,9 @@ async def get_index_prices(db: Session = Depends(get_db)):
                 nifty_change_percent = nifty_stored.get('change_percent', 0)
             else:
                 # Fallback if no stored data
-            nifty_close = 0
-            nifty_open = 0
-            nifty_trend = 'unknown'
+                nifty_close = 0
+                nifty_open = 0
+                nifty_trend = 'unknown'
                 nifty_change = 0
                 nifty_change_percent = 0
             
@@ -3991,9 +3991,9 @@ async def get_index_prices(db: Session = Depends(get_db)):
                 banknifty_change_percent = banknifty_stored.get('change_percent', 0)
             else:
                 # Fallback if no stored data
-            banknifty_close = 0
-            banknifty_open = 0
-            banknifty_trend = 'unknown'
+                banknifty_close = 0
+                banknifty_open = 0
+                banknifty_trend = 'unknown'
                 banknifty_change = 0
                 banknifty_change_percent = 0
             
