@@ -4202,18 +4202,24 @@ def close_all_open_trades():
                     continue
                 
                 # Update position for EOD exit
+                # CRITICAL: Preserve existing sell_price if it was already set by hourly updater
+                # This ensures we don't overwrite sell_price that was set when exit conditions were triggered
                 old_sell_price = position.sell_price or 0.0
-                if option_ltp and option_ltp > 0:
-                    # Successfully fetched current LTP - use it
+                
+                # If sell_price is already set (from hourly updater when exit conditions were met),
+                # preserve it instead of overwriting with current LTP
+                # This ensures trades that exited earlier (EXIT VWAP, EXIT SL) keep their original exit price
+                if old_sell_price and old_sell_price > 0:
+                    # sell_price already set - preserve it (don't overwrite with current LTP)
+                    logger.info(f"✅ Preserving existing sell_price: ₹{old_sell_price:.2f} for {option_contract} (was set by hourly updater)")
+                    position.sell_price = old_sell_price
+                elif option_ltp and option_ltp > 0:
+                    # No existing sell_price - use current LTP
                     position.sell_price = option_ltp
                     logger.info(f"✅ Using fetched LTP: ₹{option_ltp:.2f} for {option_contract}")
                 else:
                     # API call failed or returned invalid data - try fallback options
-                    if old_sell_price and old_sell_price > 0:
-                        # Use last known sell_price from hourly updates (better than buy_price)
-                        position.sell_price = old_sell_price
-                        logger.warning(f"⚠️ Could not fetch current LTP for {option_contract}, using last known sell_price: ₹{old_sell_price:.2f}")
-                    elif position.buy_price and position.buy_price > 0:
+                    if position.buy_price and position.buy_price > 0:
                         # Last resort: use buy_price (results in 0 P&L, but at least has a value)
                         position.sell_price = position.buy_price
                         logger.error(f"🚨 CRITICAL: No LTP available and no previous sell_price for {option_contract}, using buy_price as fallback: ₹{position.buy_price:.2f} (P&L will be 0)")
