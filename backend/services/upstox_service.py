@@ -183,10 +183,29 @@ class UpstoxService:
                 
                 # Handle different status codes
                 if response.status_code == 200:
-                    response_data = response.json()
+                    # Check if response is actually JSON (not HTML error page)
+                    content_type = response.headers.get('Content-Type', '').lower()
+                    if 'application/json' not in content_type:
+                        # Check if response body looks like HTML
+                        response_text = response.text[:100] if response.text else ""
+                        if response_text.strip().startswith('<!DOCTYPE') or response_text.strip().startswith('<html'):
+                            logger.error(f"❌ API returned HTML instead of JSON for {url}: {response_text[:200]}")
+                            last_error = "HTML response instead of JSON"
+                            if attempt < max_retries - 1:
+                                time.sleep(1)
+                                continue
+                            break
                     
-                    # Return data (let caller validate success status)
-                    return response_data
+                    try:
+                        response_data = response.json()
+                        # Return data (let caller validate success status)
+                        return response_data
+                    except ValueError as json_err:
+                        # Response is not valid JSON
+                        logger.error(f"❌ Invalid JSON response for {url}: {str(json_err)}")
+                        logger.error(f"   Response preview: {response.text[:200]}")
+                        last_error = "Invalid JSON response"
+                        break
                 
                 elif response.status_code == 401:
                     # Token expired
@@ -222,6 +241,18 @@ class UpstoxService:
                     last_error = "Resource not found"
                     break
                 
+                elif response.status_code == 409:
+                    # Conflict - typically means API endpoint unavailable (e.g., after market hours)
+                    # Don't retry, just return None gracefully
+                    response_preview = response.text[:200] if response.text else "No response body"
+                    # Check if response is HTML (error page) instead of JSON
+                    if response_preview.strip().startswith('<!DOCTYPE') or response_preview.strip().startswith('<html'):
+                        logger.warning(f"⚠️ HTTP 409 Conflict for {url}: API returned HTML error page (likely unavailable after market hours)")
+                    else:
+                        logger.warning(f"⚠️ HTTP 409 Conflict for {url}: {response_preview}")
+                    last_error = "Conflict (API unavailable)"
+                    break
+                
                 elif response.status_code >= 500:
                     # Server error - retry
                     logger.warning(f"⚠️ Server error ({response.status_code}) for {url}, retrying...")
@@ -229,9 +260,14 @@ class UpstoxService:
                     continue
                 
                 else:
-                    # Other errors
-                    logger.error(f"❌ HTTP {response.status_code} for {url}: {response.text[:200]}")
-                    last_error = f"HTTP {response.status_code}"
+                    # Other errors - check if response is HTML (error page)
+                    response_preview = response.text[:200] if response.text else "No response body"
+                    if response_preview.strip().startswith('<!DOCTYPE') or response_preview.strip().startswith('<html'):
+                        logger.error(f"❌ HTTP {response.status_code} for {url}: API returned HTML error page instead of JSON")
+                        last_error = f"HTTP {response.status_code} (HTML error page)"
+                    else:
+                        logger.error(f"❌ HTTP {response.status_code} for {url}: {response_preview}")
+                        last_error = f"HTTP {response.status_code}"
                     break
             
             except requests.exceptions.Timeout:
@@ -2860,6 +2896,26 @@ class UpstoxService:
             }
         """
         try:
+            # Check if market is open before making API call
+            ist = pytz.timezone('Asia/Kolkata')
+            now = datetime.now(ist)
+            current_hour = now.hour
+            current_minute = now.minute
+            
+            # Market hours: 9:15 AM to 3:30 PM IST
+            market_open = (current_hour > 9 or (current_hour == 9 and current_minute >= 15)) and \
+                         (current_hour < 15 or (current_hour == 15 and current_minute <= 30))
+            
+            if not market_open:
+                logger.debug(f"⏰ Market closed (current time: {now.strftime('%H:%M:%S IST')}), skipping API health check")
+                return {
+                    'api_accessible': True,
+                    'token_valid': True,
+                    'response_time_ms': 0,
+                    'message': 'Market closed - health check skipped',
+                    'timestamp': now.strftime('%Y-%m-%d %H:%M:%S')
+                }
+            
             start_time = time.time()
             
             # Try a simple API call (NIFTY quote)
@@ -2868,22 +2924,33 @@ class UpstoxService:
             response = requests.get(
                 url,
                 headers=self.get_headers(),
-                timeout=5
+                timeout=10  # Increased timeout
             )
             
             response_time = int((time.time() - start_time) * 1000)  # milliseconds
-            ist = pytz.timezone('Asia/Kolkata')
-            timestamp = datetime.now(ist).strftime('%Y-%m-%d %H:%M:%S')
+            timestamp = now.strftime('%Y-%m-%d %H:%M:%S')
             
             if response.status_code == 200:
-                data = response.json()
-                if data.get('status') == 'success':
-                    logger.info(f"✅ API health check passed ({response_time}ms)")
+                # Check if response is JSON
+                try:
+                    data = response.json()
+                    if data.get('status') == 'success':
+                        logger.info(f"✅ API health check passed ({response_time}ms)")
+                        return {
+                            'api_accessible': True,
+                            'token_valid': True,
+                            'response_time_ms': response_time,
+                            'message': 'API healthy',
+                            'timestamp': timestamp
+                        }
+                except ValueError:
+                    # Response is not JSON (likely HTML error page)
+                    logger.error(f"❌ API health check: Response is not JSON (likely HTML error page)")
                     return {
-                        'api_accessible': True,
+                        'api_accessible': False,
                         'token_valid': True,
                         'response_time_ms': response_time,
-                        'message': 'API healthy',
+                        'message': 'API returned non-JSON response',
                         'timestamp': timestamp
                     }
             
