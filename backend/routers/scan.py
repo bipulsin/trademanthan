@@ -1519,9 +1519,9 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                             logger.info(f"10:15 AM alert for {stock_name}: Previous day candle data available (Size={previous_size:.2f}). Candle size will be calculated in next cycle.")
                         else:
                             saved_candle_size_status = "Skipped"
-                except Exception as e:
-                    logger.warning(f"Error processing previous day candle for 10:15 alert {stock_name}: {str(e)}")
-                    saved_candle_size_status = "Pending"
+                    except Exception as e:
+                        logger.warning(f"Error processing previous day candle for 10:15 alert {stock_name}: {str(e)}")
+                        saved_candle_size_status = "Pending"
                 elif is_10_15_alert:
                     # 10:15 AM alert but no candle data available at all
                     saved_candle_size_status = "Pending"  # Will try to calculate in next cycle
