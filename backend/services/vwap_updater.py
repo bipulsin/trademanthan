@@ -2768,6 +2768,10 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 
                 # Get current stock data first (needed for historical record)
                 stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
+                # CRITICAL: Ensure stock_data is a dict, not None or boolean
+                if not stock_data or not isinstance(stock_data, dict):
+                    logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Invalid stock_data type ({type(stock_data)}), using fallback")
+                    stock_data = None
                 
                 # Try to get previous VWAP from candle API
                 # Market opens at 9:15 AM, so 1-hour candles form at :15 times (10:15, 11:15, etc.)
