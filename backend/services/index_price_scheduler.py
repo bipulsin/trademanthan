@@ -293,3 +293,11 @@ class IndexPriceScheduler:
 # Global instance
 index_price_scheduler = IndexPriceScheduler()
 
+def start_index_price_scheduler():
+    """Start the index price scheduler"""
+    index_price_scheduler.start()
+
+def stop_index_price_scheduler():
+    """Stop the index price scheduler"""
+    index_price_scheduler.stop()
+
