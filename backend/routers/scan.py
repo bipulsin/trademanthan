@@ -608,35 +608,35 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             # ====================================================================
             # ACTIVITY 2: Find Option Contract (Independent)
             # ====================================================================
-                max_retries = 3
-                for retry_attempt in range(1, max_retries + 1):
-                    try:
-                        option_contract = find_option_contract_from_master_stock(
-                            db, stock_name, forced_option_type, stock_ltp, vwap_service
-                        )
-                        if option_contract:
-                            print(f"✅ Option contract found for {stock_name} (attempt {retry_attempt}): {option_contract}")
-                            break
-                        else:
-                            if retry_attempt < max_retries:
-                                print(f"⚠️ No option contract found for {stock_name} (attempt {retry_attempt}/{max_retries}), retrying...")
-                                import time
-                                time.sleep(1)  # Brief delay before retry
-                            else:
-                                print(f"⚠️ No option contract found for {stock_name} after {max_retries} attempts")
-                    except Exception as e:
+            max_retries = 3
+            for retry_attempt in range(1, max_retries + 1):
+                try:
+                    option_contract = find_option_contract_from_master_stock(
+                        db, stock_name, forced_option_type, stock_ltp, vwap_service
+                    )
+                    if option_contract:
+                        print(f"✅ Option contract found for {stock_name} (attempt {retry_attempt}): {option_contract}")
+                        break
+                    else:
                         if retry_attempt < max_retries:
-                            print(f"⚠️ Option contract search failed for {stock_name} (attempt {retry_attempt}/{max_retries}): {str(e)}, retrying...")
+                            print(f"⚠️ No option contract found for {stock_name} (attempt {retry_attempt}/{max_retries}), retrying...")
                             import time
                             time.sleep(1)  # Brief delay before retry
                         else:
-                            print(f"⚠️ Option contract search failed for {stock_name} after {max_retries} attempts: {str(e)}")
-                            option_contract = None
-                
+                            print(f"⚠️ No option contract found for {stock_name} after {max_retries} attempts")
+                except Exception as e:
+                    if retry_attempt < max_retries:
+                        print(f"⚠️ Option contract search failed for {stock_name} (attempt {retry_attempt}/{max_retries}): {str(e)}, retrying...")
+                        import time
+                        time.sleep(1)  # Brief delay before retry
+                    else:
+                        print(f"⚠️ Option contract search failed for {stock_name} after {max_retries} attempts: {str(e)}")
+                        option_contract = None
+            
             # ====================================================================
             # ACTIVITY 3: Extract Option Strike (Independent - requires option_contract)
             # ====================================================================
-                if option_contract:
+            if option_contract:
                 try:
                     import re
                     match = re.search(r'-(\d+\.?\d*)-(?:CE|PE)$', option_contract)
