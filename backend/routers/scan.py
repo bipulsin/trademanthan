@@ -913,26 +913,26 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             elif not vwap_service:
                 print(f"⚠️ Cannot fetch option LTP for {option_contract} - vwap_service is None")
                 logger.warning(f"Cannot fetch option LTP for {option_contract} (stock: {stock_name}) - vwap_service is None")
-                                                
-                                                # ====================================================================
+            
+            # ====================================================================
             # ACTIVITY 7: Fetch Option Candles (Independent - requires instrument_key)
-                                                # ====================================================================
+            # ====================================================================
             # NOTE: Candle fetch failure should NOT block option LTP or lot size
             # Candles are used for candle size filter, but option LTP and lot size are critical for trade entry
             if instrument_key and vwap_service:
-                                                try:
+                try:
                     print(f"🔍 Fetching option candles for {option_contract} using instrument_key: {instrument_key}")
-                                                    option_candles = vwap_service.get_option_daily_candles_current_and_previous(instrument_key)
-                                                    if option_candles:
-                                                        print(f"✅ Fetched option OHLC candles for {option_contract}")
+                    option_candles = vwap_service.get_option_daily_candles_current_and_previous(instrument_key)
+                    if option_candles:
+                        print(f"✅ Fetched option OHLC candles for {option_contract}")
                         if option_candles.get('current_day_candle'):
                             print(f"   Current day candle: {option_candles.get('current_day_candle')}")
                         if option_candles.get('previous_day_candle'):
                             print(f"   Previous day candle: {option_candles.get('previous_day_candle')}")
-                                                    else:
+                    else:
                         print(f"⚠️ Could not fetch option OHLC candles for {option_contract} - returned None (this is OK, will continue with option LTP and lot size)")
                         logger.warning(f"Could not fetch option OHLC candles for {option_contract} (stock: {stock_name}, instrument_key: {instrument_key}) - returned None. Continuing with other data.")
-                    except Exception as e:
+                except Exception as e:
                     print(f"❌ ERROR fetching option OHLC candles for {option_contract}: {str(e)} (this is OK, will continue with option LTP and lot size)")
                     logger.error(f"Error fetching option OHLC candles for {option_contract} (stock: {stock_name}, instrument_key: {instrument_key}): {str(e)}. Continuing with other data.", exc_info=True)
             elif not instrument_key:
@@ -941,19 +941,19 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             elif not vwap_service:
                 print(f"⚠️ Cannot fetch option candles for {option_contract} - vwap_service is None")
                 logger.warning(f"Cannot fetch option candles for {option_contract} (stock: {stock_name}) - vwap_service is None")
-                
-                # ====================================================================
+            
+            # ====================================================================
             # ACTIVITY 8: Fetch Previous Hour VWAP (Independent)
-                # ====================================================================
-                if vwap_service and stock_name:
-                    try:
+            # ====================================================================
+            if vwap_service and stock_name:
+                try:
                     prev_vwap_data = vwap_service.get_stock_vwap_for_previous_hour(stock_name, reference_time=triggered_datetime)
-                        if prev_vwap_data:
-                            stock_vwap_previous_hour = prev_vwap_data.get('vwap')
-                            stock_vwap_previous_hour_time = prev_vwap_data.get('time')
-                            print(f"✅ Fetched previous hour VWAP for {stock_name}: ₹{stock_vwap_previous_hour:.2f} at {stock_vwap_previous_hour_time.strftime('%H:%M:%S')}")
-                        else:
-                            print(f"⚠️ Could not fetch previous hour VWAP for {stock_name}")
+                    if prev_vwap_data:
+                        stock_vwap_previous_hour = prev_vwap_data.get('vwap')
+                        stock_vwap_previous_hour_time = prev_vwap_data.get('time')
+                        print(f"✅ Fetched previous hour VWAP for {stock_name}: ₹{stock_vwap_previous_hour:.2f} at {stock_vwap_previous_hour_time.strftime('%H:%M:%S')}")
+                    else:
+                        print(f"⚠️ Could not fetch previous hour VWAP for {stock_name}")
                 except Exception as e:
                     print(f"⚠️ Error fetching previous hour VWAP for {stock_name}: {str(e)}")
             
