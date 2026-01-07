@@ -1908,45 +1908,75 @@ async def manual_start_schedulers():
         
         results = {}
         
-        # Start Health Monitor
-        if not health_monitor.is_running:
+        # Start Health Monitor - Force restart if scheduler exists but not running
+        if health_monitor and health_monitor.scheduler and health_monitor.scheduler.running:
+            results["health_monitor"] = "already_running"
+        else:
+            # Stop first if it exists but is in a bad state
+            if health_monitor and health_monitor.scheduler and not health_monitor.scheduler.running:
+                try:
+                    health_monitor.stop()
+                except:
+                    pass
             start_health_monitor()
             results["health_monitor"] = "started"
             logger.info("✅ Health Monitor manually started")
-        else:
-            results["health_monitor"] = "already_running"
         
-        # Start VWAP Updater
-        if not vwap_updater.is_running:
+        # Start VWAP Updater - Force restart if scheduler exists but not running
+        if vwap_updater and vwap_updater.scheduler and vwap_updater.scheduler.running:
+            results["vwap_updater"] = "already_running"
+        else:
+            # Stop first if it exists but is in a bad state
+            if vwap_updater and vwap_updater.scheduler and not vwap_updater.scheduler.running:
+                try:
+                    vwap_updater.stop()
+                except:
+                    pass
             start_vwap_updater()
             results["vwap_updater"] = "started"
             logger.info("✅ VWAP Updater manually started")
-        else:
-            results["vwap_updater"] = "already_running"
         
-        # Start Master Stock Scheduler
-        if not master_stock_scheduler.is_running:
+        # Start Master Stock Scheduler - Force restart if scheduler exists but not running
+        if master_stock_scheduler and master_stock_scheduler.scheduler and master_stock_scheduler.scheduler.running:
+            results["master_stock"] = "already_running"
+        else:
+            # Stop first if it exists but is in a bad state
+            if master_stock_scheduler and master_stock_scheduler.scheduler and not master_stock_scheduler.scheduler.running:
+                try:
+                    master_stock_scheduler.stop()
+                except:
+                    pass
             start_scheduler()
             results["master_stock"] = "started"
             logger.info("✅ Master Stock Scheduler manually started")
-        else:
-            results["master_stock"] = "already_running"
         
-        # Start Instruments Scheduler
-        if not instruments_scheduler.is_running:
+        # Start Instruments Scheduler - Force restart if scheduler exists but not running
+        if instruments_scheduler and instruments_scheduler.scheduler and instruments_scheduler.scheduler.running:
+            results["instruments"] = "already_running"
+        else:
+            # Stop first if it exists but is in a bad state
+            if instruments_scheduler and instruments_scheduler.scheduler and not instruments_scheduler.scheduler.running:
+                try:
+                    instruments_scheduler.stop()
+                except:
+                    pass
             start_instruments_scheduler()
             results["instruments"] = "started"
             logger.info("✅ Instruments Scheduler manually started")
-        else:
-            results["instruments"] = "already_running"
         
-        # Start Index Price Scheduler
-        if not index_price_scheduler.is_running:
+        # Start Index Price Scheduler - Force restart if scheduler exists but not running
+        if index_price_scheduler and index_price_scheduler.scheduler and index_price_scheduler.scheduler.running:
+            results["index_price"] = "already_running"
+        else:
+            # Stop first if it exists but is in a bad state
+            if index_price_scheduler and index_price_scheduler.scheduler and not index_price_scheduler.scheduler.running:
+                try:
+                    index_price_scheduler.stop()
+                except:
+                    pass
             start_index_price_scheduler()
             results["index_price"] = "started"
             logger.info("✅ Index Price Scheduler manually started")
-        else:
-            results["index_price"] = "already_running"
         
         return {
             "success": True,
