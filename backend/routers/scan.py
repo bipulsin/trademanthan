@@ -645,7 +645,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             # ====================================================================
             # ACTIVITY 3: Extract Option Strike (Independent - requires option_contract)
             # ====================================================================
-                if option_contract:
+            if option_contract:
                 try:
                     import re
                     match = re.search(r'-(\d+\.?\d*)-(?:CE|PE)$', option_contract)
