@@ -22,9 +22,12 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 # Import health monitor for tracking webhook success/failure
 try:
-    from services.health_monitor import health_monitor
+    from backend.services.health_monitor import health_monitor
 except ImportError:
-    health_monitor = None  # Graceful degradation if not available
+    try:
+        from services.health_monitor import health_monitor
+    except ImportError:
+        health_monitor = None  # Graceful degradation if not available
 from backend.services.upstox_service import upstox_service as vwap_service
 from backend.database import get_db
 from backend.models.trading import IntradayStockOption, MasterStock, HistoricalMarketData
@@ -1900,11 +1903,11 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
 async def manual_start_schedulers():
     """Manually start all schedulers if they're not running"""
     try:
-        from services.health_monitor import start_health_monitor, health_monitor
-        from services.vwap_updater import start_vwap_updater, vwap_updater
-        from services.master_stock_scheduler import start_scheduler, master_stock_scheduler
-        from services.instruments_downloader import start_instruments_scheduler, instruments_scheduler
-        from services.index_price_scheduler import start_index_price_scheduler, index_price_scheduler
+        from backend.services.health_monitor import start_health_monitor, health_monitor
+        from backend.services.vwap_updater import start_vwap_updater, vwap_updater
+        from backend.services.master_stock_scheduler import start_scheduler, master_stock_scheduler
+        from backend.services.instruments_downloader import start_instruments_scheduler, instruments_scheduler
+        from backend.services.index_price_scheduler import start_index_price_scheduler, index_price_scheduler
         
         results = {}
         
