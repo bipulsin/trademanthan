@@ -461,8 +461,12 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         stocks = data.get("stocks", "")
         trigger_prices = data.get("trigger_prices", "")
         
+        print(f"🔍 Parsing stocks: type={type(stocks)}, value={repr(stocks)}")
+        print(f"🔍 Parsing trigger_prices: type={type(trigger_prices)}, value={repr(trigger_prices)}")
+        
         # Chartink format: comma-separated strings
         if isinstance(stocks, str) and isinstance(trigger_prices, str):
+            print(f"✅ Using Chartink format (comma-separated strings)")
             stock_list = [s.strip() for s in stocks.split(",") if s.strip()]
             price_list = [p.strip() for p in trigger_prices.split(",") if p.strip()]
             
@@ -516,6 +520,9 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         # Filter out index names (NIFTY, BANKNIFTY, etc.) - these are not tradable stocks
         INDEX_NAMES = ['NIFTY', 'NIFTY50', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX']
         original_count = len(processed_data["stocks"])
+        print(f"🔍 Before index filtering: {original_count} stocks")
+        if original_count > 0:
+            print(f"🔍 Stock names before filtering: {[s.get('stock_name', 'UNKNOWN') for s in processed_data['stocks']]}")
         processed_data["stocks"] = [
             stock for stock in processed_data["stocks"]
             if stock.get("stock_name", "").strip().upper() not in INDEX_NAMES
@@ -524,6 +531,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         if filtered_count > 0:
             logger.info(f"🚫 Filtered out {filtered_count} index name(s) from stocks list")
             print(f"🚫 Filtered out {filtered_count} index name(s) from stocks list (original: {original_count}, remaining: {len(processed_data['stocks'])})")
+        else:
+            print(f"✅ No index names filtered - {len(processed_data['stocks'])} stocks remain")
         
         # Determine if this is Bullish or Bearish
         if forced_type:
@@ -1129,7 +1138,10 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             print(f"   Original data keys: {list(data.keys())}")
             print(f"   Stocks field type: {type(data.get('stocks'))}")
             print(f"   Stocks field value: {data.get('stocks')}")
+            print(f"   Processed stocks count: {len(processed_data.get('stocks', []))}")
+            print(f"   Enriched stocks count: {len(enriched_stocks) if 'enriched_stocks' in locals() else 'N/A'}")
             logger.warning(f"No stocks found in webhook payload. Data: {json.dumps(data, indent=2)}")
+            logger.warning(f"Processed stocks: {len(processed_data.get('stocks', []))}, Enriched: {len(enriched_stocks) if 'enriched_stocks' in locals() else 'N/A'}")
         
         for stock in stocks_to_save:
             stock_name = stock.get("stock_name", "UNKNOWN")
@@ -2578,6 +2590,8 @@ async def receive_bullish_webhook(request: Request, db: Session = Depends(get_db
         logger.info(f"📦 Full webhook payload: {json.dumps(data, indent=2)}")
         print(f"📥 Received bullish webhook at {datetime.now().isoformat()}")
         print(f"📦 Payload: {json.dumps(data, indent=2)}")
+        print(f"📦 Raw stocks field: {repr(data.get('stocks'))}")
+        print(f"📦 Raw trigger_prices field: {repr(data.get('trigger_prices'))}")
         
         # Process SYNCHRONOUSLY for reliability - webhooks are critical and must be processed
         # Synchronous processing ensures data is saved before response is sent
@@ -2666,6 +2680,8 @@ async def receive_bearish_webhook(request: Request, db: Session = Depends(get_db
         logger.info(f"📦 Full webhook payload: {json.dumps(data, indent=2)}")
         print(f"📥 Received bearish webhook at {datetime.now().isoformat()}")
         print(f"📦 Payload: {json.dumps(data, indent=2)}")
+        print(f"📦 Raw stocks field: {repr(data.get('stocks'))}")
+        print(f"📦 Raw trigger_prices field: {repr(data.get('trigger_prices'))}")
         
         # Process SYNCHRONOUSLY for reliability - webhooks are critical and must be processed
         # Synchronous processing ensures data is saved before response is sent
