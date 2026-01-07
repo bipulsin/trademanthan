@@ -1908,70 +1908,75 @@ async def manual_start_schedulers():
         
         results = {}
         
-        # Start Health Monitor - Force restart if scheduler exists but not running
-        if health_monitor and health_monitor.scheduler and health_monitor.scheduler.running:
+        # Start Health Monitor - Check both is_running flag and actual scheduler state
+        if health_monitor and health_monitor.scheduler and health_monitor.scheduler.running and health_monitor.is_running and len(health_monitor.scheduler.get_jobs()) > 0:
             results["health_monitor"] = "already_running"
         else:
             # Stop first if it exists but is in a bad state
-            if health_monitor and health_monitor.scheduler and not health_monitor.scheduler.running:
+            if health_monitor and health_monitor.scheduler:
                 try:
-                    health_monitor.stop()
+                    if health_monitor.scheduler.running:
+                        health_monitor.stop()
                 except:
                     pass
             start_health_monitor()
             results["health_monitor"] = "started"
             logger.info("✅ Health Monitor manually started")
         
-        # Start VWAP Updater - Force restart if scheduler exists but not running
-        if vwap_updater and vwap_updater.scheduler and vwap_updater.scheduler.running:
+        # Start VWAP Updater - Check both is_running flag and actual scheduler state
+        if vwap_updater and vwap_updater.scheduler and vwap_updater.scheduler.running and vwap_updater.is_running and len(vwap_updater.scheduler.get_jobs()) > 0:
             results["vwap_updater"] = "already_running"
         else:
             # Stop first if it exists but is in a bad state
-            if vwap_updater and vwap_updater.scheduler and not vwap_updater.scheduler.running:
+            if vwap_updater and vwap_updater.scheduler:
                 try:
-                    vwap_updater.stop()
+                    if vwap_updater.scheduler.running:
+                        vwap_updater.stop()
                 except:
                     pass
             start_vwap_updater()
             results["vwap_updater"] = "started"
             logger.info("✅ VWAP Updater manually started")
         
-        # Start Master Stock Scheduler - Force restart if scheduler exists but not running
-        if master_stock_scheduler and master_stock_scheduler.scheduler and master_stock_scheduler.scheduler.running:
+        # Start Master Stock Scheduler - Check both is_running flag and actual scheduler state
+        if master_stock_scheduler and master_stock_scheduler.scheduler and master_stock_scheduler.scheduler.running and master_stock_scheduler.is_running and len(master_stock_scheduler.scheduler.get_jobs()) > 0:
             results["master_stock"] = "already_running"
         else:
             # Stop first if it exists but is in a bad state
-            if master_stock_scheduler and master_stock_scheduler.scheduler and not master_stock_scheduler.scheduler.running:
+            if master_stock_scheduler and master_stock_scheduler.scheduler:
                 try:
-                    master_stock_scheduler.stop()
+                    if master_stock_scheduler.scheduler.running:
+                        master_stock_scheduler.stop()
                 except:
                     pass
             start_scheduler()
             results["master_stock"] = "started"
             logger.info("✅ Master Stock Scheduler manually started")
         
-        # Start Instruments Scheduler - Force restart if scheduler exists but not running
-        if instruments_scheduler and instruments_scheduler.scheduler and instruments_scheduler.scheduler.running:
+        # Start Instruments Scheduler - Check both is_running flag and actual scheduler state
+        if instruments_scheduler and instruments_scheduler.scheduler and instruments_scheduler.scheduler.running and instruments_scheduler.is_running and len(instruments_scheduler.scheduler.get_jobs()) > 0:
             results["instruments"] = "already_running"
         else:
             # Stop first if it exists but is in a bad state
-            if instruments_scheduler and instruments_scheduler.scheduler and not instruments_scheduler.scheduler.running:
+            if instruments_scheduler and instruments_scheduler.scheduler:
                 try:
-                    instruments_scheduler.stop()
+                    if instruments_scheduler.scheduler.running:
+                        instruments_scheduler.stop()
                 except:
                     pass
             start_instruments_scheduler()
             results["instruments"] = "started"
             logger.info("✅ Instruments Scheduler manually started")
         
-        # Start Index Price Scheduler - Force restart if scheduler exists but not running
-        if index_price_scheduler and index_price_scheduler.scheduler and index_price_scheduler.scheduler.running:
+        # Start Index Price Scheduler - Check both is_running flag and actual scheduler state
+        if index_price_scheduler and index_price_scheduler.scheduler and index_price_scheduler.scheduler.running and index_price_scheduler.is_running and len(index_price_scheduler.scheduler.get_jobs()) > 0:
             results["index_price"] = "already_running"
         else:
             # Stop first if it exists but is in a bad state
-            if index_price_scheduler and index_price_scheduler.scheduler and not index_price_scheduler.scheduler.running:
+            if index_price_scheduler and index_price_scheduler.scheduler:
                 try:
-                    index_price_scheduler.stop()
+                    if index_price_scheduler.scheduler.running:
+                        index_price_scheduler.stop()
                 except:
                     pass
             start_index_price_scheduler()
