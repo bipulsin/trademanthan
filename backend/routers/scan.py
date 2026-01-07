@@ -677,12 +677,12 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             # ====================================================================
             if option_contract:
                 try:
-                                from pathlib import Path
-                                import json as json_lib
+                    from pathlib import Path
+                    import json as json_lib
                     import re
-                                
-                                instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
-                                
+                    
+                    instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
+                    
                     if not instruments_file.exists():
                         print(f"⚠️ Instruments JSON file not found: {instruments_file}")
                         logger.error(f"Instruments JSON file not found: {instruments_file}")
@@ -695,8 +695,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         for retry in range(1, max_retries + 1):
                             try:
                                 print(f"📂 Loading instruments from: {instruments_file} (attempt {retry}/{max_retries})")
-                                    with open(instruments_file, 'r') as f:
-                                        instruments_data = json_lib.load(f)
+                                with open(instruments_file, 'r') as f:
+                                    instruments_data = json_lib.load(f)
                                 print(f"✅ Loaded {len(instruments_data)} instruments from file")
                                 break  # Success - exit retry loop
                             except (json_lib.JSONDecodeError, IOError, OSError) as file_error:
@@ -729,27 +729,27 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                             logger.warning(f"Instruments data is empty for {stock_name} - cannot find instrument_key")
                         else:
                             # Parse option contract format: STOCK-MonthYYYY-STRIKE-CE/PE
-                                    match = re.match(r'^([A-Z-]+)-(\w{3})(\d{4})-(\d+\.?\d*?)-(CE|PE)$', option_contract)
-                                    
-                                    if match:
-                                        symbol, month, year, strike, opt_type = match.groups()
-                                        strike_value = float(strike)
-                                        
+                            match = re.match(r'^([A-Z-]+)-(\w{3})(\d{4})-(\d+\.?\d*?)-(CE|PE)$', option_contract)
+                            
+                            if match:
+                                symbol, month, year, strike, opt_type = match.groups()
+                                strike_value = float(strike)
+                                
                                 print(f"🔍 Searching for instrument_key: symbol={symbol}, month={month}, year={year}, strike={strike_value}, type={opt_type}")
                                 
                                 # Parse month
-                                        month_map = {
-                                            'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
-                                            'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
-                                            'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
-                                        }
+                                month_map = {
+                                    'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
+                                    'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
+                                    'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
+                                }
                                 target_month = month_map.get(month[:3].capitalize(), None)
-                                        target_year = int(year)
-                                        
+                                target_year = int(year)
+                                
                                 if target_month:
-                                        # Search for matching option in NSE_FO segment
+                                    # Search for matching option in NSE_FO segment
                                     # Improved matching: Allow tolerance for expiry dates (±7 days) and strikes (±1%)
-                                        best_match = None
+                                    best_match = None
                                     best_match_score = float('inf')
                                     match_count = 0
                                     from datetime import timedelta
@@ -769,21 +769,21 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                     
                                     # Strike tolerance: ±1% or ±10, whichever is larger
                                     strike_tolerance = max(strike_value * 0.01, 10.0)
-                                        
-                                        for inst in instruments_data:
-                                            if (inst.get('underlying_symbol') == symbol and 
-                                                inst.get('instrument_type') == opt_type and
-                                                inst.get('segment') == 'NSE_FO'):
-                                                
-                                                inst_strike = inst.get('strike_price', 0)
-                                                strike_diff = abs(inst_strike - strike_value)
-                                                
-                                                expiry_ms = inst.get('expiry', 0)
-                                                if expiry_ms:
-                                                    if expiry_ms > 1e12:
-                                                        expiry_ms = expiry_ms / 1000
+                                    
+                                    for inst in instruments_data:
+                                        if (inst.get('underlying_symbol') == symbol and 
+                                            inst.get('instrument_type') == opt_type and
+                                            inst.get('segment') == 'NSE_FO'):
+                                            
+                                            inst_strike = inst.get('strike_price', 0)
+                                            strike_diff = abs(inst_strike - strike_value)
+                                            
+                                            expiry_ms = inst.get('expiry', 0)
+                                            if expiry_ms:
+                                                if expiry_ms > 1e12:
+                                                    expiry_ms = expiry_ms / 1000
                                                 inst_expiry = datetime.fromtimestamp(expiry_ms, tz=ist)
-                                                    
+                                                
                                                 # Check if expiry is within tolerance (same month/year or ±7 days)
                                                 expiry_in_range = (
                                                     (inst_expiry.year == target_year and inst_expiry.month == target_month) or
@@ -800,25 +800,25 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                                     score = expiry_score + strike_diff
                                                     
                                                     if strike_diff < 0.01 and expiry_in_range and (inst_expiry.year == target_year and inst_expiry.month == target_month):  # Exact match
-                                                            instrument_key = inst.get('instrument_key')
-                                                            trading_symbol = inst.get('trading_symbol', 'Unknown')
+                                                        instrument_key = inst.get('instrument_key')
+                                                        trading_symbol = inst.get('trading_symbol', 'Unknown')
                                                         # Also fetch lot_size from the same instrument record
                                                         inst_lot_size = inst.get('lot_size')
                                                         if inst_lot_size and inst_lot_size > 0:
                                                             qty = int(inst_lot_size)
-                                                            print(f"✅ Found EXACT match for {option_contract}:")
-                                                            print(f"   Instrument Key: {instrument_key}")
-                                                            print(f"   Trading Symbol: {trading_symbol}")
-                                                            print(f"   Strike: {inst_strike} (requested: {strike_value}, diff: {strike_diff:.4f})")
-                                                            print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
+                                                        print(f"✅ Found EXACT match for {option_contract}:")
+                                                        print(f"   Instrument Key: {instrument_key}")
+                                                        print(f"   Trading Symbol: {trading_symbol}")
+                                                        print(f"   Strike: {inst_strike} (requested: {strike_value}, diff: {strike_diff:.4f})")
+                                                        print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
                                                         print(f"   Lot Size: {qty if inst_lot_size and inst_lot_size > 0 else 'Not available'}")
                                                         break
-                                                        else:
+                                                    else:
                                                         # Track best match (within tolerance)
-                                                            if best_match is None or score < best_match_score:
-                                                                best_match = inst
-                                                                best_match_score = score
-                                        
+                                                        if best_match is None or score < best_match_score:
+                                                            best_match = inst
+                                                            best_match_score = score
+                                    
                                     print(f"   📊 Found {match_count} instrument(s) matching symbol={symbol}, type={opt_type}, expiry={target_month}/{target_year} (with tolerance)")
                                     
                                     # Use best match if no exact match but we have matches within tolerance
@@ -950,19 +950,19 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             elif not vwap_service:
                 print(f"⚠️ Cannot fetch option candles for {option_contract} - vwap_service is None")
                 logger.warning(f"Cannot fetch option candles for {option_contract} (stock: {stock_name}) - vwap_service is None")
-                
-                # ====================================================================
+            
+            # ====================================================================
             # ACTIVITY 8: Fetch Previous Hour VWAP (Independent)
-                # ====================================================================
-                if vwap_service and stock_name:
-                    try:
+            # ====================================================================
+            if vwap_service and stock_name:
+                try:
                     prev_vwap_data = vwap_service.get_stock_vwap_for_previous_hour(stock_name, reference_time=triggered_datetime)
-                        if prev_vwap_data:
-                            stock_vwap_previous_hour = prev_vwap_data.get('vwap')
-                            stock_vwap_previous_hour_time = prev_vwap_data.get('time')
-                            print(f"✅ Fetched previous hour VWAP for {stock_name}: ₹{stock_vwap_previous_hour:.2f} at {stock_vwap_previous_hour_time.strftime('%H:%M:%S')}")
-                        else:
-                            print(f"⚠️ Could not fetch previous hour VWAP for {stock_name}")
+                    if prev_vwap_data:
+                        stock_vwap_previous_hour = prev_vwap_data.get('vwap')
+                        stock_vwap_previous_hour_time = prev_vwap_data.get('time')
+                        print(f"✅ Fetched previous hour VWAP for {stock_name}: ₹{stock_vwap_previous_hour:.2f} at {stock_vwap_previous_hour_time.strftime('%H:%M:%S')}")
+                    else:
+                        print(f"⚠️ Could not fetch previous hour VWAP for {stock_name}")
                 except Exception as e:
                     print(f"⚠️ Error fetching previous hour VWAP for {stock_name}: {str(e)}")
                 
@@ -1243,8 +1243,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 else:
                     if is_10_15_alert:
                         candle_size_reason = "10:15 AM alert: Option daily candles not available. Candle size will be calculated in next cycle."
-                else:
-                    candle_size_reason = "Option daily candles not available"
+                    else:
+                        candle_size_reason = "Option daily candles not available"
                 
                 # Determine trade entry based on:
                 # 1. Time check (must be before 3:00 PM)
@@ -1532,7 +1532,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                             saved_candle_size_status = "Pending"  # Will be recalculated in next cycle
                             logger.info(f"10:15 AM alert for {stock_name}: Previous day candle data available (Size={previous_size:.2f}). Candle size will be calculated in next cycle.")
                         else:
-                    saved_candle_size_status = "Skipped"
+                            saved_candle_size_status = "Skipped"
                     except Exception as e:
                         logger.warning(f"Error processing previous day candle for 10:15 alert {stock_name}: {str(e)}")
                         saved_candle_size_status = "Pending"
@@ -1850,13 +1850,13 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         
         # Save bullish and bearish data separately
         try:
-        with open(os.path.join(data_dir, "bullish_data.json"), "w") as f:
+            with open(os.path.join(data_dir, "bullish_data.json"), "w") as f:
                 json.dump(bullish_data, f, indent=2, default=json_serializer)
         except Exception as save_error:
             logger.warning(f"Failed to save bullish_data.json: {str(save_error)}")
         
         try:
-        with open(os.path.join(data_dir, "bearish_data.json"), "w") as f:
+            with open(os.path.join(data_dir, "bearish_data.json"), "w") as f:
                 json.dump(bearish_data, f, indent=2, default=json_serializer)
         except Exception as save_error:
             logger.warning(f"Failed to save bearish_data.json: {str(save_error)}")
@@ -2847,7 +2847,7 @@ async def manual_stock_entry(request: Request, db: Session = Depends(get_db)):
     }
     """
     try:
-    data = await request.json()
+        data = await request.json()
         
         bullish_stocks_str = data.get("bullishStocks", "").strip()
         bearish_stocks_str = data.get("bearishStocks", "").strip()
@@ -3994,9 +3994,9 @@ async def get_index_prices(db: Session = Depends(get_db)):
                 nifty_change_percent = nifty_stored.get('change_percent', 0)
             else:
                 # Fallback if no stored data
-            nifty_close = 0
-            nifty_open = 0
-            nifty_trend = 'unknown'
+                nifty_close = 0
+                nifty_open = 0
+                nifty_trend = 'unknown'
                 nifty_change = 0
                 nifty_change_percent = 0
             
@@ -4009,9 +4009,9 @@ async def get_index_prices(db: Session = Depends(get_db)):
                 banknifty_change_percent = banknifty_stored.get('change_percent', 0)
             else:
                 # Fallback if no stored data
-            banknifty_close = 0
-            banknifty_open = 0
-            banknifty_trend = 'unknown'
+                banknifty_close = 0
+                banknifty_open = 0
+                banknifty_trend = 'unknown'
                 banknifty_change = 0
                 banknifty_change_percent = 0
             
