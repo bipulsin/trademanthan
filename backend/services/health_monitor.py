@@ -123,19 +123,30 @@ class HealthMonitor:
                     IntradayStockOption.trade_date >= datetime.combine(today, datetime.min.time())
                 ).count()
                 
-                # Only alert if it's a weekday (Mon-Fri) and market hours
+                # Check if it's a trading day (not weekend or holiday)
+                is_trading_day = False
+                try:
+                    from services.upstox_service import upstox_service
+                    is_trading_day = upstox_service.is_trading_day(now)
+                except Exception as trading_day_error:
+                    logger.warning(f"Could not check if trading day: {str(trading_day_error)}")
+                    # Fallback: assume it's a trading day if it's a weekday
+                    is_trading_day = now.weekday() < 5
+                
+                # Only alert if it's a trading day and market hours
                 is_weekday = now.weekday() < 5  # 0=Monday, 4=Friday
                 
-                if is_weekday and now.hour >= 11 and today_alerts == 0:
-                    # After 11 AM on weekday, we should have received some webhooks
-                    # (Unless it's a trading holiday - but we can't detect all holidays)
+                if is_trading_day and is_weekday and now.hour >= 11 and today_alerts == 0:
+                    # After 11 AM on a trading day, we should have received some webhooks
                     self.webhook_failures += 1
-                    issues.append(f"⚠️ No webhooks received today (after 11 AM on weekday)")
-                    logger.warning(f"No webhooks received today after 11 AM (weekday)")
+                    issues.append(f"⚠️ No webhooks received today (after 11 AM on trading day)")
+                    logger.warning(f"No webhooks received today after 11 AM (trading day)")
                 else:
                     self.webhook_failures = 0
-                    if is_weekday:
+                    if is_trading_day and is_weekday:
                         logger.info(f"✅ Webhooks: {today_alerts} alerts today")
+                    elif not is_trading_day:
+                        logger.info(f"ℹ️ Market holiday - No webhooks expected ({today_alerts} alerts)")
                     else:
                         logger.info(f"ℹ️ Weekend - No webhooks expected ({today_alerts} alerts)")
                 
