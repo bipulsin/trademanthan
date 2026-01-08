@@ -57,6 +57,9 @@ async def lifespan(app: FastAPI):
     """
     import sys
     
+    # Track if startup completed successfully
+    startup_completed = False
+    
     # STARTUP
     print("=" * 60, flush=True)
     print("🚀 TRADE MANTHAN API STARTUP", flush=True)
@@ -138,9 +141,24 @@ async def lifespan(app: FastAPI):
     sys.stdout.flush()
     logger.info("✅ All services initialized and running")
     
-    yield  # Application runs here
+    # Mark startup as completed
+    startup_completed = True
     
-    # SHUTDOWN
+    try:
+        yield  # Application runs here
+    except Exception as e:
+        # If there's an error during startup (like port binding), log it but don't run shutdown
+        logger.error(f"Error during application startup: {e}")
+        if "address already in use" in str(e).lower() or "errno 98" in str(e).lower():
+            logger.warning("Port 8000 is already in use. Another instance may be running. Skipping shutdown.")
+            return
+        raise
+    
+    # SHUTDOWN - Only run if startup completed successfully
+    if not startup_completed:
+        logger.warning("Startup did not complete successfully. Skipping shutdown to avoid stopping other instance's schedulers.")
+        return
+        
     print("🛑 Shutting down Trade Manthan API...", flush=True)
     logger.info("🛑 Shutting down all services...")
     
