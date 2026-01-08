@@ -1292,9 +1292,67 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     # For non-10:15 alerts: Block entry if candle size filter fails
                     # For 10:15 alerts: Don't set "Candle size" as no_entry_reason
                     no_entry_reason = "Candle size"
-                elif option_ltp_value <= 0 or lot_size <= 0:
-                    no_entry_reason = "Missing option data"
                 # 10:15 AM alerts: Candle size is calculated but not used to block entry
+                
+                # CRITICAL: Retry option data fetch if missing but instrument_key exists
+                # This handles cases where initial fetch failed but data is actually available
+                if (option_ltp_value <= 0 or lot_size <= 0) and stock.get("instrument_key"):
+                    print(f"⚠️ Option data missing (LTP: {option_ltp_value}, Qty: {lot_size}), retrying fetch...")
+                    try:
+                        # Retry option LTP fetch
+                        if option_ltp_value <= 0:
+                            option_quote = vwap_service.get_market_quote_by_key(stock.get("instrument_key"))
+                            if option_quote and option_quote.get('last_price', 0) > 0:
+                                option_ltp_value = float(option_quote.get('last_price', 0))
+                                print(f"✅ Retry successful: Fetched option LTP: ₹{option_ltp_value}")
+                                # Update stock dictionary for consistency
+                                stock["option_ltp"] = option_ltp_value
+                            else:
+                                # Try fallback: use historical candles
+                                try:
+                                    candles = vwap_service.get_historical_candles_by_instrument_key(stock.get("instrument_key"), interval="hours/1", days_back=1)
+                                    if candles and len(candles) > 0:
+                                        candles.sort(key=lambda x: x.get('timestamp', 0), reverse=True)
+                                        option_ltp_value = round(candles[0].get('close', 0), 2)
+                                        print(f"✅ Retry successful: Fetched option LTP from candles: ₹{option_ltp_value}")
+                                        stock["option_ltp"] = option_ltp_value
+                                except Exception:
+                                    pass
+                        
+                        # Retry lot_size fetch from instruments.json
+                        if lot_size <= 0 and stock.get("option_contract"):
+                            try:
+                                import json
+                                instruments_file = "/home/ubuntu/trademanthan/data/instruments/nse_instruments.json"
+                                if os.path.exists(instruments_file):
+                                    with open(instruments_file, 'r') as f:
+                                        instruments_data = json.load(f)
+                                    
+                                    # Parse option contract to get symbol and strike
+                                    option_contract = stock.get("option_contract", "")
+                                    if option_contract:
+                                        # Extract symbol from option contract (e.g., "RELIANCE 28FEB2025 3000 CALL")
+                                        parts = option_contract.split()
+                                        if len(parts) >= 1:
+                                            symbol = parts[0]
+                                            # Search for any instrument with same underlying_symbol and get lot_size
+                                            for inst in instruments_data:
+                                                if (inst.get('underlying_symbol') == symbol and 
+                                                    inst.get('segment') == 'NSE_FO' and
+                                                    inst.get('lot_size') and inst.get('lot_size') > 0):
+                                                    lot_size = int(inst.get('lot_size'))
+                                                    print(f"✅ Retry successful: Found lot_size: {lot_size}")
+                                                    stock["qty"] = lot_size
+                                                    break
+                            except Exception as e:
+                                print(f"⚠️ Retry lot_size fetch failed: {str(e)}")
+                    except Exception as retry_error:
+                        print(f"⚠️ Error retrying option data fetch: {str(retry_error)}")
+                
+                # Check for missing option data AFTER retry
+                if option_ltp_value <= 0 or lot_size <= 0:
+                    if not no_entry_reason:  # Only set if no other reason was set
+                        no_entry_reason = "Missing option data"
                 
                 if not is_after_3_00pm and can_enter_trade_by_index and filters_passed and option_ltp_value > 0 and lot_size > 0:
                     # Enter trade: Fetch current option LTP again, set buy_time to current system time, stop_loss from previous candle low
