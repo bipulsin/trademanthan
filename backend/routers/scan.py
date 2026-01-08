@@ -896,6 +896,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             # ACTIVITY 6: Fetch Option LTP (Independent - requires instrument_key)
             # ====================================================================
             # CRITICAL: Fetch option LTP even if candles fail - this is independent
+            # CRITICAL: Also try to fetch if we have option_contract but no instrument_key yet
             if instrument_key and vwap_service:
                 try:
                     print(f"🔍 Fetching option LTP for {option_contract} using instrument_key: {instrument_key}")
@@ -919,12 +920,54 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 except Exception as e:
                     print(f"❌ ERROR fetching option LTP for {option_contract}: {str(e)}")
                     logger.error(f"Error fetching option LTP for {option_contract} (stock: {stock_name}, instrument_key: {instrument_key}): {str(e)}", exc_info=True)
+            elif option_contract and vwap_service and not instrument_key:
+                # FALLBACK: Try to find instrument_key again if we have option_contract but no instrument_key
+                # This handles cases where Activity 5 failed due to nested conditions but option_contract exists
+                print(f"⚠️ instrument_key is None but option_contract exists: {option_contract}")
+                print(f"   Attempting fallback: Retry instrument_key lookup...")
+                try:
+                    # Try a simpler lookup - search by option contract string directly
+                    from pathlib import Path
+                    import json as json_lib
+                    instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
+                    if instruments_file.exists():
+                        with open(instruments_file, 'r') as f:
+                            instruments_data = json_lib.load(f)
+                        # Search for instrument by trading_symbol matching option_contract
+                        for inst in instruments_data:
+                            trading_symbol = inst.get('trading_symbol', '')
+                            # Try to match option contract format in trading_symbol
+                            if option_contract.replace('-', '') in trading_symbol.replace(' ', ''):
+                                instrument_key = inst.get('instrument_key')
+                                if instrument_key:
+                                    print(f"✅ Fallback: Found instrument_key: {instrument_key}")
+                                    # Also get qty if available
+                                    inst_lot_size = inst.get('lot_size')
+                                    if inst_lot_size and inst_lot_size > 0 and qty == 0:
+                                        qty = int(inst_lot_size)
+                                        print(f"✅ Fallback: Found lot_size: {qty}")
+                                    # Now try to fetch option LTP
+                                    try:
+                                        quote_data = vwap_service.get_market_quote_by_key(instrument_key)
+                                        if quote_data and quote_data.get('last_price'):
+                                            option_ltp = float(quote_data.get('last_price', 0))
+                                            print(f"✅ Fallback: Fetched option LTP: ₹{option_ltp}")
+                                    except Exception:
+                                        pass
+                                    break
+                except Exception as fallback_error:
+                    print(f"⚠️ Fallback instrument_key lookup failed: {str(fallback_error)}")
+                if not instrument_key:
+                    print(f"⚠️ Cannot fetch option LTP for {option_contract} - instrument_key is None (fallback also failed)")
+                    logger.warning(f"Cannot fetch option LTP for {option_contract} (stock: {stock_name}) - instrument_key is None")
             elif not instrument_key:
-                print(f"⚠️ Cannot fetch option LTP for {option_contract} - instrument_key is None")
-                logger.warning(f"Cannot fetch option LTP for {option_contract} (stock: {stock_name}) - instrument_key is None")
+                print(f"⚠️ Cannot fetch option LTP for {option_contract if option_contract else 'N/A'} - instrument_key is None")
+                if option_contract:
+                    logger.warning(f"Cannot fetch option LTP for {option_contract} (stock: {stock_name}) - instrument_key is None")
             elif not vwap_service:
-                print(f"⚠️ Cannot fetch option LTP for {option_contract} - vwap_service is None")
-                logger.warning(f"Cannot fetch option LTP for {option_contract} (stock: {stock_name}) - vwap_service is None")
+                print(f"⚠️ Cannot fetch option LTP for {option_contract if option_contract else 'N/A'} - vwap_service is None")
+                if option_contract:
+                    logger.warning(f"Cannot fetch option LTP for {option_contract} (stock: {stock_name}) - vwap_service is None")
             
             # ====================================================================
             # ACTIVITY 7: Fetch Option Candles (Independent - requires instrument_key)
