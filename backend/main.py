@@ -139,39 +139,39 @@ async def lifespan(app: FastAPI):
     # Stop master stock scheduler
     try:
         stop_scheduler()
-        print("✅ Master stock scheduler stopped", flush=True)
+        logger.info("✅ Master stock scheduler stopped")
     except Exception as e:
-        print(f"⚠️ Error stopping master stock scheduler: {e}", flush=True)
+        logger.error(f"⚠️ Error stopping master stock scheduler: {e}", exc_info=True)
     
     # Stop instruments scheduler
     try:
         stop_instruments_scheduler()
-        print("✅ Instruments scheduler stopped", flush=True)
+        logger.info("✅ Instruments scheduler stopped")
     except Exception as e:
-        print(f"⚠️ Error stopping instruments scheduler: {e}", flush=True)
+        logger.error(f"⚠️ Error stopping instruments scheduler: {e}", exc_info=True)
     
     # Stop health monitor
     try:
         stop_health_monitor()
-        print("✅ Health monitor stopped", flush=True)
+        logger.info("✅ Health monitor stopped")
     except Exception as e:
-        print(f"⚠️ Error stopping health monitor: {e}", flush=True)
+        logger.error(f"⚠️ Error stopping health monitor: {e}", exc_info=True)
     
     # Stop Market Data updater
     try:
         stop_vwap_updater()
-        print("✅ Market Data updater stopped", flush=True)
+        logger.info("✅ Market Data updater stopped")
     except Exception as e:
-        print(f"⚠️ Error stopping Market Data updater: {e}", flush=True)
+        logger.error(f"⚠️ Error stopping Market Data updater: {e}", exc_info=True)
     
     # Stop index price scheduler
     try:
         stop_index_price_scheduler()
-        print("✅ Index price scheduler stopped", flush=True)
+        logger.info("✅ Index price scheduler stopped")
     except Exception as e:
-        print(f"⚠️ Error stopping index price scheduler: {e}", flush=True)
+        logger.error(f"⚠️ Error stopping index price scheduler: {e}", exc_info=True)
     
-    print("✅ Shutdown complete", flush=True)
+    logger.info("✅ Shutdown complete")
 
 app = FastAPI(
     title="Trade Manthan API",
