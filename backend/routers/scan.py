@@ -5341,10 +5341,24 @@ async def get_scan_logs(lines: int = Query(100, ge=1, le=10000, description="Num
         # Find the most recent log file
         log_file = log_dir / 'trademanthan.log'
         
+        # Check if main log file is stale (not updated in last 5 minutes)
+        # If stale, prefer /tmp/uvicorn.log if it's more recent
+        if log_file.exists():
+            import time
+            main_log_mtime = log_file.stat().st_mtime
+            current_time = time.time()
+            # If main log hasn't been updated in 5 minutes, check uvicorn.log
+            if current_time - main_log_mtime > 300:  # 5 minutes
+                uvicorn_log = Path('/tmp/uvicorn.log')
+                if uvicorn_log.exists() and uvicorn_log.stat().st_mtime > main_log_mtime:
+                    log_file = uvicorn_log
+                    logger.info(f"Main log file stale, using {uvicorn_log}")
+        
         # Alternative: try to find from logging configuration
         if not log_file.exists():
-            # Try alternative locations
+            # Try alternative locations (including uvicorn.log as priority fallback)
             alternative_paths = [
+                Path('/tmp/uvicorn.log'),  # Priority fallback - screen session output
                 Path('/var/log/trademanthan/trademanthan.log'),
                 Path('/tmp/trademanthan.log'),
                 Path.home() / 'trademanthan.log'
