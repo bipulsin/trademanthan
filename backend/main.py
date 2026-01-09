@@ -133,7 +133,7 @@ async def lifespan(app: FastAPI):
         logger.warning("Startup did not complete successfully. Skipping shutdown to avoid stopping other instance's schedulers.")
         return
         
-    print("🛑 Shutting down Trade Manthan API...", flush=True)
+    logger.info("🛑 Shutting down Trade Manthan API...")
     logger.info("🛑 Shutting down all services...")
     
     # Stop master stock scheduler
