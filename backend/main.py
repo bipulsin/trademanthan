@@ -36,17 +36,24 @@ for handler in root_logger.handlers[:]:
     root_logger.removeHandler(handler)
 
 # Configure root logger
-# CRITICAL: Use StreamHandler first to ensure logs go to stdout/stderr (captured by screen session)
-# This ensures logs appear in /tmp/uvicorn.log when running in screen session
+# CRITICAL: Write logs ONLY to the log file, not stdout/stderr
+# This ensures all logs go to trademanthan.log regardless of how backend is started
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
     handlers=[
-        logging.StreamHandler(sys.stdout),  # Log to stdout first (captured by screen session)
-        logging.FileHandler(log_file, mode='a')  # Also log to file
+        logging.FileHandler(log_file, mode='a', encoding='utf-8'),  # Write only to log file
     ],
     force=True  # Override existing configuration
 )
+
+# Also add StreamHandler for console output (but this will go to log file if redirected)
+# This ensures print statements and logger output both go to the same place
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setLevel(logging.INFO)
+console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s'))
+root_logger = logging.getLogger()
+root_logger.addHandler(console_handler)
 
 logger = logging.getLogger(__name__)
 logger.info("🚀 TradeManthan backend starting...")
@@ -63,84 +70,57 @@ async def lifespan(app: FastAPI):
     startup_completed = False
     
     # STARTUP
-    print("=" * 60, flush=True)
-    print("🚀 TRADE MANTHAN API STARTUP", flush=True)
-    print("=" * 60, flush=True)
-    sys.stdout.flush()
+    logger.info("=" * 60)
+    logger.info("🚀 TRADE MANTHAN API STARTUP")
+    logger.info("=" * 60)
     
     # Start master stock scheduler (downloads CSV daily at 9:00 AM)
     try:
-        print("Starting Master Stock Scheduler...", flush=True)
-        sys.stdout.flush()
+        logger.info("Starting Master Stock Scheduler...")
         start_scheduler()
-        print("✅ Master Stock Scheduler: STARTED (Daily at 9:00 AM IST)", flush=True)
-        sys.stdout.flush()
+        logger.info("✅ Master Stock Scheduler: STARTED (Daily at 9:00 AM IST)")
     except Exception as e:
-        print(f"❌ Master Stock Scheduler: FAILED - {e}", flush=True)
-        sys.stdout.flush()
-        import traceback
-        traceback.print_exc()
+        logger.error(f"❌ Master Stock Scheduler: FAILED - {e}", exc_info=True)
     
     # Start instruments scheduler (downloads JSON daily at 9:05 AM)
     try:
-        print("Starting Instruments Scheduler...", flush=True)
-        sys.stdout.flush()
+        logger.info("Starting Instruments Scheduler...")
         start_instruments_scheduler()
-        print("✅ Instruments Scheduler: STARTED (Daily at 9:05 AM IST)", flush=True)
-        sys.stdout.flush()
+        logger.info("✅ Instruments Scheduler: STARTED (Daily at 9:05 AM IST)")
     except Exception as e:
-        print(f"❌ Instruments Scheduler: FAILED - {e}", flush=True)
-        sys.stdout.flush()
-        import traceback
-        traceback.print_exc()
+        logger.error(f"❌ Instruments Scheduler: FAILED - {e}", exc_info=True)
     
     # Start health monitor (checks every 30 min from 8:39 AM to 4:09 PM)
     try:
-        print("Starting Health Monitor...", flush=True)
-        sys.stdout.flush()
+        logger.info("Starting Health Monitor...")
         start_health_monitor()
-        print("✅ Health Monitor: STARTED (Every 30 min, 8:39 AM - 4:09 PM IST)", flush=True)
-        sys.stdout.flush()
+        logger.info("✅ Health Monitor: STARTED (Every 30 min, 8:39 AM - 4:09 PM IST)")
     except Exception as e:
-        print(f"❌ Health Monitor: FAILED - {e}", flush=True)
-        sys.stdout.flush()
-        import traceback
-        traceback.print_exc()
+        logger.error(f"❌ Health Monitor: FAILED - {e}", exc_info=True)
     
     # Start Market Data Updater (updates VWAP, Stock LTP, Option LTP hourly)
     try:
-        print("Starting Market Data Updater...", flush=True)
-        sys.stdout.flush()
+        logger.info("Starting Market Data Updater...")
         start_vwap_updater()
-        print("✅ Market Data Updater: STARTED", flush=True)
-        print("   - Hourly updates (9:15 AM - 3:15 PM): Stock VWAP, Stock LTP, Option LTP", flush=True)
-        print("   - Auto-close trades at 3:25 PM", flush=True)
-        sys.stdout.flush()
+        logger.info("✅ Market Data Updater: STARTED")
+        logger.info("   - Hourly updates (9:15 AM - 3:15 PM): Stock VWAP, Stock LTP, Option LTP")
+        logger.info("   - Auto-close trades at 3:25 PM")
     except Exception as e:
-        print(f"❌ Market Data Updater: FAILED - {e}", flush=True)
-        sys.stdout.flush()
-        import traceback
-        traceback.print_exc()
+        logger.error(f"❌ Market Data Updater: FAILED - {e}", exc_info=True)
     
     # Start index price scheduler (every 5 minutes during market hours, stores at 9:15 AM and 3:30 PM)
     try:
-        print("Starting Index Price Scheduler...", flush=True)
-        sys.stdout.flush()
+        logger.info("Starting Index Price Scheduler...")
         start_index_price_scheduler()
-        print("✅ Index Price Scheduler: STARTED (Every 5 min, 9:15 AM - 3:30 PM IST)", flush=True)
-        print("   - Fetches NIFTY50 and BANKNIFTY prices every 5 minutes during market hours", flush=True)
-        print("   - Stores prices at 9:15 AM (market open) and 3:30 PM (market close)", flush=True)
-        sys.stdout.flush()
+        logger.info("✅ Index Price Scheduler: STARTED (Every 5 min, 9:15 AM - 3:30 PM IST)")
+        logger.info("   - Fetches NIFTY50 and BANKNIFTY prices every 5 minutes during market hours")
+        logger.info("   - Stores prices at 9:15 AM (market open) and 3:30 PM (market close)")
     except Exception as e:
-        print(f"❌ Index Price Scheduler: FAILED - {e}", flush=True)
-        sys.stdout.flush()
-        import traceback
-        traceback.print_exc()
+        logger.error(f"❌ Index Price Scheduler: FAILED - {e}", exc_info=True)
     
-    print("=" * 60, flush=True)
-    print("✅ STARTUP COMPLETE - All Services Active", flush=True)
-    print("=" * 60, flush=True)
-    sys.stdout.flush()
+    logger.info("=" * 60)
+    logger.info("✅ STARTUP COMPLETE - All Services Active")
+    logger.info("=" * 60)
     logger.info("✅ All services initialized and running")
     
     # Mark startup as completed
