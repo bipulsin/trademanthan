@@ -36,12 +36,14 @@ for handler in root_logger.handlers[:]:
     root_logger.removeHandler(handler)
 
 # Configure root logger
+# CRITICAL: Use StreamHandler first to ensure logs go to stdout/stderr (captured by screen session)
+# This ensures logs appear in /tmp/uvicorn.log when running in screen session
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
     handlers=[
-        logging.FileHandler(log_file, mode='a'),
-        logging.StreamHandler()  # Also log to console
+        logging.StreamHandler(sys.stdout),  # Log to stdout first (captured by screen session)
+        logging.FileHandler(log_file, mode='a')  # Also log to file
     ],
     force=True  # Override existing configuration
 )
