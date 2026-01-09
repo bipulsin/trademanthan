@@ -36,24 +36,16 @@ for handler in root_logger.handlers[:]:
     root_logger.removeHandler(handler)
 
 # Configure root logger
-# CRITICAL: Write logs ONLY to the log file, not stdout/stderr
-# This ensures all logs go to trademanthan.log regardless of how backend is started
+# CRITICAL: Write logs ONLY to the log file (trademanthan.log), not stdout/stderr
+# This ensures all logs go to a single file regardless of how backend is started
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
     handlers=[
-        logging.FileHandler(log_file, mode='a', encoding='utf-8'),  # Write only to log file
+        logging.FileHandler(log_file, mode='a', encoding='utf-8')  # Write ONLY to log file
     ],
     force=True  # Override existing configuration
 )
-
-# Also add StreamHandler for console output (but this will go to log file if redirected)
-# This ensures print statements and logger output both go to the same place
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setLevel(logging.INFO)
-console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s'))
-root_logger = logging.getLogger()
-root_logger.addHandler(console_handler)
 
 logger = logging.getLogger(__name__)
 logger.info("🚀 TradeManthan backend starting...")
