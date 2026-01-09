@@ -41,6 +41,8 @@ for handler in root_logger.handlers[:]:
 file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
 file_handler.setLevel(logging.INFO)
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s'))
+# CRITICAL: Disable buffering to ensure logs are written immediately
+file_handler.stream.reconfigure(line_buffering=True) if hasattr(file_handler.stream, 'reconfigure') else None
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,10 +50,6 @@ logging.basicConfig(
     handlers=[file_handler],
     force=True  # Override existing configuration
 )
-
-# Ensure logs are flushed immediately (no buffering)
-import sys
-sys.stdout = sys.__stdout__  # Ensure stdout is unbuffered
 
 logger = logging.getLogger(__name__)
 logger.info("🚀 TradeManthan backend starting...")
