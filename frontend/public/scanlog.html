@@ -981,7 +981,8 @@
                     displayError('Maximum 10000 lines allowed. Showing 10000 lines.');
                 }
                 
-                const response = await fetch(`${API_BASE_URL}/scan/logs?lines=${lines}`);
+                // Request scan_st1_algo.log for scan algorithm logs
+                const response = await fetch(`${API_BASE_URL}/scan/logs?lines=${lines}&log_type=scan_st1_algo`);
                 
                 // Check if response is OK
                 if (!response.ok) {

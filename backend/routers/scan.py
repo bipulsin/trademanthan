@@ -2002,100 +2002,42 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
 
 @router.post("/manual-start-schedulers")
 async def manual_start_schedulers():
-    """Manually start all schedulers if they're not running"""
+    """Manually start Scan ST1 Algo Scheduler (replaces all old schedulers)"""
     try:
-        from backend.services.health_monitor import start_health_monitor, health_monitor
-        from backend.services.vwap_updater import start_vwap_updater, vwap_updater
-        from backend.services.master_stock_scheduler import start_scheduler, master_stock_scheduler
-        from backend.services.instruments_downloader import start_instruments_scheduler, instruments_scheduler
-        from backend.services.index_price_scheduler import start_index_price_scheduler, index_price_scheduler
+        from backend.services.scan_st1_algo import start_scan_st1_algo, scan_st1_algo_scheduler
         
-        results = {}
+        # Check if scan_st1_algo is already running
+        if scan_st1_algo_scheduler and scan_st1_algo_scheduler.is_running and scan_st1_algo_scheduler.scheduler.running:
+            return {
+                "success": True,
+                "message": "Scan ST1 Algo Scheduler is already running",
+                "jobs_count": len(scan_st1_algo_scheduler.scheduler.get_jobs()),
+                "timestamp": datetime.now().isoformat()
+            }
         
-        # Start Health Monitor - Check both is_running flag and actual scheduler state
-        if health_monitor and health_monitor.scheduler and health_monitor.scheduler.running and health_monitor.is_running and len(health_monitor.scheduler.get_jobs()) > 0:
-            results["health_monitor"] = "already_running"
-        else:
-            # Stop first if it exists but is in a bad state
-            if health_monitor and health_monitor.scheduler:
-                try:
-                    if health_monitor.scheduler.running:
-                        health_monitor.stop()
-                except:
-                    pass
-            start_health_monitor()
-            results["health_monitor"] = "started"
-            logger.info("✅ Health Monitor manually started")
+        # Stop first if it exists but is in a bad state
+        if scan_st1_algo_scheduler and scan_st1_algo_scheduler.scheduler:
+            try:
+                if scan_st1_algo_scheduler.scheduler.running:
+                    scan_st1_algo_scheduler.stop()
+            except:
+                pass
         
-        # Start VWAP Updater - Check both is_running flag and actual scheduler state
-        if vwap_updater and vwap_updater.scheduler and vwap_updater.scheduler.running and vwap_updater.is_running and len(vwap_updater.scheduler.get_jobs()) > 0:
-            results["vwap_updater"] = "already_running"
-        else:
-            # Stop first if it exists but is in a bad state
-            if vwap_updater and vwap_updater.scheduler:
-                try:
-                    if vwap_updater.scheduler.running:
-                        vwap_updater.stop()
-                except:
-                    pass
-            start_vwap_updater()
-            results["vwap_updater"] = "started"
-            logger.info("✅ VWAP Updater manually started")
+        # Start the unified scheduler
+        start_scan_st1_algo()
+        jobs_count = len(scan_st1_algo_scheduler.scheduler.get_jobs())
         
-        # Start Master Stock Scheduler - Check both is_running flag and actual scheduler state
-        if master_stock_scheduler and master_stock_scheduler.scheduler and master_stock_scheduler.scheduler.running and master_stock_scheduler.is_running and len(master_stock_scheduler.scheduler.get_jobs()) > 0:
-            results["master_stock"] = "already_running"
-        else:
-            # Stop first if it exists but is in a bad state
-            if master_stock_scheduler and master_stock_scheduler.scheduler:
-                try:
-                    if master_stock_scheduler.scheduler.running:
-                        master_stock_scheduler.stop()
-                except:
-                    pass
-            start_scheduler()
-            results["master_stock"] = "started"
-            logger.info("✅ Master Stock Scheduler manually started")
-        
-        # Start Instruments Scheduler - Check both is_running flag and actual scheduler state
-        if instruments_scheduler and instruments_scheduler.scheduler and instruments_scheduler.scheduler.running and instruments_scheduler.is_running and len(instruments_scheduler.scheduler.get_jobs()) > 0:
-            results["instruments"] = "already_running"
-        else:
-            # Stop first if it exists but is in a bad state
-            if instruments_scheduler and instruments_scheduler.scheduler:
-                try:
-                    if instruments_scheduler.scheduler.running:
-                        instruments_scheduler.stop()
-                except:
-                    pass
-            start_instruments_scheduler()
-            results["instruments"] = "started"
-            logger.info("✅ Instruments Scheduler manually started")
-        
-        # Start Index Price Scheduler - Check both is_running flag and actual scheduler state
-        if index_price_scheduler and index_price_scheduler.scheduler and index_price_scheduler.scheduler.running and index_price_scheduler.is_running and len(index_price_scheduler.scheduler.get_jobs()) > 0:
-            results["index_price"] = "already_running"
-        else:
-            # Stop first if it exists but is in a bad state
-            if index_price_scheduler and index_price_scheduler.scheduler:
-                try:
-                    if index_price_scheduler.scheduler.running:
-                        index_price_scheduler.stop()
-                except:
-                    pass
-            start_index_price_scheduler()
-            results["index_price"] = "started"
-            logger.info("✅ Index Price Scheduler manually started")
+        logger.info(f"✅ Scan ST1 Algo Scheduler manually started with {jobs_count} jobs")
         
         return {
             "success": True,
-            "message": "Schedulers checked and started if needed",
-            "results": results,
+            "message": "Scan ST1 Algo Scheduler started successfully",
+            "jobs_count": jobs_count,
             "timestamp": datetime.now().isoformat()
         }
         
     except Exception as e:
-        logger.error(f"Error starting schedulers: {e}")
+        logger.error(f"Error starting Scan ST1 Algo Scheduler: {e}")
         import traceback
         traceback.print_exc()
         return {
@@ -2544,75 +2486,51 @@ async def recalculate_all_today_trades(db: Session = Depends(get_db)):
 
 @router.get("/scheduler-status")
 async def get_scheduler_status():
-    """Get status of all schedulers - verifies they are running"""
+    """Get status of Scan ST1 Algo Scheduler (replaces all old schedulers)"""
     try:
-        from backend.services.health_monitor import health_monitor
-        from backend.services.vwap_updater import vwap_updater
-        from backend.services.master_stock_scheduler import master_stock_scheduler
-        from backend.services.instruments_downloader import instruments_scheduler
-        from backend.services.index_price_scheduler import index_price_scheduler
+        from backend.services.scan_st1_algo import scan_st1_algo_scheduler
         
-        status = {
-            "health_monitor": {
-                "running": health_monitor.is_running,
-                "state": health_monitor.scheduler.state if health_monitor.scheduler and hasattr(health_monitor.scheduler, 'state') else None,
-                "jobs_count": len(health_monitor.scheduler.get_jobs()) if health_monitor.scheduler else 0
-            },
-            "vwap_updater": {
-                "running": vwap_updater.is_running,
-                "state": vwap_updater.scheduler.state if vwap_updater.scheduler and hasattr(vwap_updater.scheduler, 'state') else None,
-                "jobs_count": len(vwap_updater.scheduler.get_jobs()) if vwap_updater.scheduler else 0,
-                "has_3_25pm_close_job": vwap_updater.scheduler.get_job('close_all_trades_eod') is not None if vwap_updater.scheduler else False
-            },
-            "master_stock": {
-                "running": master_stock_scheduler.is_running,
-                "jobs_count": len(master_stock_scheduler.scheduler.get_jobs()) if master_stock_scheduler.scheduler else 0
-            },
-            "instruments": {
-                "running": instruments_scheduler.is_running,
-                "jobs_count": len(instruments_scheduler.scheduler.get_jobs()) if instruments_scheduler.scheduler else 0
-            },
-            "index_price": {
-                "running": index_price_scheduler.is_running,
-                "jobs_count": len(index_price_scheduler.scheduler.get_jobs()) if index_price_scheduler.scheduler else 0
+        if not scan_st1_algo_scheduler:
+            return {
+                "success": False,
+                "error": "Scan ST1 Algo Scheduler not initialized",
+                "all_running": False,
+                "total_jobs": 0
             }
-        }
         
-        # Get next few jobs for VWAP updater
-        if vwap_updater.scheduler:
-            jobs = vwap_updater.scheduler.get_jobs()
-            status["vwap_updater"]["next_jobs"] = [
+        is_running = scan_st1_algo_scheduler.is_running and scan_st1_algo_scheduler.scheduler.running if scan_st1_algo_scheduler.scheduler else False
+        jobs_count = len(scan_st1_algo_scheduler.scheduler.get_jobs()) if scan_st1_algo_scheduler.scheduler and scan_st1_algo_scheduler.scheduler.running else 0
+        
+        # Get next few jobs
+        next_jobs = []
+        if scan_st1_algo_scheduler.scheduler and scan_st1_algo_scheduler.scheduler.running:
+            jobs = scan_st1_algo_scheduler.scheduler.get_jobs()
+            next_jobs = [
                 {"name": job.name, "next_run": str(job.next_run_time)} 
-                for job in sorted(jobs, key=lambda x: x.next_run_time if x.next_run_time else float('inf'))[:5]
+                for job in sorted(jobs, key=lambda x: x.next_run_time if x.next_run_time else float('inf'))[:10]
             ]
         
-        # Calculate total jobs across all schedulers
-        total_jobs = (
-            status["health_monitor"]["jobs_count"] +
-            status["vwap_updater"]["jobs_count"] +
-            status["master_stock"]["jobs_count"] +
-            status["instruments"]["jobs_count"] +
-            status["index_price"]["jobs_count"]
-        )
-        
-        all_running = (
-            health_monitor.is_running and 
-            vwap_updater.is_running and
-            master_stock_scheduler.is_running and
-            instruments_scheduler.is_running and
-            index_price_scheduler.is_running
-        )
-        
         return {
-            "success": True, 
-            "all_schedulers_running": all_running,
-            "total_jobs": total_jobs,
-            "schedulers": status
+            "success": True,
+            "all_running": is_running,
+            "total_jobs": jobs_count,
+            "scan_st1_algo": {
+                "running": is_running,
+                "jobs_count": jobs_count,
+                "next_jobs": next_jobs
+            }
         }
         
     except Exception as e:
         logger.error(f"Error getting scheduler status: {e}")
-        return {"success": False, "error": str(e)}
+        import traceback
+        traceback.print_exc()
+        return {
+            "success": False,
+            "error": str(e),
+            "all_running": False,
+            "total_jobs": 0
+        }
 
 
 @router.post("/deploy-backend")
@@ -5384,12 +5302,18 @@ async def get_daily_trades(
 
 
 @router.get("/logs")
-async def get_scan_logs(lines: int = Query(100, ge=1, le=10000, description="Number of log lines to retrieve (1-10000)")):
+async def get_scan_logs(
+    lines: int = Query(100, ge=1, le=10000, description="Number of log lines to retrieve (1-10000)"),
+    log_type: str = Query("scan_st1_algo", description="Log file type: 'scan_st1_algo' (default) or 'trademanthan'")
+):
     """
-    Get the last N lines from the application log file
+    Get the last N lines from the log file
+    For scanlog.html, reads from scan_st1_algo.log (scan algorithm logs)
+    For other uses, can read from trademanthan.log
     
     Args:
         lines: Number of lines to return (default 100, max 10000)
+        log_type: Type of log file - 'scan_st1_algo' (default) or 'trademanthan'
     
     Returns:
         JSON with log lines
@@ -5403,8 +5327,12 @@ async def get_scan_logs(lines: int = Query(100, ge=1, le=10000, description="Num
             # Local environment
             log_dir = Path(__file__).parent.parent.parent / 'logs'
         
-        # Find the log file - ONLY use trademanthan.log (no fallback to /tmp/uvicorn.log)
-        log_file = log_dir / 'trademanthan.log'
+        # Use scan_st1_algo.log for scan algorithm logs (default for scanlog.html)
+        if log_type == "scan_st1_algo":
+            log_file = log_dir / 'scan_st1_algo.log'
+        else:
+            # Fallback to trademanthan.log for other uses
+            log_file = log_dir / 'trademanthan.log'
         
         # Alternative: try to find from logging configuration (only if main file doesn't exist)
         if not log_file.exists():

@@ -16,11 +16,15 @@ import backend.routers.broker as broker
 import backend.routers.products as products
 import backend.routers.algo as algo
 import backend.routers.scan as scan
-from backend.services.master_stock_scheduler import start_scheduler, stop_scheduler
-from backend.services.instruments_downloader import start_instruments_scheduler, stop_instruments_scheduler
-from backend.services.health_monitor import start_health_monitor, stop_health_monitor
-from backend.services.vwap_updater import start_vwap_updater, stop_vwap_updater
-from backend.services.index_price_scheduler import start_index_price_scheduler, stop_index_price_scheduler
+# OLD SCHEDULERS - DISABLED - Migrated to scan_st1_algo
+# from backend.services.master_stock_scheduler import start_scheduler, stop_scheduler
+# from backend.services.instruments_downloader import start_instruments_scheduler, stop_instruments_scheduler
+# from backend.services.health_monitor import start_health_monitor, stop_health_monitor
+# from backend.services.vwap_updater import start_vwap_updater, stop_vwap_updater
+# from backend.services.index_price_scheduler import start_index_price_scheduler, stop_index_price_scheduler
+
+# NEW UNIFIED SCHEDULER - Scan ST1 Algo
+from backend.services.scan_st1_algo import start_scan_st1_algo, stop_scan_st1_algo
 
 load_dotenv()
 
@@ -89,49 +93,19 @@ async def lifespan(app: FastAPI):
         logger.info("🚀 TRADE MANTHAN API STARTUP")
         logger.info("=" * 60)
         
-        # Start master stock scheduler (downloads CSV daily at 9:00 AM)
-        try:
-            logger.info("Starting Master Stock Scheduler...")
-            start_scheduler()
-            logger.info("✅ Master Stock Scheduler: STARTED (Daily at 9:00 AM IST)")
-        except Exception as e:
-            logger.error(f"❌ Master Stock Scheduler: FAILED - {e}", exc_info=True)
+        # OLD SCHEDULERS - DISABLED - All migrated to scan_st1_algo
+        # These are commented out to prevent them from starting
+        # logger.info("⚠️ Old schedulers are disabled - using scan_st1_algo instead")
         
-        # Start instruments scheduler (downloads JSON daily at 9:05 AM)
+        # Start unified Scan ST1 Algo Scheduler (consolidates all 5 old schedulers)
         try:
-            logger.info("Starting Instruments Scheduler...")
-            start_instruments_scheduler()
-            logger.info("✅ Instruments Scheduler: STARTED (Daily at 9:05 AM IST)")
+            logger.info("Starting Scan ST1 Algo Scheduler Controller...")
+            start_scan_st1_algo()
+            logger.info("✅ Scan ST1 Algo Scheduler: STARTED")
+            logger.info("   - Consolidates: Master Stock, Instruments, Health Monitor, VWAP Updater, Index Price")
+            logger.info("   - All logs go to: logs/scan_st1_algo.log")
         except Exception as e:
-            logger.error(f"❌ Instruments Scheduler: FAILED - {e}", exc_info=True)
-        
-        # Start health monitor (checks every 30 min from 8:39 AM to 4:09 PM)
-        try:
-            logger.info("Starting Health Monitor...")
-            start_health_monitor()
-            logger.info("✅ Health Monitor: STARTED (Every 30 min, 8:39 AM - 4:09 PM IST)")
-        except Exception as e:
-            logger.error(f"❌ Health Monitor: FAILED - {e}", exc_info=True)
-        
-        # Start Market Data Updater (updates VWAP, Stock LTP, Option LTP hourly)
-        try:
-            logger.info("Starting Market Data Updater...")
-            start_vwap_updater()
-            logger.info("✅ Market Data Updater: STARTED")
-            logger.info("   - Hourly updates (9:15 AM - 3:15 PM): Stock VWAP, Stock LTP, Option LTP")
-            logger.info("   - Auto-close trades at 3:25 PM")
-        except Exception as e:
-            logger.error(f"❌ Market Data Updater: FAILED - {e}", exc_info=True)
-        
-        # Start index price scheduler (every 5 minutes during market hours, stores at 9:15 AM and 3:30 PM)
-        try:
-            logger.info("Starting Index Price Scheduler...")
-            start_index_price_scheduler()
-            logger.info("✅ Index Price Scheduler: STARTED (Every 5 min, 9:15 AM - 3:30 PM IST)")
-            logger.info("   - Fetches NIFTY50 and BANKNIFTY prices every 5 minutes during market hours")
-            logger.info("   - Stores prices at 9:15 AM (market open) and 3:30 PM (market close)")
-        except Exception as e:
-            logger.error(f"❌ Index Price Scheduler: FAILED - {e}", exc_info=True)
+            logger.error(f"❌ Scan ST1 Algo Scheduler: FAILED - {e}", exc_info=True)
         
         logger.info("=" * 60)
         logger.info("✅ STARTUP COMPLETE - All Services Active")
@@ -171,40 +145,12 @@ async def lifespan(app: FastAPI):
     logger.info("🛑 Shutting down Trade Manthan API...")
     logger.info("🛑 Shutting down all services...")
     
-    # Stop master stock scheduler
+    # Stop Scan ST1 Algo Scheduler (replaces all old schedulers)
     try:
-        stop_scheduler()
-        logger.info("✅ Master stock scheduler stopped")
+        stop_scan_st1_algo()
+        logger.info("✅ Scan ST1 Algo Scheduler stopped")
     except Exception as e:
-        logger.error(f"⚠️ Error stopping master stock scheduler: {e}", exc_info=True)
-    
-    # Stop instruments scheduler
-    try:
-        stop_instruments_scheduler()
-        logger.info("✅ Instruments scheduler stopped")
-    except Exception as e:
-        logger.error(f"⚠️ Error stopping instruments scheduler: {e}", exc_info=True)
-    
-    # Stop health monitor
-    try:
-        stop_health_monitor()
-        logger.info("✅ Health monitor stopped")
-    except Exception as e:
-        logger.error(f"⚠️ Error stopping health monitor: {e}", exc_info=True)
-    
-    # Stop Market Data updater
-    try:
-        stop_vwap_updater()
-        logger.info("✅ Market Data updater stopped")
-    except Exception as e:
-        logger.error(f"⚠️ Error stopping Market Data updater: {e}", exc_info=True)
-    
-    # Stop index price scheduler
-    try:
-        stop_index_price_scheduler()
-        logger.info("✅ Index price scheduler stopped")
-    except Exception as e:
-        logger.error(f"⚠️ Error stopping index price scheduler: {e}", exc_info=True)
+        logger.error(f"⚠️ Error stopping Scan ST1 Algo Scheduler: {e}", exc_info=True)
     
     logger.info("✅ Shutdown complete")
 
