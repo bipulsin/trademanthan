@@ -3566,13 +3566,13 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                     else:
                         # Option LTP fetch failed - log detailed error
                         logger.error(f"❌ Cycle {cycle_number} - {stock_name}: All conditions met BUT option LTP fetch FAILED - cannot enter")
-                            logger.error(f"   Instrument Key: {trade.instrument_key}")
-                            logger.error(f"   Option Contract: {trade.option_contract}")
-                            if option_quote:
-                                logger.error(f"   Option Quote Response: {option_quote}")
-                                logger.error(f"   Last Price in Response: {option_quote.get('last_price', 'NOT FOUND')}")
-                            else:
-                                logger.error(f"   Option Quote Response: None (API call returned None)")
+                        logger.error(f"   Instrument Key: {trade.instrument_key}")
+                        logger.error(f"   Option Contract: {trade.option_contract}")
+                        if option_quote:
+                            logger.error(f"   Option Quote Response: {option_quote}")
+                            logger.error(f"   Last Price in Response: {option_quote.get('last_price', 'NOT FOUND')}")
+                        else:
+                            logger.error(f"   Option Quote Response: None (API call returned None)")
                             logger.error(f"   📊 All Other Conditions Were Met:")
                             logger.error(f"      - Time Before 3PM: ✅ ({now.strftime('%H:%M:%S')})")
                             logger.error(f"      - Index Trends: ✅ (NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend})")
