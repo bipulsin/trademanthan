@@ -60,11 +60,16 @@ screen -wipe 2>/dev/null || true
 screen -S trademanthan -X quit 2>/dev/null || true
 sleep 1
 
-# Start backend in screen session - Run from backend directory to use backend/main.py with lifespan
-# This ensures proper imports and module resolution
-screen -dmS trademanthan bash -c 'cd /home/ubuntu/trademanthan/backend && export PYTHONPATH=/home/ubuntu/trademanthan:$PYTHONPATH && source venv/bin/activate && python3 -u -m uvicorn main:app --host 0.0.0.0 --port 8000'
+# Start backend in screen session - MUST run from project root with PYTHONPATH set
+# Use backend.main:app to load backend/main.py with lifespan function
+# PYTHONPATH must include project root so "from backend.xxx" imports work
+screen -dmS trademanthan bash -c 'cd /home/ubuntu/trademanthan && export PYTHONPATH=/home/ubuntu/trademanthan:$PYTHONPATH && source backend/venv/bin/activate && python3 -u -m uvicorn backend.main:app --host 0.0.0.0 --port 8000'
 sleep 3
-BACKEND_PID=$(pgrep -f "uvicorn.*main:app" | head -1)
+BACKEND_PID=$(pgrep -f "uvicorn.*backend.main:app" | head -1)
+if [ -z "$BACKEND_PID" ]; then
+    # Fallback: check for any uvicorn process
+    BACKEND_PID=$(pgrep -f "uvicorn.*main:app" | head -1)
+fi
 
 log_message "Backend started with PID: $BACKEND_PID"
 
