@@ -100,13 +100,21 @@ async def lifespan(app: FastAPI):
         # Start unified Scan ST1 Algo Scheduler (consolidates all schedulers except Master Stock)
         try:
             logger.info("Starting Scan ST1 Algo Scheduler Controller...")
-            start_scan_st1_algo()
-            logger.info("✅ Scan ST1 Algo Scheduler: STARTED")
-            logger.info("   - Consolidates: Instruments, Health Monitor, VWAP Updater, Index Price")
-            logger.info("   - Master Stock download from Dhan removed")
-            logger.info("   - All logs go to: logs/scan_st1_algo.log")
+            try:
+                start_scan_st1_algo()
+                logger.info("✅ Scan ST1 Algo Scheduler: STARTED")
+                logger.info("   - Consolidates: Instruments, Health Monitor, VWAP Updater, Index Price")
+                logger.info("   - Master Stock download from Dhan removed")
+                logger.info("   - All logs go to: logs/scan_st1_algo.log")
+            except ImportError as import_err:
+                logger.error(f"❌ Scan ST1 Algo Scheduler: IMPORT ERROR - {import_err}", exc_info=True)
+                logger.warning("⚠️ Continuing without scheduler - some scheduled jobs may not run")
+            except Exception as scheduler_err:
+                logger.error(f"❌ Scan ST1 Algo Scheduler: FAILED - {scheduler_err}", exc_info=True)
+                logger.warning("⚠️ Continuing without scheduler - some scheduled jobs may not run")
         except Exception as e:
-            logger.error(f"❌ Scan ST1 Algo Scheduler: FAILED - {e}", exc_info=True)
+            logger.error(f"❌ Scan ST1 Algo Scheduler: CRITICAL ERROR - {e}", exc_info=True)
+            logger.warning("⚠️ Backend will continue running but scheduled jobs may not work")
         
         logger.info("=" * 60)
         logger.info("✅ STARTUP COMPLETE - All Services Active")
