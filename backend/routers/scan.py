@@ -2105,6 +2105,55 @@ async def manual_start_schedulers():
         }
 
 
+@router.post("/manual-health-check")
+async def manual_health_check(db: Session = Depends(get_db)):
+    """Manually trigger health check job - runs immediately"""
+    try:
+        from backend.services.health_monitor import health_monitor
+        
+        logger.info("🔧 Manual trigger: Running health check NOW")
+        
+        # Call the health check function directly
+        if health_monitor and hasattr(health_monitor, 'perform_health_check'):
+            health_monitor.perform_health_check()
+            
+            # Get failure counts
+            result = {
+                "success": True,
+                "message": "Health check completed successfully",
+                "webhook_failures": health_monitor.webhook_failures,
+                "api_token_failures": health_monitor.api_token_failures,
+                "database_failures": health_monitor.database_failures,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # Check if any issues were found
+            if (health_monitor.webhook_failures > 0 or 
+                health_monitor.api_token_failures > 0 or 
+                health_monitor.database_failures > 0):
+                result["has_issues"] = True
+                result["message"] = "Health check completed with issues detected"
+            else:
+                result["has_issues"] = False
+            
+            return result
+        else:
+            return {
+                "success": False,
+                "message": "Health monitor not available",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+    except Exception as e:
+        logger.error(f"Error in manual health check: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
 @router.post("/manual-close-trades")
 async def manual_close_trades(db: Session = Depends(get_db)):
     """Manually trigger close_all_open_trades - one-time emergency use"""
