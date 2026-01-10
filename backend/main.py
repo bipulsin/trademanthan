@@ -38,14 +38,10 @@ for handler in root_logger.handlers[:]:
 # Configure root logger
 # CRITICAL: Write logs ONLY to the log file (trademanthan.log), not stdout/stderr
 # This ensures all logs go to a single file regardless of how backend is started
-# Use FileHandler directly (more reliable than StreamHandler with file object)
-file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
-file_handler.setLevel(logging.INFO)
-file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
 
 # CRITICAL: Create a custom handler class that flushes after each emit
 class FlushingFileHandler(logging.FileHandler):
-    """FileHandler that flushes after each log entry"""
+    """FileHandler that flushes after each log entry to ensure immediate writes"""
     def emit(self, record):
         super().emit(record)
         self.flush()
@@ -57,7 +53,7 @@ class FlushingFileHandler(logging.FileHandler):
             except (OSError, AttributeError):
                 pass  # Ignore if fsync fails
 
-# Replace with flushing handler
+# Use FlushingFileHandler to ensure immediate log writes
 file_handler = FlushingFileHandler(log_file, mode='a', encoding='utf-8')
 file_handler.setLevel(logging.INFO)
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
