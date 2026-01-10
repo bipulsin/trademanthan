@@ -2112,10 +2112,13 @@ async def manual_health_check(db: Session = Depends(get_db)):
         from backend.services.health_monitor import health_monitor
         
         logger.info("🔧 Manual trigger: Running health check NOW")
+        logger.info("Health monitor available: %s", health_monitor is not None)
         
         # Call the health check function directly
         if health_monitor and hasattr(health_monitor, 'perform_health_check'):
+            logger.info("Executing health check...")
             health_monitor.perform_health_check()
+            logger.info("Health check execution completed")
             
             # Get failure counts
             result = {
