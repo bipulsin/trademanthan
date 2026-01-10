@@ -93,19 +93,22 @@ class HealthMonitor:
     def perform_health_check(self):
         """Perform comprehensive health check"""
         try:
-            from database import SessionLocal
-            from models.trading import IntradayStockOption
+            logger.info("🔍 Starting health check...")
+            from backend.database import SessionLocal
+            from backend.models.trading import IntradayStockOption
             import pytz
             
             ist = pytz.timezone('Asia/Kolkata')
             now = datetime.now(ist)
             today = now.date()
             
+            logger.info(f"🔍 Health check time: {now.strftime('%Y-%m-%d %H:%M:%S IST')}")
             issues = []
             
             # 1. Check database connectivity
             try:
                 from sqlalchemy import text
+                logger.info("🔍 Checking database connectivity...")
                 db = SessionLocal()
                 db.execute(text("SELECT 1"))
                 db.close()
@@ -118,10 +121,12 @@ class HealthMonitor:
             
             # 2. Check if webhooks are being received today
             try:
+                logger.info("🔍 Checking webhook status...")
                 db = SessionLocal()
                 today_alerts = db.query(IntradayStockOption).filter(
                     IntradayStockOption.trade_date >= datetime.combine(today, datetime.min.time())
                 ).count()
+                logger.info(f"🔍 Found {today_alerts} alerts today")
                 
                 # Check if it's a trading day (not weekend or holiday)
                 is_trading_day = False
@@ -157,16 +162,21 @@ class HealthMonitor:
             
             # 3. Check Upstox token status
             try:
-                from services.upstox_service import upstox_service
+                logger.info("🔍 Checking Upstox API status...")
+                from backend.services.upstox_service import upstox_service
                 
                 # First, try to reload token from storage (in case it was updated via OAuth)
                 try:
+                    logger.info("🔍 Attempting to reload Upstox token...")
                     upstox_service.reload_token_from_storage()
+                    logger.info("✅ Token reloaded successfully")
                 except Exception as reload_error:
                     logger.debug(f"Token reload attempt: {reload_error}")
                 
                 # Try to fetch index prices (quick API call)
+                logger.info("🔍 Fetching index trends from Upstox API...")
                 result = upstox_service.check_index_trends()
+                logger.info(f"🔍 Upstox API result: {result is not None}")
                 if result and result.get('nifty_data'):
                     self.api_token_failures = 0
                     logger.info("✅ Upstox API: OK")
@@ -184,6 +194,7 @@ class HealthMonitor:
             
             # 4. Check instruments file exists and is recent
             try:
+                logger.info("🔍 Checking instruments file...")
                 instruments_file = "/home/ubuntu/trademanthan/data/instruments/nse_instruments.json"
                 if os.path.exists(instruments_file):
                     file_age = datetime.now() - datetime.fromtimestamp(os.path.getmtime(instruments_file))
@@ -193,15 +204,22 @@ class HealthMonitor:
                         logger.info(f"✅ Instruments file: {file_age.days} days old")
                 else:
                     issues.append("❌ Instruments file missing")
+                    logger.warning("⚠️ Instruments file not found at: " + instruments_file)
             except Exception as e:
                 issues.append(f"⚠️ Instruments file check failed: {str(e)}")
+                logger.error(f"Instruments file check error: {e}")
             
             # Send alert if critical issues detected
             if issues:
+                logger.info(f"⚠️ Health check found {len(issues)} issue(s)")
                 self.handle_health_issues(issues, now)
+            else:
+                logger.info("✅ Health check completed with no issues")
             
         except Exception as e:
-            logger.error(f"Health check failed: {str(e)}")
+            logger.error(f"❌ Health check failed: {str(e)}")
+            import traceback
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
     
     def handle_health_issues(self, issues: List[str], check_time: datetime):
         """Handle detected health issues with appropriate responses"""

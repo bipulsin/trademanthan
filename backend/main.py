@@ -78,14 +78,16 @@ async def lifespan(app: FastAPI):
     This ensures schedulers start once and stay running
     """
     import sys
+    import traceback
     
     # Track if startup completed successfully
     startup_completed = False
     
-    # STARTUP
-    logger.info("=" * 60)
-    logger.info("🚀 TRADE MANTHAN API STARTUP")
-    logger.info("=" * 60)
+    try:
+        # STARTUP
+        logger.info("=" * 60)
+        logger.info("🚀 TRADE MANTHAN API STARTUP")
+        logger.info("=" * 60)
     
     # Start master stock scheduler (downloads CSV daily at 9:00 AM)
     try:
@@ -131,22 +133,34 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ Index Price Scheduler: FAILED - {e}", exc_info=True)
     
-    logger.info("=" * 60)
-    logger.info("✅ STARTUP COMPLETE - All Services Active")
-    logger.info("=" * 60)
-    logger.info("✅ All services initialized and running")
-    
-    # Mark startup as completed
-    startup_completed = True
-    
-    try:
-        yield  # Application runs here
+        logger.info("=" * 60)
+        logger.info("✅ STARTUP COMPLETE - All Services Active")
+        logger.info("=" * 60)
+        logger.info("✅ All services initialized and running")
+        
+        # Mark startup as completed
+        startup_completed = True
+        
+        logger.info("✅ Lifespan startup completed successfully, entering yield phase...")
+        
+        try:
+            yield  # Application runs here
+            logger.info("✅ Lifespan yield completed normally")
+        except GeneratorExit:
+            logger.info("🛑 Lifespan generator exit - application shutting down")
+            raise
+        except Exception as e:
+            # If there's an error during startup (like port binding), log it but don't run shutdown
+            logger.error(f"❌ Error during application runtime: {e}")
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            if "address already in use" in str(e).lower() or "errno 98" in str(e).lower():
+                logger.warning("Port 8000 is already in use. Another instance may be running. Skipping shutdown.")
+                return
+            raise
     except Exception as e:
-        # If there's an error during startup (like port binding), log it but don't run shutdown
-        logger.error(f"Error during application startup: {e}")
-        if "address already in use" in str(e).lower() or "errno 98" in str(e).lower():
-            logger.warning("Port 8000 is already in use. Another instance may be running. Skipping shutdown.")
-            return
+        logger.error(f"❌ CRITICAL ERROR in lifespan startup: {e}")
+        logger.error(f"❌ Traceback: {traceback.format_exc()}")
+        startup_completed = False
         raise
     
     # SHUTDOWN - Only run if startup completed successfully
