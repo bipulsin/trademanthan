@@ -69,10 +69,7 @@ logging.basicConfig(
 # Note: All child loggers will inherit from root logger and use the same handler
 
 logger = logging.getLogger(__name__)
-# Force flush immediately after first log to ensure it's written
 logger.info("🚀 TradeManthan backend starting...")
-import sys
-sys.stdout.flush() if hasattr(sys.stdout, 'flush') else None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
