@@ -97,12 +97,13 @@ async def lifespan(app: FastAPI):
         # These are commented out to prevent them from starting
         # logger.info("⚠️ Old schedulers are disabled - using scan_st1_algo instead")
         
-        # Start unified Scan ST1 Algo Scheduler (consolidates all 5 old schedulers)
+        # Start unified Scan ST1 Algo Scheduler (consolidates all schedulers except Master Stock)
         try:
             logger.info("Starting Scan ST1 Algo Scheduler Controller...")
             start_scan_st1_algo()
             logger.info("✅ Scan ST1 Algo Scheduler: STARTED")
-            logger.info("   - Consolidates: Master Stock, Instruments, Health Monitor, VWAP Updater, Index Price")
+            logger.info("   - Consolidates: Instruments, Health Monitor, VWAP Updater, Index Price")
+            logger.info("   - Master Stock download from Dhan removed")
             logger.info("   - All logs go to: logs/scan_st1_algo.log")
         except Exception as e:
             logger.error(f"❌ Scan ST1 Algo Scheduler: FAILED - {e}", exc_info=True)

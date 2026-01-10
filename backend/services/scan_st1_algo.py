@@ -39,7 +39,7 @@ logger.addHandler(file_handler)
 logger.propagate = False  # Only log to scan_st1_algo.log, not to root logger
 
 # Import all the job functions from existing schedulers
-from backend.services.master_stock_scheduler import download_and_update_master_stock
+# Master Stock Scheduler removed - no longer downloading from Dhan
 from backend.services.instruments_downloader import download_daily_instruments
 from backend.services.vwap_updater import (
     update_vwap_for_all_open_positions,
@@ -73,19 +73,7 @@ class ScanST1AlgoScheduler:
         logger.info("🚀 Starting Scan ST1 Algo Scheduler Controller...")
         
         try:
-            # 1. Master Stock Scheduler - Daily at 9:00 AM
-            self.scheduler.add_job(
-                download_and_update_master_stock,
-                trigger=CronTrigger(hour=9, minute=0, timezone='Asia/Kolkata'),
-                id='scan_st1_master_stock',
-                name='Master Stock Download (9:00 AM)',
-                replace_existing=True,
-                max_instances=1,
-                misfire_grace_time=300
-            )
-            logger.info("✅ Scheduled: Master Stock Download (9:00 AM)")
-            
-            # 2. Instruments Downloader - Daily at 9:05 AM
+            # 1. Instruments Downloader - Daily at 9:05 AM
             self.scheduler.add_job(
                 download_daily_instruments,
                 trigger=CronTrigger(hour=9, minute=5, timezone='Asia/Kolkata'),
