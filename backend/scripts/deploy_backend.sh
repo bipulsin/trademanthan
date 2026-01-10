@@ -37,12 +37,14 @@ fi
 # Kill existing backend process (match both patterns to catch all instances)
 log_message "Stopping existing backend..."
 pkill -f "uvicorn.*main:app" || true
+pkill -f "uvicorn.*backend.main:app" || true
 sleep 2
 
 # Verify process is killed
-if pgrep -f "uvicorn.*main:app" > /dev/null; then
+if pgrep -f "uvicorn.*main:app" > /dev/null || pgrep -f "uvicorn.*backend.main:app" > /dev/null; then
     log_message "⚠️ Force killing backend process..."
     pkill -9 -f "uvicorn.*main:app" || true
+    pkill -9 -f "uvicorn.*backend.main:app" || true
     sleep 1
 fi
 
@@ -58,28 +60,28 @@ screen -wipe 2>/dev/null || true
 screen -S trademanthan -X quit 2>/dev/null || true
 sleep 1
 
-# Start backend in screen session (logs go to trademanthan.log, not /tmp/uvicorn.log)
-screen -dmS trademanthan bash -c 'cd /home/ubuntu/trademanthan && source backend/venv/bin/activate && python3 -u -m uvicorn main:app --host 0.0.0.0 --port 8000'
-BACKEND_PID=$(pgrep -f "uvicorn.*main:app" | head -1)
+# Start backend in screen session - MUST use backend.main:app to load the correct main.py with lifespan
+screen -dmS trademanthan bash -c 'cd /home/ubuntu/trademanthan && source backend/venv/bin/activate && python3 -u -m uvicorn backend.main:app --host 0.0.0.0 --port 8000'
+BACKEND_PID=$(pgrep -f "uvicorn.*backend.main:app" | head -1)
 
 log_message "Backend started with PID: $BACKEND_PID"
 
 # Wait for backend to start (with timeout)
 log_message "Waiting for backend to start..."
-for i in {1..15}; do
+for i in {1..20}; do
     sleep 1
     if check_backend_health; then
         log_message "✅ Backend is healthy and responding"
-        # Show last few lines of startup log (with timeout)
-        timeout 2 tail -5 /tmp/uvicorn.log 2>/dev/null || true
+        # Show last few lines of startup log from trademanthan.log (with timeout)
+        timeout 2 tail -10 /home/ubuntu/trademanthan/logs/trademanthan.log 2>/dev/null || true
         exit 0
     fi
 done
 
 # If we get here, backend didn't start in time
 log_message "⚠️ Backend started but health check timed out"
-log_message "Check /tmp/uvicorn.log for details"
+log_message "Check /home/ubuntu/trademanthan/logs/trademanthan.log for details"
 # Show last few lines of log (with timeout)
-timeout 2 tail -10 /tmp/uvicorn.log 2>/dev/null || true
+timeout 2 tail -20 /home/ubuntu/trademanthan/logs/trademanthan.log 2>/dev/null || true
 exit 1
 

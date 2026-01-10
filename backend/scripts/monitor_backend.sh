@@ -12,8 +12,8 @@ log_message() {
 }
 
 check_backend() {
-    # Check if process is running - match both patterns (screen session uses "main:app", direct run uses "backend.main:app")
-    if ! pgrep -f "uvicorn.*main:app" > /dev/null; then
+    # Check if process is running - match both patterns (root main.py and backend.main.py)
+    if ! pgrep -f "uvicorn.*main:app" > /dev/null && ! pgrep -f "uvicorn.*backend.main:app" > /dev/null; then
         return 1
     fi
     
@@ -36,18 +36,21 @@ restart_backend() {
     
     # Kill any existing processes - match both patterns
     pkill -f "uvicorn.*main:app" || true
+    pkill -f "uvicorn.*backend.main:app" || true
     sleep 2
     
     # Verify process is killed
-    if pgrep -f "uvicorn.*main:app" > /dev/null; then
+    if pgrep -f "uvicorn.*main:app" > /dev/null || pgrep -f "uvicorn.*backend.main:app" > /dev/null; then
         log_message "⚠️ Force killing backend process..."
         pkill -9 -f "uvicorn.*main:app" || true
+        pkill -9 -f "uvicorn.*backend.main:app" || true
         sleep 1
     fi
     
-    # Start backend in screen session (same as manual start)
+    # Start backend in screen session - MUST use backend.main:app to load the correct main.py with lifespan
     cd /home/ubuntu/trademanthan || exit 1
-    screen -dmS trademanthan bash -c 'python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 > /tmp/uvicorn.log 2>&1'
+    source backend/venv/bin/activate
+    screen -dmS trademanthan bash -c 'cd /home/ubuntu/trademanthan && source backend/venv/bin/activate && python3 -u -m uvicorn backend.main:app --host 0.0.0.0 --port 8000'
     
     sleep 5
     
