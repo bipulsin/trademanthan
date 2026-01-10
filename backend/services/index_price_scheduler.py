@@ -266,7 +266,7 @@ class IndexPriceScheduler:
             Dict with price data or None
         """
         try:
-            from models.trading import IndexPrice
+            from backend.models.trading import IndexPrice
             
             # Get the latest price record for this index
             latest_price = db.query(IndexPrice).filter(
