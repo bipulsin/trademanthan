@@ -1,11 +1,12 @@
 """
 Scan ST1 Algo Scheduler Controller
 Consolidates all scan algorithm schedulers into a single controller:
-- Master Stock Scheduler (daily at 9:00 AM)
 - Instruments Downloader (daily at 9:05 AM)
 - Health Monitor (every 30 min from 8:39 AM to 4:09 PM)
 - VWAP Updater (hourly updates + cycles + EOD close)
 - Index Price Scheduler (every 5 min during market hours)
+
+Note: Master Stock download from Dhan has been removed.
 
 All logs go to logs/scan_st1_algo.log
 """
