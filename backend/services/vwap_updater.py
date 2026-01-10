@@ -3708,7 +3708,7 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 log_path = log_dir / 'debug.log'
                 try:
                     with open(log_path, 'a') as f:
-                    f.write(json.dumps({"id":f"log_cycle1_trade_exception_{trade_id_for_log}","timestamp":int(now.timestamp()*1000),"location":"vwap_updater.py:2119","message":"Cycle 1 - Exception processing trade","data":{"stock_name":stock_name_for_log,"trade_id":trade_id_for_log,"status":trade.status if trade else None,"cycle_number":cycle_number,"error":str(e),"traceback":error_trace},"sessionId":"debug-session","runId":"post-fix","hypothesisId":"H"}) + "\n")
+                        f.write(json.dumps({"id":f"log_cycle1_trade_exception_{trade_id_for_log}","timestamp":int(now.timestamp()*1000),"location":"vwap_updater.py:2119","message":"Cycle 1 - Exception processing trade","data":{"stock_name":stock_name_for_log,"trade_id":trade_id_for_log,"status":trade.status if trade else None,"cycle_number":cycle_number,"error":str(e),"traceback":error_trace},"sessionId":"debug-session","runId":"post-fix","hypothesisId":"H"}) + "\n")
                 except Exception:
                     pass
                 # #endregion
