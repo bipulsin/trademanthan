@@ -18,7 +18,13 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
 
+# Get logger - will inherit from root logger configured in main.py
 logger = logging.getLogger(__name__)
+
+# Ensure logger has handlers (inherit from root)
+if not logger.handlers:
+    logger.handlers = logging.getLogger().handlers
+    logger.propagate = True
 
 class HealthMonitor:
     """Monitors system health and sends alerts on critical failures"""
