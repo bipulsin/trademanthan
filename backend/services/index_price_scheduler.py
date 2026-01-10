@@ -137,9 +137,9 @@ class IndexPriceScheduler:
         Only runs during market hours (9:15 AM - 3:30 PM)
         """
         try:
-            from database import SessionLocal
-            from models.trading import IndexPrice
-            from services.upstox_service import upstox_service
+            from backend.database import SessionLocal
+            from backend.models.trading import IndexPrice
+            from backend.services.upstox_service import upstox_service
             
             ist = pytz.timezone('Asia/Kolkata')
             now = datetime.now(ist)

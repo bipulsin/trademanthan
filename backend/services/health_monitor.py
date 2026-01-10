@@ -137,7 +137,7 @@ class HealthMonitor:
                 # Check if it's a trading day (not weekend or holiday)
                 is_trading_day = False
                 try:
-                    from services.upstox_service import upstox_service
+                    from backend.services.upstox_service import upstox_service
                     is_trading_day = upstox_service.is_trading_day(now)
                 except Exception as trading_day_error:
                     logger.warning(f"Could not check if trading day: {str(trading_day_error)}")
