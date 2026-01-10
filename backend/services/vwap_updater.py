@@ -3606,10 +3606,10 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                     try:
                         # Fetch current option LTP
                         current_option_ltp_for_pnl = None
-                    if trade.instrument_key:
-                        try:
-                            option_quote = vwap_service.get_market_quote_by_key(trade.instrument_key)
-                            if option_quote and option_quote.get('last_price', 0) > 0:
+                        if trade.instrument_key:
+                            try:
+                                option_quote = vwap_service.get_market_quote_by_key(trade.instrument_key)
+                                if option_quote and option_quote.get('last_price', 0) > 0:
                                     current_option_ltp_for_pnl = float(option_quote.get('last_price', 0))
                             except Exception as quote_error:
                                 logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Error fetching option LTP for PnL: {str(quote_error)}")
