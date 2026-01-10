@@ -2632,7 +2632,7 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                     with open(log_path, 'a') as f:
                         f.write(json.dumps({"id":f"log_cycle1_no_stocks_{int(now.timestamp())}","timestamp":int(now.timestamp()*1000),"location":"vwap_updater.py:1436","message":"Cycle 1 - No stocks found","data":{"cycle_number":cycle_number,"target_alert_times":[str(t) for t in target_alert_times],"today":str(today)},"sessionId":"debug-session","runId":"post-fix","hypothesisId":"F"}) + "\n")
                 except Exception:
-                pass
+                    pass
             # #endregion
             logger.info(f"ℹ️ No stocks found for Cycle {cycle_number} VWAP slope calculation")
             return
