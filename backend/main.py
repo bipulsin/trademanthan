@@ -52,10 +52,8 @@ logging.basicConfig(
     force=True  # Override existing configuration
 )
 
-# Store file object for cleanup (will be closed on shutdown)
-app.log_file_obj = log_file_obj  # Will be set after app creation
-
-# Note: We don't close the file explicitly as it should remain open during app lifetime
+# Note: We don't configure child loggers here as they'll inherit from root logger
+# The log file object will remain open during app lifetime
 
 logger = logging.getLogger(__name__)
 logger.info("🚀 TradeManthan backend starting...")
