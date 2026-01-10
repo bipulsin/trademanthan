@@ -34,24 +34,33 @@ else
     log_message "⚠️ Git pull had issues (continuing anyway)"
 fi
 
-# Kill existing backend process
+# Kill existing backend process (match both patterns to catch all instances)
 log_message "Stopping existing backend..."
-pkill -f "uvicorn backend.main:app" || true
+pkill -f "uvicorn.*main:app" || true
 sleep 2
 
 # Verify process is killed
-if pgrep -f "uvicorn backend.main:app" > /dev/null; then
+if pgrep -f "uvicorn.*main:app" > /dev/null; then
     log_message "⚠️ Force killing backend process..."
-    pkill -9 -f "uvicorn backend.main:app" || true
+    pkill -9 -f "uvicorn.*main:app" || true
     sleep 1
 fi
 
-# Start backend
-log_message "Starting backend..."
+# Start backend in screen session (consistent with how it's run manually)
+log_message "Starting backend in screen session..."
 cd /home/ubuntu/trademanthan
 source backend/venv/bin/activate
-nohup python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 > /tmp/uvicorn.log 2>&1 &
-BACKEND_PID=$!
+
+# Clean up any dead screens
+screen -wipe 2>/dev/null || true
+
+# Kill existing screen session if it exists
+screen -S trademanthan -X quit 2>/dev/null || true
+sleep 1
+
+# Start backend in screen session (logs go to trademanthan.log, not /tmp/uvicorn.log)
+screen -dmS trademanthan bash -c 'cd /home/ubuntu/trademanthan && source backend/venv/bin/activate && python3 -u -m uvicorn main:app --host 0.0.0.0 --port 8000'
+BACKEND_PID=$(pgrep -f "uvicorn.*main:app" | head -1)
 
 log_message "Backend started with PID: $BACKEND_PID"
 
