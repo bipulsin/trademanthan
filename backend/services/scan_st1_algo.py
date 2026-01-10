@@ -117,8 +117,16 @@ class ScanST1AlgoScheduler:
         
         try:
             # 1. Instruments Downloader - Daily at 9:05 AM
+            def run_instruments_download():
+                logger.info("🔧 Triggering Instruments Download job...")
+                try:
+                    download_daily_instruments()
+                    logger.info("✅ Instruments Download job completed")
+                except Exception as e:
+                    logger.error(f"❌ Instruments Download job failed: {e}", exc_info=True)
+            
             self.scheduler.add_job(
-                download_daily_instruments,
+                run_instruments_download,
                 trigger=CronTrigger(hour=9, minute=5, timezone='Asia/Kolkata'),
                 id='scan_st1_instruments',
                 name='Instruments Download (9:05 AM)',
