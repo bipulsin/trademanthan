@@ -78,11 +78,16 @@ job_loggers = [
 
 for job_logger in job_loggers:
     # Add scan_st1_algo.log handler to job loggers (in addition to their existing handlers)
-    # Check if handler already exists to avoid duplicates
-    handler_exists = any(
-        isinstance(h, FlushingFileHandler) and h.baseFilename == str(log_file) 
-        for h in job_logger.handlers
-    )
+    # Check if handler already exists to avoid duplicates by checking baseFilename attribute
+    handler_exists = False
+    for h in job_logger.handlers:
+        if isinstance(h, logging.FileHandler):
+            # Check if this handler points to our log file
+            handler_path = getattr(h, 'baseFilename', None) or getattr(h, 'stream', {}).name if hasattr(getattr(h, 'stream', None), 'name') else None
+            if handler_path and 'scan_st1_algo.log' in str(handler_path):
+                handler_exists = True
+                break
+    
     if not handler_exists:
         # Create a new handler instance for this logger
         job_file_handler = FlushingFileHandler(log_file, mode='a', encoding='utf-8')
