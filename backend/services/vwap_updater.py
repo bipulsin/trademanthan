@@ -994,8 +994,8 @@ def update_vwap_for_all_open_positions():
                             
                             if instruments_file.exists():
                                 try:
-                                with open(instruments_file, 'r') as f:
-                                    instruments_data = json_lib.load(f)
+                                    with open(instruments_file, 'r') as f:
+                                        instruments_data = json_lib.load(f)
                                 
                                 # Find option contract in instruments data
                                 import re
@@ -2418,7 +2418,8 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
             target_alert_times = [alert_time_10_15, alert_time_11_15]
         elif cycle_number == 3:
             # Cycle 3: 12:15 PM
-            # Previous VWAP: Use 1-hour candle at 11:15 AM (1-hour candle closes at 11:15 AM, represents 10:15-11:15 AM)
+            # Previous VWAP: Use 1-hour candle at 11:15 AM (1-hour cand                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         YES GO AHEAD
+            # le closes at 11:15 AM, represents 10:15-11:15 AM)
             # Market opens at 9:15 AM, so hourly candles form at :15 times
             prev_vwap_time = ist.localize(today.replace(hour=11, minute=15, second=0, microsecond=0)) if today.tzinfo is None else today.replace(hour=11, minute=15, second=0, microsecond=0)
             current_vwap_time = ist.localize(today.replace(hour=12, minute=15, second=0, microsecond=0)) if today.tzinfo is None else today.replace(hour=12, minute=15, second=0, microsecond=0)
