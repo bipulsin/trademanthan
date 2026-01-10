@@ -21,10 +21,10 @@ from sqlalchemy.orm import Session
 # Get logger - will inherit from root logger configured in main.py
 logger = logging.getLogger(__name__)
 
-# Ensure logger has handlers (inherit from root)
-if not logger.handlers:
-    logger.handlers = logging.getLogger().handlers
-    logger.propagate = True
+# Ensure logger propagates to root logger (default behavior, but make it explicit)
+logger.propagate = True
+# Set level to ensure logs pass through
+logger.setLevel(logging.INFO)
 
 class HealthMonitor:
     """Monitors system health and sends alerts on critical failures"""
