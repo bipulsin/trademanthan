@@ -2112,6 +2112,42 @@ async def manual_health_check(db: Session = Depends(get_db)):
             "timestamp": datetime.now().isoformat()
         }
 
+@router.post("/test-scan-st1-algo-log")
+async def test_scan_st1_algo_log():
+    """Test endpoint to write a log entry to scan_st1_algo.log"""
+    try:
+        from backend.services.scan_st1_algo import logger as scan_st1_logger
+        import datetime as dt
+        
+        test_message = f"🧪 TEST LOG ENTRY - {dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Scan ST1 Algo Logger Test"
+        scan_st1_logger.info(test_message)
+        
+        # Force flush
+        for handler in scan_st1_logger.handlers:
+            if hasattr(handler, 'flush'):
+                handler.flush()
+                if hasattr(handler, 'stream') and hasattr(handler.stream, 'fileno'):
+                    try:
+                        import os
+                        os.fsync(handler.stream.fileno())
+                    except (OSError, AttributeError):
+                        pass
+        
+        return {
+            "success": True,
+            "message": "Test log entry written to scan_st1_algo.log",
+            "test_message": test_message,
+            "timestamp": dt.datetime.now().isoformat()
+        }
+    except Exception as e:
+        import traceback
+        return {
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+            "timestamp": datetime.now().isoformat()
+        }
+
 @router.post("/manual-close-trades")
 async def manual_close_trades(db: Session = Depends(get_db)):
     """Manually trigger close_all_open_trades - one-time emergency use"""
