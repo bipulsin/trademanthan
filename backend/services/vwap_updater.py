@@ -3116,7 +3116,7 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                         vwap_slope_passed = True  # Don't block if skipped/blank
                         logger.info(f"ℹ️ Cycle {cycle_number} - {stock_name}: VWAP slope status is '{slope_status}' - Not blocking entry")
                     else:
-                    vwap_slope_passed = (slope_status == "Yes")
+                        vwap_slope_passed = (slope_status == "Yes")
                     logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: vwap_slope returned non-dict result: {type(slope_result)}")
                 
                 # Update database with VWAP slope data
