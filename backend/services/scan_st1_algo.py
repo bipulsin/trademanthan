@@ -454,12 +454,30 @@ class ScanST1AlgoScheduler:
     
     def get_status(self):
         """Get scheduler status"""
-        return {
-            "is_running": self.is_running,
-            "jobs_count": len(self.scheduler.get_jobs()) if self.is_running else 0,
-            "jobs": [{"id": job.id, "name": job.name, "next_run": str(job.next_run_time)} 
-                     for job in self.scheduler.get_jobs()] if self.is_running else []
-        }
+        try:
+            if not self.scheduler:
+                return {
+                    "is_running": False,
+                    "jobs_count": 0,
+                    "jobs": []
+                }
+            jobs_count = len(self.scheduler.get_jobs()) if self.is_running and self.scheduler.running else 0
+            jobs = [{"id": job.id, "name": job.name, "next_run": str(job.next_run_time) if job.next_run_time else "Not scheduled"} 
+                     for job in self.scheduler.get_jobs()] if self.is_running and self.scheduler.running else []
+            return {
+                "is_running": self.is_running and (self.scheduler.running if self.scheduler else False),
+                "jobs_count": jobs_count,
+                "jobs": jobs
+            }
+        except Exception as e:
+            logger.error(f"Error getting scheduler status: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return {
+                "is_running": False,
+                "jobs_count": 0,
+                "jobs": []
+            }
 
 
 # Global instance
