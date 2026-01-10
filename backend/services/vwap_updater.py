@@ -1234,7 +1234,7 @@ def update_vwap_for_all_open_positions():
                     # CRITICAL: Ensure sell_price is always set to a valid value (not 0)
                     # If new_option_ltp is 0, use old_sell_price or buy_price as fallback
                     if new_option_ltp > 0:
-                    position.sell_price = new_option_ltp
+                        position.sell_price = new_option_ltp
                     elif old_sell_price and old_sell_price > 0:
                         # Keep existing sell_price if new one is invalid
                         position.sell_price = old_sell_price
