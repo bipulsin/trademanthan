@@ -354,6 +354,34 @@ class ScanST1AlgoScheduler:
             
             # 5. Index Price Scheduler - Every 5 minutes during market hours
             def run_index_price_check():
+                # Check if market is open before logging and running
+                ist = pytz.timezone('Asia/Kolkata')
+                now = datetime.now(ist)
+                
+                # Market hours: 9:15 AM to 3:30 PM IST
+                if now.weekday() >= 5:  # Weekend
+                    logger.debug(f"⏰ Weekend ({now.strftime('%A')}) - skipping Index Price Check")
+                    return
+                
+                current_hour = now.hour
+                current_minute = now.minute
+                is_market_hours = False
+                
+                if current_hour < 9:
+                    is_market_hours = False
+                elif current_hour == 9:
+                    is_market_hours = current_minute >= 15
+                elif 10 <= current_hour <= 14:
+                    is_market_hours = True
+                elif current_hour == 15:
+                    is_market_hours = current_minute <= 30
+                else:
+                    is_market_hours = False
+                
+                if not is_market_hours:
+                    logger.debug(f"⏰ Market closed ({now.strftime('%H:%M:%S IST')}) - skipping Index Price Check")
+                    return
+                
                 logger.info("🔧 Triggering Index Price Check job (every 5 minutes)...")
                 try:
                     index_price_scheduler.fetch_and_store_index_prices()
