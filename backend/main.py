@@ -161,8 +161,7 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Store log file object on app for reference (will remain open during app lifetime)
-app.log_file_obj = log_file_obj
+# Note: log_file_obj is managed by the FileHandler and remains open during app lifetime
 
 # CORS middleware
 app.add_middleware(
