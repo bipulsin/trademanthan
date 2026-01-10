@@ -52,11 +52,10 @@ logging.basicConfig(
     force=True  # Override existing configuration
 )
 
-# Ensure all child loggers use the same handler
-for logger_name in logging.Logger.manager.loggerDict:
-    logger = logging.getLogger(logger_name)
-    logger.handlers = [file_handler]
-    logger.propagate = False
+# Store file object for cleanup (will be closed on shutdown)
+app.log_file_obj = log_file_obj  # Will be set after app creation
+
+# Note: We don't close the file explicitly as it should remain open during app lifetime
 
 logger = logging.getLogger(__name__)
 logger.info("🚀 TradeManthan backend starting...")
