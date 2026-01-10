@@ -38,18 +38,25 @@ for handler in root_logger.handlers[:]:
 # Configure root logger
 # CRITICAL: Write logs ONLY to the log file (trademanthan.log), not stdout/stderr
 # This ensures all logs go to a single file regardless of how backend is started
-file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
+# Open file in unbuffered mode to ensure immediate writes
+log_file_obj = open(log_file, 'a', encoding='utf-8', buffering=1)  # Line buffering
+file_handler = logging.StreamHandler(log_file_obj)  # Use StreamHandler with file object
 file_handler.setLevel(logging.INFO)
-file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s'))
-# CRITICAL: Disable buffering to ensure logs are written immediately
-file_handler.stream.reconfigure(line_buffering=True) if hasattr(file_handler.stream, 'reconfigure') else None
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
 
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
     handlers=[file_handler],
     force=True  # Override existing configuration
 )
+
+# Ensure all child loggers use the same handler
+for logger_name in logging.Logger.manager.loggerDict:
+    logger = logging.getLogger(logger_name)
+    logger.handlers = [file_handler]
+    logger.propagate = False
 
 logger = logging.getLogger(__name__)
 logger.info("🚀 TradeManthan backend starting...")
