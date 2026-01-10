@@ -813,39 +813,24 @@
                 const response = await fetch(`${API_BASE_URL}/scan/scheduler-status`);
                 const data = await response.json();
                 
-                // Use total_jobs from backend if available, otherwise calculate from all schedulers
-                const totalJobs = data.total_jobs || (
-                    (data.schedulers.health_monitor?.jobs_count || 0) +
-                    (data.schedulers.vwap_updater?.jobs_count || 0) +
-                    (data.schedulers.master_stock?.jobs_count || 0) +
-                    (data.schedulers.instruments?.jobs_count || 0) +
-                    (data.schedulers.index_price?.jobs_count || 0)
-                );
+                // New structure: scan_st1_algo replaces all old schedulers
+                const scanSt1Algo = data.scan_st1_algo || {};
+                const totalJobs = data.total_jobs || scanSt1Algo.jobs_count || 0;
+                const isRunning = data.all_running || scanSt1Algo.running || false;
                 
-                // Count running schedulers
-                const runningCount = [
-                    data.schedulers.health_monitor?.running,
-                    data.schedulers.vwap_updater?.running,
-                    data.schedulers.master_stock?.running,
-                    data.schedulers.instruments?.running,
-                    data.schedulers.index_price?.running
-                ].filter(Boolean).length;
-                
-                const totalSchedulers = 5; // health_monitor, vwap_updater, master_stock, instruments, index_price
-                
-                // If ALL schedulers running AND jobs are present
-                if (data.success && data.all_schedulers_running && totalJobs > 0) {
-                    // All schedulers running with jobs
-                    updateSchedulerStatus('active', `Schedulers: Active (${totalJobs} jobs)`);
+                // If scan_st1_algo is running AND has jobs
+                if (data.success && isRunning && totalJobs > 0) {
+                    // Scheduler is active with jobs
+                    updateSchedulerStatus('active', `Scan ST1 Algo: Active (${totalJobs} jobs)`);
                     document.getElementById('start-schedulers-btn').style.display = 'none';
                 } else {
                     // Show status based on what's missing
-                    if (runningCount < totalSchedulers) {
-                        updateSchedulerStatus('inactive', `Schedulers: ${runningCount}/${totalSchedulers} Running`);
+                    if (!isRunning) {
+                        updateSchedulerStatus('inactive', `Scan ST1 Algo: Not Running`);
                     } else if (totalJobs === 0) {
-                        updateSchedulerStatus('inactive', `Schedulers: No Jobs Found`);
+                        updateSchedulerStatus('inactive', `Scan ST1 Algo: No Jobs Found`);
                     } else {
-                        updateSchedulerStatus('inactive', `Schedulers: ${totalJobs} Jobs`);
+                        updateSchedulerStatus('inactive', `Scan ST1 Algo: ${totalJobs} Jobs`);
                     }
                     document.getElementById('start-schedulers-btn').style.display = 'inline-block';
                 }

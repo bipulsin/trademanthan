@@ -5334,8 +5334,17 @@ async def get_scan_logs(
             # Fallback to trademanthan.log for other uses
             log_file = log_dir / 'trademanthan.log'
         
-        # Alternative: try to find from logging configuration (only if main file doesn't exist)
-        if not log_file.exists():
+        # If scan_st1_algo.log doesn't exist, create it (empty file)
+        if log_type == "scan_st1_algo" and not log_file.exists():
+            try:
+                log_file.parent.mkdir(parents=True, exist_ok=True)
+                log_file.touch()
+                logger.info(f"Created scan_st1_algo.log file at {log_file}")
+            except Exception as e:
+                logger.error(f"Error creating scan_st1_algo.log: {e}")
+        
+        # Alternative: try to find from logging configuration (only for trademanthan.log if main file doesn't exist)
+        if log_type != "scan_st1_algo" and not log_file.exists():
             # Try alternative locations (EXCLUDE /tmp/uvicorn.log - that's not the proper log file)
             alternative_paths = [
                 Path('/var/log/trademanthan/trademanthan.log'),
