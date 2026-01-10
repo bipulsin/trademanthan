@@ -5494,16 +5494,32 @@ async def get_scan_logs(
             }
     
     except FileNotFoundError:
+        # Return empty logs array instead of error - log file might not exist yet
+        return {
+            "success": True,
+            "message": "Log file not found - will be created when scheduler starts",
+            "log_file": str(log_file) if 'log_file' in locals() else "Unknown",
+            "total_lines": 0,
+            "logs": []
+        }
+    except PermissionError as perm_err:
+        logger.error(f"Permission error reading log file: {perm_err}")
         return {
             "success": False,
-            "message": "Log file not found",
+            "message": f"Permission denied reading log file: {str(perm_err)}",
+            "log_file": str(log_file) if 'log_file' in locals() else "Unknown",
+            "total_lines": 0,
             "logs": []
         }
     except Exception as e:
         logger.error(f"Error reading logs: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         return {
             "success": False,
             "message": f"Error reading logs: {str(e)}",
+            "log_file": str(log_file) if 'log_file' in locals() else "Unknown",
+            "total_lines": 0,
             "logs": []
         }
 
