@@ -3556,7 +3556,7 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                             print(f"      - VWAP Slope: ✅ >= 45° ({slope_angle:.2f}°)")
                             if is_10_15_alert:
                                 print(f"      - Candle Size: ✅ Calculated (Ratio: {candle_size_ratio:.2f}x) - Not blocking for 10:15 alert" if candle_size_ratio is not None else "      - Candle Size: ⚠️ Not calculated yet for 10:15 alert")
-                            else:
+                        else:
                             print(f"      - Candle Size: ✅ {'Passed' if candle_size_check_passed else 'Skipped'}")
                             print(f"      - Option Data: ✅ Valid")
                             print(f"   💰 Trade Details:")
