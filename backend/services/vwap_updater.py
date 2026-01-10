@@ -3633,7 +3633,7 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                                 flag_modified(trade, 'pnl')
                                 
                                 logger.info(f"💰 Cycle {cycle_number} - {stock_name}: Updated sell_price ₹{old_sell_price:.2f}→₹{current_option_ltp_for_pnl:.2f}, PnL ₹{old_pnl:.2f}→₹{new_pnl:.2f}")
-                    else:
+                            else:
                                 logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Cannot calculate PnL - missing buy_price or qty")
                             
                             # CHECK EXIT CONDITIONS: Stop Loss and VWAP Cross (only if still open)
