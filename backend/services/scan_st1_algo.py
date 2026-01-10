@@ -25,8 +25,21 @@ log_dir = Path(__file__).parent.parent.parent / 'logs'
 log_dir.mkdir(exist_ok=True)
 log_file = log_dir / 'scan_st1_algo.log'
 
-# Create file handler for scan_st1_algo.log
-file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
+# Create file handler for scan_st1_algo.log with immediate flushing
+class FlushingFileHandler(logging.FileHandler):
+    """FileHandler that flushes after each log entry to ensure immediate writes"""
+    def emit(self, record):
+        super().emit(record)
+        self.flush()
+        # Also force OS-level flush to ensure data is written to disk
+        if hasattr(self.stream, 'fileno'):
+            try:
+                import os
+                os.fsync(self.stream.fileno())
+            except (OSError, AttributeError):
+                pass  # Ignore if fsync fails
+
+file_handler = FlushingFileHandler(log_file, mode='a', encoding='utf-8')
 file_handler.setLevel(logging.INFO)
 file_handler.setFormatter(logging.Formatter(
     '%(asctime)s - %(levelname)s - %(name)s - %(message)s',
@@ -53,6 +66,34 @@ from backend.services.health_monitor import health_monitor
 
 # Import index price scheduler instance and method
 from backend.services.index_price_scheduler import index_price_scheduler
+
+# Configure job function loggers to ALSO write to scan_st1_algo.log
+# This ensures all scheduler-related logs go to scan_st1_algo.log
+job_loggers = [
+    logging.getLogger('backend.services.instruments_downloader'),
+    logging.getLogger('backend.services.vwap_updater'),
+    logging.getLogger('backend.services.health_monitor'),
+    logging.getLogger('backend.services.index_price_scheduler')
+]
+
+for job_logger in job_loggers:
+    # Add scan_st1_algo.log handler to job loggers (in addition to their existing handlers)
+    # Check if handler already exists to avoid duplicates
+    handler_exists = any(
+        isinstance(h, FlushingFileHandler) and h.baseFilename == str(log_file) 
+        for h in job_logger.handlers
+    )
+    if not handler_exists:
+        # Create a new handler instance for this logger
+        job_file_handler = FlushingFileHandler(log_file, mode='a', encoding='utf-8')
+        job_file_handler.setLevel(logging.INFO)
+        job_file_handler.setFormatter(logging.Formatter(
+            '%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        ))
+        job_logger.addHandler(job_file_handler)
+        # Keep propagation enabled so logs also go to root logger (for trademanthan.log)
+        # This way logs appear in both places
 
 
 class ScanST1AlgoScheduler:
@@ -94,8 +135,18 @@ class ScanST1AlgoScheduler:
             ]
             
             for hour, minute in health_check_times:
+                def create_health_check_wrapper(h, m):
+                    def run_health_check():
+                        logger.info(f"🔧 Triggering Health Check job at {h:02d}:{m:02d}...")
+                        try:
+                            health_monitor.perform_health_check()
+                            logger.info(f"✅ Health Check job at {h:02d}:{m:02d} completed")
+                        except Exception as e:
+                            logger.error(f"❌ Health Check job at {h:02d}:{m:02d} failed: {e}", exc_info=True)
+                    return run_health_check
+                
                 self.scheduler.add_job(
-                    health_monitor.perform_health_check,
+                    create_health_check_wrapper(hour, minute),
                     trigger=CronTrigger(hour=hour, minute=minute, timezone='Asia/Kolkata'),
                     id=f'scan_st1_health_check_{hour}_{minute}',
                     name=f'Health Check {hour:02d}:{minute:02d}',
@@ -107,8 +158,16 @@ class ScanST1AlgoScheduler:
             logger.info(f"✅ Scheduled: Health Checks ({len(health_check_times)} times)")
             
             # Daily health report at 4:00 PM
+            def run_daily_health_report():
+                logger.info("🔧 Triggering Daily Health Report job...")
+                try:
+                    health_monitor.send_daily_health_report()
+                    logger.info("✅ Daily Health Report job completed")
+                except Exception as e:
+                    logger.error(f"❌ Daily Health Report job failed: {e}", exc_info=True)
+            
             self.scheduler.add_job(
-                health_monitor.send_daily_health_report,
+                run_daily_health_report,
                 trigger=CronTrigger(hour=16, minute=0, timezone='Asia/Kolkata'),
                 id='scan_st1_daily_health_report',
                 name='Daily Health Report (4:00 PM)',
@@ -121,8 +180,18 @@ class ScanST1AlgoScheduler:
             
             # 4. VWAP Updater - Hourly updates (9:15 AM - 3:15 PM)
             for hour in range(9, 16):  # 9 AM to 3 PM
+                def create_vwap_update_wrapper(h):
+                    def run_vwap_update():
+                        logger.info(f"🔧 Triggering VWAP Update job at {h:02d}:15...")
+                        try:
+                            update_vwap_for_all_open_positions()
+                            logger.info(f"✅ VWAP Update job at {h:02d}:15 completed")
+                        except Exception as e:
+                            logger.error(f"❌ VWAP Update job at {h:02d}:15 failed: {e}", exc_info=True)
+                    return run_vwap_update
+                
                 self.scheduler.add_job(
-                    update_vwap_for_all_open_positions,
+                    create_vwap_update_wrapper(hour),
                     trigger=CronTrigger(hour=hour, minute=15, timezone='Asia/Kolkata'),
                     id=f'scan_st1_vwap_update_{hour}',
                     name=f'Update VWAP {hour:02d}:15',
@@ -134,8 +203,16 @@ class ScanST1AlgoScheduler:
             logger.info("✅ Scheduled: VWAP Updates (hourly 9:15 AM - 3:15 PM)")
             
             # EOD Close at 3:25 PM
+            def run_eod_close():
+                logger.info("🔧 Triggering EOD Close All Trades job...")
+                try:
+                    close_all_open_trades()
+                    logger.info("✅ EOD Close All Trades job completed")
+                except Exception as e:
+                    logger.error(f"❌ EOD Close All Trades job failed: {e}", exc_info=True)
+            
             self.scheduler.add_job(
-                close_all_open_trades,
+                run_eod_close,
                 trigger=CronTrigger(hour=15, minute=25, timezone='Asia/Kolkata'),
                 id='scan_st1_close_all_trades_eod',
                 name='Close All Open Trades (3:25 PM)',
@@ -148,24 +225,49 @@ class ScanST1AlgoScheduler:
             
             # VWAP Slope Cycles
             def run_cycle_1():
-                import asyncio
-                asyncio.run(calculate_vwap_slope_for_cycle(1, datetime.now(pytz.timezone('Asia/Kolkata'))))
+                logger.info("🔧 Triggering Cycle 1 VWAP Slope calculation...")
+                try:
+                    import asyncio
+                    asyncio.run(calculate_vwap_slope_for_cycle(1, datetime.now(pytz.timezone('Asia/Kolkata'))))
+                    logger.info("✅ Cycle 1 VWAP Slope calculation completed")
+                except Exception as e:
+                    logger.error(f"❌ Cycle 1 VWAP Slope calculation failed: {e}", exc_info=True)
             
             def run_cycle_2():
-                import asyncio
-                asyncio.run(calculate_vwap_slope_for_cycle(2, datetime.now(pytz.timezone('Asia/Kolkata'))))
+                logger.info("🔧 Triggering Cycle 2 VWAP Slope calculation...")
+                try:
+                    import asyncio
+                    asyncio.run(calculate_vwap_slope_for_cycle(2, datetime.now(pytz.timezone('Asia/Kolkata'))))
+                    logger.info("✅ Cycle 2 VWAP Slope calculation completed")
+                except Exception as e:
+                    logger.error(f"❌ Cycle 2 VWAP Slope calculation failed: {e}", exc_info=True)
             
             def run_cycle_3():
-                import asyncio
-                asyncio.run(calculate_vwap_slope_for_cycle(3, datetime.now(pytz.timezone('Asia/Kolkata'))))
+                logger.info("🔧 Triggering Cycle 3 VWAP Slope calculation...")
+                try:
+                    import asyncio
+                    asyncio.run(calculate_vwap_slope_for_cycle(3, datetime.now(pytz.timezone('Asia/Kolkata'))))
+                    logger.info("✅ Cycle 3 VWAP Slope calculation completed")
+                except Exception as e:
+                    logger.error(f"❌ Cycle 3 VWAP Slope calculation failed: {e}", exc_info=True)
             
             def run_cycle_4():
-                import asyncio
-                asyncio.run(calculate_vwap_slope_for_cycle(4, datetime.now(pytz.timezone('Asia/Kolkata'))))
+                logger.info("🔧 Triggering Cycle 4 VWAP Slope calculation...")
+                try:
+                    import asyncio
+                    asyncio.run(calculate_vwap_slope_for_cycle(4, datetime.now(pytz.timezone('Asia/Kolkata'))))
+                    logger.info("✅ Cycle 4 VWAP Slope calculation completed")
+                except Exception as e:
+                    logger.error(f"❌ Cycle 4 VWAP Slope calculation failed: {e}", exc_info=True)
             
             def run_cycle_5():
-                import asyncio
-                asyncio.run(calculate_vwap_slope_for_cycle(5, datetime.now(pytz.timezone('Asia/Kolkata'))))
+                logger.info("🔧 Triggering Cycle 5 VWAP Slope calculation...")
+                try:
+                    import asyncio
+                    asyncio.run(calculate_vwap_slope_for_cycle(5, datetime.now(pytz.timezone('Asia/Kolkata'))))
+                    logger.info("✅ Cycle 5 VWAP Slope calculation completed")
+                except Exception as e:
+                    logger.error(f"❌ Cycle 5 VWAP Slope calculation failed: {e}", exc_info=True)
             
             # Cycle 1: 10:30 AM
             self.scheduler.add_job(
@@ -230,10 +332,12 @@ class ScanST1AlgoScheduler:
             
             # 5. Index Price Scheduler - Every 5 minutes during market hours
             def run_index_price_check():
+                logger.info("🔧 Triggering Index Price Check job (every 5 minutes)...")
                 try:
                     index_price_scheduler.fetch_and_store_index_prices()
+                    logger.info("✅ Index Price Check job completed")
                 except Exception as e:
-                    logger.error(f"❌ Error in index price check: {str(e)}", exc_info=True)
+                    logger.error(f"❌ Index Price Check job failed: {e}", exc_info=True)
             
             self.scheduler.add_job(
                 run_index_price_check,
@@ -248,8 +352,24 @@ class ScanST1AlgoScheduler:
             logger.info("✅ Scheduled: Index Price Check (Every 5 minutes)")
             
             # Special jobs for 9:15 AM and 3:30 PM
+            def run_index_price_9_15():
+                logger.info("🔧 Triggering Index Price at 9:15 AM (Market Open) job...")
+                try:
+                    index_price_scheduler.fetch_and_store_index_prices()
+                    logger.info("✅ Index Price at 9:15 AM job completed")
+                except Exception as e:
+                    logger.error(f"❌ Index Price at 9:15 AM job failed: {e}", exc_info=True)
+            
+            def run_index_price_15_30():
+                logger.info("🔧 Triggering Index Price at 3:30 PM (Market Close) job...")
+                try:
+                    index_price_scheduler.fetch_and_store_index_prices()
+                    logger.info("✅ Index Price at 3:30 PM job completed")
+                except Exception as e:
+                    logger.error(f"❌ Index Price at 3:30 PM job failed: {e}", exc_info=True)
+            
             self.scheduler.add_job(
-                index_price_scheduler.fetch_and_store_index_prices,
+                run_index_price_9_15,
                 trigger=CronTrigger(hour=9, minute=15, timezone='Asia/Kolkata'),
                 id='scan_st1_index_price_9_15',
                 name='Index Price at 9:15 AM (Market Open)',
@@ -260,7 +380,7 @@ class ScanST1AlgoScheduler:
             )
             
             self.scheduler.add_job(
-                index_price_scheduler.fetch_and_store_index_prices,
+                run_index_price_15_30,
                 trigger=CronTrigger(hour=15, minute=30, timezone='Asia/Kolkata'),
                 id='scan_st1_index_price_15_30',
                 name='Index Price at 3:30 PM (Market Close)',
