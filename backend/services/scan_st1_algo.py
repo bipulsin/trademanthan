@@ -105,11 +105,20 @@ class ScanST1AlgoScheduler:
     """Unified scheduler controller for all scan algorithm jobs"""
     
     def __init__(self):
-        self.scheduler = BackgroundScheduler(timezone='Asia/Kolkata')
-        self.is_running = False
-        logger.info("=" * 60)
-        logger.info("🔧 Scan ST1 Algo Scheduler Controller initialized")
-        logger.info("=" * 60)
+        try:
+            self.scheduler = BackgroundScheduler(timezone='Asia/Kolkata')
+            self.is_running = False
+            logger.info("=" * 60)
+            logger.info("🔧 Scan ST1 Algo Scheduler Controller initialized")
+            logger.info("=" * 60)
+        except Exception as e:
+            # Log error but don't raise - allow scheduler to be created but not started
+            print(f"ERROR: Failed to initialize ScanST1AlgoScheduler: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            # Create a dummy scheduler object to prevent AttributeError
+            self.scheduler = None
+            self.is_running = False
     
     def start(self):
         """Start all scheduled jobs - runs as independent scheduler"""

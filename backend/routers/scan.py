@@ -2524,27 +2524,71 @@ async def recalculate_all_today_trades(db: Session = Depends(get_db)):
 async def get_scheduler_status():
     """Get status of Scan ST1 Algo Scheduler (replaces all old schedulers)"""
     try:
-        from backend.services.scan_st1_algo import scan_st1_algo_scheduler
+        try:
+            from backend.services.scan_st1_algo import scan_st1_algo_scheduler
+        except ImportError as import_err:
+            logger.error(f"Failed to import scan_st1_algo_scheduler: {import_err}")
+            return {
+                "success": False,
+                "error": f"Import error: {str(import_err)}",
+                "all_running": False,
+                "total_jobs": 0,
+                "scan_st1_algo": {
+                    "running": False,
+                    "jobs_count": 0,
+                    "next_jobs": []
+                }
+            }
+        except Exception as init_err:
+            logger.error(f"Error initializing scan_st1_algo_scheduler: {init_err}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return {
+                "success": False,
+                "error": f"Initialization error: {str(init_err)}",
+                "all_running": False,
+                "total_jobs": 0,
+                "scan_st1_algo": {
+                    "running": False,
+                    "jobs_count": 0,
+                    "next_jobs": []
+                }
+            }
         
         if not scan_st1_algo_scheduler:
             return {
                 "success": False,
                 "error": "Scan ST1 Algo Scheduler not initialized",
                 "all_running": False,
-                "total_jobs": 0
+                "total_jobs": 0,
+                "scan_st1_algo": {
+                    "running": False,
+                    "jobs_count": 0,
+                    "next_jobs": []
+                }
             }
         
-        is_running = scan_st1_algo_scheduler.is_running and scan_st1_algo_scheduler.scheduler.running if scan_st1_algo_scheduler.scheduler else False
-        jobs_count = len(scan_st1_algo_scheduler.scheduler.get_jobs()) if scan_st1_algo_scheduler.scheduler and scan_st1_algo_scheduler.scheduler.running else 0
-        
-        # Get next few jobs
-        next_jobs = []
-        if scan_st1_algo_scheduler.scheduler and scan_st1_algo_scheduler.scheduler.running:
-            jobs = scan_st1_algo_scheduler.scheduler.get_jobs()
-            next_jobs = [
-                {"name": job.name, "next_run": str(job.next_run_time)} 
-                for job in sorted(jobs, key=lambda x: x.next_run_time if x.next_run_time else float('inf'))[:10]
-            ]
+        try:
+            is_running = False
+            jobs_count = 0
+            next_jobs = []
+            
+            if scan_st1_algo_scheduler.scheduler:
+                is_running = scan_st1_algo_scheduler.is_running and scan_st1_algo_scheduler.scheduler.running
+                if is_running:
+                    jobs = scan_st1_algo_scheduler.scheduler.get_jobs()
+                    jobs_count = len(jobs)
+                    next_jobs = [
+                        {"name": job.name, "next_run": str(job.next_run_time) if job.next_run_time else "Not scheduled"} 
+                        for job in sorted(jobs, key=lambda x: x.next_run_time if x.next_run_time else float('inf'))[:10]
+                    ]
+        except Exception as status_err:
+            logger.error(f"Error checking scheduler status: {status_err}")
+            import traceback
+            logger.error(traceback.format_exc())
+            is_running = False
+            jobs_count = 0
+            next_jobs = []
         
         return {
             "success": True,
@@ -2560,12 +2604,17 @@ async def get_scheduler_status():
     except Exception as e:
         logger.error(f"Error getting scheduler status: {e}")
         import traceback
-        traceback.print_exc()
+        logger.error(traceback.format_exc())
         return {
             "success": False,
             "error": str(e),
             "all_running": False,
-            "total_jobs": 0
+            "total_jobs": 0,
+            "scan_st1_algo": {
+                "running": False,
+                "jobs_count": 0,
+                "next_jobs": []
+            }
         }
 
 
