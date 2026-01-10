@@ -3556,16 +3556,16 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                             print(f"      - VWAP Slope: ✅ >= 45° ({slope_angle:.2f}°)")
                             if is_10_15_alert:
                                 print(f"      - Candle Size: ✅ Calculated (Ratio: {candle_size_ratio:.2f}x) - Not blocking for 10:15 alert" if candle_size_ratio is not None else "      - Candle Size: ⚠️ Not calculated yet for 10:15 alert")
-                        else:
-                            print(f"      - Candle Size: ✅ {'Passed' if candle_size_check_passed else 'Skipped'}")
+                            else:
+                                print(f"      - Candle Size: ✅ {'Passed' if candle_size_check_passed else 'Skipped'}")
                             print(f"      - Option Data: ✅ Valid")
                             print(f"   💰 Trade Details:")
                             print(f"      - Buy Price: ₹{current_option_ltp:.2f} (current LTP)")
                             print(f"      - Quantity: {qty}")
                             print(f"      - Stop Loss: ₹{trade.stop_loss:.2f}")
-                        else:
-                            # Option LTP fetch failed - log detailed error
-                            logger.error(f"❌ Cycle {cycle_number} - {stock_name}: All conditions met BUT option LTP fetch FAILED - cannot enter")
+                    else:
+                        # Option LTP fetch failed - log detailed error
+                        logger.error(f"❌ Cycle {cycle_number} - {stock_name}: All conditions met BUT option LTP fetch FAILED - cannot enter")
                             logger.error(f"   Instrument Key: {trade.instrument_key}")
                             logger.error(f"   Option Contract: {trade.option_contract}")
                             if option_quote:
