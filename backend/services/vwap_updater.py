@@ -3676,7 +3676,7 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                                                 flag_modified(trade, 'sell_time')
                                                 flag_modified(trade, 'status')
                                                 logger.warning(f"📉 Cycle {cycle_number} - {stock_name}: VWAP CROSS EXIT - Stock LTP ₹{stock_ltp_exit:.2f} {'<' if option_type == 'CE' else '>'} VWAP ₹{stock_vwap_exit:.2f}, PnL: ₹{trade.pnl:.2f}")
-                    else:
+                        else:
                             logger.debug(f"⏭️ Cycle {cycle_number} - {stock_name}: Option LTP not available for PnL update")
                     except Exception as pnl_update_error:
                         logger.warning(f"⚠️ Cycle {cycle_number} - {stock_name}: Error updating sell_price/PnL: {str(pnl_update_error)}")
