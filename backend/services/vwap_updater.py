@@ -1303,11 +1303,11 @@ def update_vwap_for_all_open_positions():
                     if position.buy_price and position.qty:
                         if new_option_ltp > 0:
                             # Use fetched option LTP for PnL calculation
-                        old_pnl = position.pnl or 0.0
-                        new_pnl = (new_option_ltp - position.buy_price) * position.qty
-                        position.pnl = new_pnl
+                            old_pnl = position.pnl or 0.0
+                            new_pnl = (new_option_ltp - position.buy_price) * position.qty
+                            position.pnl = new_pnl
                             flag_modified(position, 'pnl')
-                        updates_made.append(f"P&L: ₹{old_pnl:.2f}→₹{new_pnl:.2f}")
+                            updates_made.append(f"P&L: ₹{old_pnl:.2f}→₹{new_pnl:.2f}")
                             logger.info(f"📊 {stock_name}: PnL updated to ₹{new_pnl:.2f} (Buy: ₹{position.buy_price:.2f}, Sell: ₹{new_option_ltp:.2f}, Qty: {position.qty})")
                             pnl_calculated = True
                         elif position.sell_price and position.sell_price > 0:
