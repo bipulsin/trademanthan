@@ -66,12 +66,13 @@ class ScanST1AlgoScheduler:
         logger.info("=" * 60)
     
     def start(self):
-        """Start all scheduled jobs"""
+        """Start all scheduled jobs - runs as independent scheduler"""
         if self.is_running:
             logger.warning("⚠️ Scan ST1 Algo Scheduler is already running")
             return
         
-        logger.info("🚀 Starting Scan ST1 Algo Scheduler Controller...")
+        logger.info("🚀 Starting Scan ST1 Algo Scheduler Controller (Independent Schedule Job)...")
+        logger.info("📝 All scheduler logs will be written to: logs/scan_st1_algo.log")
         
         try:
             # 1. Instruments Downloader - Daily at 9:05 AM
