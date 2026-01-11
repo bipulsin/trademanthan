@@ -2357,7 +2357,7 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 entry_log = json.dumps({"id":f"log_cycle1_entry_{int(now.timestamp())}","timestamp":int(now.timestamp()*1000),"location":"vwap_updater.py:1190","message":"Cycle 1 - Function entry","data":{"cycle_number":cycle_number,"cycle_time":str(cycle_time),"now":str(now),"today":str(today)},"sessionId":"debug-session","runId":"post-fix","hypothesisId":"ENTRY"}) + "\n"
                 f.write(entry_log)
                 f.flush()  # Force write to disk
-            logger.info(f"📝 Debug log written to {log_path}")
+            logger.debug(f"📝 Debug log written to {log_path}")
         except Exception as log_err:
             logger.error(f"❌ CRITICAL: Failed to write debug log entry: {str(log_err)}")
             import traceback
