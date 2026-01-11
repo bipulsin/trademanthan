@@ -4499,6 +4499,13 @@ async def update_upstox_token(request: Request):
     Update Upstox access token from frontend (LEGACY - use OAuth instead)
     """
     try:
+        # Also log to scan_st1_algo.log for visibility in scanlog.html
+        try:
+            from backend.services.scan_st1_algo import logger as scan_st1_logger
+            scan_st1_logger.info("🔄 Updating Upstox API token (manual update)...")
+        except:
+            pass  # Continue even if scan_st1_logger is not available
+        
         data = await request.json()
         new_token = data.get("access_token", "")
         
@@ -4524,6 +4531,15 @@ async def update_upstox_token(request: Request):
         with open(service_file, 'w') as f:
             f.write(new_content)
         
+        # Log to scan_st1_algo.log
+        try:
+            from backend.services.scan_st1_algo import logger as scan_st1_logger
+            scan_st1_logger.info("✅ Upstox token updated successfully (manual update)")
+        except:
+            pass
+        
+        logger.info("✅ Upstox token updated successfully (manual update)")
+        
         # Restart the backend service
         import subprocess
         subprocess.run(['sudo', 'systemctl', 'restart', 'trademanthan-backend'], 
@@ -4538,6 +4554,13 @@ async def update_upstox_token(request: Request):
         )
         
     except Exception as e:
+        # Log error to scan_st1_algo.log
+        try:
+            from backend.services.scan_st1_algo import logger as scan_st1_logger
+            scan_st1_logger.error(f"❌ Failed to update Upstox token: {str(e)}")
+        except:
+            pass
+        logger.error(f"❌ Failed to update Upstox token: {str(e)}")
         return JSONResponse(
             status_code=500,
             content={
@@ -4687,11 +4710,23 @@ async def upstox_oauth_callback(code: str = None, state: str = None, error: str 
             except Exception as jwt_error:
                 logger.warning(f"⚠️ Could not decode JWT expiration: {jwt_error}")
         
+        # Also log to scan_st1_algo.log for visibility in scanlog.html
+        try:
+            from backend.services.scan_st1_algo import logger as scan_st1_logger
+            scan_st1_logger.info("🔄 Updating Upstox API token (OAuth callback)...")
+        except:
+            pass  # Continue even if scan_st1_logger is not available
+        
         # Save token using token manager (persistent storage)
         try:
             from services.token_manager import save_upstox_token
             if save_upstox_token(access_token, expires_at):
                 logger.info("✅ Upstox token saved to token manager")
+                try:
+                    from backend.services.scan_st1_algo import logger as scan_st1_logger
+                    scan_st1_logger.info("✅ Upstox token saved to token manager")
+                except:
+                    pass
             else:
                 logger.warning("⚠️ Failed to save token to token manager, trying fallback")
         except Exception as e:
@@ -4715,6 +4750,11 @@ async def upstox_oauth_callback(code: str = None, state: str = None, error: str 
                 f.write(new_content)
             
             logger.info("✅ Upstox token updated in service file")
+            try:
+                from backend.services.scan_st1_algo import logger as scan_st1_logger
+                scan_st1_logger.info("✅ Upstox token updated in service file")
+            except:
+                pass
         except Exception as e:
             logger.warning(f"⚠️ Could not update service file: {str(e)}")
         
@@ -4722,6 +4762,11 @@ async def upstox_oauth_callback(code: str = None, state: str = None, error: str 
         if hasattr(vwap_service, 'access_token'):
             vwap_service.access_token = access_token
             logger.info("✅ Upstox token updated in memory")
+            try:
+                from backend.services.scan_st1_algo import logger as scan_st1_logger
+                scan_st1_logger.info("✅ Upstox token updated in memory - token refresh complete")
+            except:
+                pass
         if hasattr(vwap_service, 'upstox'):
             vwap_service.upstox.set_access_token(access_token)
         
