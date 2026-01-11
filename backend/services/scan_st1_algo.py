@@ -452,15 +452,6 @@ class ScanST1AlgoScheduler:
             logger.info(f"   Total Jobs: {total_jobs}")
             logger.info(f"   Log File: {log_file}")
             logger.info(f"   Scheduler State: {self.scheduler.state if hasattr(self.scheduler, 'state') else 'RUNNING'}")
-            
-            # List all scheduled jobs
-            jobs = self.scheduler.get_jobs()
-            logger.info(f"   Scheduled Jobs ({len(jobs)} total):")
-            for job in jobs[:10]:  # Show first 10 jobs
-                next_run = job.next_run_time.strftime('%Y-%m-%d %H:%M:%S IST') if job.next_run_time else 'Not scheduled'
-                logger.info(f"      - {job.name} (Next: {next_run})")
-            if len(jobs) > 10:
-                logger.info(f"      ... and {len(jobs) - 10} more jobs")
             logger.info("=" * 60)
             
         except Exception as e:
