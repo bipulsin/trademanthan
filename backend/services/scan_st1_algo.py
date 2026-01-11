@@ -67,17 +67,18 @@ from backend.services.health_monitor import health_monitor
 # Import index price scheduler instance and method
 from backend.services.index_price_scheduler import index_price_scheduler
 
-# Configure job function loggers to ALSO write to scan_st1_algo.log
-# This ensures all scheduler-related logs go to scan_st1_algo.log
+# Configure job function loggers to write ONLY to scan_st1_algo.log
+# This ensures all scan algorithm logs (webhooks, option contracts, trades, exits) go to scan_st1_algo.log
 job_loggers = [
     logging.getLogger('backend.services.instruments_downloader'),
     logging.getLogger('backend.services.vwap_updater'),
     logging.getLogger('backend.services.health_monitor'),
-    logging.getLogger('backend.services.index_price_scheduler')
+    logging.getLogger('backend.services.index_price_scheduler'),
+    logging.getLogger('backend.routers.scan')  # Add scan router logger for webhook processing, option contracts, trades
 ]
 
 for job_logger in job_loggers:
-    # Add scan_st1_algo.log handler to job loggers (in addition to their existing handlers)
+    # Add scan_st1_algo.log handler to job loggers
     # Check if handler already exists to avoid duplicates by checking baseFilename attribute
     handler_exists = False
     for h in job_logger.handlers:
@@ -97,8 +98,9 @@ for job_logger in job_loggers:
             datefmt='%Y-%m-%d %H:%M:%S'
         ))
         job_logger.addHandler(job_file_handler)
-        # Keep propagation enabled so logs also go to root logger (for trademanthan.log)
-        # This way logs appear in both places
+        # Disable propagation to root logger so logs ONLY go to scan_st1_algo.log
+        # This prevents duplicate logs in trademanthan.log
+        job_logger.propagate = False
 
 
 class ScanST1AlgoScheduler:
