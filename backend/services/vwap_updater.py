@@ -1689,7 +1689,7 @@ def update_vwap_for_all_open_positions():
         try:
             db.flush()
             db.commit()
-            logger.info(f"✅ Committed {updated_count} position updates to database")
+            logger.debug(f"✅ Committed {updated_count} position updates to database")
             
             # #region agent log
             try:
