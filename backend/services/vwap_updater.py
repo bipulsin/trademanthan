@@ -229,7 +229,7 @@ def update_vwap_for_all_open_positions():
         entry_msg = f"🚀 FUNCTION ENTRY: update_vwap_for_all_open_positions() called at {now_temp.strftime('%Y-%m-%d %H:%M:%S IST')}"
         print(entry_msg, file=sys.stderr)  # Print to stderr as ultimate fallback
         try:
-            logger.info(entry_msg)
+            logger.debug(entry_msg)
         except Exception:
             pass  # If logger fails, print already captured it
     except Exception as entry_err:
@@ -266,7 +266,7 @@ def update_vwap_for_all_open_positions():
             f.write(entry_log)
             f.flush()
         try:
-            logger.info(f"✅ Debug log entry written to {log_path}")
+            logger.debug(f"✅ Debug log entry written to {log_path}")
         except Exception:
             pass
     except Exception as log_err:
@@ -282,7 +282,7 @@ def update_vwap_for_all_open_positions():
     # CRITICAL: Verify database session can be created
     try:
         db = SessionLocal()
-        logger.info(f"✅ Database session created successfully")
+        logger.debug(f"✅ Database session created successfully")
     except Exception as db_err:
         import sys
         error_msg = f"❌ CRITICAL: Failed to create database session: {str(db_err)}"
@@ -311,15 +311,11 @@ def update_vwap_for_all_open_positions():
         except Exception:
             log_path = None  # Skip debug logging if path unavailable
         
-        logger.info(f"📊 Starting hourly market data update at {now.strftime('%Y-%m-%d %H:%M:%S IST')}")
-        logger.info(f"🔍 DEBUG: Function update_vwap_for_all_open_positions() called at {now.strftime('%Y-%m-%d %H:%M:%S IST')}")
-        logger.info(f"🔍 DEBUG: Database session active: {db.is_active if hasattr(db, 'is_active') else 'unknown'}")
-        
         # Import VWAP service
         try:
             from services.upstox_service import upstox_service
             vwap_service = upstox_service
-            logger.info(f"✅ VWAP service imported successfully")
+            logger.debug(f"✅ VWAP service imported successfully")
         except ImportError as import_err:
             error_msg = f"❌ CRITICAL: Could not import upstox_service: {str(import_err)}"
             logger.error(error_msg)
@@ -877,15 +873,14 @@ def update_vwap_for_all_open_positions():
                 f.write(query_log)
                 f.flush()
             
-            logger.info(f"🔍 DEBUG QUERY: Found {len(open_positions)} open positions. Status breakdown: {status_breakdown}")
-            logger.info(f"🔍 DEBUG QUERY: Positions without sell_price: {sum(1 for p in open_positions if not p.sell_price or p.sell_price == 0)}")
-            logger.info(f"🔍 DEBUG QUERY: Positions without instrument_key: {sum(1 for p in open_positions if not p.instrument_key)}")
-            logger.info(f"🔍 DEBUG QUERY: Sample positions: {positions_detail[:3]}")
+            logger.debug(f"🔍 DEBUG QUERY: Found {len(open_positions)} open positions. Status breakdown: {status_breakdown}")
+            logger.debug(f"🔍 DEBUG QUERY: Positions without sell_price: {sum(1 for p in open_positions if not p.sell_price or p.sell_price == 0)}")
+            logger.debug(f"🔍 DEBUG QUERY: Positions without instrument_key: {sum(1 for p in open_positions if not p.instrument_key)}")
+            logger.debug(f"🔍 DEBUG QUERY: Sample positions: {positions_detail[:3]}")
             
-            # CRITICAL: If no positions found, log this clearly
+            # CRITICAL: If no positions found, log this clearly (once only)
             if len(open_positions) == 0:
-                logger.warning(f"⚠️ WARNING: No open positions found! Query returned 0 results.")
-                logger.warning(f"   Query filters: trade_date >= {today}, status != 'sold', exit_reason == None")
+                logger.debug(f"⚠️ No open positions found. Query filters: trade_date >= {today}, status != 'sold', exit_reason == None")
         except Exception as log_err:
             logger.error(f"❌ Failed to write query log: {str(log_err)}")
             import traceback
@@ -897,14 +892,10 @@ def update_vwap_for_all_open_positions():
         failed_count = 0
         stocks_with_history_saved = set()
         
-        logger.info(f"🔍 DEBUG: Starting to process {len(open_positions)} positions...")
+        logger.debug(f"🔍 DEBUG: Starting to process {len(open_positions)} positions...")
         
         if len(open_positions) == 0:
-            logger.warning(f"⚠️ WARNING: No positions to process! This might indicate:")
-            logger.warning(f"   1. No trades were entered today")
-            logger.warning(f"   2. All trades have been sold/exited")
-            logger.warning(f"   3. Query filters are too restrictive")
-            logger.warning(f"   4. Database connection issue")
+            logger.debug(f"⚠️ No positions to process (no trades entered today or all exited)")
         
         for idx, position in enumerate(open_positions, 1):
             try:
@@ -1689,7 +1680,7 @@ def update_vwap_for_all_open_positions():
                 }) + "\n"
                 f.write(pre_commit_log)
                 f.flush()
-            logger.info(f"🔍 DEBUG PRE-COMMIT: {len(db.dirty)} objects marked as dirty, {updated_count} positions updated")
+            logger.debug(f"🔍 DEBUG PRE-COMMIT: {len(db.dirty)} objects marked as dirty, {updated_count} positions updated")
         except Exception as log_err:
             logger.error(f"❌ Failed to write pre-commit log: {str(log_err)}")
         # #endregion
@@ -1809,7 +1800,7 @@ def update_vwap_for_all_open_positions():
                 f.write(post_commit_log)
                 f.flush()
             
-            logger.info(f"🔍 DEBUG POST-COMMIT: {with_sell_price_count}/{len(sell_price_status)} positions have sell_price")
+            logger.debug(f"🔍 DEBUG POST-COMMIT: {with_sell_price_count}/{len(sell_price_status)} positions have sell_price")
             if without_sell_price_count > 0:
                 logger.warning(f"⚠️ POST-COMMIT WARNING: {without_sell_price_count} positions still missing sell_price!")
                 missing_details = [k for k, v in sell_price_status.items() if not v["has_sell_price"]]
@@ -1864,8 +1855,8 @@ def update_vwap_for_all_open_positions():
                 f.write(final_summary_log)
                 f.flush()
             
-            logger.info(f"🔍 DEBUG FINAL SUMMARY: {final_summary['with_sell_price']}/{final_summary['total_open_positions']} positions have sell_price")
-            logger.info(f"🔍 DEBUG FINAL SUMMARY: {final_summary['without_instrument_key']} positions missing instrument_key")
+            logger.debug(f"🔍 DEBUG FINAL SUMMARY: {final_summary['with_sell_price']}/{final_summary['total_open_positions']} positions have sell_price")
+            logger.debug(f"🔍 DEBUG FINAL SUMMARY: {final_summary['without_instrument_key']} positions missing instrument_key")
             if final_summary['without_sell_price'] > 0:
                 logger.warning(f"⚠️ WARNING: {final_summary['without_sell_price']} positions still missing sell_price!")
                 for pos_detail in final_summary['positions_detail']:
@@ -1899,11 +1890,11 @@ def update_vwap_for_all_open_positions():
                 with_sell_price_verification = sum(1 for v in verification_results if v['sell_price'])
                 without_sell_price_verification = sum(1 for v in verification_results if not v['sell_price'])
                 
-                logger.info(f"🔍 DEBUG VERIFICATION QUERY: Fresh database query returned {len(verification_query)} positions")
-                logger.info(f"🔍 DEBUG VERIFICATION: Positions with sell_price: {with_sell_price_verification}")
-                logger.info(f"🔍 DEBUG VERIFICATION: Positions without sell_price: {without_sell_price_verification}")
+                logger.debug(f"🔍 DEBUG VERIFICATION QUERY: Fresh database query returned {len(verification_query)} positions")
+                logger.debug(f"🔍 DEBUG VERIFICATION: Positions with sell_price: {with_sell_price_verification}")
+                logger.debug(f"🔍 DEBUG VERIFICATION: Positions without sell_price: {without_sell_price_verification}")
                 if verification_results:
-                    logger.info(f"🔍 DEBUG VERIFICATION: Sample positions: {verification_results[:3]}")
+                    logger.debug(f"🔍 DEBUG VERIFICATION: Sample positions: {verification_results[:3]}")
                 
                 if without_sell_price_verification > 0:
                     logger.error(f"🚨 CRITICAL: {without_sell_price_verification} positions still missing sell_price after commit!")
@@ -2003,7 +1994,7 @@ def update_vwap_for_all_open_positions():
             exit_msg = f"🏁 FUNCTION EXIT: update_vwap_for_all_open_positions() completed at {now_exit.strftime('%Y-%m-%d %H:%M:%S IST')}"
             print(exit_msg, file=sys.stderr)
             try:
-                logger.info(exit_msg)
+                logger.debug(exit_msg)
             except Exception:
                 pass
         except Exception:
