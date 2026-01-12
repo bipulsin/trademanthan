@@ -85,12 +85,11 @@ def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: st
         if not option_chain:
             # Log as debug instead of warning - this is expected for some stocks that don't have options
             logger.debug(f"No option chain data available for {stock_name} (stock may not have options trading)")
-            print(f"No option chain data available for {stock_name}")
+            logger.info(f"No option chain data available for {stock_name}")
             return None
         
         # Debug: Log the structure of option_chain
         logger.info(f"Option chain structure for {stock_name}: {type(option_chain)}, keys: {list(option_chain.keys()) if isinstance(option_chain, dict) else 'not a dict'}")
-        print(f"Option chain structure for {stock_name}: {type(option_chain)}, keys: {list(option_chain.keys()) if isinstance(option_chain, dict) else 'not a dict'}")
         
         # Parse option chain data
         # Upstox API returns a dictionary with 'strikes' key containing list of strike data
@@ -100,57 +99,57 @@ def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: st
         strike_list = None
         if isinstance(option_chain, dict):
             logger.info(f"📊 Option chain for {stock_name} is a dictionary with keys: {list(option_chain.keys())}")
-            print(f"📊 Option chain for {stock_name} is a dictionary with keys: {list(option_chain.keys())}")
+            logger.info(f"📊 Option chain for {stock_name} is a dictionary with keys: {list(option_chain.keys())}")
             # Check if it has a 'strikes' key
             if 'strikes' in option_chain and isinstance(option_chain['strikes'], list):
                 strike_list = option_chain['strikes']
                 logger.info(f"✅ Found 'strikes' key with {len(strike_list)} strikes")
-                print(f"✅ Found 'strikes' key with {len(strike_list)} strikes")
+                logger.info(f"✅ Found 'strikes' key with {len(strike_list)} strikes")
             elif 'data' in option_chain and isinstance(option_chain['data'], dict):
                 # Nested data structure
                 logger.info(f"📊 Found 'data' key with sub-keys: {list(option_chain['data'].keys())}")
-                print(f"📊 Found 'data' key with sub-keys: {list(option_chain['data'].keys())}")
+                logger.info(f"📊 Found 'data' key with sub-keys: {list(option_chain['data'].keys())}")
                 if 'strikes' in option_chain['data'] and isinstance(option_chain['data']['strikes'], list):
                     strike_list = option_chain['data']['strikes']
                     logger.info(f"✅ Found 'strikes' in 'data' with {len(strike_list)} strikes")
-                    print(f"✅ Found 'strikes' in 'data' with {len(strike_list)} strikes")
+                    logger.info(f"✅ Found 'strikes' in 'data' with {len(strike_list)} strikes")
                 else:
                     logger.warning(f"⚠️ Unexpected option chain structure for {stock_name}: {list(option_chain.get('data', {}).keys())}")
-                    print(f"⚠️ Unexpected option chain structure for {stock_name}: {list(option_chain.get('data', {}).keys())}")
+                    logger.info(f"⚠️ Unexpected option chain structure for {stock_name}: {list(option_chain.get('data', {}).keys())}")
                     # Try to find any list in the data structure
                     for key, value in option_chain['data'].items():
                         if isinstance(value, list) and len(value) > 0:
                             logger.info(f"   Found list in '{key}' with {len(value)} items, first item type: {type(value[0])}")
-                            print(f"   Found list in '{key}' with {len(value)} items, first item type: {type(value[0])}")
+                            logger.info(f"   Found list in '{key}' with {len(value)} items, first item type: {type(value[0])}")
                             if isinstance(value[0], dict):
                                 logger.info(f"   First item keys: {list(value[0].keys())}")
-                                print(f"   First item keys: {list(value[0].keys())}")
+                                logger.info(f"   First item keys: {list(value[0].keys())}")
                     return None
             else:
                 logger.warning(f"⚠️ Unexpected option chain structure for {stock_name}: {list(option_chain.keys())}")
-                print(f"⚠️ Unexpected option chain structure for {stock_name}: {list(option_chain.keys())}")
+                logger.info(f"⚠️ Unexpected option chain structure for {stock_name}: {list(option_chain.keys())}")
                 # Try to find any list in the structure
                 for key, value in option_chain.items():
                     if isinstance(value, list) and len(value) > 0:
                         logger.info(f"   Found list in '{key}' with {len(value)} items, first item type: {type(value[0])}")
-                        print(f"   Found list in '{key}' with {len(value)} items, first item type: {type(value[0])}")
+                        logger.info(f"   Found list in '{key}' with {len(value)} items, first item type: {type(value[0])}")
                         if isinstance(value[0], dict):
                             logger.info(f"   First item keys: {list(value[0].keys())}")
-                            print(f"   First item keys: {list(value[0].keys())}")
+                            logger.info(f"   First item keys: {list(value[0].keys())}")
                 return None
         elif isinstance(option_chain, list):
             # Direct list format (legacy or different API version)
             strike_list = option_chain
             logger.info(f"✅ Option chain for {stock_name} is a direct list with {len(strike_list)} items")
-            print(f"✅ Option chain for {stock_name} is a direct list with {len(strike_list)} items")
+            logger.info(f"✅ Option chain for {stock_name} is a direct list with {len(strike_list)} items")
         else:
             logger.warning(f"⚠️ Unexpected option chain type for {stock_name}: {type(option_chain)}")
-            print(f"⚠️ Unexpected option chain type for {stock_name}: {type(option_chain)}")
+            logger.info(f"⚠️ Unexpected option chain type for {stock_name}: {type(option_chain)}")
             return None
         
         # Parse strikes from the list
         logger.info(f"Parsing {len(strike_list)} strikes from option chain for {stock_name}")
-        print(f"Parsing {len(strike_list)} strikes from option chain for {stock_name}")
+        logger.info(f"Parsing {len(strike_list)} strikes from option chain for {stock_name}")
         
         # Debug: Log first strike structure
         if strike_list and len(strike_list) > 0:
@@ -208,11 +207,11 @@ def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: st
                 logger.warning(f"No option_data found for strike {strike_price} {option_type} in {stock_name} - strike_data keys: {list(strike_data.keys()) if isinstance(strike_data, dict) else 'not a dict'}")
         
         logger.info(f"Found {len(strikes)} {option_type} options in chain for {stock_name}")
-        print(f"Found {len(strikes)} {option_type} options in chain for {stock_name}")
+        logger.info(f"Found {len(strikes)} {option_type} options in chain for {stock_name}")
         
         if not strikes:
             logger.warning(f"No {option_type} options found in chain for {stock_name} - this will cause 'Missing option data' error")
-            print(f"No {option_type} options found in chain for {stock_name}")
+            logger.info(f"No {option_type} options found in chain for {stock_name}")
             # Debug: Log first few strike_data items to understand structure
             if strike_list and len(strike_list) > 0:
                 logger.debug(f"First strike_data item structure: {list(strike_list[0].keys()) if isinstance(strike_list[0], dict) else type(strike_list[0])}")
@@ -232,7 +231,7 @@ def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: st
         
         if not otm_strikes:
             logger.warning(f"No OTM {option_type} strikes found for {stock_name} (stock LTP: {stock_ltp}) - this will cause 'Missing option data' error")
-            print(f"No OTM {option_type} strikes found for {stock_name} (stock LTP: {stock_ltp})")
+            logger.info(f"No OTM {option_type} strikes found for {stock_name} (stock LTP: {stock_ltp})")
             # Debug: Log available strikes to understand why
             if strikes:
                 sample_strikes = strikes[:5]
@@ -246,28 +245,28 @@ def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: st
         otm_1_to_5 = otm_strikes[:5]
         
         if not otm_1_to_5:
-            print(f"Not enough OTM strikes for {stock_name}")
+            logger.info(f"Not enough OTM strikes for {stock_name}")
             return otm_strikes[0] if otm_strikes else None
         
-        print(f"OTM-1 to OTM-5 strikes for {stock_name} {option_type}:")
+        logger.info(f"OTM-1 to OTM-5 strikes for {stock_name} {option_type}:")
         for i, strike in enumerate(otm_1_to_5, 1):
             liquidity_score = strike['volume'] * strike['oi']
-            print(f"  OTM-{i}: Strike {strike['strike_price']}, Vol: {strike['volume']}, OI: {strike['oi']}, Score: {liquidity_score}")
+            logger.info(f"  OTM-{i}: Strike {strike['strike_price']}, Vol: {strike['volume']}, OI: {strike['oi']}, Score: {liquidity_score}")
         
         # Select strike with highest volume * OI among OTM-1 to OTM-5
         selected = max(otm_1_to_5, key=lambda x: x['volume'] * x['oi'])
         
         otm_position = otm_1_to_5.index(selected) + 1
         liquidity_score = selected['volume'] * selected['oi']
-        print(f"✅ Selected OTM-{otm_position} strike: {selected['strike_price']} (Volume: {selected['volume']}, OI: {selected['oi']}, Score: {liquidity_score})")
-        print(f"   Highest liquidity among OTM-1 to OTM-5")
+        logger.info(f"✅ Selected OTM-{otm_position} strike: {selected['strike_price']} (Volume: {selected['volume']}, OI: {selected['oi']}, Score: {liquidity_score})")
+        logger.info(f"   Highest liquidity among OTM-1 to OTM-5")
         return selected
         
     except Exception as e:
         logger.error(f"Error fetching option chain for {stock_name}: {str(e)}", exc_info=True)
-        print(f"Error fetching option chain for {stock_name}: {str(e)}")
+        logger.info(f"Error fetching option chain for {stock_name}: {str(e)}")
         import traceback
-        print(traceback.format_exc())
+        logger.info(traceback.format_exc())
         return None
 
 # Helper function to process webhook data
@@ -315,7 +314,7 @@ def find_option_contract_from_instruments(stock_name: str, option_type: str, sto
             target_expiry_month = now.month
             target_expiry_year = now.year
         
-        print(f"Target expiry: {target_expiry_year}-{target_expiry_month:02d} (current date: {now.strftime('%Y-%m-%d')})")
+        logger.info(f"Target expiry: {target_expiry_year}-{target_expiry_month:02d} (current date: {now.strftime('%Y-%m-%d')})")
         logger.info(f"Target expiry: {target_expiry_year}-{target_expiry_month:02d} (current date: {now.strftime('%Y-%m-%d')}) for {stock_name} {option_type}")
         
         # Get strike from option chain API - REQUIRED, no fallback
@@ -326,7 +325,7 @@ def find_option_contract_from_instruments(stock_name: str, option_type: str, sto
                 strike_data = find_strike_from_option_chain(vwap_service, stock_name, option_type, stock_ltp)
                 if strike_data:
                     target_strike = strike_data['strike_price']
-                    print(f"Using option chain strike for {stock_name}: {target_strike} (Volume: {strike_data['volume']}, OI: {strike_data['oi']})")
+                    logger.info(f"Using option chain strike for {stock_name}: {target_strike} (Volume: {strike_data['volume']}, OI: {strike_data['oi']})")
                     logger.info(f"Using option chain strike for {stock_name} {option_type}: {target_strike} (Volume: {strike_data['volume']}, OI: {strike_data['oi']})")
                 else:
                     logger.warning(f"No strike data returned from option chain for {stock_name} {option_type} - this will cause 'Missing option data' error")
@@ -336,18 +335,18 @@ def find_option_contract_from_instruments(stock_name: str, option_type: str, sto
         
         # If option chain not available, return None to mark trade as no_entry
         if target_strike is None or target_strike == 0:
-            print(f"❌ Option chain not available for {stock_name} - Cannot determine strike. Trade will be marked as no_entry.")
+            logger.info(f"❌ Option chain not available for {stock_name} - Cannot determine strike. Trade will be marked as no_entry.")
             logger.warning(f"❌ Option chain not available for {stock_name} {option_type} - Cannot determine strike. Trade will be marked as no_entry.")
             return None
         
-        print(f"Looking for {option_type} option with strike {target_strike} for {stock_name}")
+        logger.info(f"Looking for {option_type} option with strike {target_strike} for {stock_name}")
         logger.info(f"Looking for {option_type} option with strike {target_strike} for {stock_name}")
         
         # Load instruments.json
         instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
         
         if not instruments_file.exists():
-            print(f"⚠️ Instruments JSON file not found: {instruments_file}")
+            logger.info(f"⚠️ Instruments JSON file not found: {instruments_file}")
             logger.error(f"Instruments JSON file not found: {instruments_file}")
             return None
         
@@ -365,19 +364,19 @@ def find_option_contract_from_instruments(stock_name: str, option_type: str, sto
                     import time
                     time.sleep(retry * 0.5)  # Exponential backoff
                 else:
-                    print(f"❌ ERROR: Failed to read instruments file after {max_retries} attempts: {str(file_error)}")
+                    logger.info(f"❌ ERROR: Failed to read instruments file after {max_retries} attempts: {str(file_error)}")
                     logger.error(f"Failed to read instruments file for {stock_name} after {max_retries} attempts: {str(file_error)}")
                     return None
         
         if not instruments_data:
-            print(f"⚠️ Instruments data is empty")
+            logger.info(f"⚠️ Instruments data is empty")
             logger.error(f"Instruments data is empty for {stock_name}")
             return None
         
         # Validate that instruments_data is a list
         if not isinstance(instruments_data, list):
             error_msg = f"Instruments data is not a list (type: {type(instruments_data).__name__})"
-            print(f"❌ ERROR: {error_msg}")
+            logger.info(f"❌ ERROR: {error_msg}")
             logger.error(f"{error_msg} for {stock_name}")
             return None
         
@@ -443,11 +442,11 @@ def find_option_contract_from_instruments(stock_name: str, option_type: str, sto
                             if not option_contract:
                                 # Log warning but continue searching - there might be another exact match with trading_symbol
                                 logger.warning(f"Exact match found for {stock_name} {option_type} strike {inst_strike} but trading_symbol is missing (instrument_key: {inst.get('instrument_key', 'N/A')})")
-                                print(f"⚠️ WARNING: Exact match found but trading_symbol not found in instrument JSON (strike: {inst_strike}, expiry: {inst_expiry.strftime('%d %b %Y')})")
+                                logger.info(f"⚠️ WARNING: Exact match found but trading_symbol not found in instrument JSON (strike: {inst_strike}, expiry: {inst_expiry.strftime('%d %b %Y')})")
                                 continue
-                            print(f"✅ Found EXACT match for {stock_name} {option_type}: {option_contract}")
-                            print(f"   Strike: {inst_strike} (requested: {target_strike})")
-                            print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
+                            logger.info(f"✅ Found EXACT match for {stock_name} {option_type}: {option_contract}")
+                            logger.info(f"   Strike: {inst_strike} (requested: {target_strike})")
+                            logger.info(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
                             logger.info(f"✅ Found EXACT match for {stock_name} {option_type}: {option_contract} (strike: {inst_strike}, expiry: {inst_expiry.strftime('%d %b %Y')})")
                             return option_contract
                         else:
@@ -467,31 +466,31 @@ def find_option_contract_from_instruments(stock_name: str, option_type: str, sto
                     inst_expiry = datetime.fromtimestamp(expiry_ms, tz=ist)
                 else:
                     logger.warning(f"Best match for {stock_name} {option_type} has no expiry timestamp")
-                    print(f"⚠️ WARNING: Best match has no expiry timestamp, skipping")
+                    logger.info(f"⚠️ WARNING: Best match has no expiry timestamp, skipping")
                     return None
                 
                 # Fetch option contract name from instrument JSON
                 option_contract = best_match.get('trading_symbol')
                 if not option_contract:
                     logger.warning(f"Best match found for {stock_name} {option_type} but trading_symbol is missing (instrument_key: {best_match.get('instrument_key', 'N/A')}, strike: {inst_strike})")
-                    print(f"⚠️ WARNING: trading_symbol not found in best match instrument JSON (strike: {inst_strike}, expiry: {inst_expiry.strftime('%d %b %Y')})")
+                    logger.info(f"⚠️ WARNING: trading_symbol not found in best match instrument JSON (strike: {inst_strike}, expiry: {inst_expiry.strftime('%d %b %Y')})")
                     return None
-                print(f"⚠️ WARNING: Using BEST MATCH (within tolerance) for {stock_name} {option_type}: {option_contract}")
-                print(f"   Strike: {inst_strike} (requested: {target_strike}, diff: {abs(inst_strike - target_strike):.4f})")
-                print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')} (requested: {target_expiry_month}/{target_expiry_year})")
+                logger.info(f"⚠️ WARNING: Using BEST MATCH (within tolerance) for {stock_name} {option_type}: {option_contract}")
+                logger.info(f"   Strike: {inst_strike} (requested: {target_strike}, diff: {abs(inst_strike - target_strike):.4f})")
+                logger.info(f"   Expiry: {inst_expiry.strftime('%d %b %Y')} (requested: {target_expiry_month}/{target_expiry_year})")
                 logger.info(f"⚠️ WARNING: Using BEST MATCH (within tolerance) for {stock_name} {option_type}: {option_contract} (strike: {inst_strike}, expiry: {inst_expiry.strftime('%d %b %Y')})")
                 return option_contract
             except (ValueError, OSError, OverflowError, TypeError) as best_match_error:
                 logger.error(f"Error processing best match for {stock_name} {option_type}: {best_match_error}")
-                print(f"❌ ERROR: Failed to process best match: {str(best_match_error)}")
+                logger.info(f"❌ ERROR: Failed to process best match: {str(best_match_error)}")
                 return None
         
-        print(f"No option contract found for {stock_name} {option_type} (target strike: {target_strike})")
+        logger.info(f"No option contract found for {stock_name} {option_type} (target strike: {target_strike})")
         logger.warning(f"No option contract found for {stock_name} {option_type} (target strike: {target_strike})")
         return None
             
     except Exception as e:
-        print(f"Error finding option contract for {stock_name}: {str(e)}")
+        logger.info(f"Error finding option contract for {stock_name}: {str(e)}")
         logger.error(f"❌ EXCEPTION in find_option_contract_from_instruments for {stock_name} {option_type}: {str(e)}", exc_info=True)
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
@@ -529,7 +528,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
     import json as json_module  # Use alias to avoid any potential shadowing issues
     
     try:
-        print(f"Processing webhook data (forced_type={forced_type}): {json_module.dumps(data, indent=2)}")
+        logger.info(f"Processing webhook data (forced_type={forced_type}): {json_module.dumps(data, indent=2)}")
         
         # Parse triggered_at time and combine with the last trading date
         import pytz
@@ -546,8 +545,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         else:
             trading_date = vwap_service.get_last_trading_date(now)
         
-        print(f"Current date: {now.strftime('%Y-%m-%d %A')}")
-        print(f"Last trading date: {trading_date.strftime('%Y-%m-%d %A')}")
+        logger.info(f"Current date: {now.strftime('%Y-%m-%d %A')}")
+        logger.info(f"Last trading date: {trading_date.strftime('%Y-%m-%d %A')}")
         
         # Try to parse the time and create a proper datetime
         try:
@@ -589,15 +588,15 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 )
                 triggered_at_str = triggered_datetime.isoformat()
                 triggered_at_display = corrected_time
-                print(f"Original time: {triggered_at_raw} -> Corrected to: {corrected_time}")
-                print(f"Triggered at: {triggered_datetime.strftime('%Y-%m-%d %H:%M:%S %A')}")
+                logger.info(f"Original time: {triggered_at_raw} -> Corrected to: {corrected_time}")
+                logger.info(f"Triggered at: {triggered_datetime.strftime('%Y-%m-%d %H:%M:%S %A')}")
             else:
                 # Default to first Chartink time if no time provided
                 triggered_datetime = trading_date.replace(hour=10, minute=15, second=0, microsecond=0)
                 triggered_at_str = triggered_datetime.isoformat()
                 triggered_at_display = "10:15 AM"
         except Exception as e:
-            print(f"Error parsing triggered_at '{triggered_at_raw}': {e}")
+            logger.info(f"Error parsing triggered_at '{triggered_at_raw}': {e}")
             # Default to first Chartink time on error
             triggered_datetime = trading_date.replace(hour=10, minute=15, second=0, microsecond=0)
             triggered_at_str = triggered_datetime.isoformat()
@@ -618,12 +617,12 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         stocks = data.get("stocks", "")
         trigger_prices = data.get("trigger_prices", "")
         
-        print(f"🔍 Parsing stocks: type={type(stocks)}, value={repr(stocks)}")
-        print(f"🔍 Parsing trigger_prices: type={type(trigger_prices)}, value={repr(trigger_prices)}")
+        logger.info(f"🔍 Parsing stocks: type={type(stocks)}, value={repr(stocks)}")
+        logger.info(f"🔍 Parsing trigger_prices: type={type(trigger_prices)}, value={repr(trigger_prices)}")
         
         # Chartink format: comma-separated strings
         if isinstance(stocks, str) and isinstance(trigger_prices, str):
-            print(f"✅ Using Chartink format (comma-separated strings)")
+            logger.info(f"✅ Using Chartink format (comma-separated strings)")
             stock_list = [s.strip() for s in stocks.split(",") if s.strip()]
             price_list = [p.strip() for p in trigger_prices.split(",") if p.strip()]
             
@@ -677,9 +676,9 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         # Filter out index names (NIFTY, BANKNIFTY, etc.) - these are not tradable stocks
         INDEX_NAMES = ['NIFTY', 'NIFTY50', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX']
         original_count = len(processed_data["stocks"])
-        print(f"🔍 Before index filtering: {original_count} stocks")
+        logger.info(f"🔍 Before index filtering: {original_count} stocks")
         if original_count > 0:
-            print(f"🔍 Stock names before filtering: {[s.get('stock_name', 'UNKNOWN') for s in processed_data['stocks']]}")
+            logger.info(f"🔍 Stock names before filtering: {[s.get('stock_name', 'UNKNOWN') for s in processed_data['stocks']]}")
         processed_data["stocks"] = [
             stock for stock in processed_data["stocks"]
             if stock.get("stock_name", "").strip().upper() not in INDEX_NAMES
@@ -687,16 +686,16 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         filtered_count = original_count - len(processed_data["stocks"])
         if filtered_count > 0:
             logger.info(f"🚫 Filtered out {filtered_count} index name(s) from stocks list")
-            print(f"🚫 Filtered out {filtered_count} index name(s) from stocks list (original: {original_count}, remaining: {len(processed_data['stocks'])})")
+            logger.info(f"🚫 Filtered out {filtered_count} index name(s) from stocks list (original: {original_count}, remaining: {len(processed_data['stocks'])})")
         else:
-            print(f"✅ No index names filtered - {len(processed_data['stocks'])} stocks remain")
+            logger.info(f"✅ No index names filtered - {len(processed_data['stocks'])} stocks remain")
         
         # Determine if this is Bullish or Bearish
         if forced_type:
             # Use forced type from endpoint
             is_bullish = (forced_type.lower() == 'bullish')
             is_bearish = (forced_type.lower() == 'bearish')
-            print(f"Using forced type: {forced_type}")
+            logger.info(f"Using forced type: {forced_type}")
         else:
             # Auto-detect from alert/scan name
             alert_name = processed_data.get("alert_name", "").lower()
@@ -715,16 +714,16 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 # Default to bullish if not specified (for backward compatibility)
                 is_bullish = True
                 logger.warning(f"⚠️ Alert type not specified in alert_name='{alert_name}', scan_name='{scan_name}', scan_url='{scan_url}' - defaulting to Bullish")
-                print(f"⚠️ Alert type not specified - defaulting to Bullish (alert_name='{alert_name}', scan_name='{scan_name}', scan_url='{scan_url}')")
+                logger.info(f"⚠️ Alert type not specified - defaulting to Bullish (alert_name='{alert_name}', scan_name='{scan_name}', scan_url='{scan_url}')")
             else:
                 detected_type = "Bearish" if is_bearish else "Bullish"
                 logger.info(f"✅ Auto-detected alert type: {detected_type} (alert_name='{alert_name}', scan_name='{scan_name}', scan_url='{scan_url}')")
-                print(f"✅ Auto-detected alert type: {detected_type}")
+                logger.info(f"✅ Auto-detected alert type: {detected_type}")
         
         # Force option type based on alert type
         forced_option_type = 'CE' if is_bullish else 'PE'
-        print(f"Processing {len(processed_data['stocks'])} stocks with option type: {forced_option_type}")
-        print(f"Alert name: {processed_data.get('alert_name', '')}")
+        logger.info(f"Processing {len(processed_data['stocks'])} stocks with option type: {forced_option_type}")
+        logger.info(f"Alert name: {processed_data.get('alert_name', '')}")
         
         # Process each stock individually to fetch LTP and find option contract
         # IMPORTANT: Always save at minimum stock_name and alert_time, even if enrichment fails
@@ -733,7 +732,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             stock_name = stock.get("stock_name", "")
             trigger_price = stock.get("trigger_price", 0.0)
             
-            print(f"Processing stock: {stock_name}")
+            logger.info(f"Processing stock: {stock_name}")
             
             # Initialize all fields with defaults - each activity is independent
             stock_ltp = trigger_price
@@ -755,19 +754,19 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 if stock_data:
                     if stock_data.get('ltp') and stock_data['ltp'] > 0:
                         stock_ltp = stock_data['ltp']
-                        print(f"✅ Stock LTP for {stock_name}: ₹{stock_ltp:.2f}")
+                        logger.info(f"✅ Stock LTP for {stock_name}: ₹{stock_ltp:.2f}")
                     else:
-                        print(f"⚠️ Could not fetch LTP for {stock_name}, using trigger price: ₹{trigger_price}")
+                        logger.info(f"⚠️ Could not fetch LTP for {stock_name}, using trigger price: ₹{trigger_price}")
                     
                     if stock_data.get('vwap') and stock_data['vwap'] > 0:
                         stock_vwap = stock_data['vwap']
-                        print(f"✅ Stock VWAP for {stock_name}: ₹{stock_vwap:.2f}")
+                        logger.info(f"✅ Stock VWAP for {stock_name}: ₹{stock_vwap:.2f}")
                     else:
-                        print(f"⚠️ Could not fetch VWAP for {stock_name} - will retry via hourly updater")
+                        logger.info(f"⚠️ Could not fetch VWAP for {stock_name} - will retry via hourly updater")
                 else:
-                    print(f"⚠️ Stock data fetch completely failed for {stock_name} - using defaults")
+                    logger.info(f"⚠️ Stock data fetch completely failed for {stock_name} - using defaults")
             except Exception as e:
-                print(f"❌ Stock data fetch failed for {stock_name}: {str(e)} - Using trigger price")
+                logger.info(f"❌ Stock data fetch failed for {stock_name}: {str(e)} - Using trigger price")
                 import traceback
                 traceback.print_exc()
             
@@ -784,26 +783,26 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     )
                     logger.info(f"find_option_contract_from_master_stock returned: {option_contract}")
                     if option_contract:
-                        print(f"✅ Option contract found for {stock_name} (attempt {retry_attempt}): {option_contract}")
+                        logger.info(f"✅ Option contract found for {stock_name} (attempt {retry_attempt}): {option_contract}")
                         logger.info(f"✅ Option contract found for {stock_name} (attempt {retry_attempt}): {option_contract}")
                         break
                     else:
                         if retry_attempt < max_retries:
-                            print(f"⚠️ No option contract found for {stock_name} (attempt {retry_attempt}/{max_retries}), retrying...")
+                            logger.info(f"⚠️ No option contract found for {stock_name} (attempt {retry_attempt}/{max_retries}), retrying...")
                             logger.warning(f"⚠️ No option contract found for {stock_name} (attempt {retry_attempt}/{max_retries}), retrying...")
                             import time
                             time.sleep(1)  # Brief delay before retry
                         else:
-                            print(f"⚠️ No option contract found for {stock_name} after {max_retries} attempts")
+                            logger.info(f"⚠️ No option contract found for {stock_name} after {max_retries} attempts")
                             logger.warning(f"⚠️ No option contract found for {stock_name} after {max_retries} attempts")
                 except Exception as e:
                     if retry_attempt < max_retries:
-                        print(f"⚠️ Option contract search failed for {stock_name} (attempt {retry_attempt}/{max_retries}): {str(e)}, retrying...")
+                        logger.info(f"⚠️ Option contract search failed for {stock_name} (attempt {retry_attempt}/{max_retries}): {str(e)}, retrying...")
                         logger.warning(f"⚠️ Option contract search failed for {stock_name} (attempt {retry_attempt}/{max_retries}): {str(e)}, retrying...")
                         import time
                         time.sleep(1)  # Brief delay before retry
                     else:
-                        print(f"⚠️ Option contract search failed for {stock_name} after {max_retries} attempts: {str(e)}")
+                        logger.info(f"⚠️ Option contract search failed for {stock_name} after {max_retries} attempts: {str(e)}")
                         logger.error(f"⚠️ Option contract search failed for {stock_name} after {max_retries} attempts: {str(e)}")
                         option_contract = None
                 
@@ -816,12 +815,12 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     match = re.search(r'-(\d+\.?\d*)-(?:CE|PE)$', option_contract)
                     if match:
                         option_strike = float(match.group(1))
-                        print(f"✅ Extracted option strike: {option_strike} from {option_contract}")
+                        logger.info(f"✅ Extracted option strike: {option_strike} from {option_contract}")
                     else:
-                        print(f"⚠️ Could not extract option strike from {option_contract} - regex did not match")
+                        logger.info(f"⚠️ Could not extract option strike from {option_contract} - regex did not match")
                         logger.warning(f"Could not extract option strike from {option_contract} for {stock_name}")
                 except Exception as e:
-                    print(f"❌ ERROR extracting option strike from {option_contract}: {str(e)}")
+                    logger.info(f"❌ ERROR extracting option strike from {option_contract}: {str(e)}")
                     logger.error(f"Error extracting option strike from {option_contract} for {stock_name}: {str(e)}", exc_info=True)
             
             # ====================================================================
@@ -834,7 +833,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             # This ensures we use the same data source and don't depend on master_stock table
             # If lot_size wasn't found in Activity 5, it will remain 0 (default)
             if option_contract and qty == 0:
-                print(f"⚠️ Lot size not found in instruments.json for {option_contract}, qty remains 0")
+                logger.info(f"⚠️ Lot size not found in instruments.json for {option_contract}, qty remains 0")
                 logger.warning(f"Lot size not found in instruments.json for {option_contract} (stock: {stock_name})")
             
             # ====================================================================
@@ -849,7 +848,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
                     
                     if not instruments_file.exists():
-                        print(f"⚠️ Instruments JSON file not found: {instruments_file}")
+                        logger.info(f"⚠️ Instruments JSON file not found: {instruments_file}")
                         logger.error(f"Instruments JSON file not found: {instruments_file}")
                     else:
                         # CRITICAL: Retry logic ensures we can read the file even if there are transient issues
@@ -859,27 +858,27 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         
                         for retry in range(1, max_retries + 1):
                             try:
-                                print(f"📂 Loading instruments from: {instruments_file} (attempt {retry}/{max_retries})")
+                                logger.info(f"📂 Loading instruments from: {instruments_file} (attempt {retry}/{max_retries})")
                                 with open(instruments_file, 'r') as f:
                                     instruments_data = json_lib.load(f)
-                                print(f"✅ Loaded {len(instruments_data)} instruments from file")
+                                logger.info(f"✅ Loaded {len(instruments_data)} instruments from file")
                                 break  # Success - exit retry loop
                             except (json_lib.JSONDecodeError, IOError, OSError) as file_error:
                                 if retry < max_retries:
                                     import time
                                     wait_time = retry * 0.5  # Exponential backoff: 0.5s, 1s, 1.5s
-                                    print(f"⚠️ Failed to read instruments file (attempt {retry}/{max_retries}): {str(file_error)}")
-                                    print(f"   Retrying in {wait_time}s...")
+                                    logger.info(f"⚠️ Failed to read instruments file (attempt {retry}/{max_retries}): {str(file_error)}")
+                                    logger.info(f"   Retrying in {wait_time}s...")
                                     time.sleep(wait_time)
                                 else:
-                                    print(f"❌ ERROR: Failed to read instruments file after {max_retries} attempts: {str(file_error)}")
+                                    logger.info(f"❌ ERROR: Failed to read instruments file after {max_retries} attempts: {str(file_error)}")
                                     logger.error(f"Failed to read instruments file for {stock_name} after {max_retries} attempts: {str(file_error)}")
                                     import traceback
                                     traceback.print_exc()
                                     instruments_data = []  # Set to empty list to prevent further processing
                             except Exception as file_error:
                                 # For other exceptions, don't retry
-                                print(f"❌ ERROR: Unexpected error reading instruments file: {str(file_error)}")
+                                logger.info(f"❌ ERROR: Unexpected error reading instruments file: {str(file_error)}")
                                 logger.error(f"Unexpected error reading instruments file for {stock_name}: {str(file_error)}")
                                 import traceback
                                 traceback.print_exc()
@@ -890,11 +889,11 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                             instruments_data = []  # Ensure it's set to empty list if all retries failed
                         
                         if not instruments_data:
-                            print(f"⚠️ Instruments data is empty - cannot search for {option_contract}")
+                            logger.info(f"⚠️ Instruments data is empty - cannot search for {option_contract}")
                             logger.warning(f"Instruments data is empty for {stock_name} - cannot find instrument_key")
                         else:
                             # FIRST: Try to find by trading_symbol directly (since find_option_contract_from_instruments now returns trading_symbol)
-                            print(f"🔍 Searching for instrument_key by trading_symbol: {option_contract}")
+                            logger.info(f"🔍 Searching for instrument_key by trading_symbol: {option_contract}")
                             logger.info(f"🔍 Searching for instrument_key by trading_symbol: '{option_contract}' (stock: {stock_name})")
                             found_by_trading_symbol = False
                             match_count = 0
@@ -920,11 +919,11 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                                     try:
                                                         inst_expiry = datetime.fromtimestamp(expiry_ms, tz=ist)
                                                         inst_strike = inst.get('strike_price', 0)
-                                                        print(f"✅ Found instrument by trading_symbol for {option_contract}:")
-                                                        print(f"   Instrument Key: {instrument_key}")
-                                                        print(f"   Strike: {inst_strike}")
-                                                        print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
-                                                        print(f"   Lot Size: {qty if inst_lot_size and inst_lot_size > 0 else 'Not available'}")
+                                                        logger.info(f"✅ Found instrument by trading_symbol for {option_contract}:")
+                                                        logger.info(f"   Instrument Key: {instrument_key}")
+                                                        logger.info(f"   Strike: {inst_strike}")
+                                                        logger.info(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
+                                                        logger.info(f"   Lot Size: {qty if inst_lot_size and inst_lot_size > 0 else 'Not available'}")
                                                         logger.info(f"✅ Found instrument by trading_symbol for {option_contract} (stock: {stock_name}): instrument_key={instrument_key}, strike={inst_strike}, expiry={inst_expiry.strftime('%d %b %Y')}, lot_size={qty if inst_lot_size and inst_lot_size > 0 else 'N/A'}")
                                                         found_by_trading_symbol = True
                                                         break
@@ -933,24 +932,24 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                                         continue
                                             else:
                                                 logger.warning(f"Found trading_symbol match for {option_contract} but instrument_key is None")
-                                                print(f"⚠️ WARNING: Found trading_symbol match but instrument_key is None for {option_contract}")
+                                                logger.info(f"⚠️ WARNING: Found trading_symbol match but instrument_key is None for {option_contract}")
                                                 # Continue searching - maybe another instrument has the key
                             
                             if not found_by_trading_symbol:
                                 logger.warning(f"⚠️ Could not find instrument by trading_symbol '{option_contract}' for {stock_name} (checked {match_count} instruments)")
-                                print(f"⚠️ Could not find instrument by trading_symbol '{option_contract}' for {stock_name}")
+                                logger.info(f"⚠️ Could not find instrument by trading_symbol '{option_contract}' for {stock_name}")
                             
                             # SECOND: If not found by trading_symbol, try parsing old format: STOCK-MonthYYYY-STRIKE-CE/PE
                             match = None
                             if not found_by_trading_symbol:
-                                print(f"⚠️ Not found by trading_symbol, trying old format parsing...")
+                                logger.info(f"⚠️ Not found by trading_symbol, trying old format parsing...")
                                 match = re.match(r'^([A-Z-]+)-(\w{3})(\d{4})-(\d+\.?\d*?)-(CE|PE)$', option_contract)
                             
                             if not found_by_trading_symbol and match:
                                 symbol, month, year, strike, opt_type = match.groups()
                                 strike_value = float(strike)
                                 
-                                print(f"🔍 Searching for instrument_key: symbol={symbol}, month={month}, year={year}, strike={strike_value}, type={opt_type}")
+                                logger.info(f"🔍 Searching for instrument_key: symbol={symbol}, month={month}, year={year}, strike={strike_value}, type={opt_type}")
                                 
                                 # Parse month
                                 month_map = {
@@ -1021,12 +1020,12 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                                         inst_lot_size = inst.get('lot_size')
                                                         if inst_lot_size and inst_lot_size > 0:
                                                             qty = int(inst_lot_size)
-                                                        print(f"✅ Found EXACT match for {option_contract}:")
-                                                        print(f"   Instrument Key: {instrument_key}")
-                                                        print(f"   Trading Symbol: {trading_symbol}")
-                                                        print(f"   Strike: {inst_strike} (requested: {strike_value}, diff: {strike_diff:.4f})")
-                                                        print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
-                                                        print(f"   Lot Size: {qty if inst_lot_size and inst_lot_size > 0 else 'Not available'}")
+                                                        logger.info(f"✅ Found EXACT match for {option_contract}:")
+                                                        logger.info(f"   Instrument Key: {instrument_key}")
+                                                        logger.info(f"   Trading Symbol: {trading_symbol}")
+                                                        logger.info(f"   Strike: {inst_strike} (requested: {strike_value}, diff: {strike_diff:.4f})")
+                                                        logger.info(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
+                                                        logger.info(f"   Lot Size: {qty if inst_lot_size and inst_lot_size > 0 else 'Not available'}")
                                                         break
                                                     else:
                                                         # Track best match (within tolerance)
@@ -1034,7 +1033,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                                             best_match = inst
                                                             best_match_score = score
                                     
-                                    print(f"   📊 Found {match_count} instrument(s) matching symbol={symbol}, type={opt_type}, expiry={target_month}/{target_year} (with tolerance)")
+                                    logger.info(f"   📊 Found {match_count} instrument(s) matching symbol={symbol}, type={opt_type}, expiry={target_month}/{target_year} (with tolerance)")
                                     
                                     # Use best match if no exact match but we have matches within tolerance
                                     if not instrument_key and best_match:
@@ -1049,31 +1048,31 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                         inst_lot_size = best_match.get('lot_size')
                                         if inst_lot_size and inst_lot_size > 0:
                                             qty = int(inst_lot_size)
-                                        print(f"⚠️ WARNING: Using BEST MATCH (within tolerance) for {option_contract}:")
-                                        print(f"   Instrument Key: {instrument_key}")
-                                        print(f"   Trading Symbol: {trading_symbol}")
-                                        print(f"   Strike: {inst_strike} (requested: {strike_value}, diff: {abs(inst_strike - strike_value):.4f})")
-                                        print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')} (requested: {target_month}/{target_year})")
+                                        logger.info(f"⚠️ WARNING: Using BEST MATCH (within tolerance) for {option_contract}:")
+                                        logger.info(f"   Instrument Key: {instrument_key}")
+                                        logger.info(f"   Trading Symbol: {trading_symbol}")
+                                        logger.info(f"   Strike: {inst_strike} (requested: {strike_value}, diff: {abs(inst_strike - strike_value):.4f})")
+                                        logger.info(f"   Expiry: {inst_expiry.strftime('%d %b %Y')} (requested: {target_month}/{target_year})")
                                         if inst_lot_size and inst_lot_size > 0:
-                                            print(f"   Lot Size: {qty}")
+                                            logger.info(f"   Lot Size: {qty}")
                                         else:
-                                            print(f"   ⚠️ Lot Size: Not available in instruments.json")
-                                        print(f"   ⚠️ This match is within tolerance but may not be exact!")
+                                            logger.info(f"   ⚠️ Lot Size: Not available in instruments.json")
+                                        logger.info(f"   ⚠️ This match is within tolerance but may not be exact!")
                                     
                                     # If instrument_key was found but lot_size is still 0, try to find lot_size from any instrument with same underlying_symbol
                                     if instrument_key and qty == 0:
-                                        print(f"⚠️ Instrument key found but lot_size not available, searching for lot_size from other {symbol} instruments...")
+                                        logger.info(f"⚠️ Instrument key found but lot_size not available, searching for lot_size from other {symbol} instruments...")
                                         for inst in instruments_data:
                                             if (inst.get('underlying_symbol') == symbol and 
                                                 inst.get('segment') == 'NSE_FO' and
                                                 inst.get('lot_size') and inst.get('lot_size') > 0):
                                                 qty = int(inst.get('lot_size'))
-                                                print(f"✅ Found lot_size from another {symbol} instrument: {qty}")
+                                                logger.info(f"✅ Found lot_size from another {symbol} instrument: {qty}")
                                                 break
                                     
                                     if not instrument_key:
-                                        print(f"❌ ERROR: Could not find instrument_key for {option_contract}")
-                                        print(f"   Searched for: symbol={symbol}, type={opt_type}, strike={strike_value}, expiry={target_month}/{target_year}")
+                                        logger.info(f"❌ ERROR: Could not find instrument_key for {option_contract}")
+                                        logger.info(f"   Searched for: symbol={symbol}, type={opt_type}, strike={strike_value}, expiry={target_month}/{target_year}")
                                         logger.error(f"Could not find instrument_key for {stock_name} ({option_contract}): symbol={symbol}, type={opt_type}, strike={strike_value}, expiry={target_month}/{target_year}")
                                         
                                         # Debug: Count how many instruments match the symbol and type
@@ -1081,31 +1080,31 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                                              if inst.get('underlying_symbol') == symbol 
                                                              and inst.get('instrument_type') == opt_type
                                                              and inst.get('segment') == 'NSE_FO']
-                                        print(f"   📊 Found {len(symbol_type_matches)} instruments with symbol={symbol} and type={opt_type}")
+                                        logger.info(f"   📊 Found {len(symbol_type_matches)} instruments with symbol={symbol} and type={opt_type}")
                                         
                                         # Show some examples
                                         if symbol_type_matches:
-                                            print(f"   Examples (first 5):")
+                                            logger.info(f"   Examples (first 5):")
                                             for inst in symbol_type_matches[:5]:
                                                 expiry_ms = inst.get('expiry', 0)
                                                 if expiry_ms > 1e12:
                                                     expiry_ms = expiry_ms / 1000
                                                 expiry_dt = datetime.fromtimestamp(expiry_ms) if expiry_ms else None
-                                                print(f"      - Strike: {inst.get('strike_price', 0)}, Expiry: {expiry_dt.strftime('%d %b %Y') if expiry_dt else 'N/A'}, Key: {inst.get('instrument_key', 'N/A')}, Lot Size: {inst.get('lot_size', 'N/A')}")
+                                                logger.info(f"      - Strike: {inst.get('strike_price', 0)}, Expiry: {expiry_dt.strftime('%d %b %Y') if expiry_dt else 'N/A'}, Key: {inst.get('instrument_key', 'N/A')}, Lot Size: {inst.get('lot_size', 'N/A')}")
                                 else:
-                                    print(f"⚠️ Could not parse month from option contract: {option_contract} (month: {month})")
+                                    logger.info(f"⚠️ Could not parse month from option contract: {option_contract} (month: {month})")
                                     logger.warning(f"Could not parse month from option contract for {stock_name}: {option_contract} (month: {month})")
                             else:
                                 if not found_by_trading_symbol:
-                                    print(f"⚠️ Could not parse option contract format: {option_contract}")
+                                    logger.info(f"⚠️ Could not parse option contract format: {option_contract}")
                                     logger.warning(f"Could not parse option contract format for {stock_name}: {option_contract}")
                             
                             # Final check: If instrument_key is still None after all searching methods
                             if not instrument_key:
-                                print(f"❌ ERROR: Could not find instrument_key for {option_contract} after trying both trading_symbol lookup and format parsing")
+                                logger.info(f"❌ ERROR: Could not find instrument_key for {option_contract} after trying both trading_symbol lookup and format parsing")
                                 logger.error(f"Could not find instrument_key for {stock_name} ({option_contract}) - tried trading_symbol lookup and format parsing")
                 except Exception as e:
-                    print(f"❌ ERROR: Exception finding instrument_key for {option_contract}: {str(e)}")
+                    logger.info(f"❌ ERROR: Exception finding instrument_key for {option_contract}: {str(e)}")
                     logger.error(f"Exception finding instrument_key for {stock_name} ({option_contract}): {str(e)}", exc_info=True)
                     import traceback
                     traceback.print_exc()
@@ -1117,14 +1116,14 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             # CRITICAL: Also try to fetch if we have option_contract but no instrument_key yet
             if instrument_key and vwap_service:
                 try:
-                    print(f"🔍 Fetching option LTP for {option_contract} using instrument_key: {instrument_key}")
+                    logger.info(f"🔍 Fetching option LTP for {option_contract} using instrument_key: {instrument_key}")
                     quote_data = vwap_service.get_market_quote_by_key(instrument_key)
                     if quote_data and quote_data.get('last_price'):
                         option_ltp = float(quote_data.get('last_price', 0))
-                        print(f"✅ Fetched option LTP for {option_contract}: ₹{option_ltp}")
+                        logger.info(f"✅ Fetched option LTP for {option_contract}: ₹{option_ltp}")
                     else:
-                        print(f"⚠️ Could not fetch option LTP for {option_contract} - no quote data returned")
-                        print(f"   Quote data: {quote_data}")
+                        logger.info(f"⚠️ Could not fetch option LTP for {option_contract} - no quote data returned")
+                        logger.info(f"   Quote data: {quote_data}")
                         logger.warning(f"Could not fetch option LTP for {option_contract} (stock: {stock_name}, instrument_key: {instrument_key}) - quote_data: {quote_data}")
                         # Try fallback: use historical candles if available
                         try:
@@ -1132,17 +1131,17 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                             if candles and len(candles) > 0:
                                 candles.sort(key=lambda x: x.get('timestamp', 0), reverse=True)
                                 option_ltp = round(candles[0].get('close', 0), 2)
-                                print(f"✅ Fetched option LTP from historical candles: ₹{option_ltp}")
+                                logger.info(f"✅ Fetched option LTP from historical candles: ₹{option_ltp}")
                         except Exception as fallback_error:
-                            print(f"⚠️ Fallback LTP fetch also failed: {str(fallback_error)}")
+                            logger.info(f"⚠️ Fallback LTP fetch also failed: {str(fallback_error)}")
                 except Exception as e:
-                    print(f"❌ ERROR fetching option LTP for {option_contract}: {str(e)}")
+                    logger.info(f"❌ ERROR fetching option LTP for {option_contract}: {str(e)}")
                     logger.error(f"Error fetching option LTP for {option_contract} (stock: {stock_name}, instrument_key: {instrument_key}): {str(e)}", exc_info=True)
             elif option_contract and vwap_service and not instrument_key:
                 # FALLBACK: Try to find instrument_key again if we have option_contract but no instrument_key
                 # This handles cases where Activity 5 failed due to nested conditions but option_contract exists
-                print(f"⚠️ instrument_key is None but option_contract exists: {option_contract}")
-                print(f"   Attempting fallback: Retry instrument_key lookup...")
+                logger.info(f"⚠️ instrument_key is None but option_contract exists: {option_contract}")
+                logger.info(f"   Attempting fallback: Retry instrument_key lookup...")
                 try:
                     # Try a simpler lookup - search by option contract string directly
                     from pathlib import Path
@@ -1158,32 +1157,32 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                             if option_contract.replace('-', '') in trading_symbol.replace(' ', ''):
                                 instrument_key = inst.get('instrument_key')
                                 if instrument_key:
-                                    print(f"✅ Fallback: Found instrument_key: {instrument_key}")
+                                    logger.info(f"✅ Fallback: Found instrument_key: {instrument_key}")
                                     # Also get qty if available
                                     inst_lot_size = inst.get('lot_size')
                                     if inst_lot_size and inst_lot_size > 0 and qty == 0:
                                         qty = int(inst_lot_size)
-                                        print(f"✅ Fallback: Found lot_size: {qty}")
+                                        logger.info(f"✅ Fallback: Found lot_size: {qty}")
                                     # Now try to fetch option LTP
                                     try:
                                         quote_data = vwap_service.get_market_quote_by_key(instrument_key)
                                         if quote_data and quote_data.get('last_price'):
                                             option_ltp = float(quote_data.get('last_price', 0))
-                                            print(f"✅ Fallback: Fetched option LTP: ₹{option_ltp}")
+                                            logger.info(f"✅ Fallback: Fetched option LTP: ₹{option_ltp}")
                                     except Exception:
                                         pass
                                     break
                 except Exception as fallback_error:
-                    print(f"⚠️ Fallback instrument_key lookup failed: {str(fallback_error)}")
+                    logger.info(f"⚠️ Fallback instrument_key lookup failed: {str(fallback_error)}")
                 if not instrument_key:
-                    print(f"⚠️ Cannot fetch option LTP for {option_contract} - instrument_key is None (fallback also failed)")
+                    logger.info(f"⚠️ Cannot fetch option LTP for {option_contract} - instrument_key is None (fallback also failed)")
                     logger.warning(f"Cannot fetch option LTP for {option_contract} (stock: {stock_name}) - instrument_key is None")
             elif not instrument_key:
-                print(f"⚠️ Cannot fetch option LTP for {option_contract if option_contract else 'N/A'} - instrument_key is None")
+                logger.info(f"⚠️ Cannot fetch option LTP for {option_contract if option_contract else 'N/A'} - instrument_key is None")
                 if option_contract:
                     logger.warning(f"Cannot fetch option LTP for {option_contract} (stock: {stock_name}) - instrument_key is None")
             elif not vwap_service:
-                print(f"⚠️ Cannot fetch option LTP for {option_contract if option_contract else 'N/A'} - vwap_service is None")
+                logger.info(f"⚠️ Cannot fetch option LTP for {option_contract if option_contract else 'N/A'} - vwap_service is None")
                 if option_contract:
                     logger.warning(f"Cannot fetch option LTP for {option_contract} (stock: {stock_name}) - vwap_service is None")
             
@@ -1194,25 +1193,25 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             # Candles are used for candle size filter, but option LTP and lot size are critical for trade entry
             if instrument_key and vwap_service:
                 try:
-                    print(f"🔍 Fetching option candles for {option_contract} using instrument_key: {instrument_key}")
+                    logger.info(f"🔍 Fetching option candles for {option_contract} using instrument_key: {instrument_key}")
                     option_candles = vwap_service.get_option_daily_candles_current_and_previous(instrument_key)
                     if option_candles:
-                        print(f"✅ Fetched option OHLC candles for {option_contract}")
+                        logger.info(f"✅ Fetched option OHLC candles for {option_contract}")
                         if option_candles.get('current_day_candle'):
-                            print(f"   Current day candle: {option_candles.get('current_day_candle')}")
+                            logger.info(f"   Current day candle: {option_candles.get('current_day_candle')}")
                         if option_candles.get('previous_day_candle'):
-                            print(f"   Previous day candle: {option_candles.get('previous_day_candle')}")
+                            logger.info(f"   Previous day candle: {option_candles.get('previous_day_candle')}")
                     else:
-                        print(f"⚠️ Could not fetch option OHLC candles for {option_contract} - returned None (this is OK, will continue with option LTP and lot size)")
+                        logger.info(f"⚠️ Could not fetch option OHLC candles for {option_contract} - returned None (this is OK, will continue with option LTP and lot size)")
                         logger.warning(f"Could not fetch option OHLC candles for {option_contract} (stock: {stock_name}, instrument_key: {instrument_key}) - returned None. Continuing with other data.")
                 except Exception as e:
-                    print(f"❌ ERROR fetching option OHLC candles for {option_contract}: {str(e)} (this is OK, will continue with option LTP and lot size)")
+                    logger.info(f"❌ ERROR fetching option OHLC candles for {option_contract}: {str(e)} (this is OK, will continue with option LTP and lot size)")
                     logger.error(f"Error fetching option OHLC candles for {option_contract} (stock: {stock_name}, instrument_key: {instrument_key}): {str(e)}. Continuing with other data.", exc_info=True)
             elif not instrument_key:
-                print(f"⚠️ Cannot fetch option candles for {option_contract} - instrument_key is None")
+                logger.info(f"⚠️ Cannot fetch option candles for {option_contract} - instrument_key is None")
                 logger.warning(f"Cannot fetch option candles for {option_contract} (stock: {stock_name}) - instrument_key is None")
             elif not vwap_service:
-                print(f"⚠️ Cannot fetch option candles for {option_contract} - vwap_service is None")
+                logger.info(f"⚠️ Cannot fetch option candles for {option_contract} - vwap_service is None")
                 logger.warning(f"Cannot fetch option candles for {option_contract} (stock: {stock_name}) - vwap_service is None")
             
             # ====================================================================
@@ -1224,11 +1223,11 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     if prev_vwap_data:
                         stock_vwap_previous_hour = prev_vwap_data.get('vwap')
                         stock_vwap_previous_hour_time = prev_vwap_data.get('time')
-                        print(f"✅ Fetched previous hour VWAP for {stock_name}: ₹{stock_vwap_previous_hour:.2f} at {stock_vwap_previous_hour_time.strftime('%H:%M:%S')}")
+                        logger.info(f"✅ Fetched previous hour VWAP for {stock_name}: ₹{stock_vwap_previous_hour:.2f} at {stock_vwap_previous_hour_time.strftime('%H:%M:%S')}")
                     else:
-                        print(f"⚠️ Could not fetch previous hour VWAP for {stock_name}")
+                        logger.info(f"⚠️ Could not fetch previous hour VWAP for {stock_name}")
                 except Exception as e:
-                    print(f"⚠️ Error fetching previous hour VWAP for {stock_name}: {str(e)}")
+                    logger.info(f"⚠️ Error fetching previous hour VWAP for {stock_name}: {str(e)}")
                 
             # ====================================================================
             # CREATE ENRICHED STOCK DATA (Always created with whatever data we have)
@@ -1241,7 +1240,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             if option_contract and not instrument_key:
                 enrichment_failed = True
                 enrichment_error_msg = f"Could not find instrument_key for option contract {option_contract}"
-                print(f"❌ ENRICHMENT FAILED for {stock_name}: {enrichment_error_msg}")
+                logger.info(f"❌ ENRICHMENT FAILED for {stock_name}: {enrichment_error_msg}")
             
             # ALWAYS create enriched_stock, regardless of enrichment success/failure
             # This ensures stocks are saved even if enrichment partially fails
@@ -1269,12 +1268,12 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             
             # Log what we got
             if option_contract:
-                print(f"✅ Enriched stock: {stock_name} - LTP: ₹{stock_ltp}, Option: {option_contract}, Qty: {qty}, Instrument Key: {instrument_key or 'N/A'}")
+                logger.info(f"✅ Enriched stock: {stock_name} - LTP: ₹{stock_ltp}, Option: {option_contract}, Qty: {qty}, Instrument Key: {instrument_key or 'N/A'}")
             else:
-                print(f"⚠️ Partial data for: {stock_name} - LTP: ₹{stock_ltp}, Option: N/A")
+                logger.info(f"⚠️ Partial data for: {stock_name} - LTP: ₹{stock_ltp}, Option: N/A")
         
         processed_data["stocks"] = enriched_stocks
-        print(f"Successfully processed {len(enriched_stocks)} stocks")
+        logger.info(f"Successfully processed {len(enriched_stocks)} stocks")
         
         # ====================================================================
         # STOCK RANKING & SELECTION (If too many stocks)
@@ -1282,7 +1281,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         MAX_STOCKS_PER_ALERT = 15  # Maximum stocks to enter per alert
         
         if len(enriched_stocks) > MAX_STOCKS_PER_ALERT:
-            print(f"\n📊 TOO MANY STOCKS ({len(enriched_stocks)}) - Applying ranking to select best {MAX_STOCKS_PER_ALERT}")
+            logger.info(f"\n📊 TOO MANY STOCKS ({len(enriched_stocks)}) - Applying ranking to select best {MAX_STOCKS_PER_ALERT}")
             
             # Import ranker
             try:
@@ -1295,21 +1294,21 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     alert_type=forced_option_type
                 )
                 
-                print(f"✅ RANKING COMPLETE:")
-                print(f"   • Total Available: {summary['total_available']}")
-                print(f"   • Selected: {summary['total_selected']}")
-                print(f"   • Rejected: {summary['total_rejected']}")
-                print(f"   • Avg Score: {summary['avg_score']}")
-                print(f"   • Score Range: {summary['min_score']}-{summary['max_score']}")
+                logger.info(f"✅ RANKING COMPLETE:")
+                logger.info(f"   • Total Available: {summary['total_available']}")
+                logger.info(f"   • Selected: {summary['total_selected']}")
+                logger.info(f"   • Rejected: {summary['total_rejected']}")
+                logger.info(f"   • Avg Score: {summary['avg_score']}")
+                logger.info(f"   • Score Range: {summary['min_score']}-{summary['max_score']}")
                 
                 # Replace stocks with selected ones
                 enriched_stocks = selected_stocks
                 processed_data["stocks"] = selected_stocks
                 
             except ImportError as e:
-                print(f"⚠️ Stock ranker not available, using all stocks: {str(e)}")
+                logger.info(f"⚠️ Stock ranker not available, using all stocks: {str(e)}")
         else:
-            print(f"✅ Stock count ({len(enriched_stocks)}) within limit ({MAX_STOCKS_PER_ALERT}), using all stocks")
+            logger.info(f"✅ Stock count ({len(enriched_stocks)}) within limit ({MAX_STOCKS_PER_ALERT}), using all stocks")
         
         # Get current date for grouping
         current_date = trading_date.strftime('%Y-%m-%d')
@@ -1321,12 +1320,12 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         # Check if this is a new date - if so, clear old data
         # IMPORTANT: Only clear if it's ACTUALLY a different day, not just different time
         if target_data["date"] != current_date:
-            print(f"📅 New trading date detected for {data_type}: {current_date} (previous: {target_data['date']})")
+            logger.info(f"📅 New trading date detected for {data_type}: {current_date} (previous: {target_data['date']})")
             target_data["date"] = current_date
             target_data["alerts"] = []
-            print(f"   Cleared old alerts from previous date")
+            logger.info(f"   Cleared old alerts from previous date")
         else:
-            print(f"📅 Same trading date ({current_date}), appending to existing alerts")
+            logger.info(f"📅 Same trading date ({current_date}), appending to existing alerts")
         
         # Check index trends at the time of alert
         # Index trends determine trade entry, not alert display
@@ -1347,7 +1346,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         is_10_15_alert = (alert_hour == 10 and alert_minute == 15)
         
         if is_after_3_00pm:
-            print(f"🚫 ALERT TIME {triggered_at_display} is at or after 3:00 PM - NO NEW TRADES ALLOWED")
+            logger.info(f"🚫 ALERT TIME {triggered_at_display} is at or after 3:00 PM - NO NEW TRADES ALLOWED")
         
         # Determine if trade entry is allowed based on alert type and index trends
         # Rules:
@@ -1366,29 +1365,29 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             if both_bullish:
                 # Both indices bullish → bullish alerts can enter
                 can_enter_trade_by_index = True
-                print(f"✅ BULLISH ALERT: Both indices bullish - Index check PASSED")
+                logger.info(f"✅ BULLISH ALERT: Both indices bullish - Index check PASSED")
             elif both_bearish:
                 # Both indices bearish → bullish alerts cannot enter
                 can_enter_trade_by_index = False
-                print(f"⚠️ BULLISH ALERT: Both indices bearish - Only bearish alerts allowed - NO TRADE")
+                logger.info(f"⚠️ BULLISH ALERT: Both indices bearish - Only bearish alerts allowed - NO TRADE")
             elif opposite_directions:
                 # Indices in opposite directions → no trade
                 can_enter_trade_by_index = False
-                print(f"⚠️ BULLISH ALERT: Indices in opposite directions (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend}) - NO TRADE")
+                logger.info(f"⚠️ BULLISH ALERT: Indices in opposite directions (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend}) - NO TRADE")
         elif is_bearish:
             # Bearish alert
             if both_bullish:
                 # Both indices bullish → bearish alerts can enter
                 can_enter_trade_by_index = True
-                print(f"✅ BEARISH ALERT: Both indices bullish - Index check PASSED")
+                logger.info(f"✅ BEARISH ALERT: Both indices bullish - Index check PASSED")
             elif both_bearish:
                 # Both indices bearish → bearish alerts can enter
                 can_enter_trade_by_index = True
-                print(f"✅ BEARISH ALERT: Both indices bearish - Index check PASSED")
+                logger.info(f"✅ BEARISH ALERT: Both indices bearish - Index check PASSED")
             elif opposite_directions:
                 # Indices in opposite directions → no trade
                 can_enter_trade_by_index = False
-                print(f"⚠️ BEARISH ALERT: Indices in opposite directions (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend}) - NO TRADE")
+                logger.info(f"⚠️ BEARISH ALERT: Indices in opposite directions (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend}) - NO TRADE")
         
         # Save each stock to database
         # CRITICAL: Always save at minimum stock_name and alert_time, even if enrichment failed
@@ -1397,15 +1396,15 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         SL_LOSS_TARGET = 3100.0  # Target loss for stop loss trigger
         
         stocks_to_save = processed_data.get('stocks', [])
-        print(f"\n💾 Saving {len(stocks_to_save)} stocks to database...")
+        logger.info(f"\n💾 Saving {len(stocks_to_save)} stocks to database...")
         
         if len(stocks_to_save) == 0:
-            print("⚠️ WARNING: No stocks to save! Webhook payload may be empty or malformed.")
-            print(f"   Original data keys: {list(data.keys())}")
-            print(f"   Stocks field type: {type(data.get('stocks'))}")
-            print(f"   Stocks field value: {data.get('stocks')}")
-            print(f"   Processed stocks count: {len(processed_data.get('stocks', []))}")
-            print(f"   Enriched stocks count: {len(enriched_stocks) if 'enriched_stocks' in locals() else 'N/A'}")
+            logger.info("⚠️ WARNING: No stocks to save! Webhook payload may be empty or malformed.")
+            logger.info(f"   Original data keys: {list(data.keys())}")
+            logger.info(f"   Stocks field type: {type(data.get('stocks'))}")
+            logger.info(f"   Stocks field value: {data.get('stocks')}")
+            logger.info(f"   Processed stocks count: {len(processed_data.get('stocks', []))}")
+            logger.info(f"   Enriched stocks count: {len(enriched_stocks) if 'enriched_stocks' in locals() else 'N/A'}")
             logger.warning(f"No stocks found in webhook payload. Data: {json_module.dumps(data, indent=2)}")
             logger.warning(f"Processed stocks: {len(processed_data.get('stocks', []))}, Enriched: {len(enriched_stocks) if 'enriched_stocks' in locals() else 'N/A'}")
         
@@ -1558,14 +1557,14 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 # CRITICAL: Retry option data fetch if missing but instrument_key exists
                 # This handles cases where initial fetch failed but data is actually available
                 if (option_ltp_value <= 0 or lot_size <= 0) and stock.get("instrument_key"):
-                    print(f"⚠️ Option data missing (LTP: {option_ltp_value}, Qty: {lot_size}), retrying fetch...")
+                    logger.info(f"⚠️ Option data missing (LTP: {option_ltp_value}, Qty: {lot_size}), retrying fetch...")
                     try:
                         # Retry option LTP fetch
                         if option_ltp_value <= 0:
                             option_quote = vwap_service.get_market_quote_by_key(stock.get("instrument_key"))
                             if option_quote and option_quote.get('last_price', 0) > 0:
                                 option_ltp_value = float(option_quote.get('last_price', 0))
-                                print(f"✅ Retry successful: Fetched option LTP: ₹{option_ltp_value}")
+                                logger.info(f"✅ Retry successful: Fetched option LTP: ₹{option_ltp_value}")
                                 # Update stock dictionary for consistency
                                 stock["option_ltp"] = option_ltp_value
                             else:
@@ -1575,7 +1574,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                     if candles and len(candles) > 0:
                                         candles.sort(key=lambda x: x.get('timestamp', 0), reverse=True)
                                         option_ltp_value = round(candles[0].get('close', 0), 2)
-                                        print(f"✅ Retry successful: Fetched option LTP from candles: ₹{option_ltp_value}")
+                                        logger.info(f"✅ Retry successful: Fetched option LTP from candles: ₹{option_ltp_value}")
                                         stock["option_ltp"] = option_ltp_value
                                 except Exception:
                                     pass
@@ -1602,13 +1601,13 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                                     inst.get('segment') == 'NSE_FO' and
                                                     inst.get('lot_size') and inst.get('lot_size') > 0):
                                                     lot_size = int(inst.get('lot_size'))
-                                                    print(f"✅ Retry successful: Found lot_size: {lot_size}")
+                                                    logger.info(f"✅ Retry successful: Found lot_size: {lot_size}")
                                                     stock["qty"] = lot_size
                                                     break
                             except Exception as e:
-                                print(f"⚠️ Retry lot_size fetch failed: {str(e)}")
+                                logger.info(f"⚠️ Retry lot_size fetch failed: {str(e)}")
                     except Exception as retry_error:
-                        print(f"⚠️ Error retrying option data fetch: {str(retry_error)}")
+                        logger.info(f"⚠️ Error retrying option data fetch: {str(retry_error)}")
                 
                 # Check for missing option data AFTER retry
                 if option_ltp_value <= 0 or lot_size <= 0:
@@ -1629,11 +1628,11 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                             option_quote = vwap_service.get_market_quote_by_key(stock.get('instrument_key'))
                             if option_quote and option_quote.get('last_price', 0) > 0:
                                 current_option_ltp = float(option_quote.get('last_price', 0))
-                                print(f"✅ Fetched fresh option LTP at entry: ₹{current_option_ltp:.2f}")
+                                logger.info(f"✅ Fetched fresh option LTP at entry: ₹{current_option_ltp:.2f}")
                             else:
-                                print(f"⚠️ Could not fetch fresh option LTP, using enrichment value: ₹{current_option_ltp:.2f}")
+                                logger.info(f"⚠️ Could not fetch fresh option LTP, using enrichment value: ₹{current_option_ltp:.2f}")
                         except Exception as ltp_error:
-                            print(f"⚠️ Error fetching fresh option LTP: {str(ltp_error)}, using enrichment value: ₹{current_option_ltp:.2f}")
+                            logger.info(f"⚠️ Error fetching fresh option LTP: {str(ltp_error)}, using enrichment value: ₹{current_option_ltp:.2f}")
                     
                     qty = lot_size
                     buy_price = current_option_ltp  # Use current LTP fetched at entry moment
@@ -1647,37 +1646,37 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         if current_day_candle_open and current_day_candle_open > 0:
                             # Stop loss = 5% lower than candle open price
                             stop_loss_price = float(current_day_candle_open) * 0.95
-                            print(f"✅ Stop Loss set to 5% below current candle open: ₹{stop_loss_price:.2f} (candle open: ₹{current_day_candle_open:.2f})")
+                            logger.info(f"✅ Stop Loss set to 5% below current candle open: ₹{stop_loss_price:.2f} (candle open: ₹{current_day_candle_open:.2f})")
                         else:
                             # Fallback: 5% below buy price if candle open not available
                             stop_loss_price = buy_price * 0.95
-                            print(f"⚠️ Current day candle open not available, setting SL to 5% below buy price: ₹{stop_loss_price:.2f}")
+                            logger.info(f"⚠️ Current day candle open not available, setting SL to 5% below buy price: ₹{stop_loss_price:.2f}")
                     else:
                         # Fallback: 5% below buy price if candles not available
                         stop_loss_price = buy_price * 0.95
-                        print(f"⚠️ Current day candle data not available, setting SL to 5% below buy price: ₹{stop_loss_price:.2f}")
+                        logger.info(f"⚠️ Current day candle data not available, setting SL to 5% below buy price: ₹{stop_loss_price:.2f}")
                     
                     status = 'bought'  # Trade entered
                     pnl = 0.0
                     entry_time_str = buy_time.strftime('%Y-%m-%d %H:%M:%S IST')
                     alert_time_str = triggered_datetime.strftime('%Y-%m-%d %H:%M:%S IST')
-                    print(f"✅ TRADE ENTERED: {stock_name}")
-                    print(f"   ⏰ Entry Time: {entry_time_str} (Alert Time: {alert_time_str})")
-                    print(f"   📊 Entry Conditions:")
-                    print(f"      - Time Check: ✅ Before 3:00 PM ({triggered_at_display})")
-                    print(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
-                    print(f"      - VWAP Slope: ✅ {vwap_slope_reason}")
-                    print(f"      - Candle Size: ✅ {candle_size_reason}")
-                    print(f"      - Option Data: ✅ Valid (LTP at entry: ₹{buy_price:.2f}, Qty: {lot_size})")
-                    print(f"   💰 Trade Details:")
-                    print(f"      - Buy Price: ₹{buy_price:.2f} (fetched at entry moment)")
-                    print(f"      - Quantity: {qty}")
-                    print(f"      - Stop Loss: ₹{stop_loss_price:.2f} (previous candle low)")
-                    print(f"      - Stock LTP: ₹{stock_ltp:.2f}")
-                    print(f"      - Stock VWAP: ₹{stock_vwap:.2f}")
+                    logger.info(f"✅ TRADE ENTERED: {stock_name}")
+                    logger.info(f"   ⏰ Entry Time: {entry_time_str} (Alert Time: {alert_time_str})")
+                    logger.info(f"   📊 Entry Conditions:")
+                    logger.info(f"      - Time Check: ✅ Before 3:00 PM ({triggered_at_display})")
+                    logger.info(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
+                    logger.info(f"      - VWAP Slope: ✅ {vwap_slope_reason}")
+                    logger.info(f"      - Candle Size: ✅ {candle_size_reason}")
+                    logger.info(f"      - Option Data: ✅ Valid (LTP at entry: ₹{buy_price:.2f}, Qty: {lot_size})")
+                    logger.info(f"   💰 Trade Details:")
+                    logger.info(f"      - Buy Price: ₹{buy_price:.2f} (fetched at entry moment)")
+                    logger.info(f"      - Quantity: {qty}")
+                    logger.info(f"      - Stop Loss: ₹{stop_loss_price:.2f} (previous candle low)")
+                    logger.info(f"      - Stock LTP: ₹{stock_ltp:.2f}")
+                    logger.info(f"      - Stock VWAP: ₹{stock_vwap:.2f}")
                     prev_vwap_str = f"₹{stock_vwap_prev:.2f}" if stock_vwap_prev else "N/A"
-                    print(f"      - Stock VWAP (Previous Hour): {prev_vwap_str}")
-                    print(f"      - Option Contract: {stock.get('option_contract', 'N/A')}")
+                    logger.info(f"      - Stock VWAP (Previous Hour): {prev_vwap_str}")
+                    logger.info(f"      - Option Contract: {stock.get('option_contract', 'N/A')}")
                     filter_info = f"VWAP Slope: {'SKIPPED (10:15)' if is_10_15_alert else vwap_slope_reason} | Candle Size: {'SKIPPED (10:15)' if is_10_15_alert else candle_size_reason}"
                     logger.info(f"✅ ENTRY DECISION: {stock_name} | Entry Time: {entry_time_str} | Alert Time: {alert_time_str} | Price: ₹{buy_price:.2f} | SL: ₹{stop_loss_price:.2f} | {filter_info} | Indices: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
                 else:
@@ -1713,58 +1712,58 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         # Already set above, but ensure it's set
                         if not no_entry_reason:
                             no_entry_reason = "Time >= 3PM"
-                        print(f"🚫 NO ENTRY: {stock_name} - Alert time {triggered_at_display} is at or after 3:00 PM")
-                        print(f"   ⏰ Decision Time: {no_entry_time_str}")
-                        print(f"   📊 Entry Conditions:")
-                        print(f"      - Time Check: ❌ At or after 3:00 PM ({triggered_at_display})")
-                        print(f"      - Index Trends: {'✅' if can_enter_trade_by_index else '❌'} {'Aligned' if can_enter_trade_by_index else f'Not Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})'}")
-                        print(f"      - VWAP Slope: {'✅' if vwap_slope_passed else '❌'} {vwap_slope_reason}")
-                        print(f"      - Candle Size: {'✅' if candle_size_passed else '❌'} {candle_size_reason}")
-                        print(f"      - Option Data: {'✅' if option_ltp_value > 0 and lot_size > 0 else '❌'} {'Valid' if option_ltp_value > 0 and lot_size > 0 else f'Missing (LTP: {option_ltp_value}, Qty: {lot_size})'}")
-                        print(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
+                        logger.info(f"🚫 NO ENTRY: {stock_name} - Alert time {triggered_at_display} is at or after 3:00 PM")
+                        logger.info(f"   ⏰ Decision Time: {no_entry_time_str}")
+                        logger.info(f"   📊 Entry Conditions:")
+                        logger.info(f"      - Time Check: ❌ At or after 3:00 PM ({triggered_at_display})")
+                        logger.info(f"      - Index Trends: {'✅' if can_enter_trade_by_index else '❌'} {'Aligned' if can_enter_trade_by_index else f'Not Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})'}")
+                        logger.info(f"      - VWAP Slope: {'✅' if vwap_slope_passed else '❌'} {vwap_slope_reason}")
+                        logger.info(f"      - Candle Size: {'✅' if candle_size_passed else '❌'} {candle_size_reason}")
+                        logger.info(f"      - Option Data: {'✅' if option_ltp_value > 0 and lot_size > 0 else '❌'} {'Valid' if option_ltp_value > 0 and lot_size > 0 else f'Missing (LTP: {option_ltp_value}, Qty: {lot_size})'}")
+                        logger.info(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
                         logger.info(f"🚫 NO ENTRY DECISION: {stock_name} | Time: {no_entry_time_str} | Reason: Time >= 3:00 PM")
                     elif not can_enter_trade_by_index:
                         # Already set above, but ensure it's set
                         if not no_entry_reason:
                             no_entry_reason = "Index alignment"
-                        print(f"⚠️ NO ENTRY: {stock_name} - Index trends not aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
-                        print(f"   ⏰ Decision Time: {no_entry_time_str}")
-                        print(f"   📊 Entry Conditions:")
-                        print(f"      - Time Check: ✅ Before 3:00 PM ({triggered_at_display})")
-                        print(f"      - Index Trends: ❌ Not Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
-                        print(f"      - VWAP Slope: {'✅' if vwap_slope_passed else '❌'} {vwap_slope_reason}")
-                        print(f"      - Candle Size: {'✅' if candle_size_passed else '❌'} {candle_size_reason}")
-                        print(f"      - Option Data: {'✅' if option_ltp_value > 0 and lot_size > 0 else '❌'} {'Valid' if option_ltp_value > 0 and lot_size > 0 else f'Missing (LTP: {option_ltp_value}, Qty: {lot_size})'}")
-                        print(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
+                        logger.info(f"⚠️ NO ENTRY: {stock_name} - Index trends not aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
+                        logger.info(f"   ⏰ Decision Time: {no_entry_time_str}")
+                        logger.info(f"   📊 Entry Conditions:")
+                        logger.info(f"      - Time Check: ✅ Before 3:00 PM ({triggered_at_display})")
+                        logger.info(f"      - Index Trends: ❌ Not Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
+                        logger.info(f"      - VWAP Slope: {'✅' if vwap_slope_passed else '❌'} {vwap_slope_reason}")
+                        logger.info(f"      - Candle Size: {'✅' if candle_size_passed else '❌'} {candle_size_reason}")
+                        logger.info(f"      - Option Data: {'✅' if option_ltp_value > 0 and lot_size > 0 else '❌'} {'Valid' if option_ltp_value > 0 and lot_size > 0 else f'Missing (LTP: {option_ltp_value}, Qty: {lot_size})'}")
+                        logger.info(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
                         logger.info(f"🚫 NO ENTRY DECISION: {stock_name} | Time: {no_entry_time_str} | Reason: Index trends not aligned (NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend})")
                     elif not filters_passed and not is_10_15_alert:
                         # filters_passed = candle_size_passed for non-10:15 alerts
                         # Already set above, but ensure it's set
                         if not no_entry_reason:
                             no_entry_reason = "Candle size"
-                        print(f"🚫 NO ENTRY: {stock_name} - Candle size condition not met")
-                        print(f"   ⏰ Decision Time: {no_entry_time_str}")
-                        print(f"   📊 Entry Conditions:")
-                        print(f"      - Time Check: ✅ Before 3:00 PM ({triggered_at_display})")
-                        print(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
-                        print(f"      - VWAP Slope: ✅ {vwap_slope_reason}")
-                        print(f"      - Candle Size: ❌ {candle_size_reason}")
-                        print(f"      - Option Data: {'✅' if option_ltp_value > 0 and lot_size > 0 else '❌'} {'Valid' if option_ltp_value > 0 and lot_size > 0 else f'Missing (LTP: {option_ltp_value}, Qty: {lot_size})'}")
-                        print(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
+                        logger.info(f"🚫 NO ENTRY: {stock_name} - Candle size condition not met")
+                        logger.info(f"   ⏰ Decision Time: {no_entry_time_str}")
+                        logger.info(f"   📊 Entry Conditions:")
+                        logger.info(f"      - Time Check: ✅ Before 3:00 PM ({triggered_at_display})")
+                        logger.info(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
+                        logger.info(f"      - VWAP Slope: ✅ {vwap_slope_reason}")
+                        logger.info(f"      - Candle Size: ❌ {candle_size_reason}")
+                        logger.info(f"      - Option Data: {'✅' if option_ltp_value > 0 and lot_size > 0 else '❌'} {'Valid' if option_ltp_value > 0 and lot_size > 0 else f'Missing (LTP: {option_ltp_value}, Qty: {lot_size})'}")
+                        logger.info(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
                         logger.info(f"🚫 NO ENTRY DECISION: {stock_name} | Time: {no_entry_time_str} | Reason: {candle_size_reason}")
                     elif option_ltp_value <= 0 or lot_size <= 0:
                         # Already set above, but ensure it's set
                         if not no_entry_reason:
                             no_entry_reason = "Missing option data"
-                        print(f"⚠️ NO ENTRY: {stock_name} - Missing option data (option_ltp={option_ltp_value}, qty={lot_size})")
-                        print(f"   ⏰ Decision Time: {no_entry_time_str}")
-                        print(f"   📊 Entry Conditions:")
-                        print(f"      - Time Check: ✅ Before 3:00 PM ({triggered_at_display})")
-                        print(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
-                        print(f"      - VWAP Slope: {'✅' if vwap_slope_passed else '❌'} {vwap_slope_reason}")
-                        print(f"      - Candle Size: {'✅' if candle_size_passed else '❌'} {candle_size_reason}")
-                        print(f"      - Option Data: ❌ Missing (LTP: {option_ltp_value}, Qty: {lot_size})")
-                        print(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
+                        logger.info(f"⚠️ NO ENTRY: {stock_name} - Missing option data (option_ltp={option_ltp_value}, qty={lot_size})")
+                        logger.info(f"   ⏰ Decision Time: {no_entry_time_str}")
+                        logger.info(f"   📊 Entry Conditions:")
+                        logger.info(f"      - Time Check: ✅ Before 3:00 PM ({triggered_at_display})")
+                        logger.info(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
+                        logger.info(f"      - VWAP Slope: {'✅' if vwap_slope_passed else '❌'} {vwap_slope_reason}")
+                        logger.info(f"      - Candle Size: {'✅' if candle_size_passed else '❌'} {candle_size_reason}")
+                        logger.info(f"      - Option Data: ❌ Missing (LTP: {option_ltp_value}, Qty: {lot_size})")
+                        logger.info(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
                         # For missing data, keep qty=0, buy_price=None, stop_loss=None
                         qty = 0
                         buy_price = None
@@ -1774,15 +1773,15 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         # If we reach here, all conditions passed but entry still failed - set unknown reason
                         if not no_entry_reason:
                             no_entry_reason = "Unknown"
-                        print(f"⚠️ NO ENTRY: {stock_name} - Unknown reason")
-                        print(f"   ⏰ Decision Time: {no_entry_time_str}")
-                        print(f"   📊 Entry Conditions:")
-                        print(f"      - Time Check: ✅ Before 3:00 PM ({triggered_at_display})")
-                        print(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
-                        print(f"      - VWAP Slope: {'✅' if vwap_slope_passed else '❌'} {vwap_slope_reason}")
-                        print(f"      - Candle Size: {'✅' if candle_size_passed else '❌'} {candle_size_reason}")
-                        print(f"      - Option Data: ✅ Valid (LTP: ₹{option_ltp_value:.2f}, Qty: {lot_size})")
-                        print(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
+                        logger.info(f"⚠️ NO ENTRY: {stock_name} - Unknown reason")
+                        logger.info(f"   ⏰ Decision Time: {no_entry_time_str}")
+                        logger.info(f"   📊 Entry Conditions:")
+                        logger.info(f"      - Time Check: ✅ Before 3:00 PM ({triggered_at_display})")
+                        logger.info(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
+                        logger.info(f"      - VWAP Slope: {'✅' if vwap_slope_passed else '❌'} {vwap_slope_reason}")
+                        logger.info(f"      - Candle Size: {'✅' if candle_size_passed else '❌'} {candle_size_reason}")
+                        logger.info(f"      - Option Data: ✅ Valid (LTP: ₹{option_ltp_value:.2f}, Qty: {lot_size})")
+                        logger.info(f"   💰 Would have been: Buy ₹{buy_price}, Qty: {qty}, SL: ₹{stop_loss_price} (not executed)")
                         logger.info(f"🚫 NO ENTRY DECISION: {stock_name} | Time: {no_entry_time_str} | Reason: Unknown")
                 
                 # ALWAYS create database record with whatever data we have
@@ -1794,12 +1793,12 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     if buy_time is None:
                         buy_time = triggered_datetime  # Use alert_time as buy_time fallback
                         if status != 'no_entry':
-                            print(f"⚠️  Setting buy_time to alert_time for {stock_name} (buy_price set but buy_time was None)")
+                            logger.info(f"⚠️  Setting buy_time to alert_time for {stock_name} (buy_price set but buy_time was None)")
                         else:
-                            print(f"ℹ️  Setting buy_time to alert_time for {stock_name} (no_entry trade with buy_price)")
+                            logger.info(f"ℹ️  Setting buy_time to alert_time for {stock_name} (no_entry trade with buy_price)")
                     elif buy_time != triggered_datetime:
                         # If buy_time is set but different from alert_time, log for debugging
-                        print(f"ℹ️  buy_time ({buy_time}) differs from alert_time ({triggered_datetime}) for {stock_name}")
+                        logger.info(f"ℹ️  buy_time ({buy_time}) differs from alert_time ({triggered_datetime}) for {stock_name}")
                 
                 # CRITICAL: Get instrument_key from the stock dictionary, not from a variable
                 # This ensures each stock gets its own unique instrument_key
@@ -1808,7 +1807,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 if not stock_instrument_key and option_contract:
                     # Fallback: Try to find instrument_key from option_contract if it wasn't set
                     # This ensures we preserve instrument_key even if lookup failed earlier
-                    print(f"⚠️ instrument_key not found in stock data for {stock_name}, attempting fallback lookup...")
+                    logger.info(f"⚠️ instrument_key not found in stock data for {stock_name}, attempting fallback lookup...")
                     # Note: This is a safety check - instrument_key should already be set in Activity 5
                 
                 # Extract OHLC data from option_candles
@@ -1870,7 +1869,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 if not option_type_from_stock:
                     # Set option_type based on alert_type (Bearish = PE, Bullish = CE)
                     option_type_from_stock = 'PE' if data_type == 'Bearish' else 'CE'
-                    print(f"⚠️ Option type not found in stock data for {stock_name}, setting to {option_type_from_stock} based on alert type {data_type}")
+                    logger.info(f"⚠️ Option type not found in stock data for {stock_name}, setting to {option_type_from_stock} based on alert type {data_type}")
                 
                 # Safely get scan_name from processed_data (handle case where processed_data might be None)
                 scan_name_for_record = ""
@@ -1922,7 +1921,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 )
                 db.add(db_record)
                 saved_count += 1
-                print(f"   💾 Saved {stock_name} to database (status: {status})")
+                logger.info(f"   💾 Saved {stock_name} to database (status: {status})")
                 
                 # ═══════════════════════════════════════════════════════════════
                 # CALCULATE VWAP SLOPE AND CANDLE SIZE IMMEDIATELY AFTER SAVE
@@ -1938,15 +1937,15 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     # Calculate VWAP slope (vwap_service is already imported at module level)
                     vwap_slope_calculated = calculate_vwap_slope_for_trade(db_record, db, vwap_service)
                     if vwap_slope_calculated:
-                        print(f"   ✅ VWAP slope calculated for {stock_name}")
+                        logger.info(f"   ✅ VWAP slope calculated for {stock_name}")
                     else:
-                        print(f"   ⚠️ VWAP slope calculation skipped for {stock_name} (will be calculated in cycle)")
+                        logger.info(f"   ⚠️ VWAP slope calculation skipped for {stock_name} (will be calculated in cycle)")
                     
                     # Recalculate candle size if instrument_key is available
                     if db_record.instrument_key:
                         candle_size_calculated = recalculate_candle_size_for_trade(db_record, db, vwap_service)
                         if candle_size_calculated:
-                            print(f"   ✅ Candle size recalculated for {stock_name}")
+                            logger.info(f"   ✅ Candle size recalculated for {stock_name}")
                 except Exception as calc_error:
                     logger.warning(f"⚠️ Error calculating VWAP slope/candle size for {stock_name}: {str(calc_error)}")
                     # Don't fail the entire save if calculation fails
@@ -1998,7 +1997,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             except Exception as db_error:
                 failed_count += 1
                 error_msg = str(db_error)
-                print(f"❌ Error saving stock {stock_name} to database: {error_msg}")
+                logger.info(f"❌ Error saving stock {stock_name} to database: {error_msg}")
                 logger.error(f"Database save error for {stock_name}: {error_msg}", exc_info=True)
                 import traceback
                 traceback.print_exc()
@@ -2006,7 +2005,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 # Try to save with minimal data as last resort
                 # Preserve any data that was successfully fetched before the database error
                 try:
-                    print(f"   🔄 Attempting minimal save for {stock_name}...")
+                    logger.info(f"   🔄 Attempting minimal save for {stock_name}...")
                     # Preserve option_contract and instrument_key if they were found
                     preserved_option_contract = stock.get("option_contract", "") if stock else ""
                     preserved_instrument_key = stock.get("instrument_key") if stock else None
@@ -2058,7 +2057,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     )
                     db.add(minimal_record)
                     saved_count += 1
-                    print(f"   ✅ Minimal save successful for {stock_name}")
+                    logger.info(f"   ✅ Minimal save successful for {stock_name}")
                     
                     # ═══════════════════════════════════════════════════════════════
                     # CALCULATE VWAP SLOPE AND CANDLE SIZE FOR MINIMAL RECORD
@@ -2074,15 +2073,15 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         # Calculate VWAP slope for minimal record
                         vwap_slope_calculated = calculate_vwap_slope_for_trade(minimal_record, db, vwap_service)
                         if vwap_slope_calculated:
-                            print(f"   ✅ VWAP slope calculated for minimal record {stock_name}")
+                            logger.info(f"   ✅ VWAP slope calculated for minimal record {stock_name}")
                         else:
-                            print(f"   ⚠️ VWAP slope calculation skipped for minimal record {stock_name} (will be calculated in cycle)")
+                            logger.info(f"   ⚠️ VWAP slope calculation skipped for minimal record {stock_name} (will be calculated in cycle)")
                         
                         # Recalculate candle size if instrument_key is available
                         if minimal_record.instrument_key:
                             candle_size_calculated = recalculate_candle_size_for_trade(minimal_record, db, vwap_service)
                             if candle_size_calculated:
-                                print(f"   ✅ Candle size recalculated for minimal record {stock_name}")
+                                logger.info(f"   ✅ Candle size recalculated for minimal record {stock_name}")
                     except Exception as calc_error:
                         logger.warning(f"⚠️ Error calculating VWAP slope/candle size for minimal record {stock_name}: {str(calc_error)}")
                         # Don't fail the minimal save if calculation fails
@@ -2119,33 +2118,33 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     except Exception as hist_error:
                         logger.warning(f"⚠️ Failed to save minimal historical data for {stock_name}: {str(hist_error)}")
                 except Exception as minimal_error:
-                    print(f"   ❌ Even minimal save failed for {stock_name}: {str(minimal_error)}")
+                    logger.info(f"   ❌ Even minimal save failed for {stock_name}: {str(minimal_error)}")
         
         # Commit all database records
         try:
             db.commit()
-            print(f"\n✅ DATABASE COMMIT SUCCESSFUL")
-            print(f"   • Total Stocks Processed: {len(processed_data.get('stocks', []))}")
-            print(f"   • Saved to DB: {saved_count} stocks")
+            logger.info(f"\n✅ DATABASE COMMIT SUCCESSFUL")
+            logger.info(f"   • Total Stocks Processed: {len(processed_data.get('stocks', []))}")
+            logger.info(f"   • Saved to DB: {saved_count} stocks")
             if failed_count > 0:
-                print(f"   • Failed: {failed_count} stocks")
-            print(f"   • Alert Type: {data_type}")
-            print(f"   • Alert Time: {triggered_at_str}")
-            print(f"\n📊 ENTRY FILTER SUMMARY:")
-            print(f"   • VWAP Slope Filter: >= 45 degrees")
-            print(f"   • Candle Size Filter: Current candle < 7.5× previous candle")
-            print(f"   • Stocks that passed both filters: Check 'bought' status above")
-            print(f"   • Stocks rejected: Check 'no_entry' with filter reasons")
+                logger.info(f"   • Failed: {failed_count} stocks")
+            logger.info(f"   • Alert Type: {data_type}")
+            logger.info(f"   • Alert Time: {triggered_at_str}")
+            logger.info(f"\n📊 ENTRY FILTER SUMMARY:")
+            logger.info(f"   • VWAP Slope Filter: >= 45 degrees")
+            logger.info(f"   • Candle Size Filter: Current candle < 7.5× previous candle")
+            logger.info(f"   • Stocks that passed both filters: Check 'bought' status above")
+            logger.info(f"   • Stocks rejected: Check 'no_entry' with filter reasons")
         except Exception as commit_error:
-            print(f"\n❌ DATABASE COMMIT FAILED: {str(commit_error)}")
-            print(f"   • Attempted to save: {saved_count} stocks")
-            print(f"   • Rolling back transaction...")
+            logger.info(f"\n❌ DATABASE COMMIT FAILED: {str(commit_error)}")
+            logger.info(f"   • Attempted to save: {saved_count} stocks")
+            logger.info(f"   • Rolling back transaction...")
             db.rollback()
             
             # Log all stock names that were in this webhook for recovery
-            print(f"\n⚠️ LOST ALERT - Stock names for manual recovery:")
+            logger.info(f"\n⚠️ LOST ALERT - Stock names for manual recovery:")
             for stock in processed_data.get("stocks", []):
-                print(f"   - {stock.get('stock_name', 'UNKNOWN')}: {stock.get('trigger_price', 0.0)}")
+                logger.info(f"   - {stock.get('stock_name', 'UNKNOWN')}: {stock.get('trigger_price', 0.0)}")
             
             raise HTTPException(
                 status_code=500,
@@ -2158,7 +2157,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         # Keep only last 50 alerts per section to prevent memory issues
         target_data["alerts"] = target_data["alerts"][:50]
         
-        print(f"Stored {data_type} alert in memory. Total {data_type} alerts for {current_date}: {len(target_data['alerts'])}")
+        logger.info(f"Stored {data_type} alert in memory. Total {data_type} alerts for {current_date}: {len(target_data['alerts'])}")
         
         # Save to file as backup
         data_dir = os.path.join(os.path.dirname(__file__), "..", "scan_data")
@@ -2201,7 +2200,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         )
         
     except Exception as e:
-        print(f"❌ CRITICAL ERROR processing webhook: {str(e)}")
+        logger.info(f"❌ CRITICAL ERROR processing webhook: {str(e)}")
         import traceback
         traceback.print_exc()
         
@@ -2912,7 +2911,7 @@ async def health_check(db: Session = Depends(get_db)):
             db.execute(text("SELECT 1"))
             db_healthy = True
         except Exception as e:
-            print(f"Database health check failed: {e}")
+            logger.info(f"Database health check failed: {e}")
         
         # Check today's webhook activity
         today_alerts = 0
@@ -2980,7 +2979,7 @@ async def health_check(db: Session = Depends(get_db)):
         return JSONResponse(status_code=status_code, content=health_data)
         
     except Exception as e:
-        print(f"Health check endpoint failed: {str(e)}")
+        logger.info(f"Health check endpoint failed: {str(e)}")
         import traceback
         traceback.print_exc()
         return JSONResponse(
@@ -3044,7 +3043,7 @@ async def receive_bullish_webhook(request: Request, db: Session = Depends(get_db
             logger.error(f"   Stock names in webhook: {data.get('stocks', 'N/A')}")
             import traceback
             logger.error(f"   Traceback: {traceback.format_exc()}")
-            print(f"❌ CRITICAL: Failed to process bullish webhook: {str(e)}")
+            logger.info(f"❌ CRITICAL: Failed to process bullish webhook: {str(e)}")
             traceback.print_exc()
             # Track webhook failure
             if health_monitor:
@@ -3134,7 +3133,7 @@ async def receive_bearish_webhook(request: Request, db: Session = Depends(get_db
             logger.error(f"   Stock names in webhook: {data.get('stocks', 'N/A')}")
             import traceback
             logger.error(f"   Traceback: {traceback.format_exc()}")
-            print(f"❌ CRITICAL: Failed to process bearish webhook: {str(e)}")
+            logger.info(f"❌ CRITICAL: Failed to process bearish webhook: {str(e)}")
             traceback.print_exc()
             # Track webhook failure
             if health_monitor:
@@ -3207,9 +3206,9 @@ async def receive_chartink_webhook(request: Request, db: Session = Depends(get_d
         logger.info(f"📥 Received webhook (auto-detect) with {stocks_count} stocks")
         logger.info(f"📦 Alert details: alert_name='{alert_name}', scan_name='{scan_name}', scan_url='{scan_url}'")
         logger.info(f"📦 Full webhook payload: {json.dumps(data, indent=2)}")
-        print(f"📥 Received webhook (auto-detect) at {datetime.now().isoformat()}")
-        print(f"📦 Alert details: alert_name='{alert_name}', scan_name='{scan_name}', scan_url='{scan_url}'")
-        print(f"📦 Payload: {json.dumps(data, indent=2)}")
+        logger.info(f"📥 Received webhook (auto-detect) at {datetime.now().isoformat()}")
+        logger.info(f"📦 Alert details: alert_name='{alert_name}', scan_name='{scan_name}', scan_url='{scan_url}'")
+        logger.info(f"📦 Payload: {json.dumps(data, indent=2)}")
         
         # Process SYNCHRONOUSLY for reliability
         try:
@@ -3232,7 +3231,7 @@ async def receive_chartink_webhook(request: Request, db: Session = Depends(get_d
             logger.error(f"   Stock names in webhook: {data.get('stocks', 'N/A')}")
             import traceback
             logger.error(f"   Traceback: {traceback.format_exc()}")
-            print(f"❌ CRITICAL: Failed to process webhook (auto-detect): {str(e)}")
+            logger.info(f"❌ CRITICAL: Failed to process webhook (auto-detect): {str(e)}")
             traceback.print_exc()
             # Track webhook failure
             if health_monitor:
@@ -3494,12 +3493,12 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
             # After 9:00 AM - show only today's data
             filter_date_start = today
             filter_date_end = today + timedelta(days=1)
-            print(f"Current time: {now.strftime('%Y-%m-%d %H:%M:%S')} IST - Showing TODAY's data (after 9:00 AM)")
+            logger.info(f"Current time: {now.strftime('%Y-%m-%d %H:%M:%S')} IST - Showing TODAY's data (after 9:00 AM)")
         else:
             # Before 9:00 AM - show yesterday's data
             filter_date_start = today - timedelta(days=1)
             filter_date_end = today
-            print(f"Current time: {now.strftime('%Y-%m-%d %H:%M:%S')} IST - Showing YESTERDAY's data (before 9:00 AM)")
+            logger.info(f"Current time: {now.strftime('%Y-%m-%d %H:%M:%S')} IST - Showing YESTERDAY's data (before 9:00 AM)")
         
         # For intraday alerts, use today if it's a trading day, otherwise get last trading date
         if vwap_service.is_trading_day(today):
@@ -3639,12 +3638,12 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                             # Commit immediately to persist the change
                             try:
                                 db.commit()
-                                print(f"✅ Retried and found option contract for {record.stock_name}: {retry_contract}")
+                                logger.info(f"✅ Retried and found option contract for {record.stock_name}: {retry_contract}")
                             except Exception as commit_error:
                                 db.rollback()
-                                print(f"⚠️ Failed to commit option contract for {record.stock_name}: {str(commit_error)}")
+                                logger.info(f"⚠️ Failed to commit option contract for {record.stock_name}: {str(commit_error)}")
                     except Exception as retry_error:
-                        print(f"⚠️ Retry option contract determination failed for {record.stock_name}: {str(retry_error)}")
+                        logger.info(f"⚠️ Retry option contract determination failed for {record.stock_name}: {str(retry_error)}")
                 
                 grouped_bullish[alert_key]["stocks"].append({
                     "stock_name": record.stock_name,
@@ -3806,12 +3805,12 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
                             # Commit immediately to persist the change
                             try:
                                 db.commit()
-                                print(f"✅ Retried and found option contract for {record.stock_name}: {retry_contract}")
+                                logger.info(f"✅ Retried and found option contract for {record.stock_name}: {retry_contract}")
                             except Exception as commit_error:
                                 db.rollback()
-                                print(f"⚠️ Failed to commit option contract for {record.stock_name}: {str(commit_error)}")
+                                logger.info(f"⚠️ Failed to commit option contract for {record.stock_name}: {str(commit_error)}")
                     except Exception as retry_error:
-                        print(f"⚠️ Retry option contract determination failed for {record.stock_name}: {str(retry_error)}")
+                        logger.info(f"⚠️ Retry option contract determination failed for {record.stock_name}: {str(retry_error)}")
                 
                 grouped_bearish[alert_key]["stocks"].append({
                     "stock_name": record.stock_name,
@@ -3939,7 +3938,7 @@ async def get_latest_webhook_data(db: Session = Depends(get_db)):
         )
         
     except Exception as e:
-        print(f"Error fetching latest data from database: {str(e)}")
+        logger.info(f"Error fetching latest data from database: {str(e)}")
         import traceback
         traceback.print_exc()
         
@@ -3971,7 +3970,7 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
         is_exit_time = current_time >= exit_time
         
         if is_exit_time:
-            print(f"⏰ TIME-BASED EXIT: Current time {current_time.strftime('%H:%M')} >= 15:25 - Exiting all open trades")
+            logger.info(f"⏰ TIME-BASED EXIT: Current time {current_time.strftime('%H:%M')} >= 15:25 - Exiting all open trades")
         
         # Get all OPEN records for today (not exited, not no_entry)
         # Only update trades that are still open
@@ -3991,13 +3990,13 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
             IntradayStockOption.status == 'no_entry'
         ).count()
         
-        print(f"Refreshing {len(records)} records (skipped {skipped_no_entry} 'no_entry' trades)...")
+        logger.info(f"Refreshing {len(records)} records (skipped {skipped_no_entry} 'no_entry' trades)...")
         
         for record in records:
             try:
                 # SAFETY CHECK: Skip if trade already has exit_reason (should be filtered by query, but double-check)
                 if record.exit_reason is not None:
-                    print(f"⚠️ Skipping {record.stock_name} - already exited with reason: {record.exit_reason}")
+                    logger.info(f"⚠️ Skipping {record.stock_name} - already exited with reason: {record.exit_reason}")
                     continue
                 
                 # Load instruments JSON if needed
@@ -4007,7 +4006,7 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                 instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
                 
                 if not instruments_file.exists():
-                    print(f"Instruments JSON not found")
+                    logger.info(f"Instruments JSON not found")
                     continue
                 
                 with open(instruments_file, 'r') as f:
@@ -4066,7 +4065,7 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                     # Prefer exact strike match
                                     if strike_diff < 0.01:  # Exact match (within 1 paise)
                                         instrument_key = inst.get('instrument_key')
-                                        print(f"✅ Found EXACT match for {option_contract}: {instrument_key} (strike: {inst_strike})")
+                                        logger.info(f"✅ Found EXACT match for {option_contract}: {instrument_key} (strike: {inst_strike})")
                                         break  # Found exact match, exit loop
                                     else:
                                         # Track best match if no exact match found yet
@@ -4079,10 +4078,10 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                     if not instrument_key and best_match:
                         instrument_key = best_match.get('instrument_key')
                         inst_strike = best_match.get('strike_price', 0)
-                        print(f"⚠️ WARNING: Using BEST MATCH (not exact) for {option_contract}: {instrument_key} (strike: {inst_strike}, requested: {strike_value})")
+                        logger.info(f"⚠️ WARNING: Using BEST MATCH (not exact) for {option_contract}: {instrument_key} (strike: {inst_strike}, requested: {strike_value})")
                     
                     if not instrument_key:
-                        print(f"❌ ERROR: Could not find instrument_key for {option_contract}")
+                        logger.info(f"❌ ERROR: Could not find instrument_key for {option_contract}")
                     
                     # Fetch option LTP
                     if instrument_key:
@@ -4104,7 +4103,7 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                     if stock_quote.get('vwap'):
                                         record.stock_vwap = stock_quote.get('vwap')
                             except Exception as e:
-                                print(f"Could not update stock LTP/VWAP for {record.stock_name}: {str(e)}")
+                                logger.info(f"Could not update stock LTP/VWAP for {record.stock_name}: {str(e)}")
                             
                             # Only update sell_price if trade is not already closed
                             if not record.exit_reason:
@@ -4122,12 +4121,12 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                 # 1. CHECK TIME-BASED EXIT (3:25 PM) - HIGHEST PRIORITY
                                 if is_exit_time:
                                     exit_conditions['time_based'] = True
-                                    print(f"⏰ TIME EXIT CONDITION MET for {record.stock_name}: Current time >= 3:25 PM")
+                                    logger.info(f"⏰ TIME EXIT CONDITION MET for {record.stock_name}: Current time >= 3:25 PM")
                                 
                                 # 2. CHECK STOP LOSS
                                 if record.stop_loss and new_option_ltp <= record.stop_loss:
                                     exit_conditions['stop_loss'] = True
-                                    print(f"🛑 STOP LOSS CONDITION MET for {record.stock_name}: LTP ₹{new_option_ltp} <= SL ₹{record.stop_loss}")
+                                    logger.info(f"🛑 STOP LOSS CONDITION MET for {record.stock_name}: LTP ₹{new_option_ltp} <= SL ₹{record.stop_loss}")
                                 
                                 # 3. CHECK VWAP CROSS (only after 11:15 AM)
                                 vwap_check_time = datetime.strptime("11:15", "%H:%M").time()
@@ -4135,25 +4134,25 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                 
                                 if current_time_check >= vwap_check_time and record.stock_ltp and record.stock_vwap and record.option_type:
                                     # Enhanced logging for debugging
-                                    print(f"📊 VWAP CHECK for {record.stock_name} ({record.option_type}): Stock LTP=₹{record.stock_ltp}, VWAP=₹{record.stock_vwap}, Time={current_time_check.strftime('%H:%M')}")
+                                    logger.info(f"📊 VWAP CHECK for {record.stock_name} ({record.option_type}): Stock LTP=₹{record.stock_ltp}, VWAP=₹{record.stock_vwap}, Time={current_time_check.strftime('%H:%M')}")
                                     
                                     if record.option_type == 'CE' and record.stock_ltp < record.stock_vwap:
                                         # Bullish trade: stock went below VWAP (bearish signal)
                                         exit_conditions['vwap_cross'] = True
-                                        print(f"📉 VWAP CROSS CONDITION MET for {record.stock_name} (CE): Stock LTP ₹{record.stock_ltp} < VWAP ₹{record.stock_vwap}")
+                                        logger.info(f"📉 VWAP CROSS CONDITION MET for {record.stock_name} (CE): Stock LTP ₹{record.stock_ltp} < VWAP ₹{record.stock_vwap}")
                                     elif record.option_type == 'PE' and record.stock_ltp > record.stock_vwap:
                                         # Bearish trade: stock went above VWAP (bullish signal)
                                         exit_conditions['vwap_cross'] = True
-                                        print(f"📈 VWAP CROSS CONDITION MET for {record.stock_name} (PE): Stock LTP ₹{record.stock_ltp} > VWAP ₹{record.stock_vwap}")
+                                        logger.info(f"📈 VWAP CROSS CONDITION MET for {record.stock_name} (PE): Stock LTP ₹{record.stock_ltp} > VWAP ₹{record.stock_vwap}")
                                     else:
-                                        print(f"✅ VWAP OK for {record.stock_name} - Stock {record.stock_ltp} {'>' if record.option_type == 'CE' else '<'} VWAP {record.stock_vwap}")
+                                        logger.info(f"✅ VWAP OK for {record.stock_name} - Stock {record.stock_ltp} {'>' if record.option_type == 'CE' else '<'} VWAP {record.stock_vwap}")
                                 elif current_time_check < vwap_check_time:
-                                    print(f"⏰ VWAP check skipped for {record.stock_name} (time {current_time_check.strftime('%H:%M')} < 11:15 AM)")
+                                    logger.info(f"⏰ VWAP check skipped for {record.stock_name} (time {current_time_check.strftime('%H:%M')} < 11:15 AM)")
                                 
                                 # 4. CHECK PROFIT TARGET (50% gain)
                                 if record.buy_price and new_option_ltp >= (record.buy_price * 1.5):
                                     exit_conditions['profit_target'] = True
-                                    print(f"🎯 PROFIT TARGET CONDITION MET for {record.stock_name}: LTP ₹{new_option_ltp} >= Target ₹{record.buy_price * 1.5}")
+                                    logger.info(f"🎯 PROFIT TARGET CONDITION MET for {record.stock_name}: LTP ₹{new_option_ltp} >= Target ₹{record.buy_price * 1.5}")
                                 
                                 # APPLY THE HIGHEST PRIORITY EXIT CONDITION
                                 exit_applied = False
@@ -4165,7 +4164,7 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                     record.status = 'sold'
                                     if record.buy_price and record.qty:
                                         record.pnl = (new_option_ltp - record.buy_price) * record.qty
-                                    print(f"✅ APPLIED: TIME EXIT for {record.stock_name}: PnL=₹{record.pnl}")
+                                    logger.info(f"✅ APPLIED: TIME EXIT for {record.stock_name}: PnL=₹{record.pnl}")
                                     exit_applied = True
                                 
                                 elif exit_conditions['stop_loss']:
@@ -4175,7 +4174,7 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                     record.status = 'sold'
                                     if record.buy_price and record.qty:
                                         record.pnl = (new_option_ltp - record.buy_price) * record.qty
-                                    print(f"✅ APPLIED: STOP LOSS EXIT for {record.stock_name}: PnL=₹{record.pnl}")
+                                    logger.info(f"✅ APPLIED: STOP LOSS EXIT for {record.stock_name}: PnL=₹{record.pnl}")
                                     exit_applied = True
                                 
                                 elif exit_conditions['vwap_cross']:
@@ -4185,7 +4184,7 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                     record.status = 'sold'
                                     if record.buy_price and record.qty:
                                         record.pnl = (new_option_ltp - record.buy_price) * record.qty
-                                    print(f"✅ APPLIED: VWAP CROSS EXIT for {record.stock_name}: PnL=₹{record.pnl}")
+                                    logger.info(f"✅ APPLIED: VWAP CROSS EXIT for {record.stock_name}: PnL=₹{record.pnl}")
                                     exit_applied = True
                                 
                                 elif exit_conditions['profit_target']:
@@ -4195,14 +4194,14 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                     record.status = 'sold'
                                     if record.qty:
                                         record.pnl = (new_option_ltp - record.buy_price) * record.qty
-                                    print(f"✅ APPLIED: PROFIT TARGET EXIT for {record.stock_name}: PnL=₹{record.pnl}")
+                                    logger.info(f"✅ APPLIED: PROFIT TARGET EXIT for {record.stock_name}: PnL=₹{record.pnl}")
                                     exit_applied = True
                                 
                                 # If no exit was applied, just update current price and PnL (trade still OPEN)
                                 if not exit_applied:
                                     old_sell_price = record.sell_price or 0.0
                                     record.sell_price = new_option_ltp  # Update current Option LTP
-                                    print(f"📝 PRICE UPDATE for {record.stock_name}: sell_price ₹{old_sell_price:.2f} → ₹{new_option_ltp:.2f} (OPEN trade)")
+                                    logger.info(f"📝 PRICE UPDATE for {record.stock_name}: sell_price ₹{old_sell_price:.2f} → ₹{new_option_ltp:.2f} (OPEN trade)")
                                     
                                     # DO NOT update sell_time here - only set when trade exits
                                     if record.buy_price and record.qty:
@@ -4210,27 +4209,27 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                         
                                     # Sanity check for unrealistic prices
                                     if record.buy_price and new_option_ltp > record.buy_price * 3:
-                                        print(f"🚨 WARNING: Unrealistic option price for {record.stock_name}!")
-                                        print(f"   Buy: ₹{record.buy_price:.2f}, Current: ₹{new_option_ltp:.2f} ({new_option_ltp/record.buy_price:.1f}x)")
-                                        print(f"   Previous sell_price: ₹{old_sell_price:.2f}")
-                                        print(f"   This may indicate data corruption!")
+                                        logger.info(f"🚨 WARNING: Unrealistic option price for {record.stock_name}!")
+                                        logger.info(f"   Buy: ₹{record.buy_price:.2f}, Current: ₹{new_option_ltp:.2f} ({new_option_ltp/record.buy_price:.1f}x)")
+                                        logger.info(f"   Previous sell_price: ₹{old_sell_price:.2f}")
+                                        logger.info(f"   This may indicate data corruption!")
                             else:
                                 # Trade already closed - this should NOT happen due to query filter
                                 # But if it does, log it and skip
-                                print(f"🚨 ERROR: {record.stock_name} already has exit_reason='{record.exit_reason}' but was still in query results!")
-                                print(f"   This indicates query filter bug. Skipping update.")
+                                logger.info(f"🚨 ERROR: {record.stock_name} already has exit_reason='{record.exit_reason}' but was still in query results!")
+                                logger.info(f"   This indicates query filter bug. Skipping update.")
                                 continue
                             
                             updated_count += 1
-                            print(f"✅ Updated {record.stock_name}: option_ltp=₹{new_option_ltp}, PnL=₹{record.pnl}, Exit={record.exit_reason or 'Open'}")
+                            logger.info(f"✅ Updated {record.stock_name}: option_ltp=₹{new_option_ltp}, PnL=₹{record.pnl}, Exit={record.exit_reason or 'Open'}")
                         else:
-                            print(f"❌ Could not fetch LTP for {option_contract}")
+                            logger.info(f"❌ Could not fetch LTP for {option_contract}")
                             failed_count += 1
                     else:
-                        print(f"❌ Could not find instrument key for {option_contract}")
+                        logger.info(f"❌ Could not find instrument key for {option_contract}")
                         failed_count += 1
             except Exception as e:
-                print(f"❌ Error processing {record.stock_name}: {str(e)}")
+                logger.info(f"❌ Error processing {record.stock_name}: {str(e)}")
                 failed_count += 1
         
         db.commit()
@@ -4289,7 +4288,7 @@ async def refresh_current_vwap():
                 ltp = vwap_service.get_current_ltp(stock_name)
                 
                 if not ltp or ltp == 0:
-                    print(f"Could not get LTP for {stock_name}, keeping old values")
+                    logger.info(f"Could not get LTP for {stock_name}, keeping old values")
                     continue
                 
                 # Get VWAP for comparison
@@ -4334,7 +4333,7 @@ async def refresh_current_vwap():
         # Refresh bullish data (always CE)
         bullish_count = 0
         if has_bullish:
-            print(f"Refreshing Bullish alerts...")
+            logger.info(f"Refreshing Bullish alerts...")
             for alert in bullish_data['alerts']:
                 refresh_stocks_in_alert(alert, 'CE')
                 bullish_count += len(alert.get('stocks', []))
@@ -4342,7 +4341,7 @@ async def refresh_current_vwap():
         # Refresh bearish data (always PE)
         bearish_count = 0
         if has_bearish:
-            print(f"Refreshing Bearish alerts...")
+            logger.info(f"Refreshing Bearish alerts...")
             for alert in bearish_data['alerts']:
                 refresh_stocks_in_alert(alert, 'PE')
                 bearish_count += len(alert.get('stocks', []))
@@ -4357,7 +4356,7 @@ async def refresh_current_vwap():
         with open(os.path.join(data_dir, "bearish_data.json"), "w") as f:
             json.dump(bearish_data, f, indent=2)
         
-        print(f"Successfully refreshed LTP and option strikes")
+        logger.info(f"Successfully refreshed LTP and option strikes")
         
         return JSONResponse(
             status_code=200,
@@ -4371,7 +4370,7 @@ async def refresh_current_vwap():
         )
         
     except Exception as e:
-        print(f"Error refreshing LTP and strikes: {str(e)}")
+        logger.info(f"Error refreshing LTP and strikes: {str(e)}")
         return JSONResponse(
             status_code=500,
             content={
@@ -4565,7 +4564,7 @@ async def get_index_prices(db: Session = Depends(get_db)):
             )
         else:
             # Fallback to historical data if real-time data is not available (only during market hours)
-            print("Real-time data not available, falling back to historical data")
+            logger.info("Real-time data not available, falling back to historical data")
             
             # Double-check we're still in market hours before fallback API call
             current_hour = datetime.now(ist).hour
@@ -4635,7 +4634,7 @@ async def get_index_prices(db: Session = Depends(get_db)):
                 )
             
     except Exception as e:
-        print(f"Error fetching index prices: {str(e)}")
+        logger.info(f"Error fetching index prices: {str(e)}")
         return JSONResponse(
             status_code=500,
             content={
@@ -5280,9 +5279,9 @@ async def backfill_vwap_for_date(
         except ValueError:
             return {"success": False, "message": "Invalid date format. Use YYYY-MM-DD"}
         
-        print(f"\n{'='*80}")
-        print(f"VWAP BACKFILL FOR {date_str}")
-        print(f"{'='*80}\n")
+        logger.info(f"\n{'='*80}")
+        logger.info(f"VWAP BACKFILL FOR {date_str}")
+        logger.info(f"{'='*80}\n")
         
         # Get all records from the specified date
         records = db.query(IntradayStockOption).filter(
@@ -5291,13 +5290,13 @@ async def backfill_vwap_for_date(
         ).all()
         
         total_records = len(records)
-        print(f"📊 Found {total_records} total records from {date_str}")
+        logger.info(f"📊 Found {total_records} total records from {date_str}")
         
         # Filter records with missing VWAP
         empty_vwap_records = [r for r in records if not r.stock_vwap or r.stock_vwap == 0.0]
         empty_count = len(empty_vwap_records)
         
-        print(f"⚠️  Records with missing/zero stock_vwap: {empty_count}")
+        logger.info(f"⚠️  Records with missing/zero stock_vwap: {empty_count}")
         
         if not empty_vwap_records:
             return {
@@ -5320,7 +5319,7 @@ async def backfill_vwap_for_date(
                 unique_stocks[stock_name] = []
             unique_stocks[stock_name].append(record)
         
-        print(f"📈 Processing {len(unique_stocks)} unique stocks...\n")
+        logger.info(f"📈 Processing {len(unique_stocks)} unique stocks...\n")
         
         updated_count = 0
         failed_count = 0
@@ -5328,7 +5327,7 @@ async def backfill_vwap_for_date(
         
         for stock_name, stock_records in unique_stocks.items():
             try:
-                print(f"Fetching VWAP for {stock_name} ({len(stock_records)} records)...")
+                logger.info(f"Fetching VWAP for {stock_name} ({len(stock_records)} records)...")
                 
                 # Fetch VWAP from Upstox API
                 vwap = vwap_service.get_stock_vwap(stock_name)
@@ -5339,7 +5338,7 @@ async def backfill_vwap_for_date(
                         record.stock_vwap = vwap
                         record.updated_at = datetime.now(ist)
                     
-                    print(f"  ✅ Updated {len(stock_records)} records with VWAP = ₹{vwap:.2f}")
+                    logger.info(f"  ✅ Updated {len(stock_records)} records with VWAP = ₹{vwap:.2f}")
                     updated_count += len(stock_records)
                     results.append({
                         "stock": stock_name,
@@ -5348,7 +5347,7 @@ async def backfill_vwap_for_date(
                         "records_updated": len(stock_records)
                     })
                 else:
-                    print(f"  ⚠️  Could not fetch VWAP for {stock_name} (API returned 0 or failed)")
+                    logger.info(f"  ⚠️  Could not fetch VWAP for {stock_name} (API returned 0 or failed)")
                     failed_count += len(stock_records)
                     results.append({
                         "stock": stock_name,
@@ -5358,7 +5357,7 @@ async def backfill_vwap_for_date(
                     })
                     
             except Exception as e:
-                print(f"  ❌ Error processing {stock_name}: {str(e)}")
+                logger.info(f"  ❌ Error processing {stock_name}: {str(e)}")
                 failed_count += len(stock_records)
                 results.append({
                     "stock": stock_name,
@@ -5370,11 +5369,11 @@ async def backfill_vwap_for_date(
         # Commit all changes
         db.commit()
         
-        print(f"\n{'='*80}")
-        print("BACKFILL COMPLETE")
-        print(f"{'='*80}")
-        print(f"✅ Successfully updated: {updated_count} records")
-        print(f"❌ Failed: {failed_count} records\n")
+        logger.info(f"\n{'='*80}")
+        logger.info("BACKFILL COMPLETE")
+        logger.info(f"{'='*80}")
+        logger.info(f"✅ Successfully updated: {updated_count} records")
+        logger.info(f"❌ Failed: {failed_count} records\n")
         
         return {
             "success": True,
@@ -5388,7 +5387,7 @@ async def backfill_vwap_for_date(
         
     except Exception as e:
         db.rollback()
-        print(f"❌ Error in backfill: {str(e)}")
+        logger.info(f"❌ Error in backfill: {str(e)}")
         import traceback
         traceback.print_exc()
         return {
