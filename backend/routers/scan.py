@@ -2878,7 +2878,7 @@ async def process_all_today_stocks(db: Session = Depends(get_db)):
     try:
         import pytz
         from sqlalchemy import and_
-        from backend.services.vwap_updater import vwap_service
+        from backend.services.upstox_service import upstox_service as vwap_service
         
         ist = pytz.timezone('Asia/Kolkata')
         now = datetime.now(ist)
