@@ -15,43 +15,49 @@ import logging
 import asyncio
 from pathlib import Path
 
-# Use scan_st1_algo logger to write to scan_st1_algo.log instead of trademanthan.log
+# Configure logger to write to scan_st1_algo.log instead of trademanthan.log
 # This ensures all scan-related logs (webhooks, option contracts, trades) go to scan_st1_algo.log
-try:
-    # Try to get the scan_st1_algo logger if it's already configured
-    logger = logging.getLogger('scan_st1_algo')
-    # If logger doesn't have handlers yet, configure it
-    if not logger.handlers:
-        # Configure logger to write to scan_st1_algo.log
-        log_dir = Path(__file__).parent.parent.parent / 'logs'
-        log_dir.mkdir(exist_ok=True)
-        log_file = log_dir / 'scan_st1_algo.log'
-        
-        # Create file handler with immediate flushing
-        class FlushingFileHandler(logging.FileHandler):
-            """FileHandler that flushes after each log entry to ensure immediate writes"""
-            def emit(self, record):
-                super().emit(record)
-                self.flush()
-                if hasattr(self.stream, 'fileno'):
-                    try:
-                        import os
-                        os.fsync(self.stream.fileno())
-                    except (OSError, AttributeError):
-                        pass
-        
-        file_handler = FlushingFileHandler(log_file, mode='a', encoding='utf-8')
-        file_handler.setLevel(logging.INFO)
-        file_handler.setFormatter(logging.Formatter(
-            '%(asctime)s - %(levelname)s - %(name)s - %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        ))
-        logger.setLevel(logging.INFO)
-        logger.addHandler(file_handler)
-        logger.propagate = False  # Only log to scan_st1_algo.log, not to root logger
-except Exception:
-    # Fallback to default logger if scan_st1_algo logger setup fails
-    logger = logging.getLogger(__name__)
+# The scan_st1_algo service will also configure this logger, but we set it up here to ensure
+# logs are written correctly even if scan_st1_algo hasn't started yet
+log_dir = Path(__file__).parent.parent.parent / 'logs'
+log_dir.mkdir(exist_ok=True)
+log_file = log_dir / 'scan_st1_algo.log'
+
+# Create file handler with immediate flushing
+class FlushingFileHandler(logging.FileHandler):
+    """FileHandler that flushes after each log entry to ensure immediate writes"""
+    def emit(self, record):
+        super().emit(record)
+        self.flush()
+        if hasattr(self.stream, 'fileno'):
+            try:
+                import os
+                os.fsync(self.stream.fileno())
+            except (OSError, AttributeError):
+                pass
+
+# Get the logger for backend.routers.scan (scan_st1_algo.py will also configure this)
+logger = logging.getLogger(__name__)  # This will be 'backend.routers.scan'
+
+# Check if handler already exists to avoid duplicates
+handler_exists = False
+for h in logger.handlers:
+    if isinstance(h, logging.FileHandler):
+        handler_path = getattr(h, 'baseFilename', None) or (getattr(h, 'stream', {}).name if hasattr(getattr(h, 'stream', None), 'name') else None)
+        if handler_path and 'scan_st1_algo.log' in str(handler_path):
+            handler_exists = True
+            break
+
+if not handler_exists:
+    file_handler = FlushingFileHandler(log_file, mode='a', encoding='utf-8')
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(logging.Formatter(
+        '%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    ))
+    logger.setLevel(logging.INFO)
+    logger.addHandler(file_handler)
+    logger.propagate = False  # Only log to scan_st1_algo.log, not to root logger
 
 # Add services to path
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
