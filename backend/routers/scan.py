@@ -740,9 +740,9 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             logger.info(f"Using forced type: {forced_type}")
         else:
             # Auto-detect from alert/scan name
-            alert_name = processed_data.get("alert_name", "").lower()
-            scan_name = processed_data.get("scan_name", "").lower()
-            scan_url = processed_data.get("scan_url", "").lower()
+            alert_name = processed_data.get("alert_name", "").lower() if processed_data and isinstance(processed_data, dict) else ""
+            scan_name = processed_data.get("scan_name", "").lower() if processed_data and isinstance(processed_data, dict) else ""
+            scan_url = processed_data.get("scan_url", "").lower() if processed_data and isinstance(processed_data, dict) else ""
             
             # Check for bearish indicators first (more specific)
             is_bearish = ("bearish" in alert_name or "bearish" in scan_name or "bearish" in scan_url or
@@ -764,8 +764,10 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         
         # Force option type based on alert type
         forced_option_type = 'CE' if is_bullish else 'PE'
-        logger.info(f"Processing {len(processed_data['stocks'])} stocks with option type: {forced_option_type}")
-        logger.info(f"Alert name: {processed_data.get('alert_name', '')}")
+        stocks_count = len(processed_data['stocks']) if processed_data and isinstance(processed_data, dict) and 'stocks' in processed_data else 0
+        logger.info(f"Processing {stocks_count} stocks with option type: {forced_option_type}")
+        alert_name_display = processed_data.get('alert_name', '') if processed_data and isinstance(processed_data, dict) else ''
+        logger.info(f"Alert name: {alert_name_display}")
         
         # Process each stock individually to fetch LTP and find option contract
         # IMPORTANT: Always save at minimum stock_name and alert_time, even if enrichment fails
