@@ -503,7 +503,14 @@ def find_option_contract_from_master_stock(db: Session, stock_name: str, option_
     DEPRECATED: This function now delegates to find_option_contract_from_instruments().
     Kept for backward compatibility during transition.
     """
-    return find_option_contract_from_instruments(stock_name, option_type, stock_ltp, vwap_service)
+    logger.info(f"🔍 find_option_contract_from_master_stock called for {stock_name} {option_type} (LTP: {stock_ltp})")
+    try:
+        result = find_option_contract_from_instruments(stock_name, option_type, stock_ltp, vwap_service)
+        logger.info(f"find_option_contract_from_master_stock returning: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"❌ EXCEPTION in find_option_contract_from_master_stock for {stock_name} {option_type}: {str(e)}", exc_info=True)
+        return None
 
 
 async def process_webhook_data(data: dict, db: Session, forced_type: str = None):
@@ -767,12 +774,15 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             # ====================================================================
             # ACTIVITY 2: Find Option Contract (Independent)
             # ====================================================================
+                logger.info(f"🔍 ACTIVITY 2: Finding option contract for {stock_name} with forced_option_type={forced_option_type}, stock_ltp={stock_ltp}")
                 max_retries = 3
                 for retry_attempt in range(1, max_retries + 1):
                     try:
+                        logger.info(f"Calling find_option_contract_from_master_stock for {stock_name} (attempt {retry_attempt})")
                         option_contract = find_option_contract_from_master_stock(
                             db, stock_name, forced_option_type, stock_ltp, vwap_service
                         )
+                        logger.info(f"find_option_contract_from_master_stock returned: {option_contract}")
                         if option_contract:
                             print(f"✅ Option contract found for {stock_name} (attempt {retry_attempt}): {option_contract}")
                             logger.info(f"✅ Option contract found for {stock_name} (attempt {retry_attempt}): {option_contract}")
