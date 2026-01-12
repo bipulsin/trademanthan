@@ -811,10 +811,47 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                             print(f"⚠️ Instruments data is empty - cannot search for {option_contract}")
                             logger.warning(f"Instruments data is empty for {stock_name} - cannot find instrument_key")
                         else:
-                            # Parse option contract format: STOCK-MonthYYYY-STRIKE-CE/PE
-                            match = re.match(r'^([A-Z-]+)-(\w{3})(\d{4})-(\d+\.?\d*?)-(CE|PE)$', option_contract)
+                            # FIRST: Try to find by trading_symbol directly (since find_option_contract_from_instruments now returns trading_symbol)
+                            print(f"🔍 Searching for instrument_key by trading_symbol: {option_contract}")
+                            found_by_trading_symbol = False
+                            for inst in instruments_data:
+                                if isinstance(inst, dict):
+                                    inst_trading_symbol = inst.get('trading_symbol', '')
+                                    if inst_trading_symbol and inst_trading_symbol == option_contract:
+                                        instrument_key = inst.get('instrument_key')
+                                        if instrument_key:
+                                            inst_lot_size = inst.get('lot_size')
+                                            if inst_lot_size and inst_lot_size > 0:
+                                                qty = int(inst_lot_size)
+                                            expiry_ms = inst.get('expiry', 0)
+                                            if expiry_ms:
+                                                if expiry_ms > 1e12:
+                                                    expiry_ms = expiry_ms / 1000
+                                                try:
+                                                    inst_expiry = datetime.fromtimestamp(expiry_ms, tz=ist)
+                                                    inst_strike = inst.get('strike_price', 0)
+                                                    print(f"✅ Found instrument by trading_symbol for {option_contract}:")
+                                                    print(f"   Instrument Key: {instrument_key}")
+                                                    print(f"   Strike: {inst_strike}")
+                                                    print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
+                                                    print(f"   Lot Size: {qty if inst_lot_size and inst_lot_size > 0 else 'Not available'}")
+                                                    found_by_trading_symbol = True
+                                                    break
+                                                except (ValueError, OSError) as e:
+                                                    logger.warning(f"Invalid expiry timestamp for {option_contract}: {expiry_ms}, error: {str(e)}")
+                                                    continue
+                                        else:
+                                            logger.warning(f"Found trading_symbol match for {option_contract} but instrument_key is None")
+                                            print(f"⚠️ WARNING: Found trading_symbol match but instrument_key is None for {option_contract}")
+                                            # Continue searching - maybe another instrument has the key
                             
-                            if match:
+                            # SECOND: If not found by trading_symbol, try parsing old format: STOCK-MonthYYYY-STRIKE-CE/PE
+                            match = None
+                            if not found_by_trading_symbol:
+                                print(f"⚠️ Not found by trading_symbol, trying old format parsing...")
+                                match = re.match(r'^([A-Z-]+)-(\w{3})(\d{4})-(\d+\.?\d*?)-(CE|PE)$', option_contract)
+                            
+                            if not found_by_trading_symbol and match:
                                 symbol, month, year, strike, opt_type = match.groups()
                                 strike_value = float(strike)
                                 
@@ -964,8 +1001,14 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                     print(f"⚠️ Could not parse month from option contract: {option_contract} (month: {month})")
                                     logger.warning(f"Could not parse month from option contract for {stock_name}: {option_contract} (month: {month})")
                             else:
-                                print(f"⚠️ Could not parse option contract format: {option_contract}")
-                                logger.warning(f"Could not parse option contract format for {stock_name}: {option_contract}")
+                                if not found_by_trading_symbol:
+                                    print(f"⚠️ Could not parse option contract format: {option_contract}")
+                                    logger.warning(f"Could not parse option contract format for {stock_name}: {option_contract}")
+                            
+                            # Final check: If instrument_key is still None after all searching methods
+                            if not instrument_key:
+                                print(f"❌ ERROR: Could not find instrument_key for {option_contract} after trying both trading_symbol lookup and format parsing")
+                                logger.error(f"Could not find instrument_key for {stock_name} ({option_contract}) - tried trading_symbol lookup and format parsing")
                 except Exception as e:
                     print(f"❌ ERROR: Exception finding instrument_key for {option_contract}: {str(e)}")
                     logger.error(f"Exception finding instrument_key for {stock_name} ({option_contract}): {str(e)}", exc_info=True)
