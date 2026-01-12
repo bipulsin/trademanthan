@@ -708,21 +708,26 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         )
                         if option_contract:
                             print(f"✅ Option contract found for {stock_name} (attempt {retry_attempt}): {option_contract}")
+                            logger.info(f"✅ Option contract found for {stock_name} (attempt {retry_attempt}): {option_contract}")
                             break
                         else:
                             if retry_attempt < max_retries:
                                 print(f"⚠️ No option contract found for {stock_name} (attempt {retry_attempt}/{max_retries}), retrying...")
+                                logger.warning(f"⚠️ No option contract found for {stock_name} (attempt {retry_attempt}/{max_retries}), retrying...")
                                 import time
                                 time.sleep(1)  # Brief delay before retry
                             else:
                                 print(f"⚠️ No option contract found for {stock_name} after {max_retries} attempts")
+                                logger.warning(f"⚠️ No option contract found for {stock_name} after {max_retries} attempts")
                     except Exception as e:
                         if retry_attempt < max_retries:
                             print(f"⚠️ Option contract search failed for {stock_name} (attempt {retry_attempt}/{max_retries}): {str(e)}, retrying...")
+                            logger.warning(f"⚠️ Option contract search failed for {stock_name} (attempt {retry_attempt}/{max_retries}): {str(e)}, retrying...")
                             import time
                             time.sleep(1)  # Brief delay before retry
                         else:
                             print(f"⚠️ Option contract search failed for {stock_name} after {max_retries} attempts: {str(e)}")
+                            logger.error(f"⚠️ Option contract search failed for {stock_name} after {max_retries} attempts: {str(e)}")
                             option_contract = None
                 
             # ====================================================================
@@ -813,37 +818,50 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         else:
                             # FIRST: Try to find by trading_symbol directly (since find_option_contract_from_instruments now returns trading_symbol)
                             print(f"🔍 Searching for instrument_key by trading_symbol: {option_contract}")
+                            logger.info(f"🔍 Searching for instrument_key by trading_symbol: '{option_contract}' (stock: {stock_name})")
                             found_by_trading_symbol = False
+                            match_count = 0
+                            # Normalize option_contract for comparison (strip whitespace, handle case)
+                            option_contract_normalized = option_contract.strip() if option_contract else ""
                             for inst in instruments_data:
                                 if isinstance(inst, dict):
                                     inst_trading_symbol = inst.get('trading_symbol', '')
-                                    if inst_trading_symbol and inst_trading_symbol == option_contract:
-                                        instrument_key = inst.get('instrument_key')
-                                        if instrument_key:
-                                            inst_lot_size = inst.get('lot_size')
-                                            if inst_lot_size and inst_lot_size > 0:
-                                                qty = int(inst_lot_size)
-                                            expiry_ms = inst.get('expiry', 0)
-                                            if expiry_ms:
-                                                if expiry_ms > 1e12:
-                                                    expiry_ms = expiry_ms / 1000
-                                                try:
-                                                    inst_expiry = datetime.fromtimestamp(expiry_ms, tz=ist)
-                                                    inst_strike = inst.get('strike_price', 0)
-                                                    print(f"✅ Found instrument by trading_symbol for {option_contract}:")
-                                                    print(f"   Instrument Key: {instrument_key}")
-                                                    print(f"   Strike: {inst_strike}")
-                                                    print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
-                                                    print(f"   Lot Size: {qty if inst_lot_size and inst_lot_size > 0 else 'Not available'}")
-                                                    found_by_trading_symbol = True
-                                                    break
-                                                except (ValueError, OSError) as e:
-                                                    logger.warning(f"Invalid expiry timestamp for {option_contract}: {expiry_ms}, error: {str(e)}")
-                                                    continue
-                                        else:
-                                            logger.warning(f"Found trading_symbol match for {option_contract} but instrument_key is None")
-                                            print(f"⚠️ WARNING: Found trading_symbol match but instrument_key is None for {option_contract}")
-                                            # Continue searching - maybe another instrument has the key
+                                    if inst_trading_symbol:
+                                        match_count += 1
+                                        # Try exact match first
+                                        inst_trading_symbol_normalized = inst_trading_symbol.strip()
+                                        if inst_trading_symbol_normalized == option_contract_normalized:
+                                            instrument_key = inst.get('instrument_key')
+                                            if instrument_key:
+                                                inst_lot_size = inst.get('lot_size')
+                                                if inst_lot_size and inst_lot_size > 0:
+                                                    qty = int(inst_lot_size)
+                                                expiry_ms = inst.get('expiry', 0)
+                                                if expiry_ms:
+                                                    if expiry_ms > 1e12:
+                                                        expiry_ms = expiry_ms / 1000
+                                                    try:
+                                                        inst_expiry = datetime.fromtimestamp(expiry_ms, tz=ist)
+                                                        inst_strike = inst.get('strike_price', 0)
+                                                        print(f"✅ Found instrument by trading_symbol for {option_contract}:")
+                                                        print(f"   Instrument Key: {instrument_key}")
+                                                        print(f"   Strike: {inst_strike}")
+                                                        print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
+                                                        print(f"   Lot Size: {qty if inst_lot_size and inst_lot_size > 0 else 'Not available'}")
+                                                        logger.info(f"✅ Found instrument by trading_symbol for {option_contract} (stock: {stock_name}): instrument_key={instrument_key}, strike={inst_strike}, expiry={inst_expiry.strftime('%d %b %Y')}, lot_size={qty if inst_lot_size and inst_lot_size > 0 else 'N/A'}")
+                                                        found_by_trading_symbol = True
+                                                        break
+                                                    except (ValueError, OSError) as e:
+                                                        logger.warning(f"Invalid expiry timestamp for {option_contract}: {expiry_ms}, error: {str(e)}")
+                                                        continue
+                                            else:
+                                                logger.warning(f"Found trading_symbol match for {option_contract} but instrument_key is None")
+                                                print(f"⚠️ WARNING: Found trading_symbol match but instrument_key is None for {option_contract}")
+                                                # Continue searching - maybe another instrument has the key
+                            
+                            if not found_by_trading_symbol:
+                                logger.warning(f"⚠️ Could not find instrument by trading_symbol '{option_contract}' for {stock_name} (checked {match_count} instruments)")
+                                print(f"⚠️ Could not find instrument by trading_symbol '{option_contract}' for {stock_name}")
                             
                             # SECOND: If not found by trading_symbol, try parsing old format: STOCK-MonthYYYY-STRIKE-CE/PE
                             match = None
