@@ -75,9 +75,12 @@ def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: st
     Returns:
         Dict with strike_price, volume, oi, ltp or None
     """
+    logger.info(f"🔍 find_strike_from_option_chain called for {stock_name} {option_type} (LTP: {stock_ltp})")
     try:
         # Get option chain from Upstox API
+        logger.info(f"Calling vwap_service.get_option_chain({stock_name})")
         option_chain = vwap_service.get_option_chain(stock_name)
+        logger.info(f"get_option_chain returned: type={type(option_chain)}, is None={option_chain is None}")
         
         if not option_chain:
             # Log as debug instead of warning - this is expected for some stocks that don't have options
