@@ -1890,7 +1890,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 # For 10:15 AM alerts: Use previous day candle data if current day data isn't available
                 saved_candle_size_ratio = None
                 saved_candle_size_status = None
-                if option_candles_data and current_day_candle and previous_day_candle:
+                if option_candles_data and current_day_candle and previous_day_candle and isinstance(current_day_candle, dict) and isinstance(previous_day_candle, dict):
                     try:
                         current_high = current_day_candle.get('high', 0)
                         current_low = current_day_candle.get('low', 0)
@@ -1908,7 +1908,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     except Exception as e:
                         logger.warning(f"Error calculating candle size for {stock_name}: {str(e)}")
                         saved_candle_size_status = None
-                elif is_10_15_alert and previous_day_candle:
+                elif is_10_15_alert and previous_day_candle and isinstance(previous_day_candle, dict):
                     # For 10:15 AM alerts: Use previous day candle data
                     # Store previous day candle data for later cycle calculations
                     # At 10:15 AM, we have previous day data but current day data may not be ready yet
