@@ -265,21 +265,28 @@ def find_option_contract_from_instruments(stock_name: str, option_type: str, sto
             target_expiry_year = now.year
         
         print(f"Target expiry: {target_expiry_year}-{target_expiry_month:02d} (current date: {now.strftime('%Y-%m-%d')})")
+        logger.info(f"Target expiry: {target_expiry_year}-{target_expiry_month:02d} (current date: {now.strftime('%Y-%m-%d')}) for {stock_name} {option_type}")
         
         # Get strike from option chain API - REQUIRED, no fallback
         target_strike = None
         if vwap_service:
+            logger.info(f"Fetching strike from option chain for {stock_name} {option_type} (LTP: {stock_ltp})")
             strike_data = find_strike_from_option_chain(vwap_service, stock_name, option_type, stock_ltp)
             if strike_data:
                 target_strike = strike_data['strike_price']
                 print(f"Using option chain strike for {stock_name}: {target_strike} (Volume: {strike_data['volume']}, OI: {strike_data['oi']})")
+                logger.info(f"Using option chain strike for {stock_name} {option_type}: {target_strike} (Volume: {strike_data['volume']}, OI: {strike_data['oi']})")
+            else:
+                logger.warning(f"No strike data returned from option chain for {stock_name} {option_type}")
         
         # If option chain not available, return None to mark trade as no_entry
         if target_strike is None or target_strike == 0:
             print(f"❌ Option chain not available for {stock_name} - Cannot determine strike. Trade will be marked as no_entry.")
+            logger.warning(f"❌ Option chain not available for {stock_name} {option_type} - Cannot determine strike. Trade will be marked as no_entry.")
             return None
         
         print(f"Looking for {option_type} option with strike {target_strike} for {stock_name}")
+        logger.info(f"Looking for {option_type} option with strike {target_strike} for {stock_name}")
         
         # Load instruments.json
         instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
@@ -386,6 +393,7 @@ def find_option_contract_from_instruments(stock_name: str, option_type: str, sto
                             print(f"✅ Found EXACT match for {stock_name} {option_type}: {option_contract}")
                             print(f"   Strike: {inst_strike} (requested: {target_strike})")
                             print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
+                            logger.info(f"✅ Found EXACT match for {stock_name} {option_type}: {option_contract} (strike: {inst_strike}, expiry: {inst_expiry.strftime('%d %b %Y')})")
                             return option_contract
                         else:
                             # Track best match (within tolerance)
@@ -416,6 +424,7 @@ def find_option_contract_from_instruments(stock_name: str, option_type: str, sto
                 print(f"⚠️ WARNING: Using BEST MATCH (within tolerance) for {stock_name} {option_type}: {option_contract}")
                 print(f"   Strike: {inst_strike} (requested: {target_strike}, diff: {abs(inst_strike - target_strike):.4f})")
                 print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')} (requested: {target_expiry_month}/{target_expiry_year})")
+                logger.info(f"⚠️ WARNING: Using BEST MATCH (within tolerance) for {stock_name} {option_type}: {option_contract} (strike: {inst_strike}, expiry: {inst_expiry.strftime('%d %b %Y')})")
                 return option_contract
             except (ValueError, OSError, OverflowError, TypeError) as best_match_error:
                 logger.error(f"Error processing best match for {stock_name} {option_type}: {best_match_error}")
@@ -423,6 +432,7 @@ def find_option_contract_from_instruments(stock_name: str, option_type: str, sto
                 return None
         
         print(f"No option contract found for {stock_name} {option_type} (target strike: {target_strike})")
+        logger.warning(f"No option contract found for {stock_name} {option_type} (target strike: {target_strike})")
         return None
             
     except Exception as e:
