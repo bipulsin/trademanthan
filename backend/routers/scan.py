@@ -2877,10 +2877,10 @@ async def receive_bullish_webhook(request: Request, db: Session = Depends(get_db
         stocks_count = len(data.get('stocks', '').split(',')) if isinstance(data.get('stocks'), str) else len(data.get('stocks', []))
         logger.info(f"📥 Received bullish webhook with {stocks_count} stocks")
         logger.info(f"📦 Full webhook payload: {json.dumps(data, indent=2)}")
-        print(f"📥 Received bullish webhook at {datetime.now().isoformat()}")
-        print(f"📦 Payload: {json.dumps(data, indent=2)}")
-        print(f"📦 Raw stocks field: {repr(data.get('stocks'))}")
-        print(f"📦 Raw trigger_prices field: {repr(data.get('trigger_prices'))}")
+        logger.info(f"📥 Received bullish webhook at {datetime.now().isoformat()}")
+        logger.info(f"📦 Payload: {json.dumps(data, indent=2)}")
+        logger.info(f"📦 Raw stocks field: {repr(data.get('stocks'))}")
+        logger.info(f"📦 Raw trigger_prices field: {repr(data.get('trigger_prices'))}")
         
         # Process SYNCHRONOUSLY for reliability - webhooks are critical and must be processed
         # Synchronous processing ensures data is saved before response is sent
@@ -2967,10 +2967,10 @@ async def receive_bearish_webhook(request: Request, db: Session = Depends(get_db
         stocks_count = len(data.get('stocks', '').split(',')) if isinstance(data.get('stocks'), str) else len(data.get('stocks', []))
         logger.info(f"📥 Received bearish webhook with {stocks_count} stocks")
         logger.info(f"📦 Full webhook payload: {json.dumps(data, indent=2)}")
-        print(f"📥 Received bearish webhook at {datetime.now().isoformat()}")
-        print(f"📦 Payload: {json.dumps(data, indent=2)}")
-        print(f"📦 Raw stocks field: {repr(data.get('stocks'))}")
-        print(f"📦 Raw trigger_prices field: {repr(data.get('trigger_prices'))}")
+        logger.info(f"📥 Received bearish webhook at {datetime.now().isoformat()}")
+        logger.info(f"📦 Payload: {json.dumps(data, indent=2)}")
+        logger.info(f"📦 Raw stocks field: {repr(data.get('stocks'))}")
+        logger.info(f"📦 Raw trigger_prices field: {repr(data.get('trigger_prices'))}")
         
         # Process SYNCHRONOUSLY for reliability - webhooks are critical and must be processed
         # Synchronous processing ensures data is saved before response is sent
