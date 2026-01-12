@@ -15,7 +15,43 @@ import logging
 import asyncio
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+# Use scan_st1_algo logger to write to scan_st1_algo.log instead of trademanthan.log
+# This ensures all scan-related logs (webhooks, option contracts, trades) go to scan_st1_algo.log
+try:
+    # Try to get the scan_st1_algo logger if it's already configured
+    logger = logging.getLogger('scan_st1_algo')
+    # If logger doesn't have handlers yet, configure it
+    if not logger.handlers:
+        # Configure logger to write to scan_st1_algo.log
+        log_dir = Path(__file__).parent.parent.parent / 'logs'
+        log_dir.mkdir(exist_ok=True)
+        log_file = log_dir / 'scan_st1_algo.log'
+        
+        # Create file handler with immediate flushing
+        class FlushingFileHandler(logging.FileHandler):
+            """FileHandler that flushes after each log entry to ensure immediate writes"""
+            def emit(self, record):
+                super().emit(record)
+                self.flush()
+                if hasattr(self.stream, 'fileno'):
+                    try:
+                        import os
+                        os.fsync(self.stream.fileno())
+                    except (OSError, AttributeError):
+                        pass
+        
+        file_handler = FlushingFileHandler(log_file, mode='a', encoding='utf-8')
+        file_handler.setLevel(logging.INFO)
+        file_handler.setFormatter(logging.Formatter(
+            '%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        ))
+        logger.setLevel(logging.INFO)
+        logger.addHandler(file_handler)
+        logger.propagate = False  # Only log to scan_st1_algo.log, not to root logger
+except Exception:
+    # Fallback to default logger if scan_st1_algo logger setup fails
+    logger = logging.getLogger(__name__)
 
 # Add services to path
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
