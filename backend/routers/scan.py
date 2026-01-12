@@ -149,29 +149,71 @@ def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: st
         logger.info(f"Parsing {len(strike_list)} strikes from option chain for {stock_name}")
         print(f"Parsing {len(strike_list)} strikes from option chain for {stock_name}")
         
+        # Debug: Log first strike structure
+        if strike_list and len(strike_list) > 0:
+            first_strike = strike_list[0]
+            logger.info(f"First strike structure for {stock_name}: type={type(first_strike)}, keys={list(first_strike.keys()) if isinstance(first_strike, dict) else 'not a dict'}")
+            if isinstance(first_strike, dict):
+                logger.info(f"First strike sample keys: {list(first_strike.keys())}")
+                if 'call_options' in first_strike:
+                    logger.info(f"call_options type: {type(first_strike['call_options'])}, keys: {list(first_strike['call_options'].keys()) if isinstance(first_strike['call_options'], dict) else 'not a dict'}")
+                if 'put_options' in first_strike:
+                    logger.info(f"put_options type: {type(first_strike['put_options'])}, keys: {list(first_strike['put_options'].keys()) if isinstance(first_strike['put_options'], dict) else 'not a dict'}")
+        
         for strike_data in strike_list:
-                strike_price = strike_data.get('strike_price', 0)
+            if not isinstance(strike_data, dict):
+                logger.warning(f"Skipping non-dict strike_data item: {type(strike_data)}")
+                continue
                 
-                # Get option data based on option type
-                if option_type == 'CE':
-                    option_data = strike_data.get('call_options', {}).get('market_data', {})
-                else:  # PE
-                    option_data = strike_data.get('put_options', {}).get('market_data', {})
+            strike_price = strike_data.get('strike_price', 0)
+            if not strike_price:
+                logger.debug(f"Skipping strike_data with no strike_price: {list(strike_data.keys())}")
+                continue
+            
+            # Get option data based on option type
+            # Try multiple possible structures
+            option_data = None
+            if option_type == 'CE':
+                if 'call_options' in strike_data:
+                    call_opts = strike_data['call_options']
+                    if isinstance(call_opts, dict):
+                        option_data = call_opts.get('market_data', call_opts)  # Try market_data first, fallback to direct
+                    elif isinstance(call_opts, list) and len(call_opts) > 0:
+                        option_data = call_opts[0]  # If it's a list, take first item
+            else:  # PE
+                if 'put_options' in strike_data:
+                    put_opts = strike_data['put_options']
+                    if isinstance(put_opts, dict):
+                        option_data = put_opts.get('market_data', put_opts)  # Try market_data first, fallback to direct
+                    elif isinstance(put_opts, list) and len(put_opts) > 0:
+                        option_data = put_opts[0]  # If it's a list, take first item
+            
+            if option_data and isinstance(option_data, dict):
+                volume = option_data.get('volume', 0) or option_data.get('total_volume', 0)
+                oi = option_data.get('oi', 0) or option_data.get('open_interest', 0)
+                ltp = option_data.get('ltp', 0) or option_data.get('last_price', 0)
                 
-                if option_data:
+                if volume or oi:  # Include even if volume/OI is 0, as long as one exists
                     strikes.append({
                         'strike_price': float(strike_price),
-                        'volume': float(option_data.get('volume', 0)),
-                        'oi': float(option_data.get('oi', 0)),
-                        'ltp': float(option_data.get('ltp', 0))
+                        'volume': float(volume),
+                        'oi': float(oi),
+                        'ltp': float(ltp)
                     })
+            else:
+                logger.debug(f"No option_data found for strike {strike_price} {option_type} in {stock_name}")
         
         logger.info(f"Found {len(strikes)} {option_type} options in chain for {stock_name}")
         print(f"Found {len(strikes)} {option_type} options in chain for {stock_name}")
         
         if not strikes:
-            logger.warning(f"No {option_type} options found in chain for {stock_name}")
+            logger.warning(f"No {option_type} options found in chain for {stock_name} - this will cause 'Missing option data' error")
             print(f"No {option_type} options found in chain for {stock_name}")
+            # Debug: Log first few strike_data items to understand structure
+            if strike_list and len(strike_list) > 0:
+                logger.debug(f"First strike_data item structure: {list(strike_list[0].keys()) if isinstance(strike_list[0], dict) else type(strike_list[0])}")
+                if isinstance(strike_list[0], dict):
+                    logger.debug(f"First strike_data sample: strike_price={strike_list[0].get('strike_price')}, call_options keys={list(strike_list[0].get('call_options', {}).keys())}, put_options keys={list(strike_list[0].get('put_options', {}).keys())}")
             return None
         
         # For OTM options:
@@ -185,8 +227,12 @@ def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: st
                 otm_strikes.append(strike)
         
         if not otm_strikes:
-            logger.warning(f"No OTM {option_type} strikes found for {stock_name} (stock LTP: {stock_ltp})")
+            logger.warning(f"No OTM {option_type} strikes found for {stock_name} (stock LTP: {stock_ltp}) - this will cause 'Missing option data' error")
             print(f"No OTM {option_type} strikes found for {stock_name} (stock LTP: {stock_ltp})")
+            # Debug: Log available strikes to understand why
+            if strikes:
+                sample_strikes = strikes[:5]
+                logger.debug(f"Sample available strikes: {[s['strike_price'] for s in sample_strikes]}")
             return None
         
         # Sort by distance from LTP (closest first) to get OTM-1 to OTM-5
@@ -271,13 +317,17 @@ def find_option_contract_from_instruments(stock_name: str, option_type: str, sto
         target_strike = None
         if vwap_service:
             logger.info(f"Fetching strike from option chain for {stock_name} {option_type} (LTP: {stock_ltp})")
-            strike_data = find_strike_from_option_chain(vwap_service, stock_name, option_type, stock_ltp)
-            if strike_data:
-                target_strike = strike_data['strike_price']
-                print(f"Using option chain strike for {stock_name}: {target_strike} (Volume: {strike_data['volume']}, OI: {strike_data['oi']})")
-                logger.info(f"Using option chain strike for {stock_name} {option_type}: {target_strike} (Volume: {strike_data['volume']}, OI: {strike_data['oi']})")
-            else:
-                logger.warning(f"No strike data returned from option chain for {stock_name} {option_type}")
+            try:
+                strike_data = find_strike_from_option_chain(vwap_service, stock_name, option_type, stock_ltp)
+                if strike_data:
+                    target_strike = strike_data['strike_price']
+                    print(f"Using option chain strike for {stock_name}: {target_strike} (Volume: {strike_data['volume']}, OI: {strike_data['oi']})")
+                    logger.info(f"Using option chain strike for {stock_name} {option_type}: {target_strike} (Volume: {strike_data['volume']}, OI: {strike_data['oi']})")
+                else:
+                    logger.warning(f"No strike data returned from option chain for {stock_name} {option_type} - this will cause 'Missing option data' error")
+            except Exception as e:
+                logger.error(f"Exception in find_strike_from_option_chain for {stock_name} {option_type}: {str(e)}", exc_info=True)
+                strike_data = None
         
         # If option chain not available, return None to mark trade as no_entry
         if target_strike is None or target_strike == 0:
