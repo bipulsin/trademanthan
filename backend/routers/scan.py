@@ -772,7 +772,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         # Process each stock individually to fetch LTP and find option contract
         # IMPORTANT: Always save at minimum stock_name and alert_time, even if enrichment fails
         enriched_stocks = []
-        for stock in processed_data["stocks"]:
+        stocks_to_enrich = processed_data.get("stocks", []) if processed_data and isinstance(processed_data, dict) else []
+        for stock in stocks_to_enrich:
             stock_name = stock.get("stock_name", "")
             trigger_price = stock.get("trigger_price", 0.0)
             
