@@ -811,6 +811,13 @@
         async function checkSchedulerStatus() {
             try {
                 const response = await fetch(`${API_BASE_URL}/scan/scheduler-status`);
+                
+                // Check if response is OK
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({ message: `HTTP ${response.status}: ${response.statusText}` }));
+                    throw new Error(errorData.detail || errorData.message || errorData.error || `HTTP ${response.status}`);
+                }
+                
                 const data = await response.json();
                 
                 // New structure: scan_st1_algo replaces all old schedulers
@@ -825,7 +832,9 @@
                     document.getElementById('start-schedulers-btn').style.display = 'none';
                 } else {
                     // Show status based on what's missing
-                    if (!isRunning) {
+                    if (!data.success) {
+                        updateSchedulerStatus('inactive', `Scan ST1 Algo: ${data.error || 'Error'}`);
+                    } else if (!isRunning) {
                         updateSchedulerStatus('inactive', `Scan ST1 Algo: Not Running`);
                     } else if (totalJobs === 0) {
                         updateSchedulerStatus('inactive', `Scan ST1 Algo: No Jobs Found`);
@@ -836,7 +845,7 @@
                 }
             } catch (error) {
                 console.error('Error checking scheduler status:', error);
-                updateSchedulerStatus('inactive', 'Schedulers: Error');
+                updateSchedulerStatus('inactive', `Schedulers: ${error.message || 'Error'}`);
                 document.getElementById('start-schedulers-btn').style.display = 'inline-block';
             }
         }
