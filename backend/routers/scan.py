@@ -452,9 +452,10 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         JSONResponse with status
     """
     global bullish_data, bearish_data
+    import json as json_module  # Use alias to avoid any potential shadowing issues
     
     try:
-        print(f"Processing webhook data (forced_type={forced_type}): {json.dumps(data, indent=2)}")
+        print(f"Processing webhook data (forced_type={forced_type}): {json_module.dumps(data, indent=2)}")
         
         # Parse triggered_at time and combine with the last trading date
         import pytz
@@ -1267,7 +1268,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             print(f"   Stocks field value: {data.get('stocks')}")
             print(f"   Processed stocks count: {len(processed_data.get('stocks', []))}")
             print(f"   Enriched stocks count: {len(enriched_stocks) if 'enriched_stocks' in locals() else 'N/A'}")
-            logger.warning(f"No stocks found in webhook payload. Data: {json.dumps(data, indent=2)}")
+            logger.warning(f"No stocks found in webhook payload. Data: {json_module.dumps(data, indent=2)}")
             logger.warning(f"Processed stocks: {len(processed_data.get('stocks', []))}, Enriched: {len(enriched_stocks) if 'enriched_stocks' in locals() else 'N/A'}")
         
         for stock in stocks_to_save:
@@ -1448,7 +1449,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                 instruments_file = "/home/ubuntu/trademanthan/data/instruments/nse_instruments.json"
                                 if os.path.exists(instruments_file):
                                     with open(instruments_file, 'r') as f:
-                                        instruments_data = json.load(f)
+                                        instruments_data = json_module.load(f)
                                     
                                     # Parse option contract to get symbol and strike
                                     option_contract = stock.get("option_contract", "")
@@ -2034,13 +2035,13 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         # Save bullish and bearish data separately
         try:
             with open(os.path.join(data_dir, "bullish_data.json"), "w") as f:
-                json.dump(bullish_data, f, indent=2, default=json_serializer)
+                json_module.dump(bullish_data, f, indent=2, default=json_serializer)
         except Exception as save_error:
             logger.warning(f"Failed to save bullish_data.json: {str(save_error)}")
         
         try:
             with open(os.path.join(data_dir, "bearish_data.json"), "w") as f:
-                json.dump(bearish_data, f, indent=2, default=json_serializer)
+                json_module.dump(bearish_data, f, indent=2, default=json_serializer)
         except Exception as save_error:
             logger.warning(f"Failed to save bearish_data.json: {str(save_error)}")
         
@@ -3238,7 +3239,7 @@ async def manual_stock_entry(request: Request, db: Session = Depends(get_db)):
                     try:
                         result_data = json.loads(bullish_result.body.decode())
                         bullish_count = result_data.get('saved_to_database', 0)
-                    except (json.JSONDecodeError, AttributeError) as decode_error:
+                    except (json.JSONDecodeError, AttributeError, UnicodeDecodeError) as decode_error:
                         logger.warning(f"Could not decode bullish result: {str(decode_error)}")
                         # If we can't decode, check if it was successful by status code
                         if bullish_result.status_code == 200:
