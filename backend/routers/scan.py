@@ -2196,14 +2196,23 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         scan_datetime = triggered_datetime
                         if not historical_data_exists(db, stock_name, scan_datetime):
                             # Minimal record - VWAP slope not available, but try to get any available data
-                            stock_vwap_prev = stock.get("stock_vwap_previous_hour") if stock else None
-                            stock_vwap_prev_time = stock.get("stock_vwap_previous_hour_time") if stock else None
-                            option_vwap_value = stock.get("option_vwap", 0.0) if stock and stock.get("option_vwap", 0.0) > 0 else None
+                            if stock and isinstance(stock, dict):
+                                stock_vwap_prev = stock.get("stock_vwap_previous_hour")
+                                stock_vwap_prev_time = stock.get("stock_vwap_previous_hour_time")
+                                option_vwap_val = stock.get("option_vwap", 0.0)
+                                option_vwap_value = option_vwap_val if option_vwap_val and option_vwap_val > 0 else None
+                                stock_ltp_val = stock.get("trigger_price", 0.0)
+                                stock_ltp_save = stock_ltp_val if stock_ltp_val and stock_ltp_val > 0 else None
+                            else:
+                                stock_vwap_prev = None
+                                stock_vwap_prev_time = None
+                                option_vwap_value = None
+                                stock_ltp_save = None
                             
                             historical_record = HistoricalMarketData(
                                 stock_name=stock_name,
                                 stock_vwap=None,
-                                stock_ltp=stock.get("trigger_price", 0.0) if stock and stock.get("trigger_price", 0.0) > 0 else None,
+                                stock_ltp=stock_ltp_save,
                                 stock_vwap_previous_hour=stock_vwap_prev if stock_vwap_prev and stock_vwap_prev > 0 else None,
                                 stock_vwap_previous_hour_time=stock_vwap_prev_time,
                                 vwap_slope_angle=None,
