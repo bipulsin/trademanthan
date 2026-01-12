@@ -2865,6 +2865,153 @@ async def recalculate_all_today_trades(db: Session = Depends(get_db)):
             "timestamp": datetime.now().isoformat()
         }
 
+@router.post("/process-all-today-stocks")
+async def process_all_today_stocks(db: Session = Depends(get_db)):
+    """
+    One-time process to update all stocks for today:
+    - Set buy_price to current LTP
+    - Set qty to option lot_size
+    - Update status to 'bought'
+    - Set buy_time to current time
+    - Set stop_loss to 5% below buy_price
+    """
+    try:
+        import pytz
+        from sqlalchemy import and_
+        from backend.services.vwap_updater import vwap_service
+        
+        ist = pytz.timezone('Asia/Kolkata')
+        now = datetime.now(ist)
+        today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        tomorrow = today.replace(day=today.day + 1) if today.day < 28 else today.replace(month=today.month + 1, day=1)
+        
+        # Get all trades for today that have instrument_key but no buy_price
+        all_trades = db.query(IntradayStockOption).filter(
+            and_(
+                IntradayStockOption.trade_date >= today,
+                IntradayStockOption.trade_date < tomorrow,
+                IntradayStockOption.instrument_key.isnot(None),
+                IntradayStockOption.instrument_key != ""
+            )
+        ).all()
+        
+        logger.info(f"📊 Processing {len(all_trades)} stocks for today...")
+        
+        processed_count = 0
+        updated_count = 0
+        error_count = 0
+        
+        # Load instruments.json to get lot_size
+        instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
+        instruments_data = []
+        if instruments_file.exists():
+            try:
+                with open(instruments_file, 'r') as f:
+                    instruments_data = json.load(f)
+                logger.info(f"✅ Loaded {len(instruments_data)} instruments from JSON")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not load instruments.json: {str(e)}")
+        
+        for trade in all_trades:
+            try:
+                stock_name = trade.stock_name
+                instrument_key = trade.instrument_key
+                
+                # Skip if already has buy_price and status is 'bought'
+                if trade.buy_price and trade.status == 'bought':
+                    logger.info(f"⏭️ Skipping {stock_name} - already processed (buy_price: ₹{trade.buy_price:.2f}, status: {trade.status})")
+                    continue
+                
+                # Get current LTP
+                current_ltp = None
+                try:
+                    if vwap_service:
+                        option_quote = vwap_service.get_market_quote_by_key(instrument_key)
+                        if option_quote and option_quote.get('last_price', 0) > 0:
+                            current_ltp = float(option_quote.get('last_price', 0))
+                            logger.info(f"✅ Fetched current LTP for {stock_name}: ₹{current_ltp:.2f}")
+                        else:
+                            logger.warning(f"⚠️ Could not fetch LTP for {stock_name} (instrument_key: {instrument_key})")
+                    else:
+                        logger.warning(f"⚠️ vwap_service not available for {stock_name}")
+                except Exception as ltp_error:
+                    logger.warning(f"⚠️ Error fetching LTP for {stock_name}: {str(ltp_error)}")
+                
+                if not current_ltp or current_ltp <= 0:
+                    logger.warning(f"⚠️ Skipping {stock_name} - invalid LTP: {current_ltp}")
+                    error_count += 1
+                    continue
+                
+                # Get lot_size from instruments.json
+                lot_size = None
+                if instruments_data:
+                    for inst in instruments_data:
+                        if isinstance(inst, dict) and inst.get('instrument_key') == instrument_key:
+                            lot_size = inst.get('lot_size')
+                            if lot_size and lot_size > 0:
+                                logger.info(f"✅ Found lot_size for {stock_name}: {lot_size}")
+                                break
+                
+                if not lot_size or lot_size <= 0:
+                    # Try to get from trade.qty if available
+                    if trade.qty and trade.qty > 0:
+                        lot_size = trade.qty
+                        logger.info(f"✅ Using existing qty as lot_size for {stock_name}: {lot_size}")
+                    else:
+                        logger.warning(f"⚠️ Could not find lot_size for {stock_name} (instrument_key: {instrument_key})")
+                        error_count += 1
+                        continue
+                
+                # Update trade
+                trade.buy_price = current_ltp
+                trade.qty = lot_size
+                trade.status = 'bought'
+                trade.buy_time = now
+                trade.stop_loss = current_ltp * 0.95  # 5% below buy_price
+                trade.no_entry_reason = None  # Clear no_entry_reason since we're entering
+                
+                updated_count += 1
+                processed_count += 1
+                
+                logger.info(f"✅ Updated {stock_name}: buy_price=₹{current_ltp:.2f}, qty={lot_size}, stop_loss=₹{trade.stop_loss:.2f}")
+                
+            except Exception as trade_error:
+                logger.error(f"❌ Error processing {trade.stock_name}: {str(trade_error)}")
+                import traceback
+                logger.error(traceback.format_exc())
+                error_count += 1
+                continue
+        
+        # Commit all changes
+        try:
+            db.commit()
+            logger.info(f"✅ Successfully committed {updated_count} updates to database")
+        except Exception as commit_error:
+            db.rollback()
+            logger.error(f"❌ Database commit failed: {str(commit_error)}")
+            raise
+        
+        return {
+            "success": True,
+            "message": f"Processed all stocks for today",
+            "total_trades": len(all_trades),
+            "processed_count": processed_count,
+            "updated_count": updated_count,
+            "error_count": error_count,
+            "timestamp": now.isoformat()
+        }
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error in process all today stocks: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
 @router.get("/scheduler-status")
 async def get_scheduler_status():
     """Get status of Scan ST1 Algo Scheduler (replaces all old schedulers)"""
