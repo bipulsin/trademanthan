@@ -783,29 +783,29 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         db, stock_name, forced_option_type, stock_ltp, vwap_service
                     )
                     logger.info(f"find_option_contract_from_master_stock returned: {option_contract}")
-                        if option_contract:
-                            print(f"✅ Option contract found for {stock_name} (attempt {retry_attempt}): {option_contract}")
-                            logger.info(f"✅ Option contract found for {stock_name} (attempt {retry_attempt}): {option_contract}")
-                            break
-                        else:
-                            if retry_attempt < max_retries:
-                                print(f"⚠️ No option contract found for {stock_name} (attempt {retry_attempt}/{max_retries}), retrying...")
-                                logger.warning(f"⚠️ No option contract found for {stock_name} (attempt {retry_attempt}/{max_retries}), retrying...")
-                                import time
-                                time.sleep(1)  # Brief delay before retry
-                            else:
-                                print(f"⚠️ No option contract found for {stock_name} after {max_retries} attempts")
-                                logger.warning(f"⚠️ No option contract found for {stock_name} after {max_retries} attempts")
-                    except Exception as e:
+                    if option_contract:
+                        print(f"✅ Option contract found for {stock_name} (attempt {retry_attempt}): {option_contract}")
+                        logger.info(f"✅ Option contract found for {stock_name} (attempt {retry_attempt}): {option_contract}")
+                        break
+                    else:
                         if retry_attempt < max_retries:
-                            print(f"⚠️ Option contract search failed for {stock_name} (attempt {retry_attempt}/{max_retries}): {str(e)}, retrying...")
-                            logger.warning(f"⚠️ Option contract search failed for {stock_name} (attempt {retry_attempt}/{max_retries}): {str(e)}, retrying...")
+                            print(f"⚠️ No option contract found for {stock_name} (attempt {retry_attempt}/{max_retries}), retrying...")
+                            logger.warning(f"⚠️ No option contract found for {stock_name} (attempt {retry_attempt}/{max_retries}), retrying...")
                             import time
                             time.sleep(1)  # Brief delay before retry
                         else:
-                            print(f"⚠️ Option contract search failed for {stock_name} after {max_retries} attempts: {str(e)}")
-                            logger.error(f"⚠️ Option contract search failed for {stock_name} after {max_retries} attempts: {str(e)}")
-                            option_contract = None
+                            print(f"⚠️ No option contract found for {stock_name} after {max_retries} attempts")
+                            logger.warning(f"⚠️ No option contract found for {stock_name} after {max_retries} attempts")
+                except Exception as e:
+                    if retry_attempt < max_retries:
+                        print(f"⚠️ Option contract search failed for {stock_name} (attempt {retry_attempt}/{max_retries}): {str(e)}, retrying...")
+                        logger.warning(f"⚠️ Option contract search failed for {stock_name} (attempt {retry_attempt}/{max_retries}): {str(e)}, retrying...")
+                        import time
+                        time.sleep(1)  # Brief delay before retry
+                    else:
+                        print(f"⚠️ Option contract search failed for {stock_name} after {max_retries} attempts: {str(e)}")
+                        logger.error(f"⚠️ Option contract search failed for {stock_name} after {max_retries} attempts: {str(e)}")
+                        option_contract = None
                 
             # ====================================================================
             # ACTIVITY 3: Extract Option Strike (Independent - requires option_contract)
