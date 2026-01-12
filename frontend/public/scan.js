@@ -681,8 +681,8 @@ function renderAlertGroup(alert, type) {
                         <th>Buy Price</th>
                         <th>Stop Loss</th>
                         <th>Sell Price</th>
-                        <th>Status</th>
                         <th>PnL</th>
+                        <th>Status</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -830,11 +830,11 @@ function renderAlertGroup(alert, type) {
                             '<td class="buy-price">' + buyPriceDisplay + '</td>' +
                             '<td class="stop-loss" style="color: #dc2626; font-weight: 600;">' + stopLossDisplay + '</td>' +
                             '<td class="sell-price">' + sellPriceDisplay + '</td>' +
+                            '<td class="pnl">' + pnlDisplay + '</td>' +
                             '<td class="status-col">' + (isNoEntry ? (() => {
                                 const noEntryReason = stock.no_entry_reason ? ` - ${stock.no_entry_reason}` : '';
                                 return '<span style="color: #dc2626; font-weight: 700;">No Entry' + noEntryReason + '</span>';
                             })() : statusDisplay) + '</td>' +
-                            '<td class="pnl">' + pnlDisplay + '</td>' +
                             '</tr>';
                     }).join('')}
                 </tbody>
