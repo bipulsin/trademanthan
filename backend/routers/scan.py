@@ -488,7 +488,9 @@ def find_option_contract_from_instruments(stock_name: str, option_type: str, sto
             
     except Exception as e:
         print(f"Error finding option contract for {stock_name}: {str(e)}")
-        logger.error(f"Error finding option contract from instruments.json for {stock_name}: {str(e)}", exc_info=True)
+        logger.error(f"❌ EXCEPTION in find_option_contract_from_instruments for {stock_name} {option_type}: {str(e)}", exc_info=True)
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return None
 
 
