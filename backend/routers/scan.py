@@ -221,27 +221,31 @@ def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: st
         return None
 
 # Helper function to process webhook data
-def find_option_contract_from_master_stock(db: Session, stock_name: str, option_type: str, stock_ltp: float, vwap_service=None) -> Optional[str]:
+def find_option_contract_from_instruments(stock_name: str, option_type: str, stock_ltp: float, vwap_service=None) -> Optional[str]:
     """
-    Find the correct option contract from master_stock table based on:
+    Find the correct option contract from instruments.json based on:
     - underlying_symbol matching stock_name
     - option_type matching (CE/PE)
     - Strike price from option chain API (volume/OI based) - REQUIRED, no fallback
     - Expiry month: If current date > 17th, use next month's expiry; otherwise use current month
     
     Args:
-        db: Database session
         stock_name: Stock symbol (e.g., 'RELIANCE')
         option_type: Option type ('CE' or 'PE')
         stock_ltp: Current stock LTP price
         vwap_service: UpstoxService instance for API calls
         
     Returns:
-        symbol_name from master_stock table, or None if option chain unavailable or contract not found
+        Option contract name (trading_symbol) from instruments.json
+        or None if option chain unavailable or contract not found
         (Trade will be marked as no_entry when None is returned)
     """
     try:
         import pytz
+        from pathlib import Path
+        import json as json_lib
+        from datetime import timedelta
+        
         ist = pytz.timezone('Asia/Kolkata')
         now = datetime.now(ist)
         
@@ -277,87 +281,162 @@ def find_option_contract_from_master_stock(db: Session, stock_name: str, option_
         
         print(f"Looking for {option_type} option with strike {target_strike} for {stock_name}")
         
-        # Query master_stock table with expiry month filter
-        # Filter by expiry month/year to ensure we get the correct expiry
-        option_record = db.query(MasterStock).filter(
-            and_(
-                MasterStock.underlying_symbol == stock_name,
-                MasterStock.option_type == option_type,
-                MasterStock.strike_price == target_strike,
-                MasterStock.expiry_flag == 'M',  # Monthly expiry
-                func.extract('year', MasterStock.sm_expiry_date) == target_expiry_year,
-                func.extract('month', MasterStock.sm_expiry_date) == target_expiry_month
-            )
-        ).first()
+        # Load instruments.json
+        instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
         
-        if option_record:
-            print(f"Found exact option contract: {option_record.symbol_name}")
-            return option_record.symbol_name
-        
-        # If exact strike not found, find the closest available strike
-        print(f"Exact strike {target_strike} not found, looking for closest available strike")
-        
-        if option_type == 'CE':
-            # For CE, find the closest strike >= target_strike
-            closest_record = db.query(MasterStock).filter(
-                and_(
-                    MasterStock.underlying_symbol == stock_name,
-                    MasterStock.option_type == option_type,
-                    MasterStock.strike_price >= target_strike,
-                    MasterStock.expiry_flag == 'M',
-                    func.extract('year', MasterStock.sm_expiry_date) == target_expiry_year,
-                    func.extract('month', MasterStock.sm_expiry_date) == target_expiry_month
-                )
-            ).order_by(MasterStock.strike_price.asc()).first()
-            
-            # If no strike >= target found, get the highest available strike for target expiry
-            if not closest_record:
-                print(f"No strike >= {target_strike} found, getting highest available strike")
-                closest_record = db.query(MasterStock).filter(
-                    and_(
-                        MasterStock.underlying_symbol == stock_name,
-                        MasterStock.option_type == option_type,
-                        MasterStock.expiry_flag == 'M',
-                        func.extract('year', MasterStock.sm_expiry_date) == target_expiry_year,
-                        func.extract('month', MasterStock.sm_expiry_date) == target_expiry_month
-                    )
-                ).order_by(MasterStock.strike_price.desc()).first()
-        else:  # PE
-            # For PE, find the closest strike <= target_strike
-            closest_record = db.query(MasterStock).filter(
-                and_(
-                    MasterStock.underlying_symbol == stock_name,
-                    MasterStock.option_type == option_type,
-                    MasterStock.strike_price <= target_strike,
-                    MasterStock.expiry_flag == 'M',
-                    func.extract('year', MasterStock.sm_expiry_date) == target_expiry_year,
-                    func.extract('month', MasterStock.sm_expiry_date) == target_expiry_month
-                )
-            ).order_by(MasterStock.strike_price.desc()).first()
-            
-            # If no strike <= target found, get the lowest available strike for target expiry
-            if not closest_record:
-                print(f"No strike <= {target_strike} found, getting lowest available strike")
-                closest_record = db.query(MasterStock).filter(
-                    and_(
-                        MasterStock.underlying_symbol == stock_name,
-                        MasterStock.option_type == option_type,
-                        MasterStock.expiry_flag == 'M',
-                        func.extract('year', MasterStock.sm_expiry_date) == target_expiry_year,
-                        func.extract('month', MasterStock.sm_expiry_date) == target_expiry_month
-                    )
-                ).order_by(MasterStock.strike_price.asc()).first()
-        
-        if closest_record:
-            print(f"Found closest option contract: {closest_record.symbol_name} (strike: {closest_record.strike_price})")
-            return closest_record.symbol_name
-        else:
-            print(f"No option contract found for {stock_name} {option_type} (target strike: {target_strike})")
+        if not instruments_file.exists():
+            print(f"⚠️ Instruments JSON file not found: {instruments_file}")
+            logger.error(f"Instruments JSON file not found: {instruments_file}")
             return None
+        
+        # Load instruments data with retry logic
+        max_retries = 3
+        instruments_data = None
+        
+        for retry in range(1, max_retries + 1):
+            try:
+                with open(instruments_file, 'r') as f:
+                    instruments_data = json_lib.load(f)
+                break  # Success - exit retry loop
+            except (json_lib.JSONDecodeError, IOError, OSError) as file_error:
+                if retry < max_retries:
+                    import time
+                    time.sleep(retry * 0.5)  # Exponential backoff
+                else:
+                    print(f"❌ ERROR: Failed to read instruments file after {max_retries} attempts: {str(file_error)}")
+                    logger.error(f"Failed to read instruments file for {stock_name} after {max_retries} attempts: {str(file_error)}")
+                    return None
+        
+        if not instruments_data:
+            print(f"⚠️ Instruments data is empty")
+            logger.error(f"Instruments data is empty for {stock_name}")
+            return None
+        
+        # Validate that instruments_data is a list
+        if not isinstance(instruments_data, list):
+            error_msg = f"Instruments data is not a list (type: {type(instruments_data).__name__})"
+            print(f"❌ ERROR: {error_msg}")
+            logger.error(f"{error_msg} for {stock_name}")
+            return None
+        
+        # Calculate target expiry date range (±7 days tolerance)
+        target_expiry_start = datetime(target_expiry_year, target_expiry_month, 1, tzinfo=ist)
+        if target_expiry_month == 12:
+            target_expiry_end = datetime(target_expiry_year + 1, 1, 1, tzinfo=ist) - timedelta(days=1)
+        else:
+            target_expiry_end = datetime(target_expiry_year, target_expiry_month + 1, 1, tzinfo=ist) - timedelta(days=1)
+        
+        expiry_tolerance_days = 7
+        target_expiry_min = target_expiry_start - timedelta(days=expiry_tolerance_days)
+        target_expiry_max = target_expiry_end + timedelta(days=expiry_tolerance_days)
+        
+        # Strike tolerance: ±1% or ±10, whichever is larger
+        strike_tolerance = max(target_strike * 0.01, 10.0)
+        
+        # Search for exact match first
+        best_match = None
+        best_match_score = float('inf')
+        
+        for inst in instruments_data:
+            # Skip non-dictionary entries
+            if not isinstance(inst, dict):
+                continue
+            
+            if (inst.get('underlying_symbol') == stock_name and 
+                inst.get('instrument_type') == option_type and
+                inst.get('segment') == 'NSE_FO'):
+                
+                inst_strike = inst.get('strike_price', 0)
+                strike_diff = abs(inst_strike - target_strike)
+                
+                expiry_ms = inst.get('expiry', 0)
+                if expiry_ms:
+                    try:
+                        if expiry_ms > 1e12:
+                            expiry_ms = expiry_ms / 1000
+                        inst_expiry = datetime.fromtimestamp(expiry_ms, tz=ist)
+                    except (ValueError, OSError, OverflowError) as expiry_error:
+                        # Skip instruments with invalid expiry timestamps
+                        logger.debug(f"Skipping instrument with invalid expiry timestamp for {stock_name}: {expiry_error}")
+                        continue
+                    
+                    # Check if expiry is within tolerance (same month/year or ±7 days)
+                    expiry_in_range = (
+                        (inst_expiry.year == target_expiry_year and inst_expiry.month == target_expiry_month) or
+                        (target_expiry_min <= inst_expiry <= target_expiry_max)
+                    )
+                    
+                    # Check if strike is within tolerance
+                    strike_in_range = strike_diff <= strike_tolerance
+                    
+                    if expiry_in_range and strike_in_range:
+                        # Score: prioritize exact expiry match, then strike difference
+                        expiry_score = 0 if (inst_expiry.year == target_expiry_year and inst_expiry.month == target_expiry_month) else 1000
+                        score = expiry_score + strike_diff
+                        
+                        # Exact match (same month/year and exact strike)
+                        if strike_diff < 0.01 and expiry_in_range and (inst_expiry.year == target_expiry_year and inst_expiry.month == target_expiry_month):
+                            # Fetch option contract name from instrument JSON
+                            option_contract = inst.get('trading_symbol')
+                            if not option_contract:
+                                # Log warning but continue searching - there might be another exact match with trading_symbol
+                                logger.warning(f"Exact match found for {stock_name} {option_type} strike {inst_strike} but trading_symbol is missing (instrument_key: {inst.get('instrument_key', 'N/A')})")
+                                print(f"⚠️ WARNING: Exact match found but trading_symbol not found in instrument JSON (strike: {inst_strike}, expiry: {inst_expiry.strftime('%d %b %Y')})")
+                                continue
+                            print(f"✅ Found EXACT match for {stock_name} {option_type}: {option_contract}")
+                            print(f"   Strike: {inst_strike} (requested: {target_strike})")
+                            print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
+                            return option_contract
+                        else:
+                            # Track best match (within tolerance)
+                            if best_match is None or score < best_match_score:
+                                best_match = inst
+                                best_match_score = score
+        
+        # If no exact match, use best match within tolerance
+        if best_match:
+            try:
+                inst_strike = best_match.get('strike_price', 0)
+                expiry_ms = best_match.get('expiry', 0)
+                if expiry_ms:
+                    if expiry_ms > 1e12:
+                        expiry_ms = expiry_ms / 1000
+                    inst_expiry = datetime.fromtimestamp(expiry_ms, tz=ist)
+                else:
+                    logger.warning(f"Best match for {stock_name} {option_type} has no expiry timestamp")
+                    print(f"⚠️ WARNING: Best match has no expiry timestamp, skipping")
+                    return None
+                
+                # Fetch option contract name from instrument JSON
+                option_contract = best_match.get('trading_symbol')
+                if not option_contract:
+                    logger.warning(f"Best match found for {stock_name} {option_type} but trading_symbol is missing (instrument_key: {best_match.get('instrument_key', 'N/A')}, strike: {inst_strike})")
+                    print(f"⚠️ WARNING: trading_symbol not found in best match instrument JSON (strike: {inst_strike}, expiry: {inst_expiry.strftime('%d %b %Y')})")
+                    return None
+                print(f"⚠️ WARNING: Using BEST MATCH (within tolerance) for {stock_name} {option_type}: {option_contract}")
+                print(f"   Strike: {inst_strike} (requested: {target_strike}, diff: {abs(inst_strike - target_strike):.4f})")
+                print(f"   Expiry: {inst_expiry.strftime('%d %b %Y')} (requested: {target_expiry_month}/{target_expiry_year})")
+                return option_contract
+            except (ValueError, OSError, OverflowError, TypeError) as best_match_error:
+                logger.error(f"Error processing best match for {stock_name} {option_type}: {best_match_error}")
+                print(f"❌ ERROR: Failed to process best match: {str(best_match_error)}")
+                return None
+        
+        print(f"No option contract found for {stock_name} {option_type} (target strike: {target_strike})")
+        return None
             
     except Exception as e:
         print(f"Error finding option contract for {stock_name}: {str(e)}")
+        logger.error(f"Error finding option contract from instruments.json for {stock_name}: {str(e)}", exc_info=True)
         return None
+
+
+def find_option_contract_from_master_stock(db: Session, stock_name: str, option_type: str, stock_ltp: float, vwap_service=None) -> Optional[str]:
+    """
+    DEPRECATED: This function now delegates to find_option_contract_from_instruments().
+    Kept for backward compatibility during transition.
+    """
+    return find_option_contract_from_instruments(stock_name, option_type, stock_ltp, vwap_service)
 
 
 async def process_webhook_data(data: dict, db: Session, forced_type: str = None):
