@@ -1383,6 +1383,20 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         alert_minute = triggered_datetime.minute
         is_after_3_00pm = (alert_hour > 15) or (alert_hour == 15 and alert_minute >= 0)
         
+        # TEMPORARY EXCEPTION: Allow 3:15 PM alerts today only (January 12, 2026)
+        # This is a one-time exception for today's 3:15 PM alerts
+        import pytz
+        ist = pytz.timezone('Asia/Kolkata')
+        today = datetime.now(ist).date()
+        is_3_15_alert = (alert_hour == 15 and alert_minute == 15)
+        is_today = (triggered_datetime.date() == today)
+        is_jan_12_2026 = (today == datetime(2026, 1, 12).date())
+        
+        # Override is_after_3_00pm for 3:15 PM alerts today only
+        if is_3_15_alert and is_today and is_jan_12_2026:
+            is_after_3_00pm = False
+            logger.info(f"⚠️ TEMPORARY EXCEPTION: Allowing 3:15 PM alert today (January 12, 2026) - Time check bypassed")
+        
         # Special handling flag for 10:15 AM alerts (first alert of the day)
         # NOTE: Historically we skipped VWAP slope and candle size filters for 10:15 alerts.
         # This behaviour has been CHANGED: 10:15 alerts will now go through the same
