@@ -196,15 +196,16 @@ def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: st
                 oi = option_data.get('oi', 0) or option_data.get('open_interest', 0)
                 ltp = option_data.get('ltp', 0) or option_data.get('last_price', 0)
                 
-                if volume or oi:  # Include even if volume/OI is 0, as long as one exists
-                    strikes.append({
-                        'strike_price': float(strike_price),
-                        'volume': float(volume),
-                        'oi': float(oi),
-                        'ltp': float(ltp)
-                    })
+                # Always include the strike, even if volume/OI is 0 - we need it for OTM calculation
+                strikes.append({
+                    'strike_price': float(strike_price),
+                    'volume': float(volume),
+                    'oi': float(oi),
+                    'ltp': float(ltp)
+                })
+                logger.debug(f"Added strike {strike_price} {option_type}: vol={volume}, oi={oi}, ltp={ltp}")
             else:
-                logger.debug(f"No option_data found for strike {strike_price} {option_type} in {stock_name}")
+                logger.warning(f"No option_data found for strike {strike_price} {option_type} in {stock_name} - strike_data keys: {list(strike_data.keys()) if isinstance(strike_data, dict) else 'not a dict'}")
         
         logger.info(f"Found {len(strikes)} {option_type} options in chain for {stock_name}")
         print(f"Found {len(strikes)} {option_type} options in chain for {stock_name}")
