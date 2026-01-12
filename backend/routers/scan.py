@@ -286,6 +286,7 @@ def find_option_contract_from_instruments(stock_name: str, option_type: str, sto
         or None if option chain unavailable or contract not found
         (Trade will be marked as no_entry when None is returned)
     """
+    logger.info(f"🔍 find_option_contract_from_instruments called for {stock_name} {option_type} (LTP: {stock_ltp})")
     try:
         import pytz
         from pathlib import Path
