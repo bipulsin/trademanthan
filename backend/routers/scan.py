@@ -1437,7 +1437,19 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         failed_count = 0
         SL_LOSS_TARGET = 3100.0  # Target loss for stop loss trigger
         
-        stocks_to_save = processed_data.get('stocks', [])
+        # Safely get stocks_to_save, handling case where processed_data might be None
+        stocks_to_save = []
+        if processed_data and isinstance(processed_data, dict):
+            stocks_to_save = processed_data.get('stocks', [])
+        elif enriched_stocks:
+            # Fallback: Use enriched_stocks if processed_data is not available
+            stocks_to_save = enriched_stocks
+        
+        # Ensure stocks_to_save is a list and filter out None values
+        if not isinstance(stocks_to_save, list):
+            stocks_to_save = []
+        stocks_to_save = [s for s in stocks_to_save if s is not None and isinstance(s, dict)]
+        
         logger.info(f"\n💾 Saving {len(stocks_to_save)} stocks to database...")
         
         if len(stocks_to_save) == 0:
@@ -1451,6 +1463,11 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             logger.warning(f"Processed stocks: {len(processed_data.get('stocks', []))}, Enriched: {len(enriched_stocks) if 'enriched_stocks' in locals() else 'N/A'}")
         
         for stock in stocks_to_save:
+            # Validate stock is a dict before accessing
+            if not stock or not isinstance(stock, dict):
+                logger.warning(f"Skipping invalid stock entry: {stock}")
+                continue
+                
             stock_name = stock.get("stock_name", "UNKNOWN")
             
             try:
@@ -1853,9 +1870,14 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     # Note: This is a safety check - instrument_key should already be set in Activity 5
                 
                 # Extract OHLC data from option_candles
-                option_candles_data = stock.get("option_candles")
-                current_day_candle = option_candles_data.get('current_day_candle', {}) if option_candles_data else {}
-                previous_day_candle = option_candles_data.get('previous_day_candle', {}) if option_candles_data else {}
+                option_candles_data = stock.get("option_candles") if stock and isinstance(stock, dict) else None
+                current_day_candle = option_candles_data.get('current_day_candle') if option_candles_data and isinstance(option_candles_data, dict) else None
+                previous_day_candle = option_candles_data.get('previous_day_candle') if option_candles_data and isinstance(option_candles_data, dict) else None
+                # Ensure they are dicts, not None
+                if current_day_candle is None or not isinstance(current_day_candle, dict):
+                    current_day_candle = {}
+                if previous_day_candle is None or not isinstance(previous_day_candle, dict):
+                    previous_day_candle = {}
                 
                 # Calculate and save candle size ratio and status (use the same calculation as above)
                 # For 10:15 AM alerts: Use previous day candle data if current day data isn't available
@@ -1907,7 +1929,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     saved_candle_size_status = None
                 
                 # Ensure option_type is set correctly based on alert type if not already set
-                option_type_from_stock = stock.get("option_type", "")
+                option_type_from_stock = stock.get("option_type", "") if stock and isinstance(stock, dict) else ""
                 if not option_type_from_stock:
                     # Set option_type based on alert_type (Bearish = PE, Bullish = CE)
                     option_type_from_stock = 'PE' if data_type == 'Bearish' else 'CE'
@@ -1921,31 +1943,49 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     # Fallback to original data if processed_data is not available
                     scan_name_for_record = data.get("scan_name", "")
                 
+                # Safely get values from stock dict, handling None case
+                if stock and isinstance(stock, dict):
+                    stock_ltp_val = stock.get("last_traded_price") or stock.get("trigger_price", 0.0)
+                    stock_vwap_val = stock.get("stock_vwap", 0.0)
+                    stock_vwap_prev = stock.get("stock_vwap_previous_hour")
+                    stock_vwap_prev_time = stock.get("stock_vwap_previous_hour_time")
+                    option_contract_val = stock.get("option_contract", "")
+                    option_strike_val = stock.get("otm1_strike", 0.0)
+                    option_vwap_val = stock.get("option_vwap", 0.0)
+                else:
+                    stock_ltp_val = 0.0
+                    stock_vwap_val = 0.0
+                    stock_vwap_prev = None
+                    stock_vwap_prev_time = None
+                    option_contract_val = ""
+                    option_strike_val = 0.0
+                    option_vwap_val = 0.0
+                
                 db_record = IntradayStockOption(
                     alert_time=triggered_datetime,
                     alert_type=data_type,
                     scan_name=scan_name_for_record,
                     stock_name=stock_name,
-                    stock_ltp=stock.get("last_traded_price") or stock.get("trigger_price", 0.0),
-                    stock_vwap=stock.get("stock_vwap", 0.0),
-                    stock_vwap_previous_hour=stock.get("stock_vwap_previous_hour"),
-                    stock_vwap_previous_hour_time=stock.get("stock_vwap_previous_hour_time"),
-                    option_contract=stock.get("option_contract", ""),
+                    stock_ltp=stock_ltp_val,
+                    stock_vwap=stock_vwap_val,
+                    stock_vwap_previous_hour=stock_vwap_prev,
+                    stock_vwap_previous_hour_time=stock_vwap_prev_time,
+                    option_contract=option_contract_val,
                     option_type=option_type_from_stock,
-                    option_strike=stock.get("otm1_strike", 0.0),
+                    option_strike=option_strike_val,
                     option_ltp=option_ltp_value,
-                    option_vwap=stock.get("option_vwap", 0.0),
+                    option_vwap=option_vwap_val,
                     # Option daily OHLC candles (current day vs previous day)
-                    option_current_candle_open=current_day_candle.get('open'),
-                    option_current_candle_high=current_day_candle.get('high'),
-                    option_current_candle_low=current_day_candle.get('low'),
-                    option_current_candle_close=current_day_candle.get('close'),
-                    option_current_candle_time=current_day_candle.get('time'),
-                    option_previous_candle_open=previous_day_candle.get('open'),
-                    option_previous_candle_high=previous_day_candle.get('high'),
-                    option_previous_candle_low=previous_day_candle.get('low'),
-                    option_previous_candle_close=previous_day_candle.get('close'),
-                    option_previous_candle_time=previous_day_candle.get('time'),
+                    option_current_candle_open=current_day_candle.get('open') if current_day_candle else None,
+                    option_current_candle_high=current_day_candle.get('high') if current_day_candle else None,
+                    option_current_candle_low=current_day_candle.get('low') if current_day_candle else None,
+                    option_current_candle_close=current_day_candle.get('close') if current_day_candle else None,
+                    option_current_candle_time=current_day_candle.get('time') if current_day_candle else None,
+                    option_previous_candle_open=previous_day_candle.get('open') if previous_day_candle else None,
+                    option_previous_candle_high=previous_day_candle.get('high') if previous_day_candle else None,
+                    option_previous_candle_low=previous_day_candle.get('low') if previous_day_candle else None,
+                    option_previous_candle_close=previous_day_candle.get('close') if previous_day_candle else None,
+                    option_previous_candle_time=previous_day_candle.get('time') if previous_day_candle else None,
                     # Candle size fields (calculated when stock is received from webhook)
                     candle_size_ratio=saved_candle_size_ratio,
                     candle_size_status=saved_candle_size_status,
@@ -2007,21 +2047,36 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     if not historical_data_exists(db, stock_name, scan_datetime):
                         # VWAP slope not calculated yet at webhook time (will be calculated in cycle scheduler)
                         # Get all available data from webhook enrichment
-                        stock_vwap_prev = stock.get("stock_vwap_previous_hour")
-                        stock_vwap_prev_time = stock.get("stock_vwap_previous_hour_time")
-                        option_vwap_value = stock.get("option_vwap", 0.0) if stock.get("option_vwap", 0.0) > 0 else None
+                        # Safely get values from stock dict, handling None case
+                        if stock and isinstance(stock, dict):
+                            stock_vwap_prev = stock.get("stock_vwap_previous_hour")
+                            stock_vwap_prev_time = stock.get("stock_vwap_previous_hour_time")
+                            option_vwap_val = stock.get("option_vwap", 0.0)
+                            option_vwap_value = option_vwap_val if option_vwap_val and option_vwap_val > 0 else None
+                            stock_vwap_val = stock.get("stock_vwap", 0.0)
+                            stock_vwap_save = stock_vwap_val if stock_vwap_val and stock_vwap_val > 0 else None
+                            stock_ltp_val = stock.get("last_traded_price") or stock.get("trigger_price", 0.0)
+                            stock_ltp_save = stock_ltp_val if stock_ltp_val and stock_ltp_val > 0 else None
+                            option_contract_val = stock.get("option_contract", "")
+                        else:
+                            stock_vwap_prev = None
+                            stock_vwap_prev_time = None
+                            option_vwap_value = None
+                            stock_vwap_save = None
+                            stock_ltp_save = None
+                            option_contract_val = ""
                         
                         historical_record = HistoricalMarketData(
                             stock_name=stock_name,
-                            stock_vwap=stock.get("stock_vwap", 0.0) if stock.get("stock_vwap", 0.0) > 0 else None,
-                            stock_ltp=stock.get("last_traded_price") or stock.get("trigger_price", 0.0) if (stock.get("last_traded_price") or stock.get("trigger_price", 0.0)) > 0 else None,
+                            stock_vwap=stock_vwap_save,
+                            stock_ltp=stock_ltp_save,
                             stock_vwap_previous_hour=stock_vwap_prev if stock_vwap_prev and stock_vwap_prev > 0 else None,
                             stock_vwap_previous_hour_time=stock_vwap_prev_time,
                             vwap_slope_angle=None,
                             vwap_slope_status=None,
                             vwap_slope_direction=None,
                             vwap_slope_time=None,
-                            option_contract=stock.get("option_contract", ""),
+                            option_contract=option_contract_val,
                             option_instrument_key=stock_instrument_key,
                             option_ltp=option_ltp_value if option_ltp_value > 0 else None,
                             option_vwap=option_vwap_value,
