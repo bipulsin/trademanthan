@@ -1454,13 +1454,17 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         
         if len(stocks_to_save) == 0:
             logger.info("⚠️ WARNING: No stocks to save! Webhook payload may be empty or malformed.")
-            logger.info(f"   Original data keys: {list(data.keys())}")
-            logger.info(f"   Stocks field type: {type(data.get('stocks'))}")
-            logger.info(f"   Stocks field value: {data.get('stocks')}")
-            logger.info(f"   Processed stocks count: {len(processed_data.get('stocks', []))}")
+            if data and isinstance(data, dict):
+                logger.info(f"   Original data keys: {list(data.keys())}")
+                logger.info(f"   Stocks field type: {type(data.get('stocks'))}")
+                logger.info(f"   Stocks field value: {data.get('stocks')}")
+            if processed_data and isinstance(processed_data, dict):
+                logger.info(f"   Processed stocks count: {len(processed_data.get('stocks', []))}")
             logger.info(f"   Enriched stocks count: {len(enriched_stocks) if 'enriched_stocks' in locals() else 'N/A'}")
-            logger.warning(f"No stocks found in webhook payload. Data: {json_module.dumps(data, indent=2)}")
-            logger.warning(f"Processed stocks: {len(processed_data.get('stocks', []))}, Enriched: {len(enriched_stocks) if 'enriched_stocks' in locals() else 'N/A'}")
+            if data and isinstance(data, dict):
+                logger.warning(f"No stocks found in webhook payload. Data: {json_module.dumps(data, indent=2)}")
+            processed_stocks_count = len(processed_data.get('stocks', [])) if processed_data and isinstance(processed_data, dict) else 0
+            logger.warning(f"Processed stocks: {processed_stocks_count}, Enriched: {len(enriched_stocks) if 'enriched_stocks' in locals() else 'N/A'}")
         
         for stock in stocks_to_save:
             # Validate stock is a dict before accessing
