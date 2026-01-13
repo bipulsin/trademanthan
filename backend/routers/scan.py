@@ -5180,7 +5180,7 @@ async def upstox_oauth_callback(code: str = None, state: str = None, error: str 
         # Calculate expiration timestamp
         expires_at = None
         if expires_in:
-            from datetime import datetime, timedelta
+            from datetime import timedelta
             expires_at = int((datetime.now() + timedelta(seconds=expires_in)).timestamp())
         else:
             # If expires_in not provided, decode from JWT token
@@ -5198,6 +5198,7 @@ async def upstox_oauth_callback(code: str = None, state: str = None, error: str 
                     jwt_data = json.loads(decoded)
                     expires_at = jwt_data.get('exp')
                     if expires_at:
+                        # datetime is already imported at top of file, use it here
                         logger.info(f"✅ Decoded expiration from JWT: {datetime.fromtimestamp(expires_at).strftime('%Y-%m-%d %H:%M:%S')}")
             except Exception as jwt_error:
                 logger.warning(f"⚠️ Could not decode JWT expiration: {jwt_error}")
