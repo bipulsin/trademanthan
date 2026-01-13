@@ -95,11 +95,13 @@ function updateDaySummary(bullishData, bearishData) {
                 if (alert.stocks) {
                     totalAlerts += alert.stocks.length;
                     alert.stocks.forEach(stock => {
-                        // Check if trade was entered - use status field first, then fallback to buy_price/qty
-                        // A trade is entered if status is 'bought' or 'sold', NOT 'no_entry'
+                        // Check if trade was entered - a trade is entered if:
+                        // 1. status is NOT 'no_entry', AND
+                        // 2. (has exit_reason OR has buy_price/qty > 0)
+                        // exit_reason indicates trade was entered and exited, so it should be counted
                         const tradeWasEntered = stock.status !== 'no_entry' && 
-                                              stock.buy_price && stock.buy_price > 0 && 
-                                              stock.qty && stock.qty > 0;
+                                              (stock.exit_reason || 
+                                               (stock.buy_price && stock.buy_price > 0 && stock.qty && stock.qty > 0));
                         
                         if (tradeWasEntered) {
                             tradesEntered++;
@@ -137,11 +139,13 @@ function updateDaySummary(bullishData, bearishData) {
                 if (alert.stocks) {
                     totalAlerts += alert.stocks.length;
                     alert.stocks.forEach(stock => {
-                        // Check if trade was entered - use status field first, then fallback to buy_price/qty
-                        // A trade is entered if status is 'bought' or 'sold', NOT 'no_entry'
+                        // Check if trade was entered - a trade is entered if:
+                        // 1. status is NOT 'no_entry', AND
+                        // 2. (has exit_reason OR has buy_price/qty > 0)
+                        // exit_reason indicates trade was entered and exited, so it should be counted
                         const tradeWasEntered = stock.status !== 'no_entry' && 
-                                              stock.buy_price && stock.buy_price > 0 && 
-                                              stock.qty && stock.qty > 0;
+                                              (stock.exit_reason || 
+                                               (stock.buy_price && stock.buy_price > 0 && stock.qty && stock.qty > 0));
                         
                         if (tradeWasEntered) {
                             tradesEntered++;

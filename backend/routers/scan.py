@@ -5761,8 +5761,18 @@ async def get_trading_report(
             elif record.alert_type.lower() == 'bearish':
                 day_data['bearish_alerts'] += 1
             
-            # Count trades (status = bought or sold)
-            if record.status in ['bought', 'sold']:
+            # Count trades: status = bought/sold OR has exit_reason (indicates trade was entered and exited)
+            # A trade is considered entered if:
+            # 1. status is 'bought' or 'sold', OR
+            # 2. has exit_reason (means it was entered and exited), OR
+            # 3. has buy_price > 0 and qty > 0 (indicates entry was made)
+            is_trade_entered = (
+                record.status in ['bought', 'sold'] or
+                record.exit_reason is not None or
+                (record.buy_price and record.buy_price > 0 and record.qty and record.qty > 0)
+            )
+            
+            if is_trade_entered and record.status != 'no_entry':
                 day_data['total_trades'] += 1
                 
                 # Track by alert type
