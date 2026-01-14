@@ -3282,9 +3282,25 @@ async def receive_bullish_webhook(request: Request, background_tasks: Background
     }
     """
     try:
-        # Read JSON body quickly with shorter timeout to prevent Chartink disconnection
-        # Return immediate acknowledgment, then process in background
-        data = await asyncio.wait_for(request.json(), timeout=2.0)
+        # Read raw body bytes first (faster than JSON parsing)
+        # This prevents Chartink from timing out during body reading
+        body_bytes = await asyncio.wait_for(request.body(), timeout=1.0)
+        
+        if not body_bytes:
+            return JSONResponse(
+                content={"status": "error", "message": "Empty request body"},
+                status_code=400
+            )
+        
+        # Parse JSON in background to return response immediately
+        try:
+            data = json.loads(body_bytes.decode('utf-8'))
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ Invalid JSON in bullish webhook: {str(e)}")
+            return JSONResponse(
+                content={"status": "error", "message": "Invalid JSON format"},
+                status_code=400
+            )
         
         # Enhanced logging: Log full payload for debugging
         stocks_count = len(data.get('stocks', '').split(',')) if isinstance(data.get('stocks'), str) else len(data.get('stocks', []))
@@ -3369,9 +3385,25 @@ async def receive_bearish_webhook(request: Request, background_tasks: Background
     }
     """
     try:
-        # Read JSON body quickly with shorter timeout to prevent Chartink disconnection
-        # Return immediate acknowledgment, then process in background
-        data = await asyncio.wait_for(request.json(), timeout=2.0)
+        # Read raw body bytes first (faster than JSON parsing)
+        # This prevents Chartink from timing out during body reading
+        body_bytes = await asyncio.wait_for(request.body(), timeout=1.0)
+        
+        if not body_bytes:
+            return JSONResponse(
+                content={"status": "error", "message": "Empty request body"},
+                status_code=400
+            )
+        
+        # Parse JSON in background to return response immediately
+        try:
+            data = json.loads(body_bytes.decode('utf-8'))
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ Invalid JSON in bearish webhook: {str(e)}")
+            return JSONResponse(
+                content={"status": "error", "message": "Invalid JSON format"},
+                status_code=400
+            )
         
         # Enhanced logging: Log full payload for debugging
         stocks_count = len(data.get('stocks', '').split(',')) if isinstance(data.get('stocks'), str) else len(data.get('stocks', []))
