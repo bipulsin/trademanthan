@@ -21,6 +21,16 @@ from backend.models.trading import IntradayStockOption, HistoricalMarketData
 
 logger = logging.getLogger(__name__)
 
+def _ensure_ist(dt_value: datetime, ist_tz) -> datetime:
+    """Normalize a datetime to IST and ensure timezone-awareness."""
+    if not dt_value:
+        return None
+    if dt_value.tzinfo is None:
+        return ist_tz.localize(dt_value)
+    if dt_value.tzinfo != ist_tz:
+        return dt_value.astimezone(ist_tz)
+    return dt_value
+
 
 def historical_data_exists(db: Session, stock_name: str, scan_time: datetime, time_window_minutes: int = 2) -> bool:
     """
@@ -2157,9 +2167,13 @@ def calculate_vwap_slope_for_trade(trade: IntradayStockOption, db: Session, vwap
             logger.warning(f"⚠️ Invalid VWAP values for {stock_name} (prev: {prev_vwap}, current: {current_vwap})")
             return False
         
+        # Normalize times to IST before comparison to avoid naive/aware errors
+        prev_vwap_time_actual = _ensure_ist(prev_vwap_time_actual, ist)
+        current_vwap_time_actual = _ensure_ist(current_vwap_time_actual, ist)
+        
         # Validate time ordering before calculating slope
         # Ensure time1 is earlier than time2
-        if prev_vwap_time_actual >= current_vwap_time_actual:
+        if prev_vwap_time_actual and current_vwap_time_actual and prev_vwap_time_actual >= current_vwap_time_actual:
             logger.warning(f"⚠️ {stock_name}: Invalid time ordering (prev_time: {prev_vwap_time_actual}, current_time: {current_vwap_time_actual}). Using current time as time2.")
             # Use current time (now) as time2 if alert_time is same as prev_time
             current_vwap_time_actual = now

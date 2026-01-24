@@ -1188,6 +1188,9 @@ class UpstoxService:
             data = self.make_api_request(url, method="GET", timeout=10, max_retries=2)
             
             if data and data.get('status') == 'success' and 'data' in data:
+                if not isinstance(data.get('data'), dict):
+                    logger.error(f"❌ Invalid market quote data type for {instrument_key}: {type(data.get('data'))}")
+                    return None
                 # Try different key formats to find exact match
                 # Upstox API may return keys in different formats than requested:
                 # - Request: "NSE_FO|104500" (pipe separator)
