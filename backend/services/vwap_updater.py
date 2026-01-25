@@ -885,9 +885,7 @@ def update_vwap_for_all_open_positions():
         open_positions = db.query(IntradayStockOption).filter(
             and_(
                 IntradayStockOption.trade_date >= today,
-                IntradayStockOption.status != 'sold',
-                IntradayStockOption.status != 'no_entry',  # exclude never-entered trades from hourly update
-                IntradayStockOption.exit_reason == None
+                IntradayStockOption.status == 'bought'
             )
         ).all()
         
