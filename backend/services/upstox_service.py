@@ -404,7 +404,8 @@ class UpstoxService:
         entry_price: float,
         stop_loss: float,
         target_price: float,
-        product: str = "D"
+        product: str = "D",
+        use_amo_if_market_closed: bool = True
     ) -> Dict[str, Any]:
         """
         Place a GTT (Good Till Triggered) order with ENTRY + SL + TARGET.
@@ -449,6 +450,9 @@ class UpstoxService:
         }
 
         try:
+            if use_amo_if_market_closed and not self.is_market_open_ist():
+                payload["order_complexity"] = "AMO"
+                payload["is_amo"] = True
             response = self.make_api_request(
                 url=url,
                 method="POST",
@@ -456,6 +460,23 @@ class UpstoxService:
                 timeout=10,
                 max_retries=2
             )
+            if response and response.get("status") == "error":
+                errors = response.get("errors") if isinstance(response, dict) else None
+                if isinstance(errors, list):
+                    invalid_field = any(
+                        (err.get("property_path") or err.get("propertyPath")) in {"order_complexity", "is_amo"}
+                        for err in errors if isinstance(err, dict)
+                    )
+                    if invalid_field:
+                        payload.pop("order_complexity", None)
+                        payload.pop("is_amo", None)
+                        response = self.make_api_request(
+                            url=url,
+                            method="POST",
+                            data=payload,
+                            timeout=10,
+                            max_retries=2
+                        )
             if response and response.get("status") == "success":
                 order_id = None
                 if isinstance(response, dict):
@@ -556,6 +577,21 @@ class UpstoxService:
                     return None
         except Exception:
             return None
+
+    def is_market_open_ist(self) -> bool:
+        """
+        Basic market-hours check for NSE (IST).
+        """
+        import pytz
+        from datetime import datetime, time as dtime
+
+        ist = pytz.timezone("Asia/Kolkata")
+        now = datetime.now(ist)
+        if now.weekday() >= 5:
+            return False
+        market_open = dtime(9, 15)
+        market_close = dtime(15, 30)
+        return market_open <= now.time() <= market_close
     
     def get_market_holidays(self, year: int = None) -> List[str]:
         """
