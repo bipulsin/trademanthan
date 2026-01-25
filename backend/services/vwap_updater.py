@@ -34,13 +34,17 @@ def _ensure_ist(dt_value: datetime, ist_tz) -> datetime:
 
 def _try_live_exit(position, reason: str, option_contract: str):
     """Attempt live exit; return (ok, order_id)."""
+    buy_order_id = getattr(position, "buy_order_id", None)
+    if not buy_order_id:
+        logger.warning(f"⚠️ Skipping LIVE exit for {position.stock_name} - missing buy_order_id")
+        return True, None
     result = live_trading.place_live_upstox_exit(
         instrument_key=position.instrument_key,
         qty=position.qty,
         stock_name=position.stock_name,
         option_contract=option_contract or "N/A",
-        buy_order_id=getattr(position, "buy_order_id", None),
-        tag=f"vwap_exit_{reason}:{getattr(position, 'buy_order_id', None) or 'no_buy_id'}"
+        buy_order_id=buy_order_id,
+        tag=f"vwap_exit_{reason}:{buy_order_id}"
     )
     if result.get("skipped"):
         return True, None
