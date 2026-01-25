@@ -362,10 +362,13 @@ class UpstoxService:
         if tag:
             payload["tag"] = tag
 
-        if payload["order_type"] != "MARKET":
+        if payload["order_type"] == "MARKET":
             payload["price"] = float(price) if price is not None else 0.0
-        if trigger_price is not None:
-            payload["trigger_price"] = float(trigger_price)
+            payload["trigger_price"] = float(trigger_price) if trigger_price is not None else 0.0
+        else:
+            payload["price"] = float(price) if price is not None else 0.0
+            if trigger_price is not None:
+                payload["trigger_price"] = float(trigger_price)
 
         try:
             response = self.make_api_request(
