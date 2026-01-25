@@ -613,8 +613,7 @@ def update_vwap_for_all_open_positions():
         open_positions = db.query(IntradayStockOption).filter(
             and_(
                 IntradayStockOption.trade_date >= today,
-                IntradayStockOption.status != 'sold',
-                IntradayStockOption.exit_reason == None  # No exit reason means still open
+                IntradayStockOption.status == 'bought'
             )
         ).all()
         
@@ -622,8 +621,7 @@ def update_vwap_for_all_open_positions():
         all_trades_for_history = db.query(IntradayStockOption).filter(
             and_(
                 IntradayStockOption.trade_date >= today,
-                IntradayStockOption.trade_date < today + timedelta(days=1),
-                IntradayStockOption.exit_reason == None  # Only include trades that haven't exited yet
+                IntradayStockOption.trade_date < today + timedelta(days=1)
             )
         ).all()
         
