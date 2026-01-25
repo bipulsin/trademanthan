@@ -5,7 +5,7 @@ import requests
 import logging
 import time
 from datetime import datetime, timedelta
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Any
 import pytz
 
 logger = logging.getLogger(__name__)
@@ -299,6 +299,73 @@ class UpstoxService:
         # All retries failed
         logger.error(f"❌ All {max_retries} attempts failed for {url}: {last_error}")
         return None
+
+    def place_order(
+        self,
+        instrument_key: str,
+        quantity: int,
+        transaction_type: str,
+        order_type: str = "MARKET",
+        product: str = "I",
+        validity: str = "DAY",
+        price: Optional[float] = None,
+        trigger_price: Optional[float] = None,
+        tag: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Place an order via Upstox API.
+        Returns a dict with success flag and response payload.
+        """
+        if not self.access_token:
+            return {"success": False, "error": "Missing access token"}
+        if not instrument_key:
+            return {"success": False, "error": "Missing instrument_key"}
+        if not quantity or quantity <= 0:
+            return {"success": False, "error": "Invalid quantity"}
+
+        url = "https://api.upstox.com/v2/order/place"
+        payload: Dict[str, Any] = {
+            "instrument_token": instrument_key,
+            "quantity": int(quantity),
+            "transaction_type": transaction_type.upper(),
+            "order_type": order_type.upper(),
+            "product": product.upper(),
+            "validity": validity.upper(),
+            "disclosed_quantity": 0,
+            "is_amo": False
+        }
+
+        if tag:
+            payload["tag"] = tag
+
+        if payload["order_type"] != "MARKET":
+            payload["price"] = float(price) if price is not None else 0.0
+        if trigger_price is not None:
+            payload["trigger_price"] = float(trigger_price)
+
+        try:
+            response = self.make_api_request(
+                url=url,
+                method="POST",
+                data=payload,
+                timeout=10,
+                max_retries=2
+            )
+            if response and response.get("status") == "success":
+                order_id = None
+                if isinstance(response, dict):
+                    data = response.get("data") or {}
+                    if isinstance(data, dict):
+                        order_id = data.get("order_id") or data.get("orderId")
+                return {"success": True, "data": response, "order_id": order_id}
+            return {
+                "success": False,
+                "error": response.get("message") if isinstance(response, dict) else "Order failed",
+                "data": response
+            }
+        except Exception as e:
+            logger.error(f"❌ Exception placing order: {str(e)}")
+            return {"success": False, "error": str(e)}
     
     def get_market_holidays(self, year: int = None) -> List[str]:
         """
@@ -2783,14 +2850,20 @@ class UpstoxService:
                 
                 # Use same hour as current time for previous day
                 previous_time = (now - timedelta(days=1)).replace(minute=0, second=0, microsecond=0)
-                
-                previous_day_candle = {
-                    'open': previous_open,
-                    'high': previous_high,
-                    'low': previous_low,
-                    'close': previous_close,
-                    'time': previous_time
-                }
+                if previous_high <= 0 or previous_low <= 0 or previous_high < previous_low:
+                    logger.warning(
+                        f"⚠️ Invalid previous day candle for {instrument_key}: "
+                        f"H={previous_high}, L={previous_low}. Treating as missing."
+                    )
+                    previous_day_candle = None
+                else:
+                    previous_day_candle = {
+                        'open': previous_open,
+                        'high': previous_high,
+                        'low': previous_low,
+                        'close': previous_close,
+                        'time': previous_time
+                    }
             
             # Handle cases where candles are unavailable (newly listed options, market hours, etc.)
             # Return partial data if at least one candle is available, or use market quotes as fallback

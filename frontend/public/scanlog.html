@@ -335,6 +335,77 @@
             flex-wrap: wrap;
         }
 
+        .live-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            border-radius: 10px;
+            background: rgba(0, 0, 0, 0.25);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+
+        .live-label {
+            font-size: 13px;
+            font-weight: 600;
+            color: #f1f5f9;
+        }
+
+        .live-status {
+            font-size: 12px;
+            font-weight: 700;
+            color: #f87171;
+        }
+
+        .live-status.active {
+            color: #22c55e;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 46px;
+            height: 24px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #6b7280;
+            transition: 0.2s;
+            border-radius: 999px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: 0.2s;
+            border-radius: 50%;
+        }
+
+        .switch input:checked + .slider {
+            background-color: #dc2626;
+        }
+
+        .switch input:checked + .slider:before {
+            transform: translateX(22px);
+        }
+
         .btn {
             padding: 10px 20px;
             border: none;
@@ -722,6 +793,14 @@
                 <button class="btn btn-primary" onclick="toggleAutoRefresh()">
                     <span id="auto-refresh-text">⏸ Pause Auto-Refresh</span>
                 </button>
+                <div class="live-toggle">
+                    <span class="live-label">Live Trading</span>
+                    <label class="switch">
+                        <input type="checkbox" id="trading-live-toggle" onchange="onTradingLiveToggle()">
+                        <span class="slider"></span>
+                    </label>
+                    <span id="trading-live-status" class="live-status">NO</span>
+                </div>
             </div>
         </div>
 
@@ -803,6 +882,7 @@
             startAutoRefresh();
             checkSchedulerStatus(); // Check scheduler status on load
             startSchedulerStatusRefresh(); // Auto-refresh scheduler status
+            loadTradingLive();
         };
 
         let schedulerStatusInterval = null;
@@ -901,6 +981,73 @@
         function startSchedulerStatusRefresh() {
             // Refresh scheduler status every 3 minutes
             schedulerStatusInterval = setInterval(checkSchedulerStatus, 180000);
+        }
+
+        let tradingLiveValue = "NO";
+        let tradingLiveBusy = false;
+
+        async function loadTradingLive() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/scan/trading-live`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const data = await response.json();
+                tradingLiveValue = (data.trading_live || "NO").toUpperCase();
+                updateTradingLiveUI(tradingLiveValue);
+            } catch (error) {
+                console.error("Failed to load trading_live:", error);
+                updateTradingLiveUI("NO");
+            }
+        }
+
+        function updateTradingLiveUI(value) {
+            const toggle = document.getElementById('trading-live-toggle');
+            const statusEl = document.getElementById('trading-live-status');
+            const isOn = value === "YES";
+            toggle.checked = isOn;
+            statusEl.textContent = isOn ? "YES" : "NO";
+            statusEl.classList.toggle('active', isOn);
+        }
+
+        async function onTradingLiveToggle() {
+            if (tradingLiveBusy) {
+                return;
+            }
+            const toggle = document.getElementById('trading-live-toggle');
+            const desired = toggle.checked ? "YES" : "NO";
+
+            if (desired === "YES") {
+                const confirmed = confirm(
+                    "Enable LIVE trading? This will place real orders on Upstox."
+                );
+                if (!confirmed) {
+                    toggle.checked = false;
+                    updateTradingLiveUI("NO");
+                    return;
+                }
+            }
+
+            tradingLiveBusy = true;
+            try {
+                const response = await fetch(`${API_BASE_URL}/scan/trading-live`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ trading_live: desired })
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.detail || data.error || `HTTP ${response.status}`);
+                }
+                tradingLiveValue = (data.trading_live || "NO").toUpperCase();
+                updateTradingLiveUI(tradingLiveValue);
+            } catch (error) {
+                console.error("Failed to set trading_live:", error);
+                alert(`Failed to update Live Trading: ${error.message}`);
+                updateTradingLiveUI(tradingLiveValue);
+            } finally {
+                tradingLiveBusy = false;
+            }
         }
 
         function startAutoRefresh() {

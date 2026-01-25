@@ -71,6 +71,7 @@ except ImportError:
     except ImportError:
         health_monitor = None  # Graceful degradation if not available
 from backend.services.upstox_service import upstox_service as vwap_service
+from backend.services import live_trading
 from backend.database import get_db
 from backend.models.trading import IntradayStockOption, MasterStock, HistoricalMarketData
 from backend.config import settings
@@ -97,6 +98,9 @@ class StockAlert(BaseModel):
     alert_name: str
     scan_name: str
     triggered_at: str
+
+class TradingLiveToggle(BaseModel):
+    trading_live: str
 
 # Helper function to find strike from option chain based on volume and OI
 def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: str, stock_ltp: float) -> Optional[Dict]:
@@ -1562,7 +1566,9 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                 else:
                                     candle_size_reason = f"Daily candle size too large: Current Day (up to {triggered_datetime.hour}:{triggered_datetime.minute:02d}) High={current_high:.2f}, Low={current_low:.2f}, Size={current_size:.2f} >= 7.5× Previous Day (complete) High={previous_high:.2f}, Low={previous_low:.2f}, Size={previous_size:.2f}, Ratio: {size_ratio:.2f}"
                             else:
-                                candle_size_reason = "Previous day candle size is zero (cannot calculate ratio)"
+                                candle_size_passed = True
+                                saved_candle_size_status = "Skipped"
+                                candle_size_reason = "Previous day candle data invalid/zero; candle size skipped"
                         elif is_10_15_alert and previous_day_candle:
                             # For 10:15 AM alerts: If current day candle not available, use previous day candle data
                             # Compare previous day vs previous-previous day (if available) or use a default comparison
@@ -1578,7 +1584,9 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                                 candle_size_reason = f"10:15 AM alert: Previous day candle available (High={previous_high:.2f}, Low={previous_low:.2f}, Size={previous_size:.2f}). Candle size will be calculated in next cycle."
                                 # Don't set candle_size_passed here - it will be calculated in cycles
                             else:
-                                candle_size_reason = "10:15 AM alert: Previous day candle size is zero (cannot calculate ratio)"
+                                candle_size_passed = True
+                                saved_candle_size_status = "Skipped"
+                                candle_size_reason = "10:15 AM alert: Previous day candle data invalid/zero; candle size skipped"
                         else:
                             candle_size_reason = "Missing daily candle data"
                     except Exception as candle_error:
@@ -1718,6 +1726,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     buy_price = current_option_ltp  # Use current LTP fetched at entry moment
                     buy_time = current_time  # Use current system time, not alert time
                     sell_price = None  # BLANK initially - will be updated hourly by market data updater
+                    stock_instrument_key = stock.get("instrument_key") if stock and isinstance(stock, dict) else None
+                    buy_order_id = None
                     
                     # Stop Loss = 5% lower than the open price of the current candle
                     stop_loss_price = None
@@ -1738,27 +1748,51 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     
                     status = 'bought'  # Trade entered
                     pnl = 0.0
-                    entry_time_str = buy_time.strftime('%Y-%m-%d %H:%M:%S IST')
-                    alert_time_str = triggered_datetime.strftime('%Y-%m-%d %H:%M:%S IST')
-                    logger.info(f"✅ TRADE ENTERED: {stock_name}")
-                    logger.info(f"   ⏰ Entry Time: {entry_time_str} (Alert Time: {alert_time_str})")
-                    logger.info(f"   📊 Entry Conditions:")
-                    logger.info(f"      - Time Check: ✅ Before 3:00 PM ({triggered_at_display})")
-                    logger.info(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
-                    logger.info(f"      - VWAP Slope: ✅ {vwap_slope_reason}")
-                    logger.info(f"      - Candle Size: ✅ {candle_size_reason}")
-                    logger.info(f"      - Option Data: ✅ Valid (LTP at entry: ₹{buy_price:.2f}, Qty: {lot_size})")
-                    logger.info(f"   💰 Trade Details:")
-                    logger.info(f"      - Buy Price: ₹{buy_price:.2f} (fetched at entry moment)")
-                    logger.info(f"      - Quantity: {qty}")
-                    logger.info(f"      - Stop Loss: ₹{stop_loss_price:.2f} (previous candle low)")
-                    logger.info(f"      - Stock LTP: ₹{stock_ltp:.2f}")
-                    logger.info(f"      - Stock VWAP: ₹{stock_vwap:.2f}")
-                    prev_vwap_str = f"₹{stock_vwap_prev:.2f}" if stock_vwap_prev else "N/A"
-                    logger.info(f"      - Stock VWAP (Previous Hour): {prev_vwap_str}")
-                    logger.info(f"      - Option Contract: {stock.get('option_contract', 'N/A')}")
-                    filter_info = f"VWAP Slope: {'SKIPPED (10:15)' if is_10_15_alert else vwap_slope_reason} | Candle Size: {'SKIPPED (10:15)' if is_10_15_alert else candle_size_reason}"
-                    logger.info(f"✅ ENTRY DECISION: {stock_name} | Entry Time: {entry_time_str} | Alert Time: {alert_time_str} | Price: ₹{buy_price:.2f} | SL: ₹{stop_loss_price:.2f} | {filter_info} | Indices: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
+                    no_entry_reason = None
+
+                    live_entry_result = live_trading.place_live_upstox_order(
+                        action="BUY",
+                        instrument_key=stock_instrument_key,
+                        qty=qty,
+                        stock_name=stock_name,
+                        option_contract=stock.get('option_contract', 'N/A'),
+                        tag="scan_st1_entry"
+                    )
+                    if not live_entry_result.get("skipped") and not live_entry_result.get("success"):
+                        status = 'no_entry'
+                        pnl = None
+                        buy_time = None
+                        no_entry_reason = f"Live order failed: {live_entry_result.get('error')}"
+                        logger.error(f"🚨 LIVE ENTRY FAILED for {stock_name}: {no_entry_reason}")
+                    elif live_entry_result.get("success"):
+                        buy_order_id = live_entry_result.get("order_id")
+                        if buy_order_id:
+                            logger.warning(f"🧾 LIVE BUY ORDER ID for {stock_name}: {buy_order_id}")
+
+                    if status == 'bought':
+                        entry_time_str = buy_time.strftime('%Y-%m-%d %H:%M:%S IST')
+                        alert_time_str = triggered_datetime.strftime('%Y-%m-%d %H:%M:%S IST')
+                        logger.info(f"✅ TRADE ENTERED: {stock_name}")
+                        logger.info(f"   ⏰ Entry Time: {entry_time_str} (Alert Time: {alert_time_str})")
+                        logger.info(f"   📊 Entry Conditions:")
+                        logger.info(f"      - Time Check: ✅ Before 3:00 PM ({triggered_at_display})")
+                        logger.info(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
+                        logger.info(f"      - VWAP Slope: ✅ {vwap_slope_reason}")
+                        logger.info(f"      - Candle Size: ✅ {candle_size_reason}")
+                        logger.info(f"      - Option Data: ✅ Valid (LTP at entry: ₹{buy_price:.2f}, Qty: {lot_size})")
+                        logger.info(f"   💰 Trade Details:")
+                        logger.info(f"      - Buy Price: ₹{buy_price:.2f} (fetched at entry moment)")
+                        logger.info(f"      - Quantity: {qty}")
+                        logger.info(f"      - Stop Loss: ₹{stop_loss_price:.2f} (previous candle low)")
+                        logger.info(f"      - Stock LTP: ₹{stock_ltp:.2f}")
+                        logger.info(f"      - Stock VWAP: ₹{stock_vwap:.2f}")
+                        prev_vwap_str = f"₹{stock_vwap_prev:.2f}" if stock_vwap_prev else "N/A"
+                        logger.info(f"      - Stock VWAP (Previous Hour): {prev_vwap_str}")
+                        logger.info(f"      - Option Contract: {stock.get('option_contract', 'N/A')}")
+                        filter_info = f"VWAP Slope: {'SKIPPED (10:15)' if is_10_15_alert else vwap_slope_reason} | Candle Size: {'SKIPPED (10:15)' if is_10_15_alert else candle_size_reason}"
+                        logger.info(f"✅ ENTRY DECISION: {stock_name} | Entry Time: {entry_time_str} | Alert Time: {alert_time_str} | Price: ₹{buy_price:.2f} | SL: ₹{stop_loss_price:.2f} | {filter_info} | Indices: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
+                    else:
+                        logger.info(f"🚫 NO ENTRY DECISION: {stock_name} | Reason: {no_entry_reason}")
                 else:
                     # No entry: Store qty, buy_price, and SL for reference, but don't execute trade
                     # This helps track what trades would have been if conditions were favorable
@@ -2019,6 +2053,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     stop_loss=stop_loss_price,
                     sell_price=sell_price,
                     buy_time=buy_time,  # Will be set to triggered_datetime if trade was entered
+                    buy_order_id=buy_order_id,
                     exit_reason=None,
                     pnl=pnl,
                     no_entry_reason=no_entry_reason if status == 'no_entry' else None
@@ -2969,6 +3004,26 @@ async def process_all_today_stocks(db: Session = Depends(get_db)):
                 trade.buy_time = now
                 trade.stop_loss = current_ltp * 0.95  # 5% below buy_price
                 trade.no_entry_reason = None  # Clear no_entry_reason since we're entering
+
+                live_entry_result = live_trading.place_live_upstox_order(
+                    action="BUY",
+                    instrument_key=instrument_key or trade.instrument_key,
+                    qty=lot_size,
+                    stock_name=stock_name,
+                    option_contract=trade.option_contract or "N/A",
+                    tag="scan_st1_manual_entry"
+                )
+                if not live_entry_result.get("skipped") and not live_entry_result.get("success"):
+                    trade.status = 'no_entry'
+                    trade.buy_time = None
+                    trade.no_entry_reason = f"Live order failed: {live_entry_result.get('error')}"
+                    error_count += 1
+                    logger.error(f"🚨 LIVE ENTRY FAILED for {stock_name}: {trade.no_entry_reason}")
+                    continue
+                if live_entry_result.get("success"):
+                    trade.buy_order_id = live_entry_result.get("order_id")
+                    if trade.buy_order_id:
+                        logger.warning(f"🧾 LIVE BUY ORDER ID for {stock_name}: {trade.buy_order_id}")
                 
                 updated_count += 1
                 processed_count += 1
@@ -3108,6 +3163,25 @@ async def get_scheduler_status():
                 "next_jobs": []
             }
         }
+
+@router.get("/trading-live")
+async def get_trading_live():
+    """Get current live trading toggle value"""
+    return {
+        "trading_live": live_trading.get_trading_live_value()
+    }
+
+@router.post("/trading-live")
+async def set_trading_live(toggle: TradingLiveToggle):
+    """Set live trading toggle value (YES/NO)"""
+    updated_value = live_trading.set_trading_live_value(toggle.trading_live)
+    if updated_value == "YES":
+        logger.warning("🚨 LIVE TRADING ENABLED via scanlog toggle")
+    else:
+        logger.warning("🛑 LIVE TRADING DISABLED via scanlog toggle")
+    return {
+        "trading_live": updated_value
+    }
 
 
 @router.post("/deploy-backend")
@@ -4412,6 +4486,7 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                 # Then apply the highest priority exit
                                 # Priority: Time > Stop Loss > VWAP Cross > Profit Target
                                 
+                                live_instrument_key = instrument_key or record.instrument_key
                                 exit_conditions = {
                                     'time_based': False,
                                     'stop_loss': False,
@@ -4459,44 +4534,92 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                 exit_applied = False
                                 
                                 if exit_conditions['time_based']:
-                                    record.sell_price = new_option_ltp
-                                    record.sell_time = now
-                                    record.exit_reason = 'time_based'
-                                    record.status = 'sold'
-                                    if record.buy_price and record.qty:
-                                        record.pnl = (new_option_ltp - record.buy_price) * record.qty
-                                    logger.info(f"✅ APPLIED: TIME EXIT for {record.stock_name}: PnL=₹{record.pnl}")
-                                    exit_applied = True
+                                    live_exit_result = live_trading.place_live_upstox_order(
+                                        action="SELL",
+                                        instrument_key=live_instrument_key,
+                                        qty=record.qty,
+                                        stock_name=record.stock_name,
+                                        option_contract=option_contract,
+                                        tag=f"scan_st1_exit_time:{record.buy_order_id or 'no_buy_id'}"
+                                    )
+                                    if not live_exit_result.get("skipped") and not live_exit_result.get("success"):
+                                        logger.error(f"🚨 LIVE EXIT FAILED (time_based) for {record.stock_name} - keeping trade OPEN")
+                                    else:
+                                        record.sell_price = new_option_ltp
+                                        record.sell_time = now
+                                        record.exit_reason = 'time_based'
+                                        record.status = 'sold'
+                                        record.sell_order_id = live_exit_result.get("order_id")
+                                        if record.buy_price and record.qty:
+                                            record.pnl = (new_option_ltp - record.buy_price) * record.qty
+                                        logger.info(f"✅ APPLIED: TIME EXIT for {record.stock_name}: PnL=₹{record.pnl}")
+                                        exit_applied = True
                                 
                                 elif exit_conditions['stop_loss']:
-                                    record.sell_price = new_option_ltp
-                                    record.sell_time = now
-                                    record.exit_reason = 'stop_loss'
-                                    record.status = 'sold'
-                                    if record.buy_price and record.qty:
-                                        record.pnl = (new_option_ltp - record.buy_price) * record.qty
-                                    logger.info(f"✅ APPLIED: STOP LOSS EXIT for {record.stock_name}: PnL=₹{record.pnl}")
-                                    exit_applied = True
+                                    live_exit_result = live_trading.place_live_upstox_order(
+                                        action="SELL",
+                                        instrument_key=live_instrument_key,
+                                        qty=record.qty,
+                                        stock_name=record.stock_name,
+                                        option_contract=option_contract,
+                                        tag=f"scan_st1_exit_stop_loss:{record.buy_order_id or 'no_buy_id'}"
+                                    )
+                                    if not live_exit_result.get("skipped") and not live_exit_result.get("success"):
+                                        logger.error(f"🚨 LIVE EXIT FAILED (stop_loss) for {record.stock_name} - keeping trade OPEN")
+                                    else:
+                                        record.sell_price = new_option_ltp
+                                        record.sell_time = now
+                                        record.exit_reason = 'stop_loss'
+                                        record.status = 'sold'
+                                        record.sell_order_id = live_exit_result.get("order_id")
+                                        if record.buy_price and record.qty:
+                                            record.pnl = (new_option_ltp - record.buy_price) * record.qty
+                                        logger.info(f"✅ APPLIED: STOP LOSS EXIT for {record.stock_name}: PnL=₹{record.pnl}")
+                                        exit_applied = True
                                 
                                 elif exit_conditions['vwap_cross']:
-                                    record.sell_price = new_option_ltp
-                                    record.sell_time = now
-                                    record.exit_reason = 'stock_vwap_cross'
-                                    record.status = 'sold'
-                                    if record.buy_price and record.qty:
-                                        record.pnl = (new_option_ltp - record.buy_price) * record.qty
-                                    logger.info(f"✅ APPLIED: VWAP CROSS EXIT for {record.stock_name}: PnL=₹{record.pnl}")
-                                    exit_applied = True
+                                    live_exit_result = live_trading.place_live_upstox_order(
+                                        action="SELL",
+                                        instrument_key=live_instrument_key,
+                                        qty=record.qty,
+                                        stock_name=record.stock_name,
+                                        option_contract=option_contract,
+                                        tag=f"scan_st1_exit_vwap:{record.buy_order_id or 'no_buy_id'}"
+                                    )
+                                    if not live_exit_result.get("skipped") and not live_exit_result.get("success"):
+                                        logger.error(f"🚨 LIVE EXIT FAILED (vwap_cross) for {record.stock_name} - keeping trade OPEN")
+                                    else:
+                                        record.sell_price = new_option_ltp
+                                        record.sell_time = now
+                                        record.exit_reason = 'stock_vwap_cross'
+                                        record.status = 'sold'
+                                        record.sell_order_id = live_exit_result.get("order_id")
+                                        if record.buy_price and record.qty:
+                                            record.pnl = (new_option_ltp - record.buy_price) * record.qty
+                                        logger.info(f"✅ APPLIED: VWAP CROSS EXIT for {record.stock_name}: PnL=₹{record.pnl}")
+                                        exit_applied = True
                                 
                                 elif exit_conditions['profit_target']:
-                                    record.sell_price = new_option_ltp
-                                    record.sell_time = now
-                                    record.exit_reason = 'profit_target'
-                                    record.status = 'sold'
-                                    if record.qty:
-                                        record.pnl = (new_option_ltp - record.buy_price) * record.qty
-                                    logger.info(f"✅ APPLIED: PROFIT TARGET EXIT for {record.stock_name}: PnL=₹{record.pnl}")
-                                    exit_applied = True
+                                    live_exit_result = live_trading.place_live_upstox_order(
+                                        action="SELL",
+                                        instrument_key=live_instrument_key,
+                                        qty=record.qty,
+                                        stock_name=record.stock_name,
+                                        option_contract=option_contract,
+                                        tag=f"scan_st1_exit_target:{record.buy_order_id or 'no_buy_id'}"
+                                    )
+                                    if not live_exit_result.get("skipped") and not live_exit_result.get("success"):
+                                        logger.error(f"🚨 LIVE EXIT FAILED (profit_target) for {record.stock_name} - keeping trade OPEN")
+                                    else:
+                                        record.sell_price = new_option_ltp
+                                        record.sell_time = now
+                                        record.exit_reason = 'profit_target'
+                                        record.status = 'sold'
+                                        record.sell_order_id = live_exit_result.get("order_id")
+                                        if record.qty:
+                                            record.pnl = (new_option_ltp - record.buy_price) * record.qty
+                                        logger.info(f"✅ APPLIED: PROFIT TARGET EXIT for {record.stock_name}: PnL=₹{record.pnl}")
+                                        exit_applied = True
                                 
                                 # If no exit was applied, just update current price and PnL (trade still OPEN)
                                 if not exit_applied:

@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 import time
 from typing import List
 import pytz
+from backend.services import live_trading
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
@@ -31,6 +32,22 @@ def _ensure_ist(dt_value: datetime, ist_tz) -> datetime:
         return dt_value.astimezone(ist_tz)
     return dt_value
 
+def _try_live_exit(position, reason: str, option_contract: str):
+    """Attempt live exit; return (ok, order_id)."""
+    result = live_trading.place_live_upstox_order(
+        action="SELL",
+        instrument_key=position.instrument_key,
+        qty=position.qty,
+        stock_name=position.stock_name,
+        option_contract=option_contract or "N/A",
+        tag=f"vwap_exit_{reason}:{getattr(position, 'buy_order_id', None) or 'no_buy_id'}"
+    )
+    if result.get("skipped"):
+        return True, None
+    if result.get("success"):
+        return True, result.get("order_id")
+    return False, None
+
 
 def historical_data_exists(db: Session, stock_name: str, scan_time: datetime, time_window_minutes: int = 2) -> bool:
     """
@@ -47,6 +64,10 @@ def historical_data_exists(db: Session, stock_name: str, scan_time: datetime, ti
         True if historical data exists within the time window, False otherwise
     """
     try:
+        ist = pytz.timezone('Asia/Kolkata')
+        scan_time = _ensure_ist(scan_time, ist)
+        if not scan_time:
+            return False
         time_window_start = scan_time - timedelta(minutes=time_window_minutes)
         time_window_end = scan_time + timedelta(minutes=time_window_minutes)
         
@@ -491,6 +512,18 @@ def update_vwap_for_all_open_positions():
                         if option_quote and option_quote.get('last_price', 0) > 0:
                             current_option_ltp = float(option_quote.get('last_price', 0))
                             
+                            live_entry_result = live_trading.place_live_upstox_order(
+                                action="BUY",
+                                instrument_key=no_entry_trade.instrument_key,
+                                qty=no_entry_trade.qty or 0,
+                                stock_name=stock_name,
+                                option_contract=no_entry_trade.option_contract or "N/A",
+                                tag="vwap_reentry"
+                            )
+                            if not live_entry_result.get("skipped") and not live_entry_result.get("success"):
+                                logger.error(f"🚨 LIVE RE-ENTRY FAILED for {stock_name}: {live_entry_result.get('error')}")
+                                continue
+
                             # Enter the trade with CURRENT time and prices
                             no_entry_trade.buy_price = current_option_ltp
                             no_entry_trade.buy_time = now  # Use CURRENT time, not alert time
@@ -499,6 +532,8 @@ def update_vwap_for_all_open_positions():
                             no_entry_trade.option_ltp = current_option_ltp
                             no_entry_trade.status = 'bought'
                             no_entry_trade.pnl = 0.0
+                            if live_entry_result.get("success") and live_entry_result.get("order_id"):
+                                no_entry_trade.buy_order_id = live_entry_result.get("order_id")
                             
                             # Calculate stop loss: 5% lower than the open price of the current candle
                             try:
@@ -754,6 +789,18 @@ def update_vwap_for_all_open_positions():
                         if option_quote and option_quote.get('last_price', 0) > 0:
                             current_option_ltp = float(option_quote.get('last_price', 0))
                             
+                            live_entry_result = live_trading.place_live_upstox_order(
+                                action="BUY",
+                                instrument_key=no_entry_trade.instrument_key,
+                                qty=no_entry_trade.qty or 0,
+                                stock_name=stock_name,
+                                option_contract=no_entry_trade.option_contract or "N/A",
+                                tag="vwap_reentry"
+                            )
+                            if not live_entry_result.get("skipped") and not live_entry_result.get("success"):
+                                logger.error(f"🚨 LIVE RE-ENTRY FAILED for {stock_name}: {live_entry_result.get('error')}")
+                                continue
+
                             # Enter the trade with CURRENT time and prices
                             no_entry_trade.buy_price = current_option_ltp
                             no_entry_trade.buy_time = now  # Use CURRENT time, not alert time
@@ -762,6 +809,8 @@ def update_vwap_for_all_open_positions():
                             no_entry_trade.option_ltp = current_option_ltp
                             no_entry_trade.status = 'bought'
                             no_entry_trade.pnl = 0.0
+                            if live_entry_result.get("success") and live_entry_result.get("order_id"):
+                                no_entry_trade.buy_order_id = live_entry_result.get("order_id")
                             
                             # Calculate stop loss: 5% lower than the open price of the current candle
                             try:
@@ -1116,17 +1165,23 @@ def update_vwap_for_all_open_positions():
                                         new_option_ltp = 0.0
                                 
                                 # Exit with VWAP cross
-                                position.exit_reason = 'stock_vwap_cross'
-                                position.sell_time = now
-                                position.status = 'sold'
-                                position.sell_price = new_option_ltp  # CRITICAL: Always set sell_price
-                                if position.buy_price and position.qty:
-                                    position.pnl = (new_option_ltp - position.buy_price) * position.qty
+                                live_ok, live_order_id = _try_live_exit(position, 'stock_vwap_cross', option_contract)
+                                if not live_ok:
+                                    logger.error(f"🚨 LIVE EXIT FAILED (vwap_cross) for {stock_name} - keeping trade OPEN")
                                 else:
-                                    position.pnl = 0.0
-                                logger.critical(f"✅ FORCED EXIT: {stock_name} on VWAP cross with price ₹{new_option_ltp:.2f}, PnL=₹{position.pnl:.2f}")
-                                updates_made.append(f"🚨 EXITED: stock_vwap_cross at ₹{new_option_ltp:.2f}")
-                                updated_count += 1
+                                    position.exit_reason = 'stock_vwap_cross'
+                                    position.sell_time = now
+                                    position.status = 'sold'
+                                    position.sell_price = new_option_ltp  # CRITICAL: Always set sell_price
+                                    if live_order_id:
+                                        position.sell_order_id = live_order_id
+                                    if position.buy_price and position.qty:
+                                        position.pnl = (new_option_ltp - position.buy_price) * position.qty
+                                    else:
+                                        position.pnl = 0.0
+                                    logger.critical(f"✅ FORCED EXIT: {stock_name} on VWAP cross with price ₹{new_option_ltp:.2f}, PnL=₹{position.pnl:.2f}")
+                                    updates_made.append(f"🚨 EXITED: stock_vwap_cross at ₹{new_option_ltp:.2f}")
+                                    updated_count += 1
                                 # Continue to update stock LTP/VWAP below for record keeping
                 
                 # Update position with new values
@@ -1261,7 +1316,8 @@ def update_vwap_for_all_open_positions():
                     insp = inspect(position)
                     if insp.modified:
                         logger.debug(f"🔍 Position {stock_name} is marked as modified in session")
-                        logger.debug(f"🔍 Modified attributes: {list(insp.modified.keys())}")
+                        modified_attrs = [attr.key for attr in insp.attrs if attr.history.has_changes()]
+                        logger.debug(f"🔍 Modified attributes: {modified_attrs}")
                     else:
                         logger.warning(f"⚠️ Position {stock_name} is NOT marked as modified after setting sell_price!")
                     
@@ -1508,47 +1564,55 @@ def update_vwap_for_all_open_positions():
                     #   - No more updates will be applied to this trade
                     # ═══════════════════════════════════════════════════════════════
                     if exit_triggered and exit_reason_to_set:
-                        # CRITICAL: Ensure sell_price is ALWAYS set when exiting
-                        from sqlalchemy.orm.attributes import flag_modified
-                        if position.sell_price is None or position.sell_price == 0:
-                            if new_option_ltp > 0:
-                                position.sell_price = new_option_ltp
-                            elif old_option_ltp > 0:
-                                position.sell_price = old_option_ltp
-                                logger.warning(f"⚠️ Using last known sell_price ₹{old_option_ltp:.2f} for exit")
-                            elif position.buy_price > 0:
-                                position.sell_price = position.buy_price
-                                logger.error(f"🚨 CRITICAL: No option LTP available, using buy_price ₹{position.buy_price:.2f} (P&L will be 0)")
-                            else:
-                                position.sell_price = 0.0
-                                logger.error(f"🚨 CRITICAL: No sell_price, no buy_price - setting to 0.0")
-                            flag_modified(position, 'sell_price')  # Explicitly mark as modified
-                        
-                        position.exit_reason = exit_reason_to_set
-                        flag_modified(position, 'exit_reason')  # Explicitly mark as modified
-                        position.sell_time = now  # Set ONLY once at exit
-                        position.status = 'sold'
-                        
-                        # CRITICAL: Ensure PnL is ALWAYS calculated when exiting
-                        from sqlalchemy.orm.attributes import flag_modified
-                        if position.buy_price and position.qty and position.sell_price:
-                            position.pnl = (position.sell_price - position.buy_price) * position.qty
-                            flag_modified(position, 'pnl')  # Explicitly mark as modified
-                        elif position.buy_price and position.qty:
-                            # If sell_price is still 0, PnL will be negative (loss)
-                            position.pnl = (0 - position.buy_price) * position.qty
-                            flag_modified(position, 'pnl')  # Explicitly mark as modified
-                            logger.error(f"🚨 CRITICAL: PnL calculated with sell_price=0, result: ₹{position.pnl:.2f}")
+                        live_ok, live_order_id = _try_live_exit(position, exit_reason_to_set, option_contract)
+                        if not live_ok:
+                            logger.error(f"🚨 LIVE EXIT FAILED ({exit_reason_to_set}) for {stock_name} - keeping trade OPEN")
+                            exit_triggered = False
+                            exit_reason_to_set = None
                         else:
-                            position.pnl = 0.0
-                            flag_modified(position, 'pnl')  # Explicitly mark as modified
-                            logger.error(f"🚨 CRITICAL: Cannot calculate PnL - missing buy_price or qty")
-                        
-                        flag_modified(position, 'status')  # Explicitly mark status change
-                        flag_modified(position, 'sell_time')  # Explicitly mark sell_time change
-                        
-                        updates_made.append(f"🚨 EXITED: {exit_reason_to_set} at ₹{position.sell_price:.2f}")
-                        logger.critical(f"🔴 EXIT RECORDED for {stock_name}:")
+                            # CRITICAL: Ensure sell_price is ALWAYS set when exiting
+                            from sqlalchemy.orm.attributes import flag_modified
+                            if position.sell_price is None or position.sell_price == 0:
+                                if new_option_ltp > 0:
+                                    position.sell_price = new_option_ltp
+                                elif old_option_ltp > 0:
+                                    position.sell_price = old_option_ltp
+                                    logger.warning(f"⚠️ Using last known sell_price ₹{old_option_ltp:.2f} for exit")
+                                elif position.buy_price > 0:
+                                    position.sell_price = position.buy_price
+                                    logger.error(f"🚨 CRITICAL: No option LTP available, using buy_price ₹{position.buy_price:.2f} (P&L will be 0)")
+                                else:
+                                    position.sell_price = 0.0
+                                    logger.error(f"🚨 CRITICAL: No sell_price, no buy_price - setting to 0.0")
+                                flag_modified(position, 'sell_price')  # Explicitly mark as modified
+
+                            position.exit_reason = exit_reason_to_set
+                            flag_modified(position, 'exit_reason')  # Explicitly mark as modified
+                            position.sell_time = now  # Set ONLY once at exit
+                            position.status = 'sold'
+                            if live_order_id:
+                                position.sell_order_id = live_order_id
+
+                            # CRITICAL: Ensure PnL is ALWAYS calculated when exiting
+                            from sqlalchemy.orm.attributes import flag_modified
+                            if position.buy_price and position.qty and position.sell_price:
+                                position.pnl = (position.sell_price - position.buy_price) * position.qty
+                                flag_modified(position, 'pnl')  # Explicitly mark as modified
+                            elif position.buy_price and position.qty:
+                                # If sell_price is still 0, PnL will be negative (loss)
+                                position.pnl = (0 - position.buy_price) * position.qty
+                                flag_modified(position, 'pnl')  # Explicitly mark as modified
+                                logger.error(f"🚨 CRITICAL: PnL calculated with sell_price=0, result: ₹{position.pnl:.2f}")
+                            else:
+                                position.pnl = 0.0
+                                flag_modified(position, 'pnl')  # Explicitly mark as modified
+                                logger.error(f"🚨 CRITICAL: Cannot calculate PnL - missing buy_price or qty")
+
+                            flag_modified(position, 'status')  # Explicitly mark status change
+                            flag_modified(position, 'sell_time')  # Explicitly mark sell_time change
+
+                            updates_made.append(f"🚨 EXITED: {exit_reason_to_set} at ₹{position.sell_price:.2f}")
+                            logger.critical(f"🔴 EXIT RECORDED for {stock_name}:")
                         logger.critical(f"   Exit Reason: {exit_reason_to_set}")
                         logger.critical(f"   Sell Price: ₹{position.sell_price:.2f}")
                         logger.critical(f"   Option LTP (fetched): ₹{new_option_ltp:.2f}")
@@ -1907,10 +1971,17 @@ def update_vwap_for_all_open_positions():
                     logger.debug(f"🔍 DEBUG VERIFICATION: Sample positions: {verification_results[:3]}")
                 
                 if without_sell_price_verification > 0:
-                    logger.error(f"🚨 CRITICAL: {without_sell_price_verification} positions still missing sell_price after commit!")
                     missing_positions = [v for v in verification_results if not v['sell_price']]
-                    for missing in missing_positions[:5]:
-                        logger.error(f"   MISSING sell_price: {missing['stock_name']} - status={missing['status']}, has_instrument_key={missing['has_instrument_key']}, buy_price={missing['buy_price']}")
+                    missing_non_no_entry = [v for v in missing_positions if v.get('status') != 'no_entry']
+                    missing_no_entry = [v for v in missing_positions if v.get('status') == 'no_entry']
+                    if missing_non_no_entry:
+                        logger.error(f"🚨 CRITICAL: {len(missing_non_no_entry)} non-no_entry positions still missing sell_price after commit!")
+                        for missing in missing_non_no_entry[:5]:
+                            logger.error(f"   MISSING sell_price: {missing['stock_name']} - status={missing['status']}, has_instrument_key={missing['has_instrument_key']}, buy_price={missing['buy_price']}")
+                    if missing_no_entry:
+                        logger.warning(f"⚠️ {len(missing_no_entry)} no_entry positions missing sell_price after commit (expected if no option quote).")
+                        for missing in missing_no_entry[:5]:
+                            logger.warning(f"   MISSING sell_price (no_entry): {missing['stock_name']} - has_instrument_key={missing['has_instrument_key']}, buy_price={missing['buy_price']}")
                 
                 # #region agent log
                 try:
@@ -2037,11 +2108,7 @@ def calculate_vwap_slope_for_trade(trade: IntradayStockOption, db: Session, vwap
             logger.warning(f"⚠️ Cannot calculate VWAP slope for {stock_name}: alert_time is None")
             return False
         
-        alert_time = trade.alert_time
-        if alert_time.tzinfo is None:
-            alert_time = ist.localize(alert_time)
-        elif alert_time.tzinfo != ist:
-            alert_time = alert_time.astimezone(ist)
+        alert_time = _ensure_ist(trade.alert_time, ist)
         
         alert_hour = alert_time.hour
         alert_minute = alert_time.minute
@@ -2093,15 +2160,8 @@ def calculate_vwap_slope_for_trade(trade: IntradayStockOption, db: Session, vwap
                 return False
         
         # Ensure timezone-aware
-        if prev_vwap_time.tzinfo is None:
-            prev_vwap_time = ist.localize(prev_vwap_time)
-        elif prev_vwap_time.tzinfo != ist:
-            prev_vwap_time = prev_vwap_time.astimezone(ist)
-        
-        if current_vwap_time.tzinfo is None:
-            current_vwap_time = ist.localize(current_vwap_time)
-        elif current_vwap_time.tzinfo != ist:
-            current_vwap_time = current_vwap_time.astimezone(ist)
+        prev_vwap_time = _ensure_ist(prev_vwap_time, ist)
+        current_vwap_time = _ensure_ist(current_vwap_time, ist)
         
         prev_interval = "hours/1"
         current_interval = "hours/1"
@@ -2180,7 +2240,7 @@ def calculate_vwap_slope_for_trade(trade: IntradayStockOption, db: Session, vwap
             # Re-fetch current VWAP at current time
             try:
                 current_stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
-                if current_stock_data and current_stock_data.get('vwap', 0) > 0:
+                if isinstance(current_stock_data, dict) and current_stock_data.get('vwap', 0) > 0:
                     current_vwap = current_stock_data.get('vwap', 0)
                     logger.info(f"🔄 {stock_name}: Using real-time VWAP (₹{current_vwap:.2f}) for slope calculation")
                 else:
@@ -2349,7 +2409,7 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
     db = SessionLocal()
     try:
         ist = pytz.timezone('Asia/Kolkata')
-        now = cycle_time if cycle_time.tzinfo else ist.localize(cycle_time)
+        now = _ensure_ist(cycle_time, ist)
         today = now.replace(hour=0, minute=0, second=0, microsecond=0)
         
         # #region agent log
@@ -2470,6 +2530,11 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
         else:
             logger.error(f"Invalid cycle number: {cycle_number}")
             return
+
+        # Normalize key times to avoid naive/aware comparisons
+        prev_vwap_time = _ensure_ist(prev_vwap_time, ist)
+        current_vwap_time = _ensure_ist(current_vwap_time, ist)
+        target_alert_times = [_ensure_ist(t, ist) for t in target_alert_times]
         
         # Query stocks that need VWAP slope calculation
         # Rules:
@@ -3511,6 +3576,18 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                         if option_quote and option_quote.get('last_price', 0) > 0:
                             current_option_ltp = float(option_quote.get('last_price', 0))
                             
+                            live_entry_result = live_trading.place_live_upstox_order(
+                                action="BUY",
+                                instrument_key=trade.instrument_key,
+                                qty=trade.qty or 0,
+                                stock_name=stock_name,
+                                option_contract=trade.option_contract or "N/A",
+                                tag="vwap_cycle_entry"
+                            )
+                            if not live_entry_result.get("skipped") and not live_entry_result.get("success"):
+                                logger.error(f"🚨 LIVE ENTRY FAILED for {stock_name}: {live_entry_result.get('error')}")
+                                continue
+
                             # Enter the trade with CURRENT time and prices
                             trade.buy_price = current_option_ltp
                             trade.buy_time = now  # Use CURRENT time, not alert time
@@ -3519,6 +3596,8 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                             trade.option_ltp = current_option_ltp
                             trade.status = 'bought'
                             trade.pnl = 0.0
+                            if live_entry_result.get("success") and live_entry_result.get("order_id"):
+                                trade.buy_order_id = live_entry_result.get("order_id")
                             
                             # Calculate stop loss: 5% lower than the open price of the current candle
                             try:
@@ -3649,14 +3728,21 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                                 # 1. CHECK STOP LOSS
                                 if trade.stop_loss and current_option_ltp_for_pnl <= trade.stop_loss:
                                     exit_triggered = True
-                                    trade.exit_reason = 'stop_loss'
-                                    trade.sell_time = now
-                                    trade.status = 'sold'
-                                    # PnL already calculated above
-                                    flag_modified(trade, 'exit_reason')
-                                    flag_modified(trade, 'sell_time')
-                                    flag_modified(trade, 'status')
-                                    logger.warning(f"🛑 Cycle {cycle_number} - {stock_name}: STOP LOSS EXIT - LTP ₹{current_option_ltp_for_pnl:.2f} <= SL ₹{trade.stop_loss:.2f}, PnL: ₹{trade.pnl:.2f}")
+                                    live_ok, live_order_id = _try_live_exit(trade, 'stop_loss', trade.option_contract)
+                                    if not live_ok:
+                                        logger.error(f"🚨 LIVE EXIT FAILED (stop_loss) for {stock_name} - keeping trade OPEN")
+                                        exit_triggered = False
+                                    else:
+                                        trade.exit_reason = 'stop_loss'
+                                        trade.sell_time = now
+                                        trade.status = 'sold'
+                                        if live_order_id:
+                                            trade.sell_order_id = live_order_id
+                                        # PnL already calculated above
+                                        flag_modified(trade, 'exit_reason')
+                                        flag_modified(trade, 'sell_time')
+                                        flag_modified(trade, 'status')
+                                        logger.warning(f"🛑 Cycle {cycle_number} - {stock_name}: STOP LOSS EXIT - LTP ₹{current_option_ltp_for_pnl:.2f} <= SL ₹{trade.stop_loss:.2f}, PnL: ₹{trade.pnl:.2f}")
                                 
                                 # 2. CHECK VWAP CROSS (only if stop loss not triggered and after 11:15 AM)
                                 elif now.hour >= 11 and (now.hour > 11 or now.minute >= 15):
@@ -3673,13 +3759,20 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                                             if (option_type == 'CE' and stock_ltp_exit < stock_vwap_exit) or \
                                                (option_type == 'PE' and stock_ltp_exit > stock_vwap_exit):
                                                 exit_triggered = True
-                                                trade.exit_reason = 'stock_vwap_cross'
-                                                trade.sell_time = now
-                                                trade.status = 'sold'
-                                                # PnL already calculated above
-                                                flag_modified(trade, 'exit_reason')
-                                                flag_modified(trade, 'sell_time')
-                                                flag_modified(trade, 'status')
+                                                live_ok, live_order_id = _try_live_exit(trade, 'stock_vwap_cross', trade.option_contract)
+                                                if not live_ok:
+                                                    logger.error(f"🚨 LIVE EXIT FAILED (vwap_cross) for {stock_name} - keeping trade OPEN")
+                                                    exit_triggered = False
+                                                else:
+                                                    trade.exit_reason = 'stock_vwap_cross'
+                                                    trade.sell_time = now
+                                                    trade.status = 'sold'
+                                                    if live_order_id:
+                                                        trade.sell_order_id = live_order_id
+                                                    # PnL already calculated above
+                                                    flag_modified(trade, 'exit_reason')
+                                                    flag_modified(trade, 'sell_time')
+                                                    flag_modified(trade, 'status')
                                                 logger.warning(f"📉 Cycle {cycle_number} - {stock_name}: VWAP CROSS EXIT - Stock LTP ₹{stock_ltp_exit:.2f} {'<' if option_type == 'CE' else '>'} VWAP ₹{stock_vwap_exit:.2f}, PnL: ₹{trade.pnl:.2f}")
                         else:
                             logger.debug(f"⏭️ Cycle {cycle_number} - {stock_name}: Option LTP not available for PnL update")
@@ -4271,9 +4364,15 @@ def close_all_open_trades():
                 position = fresh_position
                 
                 exit_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
+                live_ok, live_order_id = _try_live_exit(position, 'time_based', option_contract)
+                if not live_ok:
+                    logger.error(f"🚨 LIVE EXIT FAILED (time_based) for {stock_name} - keeping trade OPEN")
+                    continue
                 position.sell_time = now
                 position.exit_reason = 'time_based'
                 position.status = 'sold'
+                if live_order_id:
+                    position.sell_order_id = live_order_id
                 
                 # ═══════════════════════════════════════════════════════════════
                 # SAVE HISTORICAL MARKET DATA AT 15:25 PM (END OF DAY)
