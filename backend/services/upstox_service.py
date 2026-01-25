@@ -404,8 +404,7 @@ class UpstoxService:
         entry_price: float,
         stop_loss: float,
         target_price: float,
-        product: str = "D",
-        use_amo_if_market_closed: bool = True
+        product: str = "D"
     ) -> Dict[str, Any]:
         """
         Place a GTT (Good Till Triggered) order with ENTRY + SL + TARGET.
@@ -424,6 +423,10 @@ class UpstoxService:
             return {"success": False, "error": "Invalid target_price"}
 
         url = "https://api.upstox.com/v3/order/gtt/place"
+        entry_trigger_type = "IMMEDIATE"
+        if not self.is_market_open_ist():
+            entry_trigger_type = "ABOVE" if transaction_type.upper() == "BUY" else "BELOW"
+
         payload = {
             "type": "MULTIPLE",
             "quantity": int(quantity),
@@ -431,7 +434,7 @@ class UpstoxService:
             "rules": [
                 {
                     "strategy": "ENTRY",
-                    "trigger_type": "IMMEDIATE",
+                    "trigger_type": entry_trigger_type,
                     "trigger_price": float(entry_price)
                 },
                 {
@@ -450,9 +453,6 @@ class UpstoxService:
         }
 
         try:
-            if use_amo_if_market_closed and not self.is_market_open_ist():
-                payload["order_complexity"] = "AMO"
-                payload["is_amo"] = True
             response = self.make_api_request(
                 url=url,
                 method="POST",
@@ -460,23 +460,6 @@ class UpstoxService:
                 timeout=10,
                 max_retries=2
             )
-            if response and response.get("status") == "error":
-                errors = response.get("errors") if isinstance(response, dict) else None
-                if isinstance(errors, list):
-                    invalid_field = any(
-                        (err.get("property_path") or err.get("propertyPath")) in {"order_complexity", "is_amo"}
-                        for err in errors if isinstance(err, dict)
-                    )
-                    if invalid_field:
-                        payload.pop("order_complexity", None)
-                        payload.pop("is_amo", None)
-                        response = self.make_api_request(
-                            url=url,
-                            method="POST",
-                            data=payload,
-                            timeout=10,
-                            max_retries=2
-                        )
             if response and response.get("status") == "success":
                 order_id = None
                 if isinstance(response, dict):
