@@ -97,6 +97,56 @@ def place_live_upstox_order(
         )
     return result
 
+def place_live_upstox_gtt_entry(
+    instrument_key: str,
+    qty: int,
+    stock_name: str,
+    option_contract: str,
+    buy_price: float,
+    stop_loss: float,
+    risk_reward: float = 2.5
+) -> Dict[str, Any]:
+    if not is_trading_live_enabled():
+        return {"success": False, "skipped": True, "error": "Live trading disabled"}
+    if not upstox_service:
+        return {"success": False, "error": "Upstox service unavailable"}
+    if not instrument_key:
+        return {"success": False, "error": "Missing instrument_key"}
+    if not qty or qty <= 0:
+        return {"success": False, "error": "Invalid quantity"}
+    if not buy_price or buy_price <= 0:
+        return {"success": False, "error": "Invalid buy_price"}
+    if not stop_loss or stop_loss <= 0:
+        return {"success": False, "error": "Invalid stop_loss"}
+
+    risk = buy_price - stop_loss
+    if risk <= 0:
+        return {"success": False, "error": "Stop loss must be below buy price"}
+
+    target_price = buy_price + (risk_reward * risk)
+
+    result = upstox_service.place_gtt_order(
+        instrument_key=instrument_key,
+        quantity=qty,
+        transaction_type="BUY",
+        entry_price=buy_price,
+        stop_loss=stop_loss,
+        target_price=target_price,
+        product="D"
+    )
+
+    if result.get("success"):
+        logger.warning(
+            f"🚨 LIVE GTT ENTRY PLACED: {stock_name} {option_contract} | "
+            f"Qty={qty} | Entry=₹{buy_price:.2f} | SL=₹{stop_loss:.2f} | Target=₹{target_price:.2f}"
+        )
+    else:
+        logger.error(
+            f"❌ LIVE GTT ENTRY FAILED: {stock_name} {option_contract} | "
+            f"Error={result.get('error')}"
+        )
+    return result
+
 def _extract_order_status(details: Dict[str, Any]) -> Optional[str]:
     data = details.get("data") if isinstance(details, dict) else None
     if isinstance(data, dict):

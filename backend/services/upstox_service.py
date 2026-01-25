@@ -396,6 +396,82 @@ class UpstoxService:
             logger.error(f"❌ Exception placing order: {str(e)}")
             return {"success": False, "error": str(e)}
 
+    def place_gtt_order(
+        self,
+        instrument_key: str,
+        quantity: int,
+        transaction_type: str,
+        entry_price: float,
+        stop_loss: float,
+        target_price: float,
+        product: str = "D"
+    ) -> Dict[str, Any]:
+        """
+        Place a GTT (Good Till Triggered) order with ENTRY + SL + TARGET.
+        """
+        if not self.access_token:
+            return {"success": False, "error": "Missing access token"}
+        if not instrument_key:
+            return {"success": False, "error": "Missing instrument_key"}
+        if not quantity or quantity <= 0:
+            return {"success": False, "error": "Invalid quantity"}
+        if not entry_price or entry_price <= 0:
+            return {"success": False, "error": "Invalid entry_price"}
+        if not stop_loss or stop_loss <= 0:
+            return {"success": False, "error": "Invalid stop_loss"}
+        if not target_price or target_price <= 0:
+            return {"success": False, "error": "Invalid target_price"}
+
+        url = "https://api.upstox.com/v3/order/gtt/place"
+        payload = {
+            "type": "MULTIPLE",
+            "quantity": int(quantity),
+            "product": product,
+            "rules": [
+                {
+                    "strategy": "ENTRY",
+                    "trigger_type": "IMMEDIATE",
+                    "trigger_price": float(entry_price)
+                },
+                {
+                    "strategy": "TARGET",
+                    "trigger_type": "IMMEDIATE",
+                    "trigger_price": float(target_price)
+                },
+                {
+                    "strategy": "STOPLOSS",
+                    "trigger_type": "IMMEDIATE",
+                    "trigger_price": float(stop_loss)
+                }
+            ],
+            "instrument_token": instrument_key,
+            "transaction_type": transaction_type
+        }
+
+        try:
+            response = self.make_api_request(
+                url=url,
+                method="POST",
+                data=payload,
+                timeout=10,
+                max_retries=2
+            )
+            if response and response.get("status") == "success":
+                order_id = None
+                if isinstance(response, dict):
+                    data = response.get("data") or {}
+                    if isinstance(data, dict):
+                        order_id = data.get("order_id") or data.get("gtt_order_id") or data.get("id")
+                return {"success": True, "data": response, "order_id": order_id}
+            return {
+                "success": False,
+                "error": response.get("message") if isinstance(response, dict) else "GTT order failed",
+                "data": response
+            }
+        except Exception as e:
+            logger.error(f"❌ Exception placing GTT order: {str(e)}")
+            return {"success": False, "error": str(e)}
+
     def get_order_details(self, order_id: str) -> Dict[str, Any]:
         """
         Fetch order details by order_id.

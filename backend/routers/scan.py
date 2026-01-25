@@ -1750,13 +1750,13 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     pnl = 0.0
                     no_entry_reason = None
 
-                    live_entry_result = live_trading.place_live_upstox_order(
-                        action="BUY",
+                    live_entry_result = live_trading.place_live_upstox_gtt_entry(
                         instrument_key=stock_instrument_key,
                         qty=qty,
                         stock_name=stock_name,
                         option_contract=stock.get('option_contract', 'N/A'),
-                        tag="scan_st1_entry"
+                        buy_price=buy_price,
+                        stop_loss=stop_loss_price
                     )
                     if not live_entry_result.get("skipped") and not live_entry_result.get("success"):
                         status = 'no_entry'
@@ -3005,13 +3005,13 @@ async def process_all_today_stocks(db: Session = Depends(get_db)):
                 trade.stop_loss = current_ltp * 0.95  # 5% below buy_price
                 trade.no_entry_reason = None  # Clear no_entry_reason since we're entering
 
-                live_entry_result = live_trading.place_live_upstox_order(
-                    action="BUY",
+                live_entry_result = live_trading.place_live_upstox_gtt_entry(
                     instrument_key=instrument_key or trade.instrument_key,
                     qty=lot_size,
                     stock_name=stock_name,
                     option_contract=trade.option_contract or "N/A",
-                    tag="scan_st1_manual_entry"
+                    buy_price=trade.buy_price,
+                    stop_loss=trade.stop_loss
                 )
                 if not live_entry_result.get("skipped") and not live_entry_result.get("success"):
                     trade.status = 'no_entry'

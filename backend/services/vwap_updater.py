@@ -511,14 +511,33 @@ def update_vwap_for_all_open_positions():
                         option_quote = vwap_service.get_market_quote_by_key(no_entry_trade.instrument_key)
                         if option_quote and option_quote.get('last_price', 0) > 0:
                             current_option_ltp = float(option_quote.get('last_price', 0))
-                            
-                            live_entry_result = live_trading.place_live_upstox_order(
-                                action="BUY",
+
+                            # Calculate stop loss BEFORE placing live order
+                            stop_loss_price = None
+                            try:
+                                option_candles = vwap_service.get_option_candles_current_and_previous(no_entry_trade.instrument_key)
+                                if option_candles and option_candles.get('current_candle'):
+                                    current_candle_open = option_candles.get('current_candle', {}).get('open', 0)
+                                    if current_candle_open and current_candle_open > 0:
+                                        stop_loss_price = current_candle_open * 0.95
+                                        logger.info(f"   Stop Loss: ₹{stop_loss_price:.2f} (5% below candle open: ₹{current_candle_open:.2f})")
+                                    else:
+                                        stop_loss_price = current_option_ltp * 0.95
+                                        logger.warning(f"   Stop Loss: ₹{stop_loss_price:.2f} (5% below buy price, candle open not available)")
+                                else:
+                                    stop_loss_price = current_option_ltp * 0.95
+                                    logger.warning(f"   Stop Loss: ₹{stop_loss_price:.2f} (5% below buy price, candles not available)")
+                            except Exception as sl_error:
+                                stop_loss_price = current_option_ltp * 0.95
+                                logger.warning(f"   Stop Loss: ₹{stop_loss_price:.2f} (5% below buy price, error fetching candles: {str(sl_error)})")
+
+                            live_entry_result = live_trading.place_live_upstox_gtt_entry(
                                 instrument_key=no_entry_trade.instrument_key,
                                 qty=no_entry_trade.qty or 0,
                                 stock_name=stock_name,
                                 option_contract=no_entry_trade.option_contract or "N/A",
-                                tag="vwap_reentry"
+                                buy_price=current_option_ltp,
+                                stop_loss=stop_loss_price
                             )
                             if not live_entry_result.get("skipped") and not live_entry_result.get("success"):
                                 logger.error(f"🚨 LIVE RE-ENTRY FAILED for {stock_name}: {live_entry_result.get('error')}")
@@ -534,28 +553,7 @@ def update_vwap_for_all_open_positions():
                             no_entry_trade.pnl = 0.0
                             if live_entry_result.get("success") and live_entry_result.get("order_id"):
                                 no_entry_trade.buy_order_id = live_entry_result.get("order_id")
-                            
-                            # Calculate stop loss: 5% lower than the open price of the current candle
-                            try:
-                                option_candles = vwap_service.get_option_candles_current_and_previous(no_entry_trade.instrument_key)
-                                if option_candles and option_candles.get('current_candle'):
-                                    current_candle_open = option_candles.get('current_candle', {}).get('open', 0)
-                                    if current_candle_open and current_candle_open > 0:
-                                        # Stop loss = 5% lower than candle open price
-                                        no_entry_trade.stop_loss = current_candle_open * 0.95
-                                        logger.info(f"   Stop Loss: ₹{no_entry_trade.stop_loss:.2f} (5% below candle open: ₹{current_candle_open:.2f})")
-                                    else:
-                                        # Fallback: 5% below buy price if candle open not available
-                                        no_entry_trade.stop_loss = current_option_ltp * 0.95
-                                        logger.warning(f"   Stop Loss: ₹{no_entry_trade.stop_loss:.2f} (5% below buy price, candle open not available)")
-                                else:
-                                    # Fallback: 5% below buy price if candles not available
-                                    no_entry_trade.stop_loss = current_option_ltp * 0.95
-                                    logger.warning(f"   Stop Loss: ₹{no_entry_trade.stop_loss:.2f} (5% below buy price, candles not available)")
-                            except Exception as sl_error:
-                                # Fallback: 5% below buy price if error
-                                no_entry_trade.stop_loss = current_option_ltp * 0.95
-                                logger.warning(f"   Stop Loss: ₹{no_entry_trade.stop_loss:.2f} (5% below buy price, error fetching candles: {str(sl_error)})")
+                            no_entry_trade.stop_loss = stop_loss_price
                             
                             re_entry_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
                             alert_time_str = no_entry_trade.alert_time.strftime('%H:%M:%S') if no_entry_trade.alert_time else 'N/A'
@@ -788,14 +786,33 @@ def update_vwap_for_all_open_positions():
                         option_quote = vwap_service.get_market_quote_by_key(no_entry_trade.instrument_key)
                         if option_quote and option_quote.get('last_price', 0) > 0:
                             current_option_ltp = float(option_quote.get('last_price', 0))
-                            
-                            live_entry_result = live_trading.place_live_upstox_order(
-                                action="BUY",
+
+                            # Calculate stop loss BEFORE placing live order
+                            stop_loss_price = None
+                            try:
+                                option_candles = vwap_service.get_option_candles_current_and_previous(no_entry_trade.instrument_key)
+                                if option_candles and option_candles.get('current_candle'):
+                                    current_candle_open = option_candles.get('current_candle', {}).get('open', 0)
+                                    if current_candle_open and current_candle_open > 0:
+                                        stop_loss_price = current_candle_open * 0.95
+                                        logger.info(f"   Stop Loss: ₹{stop_loss_price:.2f} (5% below candle open: ₹{current_candle_open:.2f})")
+                                    else:
+                                        stop_loss_price = current_option_ltp * 0.95
+                                        logger.warning(f"   Stop Loss: ₹{stop_loss_price:.2f} (5% below buy price, candle open not available)")
+                                else:
+                                    stop_loss_price = current_option_ltp * 0.95
+                                    logger.warning(f"   Stop Loss: ₹{stop_loss_price:.2f} (5% below buy price, candles not available)")
+                            except Exception as sl_error:
+                                stop_loss_price = current_option_ltp * 0.95
+                                logger.warning(f"   Stop Loss: ₹{stop_loss_price:.2f} (5% below buy price, error fetching candles: {str(sl_error)})")
+
+                            live_entry_result = live_trading.place_live_upstox_gtt_entry(
                                 instrument_key=no_entry_trade.instrument_key,
                                 qty=no_entry_trade.qty or 0,
                                 stock_name=stock_name,
                                 option_contract=no_entry_trade.option_contract or "N/A",
-                                tag="vwap_reentry"
+                                buy_price=current_option_ltp,
+                                stop_loss=stop_loss_price
                             )
                             if not live_entry_result.get("skipped") and not live_entry_result.get("success"):
                                 logger.error(f"🚨 LIVE RE-ENTRY FAILED for {stock_name}: {live_entry_result.get('error')}")
@@ -811,28 +828,7 @@ def update_vwap_for_all_open_positions():
                             no_entry_trade.pnl = 0.0
                             if live_entry_result.get("success") and live_entry_result.get("order_id"):
                                 no_entry_trade.buy_order_id = live_entry_result.get("order_id")
-                            
-                            # Calculate stop loss: 5% lower than the open price of the current candle
-                            try:
-                                option_candles = vwap_service.get_option_candles_current_and_previous(no_entry_trade.instrument_key)
-                                if option_candles and option_candles.get('current_candle'):
-                                    current_candle_open = option_candles.get('current_candle', {}).get('open', 0)
-                                    if current_candle_open and current_candle_open > 0:
-                                        # Stop loss = 5% lower than candle open price
-                                        no_entry_trade.stop_loss = current_candle_open * 0.95
-                                        logger.info(f"   Stop Loss: ₹{no_entry_trade.stop_loss:.2f} (5% below candle open: ₹{current_candle_open:.2f})")
-                                    else:
-                                        # Fallback: 5% below buy price if candle open not available
-                                        no_entry_trade.stop_loss = current_option_ltp * 0.95
-                                        logger.warning(f"   Stop Loss: ₹{no_entry_trade.stop_loss:.2f} (5% below buy price, candle open not available)")
-                                else:
-                                    # Fallback: 5% below buy price if candles not available
-                                    no_entry_trade.stop_loss = current_option_ltp * 0.95
-                                    logger.warning(f"   Stop Loss: ₹{no_entry_trade.stop_loss:.2f} (5% below buy price, candles not available)")
-                            except Exception as sl_error:
-                                # Fallback: 5% below buy price if error
-                                no_entry_trade.stop_loss = current_option_ltp * 0.95
-                                logger.warning(f"   Stop Loss: ₹{no_entry_trade.stop_loss:.2f} (5% below buy price, error fetching candles: {str(sl_error)})")
+                            no_entry_trade.stop_loss = stop_loss_price
                             
                             re_entry_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
                             alert_time_str = no_entry_trade.alert_time.strftime('%H:%M:%S') if no_entry_trade.alert_time else 'N/A'
@@ -3575,14 +3571,33 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                         option_quote = vwap_service.get_market_quote_by_key(trade.instrument_key)
                         if option_quote and option_quote.get('last_price', 0) > 0:
                             current_option_ltp = float(option_quote.get('last_price', 0))
-                            
-                            live_entry_result = live_trading.place_live_upstox_order(
-                                action="BUY",
+
+                            # Calculate stop loss BEFORE placing live order
+                            stop_loss_price = None
+                            try:
+                                option_candles = vwap_service.get_option_candles_current_and_previous(trade.instrument_key)
+                                if option_candles and option_candles.get('current_candle'):
+                                    current_candle_open = option_candles.get('current_candle', {}).get('open', 0)
+                                    if current_candle_open and current_candle_open > 0:
+                                        stop_loss_price = current_candle_open * 0.95
+                                        logger.info(f"   Stop Loss: ₹{stop_loss_price:.2f} (5% below candle open: ₹{current_candle_open:.2f})")
+                                    else:
+                                        stop_loss_price = current_option_ltp * 0.95
+                                        logger.warning(f"   Stop Loss: ₹{stop_loss_price:.2f} (5% below buy price, candle open not available)")
+                                else:
+                                    stop_loss_price = current_option_ltp * 0.95
+                                    logger.warning(f"   Stop Loss: ₹{stop_loss_price:.2f} (5% below buy price, candles not available)")
+                            except Exception as sl_error:
+                                stop_loss_price = current_option_ltp * 0.95
+                                logger.warning(f"   Stop Loss: ₹{stop_loss_price:.2f} (5% below buy price, error fetching candles: {str(sl_error)})")
+
+                            live_entry_result = live_trading.place_live_upstox_gtt_entry(
                                 instrument_key=trade.instrument_key,
                                 qty=trade.qty or 0,
                                 stock_name=stock_name,
                                 option_contract=trade.option_contract or "N/A",
-                                tag="vwap_cycle_entry"
+                                buy_price=current_option_ltp,
+                                stop_loss=stop_loss_price
                             )
                             if not live_entry_result.get("skipped") and not live_entry_result.get("success"):
                                 logger.error(f"🚨 LIVE ENTRY FAILED for {stock_name}: {live_entry_result.get('error')}")
@@ -3598,28 +3613,7 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                             trade.pnl = 0.0
                             if live_entry_result.get("success") and live_entry_result.get("order_id"):
                                 trade.buy_order_id = live_entry_result.get("order_id")
-                            
-                            # Calculate stop loss: 5% lower than the open price of the current candle
-                            try:
-                                option_candles = vwap_service.get_option_candles_current_and_previous(trade.instrument_key)
-                                if option_candles and option_candles.get('current_candle'):
-                                    current_candle_open = option_candles.get('current_candle', {}).get('open', 0)
-                                    if current_candle_open and current_candle_open > 0:
-                                        # Stop loss = 5% lower than candle open price
-                                        trade.stop_loss = current_candle_open * 0.95
-                                        logger.info(f"   Stop Loss: ₹{trade.stop_loss:.2f} (5% below candle open: ₹{current_candle_open:.2f})")
-                                    else:
-                                        # Fallback: 5% below buy price if candle open not available
-                                        trade.stop_loss = current_option_ltp * 0.95
-                                        logger.warning(f"   Stop Loss: ₹{trade.stop_loss:.2f} (5% below buy price, candle open not available)")
-                                else:
-                                    # Fallback: 5% below buy price if candles not available
-                                    trade.stop_loss = current_option_ltp * 0.95
-                                    logger.warning(f"   Stop Loss: ₹{trade.stop_loss:.2f} (5% below buy price, candles not available)")
-                            except Exception as sl_error:
-                                # Fallback: 5% below buy price if error
-                                trade.stop_loss = current_option_ltp * 0.95
-                                logger.warning(f"   Stop Loss: ₹{trade.stop_loss:.2f} (5% below buy price, error fetching candles: {str(sl_error)})")
+                            trade.stop_loss = stop_loss_price
                             
                             entry_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
                             alert_time_str = trade.alert_time.strftime('%H:%M:%S') if trade.alert_time else 'N/A'
