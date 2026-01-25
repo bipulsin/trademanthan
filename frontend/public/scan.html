@@ -86,6 +86,19 @@
             gap: 30px;
             align-items: center;
         }
+
+        .live-indicator {
+            display: none;
+            font-weight: 800;
+            color: #facc15;
+            font-size: 14px;
+            margin-left: 6px;
+            letter-spacing: 0.5px;
+        }
+
+        .live-indicator.active {
+            display: inline-block;
+        }
         
         .index-item {
             text-align: center;
@@ -301,6 +314,23 @@
             font-size: 24px;
             font-weight: bold;
             transition: all 0.3s ease;
+        }
+
+        .mobile-menu-btn.live-on {
+            background: #facc15;
+            color: #111827;
+        }
+
+        .mobile-live-badge {
+            display: none;
+            font-weight: 800;
+            color: #facc15;
+            font-size: 16px;
+            margin-right: 6px;
+        }
+
+        .mobile-live-badge.active {
+            display: inline-block;
         }
 
         .mobile-menu-btn:hover {
@@ -1187,6 +1217,7 @@
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <span id="summaryCaret" class="summary-caret collapsed">▶</span>
                     <h3 style="margin: 0; font-size: 16px; font-weight: 600;">📊 Day Summary</h3>
+                    <span id="liveIndicator" class="live-indicator">LIVE</span>
                 </div>
                 <div id="summaryQuickStats" class="summary-quick-stats">
                     <!-- Quick stats shown when collapsed -->
@@ -1382,6 +1413,44 @@
         
         console.log('initiateUpstoxOAuth function defined:', typeof window.initiateUpstoxOAuth);
     </script>
+
+    <script>
+        async function loadTradingLiveStatus() {
+            try {
+                const apiBase = window.location.hostname === 'localhost'
+                    ? 'http://localhost:8000'
+                    : 'https://trademanthan.in';
+                const response = await fetch(`${apiBase}/scan/trading-live`);
+                if (!response.ok) {
+                    return;
+                }
+                const data = await response.json();
+                const isLive = (data.trading_live || 'NO').toUpperCase() === 'YES';
+
+                const liveIndicator = document.getElementById('liveIndicator');
+                if (liveIndicator) {
+                    liveIndicator.classList.toggle('active', isLive);
+                }
+
+                const mobileBadge = document.getElementById('mobileLiveBadge');
+                if (mobileBadge) {
+                    mobileBadge.classList.toggle('active', isLive);
+                }
+
+                const mobileMenuBtn = document.querySelector('.mobile-menu-btn');
+                if (mobileMenuBtn) {
+                    mobileMenuBtn.classList.toggle('live-on', isLive);
+                }
+            } catch (e) {
+                // ignore
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            loadTradingLiveStatus();
+            setInterval(loadTradingLiveStatus, 60000);
+        });
+    </script>
     
     <!-- Mobile Fixed Footer Bar -->
     <div class="mobile-footer-bar">
@@ -1395,6 +1464,7 @@
         </div>
         
         <!-- Middle: Menu Button -->
+        <span id="mobileLiveBadge" class="mobile-live-badge">L</span>
         <button class="mobile-menu-btn" onclick="openMobileDrawer()">
             <i class="fas fa-home"></i>
         </button>
