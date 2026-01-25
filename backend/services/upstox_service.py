@@ -369,6 +369,8 @@ class UpstoxService:
             payload["price"] = float(price) if price is not None else 0.0
             if trigger_price is not None:
                 payload["trigger_price"] = float(trigger_price)
+            elif payload["order_type"] == "LIMIT":
+                payload["trigger_price"] = float(payload["price"])
 
         try:
             response = self.make_api_request(
