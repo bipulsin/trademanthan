@@ -306,7 +306,7 @@ class UpstoxService:
         quantity: int,
         transaction_type: str,
         order_type: str = "MARKET",
-        product: str = "I",
+        product: str = "D",
         validity: str = "DAY",
         price: Optional[float] = None,
         trigger_price: Optional[float] = None,
