@@ -23,7 +23,7 @@ class UpstoxService:
         
         # Try to load token from token manager first, fallback to provided token
         try:
-            from services.token_manager import load_upstox_token
+            from backend.services.token_manager import load_upstox_token
             loaded_token = load_upstox_token()
             self.access_token = loaded_token or access_token
             if loaded_token:
@@ -33,8 +33,19 @@ class UpstoxService:
             else:
                 logger.warning("⚠️ No Upstox token available")
         except Exception as e:
-            logger.warning(f"Could not load token from manager: {e}, using provided token")
-            self.access_token = access_token
+            try:
+                from services.token_manager import load_upstox_token
+                loaded_token = load_upstox_token()
+                self.access_token = loaded_token or access_token
+                if loaded_token:
+                    logger.info("✅ Using Upstox token from token manager (fallback import)")
+                elif access_token:
+                    logger.info("✅ Using Upstox token from initialization parameter")
+                else:
+                    logger.warning("⚠️ No Upstox token available")
+            except Exception as fallback_error:
+                logger.warning(f"Could not load token from manager: {fallback_error}, using provided token")
+                self.access_token = access_token
         
         self.base_url = "https://api.upstox.com/v3"
     
@@ -47,7 +58,7 @@ class UpstoxService:
             True if token was loaded successfully
         """
         try:
-            from services.token_manager import load_upstox_token
+            from backend.services.token_manager import load_upstox_token
             loaded_token = load_upstox_token()
             
             if loaded_token:
@@ -62,8 +73,21 @@ class UpstoxService:
                 return False
                 
         except Exception as e:
-            logger.error(f"❌ Failed to reload token: {str(e)}")
-            return False
+            try:
+                from services.token_manager import load_upstox_token
+                loaded_token = load_upstox_token()
+                if loaded_token:
+                    old_token_preview = self.access_token[:20] if self.access_token else "None"
+                    new_token_preview = loaded_token[:20]
+                    self.access_token = loaded_token
+                    logger.info(f"🔄 Token reloaded: {old_token_preview}... → {new_token_preview}...")
+                    return True
+                else:
+                    logger.warning("⚠️ No token found in storage")
+                    return False
+            except Exception as fallback_error:
+                logger.error(f"❌ Failed to reload token: {str(fallback_error)}")
+                return False
         
     def refresh_access_token(self) -> Optional[str]:
         """
