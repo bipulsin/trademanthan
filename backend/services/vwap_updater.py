@@ -1388,6 +1388,9 @@ def update_vwap_for_all_open_positions():
                     if (not position.sell_price or position.sell_price == 0) and position.buy_price:
                         from sqlalchemy.orm.attributes import flag_modified
                         position.sell_price = position.buy_price
+                        if position.qty:
+                            position.pnl = (position.sell_price - position.buy_price) * position.qty
+                            flag_modified(position, 'pnl')
                         flag_modified(position, 'sell_price')
                         logger.warning(f"⚠️ {stock_name}: Using buy_price ₹{position.buy_price:.2f} as sell_price fallback")
                     
