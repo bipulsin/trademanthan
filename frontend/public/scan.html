@@ -90,14 +90,39 @@
         .live-indicator {
             display: none;
             font-weight: 800;
-            color: #facc15;
+            color: #f7c948;
             font-size: 28px;
             margin-left: 6px;
             letter-spacing: 0.5px;
+            text-shadow:
+                0 0 6px rgba(247, 201, 72, 0.9),
+                0 0 14px rgba(255, 215, 0, 0.8),
+                0 0 22px rgba(255, 200, 0, 0.6);
         }
 
         .live-indicator.active {
             display: inline-block;
+            animation: liveBlink 1.2s infinite, liveGlow 2s ease-in-out infinite;
+        }
+
+        @keyframes liveBlink {
+            0%, 48% { opacity: 1; }
+            50%, 100% { opacity: 0.25; }
+        }
+
+        @keyframes liveGlow {
+            0%, 100% {
+                text-shadow:
+                    0 0 6px rgba(247, 201, 72, 0.9),
+                    0 0 14px rgba(255, 215, 0, 0.8),
+                    0 0 22px rgba(255, 200, 0, 0.6);
+            }
+            50% {
+                text-shadow:
+                    0 0 10px rgba(255, 223, 102, 1),
+                    0 0 20px rgba(255, 215, 0, 0.9),
+                    0 0 30px rgba(255, 200, 0, 0.8);
+            }
         }
         
         .index-item {
@@ -324,13 +349,17 @@
         .mobile-live-badge {
             display: none;
             font-weight: 800;
-            color: #facc15;
+            color: #f7c948;
             font-size: 16px;
             margin-right: 6px;
+            text-shadow:
+                0 0 4px rgba(247, 201, 72, 0.9),
+                0 0 10px rgba(255, 215, 0, 0.8);
         }
 
         .mobile-live-badge.active {
             display: inline-block;
+            animation: liveBlink 1.2s infinite, liveGlow 2s ease-in-out infinite;
         }
 
         .mobile-menu-btn:hover {
