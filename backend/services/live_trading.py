@@ -119,11 +119,21 @@ def place_live_upstox_gtt_entry(
     if not stop_loss or stop_loss <= 0:
         return {"success": False, "error": "Invalid stop_loss"}
 
+    tick_size = upstox_service.get_tick_size_by_instrument_key(instrument_key) or 0.05
+
+    def _round_to_tick(price: float) -> float:
+        return round(round(price / tick_size) * tick_size, 2)
+
+    buy_price = _round_to_tick(buy_price)
+    stop_loss = _round_to_tick(stop_loss)
+    if stop_loss >= buy_price:
+        stop_loss = _round_to_tick(buy_price - tick_size)
+
     risk = buy_price - stop_loss
     if risk <= 0:
         return {"success": False, "error": "Stop loss must be below buy price"}
 
-    target_price = buy_price + (risk_reward * risk)
+    target_price = _round_to_tick(buy_price + (risk_reward * risk))
 
     result = upstox_service.place_gtt_order(
         instrument_key=instrument_key,

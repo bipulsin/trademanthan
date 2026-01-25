@@ -527,6 +527,35 @@ class UpstoxService:
         except Exception as e:
             logger.error(f"❌ Exception cancelling order: {str(e)}")
             return {"success": False, "error": str(e)}
+
+    def get_tick_size_by_instrument_key(self, instrument_key: str) -> Optional[float]:
+        """
+        Lookup tick size from instruments.json by instrument_key.
+        """
+        try:
+            from pathlib import Path
+            import json as json_lib
+
+            if not instrument_key:
+                return None
+
+            instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
+            if not instruments_file.exists():
+                instruments_file = Path(__file__).resolve().parent.parent.parent / "data" / "instruments" / "nse_instruments.json"
+            if not instruments_file.exists():
+                return None
+
+            with open(instruments_file, "r") as f:
+                instruments_data = json_lib.load(f)
+
+            for inst in instruments_data:
+                if isinstance(inst, dict) and inst.get("instrument_key") == instrument_key:
+                    tick = inst.get("tick_size") or inst.get("tickSize")
+                    if tick and float(tick) > 0:
+                        return float(tick)
+                    return None
+        except Exception:
+            return None
     
     def get_market_holidays(self, year: int = None) -> List[str]:
         """
