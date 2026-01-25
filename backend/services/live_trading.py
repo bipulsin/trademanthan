@@ -96,3 +96,54 @@ def place_live_upstox_order(
             f"❌ LIVE ORDER FAILED ({action}): {stock_name} {option_contract} | Qty={qty} | Instrument={instrument_key} | Error={result.get('error')}"
         )
     return result
+
+def _extract_order_status(details: Dict[str, Any]) -> Optional[str]:
+    data = details.get("data") if isinstance(details, dict) else None
+    if isinstance(data, dict):
+        payload = data.get("data")
+        if isinstance(payload, list) and payload:
+            return payload[0].get("status")
+        if isinstance(payload, dict):
+            return payload.get("status")
+    return None
+
+def place_live_upstox_exit(
+    instrument_key: str,
+    qty: int,
+    stock_name: str,
+    option_contract: str,
+    buy_order_id: Optional[str],
+    tag: Optional[str] = None
+) -> Dict[str, Any]:
+    if not is_trading_live_enabled():
+        return {"success": False, "skipped": True, "error": "Live trading disabled"}
+    if not buy_order_id:
+        return {"success": False, "skipped": True, "error": "Missing buy_order_id"}
+    if not upstox_service:
+        return {"success": False, "error": "Upstox service unavailable"}
+
+    details = upstox_service.get_order_details(buy_order_id)
+    if not details.get("success"):
+        return {"success": False, "error": details.get("error", "Order details failed")}
+
+    status = _extract_order_status(details.get("data", {})) or ""
+    status = status.upper()
+
+    if status == "COMPLETE":
+        return place_live_upstox_order(
+            action="SELL",
+            instrument_key=instrument_key,
+            qty=qty,
+            stock_name=stock_name,
+            option_contract=option_contract,
+            tag=tag
+        )
+    if status == "OPEN":
+        cancel = upstox_service.cancel_order(buy_order_id)
+        if cancel.get("success"):
+            return {"success": False, "skipped": True, "info": "Buy order open; canceled"}
+        return {"success": False, "error": cancel.get("error", "Cancel failed")}
+    if status in {"REJECTED", "CANCELLED", "CANCELED"}:
+        return {"success": False, "skipped": True, "info": f"Buy order {status}"}
+
+    return {"success": False, "skipped": True, "info": f"Buy order status {status or 'UNKNOWN'}"}

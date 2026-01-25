@@ -4534,12 +4534,12 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                 exit_applied = False
                                 
                                 if exit_conditions['time_based']:
-                                    live_exit_result = live_trading.place_live_upstox_order(
-                                        action="SELL",
+                                    live_exit_result = live_trading.place_live_upstox_exit(
                                         instrument_key=live_instrument_key,
                                         qty=record.qty,
                                         stock_name=record.stock_name,
                                         option_contract=option_contract,
+                                        buy_order_id=record.buy_order_id,
                                         tag=f"scan_st1_exit_time:{record.buy_order_id or 'no_buy_id'}"
                                     )
                                     if not live_exit_result.get("skipped") and not live_exit_result.get("success"):
@@ -4556,12 +4556,12 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                         exit_applied = True
                                 
                                 elif exit_conditions['stop_loss']:
-                                    live_exit_result = live_trading.place_live_upstox_order(
-                                        action="SELL",
+                                    live_exit_result = live_trading.place_live_upstox_exit(
                                         instrument_key=live_instrument_key,
                                         qty=record.qty,
                                         stock_name=record.stock_name,
                                         option_contract=option_contract,
+                                        buy_order_id=record.buy_order_id,
                                         tag=f"scan_st1_exit_stop_loss:{record.buy_order_id or 'no_buy_id'}"
                                     )
                                     if not live_exit_result.get("skipped") and not live_exit_result.get("success"):
@@ -4578,12 +4578,12 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                         exit_applied = True
                                 
                                 elif exit_conditions['vwap_cross']:
-                                    live_exit_result = live_trading.place_live_upstox_order(
-                                        action="SELL",
+                                    live_exit_result = live_trading.place_live_upstox_exit(
                                         instrument_key=live_instrument_key,
                                         qty=record.qty,
                                         stock_name=record.stock_name,
                                         option_contract=option_contract,
+                                        buy_order_id=record.buy_order_id,
                                         tag=f"scan_st1_exit_vwap:{record.buy_order_id or 'no_buy_id'}"
                                     )
                                     if not live_exit_result.get("skipped") and not live_exit_result.get("success"):
@@ -4600,12 +4600,12 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                         exit_applied = True
                                 
                                 elif exit_conditions['profit_target']:
-                                    live_exit_result = live_trading.place_live_upstox_order(
-                                        action="SELL",
+                                    live_exit_result = live_trading.place_live_upstox_exit(
                                         instrument_key=live_instrument_key,
                                         qty=record.qty,
                                         stock_name=record.stock_name,
                                         option_contract=option_contract,
+                                        buy_order_id=record.buy_order_id,
                                         tag=f"scan_st1_exit_target:{record.buy_order_id or 'no_buy_id'}"
                                     )
                                     if not live_exit_result.get("skipped") and not live_exit_result.get("success"):

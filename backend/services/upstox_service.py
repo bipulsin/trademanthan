@@ -395,6 +395,62 @@ class UpstoxService:
         except Exception as e:
             logger.error(f"❌ Exception placing order: {str(e)}")
             return {"success": False, "error": str(e)}
+
+    def get_order_details(self, order_id: str) -> Dict[str, Any]:
+        """
+        Fetch order details by order_id.
+        """
+        if not self.access_token:
+            return {"success": False, "error": "Missing access token"}
+        if not order_id:
+            return {"success": False, "error": "Missing order_id"}
+
+        url = f"https://api.upstox.com/v2/order/details?order_id={order_id}"
+        try:
+            response = self.make_api_request(
+                url=url,
+                method="GET",
+                timeout=10,
+                max_retries=2
+            )
+            if response and response.get("status") == "success":
+                return {"success": True, "data": response}
+            return {
+                "success": False,
+                "error": response.get("message") if isinstance(response, dict) else "Order details failed",
+                "data": response
+            }
+        except Exception as e:
+            logger.error(f"❌ Exception fetching order details: {str(e)}")
+            return {"success": False, "error": str(e)}
+
+    def cancel_order(self, order_id: str) -> Dict[str, Any]:
+        """
+        Cancel order by order_id.
+        """
+        if not self.access_token:
+            return {"success": False, "error": "Missing access token"}
+        if not order_id:
+            return {"success": False, "error": "Missing order_id"}
+
+        url = f"https://api.upstox.com/v2/order/cancel?order_id={order_id}"
+        try:
+            response = self.make_api_request(
+                url=url,
+                method="POST",
+                timeout=10,
+                max_retries=2
+            )
+            if response and response.get("status") == "success":
+                return {"success": True, "data": response}
+            return {
+                "success": False,
+                "error": response.get("message") if isinstance(response, dict) else "Cancel failed",
+                "data": response
+            }
+        except Exception as e:
+            logger.error(f"❌ Exception cancelling order: {str(e)}")
+            return {"success": False, "error": str(e)}
     
     def get_market_holidays(self, year: int = None) -> List[str]:
         """
