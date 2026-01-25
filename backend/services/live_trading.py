@@ -178,7 +178,7 @@ def place_live_upstox_exit(
     if not is_trading_live_enabled():
         return {"success": False, "skipped": True, "error": "Live trading disabled"}
     if not buy_order_id:
-        return {"success": False, "skipped": True, "error": "Missing buy_order_id"}
+        return {"success": False, "skipped": False, "error": "Missing buy_order_id"}
     if not upstox_service:
         return {"success": False, "error": "Upstox service unavailable"}
 

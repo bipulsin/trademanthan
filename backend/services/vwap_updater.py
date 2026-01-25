@@ -2435,6 +2435,13 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
         # #endregion
         
         logger.info(f"🔄 Starting Cycle {cycle_number} VWAP slope calculation at {now.strftime('%Y-%m-%d %H:%M:%S IST')}")
+
+        # Ensure exit checks run for active trades during cycles 2-5
+        if cycle_number in {2, 3, 4, 5}:
+            try:
+                update_vwap_for_all_open_positions()
+            except Exception as exit_error:
+                logger.error(f"❌ Cycle {cycle_number}: Exit check failed: {str(exit_error)}")
         
         # Import VWAP service
         try:
