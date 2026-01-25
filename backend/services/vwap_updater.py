@@ -370,8 +370,7 @@ def update_vwap_for_all_open_positions():
         no_entry_trades = db.query(IntradayStockOption).filter(
             and_(
                 IntradayStockOption.trade_date >= today,
-                IntradayStockOption.status == 'no_entry',
-                IntradayStockOption.exit_reason == None
+                IntradayStockOption.status == 'no_entry'
             )
         ).all()
         
