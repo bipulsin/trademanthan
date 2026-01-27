@@ -1494,7 +1494,9 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 continue
                 
             stock_name = stock.get("stock_name", "UNKNOWN")
-            
+            # Default blank for non-LIVE and no_entry; only set when a live order is placed
+            buy_order_id = None
+
             try:
                 # Get option_ltp value and lot_size
                 option_ltp_value = stock.get("option_ltp", 0.0)
@@ -1797,7 +1799,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     # No entry: Store qty, buy_price, and SL for reference, but don't execute trade
                     # This helps track what trades would have been if conditions were favorable
                     import math
-                    
+
                     qty = lot_size  # Store the quantity that would have been traded
                     buy_price = option_ltp_value  # Store the option price at alert time
                     buy_time = None  # Don't set buy time since trade wasn't executed

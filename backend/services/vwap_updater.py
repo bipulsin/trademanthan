@@ -1472,7 +1472,7 @@ def update_vwap_for_all_open_positions():
                     
                     if exit_conditions['stop_loss']:
                         exit_triggered = True
-                        exit_reason_to_set = 'Exit-SL'
+                        exit_reason_to_set = 'stop_loss'  # Canonical value for frontend (EXITED-SL)
                         exit_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
                         logger.warning(f"✅ APPLIED: STOP LOSS EXIT for {stock_name}")
                         logger.info(f"🛑 EXIT DECISION: {stock_name} | Time: {exit_time_str} | Reason: Stop Loss | Option LTP: ₹{new_option_ltp:.2f} <= SL: ₹{position.stop_loss:.2f} | PnL: ₹{position.pnl:.2f}")
@@ -1516,7 +1516,7 @@ def update_vwap_for_all_open_positions():
                         new_option_ltp = exit_option_ltp
                         
                         exit_triggered = True
-                        exit_reason_to_set = 'Exit-VWAP Cross'
+                        exit_reason_to_set = 'stock_vwap_cross'  # Canonical value for frontend (EXITED-VW)
                         exit_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
                         logger.warning(f"✅ APPLIED: VWAP CROSS EXIT for {stock_name}")
                         # Use the same values that triggered the exit (fallback values if API fetch failed)
@@ -1535,7 +1535,7 @@ def update_vwap_for_all_open_positions():
                     
                     elif exit_conditions['profit_target']:
                         exit_triggered = True
-                        exit_reason_to_set = 'Exit-Target'
+                        exit_reason_to_set = 'profit_target'  # Canonical value for frontend (EXITED-TG)
                         exit_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
                         profit_target = position.buy_price * 1.5
                         logger.warning(f"✅ APPLIED: PROFIT TARGET EXIT for {stock_name}")
