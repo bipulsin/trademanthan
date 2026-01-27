@@ -805,7 +805,7 @@ function renderAlertGroup(alert, type) {
                                 parts.push(`<span style="color: ${slopeColor}; font-weight: 600;">${roundedAngle}°</span>`);
                             }
                         } else if (stock.vwap_slope_status === 'Skipped') {
-                            parts.push(`<span style="color: #f59e0b; font-weight: 600;">⚠️ Skipped</span>`);
+                            parts.push(`<span style="color: #f59e0b; font-weight: 600;" title="Skipped">⚠️</span>`);
                         }
                         
                         // Extract candle size ratio
@@ -816,7 +816,7 @@ function renderAlertGroup(alert, type) {
                                 parts.push(`<span style="color: ${sizeColor}; font-weight: 600;" title="Ratio: ${stock.candle_size_ratio.toFixed(2)}×">${ratioText}</span>`);
                             }
                         } else if (stock.candle_size_status === 'Skipped') {
-                            parts.push(`<span style="color: #f59e0b; font-weight: 600;">⚠️ Skipped</span>`);
+                            parts.push(`<span style="color: #f59e0b; font-weight: 600;" title="Skipped">⚠️</span>`);
                         }
                         
                         // Combine with "/" separator: "70°/1.83x"
