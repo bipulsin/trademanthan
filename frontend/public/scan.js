@@ -864,7 +864,8 @@ function renderAlertGroup(alert, type) {
                     let pnlValue = parseFloat(stock.pnl || 0);
                     let pnlColor = pnlValue > 0 ? 'green' : (pnlValue < 0 ? 'red' : '');
                     
-                    // Determine exit status display (mobile) - Check ALL exit criteria
+                    // Determine exit status display (mobile) - match desktop logic and order
+                    // Priority: exit_reason first (canonical + legacy), then No Entry, then time/open checks
                     let statusDisplay = '';
                     
                     // Get current time in IST first to check market close
@@ -877,14 +878,8 @@ function renderAlertGroup(alert, type) {
                     const currentTimeMinutes = currentHour * 60 + currentMinute;
                     const marketCloseMinutes = 15 * 60 + 30; // 3:30 PM IST (market close)
                     
-                    // PRIORITY CHECK: If after 3:30 PM IST, always show EXT-TM (mobile abbreviation)
-                    if (currentTimeMinutes >= marketCloseMinutes && !isNoEntry && !stock.exit_reason) {
-                        statusDisplay = '<span style="background: #f59e0b; color: black; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXT-TM</span>';
-                    }
-                    else if (isNoEntry) {
-                        const noEntryReason = stock.no_entry_reason ? ` - ${stock.no_entry_reason}` : '';
-                        statusDisplay = `<span style="color: #dc2626; font-weight: 700; font-size: 11px; white-space: nowrap;">No Entry${noEntryReason}</span>`;
-                    } else if (stock.exit_reason === 'stop_loss' || stock.exit_reason === 'Exit-SL') {
+                    // 1. EXIT REASON (backend) - check first so exited trades always show correct badge
+                    if (stock.exit_reason === 'stop_loss' || stock.exit_reason === 'Exit-SL') {
                         statusDisplay = '<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXD-SL</span>';
                     } else if (stock.exit_reason === 'profit_target' || stock.exit_reason === 'Exit-Target') {
                         statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXD-TG</span>';
@@ -894,7 +889,18 @@ function renderAlertGroup(alert, type) {
                         statusDisplay = '<span style="background: #8b5cf6; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXD-VW</span>';
                     } else if (stock.exit_reason) {
                         statusDisplay = '<span style="background: #6b7280; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXD</span>';
-                    } else {
+                    }
+                    // 2. No Entry
+                    else if (isNoEntry) {
+                        const noEntryReason = stock.no_entry_reason ? ` - ${stock.no_entry_reason}` : '';
+                        statusDisplay = `<span style="color: #dc2626; font-weight: 700; font-size: 11px; white-space: nowrap;">No Entry${noEntryReason}</span>`;
+                    }
+                    // 3. After 3:30 with no exit_reason yet -> EXT-TM
+                    else if (currentTimeMinutes >= marketCloseMinutes) {
+                        statusDisplay = '<span style="background: #f59e0b; color: black; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXT-TM</span>';
+                    }
+                    // 4. Open trades: time/price-based hints
+                    else {
                         // For open trades: Check ALL exit criteria in priority order
                         const option_ltp = stock.sell_price || 0;  // Current option price
                         const buy_price = stock.buy_price || 0;
