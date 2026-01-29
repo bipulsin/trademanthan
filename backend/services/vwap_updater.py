@@ -543,7 +543,10 @@ def update_vwap_for_all_open_positions():
                                 stop_loss=stop_loss_price
                             )
                             if not live_entry_result.get("skipped") and not live_entry_result.get("success"):
-                                logger.error(f"🚨 LIVE RE-ENTRY FAILED for {stock_name}: {live_entry_result.get('error')}")
+                                api_err = live_entry_result.get('error') or 'Unknown'
+                                no_entry_trade.no_entry_reason = ("Live order failed: " + api_err)[:255]
+                                no_entry_trade.exit_reason = api_err[:50]
+                                logger.error(f"🚨 LIVE RE-ENTRY FAILED for {stock_name}: {api_err}")
                                 continue
 
                             # Enter the trade with CURRENT time and prices
@@ -816,7 +819,10 @@ def update_vwap_for_all_open_positions():
                                 stop_loss=stop_loss_price
                             )
                             if not live_entry_result.get("skipped") and not live_entry_result.get("success"):
-                                logger.error(f"🚨 LIVE RE-ENTRY FAILED for {stock_name}: {live_entry_result.get('error')}")
+                                api_err = live_entry_result.get('error') or 'Unknown'
+                                no_entry_trade.no_entry_reason = ("Live order failed: " + api_err)[:255]
+                                no_entry_trade.exit_reason = api_err[:50]
+                                logger.error(f"🚨 LIVE RE-ENTRY FAILED for {stock_name}: {api_err}")
                                 continue
 
                             # Enter the trade with CURRENT time and prices
@@ -3609,7 +3615,10 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                                 stop_loss=stop_loss_price
                             )
                             if not live_entry_result.get("skipped") and not live_entry_result.get("success"):
-                                logger.error(f"🚨 LIVE ENTRY FAILED for {stock_name}: {live_entry_result.get('error')}")
+                                api_err = live_entry_result.get('error') or 'Unknown'
+                                trade.no_entry_reason = ("Live order failed: " + api_err)[:255]
+                                trade.exit_reason = api_err[:50]
+                                logger.error(f"🚨 LIVE ENTRY FAILED for {stock_name}: {api_err}")
                                 continue
 
                             # Enter the trade with CURRENT time and prices

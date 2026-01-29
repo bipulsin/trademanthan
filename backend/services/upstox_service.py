@@ -254,9 +254,16 @@ class UpstoxService:
                     continue
                 
                 elif response.status_code == 400:
-                    # Bad request - don't retry
+                    # Bad request - don't retry; return parsed JSON so callers can extract error message
+                    try:
+                        body = response.json()
+                        if isinstance(body, dict):
+                            logger.error(f"❌ Bad request (400) for {url}: {body.get('message') or body.get('error') or response.text[:200]}")
+                            return body
+                    except Exception:
+                        pass
                     logger.error(f"❌ Bad request (400) for {url}: {response.text[:200]}")
-                    last_error = f"Bad request: {response.text[:100]}"
+                    last_error = response.text[:300] if response.text else "Bad request"
                     break
                 
                 elif response.status_code == 404:
@@ -467,14 +474,32 @@ class UpstoxService:
                     if isinstance(data, dict):
                         order_id = data.get("order_id") or data.get("gtt_order_id") or data.get("id")
                 return {"success": True, "data": response, "order_id": order_id}
-            return {
-                "success": False,
-                "error": response.get("message") if isinstance(response, dict) else "GTT order failed",
-                "data": response
-            }
+
+            # Extract error message from API response (handles 400 JSON body or None)
+            err_msg = "GTT order failed"
+            if isinstance(response, dict):
+                err_msg = (
+                    response.get("message")
+                    or response.get("error")
+                    or (response.get("errors", [{}])[0].get("message") if response.get("errors") else None)
+                    or response.get("status")
+                    or err_msg
+                )
+                if isinstance(err_msg, dict):
+                    err_msg = err_msg.get("message") or str(err_msg)
+
+            # Normalize insufficient-fund type errors and log gracefully (no retry)
+            err_lower = (err_msg or "").lower()
+            if "insufficient" in err_lower or "fund" in err_lower or "margin" in err_lower or "balance" in err_lower:
+                logger.warning(f"⚠️ GTT order skipped (insufficient funds): {err_msg}")
+                err_msg = f"Insufficient funds: {err_msg}" if "insufficient" not in err_lower else err_msg
+            else:
+                logger.error(f"❌ GTT order failed: {err_msg}")
+
+            return {"success": False, "error": (err_msg or "GTT order failed")[:500], "data": response}
         except Exception as e:
             logger.error(f"❌ Exception placing GTT order: {str(e)}")
-            return {"success": False, "error": str(e)}
+            return {"success": False, "error": str(e)[:500]}
 
     def get_order_details(self, order_id: str) -> Dict[str, Any]:
         """

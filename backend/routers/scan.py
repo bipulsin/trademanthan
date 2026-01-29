@@ -1494,8 +1494,16 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 continue
                 
             stock_name = stock.get("stock_name", "UNKNOWN")
+            # Initialize all variables that will be used in db_record to avoid UnboundLocalError
             # Default blank for non-LIVE and no_entry; only set when a live order is placed
             buy_order_id = None
+            buy_price = None
+            buy_time = None
+            status = None
+            pnl = None
+            stop_loss_price = None
+            sell_price = None
+            stock_instrument_key = None
 
             try:
                 # Get option_ltp value and lot_size
@@ -1620,8 +1628,9 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     # For all other alerts: Apply candle size filter normally
                     filters_passed = candle_size_passed
                 
-                # Initialize no_entry_reason early (will be set if entry fails)
+                # Initialize no_entry_reason and exit_reason early (will be set if entry fails)
                 no_entry_reason = None
+                exit_reason = None
                 
                 # Check if enrichment failed - this takes priority over other reasons
                 if stock.get("_enrichment_failed"):
@@ -1729,7 +1738,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     buy_time = current_time  # Use current system time, not alert time
                     sell_price = None  # BLANK initially - will be updated hourly by market data updater
                     stock_instrument_key = stock.get("instrument_key") if stock and isinstance(stock, dict) else None
-                    buy_order_id = None
+                    # buy_order_id already initialized above, will be set if live entry succeeds
                     
                     # Stop Loss = 5% lower than the open price of the current candle
                     stop_loss_price = None
@@ -1764,7 +1773,9 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         status = 'no_entry'
                         pnl = None
                         buy_time = None
-                        no_entry_reason = f"Live order failed: {live_entry_result.get('error')}"
+                        api_err = live_entry_result.get('error') or 'Unknown'
+                        no_entry_reason = ("Live order failed: " + api_err)[:255]
+                        exit_reason = api_err[:50]
                         logger.error(f"🚨 LIVE ENTRY FAILED for {stock_name}: {no_entry_reason}")
                     elif live_entry_result.get("success"):
                         buy_order_id = live_entry_result.get("order_id")
@@ -2056,7 +2067,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     sell_price=sell_price,
                     buy_time=buy_time,  # Will be set to triggered_datetime if trade was entered
                     buy_order_id=buy_order_id,
-                    exit_reason=None,
+                    exit_reason=exit_reason if status == 'no_entry' else None,
                     pnl=pnl,
                     no_entry_reason=no_entry_reason if status == 'no_entry' else None
                 )
@@ -3018,7 +3029,9 @@ async def process_all_today_stocks(db: Session = Depends(get_db)):
                 if not live_entry_result.get("skipped") and not live_entry_result.get("success"):
                     trade.status = 'no_entry'
                     trade.buy_time = None
-                    trade.no_entry_reason = f"Live order failed: {live_entry_result.get('error')}"
+                    api_err = live_entry_result.get('error') or 'Unknown'
+                    trade.no_entry_reason = ("Live order failed: " + api_err)[:255]
+                    trade.exit_reason = api_err[:50]
                     error_count += 1
                     logger.error(f"🚨 LIVE ENTRY FAILED for {stock_name}: {trade.no_entry_reason}")
                     continue
