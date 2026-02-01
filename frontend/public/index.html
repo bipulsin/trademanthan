@@ -18,40 +18,64 @@
             min-height: 100vh;
         }
         
-        /* Header with TRADENTICAL banner */
+        /* Header with TRADENTICAL banner - full height */
         .header {
             position: fixed !important;
             top: 0 !important;
             left: 0 !important;
             right: 0 !important;
             z-index: 1000 !important;
-            height: 100px;
+            height: auto !important;
             border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
         }
         
         .header .container {
-            position: relative;
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
             display: flex;
             align-items: center;
             justify-content: space-between;
             padding: 0 1rem;
-            height: 100%;
+            min-height: 48px;
+            pointer-events: none;
+        }
+        
+        .header .container .nav {
+            pointer-events: auto;
         }
         
         .header-banner {
-            position: absolute;
-            left: 0;
-            top: 0;
+            display: block;
             width: 100%;
-            height: 100%;
-            object-fit: cover;
-            object-position: center;
+            height: auto;
+            vertical-align: top;
             pointer-events: none;
+            object-fit: contain;
+            object-position: center top;
+        }
+        
+        /* Desktop: banner fixed height 300px, width auto, left-aligned */
+        @media (min-width: 769px) {
+            .header {
+                background: #0a1628;
+                height: 300px;
+                display: block;
+                overflow: hidden;
+            }
+            .header-banner {
+                height: 300px;
+                width: auto;
+                display: block;
+                margin: 0;
+                object-fit: contain;
+                object-position: left top;
+            }
         }
         
         .header .logo {
             flex: 1;
-            min-height: 60px;
             position: relative;
             z-index: 1;
         }
@@ -94,11 +118,16 @@
         
         /* Main section - add top padding for fixed header */
         .main {
-            padding-top: 100px !important;
+            padding-top: min(400px, 40vw) !important;
             padding-bottom: 0 !important;
             padding-left: 0 !important;
             padding-right: 0 !important;
             margin: 0 !important;
+        }
+        @media (min-width: 769px) {
+            .main {
+                padding-top: 300px !important;
+            }
         }
         
         /* Ensure content starts below header */
