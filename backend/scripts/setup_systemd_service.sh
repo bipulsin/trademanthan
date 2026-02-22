@@ -35,7 +35,7 @@ After=network.target
 Type=simple
 User=ubuntu
 Group=ubuntu
-WorkingDirectory=${BACKEND_DIR}
+WorkingDirectory=${PROJECT_DIR}
 Environment="PATH=${BACKEND_DIR}/venv/bin"
 Environment="PYTHONUNBUFFERED=1"
 ExecStart=${BACKEND_DIR}/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000

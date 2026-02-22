@@ -97,6 +97,9 @@ if ssh -i "$EC2_KEY" -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" "bash -s"
     pip install -r requirements.txt -q 2>/dev/null || echo "⚠ pip install had issues (deps may already be installed)"
     
     echo "Restarting backend service..."
+    sudo sed -i 's|WorkingDirectory=${BACKEND_DIR}|WorkingDirectory=${PROJECT_DIR}|' /etc/systemd/system/trademanthan-backend.service 2>/dev/null || true
+    sudo sed -i 's|WorkingDirectory=/home/ubuntu/trademanthan/backend|WorkingDirectory=/home/ubuntu/trademanthan|' /etc/systemd/system/trademanthan-backend.service 2>/dev/null || true
+    sudo systemctl daemon-reload 2>/dev/null || true
     sudo systemctl restart trademanthan-backend
     
     echo "Updating Nginx config for tradentical.com..."
