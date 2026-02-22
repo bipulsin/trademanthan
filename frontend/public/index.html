@@ -3,388 +3,141 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trade Manthan - Professional Algo Trading Platform</title>
+    <title>Tradentical - AI-Powered Algorithmic Trading</title>
+    <meta name="description" content="Trading Identical. AI-based Algo platform by Trade With CTO. Harness the power of advanced AI to automate your trading strategies.">
     <link rel="stylesheet" href="styles.css?v=1.5">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Montserrat:wght@700&family=Orbitron:wght@600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="landing.css?v=1">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="icon" type="image/x-icon" href="favicon.ico">
-    <style>
-        /* Override body background for home page */
-        body {
-            background: url('body_bg.png') center center !important;
-            background-size: cover !important;
-            background-repeat: no-repeat !important;
-            background-attachment: fixed !important;
-            min-height: 100vh;
-        }
-        
-        /* Header with TRADENTICAL banner - no padding top/bottom */
-        .header {
-            position: fixed !important;
-            top: 0 !important;
-            left: 0 !important;
-            right: 0 !important;
-            z-index: 1000 !important;
-            height: auto !important;
-            padding: 0 !important;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
-        }
-        
-        .header .container {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 0 !important;
-            pointer-events: none;
-        }
-        
-        .header .container .logo {
-            display: none;
-        }
-        
-        .header .container .nav {
-            pointer-events: auto;
-        }
-        
-        .header-banner {
-            display: block;
-            width: 100%;
-            height: auto;
-            vertical-align: top;
-            margin: 0;
-            padding: 0;
-            pointer-events: none;
-            object-fit: contain;
-            object-position: center top;
-        }
-        
-        /* Desktop: banner fixed height 200px, width auto, left-aligned */
-        @media (min-width: 769px) {
-            .header {
-                background: #0a1628;
-                height: 200px;
-                display: block;
-                overflow: hidden;
-                padding: 0 !important;
-            }
-            .header-banner {
-                height: 200px;
-                width: auto;
-                display: block;
-                margin: 0;
-                padding: 0;
-                object-fit: contain;
-                object-position: left top;
-            }
-        }
-        
-        .header .logo {
-            flex: 1;
-            position: relative;
-            z-index: 1;
-        }
-        
-        .header .nav {
-            position: relative;
-            z-index: 2;
-        }
-        
-        /* Update sign in button for dark header */
-        .header .btn-primary {
-            background: #FFD700 !important;
-            color: #000000 !important;
-            border: none !important;
-        }
-        
-        .header .btn-primary:hover {
-            background: #FFC107 !important;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(255, 215, 0, 0.4);
-        }
-        
-        /* Update footer for white background */
-        .footer {
-            background: rgba(0, 0, 0, 0.05) !important;
-            color: #333 !important;
-            border-top: 1px solid rgba(0, 0, 0, 0.1) !important;
-            padding: 15px 0 !important;
-            margin: 0 !important;
-        }
-        
-        .footer .container {
-            padding: 0 2rem !important;
-        }
-        
-        .footer p {
-            margin: 0 !important;
-            font-size: 14px;
-        }
-        
-        /* Main section - add top padding for fixed header */
-        .main {
-            padding-top: min(400px, 40vw) !important;
-            padding-bottom: 0 !important;
-            padding-left: 0 !important;
-            padding-right: 0 !important;
-            margin: 0 !important;
-        }
-        @media (min-width: 769px) {
-            .main {
-                padding-top: 200px !important;
-            }
-        }
-        
-        /* Ensure content starts below header */
-        #app {
-            padding-top: 0 !important;
-        }
-        
-        .section {
-            padding: 0 !important;
-            margin: 0 !important;
-        }
-        
-        /* New Home Page Layout */
-        .home-container {
-            display: flex;
-            align-items: stretch;
-            justify-content: space-between;
-            gap: 0;
-            max-width: 100%;
-            margin: 0;
-            padding: 50px 0 0 0;
-            min-height: calc(100vh - 160px);
-        }
-        
-        /* Left Side - Large Image (Full Height) */
-        .left-image-section {
-            flex: 1;
-            display: flex;
-            align-items: stretch;
-            justify-content: center;
-            padding: 0;
-            margin: 0;
-            background: transparent;
-        }
-        
-        .hero-image {
-            width: 100%;
-            height: 100%;
-            min-height: calc(100vh - 160px);
-            object-fit: cover;
-            background: transparent;
-            padding: 0;
-            margin: 0;
-            display: block;
-        }
-        
-        /* Right Side - 2x2 Grid */
-        .right-content-section {
-            flex: 1;
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            grid-template-rows: auto auto;
-            gap: 30px;
-            align-items: start;
-            padding: 40px;
-        }
-        
-        /* Logo Card - No Background */
-        .logo-card-new {
-            grid-column: 1 / 2;
-            grid-row: 1 / 2;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: flex-start;
-            padding: 0;
-            background: transparent;
-            gap: 20px;
-        }
-        
-        .logo-home-image {
-            width: 180px;
-            height: auto;
-            object-fit: contain;
-            background: transparent;
-            border: none;
-            box-shadow: none;
-            border-radius: 0;
-        }
-        
-        /* By Bipul Sahay Image Container */
-        .bipul-sahay-container {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            width: 100%;
-            max-width: 280px;
-            padding: 15px;
-            background: transparent;
-            box-sizing: border-box;
-        }
-        
-        .bipul-sahay-image {
-            width: 100%;
-            max-width: 280px;
-            height: auto;
-            max-height: 120px;
-            object-fit: contain;
-            background: transparent;
-            display: block;
-            image-rendering: auto;
-            /* Display image in original colors - no blend mode needed if image has transparent background */
-        }
-        
-        /* Feature Cards in 2x2 Grid */
-        .right-content-section .feature-card {
-            background: #ffffff;
-            border: 2px solid #e9ecef;
-            border-radius: 16px;
-            padding: 30px;
-            text-align: center;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-        }
-        
-        .right-content-section .feature-card:hover {
-            background: #ffffff;
-            border-color: #1976d2;
-            transform: translateY(-5px);
-            box-shadow: 0 8px 24px rgba(25, 118, 210, 0.3);
-        }
-        
-        /* Feature card text colors */
-        .right-content-section .feature-card h3 {
-            color: #1976d2;
-            margin: 15px 0 10px 0;
-        }
-        
-        .right-content-section .feature-card p {
-            color: #666;
-            font-size: 14px;
-            line-height: 1.5;
-        }
-        
-        .right-content-section .feature-icon {
-            font-size: 48px;
-        }
-        
-        /* Responsive Design */
-        @media (max-width: 1024px) {
-            .home-container {
-                flex-direction: column;
-                gap: 40px;
-            }
-            
-            .left-image-section {
-                width: 100%;
-            }
-            
-            .hero-image {
-                width: 400px;
-            }
-            
-            .right-content-section {
-                width: 100%;
-                max-width: 800px;
-            }
-        }
-        
-        @media (max-width: 768px) {
-            .right-content-section {
-                grid-template-columns: 1fr;
-                gap: 20px;
-            }
-            
-            .logo-card-new {
-                grid-column: 1 / 2;
-            }
-            
-            .hero-image {
-                width: 300px;
-            }
-            
-            .bipul-sahay-container {
-                max-width: 220px;
-                padding: 10px;
-            }
-            
-            .bipul-sahay-image {
-                max-width: 220px;
-                max-height: 100px;
-            }
-        }
-    </style>
 </head>
-<body>
+<body class="landing-page">
     <div id="app">
-        <!-- Header -->
-        <header class="header">
-            <img src="header-banner.png" alt="TRADENTICAL - Trading Identical: The Precision of Agentic AI Trading" class="header-banner">
-            <div class="container">
-                <div class="logo" aria-hidden="true"></div>
-                <nav class="nav">
-                    <a href="car_setup.html" class="btn btn-secondary" style="margin-right: 0.5rem;">
-                        <i class="fas fa-chart-line"></i> CAR GPT
-                    </a>
-                    <button class="btn btn-primary" onclick="openLoginPopup()">
-                        <i class="fas fa-sign-in-alt"></i>
-                        Sign In
-                    </button>
-                </nav>
-            </div>
-        </header>
-
-        <!-- Main Content -->
-        <main class="main">
-            <section id="features" class="section active">
-                <div class="home-container">
-                    <!-- Left Side: Large Image -->
-                    <div class="left-image-section">
-                        <img src="tradem_white.png" alt="Trade Manthan" class="hero-image">
+        <!-- Top Navigation Bar -->
+        <nav class="landing-nav">
+            <div class="nav-inner">
+                <div class="brand">
+                    <svg class="brand-icon" viewBox="0 0 42 42" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="21" cy="21" r="20" fill="url(#brandGrad)" opacity="0.9"/>
+                        <path d="M21 8v14l8-7-8-7z" fill="white" opacity="0.95"/>
+                        <path d="M13 28h16v2H13v-2z" fill="white" opacity="0.8"/>
+                        <defs>
+                            <linearGradient id="brandGrad" x1="0" y1="0" x2="42" y2="42" gradientUnits="userSpaceOnUse">
+                                <stop stop-color="#10b981"/>
+                                <stop offset="1" stop-color="#f59e0b"/>
+                            </linearGradient>
+                        </defs>
+                    </svg>
+                    <div class="brand-text">
+                        <span class="brand-title">Tradentical</span>
+                        <span class="brand-subtitle">Trading Identical. AI-based Algo platform by Trade With CTO</span>
                     </div>
-                    
-                    <!-- Right Side: Logo and Feature Cards in 2x2 Grid -->
-                    <div class="right-content-section">
-                        <!-- Logo (Top-Left) -->
-                        <div class="logo-card-new">
-                            <img src="tm_logo.png" alt="Trade Manthan Logo" class="logo-home-image">
-                            <div class="bipul-sahay-container">
-                                <img src="bipul_sahay.png" alt="by Bipul Sahay" class="bipul-sahay-image">
+                </div>
+                <div class="nav-right">
+                    <div class="social-icons">
+                        <a href="https://youtube.com/@tradewithcto" target="_blank" rel="noopener noreferrer" aria-label="YouTube"><i class="fab fa-youtube"></i></a>
+                        <a href="https://x.com/tradewithcto" target="_blank" rel="noopener noreferrer" aria-label="X / Twitter"><i class="fab fa-x-twitter"></i></a>
+                        <a href="https://instagram.com/tradewithcto" target="_blank" rel="noopener noreferrer" aria-label="Instagram"><i class="fab fa-instagram"></i></a>
+                        <a href="https://t.me/tradewithcto" target="_blank" rel="noopener noreferrer" aria-label="Telegram"><i class="fab fa-telegram"></i></a>
+                    </div>
+                    <a href="car_setup.html" class="landing-nav-car"><i class="fas fa-chart-line"></i> CAR GPT</a>
+                    <button class="btn-google" onclick="openLoginPopup()">
+                        <svg viewBox="0 0 24 24" width="18" height="18">
+                            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                        </svg>
+                        Sign in with Google
+                    </button>
+                    <button class="mobile-toggle" aria-label="Menu" onclick="toggleMobileNav()">
+                        <i class="fas fa-bars"></i>
+                    </button>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Hero Section -->
+        <section class="landing-hero">
+            <div class="hero-content">
+                <div class="hero-text">
+                    <h1><span class="highlight">AI-Powered</span> Algorithmic Trading</h1>
+                    <p>Harness the power of advanced AI to automate your trading strategies and maximize your profits.</p>
+                    <button class="btn-cta" onclick="openLoginPopup()">
+                        <i class="fas fa-rocket"></i>
+                        Get Started / Try Now
+                    </button>
+                </div>
+                <div class="hero-visual">
+                    <div class="hero-visual-inner">
+                        <div class="hero-graphic">
+                            <div class="grid-lines"></div>
+                            <div class="globe"></div>
+                            <svg class="arrow-curve" viewBox="0 0 280 140" fill="none">
+                                <path d="M0 140 Q140 0 280 140" stroke="url(#arrowGrad)" stroke-width="4" fill="none"/>
+                                <defs>
+                                    <linearGradient id="arrowGrad" x1="0" y1="140" x2="280" y2="0">
+                                        <stop offset="0%" stop-color="#3b82f6"/>
+                                        <stop offset="50%" stop-color="#8b5cf6"/>
+                                        <stop offset="100%" stop-color="#f59e0b"/>
+                                    </linearGradient>
+                                </defs>
+                            </svg>
+                            <div class="candles">
+                                <div class="candle up"></div>
+                                <div class="candle down"></div>
+                                <div class="candle up"></div>
+                                <div class="candle down"></div>
+                                <div class="candle up"></div>
                             </div>
-                        </div>
-                        
-                        <!-- Feature Cards Grid (2x2 - 3 cards) -->
-                        <div class="feature-card">
-                            <div class="feature-icon">🤖</div>
-                            <h3>Algo Trading</h3>
-                            <p>Automated trading strategies with real-time execution</p>
-                        </div>
-                        <div class="feature-card">
-                            <div class="feature-icon">⚡</div>
-                            <h3>Real-time Data</h3>
-                            <p>Live market data and instant trade execution</p>
-                        </div>
-                        <div class="feature-card">
-                            <div class="feature-icon">🔒</div>
-                            <h3>Secure Authentication</h3>
-                            <p>Google OAuth integration for secure access</p>
                         </div>
                     </div>
                 </div>
-            </section>
-        </main>
+            </div>
+        </section>
+
+        <!-- Features / Value Propositions -->
+        <section class="landing-features">
+            <div class="features-inner">
+                <div class="features-grid">
+                    <div class="feature-block">
+                        <div class="feature-icon"><i class="fas fa-bolt"></i></div>
+                        <h3>Real-Time Algo Execution</h3>
+                        <p>Execute trading strategies instantly with low-latency order routing and real-time market data.</p>
+                    </div>
+                    <div class="feature-block">
+                        <div class="feature-icon"><i class="fas fa-brain"></i></div>
+                        <h3>AI Trading Signals</h3>
+                        <p>Leverage machine learning models to identify high-probability trade setups and market patterns.</p>
+                    </div>
+                    <div class="feature-block">
+                        <div class="feature-icon"><i class="fas fa-cogs"></i></div>
+                        <h3>Customizable Strategies</h3>
+                        <p>Build and deploy your own algo strategies with our flexible, no-code strategy builder.</p>
+                    </div>
+                    <div class="feature-block">
+                        <div class="feature-icon"><i class="fas fa-shield-alt"></i></div>
+                        <h3>Smart Risk Management</h3>
+                        <p>Automated stop-loss, position sizing, and portfolio-level risk controls to protect your capital.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
 
         <!-- Footer -->
-        <footer class="footer">
-            <div class="container">
-                <p>&copy; 2025 Trade Manthan. All rights reserved.</p>
+        <footer class="landing-footer">
+            <div class="footer-inner">
+                <div class="footer-social">
+                    <a href="https://youtube.com/@tradewithcto" target="_blank" rel="noopener noreferrer" aria-label="YouTube"><i class="fab fa-youtube"></i></a>
+                    <a href="https://x.com/tradewithcto" target="_blank" rel="noopener noreferrer" aria-label="X"><i class="fab fa-x-twitter"></i></a>
+                    <a href="https://instagram.com/tradewithcto" target="_blank" rel="noopener noreferrer" aria-label="Instagram"><i class="fab fa-instagram"></i></a>
+                    <a href="https://t.me/tradewithcto" target="_blank" rel="noopener noreferrer" aria-label="Telegram"><i class="fab fa-telegram"></i></a>
+                </div>
+                <div class="footer-legal">
+                    <a href="#">Privacy Policy</a>
+                    <a href="#">Terms of Service</a>
+                </div>
+                <span class="footer-copy">&copy; 2026 Tradentical. All rights reserved.</span>
             </div>
         </footer>
     </div>
@@ -392,28 +145,20 @@
     <!-- Login Popup Overlay -->
     <div class="login-overlay" id="loginOverlay" style="display: none;">
         <div class="login-popup">
-            <!-- Close Button -->
             <button class="close-btn" onclick="closeLoginPopup()">&times;</button>
-            
-            <!-- Logo -->
             <div class="logo-container">
-                <img src="tm_logo.png" alt="Trade Manthan Logo" class="logo-image">
-                <h2>Trade Manthan</h2>
+                <img src="tm_logo.png" alt="Tradentical Logo" class="logo-image">
+                <h2>Tradentical</h2>
             </div>
-            
-            <!-- Login Form -->
             <div class="login-form">
                 <h3>Welcome Back</h3>
                 <p>Sign in to access your trading dashboard</p>
-                
-                <!-- Google OAuth Button -->
                 <div id="g_id_onload"
                      data-client_id="822255471884-ihvqhttvtnqjfqtukq1c9msi4n3qjad5.apps.googleusercontent.com"
                      data-callback="handleCredentialResponse"
                      data-auto_prompt="false"
                      data-ux_mode="popup">
                 </div>
-                
                 <div class="g_id_signin"
                      data-type="standard"
                      data-size="large"
@@ -425,19 +170,10 @@
                      data-ux_mode="popup"
                      data-prompt_parent_id="loginOverlay">
                 </div>
-                
-                <!-- Instagram Login Button -->
-                <button class="btn btn-instagram btn-full" onclick="handleInstagramLogin()">
-                    <i class="fab fa-instagram"></i>
-                    Continue with Instagram
+                <button class="btn btn-instagram btn-full" onclick="handleInstagramLogin()" style="display:none;">
+                    <i class="fab fa-instagram"></i> Continue with Instagram
                 </button>
-                
-                <!-- Alternative Login Options -->
-                <div class="divider">
-                    <span>or</span>
-                </div>
-                
-                <!-- Email/Password Login Form -->
+                <div class="divider"><span>or</span></div>
                 <form id="emailLoginForm" class="email-login-form">
                     <div class="form-group">
                         <input type="email" id="loginEmail" placeholder="Email Address" required>
@@ -447,19 +183,13 @@
                     </div>
                     <button type="submit" class="btn btn-primary btn-full">Sign In</button>
                 </form>
-                
-                <!-- Sign Up Link -->
                 <div class="signup-link">
-                    <p>Don't have an account? <a href="#" onclick="showSignupForm()">Sign Up</a></p>
+                    <p>Don't have an account? <a href="#" onclick="showSignupForm(); return false;">Sign Up</a></p>
                 </div>
-                
-                <!-- Forgot Password Link -->
                 <div class="forgot-password">
-                    <a href="#" onclick="showForgotPassword()">Forgot Password?</a>
+                    <a href="#" onclick="showForgotPassword(); return false;">Forgot Password?</a>
                 </div>
             </div>
-            
-            <!-- Footer -->
             <div class="login-footer">
                 <p>By signing in, you agree to our Terms of Service and Privacy Policy</p>
             </div>
@@ -468,5 +198,11 @@
 
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="app.js?v=1.3"></script>
+    <script>
+        function toggleMobileNav() {
+            const socials = document.querySelector('.landing-nav .social-icons');
+            if (socials) socials.style.display = socials.style.display === 'none' ? 'flex' : 'none';
+        }
+    </script>
 </body>
 </html>

@@ -107,9 +107,11 @@ function openLoginPopup() {
     overlay.style.display = 'flex';
     overlay.style.animation = 'slideIn 0.3s ease-out';
     
-    // Force Google button width after popup opens
-    setTimeout(forceGoogleButtonWidth, 100);
-    setTimeout(forceGoogleButtonWidth, 500);
+    // Force Google button width after popup opens (if defined)
+    if (typeof forceGoogleButtonWidth === 'function') {
+        setTimeout(forceGoogleButtonWidth, 100);
+        setTimeout(forceGoogleButtonWidth, 500);
+    }
 }
 
 function closeLoginPopup() {
@@ -381,7 +383,4 @@ function styleGoogleButton() {
 setTimeout(styleGoogleButton, 1000);
 setTimeout(styleGoogleButton, 2000);
 
-// Also call when login popup opens
-function openLoginPopup() {
-    document.getElementById('loginOverlay').style.display = 'flex';
-}
+// openLoginPopup is defined above - duplicate removed
