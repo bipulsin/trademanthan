@@ -115,9 +115,12 @@
             empty.style.display = 'none';
             try {
                 const r = await fetch(API_BASE + '/cargpt/stock-list');
+                if (!r.ok) {
+                    throw new Error('API returned ' + r.status);
+                }
                 const data = await r.json();
                 loading.style.display = 'none';
-                if (data && data.length > 0) {
+                if (data && Array.isArray(data) && data.length > 0) {
                     wrap.style.display = 'block';
                     const tbody = document.getElementById('stockTableBody');
                     tbody.innerHTML = '';
@@ -136,8 +139,8 @@
             } catch (e) {
                 loading.style.display = 'none';
                 empty.style.display = 'block';
-                empty.textContent = 'Error loading list. Check API connection.';
-                console.error(e);
+                empty.textContent = 'Error loading list. ' + (e.message || 'Check API connection.');
+                console.error('loadStockList error:', e);
             }
         }
 

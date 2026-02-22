@@ -92,16 +92,21 @@ async def save_stock_list(
 @router.get("/stock-list", response_model=List[CarStockItem])
 async def get_stock_list(db: Session = Depends(get_db)):
     """Get all symbols from carstocklist with stock names from instruments, ordered by created_at desc."""
-    rows = db.query(CarStockList).order_by(CarStockList.created_at.desc()).all()
-    return [
-        CarStockItem(
-            id=r.id,
-            symbol=r.symbol,
-            stock_name=get_stock_name(r.symbol),
-            created_at=r.created_at.isoformat() if r.created_at else ""
-        )
-        for r in rows
-    ]
+    try:
+        rows = db.query(CarStockList).order_by(CarStockList.created_at.desc()).all()
+        return [
+            CarStockItem(
+                id=r.id,
+                symbol=r.symbol,
+                stock_name=get_stock_name(r.symbol) or r.symbol,
+                created_at=r.created_at.isoformat() if r.created_at else ""
+            )
+            for r in rows
+        ]
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception("stock-list error")
+        return []
 
 
 @router.get("/config")
