@@ -91,7 +91,7 @@ if ssh -i "$EC2_KEY" -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" "bash -s"
     echo "Installing/updating backend dependencies..."
     cd backend
     source venv/bin/activate
-    pip install -r requirements.txt -q
+    pip install -r requirements.txt -q 2>/dev/null || echo "⚠ pip install had issues (deps may already be installed)"
     
     echo "Restarting backend service..."
     sudo systemctl restart trademanthan-backend
