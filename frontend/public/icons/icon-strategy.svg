@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <!-- Slider tracks -->
+  <rect x="8" y="12" width="32" height="6" rx="3" fill="rgba(139,92,246,0.3)"/>
+  <rect x="8" y="21" width="32" height="6" rx="3" fill="rgba(139,92,246,0.3)"/>
+  <rect x="8" y="30" width="32" height="6" rx="3" fill="rgba(139,92,246,0.3)"/>
+  <!-- Slider thumbs -->
+  <circle cx="28" cy="15" r="5" fill="url(#sliderGrad)"/>
+  <circle cx="18" cy="24" r="5" fill="url(#sliderGrad)"/>
+  <circle cx="32" cy="33" r="5" fill="url(#sliderGrad)"/>
+  <!-- Connection arrows -->
+  <path d="M28 20v-2M18 27h8M32 30h-4" stroke="rgba(167,139,250,0.6)" stroke-width="1.5" stroke-linecap="round"/>
+  <defs>
+    <linearGradient id="sliderGrad" x1="0" y1="0" x2="48" y2="48">
+      <stop stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+  </defs>
+</svg>

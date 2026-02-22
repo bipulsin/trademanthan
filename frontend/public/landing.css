@@ -247,62 +247,16 @@ body.landing-page {
 .landing-hero .hero-visual {
   position: relative;
   min-height: 400px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.landing-hero .hero-visual-inner {
-  position: relative;
+.landing-hero .hero-visual-img {
   width: 100%;
-  height: 100%;
-  min-height: 380px;
-}
-
-/* Hero illustration - globe, curved arrow, candlesticks */
-.hero-graphic {
-  position: absolute;
-  width: 100%;
-  height: 100%;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-}
-
-.hero-stars {
-  position: absolute;
-  inset: 0;
-  background-image:
-    radial-gradient(2px 2px at 20px 30px, rgba(255,255,255,0.4), transparent),
-    radial-gradient(2px 2px at 40px 70px, rgba(59,130,246,0.3), transparent),
-    radial-gradient(2px 2px at 50px 160px, rgba(255,255,255,0.3), transparent),
-    radial-gradient(2px 2px at 90px 40px, rgba(139,92,246,0.3), transparent),
-    radial-gradient(2px 2px at 130px 80px, rgba(255,255,255,0.35), transparent),
-    radial-gradient(2px 2px at 160px 120px, rgba(59,130,246,0.25), transparent);
-  background-size: 200px 200px;
-  animation: twinkle 4s ease-in-out infinite;
-}
-
-@keyframes twinkle {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
-}
-
-.hero-graphic .hero-illustration {
-  position: absolute;
-  width: 100%;
-  height: 100%;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  max-width: 420px;
-  max-height: 340px;
-}
-
-.hero-graphic .grid-lines {
-  position: absolute;
-  inset: 0;
-  background-image: 
-    linear-gradient(rgba(59, 130, 246, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(59, 130, 246, 0.04) 1px, transparent 1px);
-  background-size: 40px 40px;
+  max-width: 600px;
+  height: auto;
+  object-fit: contain;
 }
 
 /* ========== Features Section ========== */
@@ -360,29 +314,14 @@ body.landing-page {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.75rem;
   border-radius: 12px;
   background: var(--gradient-glow);
 }
 
-.landing-features .feature-icon-yellow {
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.4) 0%, rgba(251, 191, 36, 0.3) 100%);
-  color: #fbbf24;
-}
-
-.landing-features .feature-icon-blue {
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.4) 0%, rgba(96, 165, 250, 0.3) 100%);
-  color: #60a5fa;
-}
-
-.landing-features .feature-icon-purple {
-  background: linear-gradient(135deg, rgba(139, 92, 246, 0.4) 0%, rgba(167, 139, 250, 0.3) 100%);
-  color: #a78bfa;
-}
-
-.landing-features .feature-icon-shield {
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.4) 0%, rgba(96, 165, 250, 0.3) 100%);
-  color: #60a5fa;
+.landing-features .feature-icon-svg {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
 }
 
 .landing-features .feature-block h3 {
@@ -493,14 +432,13 @@ body.landing-page {
     padding: 6rem 1rem 3rem;
   }
 
-  .landing-hero .hero-visual {
+  .landing-hero   .hero-visual {
     min-height: 280px;
     order: -1;
   }
 
-  .hero-graphic .hero-illustration {
-    max-width: 320px;
-    max-height: 260px;
+  .hero-visual-img {
+    max-width: 100%;
   }
 
   .landing-features {

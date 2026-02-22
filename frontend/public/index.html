@@ -84,47 +84,7 @@
                     </button>
                 </div>
                 <div class="hero-visual">
-                    <div class="hero-visual-inner">
-                        <div class="hero-graphic">
-                            <div class="hero-stars"></div>
-                            <div class="grid-lines"></div>
-                            <svg class="hero-illustration" viewBox="0 0 400 320" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <defs>
-                                    <linearGradient id="earthGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                                        <stop offset="0%" stop-color="#1e40af"/>
-                                        <stop offset="50%" stop-color="#3b82f6"/>
-                                        <stop offset="100%" stop-color="#60a5fa"/>
-                                    </linearGradient>
-                                    <linearGradient id="arrowGradHero" x1="0%" y1="0%" x2="100%" y2="100%">
-                                        <stop offset="0%" stop-color="#3b82f6"/>
-                                        <stop offset="40%" stop-color="#60a5fa"/>
-                                        <stop offset="60%" stop-color="#f59e0b"/>
-                                        <stop offset="100%" stop-color="#fbbf24"/>
-                                    </linearGradient>
-                                    <filter id="glow">
-                                        <feGaussianBlur stdDeviation="4" result="blur"/>
-                                        <feMerge>
-                                            <feMergeNode in="blur"/>
-                                            <feMergeNode in="SourceGraphic"/>
-                                        </feMerge>
-                                    </filter>
-                                </defs>
-                                <!-- Glowing Earth globe -->
-                                <circle cx="200" cy="155" r="72" fill="url(#earthGrad)" filter="url(#glow)" opacity="0.95"/>
-                                <circle cx="200" cy="155" r="68" fill="none" stroke="rgba(59,130,246,0.6)" stroke-width="2"/>
-                                <!-- Curved arrow - blue top, orange underside, wrapping around globe -->
-                                <path d="M75 255 Q115 75 200 45 Q285 75 325 255" stroke="url(#arrowGradHero)" stroke-width="14" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-                                <!-- Candlestick charts in front (green, green, red, green, orange) -->
-                                <g transform="translate(115, 195)">
-                                    <rect x="0" y="35" width="10" height="35" rx="2" fill="#10b981"/>
-                                    <rect x="22" y="5" width="10" height="65" rx="2" fill="#10b981"/>
-                                    <rect x="44" y="45" width="10" height="25" rx="2" fill="#ef4444"/>
-                                    <rect x="66" y="25" width="10" height="45" rx="2" fill="#10b981"/>
-                                    <rect x="88" y="50" width="10" height="20" rx="2" fill="#f59e0b"/>
-                                </g>
-                            </svg>
-                        </div>
-                    </div>
+                    <img src="hero-visual.png" alt="AI trading globe and candlestick visualization" class="hero-visual-img">
                 </div>
             </div>
         </section>
@@ -134,22 +94,22 @@
             <div class="features-inner">
                 <div class="features-grid">
                     <div class="feature-block">
-                        <div class="feature-icon feature-icon-yellow"><i class="fas fa-bolt"></i></div>
+                        <div class="feature-icon"><img src="icons/icon-execution.svg" alt="" class="feature-icon-svg"></div>
                         <h3>Real-Time Algo Execution</h3>
                         <p>Harness the power of advanced AI to automate your trading strategies and maximize your profits.</p>
                     </div>
                     <div class="feature-block">
-                        <div class="feature-icon feature-icon-blue"><i class="fas fa-brain"></i></div>
+                        <div class="feature-icon"><img src="icons/icon-ai.svg" alt="" class="feature-icon-svg"></div>
                         <h3>AI Trading Signals</h3>
                         <p>Harness the power of advanced AI to automate your trading strategies and maximize your profits.</p>
                     </div>
                     <div class="feature-block">
-                        <div class="feature-icon feature-icon-purple"><i class="fas fa-sliders-h"></i></div>
+                        <div class="feature-icon"><img src="icons/icon-strategy.svg" alt="" class="feature-icon-svg"></div>
                         <h3>Customizable Strategies</h3>
                         <p>Generate power tools to easily customize your trading and time when trading your action evolves.</p>
                     </div>
                     <div class="feature-block">
-                        <div class="feature-icon feature-icon-shield"><i class="fas fa-shield-alt"></i></div>
+                        <div class="feature-icon"><img src="icons/icon-risk.svg" alt="" class="feature-icon-svg"></div>
                         <h3>Smart Risk Management</h3>
                         <p>Minimize your risk with advanced AI to automate your trading processes and improve your profits.</p>
                     </div>
