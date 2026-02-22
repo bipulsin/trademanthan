@@ -99,8 +99,14 @@ if ssh -i "$EC2_KEY" -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" "bash -s"
     echo "Restarting backend service..."
     sudo systemctl restart trademanthan-backend
     
+    echo "Updating Nginx config for tradentical.com..."
+    if [ -f /home/ubuntu/trademanthan/scripts/nginx-tradentical.conf ]; then
+        sudo cp /home/ubuntu/trademanthan/scripts/nginx-tradentical.conf /etc/nginx/sites-available/tradentical
+        sudo ln -sf /etc/nginx/sites-available/tradentical /etc/nginx/sites-enabled/
+    fi
+    
     echo "Reloading Nginx..."
-    sudo systemctl reload nginx
+    sudo nginx -t 2>/dev/null && sudo systemctl reload nginx
     
     echo "Checking service status..."
     if systemctl is-active --quiet trademanthan-backend; then
