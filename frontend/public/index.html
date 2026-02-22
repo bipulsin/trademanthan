@@ -18,11 +18,26 @@
             <div class="nav-inner">
                 <div class="brand">
                     <svg class="brand-icon" viewBox="0 0 42 42" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <circle cx="21" cy="21" r="20" fill="url(#brandGrad)" opacity="0.9"/>
-                        <path d="M21 8v14l8-7-8-7z" fill="white" opacity="0.95"/>
-                        <path d="M13 28h16v2H13v-2z" fill="white" opacity="0.8"/>
+                        <circle cx="21" cy="21" r="12" fill="url(#globeGrad)"/>
+                        <ellipse cx="21" cy="21" rx="18" ry="5" fill="none" stroke="url(#ringGrad)" stroke-width="2" opacity="0.9"/>
+                        <ellipse cx="21" cy="21" rx="18" ry="5" fill="none" stroke="url(#ringGrad2)" stroke-width="1.5" opacity="0.7" transform="rotate(60 21 21)"/>
+                        <ellipse cx="21" cy="21" rx="14" ry="4" fill="none" stroke="url(#ringGrad3)" stroke-width="1" opacity="0.6" transform="rotate(-30 21 21)"/>
                         <defs>
-                            <linearGradient id="brandGrad" x1="0" y1="0" x2="42" y2="42" gradientUnits="userSpaceOnUse">
+                            <linearGradient id="globeGrad" x1="0" y1="0" x2="42" y2="42">
+                                <stop stop-color="#3b82f6"/>
+                                <stop offset="0.5" stop-color="#10b981"/>
+                                <stop offset="1" stop-color="#f59e0b"/>
+                            </linearGradient>
+                            <linearGradient id="ringGrad" x1="0" y1="0" x2="42" y2="0">
+                                <stop stop-color="#10b981"/>
+                                <stop offset="0.5" stop-color="#3b82f6"/>
+                                <stop offset="1" stop-color="#f59e0b"/>
+                            </linearGradient>
+                            <linearGradient id="ringGrad2" x1="0" y1="0" x2="42" y2="42">
+                                <stop stop-color="#3b82f6"/>
+                                <stop offset="1" stop-color="#f59e0b"/>
+                            </linearGradient>
+                            <linearGradient id="ringGrad3" x1="0" y1="0" x2="42" y2="0">
                                 <stop stop-color="#10b981"/>
                                 <stop offset="1" stop-color="#f59e0b"/>
                             </linearGradient>
@@ -71,25 +86,43 @@
                 <div class="hero-visual">
                     <div class="hero-visual-inner">
                         <div class="hero-graphic">
+                            <div class="hero-stars"></div>
                             <div class="grid-lines"></div>
-                            <div class="globe"></div>
-                            <svg class="arrow-curve" viewBox="0 0 280 140" fill="none">
-                                <path d="M0 140 Q140 0 280 140" stroke="url(#arrowGrad)" stroke-width="4" fill="none"/>
+                            <svg class="hero-illustration" viewBox="0 0 400 320" fill="none" xmlns="http://www.w3.org/2000/svg">
                                 <defs>
-                                    <linearGradient id="arrowGrad" x1="0" y1="140" x2="280" y2="0">
-                                        <stop offset="0%" stop-color="#3b82f6"/>
-                                        <stop offset="50%" stop-color="#8b5cf6"/>
-                                        <stop offset="100%" stop-color="#f59e0b"/>
+                                    <linearGradient id="earthGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                        <stop offset="0%" stop-color="#1e40af"/>
+                                        <stop offset="50%" stop-color="#3b82f6"/>
+                                        <stop offset="100%" stop-color="#60a5fa"/>
                                     </linearGradient>
+                                    <linearGradient id="arrowGradHero" x1="0%" y1="0%" x2="100%" y2="100%">
+                                        <stop offset="0%" stop-color="#3b82f6"/>
+                                        <stop offset="40%" stop-color="#60a5fa"/>
+                                        <stop offset="60%" stop-color="#f59e0b"/>
+                                        <stop offset="100%" stop-color="#fbbf24"/>
+                                    </linearGradient>
+                                    <filter id="glow">
+                                        <feGaussianBlur stdDeviation="4" result="blur"/>
+                                        <feMerge>
+                                            <feMergeNode in="blur"/>
+                                            <feMergeNode in="SourceGraphic"/>
+                                        </feMerge>
+                                    </filter>
                                 </defs>
+                                <!-- Glowing Earth globe -->
+                                <circle cx="200" cy="155" r="72" fill="url(#earthGrad)" filter="url(#glow)" opacity="0.95"/>
+                                <circle cx="200" cy="155" r="68" fill="none" stroke="rgba(59,130,246,0.6)" stroke-width="2"/>
+                                <!-- Curved arrow - blue top, orange underside, wrapping around globe -->
+                                <path d="M75 255 Q115 75 200 45 Q285 75 325 255" stroke="url(#arrowGradHero)" stroke-width="14" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                                <!-- Candlestick charts in front (green, green, red, green, orange) -->
+                                <g transform="translate(115, 195)">
+                                    <rect x="0" y="35" width="10" height="35" rx="2" fill="#10b981"/>
+                                    <rect x="22" y="5" width="10" height="65" rx="2" fill="#10b981"/>
+                                    <rect x="44" y="45" width="10" height="25" rx="2" fill="#ef4444"/>
+                                    <rect x="66" y="25" width="10" height="45" rx="2" fill="#10b981"/>
+                                    <rect x="88" y="50" width="10" height="20" rx="2" fill="#f59e0b"/>
+                                </g>
                             </svg>
-                            <div class="candles">
-                                <div class="candle up"></div>
-                                <div class="candle down"></div>
-                                <div class="candle up"></div>
-                                <div class="candle down"></div>
-                                <div class="candle up"></div>
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -101,24 +134,24 @@
             <div class="features-inner">
                 <div class="features-grid">
                     <div class="feature-block">
-                        <div class="feature-icon"><i class="fas fa-bolt"></i></div>
+                        <div class="feature-icon feature-icon-yellow"><i class="fas fa-bolt"></i></div>
                         <h3>Real-Time Algo Execution</h3>
-                        <p>Execute trading strategies instantly with low-latency order routing and real-time market data.</p>
+                        <p>Harness the power of advanced AI to automate your trading strategies and maximize your profits.</p>
                     </div>
                     <div class="feature-block">
-                        <div class="feature-icon"><i class="fas fa-brain"></i></div>
+                        <div class="feature-icon feature-icon-blue"><i class="fas fa-brain"></i></div>
                         <h3>AI Trading Signals</h3>
-                        <p>Leverage machine learning models to identify high-probability trade setups and market patterns.</p>
+                        <p>Harness the power of advanced AI to automate your trading strategies and maximize your profits.</p>
                     </div>
                     <div class="feature-block">
-                        <div class="feature-icon"><i class="fas fa-cogs"></i></div>
+                        <div class="feature-icon feature-icon-purple"><i class="fas fa-sliders-h"></i></div>
                         <h3>Customizable Strategies</h3>
-                        <p>Build and deploy your own algo strategies with our flexible, no-code strategy builder.</p>
+                        <p>Generate power tools to easily customize your trading and time when trading your action evolves.</p>
                     </div>
                     <div class="feature-block">
-                        <div class="feature-icon"><i class="fas fa-shield-alt"></i></div>
+                        <div class="feature-icon feature-icon-shield"><i class="fas fa-shield-alt"></i></div>
                         <h3>Smart Risk Management</h3>
-                        <p>Automated stop-loss, position sizing, and portfolio-level risk controls to protect your capital.</p>
+                        <p>Minimize your risk with advanced AI to automate your trading processes and improve your profits.</p>
                     </div>
                 </div>
             </div>
