@@ -16,6 +16,7 @@ import backend.routers.broker as broker
 import backend.routers.products as products
 import backend.routers.algo as algo
 import backend.routers.scan as scan
+import backend.routers.cargpt as cargpt
 # OLD SCHEDULERS - DISABLED - Migrated to scan_st1_algo
 # from backend.services.master_stock_scheduler import start_scheduler, stop_scheduler
 # from backend.services.instruments_downloader import start_instruments_scheduler, stop_instruments_scheduler
@@ -175,7 +176,7 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://trademanthan.in", "http://localhost:3000", "http://localhost:8000", "https://65.2.29.219"],
+    allow_origins=["https://trademanthan.in", "https://tradentical.com", "http://localhost:3000", "http://localhost:8000", "https://65.2.29.219"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -197,6 +198,7 @@ app.include_router(broker.router)
 app.include_router(products.router)
 app.include_router(algo.router)
 app.include_router(scan.router)
+app.include_router(cargpt.router)
 
 def get_database_info():
     """Get database connection information"""

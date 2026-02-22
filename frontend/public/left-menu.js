@@ -20,6 +20,7 @@ class LeftMenu {
         if (path.includes('scan')) return 'scan';
         if (path.includes('settings')) return 'settings';
         if (path.includes('reports')) return 'reports';
+        if (path.includes('car_setup') || path.includes('car_gpt')) return 'cargpt';
         return 'dashboard';
     }
 
@@ -63,7 +64,7 @@ class LeftMenu {
                                       currentPath.includes('reports') ||
                                       currentPath.includes('settings');
                 
-                if (!hasRedirected && isProtectedPage) {
+                if (!hasRedirected && isProtectedPage && !isCargptPage) {
                     hasRedirected = true;
                     console.log('LeftMenu: Redirecting to login page');
                     window.location.replace('index.html');
@@ -171,6 +172,10 @@ class LeftMenu {
                             <li class="nav-item" data-section="reports">
                                 <i class="fas fa-chart-bar"></i>
                                 <span>Reports</span>
+                            </li>
+                            <li class="nav-item" data-section="cargpt">
+                                <i class="fas fa-chart-line"></i>
+                                <span>CAR GPT</span>
                             </li>
                         </ul>
                     </nav>
@@ -287,6 +292,9 @@ class LeftMenu {
                         break;
                     case 'reports':
                         targetPage = 'reports.html';
+                        break;
+                    case 'cargpt':
+                        targetPage = 'car_setup.html';
                         break;
                     default:
                         console.error('LeftMenu: Unknown section:', section);

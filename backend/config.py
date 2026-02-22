@@ -21,4 +21,7 @@ class Settings(BaseSettings):
     UPSTOX_API_SECRET: str = os.getenv("UPSTOX_API_SECRET", "8lvpi8fb1f")
     UPSTOX_REDIRECT_URI: str = os.getenv("UPSTOX_REDIRECT_URI", "https://trademanthan.in/scan/upstox/callback")
 
+    # CAR GPT Configuration
+    CAR_NUMBER_OF_WEEKS: int = int(os.getenv("CAR_NUMBER_OF_WEEKS", "52"))
+
 settings = Settings()

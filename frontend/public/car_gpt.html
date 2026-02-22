@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CAR GPT - Analysis Report | Trade Manthan</title>
+    <link rel="stylesheet" href="cargpt.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body class="cargpt-body">
+    <header class="cargpt-title-bar">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <button class="cargpt-hamburger" id="menuToggle" aria-label="Menu">
+                <i class="fas fa-bars"></i>
+            </button>
+            <h1>CAR GPT - Report</h1>
+        </div>
+        <nav class="nav-links">
+            <a href="car_setup.html">Setup</a>
+            <a href="car_gpt.html" class="active">Report</a>
+            <a href="index.html">Home</a>
+        </nav>
+    </header>
+
+    <div class="cargpt-layout">
+        <aside class="cargpt-left-menu" id="leftMenu">
+            <nav>
+                <ul>
+                    <li><a href="car_setup.html"><i class="fas fa-cog"></i> Setup</a></li>
+                    <li><a href="car_gpt.html" class="active"><i class="fas fa-chart-line"></i> CAR Report</a></li>
+                    <li><a href="index.html"><i class="fas fa-home"></i> Home</a></li>
+                </ul>
+            </nav>
+        </aside>
+
+        <main class="cargpt-main">
+            <section class="cargpt-card">
+                <h2>
+                    <span><i class="fas fa-chart-bar"></i> CAR Analysis</span>
+                    <button class="cargpt-btn cargpt-btn-primary" id="runBtn">
+                        <i class="fas fa-play"></i> Run Analysis
+                    </button>
+                </h2>
+                <div class="card-body">
+                    <p style="color: var(--cargpt-muted); margin-bottom: 16px; font-size: 0.9rem;">
+                        Runs CAR analysis on stocks from Setup. Uses 52-week high date, cumulative average, and BUY signal logic.
+                    </p>
+                    <div id="analysisContainer">
+                        <div class="cargpt-empty" id="analysisEmpty">Click "Run Analysis" to generate the report.</div>
+                        <div class="cargpt-loading" id="analysisLoading" style="display: none;">
+                            <i class="fas fa-spinner fa-spin"></i> Analyzing...
+                        </div>
+                        <div class="cargpt-table-wrap" id="analysisTableWrap" style="display: none;">
+                            <table class="cargpt-table">
+                                <thead>
+                                    <tr>
+                                        <th>Symbol</th>
+                                        <th>Stock Name</th>
+                                        <th>52 Week High Date</th>
+                                        <th>Current Price</th>
+                                        <th>Last 10 Day Cumulative Avg</th>
+                                        <th>Signal</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="analysisTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <div class="cargpt-overlay" id="loadingOverlay">
+        <div class="cargpt-loading" style="font-size: 1.2rem;">
+            <i class="fas fa-spinner fa-spin"></i> Running analysis...
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+
+        document.getElementById('menuToggle').addEventListener('click', () => {
+            document.getElementById('leftMenu').classList.toggle('mobile-open');
+        });
+
+        function formatCumulativeAvg(arr) {
+            if (!arr || arr.length === 0) return '-';
+            return arr.map(v => Number(v).toFixed(2)).join(', ');
+        }
+
+        document.getElementById('runBtn').addEventListener('click', async () => {
+            const overlay = document.getElementById('loadingOverlay');
+            const empty = document.getElementById('analysisEmpty');
+            const loading = document.getElementById('analysisLoading');
+            const wrap = document.getElementById('analysisTableWrap');
+            const tbody = document.getElementById('analysisTableBody');
+
+            overlay.classList.add('visible');
+            empty.style.display = 'none';
+            loading.style.display = 'block';
+            wrap.style.display = 'none';
+
+            try {
+                const r = await fetch(API_BASE + '/cargpt/analyze');
+                const data = await r.json();
+                loading.style.display = 'none';
+                overlay.classList.remove('visible');
+
+                if (!r.ok) {
+                    empty.style.display = 'block';
+                    empty.textContent = 'Error: ' + (data.detail || r.statusText);
+                    return;
+                }
+
+                if (!data || data.length === 0) {
+                    empty.style.display = 'block';
+                    empty.textContent = 'No stocks in list. Add symbols in Setup first.';
+                    return;
+                }
+
+                wrap.style.display = 'block';
+                tbody.innerHTML = '';
+                for (const row of data) {
+                    const tr = document.createElement('tr');
+                    const signalClass = (row.signal || '').includes('BUY') ? 'cargpt-signal-buy' : 'cargpt-signal-avoid';
+                    const err = row.error ? `<br><small style="color: var(--cargpt-avoid);">${row.error}</small>` : '';
+                    tr.innerHTML = `
+                        <td>${row.symbol || '-'}</td>
+                        <td>${row.stock_name || row.symbol || '-'}</td>
+                        <td>${row.week_52_high_date || '-'}${err}</td>
+                        <td>${row.current_price != null ? '₹' + row.current_price : '-'}</td>
+                        <td style="font-size: 0.85rem;">${formatCumulativeAvg(row.last_10_cumulative_avg)}</td>
+                        <td class="${signalClass}">${row.signal || '-'}</td>
+                    `;
+                    tbody.appendChild(tr);
+                }
+            } catch (e) {
+                loading.style.display = 'none';
+                overlay.classList.remove('visible');
+                empty.style.display = 'block';
+                empty.textContent = 'Error: ' + (e.message || 'Network error');
+                console.error(e);
+            }
+        });
+    </script>
+</body>
+</html>

@@ -18,7 +18,7 @@
             min-height: 100vh;
         }
         
-        /* Header with TRADENTICAL banner - full height */
+        /* Header with TRADENTICAL banner - no padding top/bottom */
         .header {
             position: fixed !important;
             top: 0 !important;
@@ -26,6 +26,7 @@
             right: 0 !important;
             z-index: 1000 !important;
             height: auto !important;
+            padding: 0 !important;
             border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
         }
         
@@ -34,12 +35,16 @@
             top: 0;
             left: 0;
             right: 0;
+            bottom: 0;
             display: flex;
             align-items: center;
-            justify-content: space-between;
-            padding: 0 1rem;
-            min-height: 48px;
+            justify-content: center;
+            padding: 0 !important;
             pointer-events: none;
+        }
+        
+        .header .container .logo {
+            display: none;
         }
         
         .header .container .nav {
@@ -51,6 +56,8 @@
             width: 100%;
             height: auto;
             vertical-align: top;
+            margin: 0;
+            padding: 0;
             pointer-events: none;
             object-fit: contain;
             object-position: center top;
@@ -63,12 +70,14 @@
                 height: 200px;
                 display: block;
                 overflow: hidden;
+                padding: 0 !important;
             }
             .header-banner {
                 height: 200px;
                 width: auto;
                 display: block;
                 margin: 0;
+                padding: 0;
                 object-fit: contain;
                 object-position: left top;
             }
@@ -321,6 +330,9 @@
             <div class="container">
                 <div class="logo" aria-hidden="true"></div>
                 <nav class="nav">
+                    <a href="car_setup.html" class="btn btn-secondary" style="margin-right: 0.5rem;">
+                        <i class="fas fa-chart-line"></i> CAR GPT
+                    </a>
                     <button class="btn btn-primary" onclick="openLoginPopup()">
                         <i class="fas fa-sign-in-alt"></i>
                         Sign In

@@ -194,6 +194,15 @@ SYMBOL_TO_ISIN_FALLBACK = {
     "UNOMINDA": "INE405E01023",  # UNO MINDA LIMITED
     "SHREECEM": "INE070A01015",  # SHREE CEMENT LIMITED
     # Note: BAJFINANCE, ULTRACEMCO, LUPIN already exist above
+
+    # Stocks that caused "Missing option data" (20-Feb) - ensure ISIN available for option chain
+    "LTIM": "INE214T01019",  # LTIMindtree Ltd (NSE: LTIM)
+    "LTIMIND": "INE214T01019",  # Alias for LTIMindtree
+    "LTIMINDTREE": "INE214T01019",  # Alias for LTIMindtree
+    "HINDPETRO": "INE094A01015",  # Hindustan Petroleum Corporation Ltd
+    "HPCL": "INE094A01015",  # Alias for Hindustan Petroleum
+    "PERSISTENT": "INE262H01021",  # Persistent Systems Ltd
+    "PERSISTENTSYS": "INE262H01021",  # Alias for Persistent Systems
 }
 
 def load_isin_from_instruments() -> Dict[str, str]:
@@ -337,6 +346,36 @@ def get_instrument_key(symbol: str, exchange: str = "NSE_EQ") -> str:
         # Fallback to simple format (may not work for regular stocks)
         logger.warning(f"⚠️ No ISIN found for {symbol}, using fallback format")
         return f"{exchange}|{symbol_upper}"
+
+def get_stock_name(symbol: str) -> Optional[str]:
+    """
+    Get company/stock name from instruments file for a given symbol.
+    
+    Args:
+        symbol: Stock symbol (e.g., "RELIANCE")
+        
+    Returns:
+        Company name if found, symbol itself as fallback, or None
+    """
+    if not symbol:
+        return None
+    symbol_upper = symbol.strip().upper().replace("-EQ", "").replace(".NS", "").replace(".BO", "")
+    try:
+        if not INSTRUMENTS_FILE.exists():
+            return symbol_upper
+        with open(INSTRUMENTS_FILE, 'r') as f:
+            instruments = json.load(f)
+        for inst in instruments:
+            if inst.get('segment') == 'NSE_EQ':
+                trading_symbol = (inst.get('trading_symbol') or inst.get('tradingsymbol') or '').strip().upper()
+                if trading_symbol == symbol_upper:
+                    name = inst.get('name', '').strip()
+                    return name if name else symbol_upper
+        return symbol_upper
+    except Exception as e:
+        logger.warning(f"Could not get stock name for {symbol}: {e}")
+        return symbol_upper
+
 
 def is_symbol_supported(symbol: str) -> bool:
     """

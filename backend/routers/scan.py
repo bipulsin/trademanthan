@@ -316,10 +316,44 @@ def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: st
         return None
 
 # Helper function to process webhook data
+# Chartink/scan symbol -> underlying_symbol aliases for NSE F&O instruments lookup
+# Upstox instruments may use different underlying_symbol than Chartink sends
+CHARTINK_UNDERLYING_ALIASES = {
+    "LTIM": ["LTIM", "LTIMINDTREE", "LTIMIND"],
+    "LTIMIND": ["LTIM", "LTIMINDTREE", "LTIMIND"],
+    "LTIMINDTREE": ["LTIM", "LTIMINDTREE", "LTIMIND"],
+    "HINDPETRO": ["HINDPETRO", "HPCL"],
+    "HPCL": ["HINDPETRO", "HPCL"],
+    "PERSISTENT": ["PERSISTENT", "PERSISTENTSYS"],
+    "PERSISTENTSYS": ["PERSISTENT", "PERSISTENTSYS"],
+}
+
+# Symbol to use for Upstox option chain API (some symbols need mapping)
+OPTION_CHAIN_API_SYMBOL = {
+    "LTIMIND": "LTIM",
+    "LTIMINDTREE": "LTIM",
+    "HPCL": "HINDPETRO",
+    "PERSISTENTSYS": "PERSISTENT",
+}
+
+
+def _symbol_for_option_chain_api(stock_name: str) -> str:
+    """Return symbol to use for Upstox option chain API."""
+    key = stock_name.strip().upper()
+    return OPTION_CHAIN_API_SYMBOL.get(key, key)
+
+
+def _symbols_to_try_for_underlying(stock_name: str) -> List[str]:
+    """Return list of underlying_symbol values to try when matching instruments."""
+    key = stock_name.strip().upper()
+    aliases = CHARTINK_UNDERLYING_ALIASES.get(key, [key])
+    return list(dict.fromkeys([key] + [a for a in aliases if a != key]))
+
+
 def find_option_contract_from_instruments(stock_name: str, option_type: str, stock_ltp: float, vwap_service=None) -> Optional[str]:
     """
     Find the correct option contract from instruments.json based on:
-    - underlying_symbol matching stock_name
+    - underlying_symbol matching stock_name (or aliases for LTIM, HINDPETRO, PERSISTENT, etc.)
     - option_type matching (CE/PE)
     - Strike price from option chain API (volume/OI based) - REQUIRED, no fallback
     - Expiry month: If current date > 17th, use next month's expiry; otherwise use current month
@@ -365,10 +399,11 @@ def find_option_contract_from_instruments(stock_name: str, option_type: str, sto
         
         # Get strike from option chain API - REQUIRED, no fallback
         target_strike = None
+        api_symbol = _symbol_for_option_chain_api(stock_name)
         if vwap_service:
-            logger.info(f"Fetching strike from option chain for {stock_name} {option_type} (LTP: {stock_ltp})")
+            logger.info(f"Fetching strike from option chain for {stock_name} {option_type} (LTP: {stock_ltp}, API symbol: {api_symbol})")
             try:
-                strike_data = find_strike_from_option_chain(vwap_service, stock_name, option_type, stock_ltp)
+                strike_data = find_strike_from_option_chain(vwap_service, api_symbol, option_type, stock_ltp)
                 if strike_data:
                     target_strike = strike_data['strike_price']
                     logger.info(f"Using option chain strike for {stock_name}: {target_strike} (Volume: {strike_data['volume']}, OI: {strike_data['oi']})")
@@ -444,12 +479,14 @@ def find_option_contract_from_instruments(stock_name: str, option_type: str, sto
         best_match = None
         best_match_score = float('inf')
         
+        symbols_to_try = _symbols_to_try_for_underlying(stock_name)
         for inst in instruments_data:
             # Skip non-dictionary entries
             if not isinstance(inst, dict):
                 continue
             
-            if (inst.get('underlying_symbol') == stock_name and 
+            inst_underlying = (inst.get('underlying_symbol') or '').strip().upper()
+            if (inst_underlying in symbols_to_try and 
                 inst.get('instrument_type') == option_type and
                 inst.get('segment') == 'NSE_FO'):
                 
@@ -483,8 +520,8 @@ def find_option_contract_from_instruments(stock_name: str, option_type: str, sto
                         
                         # Exact match (same month/year and exact strike)
                         if strike_diff < 0.01 and expiry_in_range and (inst_expiry.year == target_expiry_year and inst_expiry.month == target_expiry_month):
-                            # Fetch option contract name from instrument JSON
-                            option_contract = inst.get('trading_symbol')
+                            # Fetch option contract name from instrument JSON (Upstox may use trading_symbol or tradingsymbol)
+                            option_contract = inst.get('trading_symbol') or inst.get('tradingsymbol')
                             if not option_contract:
                                 # Log warning but continue searching - there might be another exact match with trading_symbol
                                 logger.warning(f"Exact match found for {stock_name} {option_type} strike {inst_strike} but trading_symbol is missing (instrument_key: {inst.get('instrument_key', 'N/A')})")
@@ -515,8 +552,8 @@ def find_option_contract_from_instruments(stock_name: str, option_type: str, sto
                     logger.info(f"⚠️ WARNING: Best match has no expiry timestamp, skipping")
                     return None
                 
-                # Fetch option contract name from instrument JSON
-                option_contract = best_match.get('trading_symbol')
+                # Fetch option contract name from instrument JSON (Upstox may use trading_symbol or tradingsymbol)
+                option_contract = best_match.get('trading_symbol') or best_match.get('tradingsymbol')
                 if not option_contract:
                     logger.warning(f"Best match found for {stock_name} {option_type} but trading_symbol is missing (instrument_key: {best_match.get('instrument_key', 'N/A')}, strike: {inst_strike})")
                     logger.info(f"⚠️ WARNING: trading_symbol not found in best match instrument JSON (strike: {inst_strike}, expiry: {inst_expiry.strftime('%d %b %Y')})")
@@ -5513,6 +5550,78 @@ async def upstox_oauth_status():
                 "error_type": "token_expired"
             }
         )
+
+
+@router.post("/upstox/postback")
+async def upstox_postback(request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """
+    Upstox Postback URL - receives real-time order and GTT updates.
+    Configure in Upstox My Apps: https://tradentical.com/scan/upstox/postback
+    
+    Requirements: Open POST API, no auth, respond with 2XX.
+    """
+    try:
+        body = await request.body()
+        payload = None
+        try:
+            payload = json.loads(body) if body else {}
+        except json.JSONDecodeError:
+            payload = {"raw": body.decode("utf-8", errors="replace")[:500]}
+        
+        update_type = payload.get("update_type", "unknown")
+        order_id = payload.get("order_id") or payload.get("order_ref_id")
+        status = payload.get("status", "")
+        
+        logger.info(f"📥 Upstox postback: type={update_type}, order_id={order_id}, status={status}")
+        
+        def process_postback():
+            try:
+                from backend.database import SessionLocal
+                _db = SessionLocal()
+                try:
+                    _process_upstox_order_update(_db, payload)
+                finally:
+                    _db.close()
+            except Exception as e:
+                logger.error(f"Upstox postback processing error: {e}", exc_info=True)
+        
+        background_tasks.add_task(process_postback)
+        
+        return JSONResponse(content={"status": "received"}, status_code=200)
+    except Exception as e:
+        logger.error(f"Upstox postback error: {e}", exc_info=True)
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=200)
+
+
+def _process_upstox_order_update(db: Session, payload: dict):
+    """Process Upstox order update - sync buy/sell price to IntradayStockOption when order completes."""
+    from backend.models.trading import IntradayStockOption
+    
+    order_id = payload.get("order_id") or payload.get("order_ref_id")
+    if not order_id:
+        return
+    
+    status = (payload.get("status") or "").lower()
+    average_price = payload.get("average_price") or payload.get("price") or 0
+    completed_statuses = ("complete", "filled", "cancelled", "rejected", "triggered")
+    is_complete = any(s in status for s in completed_statuses)
+    
+    trade = db.query(IntradayStockOption).filter(
+        (IntradayStockOption.buy_order_id == order_id) | (IntradayStockOption.sell_order_id == order_id)
+    ).first()
+    
+    if trade and is_complete and average_price and float(average_price) > 0:
+        try:
+            if trade.buy_order_id == order_id:
+                trade.buy_price = float(average_price)
+                logger.info(f"✅ Postback: Updated {trade.stock_name} buy_price=₹{average_price}")
+            elif trade.sell_order_id == order_id:
+                trade.sell_price = float(average_price)
+                logger.info(f"✅ Postback: Updated {trade.stock_name} sell_price=₹{average_price}")
+            db.commit()
+        except Exception as commit_err:
+            logger.warning(f"Postback commit error: {commit_err}")
+            db.rollback()
 
 
 @router.post("/update-vwap")
