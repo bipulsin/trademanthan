@@ -88,6 +88,9 @@ if ssh -i "$EC2_KEY" -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" "bash -s"
     git stash > /dev/null 2>&1 || true
     git pull origin main
     
+    echo "Running migrations..."
+    python3 backend/migrations/add_carstocklist.py 2>/dev/null || true
+    
     echo "Installing/updating backend dependencies..."
     cd backend
     source venv/bin/activate
