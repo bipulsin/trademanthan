@@ -254,7 +254,7 @@ body.landing-page {
 
 .landing-hero .hero-visual-img {
   width: 100%;
-  max-width: 600px;
+  max-width: 780px;  /* 130% of 600px base */
   height: auto;
   object-fit: contain;
 }
