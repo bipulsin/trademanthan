@@ -190,10 +190,15 @@ body.landing-page {
   margin: 0 auto;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 4rem;
+  gap: 2rem;
   align-items: center;
   position: relative;
   z-index: 1;
+}
+
+.landing-hero .hero-text {
+  position: relative;
+  z-index: 2;
 }
 
 .landing-hero .hero-text h1 {
@@ -246,17 +251,21 @@ body.landing-page {
 
 .landing-hero .hero-visual {
   position: relative;
-  min-height: 400px;
+  min-height: 480px;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
+  margin-left: -12%;
+  z-index: 1;
 }
 
 .landing-hero .hero-visual-img {
   width: 100%;
-  max-width: 780px;  /* 130% of 600px base */
+  min-width: 580px;
+  max-width: 900px;
   height: auto;
   object-fit: contain;
+  object-position: left center;
 }
 
 /* ========== Features Section ========== */
@@ -397,6 +406,17 @@ body.landing-page {
     text-align: center;
   }
 
+  .landing-hero .hero-visual {
+    margin-left: 0;
+    justify-content: center;
+  }
+
+  .landing-hero .hero-visual-img {
+    min-width: auto;
+    max-width: 100%;
+    object-position: center;
+  }
+
   .landing-hero .hero-text p {
     margin-left: auto;
     margin-right: auto;
@@ -432,12 +452,13 @@ body.landing-page {
     padding: 6rem 1rem 3rem;
   }
 
-  .landing-hero   .hero-visual {
+  .landing-hero .hero-visual {
     min-height: 280px;
     order: -1;
   }
 
-  .hero-visual-img {
+  .landing-hero .hero-visual-img {
+    min-width: auto;
     max-width: 100%;
   }
 
