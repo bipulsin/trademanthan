@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <!-- Two intertwined gears -->
+  <circle cx="20" cy="20" r="9" fill="none" stroke="url(#cogsGrad)" stroke-width="3"/>
+  <circle cx="20" cy="20" r="4" fill="url(#cogsGrad)"/>
+  <rect x="18" y="8" width="4" height="6" rx="1" fill="url(#cogsGrad)"/>
+  <rect x="18" y="34" width="4" height="6" rx="1" fill="url(#cogsGrad)"/>
+  <rect x="8" y="18" width="6" height="4" rx="1" fill="url(#cogsGrad)"/>
+  <rect x="34" y="18" width="6" height="4" rx="1" fill="url(#cogsGrad)"/>
+  <circle cx="28" cy="28" r="7" fill="none" stroke="url(#cogsGrad2)" stroke-width="2.5"/>
+  <circle cx="28" cy="28" r="3" fill="url(#cogsGrad2)"/>
+  <rect x="26" y="19" width="4" height="5" rx="1" fill="url(#cogsGrad2)"/>
+  <rect x="26" y="32" width="4" height="5" rx="1" fill="url(#cogsGrad2)"/>
+  <rect x="19" y="26" width="5" height="4" rx="1" fill="url(#cogsGrad2)"/>
+  <rect x="32" y="26" width="5" height="4" rx="1" fill="url(#cogsGrad2)"/>
+  <defs>
+    <linearGradient id="cogsGrad" x1="0" y1="0" x2="48" y2="48">
+      <stop stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+    <linearGradient id="cogsGrad2" x1="20" y1="20" x2="36" y2="36">
+      <stop stop-color="#a78bfa"/>
+      <stop offset="1" stop-color="#c4b5fd"/>
+    </linearGradient>
+  </defs>
+</svg>
