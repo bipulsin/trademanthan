@@ -16,6 +16,7 @@ from backend.services.car_service import (
     run_car_analysis_for_symbols,
     get_stock_name,
 )
+from backend.services.symbol_isin_mapping import get_stock_names_batch
 
 router = APIRouter(prefix="/cargpt", tags=["cargpt"])
 
@@ -94,11 +95,13 @@ async def get_stock_list(db: Session = Depends(get_db)):
     """Get all symbols from carstocklist with stock names from instruments, ordered by created_at desc."""
     try:
         rows = db.query(CarStockList).order_by(CarStockList.created_at.desc()).all()
+        symbols = [r.symbol for r in rows]
+        names_map = get_stock_names_batch(symbols) if symbols else {}
         return [
             CarStockItem(
                 id=r.id,
                 symbol=r.symbol,
-                stock_name=get_stock_name(r.symbol) or r.symbol,
+                stock_name=names_map.get(r.symbol.upper(), r.symbol) if r.symbol else r.symbol,
                 created_at=r.created_at.isoformat() if r.created_at else ""
             )
             for r in rows

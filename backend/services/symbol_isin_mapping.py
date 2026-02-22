@@ -347,6 +347,36 @@ def get_instrument_key(symbol: str, exchange: str = "NSE_EQ") -> str:
         logger.warning(f"⚠️ No ISIN found for {symbol}, using fallback format")
         return f"{exchange}|{symbol_upper}"
 
+def get_stock_names_batch(symbols: list) -> dict:
+    """Get stock names for multiple symbols in one pass (avoids repeated file reads)."""
+    result = {}
+    symbols_upper = [s.strip().upper().replace("-EQ", "").replace(".NS", "").replace(".BO", "") for s in symbols if s]
+    if not symbols_upper:
+        return result
+    try:
+        if not INSTRUMENTS_FILE.exists():
+            return {s: s for s in symbols_upper}
+        with open(INSTRUMENTS_FILE, 'r') as f:
+            instruments = json.load(f)
+        needed = set(symbols_upper)
+        for inst in instruments:
+            if not needed:
+                break
+            if inst.get('segment') == 'NSE_EQ':
+                trading_symbol = (inst.get('trading_symbol') or inst.get('tradingsymbol') or '').strip().upper()
+                if trading_symbol in needed:
+                    name = inst.get('name', '').strip()
+                    result[trading_symbol] = name if name else trading_symbol
+                    needed.discard(trading_symbol)
+        for s in symbols_upper:
+            if s not in result:
+                result[s] = s
+        return result
+    except Exception as e:
+        logger.warning(f"Could not get stock names batch: {e}")
+        return {s: s for s in symbols_upper}
+
+
 def get_stock_name(symbol: str) -> Optional[str]:
     """
     Get company/stock name from instruments file for a given symbol.
