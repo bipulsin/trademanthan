@@ -27,6 +27,10 @@ else:
 _ISIN_CACHE: Dict[str, str] = {}
 _CACHE_LOADED = False
 
+# In-memory cache for symbol->name (used by get_stock_names_batch to avoid repeated file reads)
+_NAMES_CACHE: Dict[str, str] = {}
+_NAMES_CACHE_LOADED = False
+
 # Fallback static mapping for common stocks (used if instruments file not available)
 # This is only used as fallback - primary source is instruments JSON file
 SYMBOL_TO_ISIN_FALLBACK = {
@@ -347,30 +351,47 @@ def get_instrument_key(symbol: str, exchange: str = "NSE_EQ") -> str:
         logger.warning(f"⚠️ No ISIN found for {symbol}, using fallback format")
         return f"{exchange}|{symbol_upper}"
 
+def _load_names_cache() -> Dict[str, str]:
+    """Load symbol->name mapping from instruments file (cached)."""
+    global _NAMES_CACHE, _NAMES_CACHE_LOADED
+    if _NAMES_CACHE_LOADED and _NAMES_CACHE:
+        return _NAMES_CACHE
+    try:
+        if not INSTRUMENTS_FILE.exists():
+            _NAMES_CACHE = {}
+            _NAMES_CACHE_LOADED = True
+            return _NAMES_CACHE
+        logger.info(f"Loading stock names cache from {INSTRUMENTS_FILE}")
+        with open(INSTRUMENTS_FILE, 'r') as f:
+            instruments = json.load(f)
+        names_map = {}
+        for inst in instruments:
+            if inst.get('segment') == 'NSE_EQ':
+                trading_symbol = (inst.get('trading_symbol') or inst.get('tradingsymbol') or '').strip().upper()
+                if trading_symbol:
+                    name = inst.get('name', '').strip()
+                    names_map[trading_symbol] = name if name else trading_symbol
+        _NAMES_CACHE = names_map
+        _NAMES_CACHE_LOADED = True
+        logger.info(f"Loaded {len(names_map)} stock names into cache")
+        return _NAMES_CACHE
+    except Exception as e:
+        logger.warning(f"Could not load names cache: {e}")
+        _NAMES_CACHE = {}
+        _NAMES_CACHE_LOADED = True
+        return _NAMES_CACHE
+
+
 def get_stock_names_batch(symbols: list) -> dict:
-    """Get stock names for multiple symbols in one pass (avoids repeated file reads)."""
+    """Get stock names for multiple symbols using cached instruments data (avoids repeated file reads)."""
     result = {}
     symbols_upper = [s.strip().upper().replace("-EQ", "").replace(".NS", "").replace(".BO", "") for s in symbols if s]
     if not symbols_upper:
         return result
     try:
-        if not INSTRUMENTS_FILE.exists():
-            return {s: s for s in symbols_upper}
-        with open(INSTRUMENTS_FILE, 'r') as f:
-            instruments = json.load(f)
-        needed = set(symbols_upper)
-        for inst in instruments:
-            if not needed:
-                break
-            if inst.get('segment') == 'NSE_EQ':
-                trading_symbol = (inst.get('trading_symbol') or inst.get('tradingsymbol') or '').strip().upper()
-                if trading_symbol in needed:
-                    name = inst.get('name', '').strip()
-                    result[trading_symbol] = name if name else trading_symbol
-                    needed.discard(trading_symbol)
+        names_map = _load_names_cache()
         for s in symbols_upper:
-            if s not in result:
-                result[s] = s
+            result[s] = names_map.get(s, s)
         return result
     except Exception as e:
         logger.warning(f"Could not get stock names batch: {e}")
