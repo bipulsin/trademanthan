@@ -68,7 +68,7 @@ body.landing-page {
   gap: 1rem;
 }
 
-/* Squared social icons - YouTube, Telegram, X, Instagram */
+/* Squared social icons - glass texture, YouTube, Telegram, X, Instagram */
 .landing-nav .social-icons-squared {
   display: flex;
   gap: 0.5rem;
@@ -83,18 +83,24 @@ body.landing-page {
   justify-content: center;
   color: #fff !important;
   font-size: 1rem;
-  transition: transform 0.2s, opacity 0.2s;
+  transition: transform 0.2s, opacity 0.2s, box-shadow 0.2s;
+  text-decoration: none;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 .landing-nav .social-icons-squared a:hover {
   transform: translateY(-2px);
-  opacity: 0.9;
+  opacity: 0.95;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 
-.landing-nav .social-yt { background: #ff0000; }
-.landing-nav .social-tg { background: #0088cc; }
-.landing-nav .social-x { background: #000000; }
-.landing-nav .social-ig { background: linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888); }
+.landing-nav .social-yt { background: rgba(255, 0, 0, 0.5); }
+.landing-nav .social-tg { background: rgba(0, 136, 204, 0.5); }
+.landing-nav .social-x { background: rgba(0, 0, 0, 0.5); }
+.landing-nav .social-ig { background: linear-gradient(135deg, rgba(240, 148, 51, 0.5), rgba(220, 39, 67, 0.5)); }
 
 /* Sign in with Google - blue & white gradient */
 .landing-nav .btn-google {
