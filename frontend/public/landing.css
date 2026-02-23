@@ -56,10 +56,12 @@ body.landing-page {
 }
 
 .landing-nav .brand-logo-img {
-  height: 48px;
+  height: 53px;
   width: auto;
   object-fit: contain;
   display: block;
+  transform: scale(1.1);
+  transform-origin: left center;
 }
 
 .landing-nav .nav-right {
@@ -181,13 +183,13 @@ body.landing-page {
   min-height: 70vh;
 }
 
-/* Hero visual - right-aligned, 3px from right, no top/bottom margin */
+/* Hero visual - right-aligned, 3px from right, 5px margin above */
 .landing-hero .hero-visual {
   position: absolute;
-  top: 0;
+  top: 5px;
   bottom: 0;
   right: 3px;
-  height: 100%;
+  height: calc(100% - 5px);
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -201,7 +203,7 @@ body.landing-page {
   max-width: 70vw;
   object-fit: contain;
   object-position: right center;
-  transform: scale(1.3);
+  transform: scale(1.2);
   transform-origin: right center;
 }
 
@@ -382,7 +384,8 @@ body.landing-page {
   }
 
   .landing-nav .brand-logo-img {
-    height: 36px;
+    height: 40px;
+    transform: scale(1.1);
   }
 
   .landing-nav .social-icons-squared {
