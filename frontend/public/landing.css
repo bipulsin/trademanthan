@@ -96,14 +96,15 @@ body.landing-page {
 .landing-nav .social-x { background: #000000; }
 .landing-nav .social-ig { background: linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888); }
 
-/* Sign in with Google - yellow background, black text */
+/* Sign in with Google - blue & white gradient */
 .landing-nav .btn-google {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
   padding: 0.6rem 1.25rem;
-  background: var(--accent-yellow) !important;
-  color: #000 !important;
+  background: linear-gradient(135deg, #2563eb 0%, #3b82f6 50%, #93c5fd 80%, #ffffff 100%) !important;
+  color: #fff !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
   border: none;
   border-radius: 10px;
   font-size: 0.9rem;
@@ -114,7 +115,7 @@ body.landing-page {
 }
 
 .landing-nav .btn-google:hover {
-  box-shadow: 0 4px 12px rgba(250, 204, 21, 0.4);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.5);
   transform: translateY(-1px);
 }
 
@@ -409,7 +410,7 @@ body.landing-page {
   }
 
   .landing-features {
-    padding: 3rem 1rem;
+    padding: 0 1rem 3rem;
   }
 
   .landing-features .features-grid {
