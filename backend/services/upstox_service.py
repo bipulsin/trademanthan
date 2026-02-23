@@ -98,13 +98,15 @@ class UpstoxService:
         """
         try:
             # Try different redirect URIs that might be configured
+            from backend.config import settings
             redirect_uris = [
+                settings.UPSTOX_REDIRECT_URI,
+                "https://tradentical.com/scan/upstox/callback",
+                "https://tradentical.com",
+                "https://trademanthan.in/scan/upstox/callback",
                 "https://trademanthan.in",
-                "https://trademanthan.in/",
                 "http://localhost:3000",
                 "https://localhost:3000",
-                "https://api.upstox.com",
-                "https://upstox.com"
             ]
             
             for redirect_uri in redirect_uris:
