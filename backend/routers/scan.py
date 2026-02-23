@@ -423,8 +423,9 @@ def find_option_contract_from_instruments(stock_name: str, option_type: str, sto
         logger.info(f"Looking for {option_type} option with strike {target_strike} for {stock_name}")
         logger.info(f"Looking for {option_type} option with strike {target_strike} for {stock_name}")
         
-        # Load instruments.json
-        instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
+        # Load instruments.json (EC2 path or project-relative fallback)
+        from backend.config import get_instruments_file_path
+        instruments_file = get_instruments_file_path()
         
         if not instruments_file.exists():
             logger.info(f"⚠️ Instruments JSON file not found: {instruments_file}")
@@ -490,15 +491,24 @@ def find_option_contract_from_instruments(stock_name: str, option_type: str, sto
                 inst.get('instrument_type') == option_type and
                 inst.get('segment') == 'NSE_FO'):
                 
-                inst_strike = inst.get('strike_price', 0)
+                # Upstox JSON uses strike_price; CSV uses strike - support both
+                inst_strike = inst.get('strike_price') or inst.get('strike') or 0
+                inst_strike = float(inst_strike) if inst_strike else 0
                 strike_diff = abs(inst_strike - target_strike)
                 
-                expiry_ms = inst.get('expiry', 0)
-                if expiry_ms:
+                expiry_val = inst.get('expiry', 0)
+                if expiry_val:
                     try:
-                        if expiry_ms > 1e12:
-                            expiry_ms = expiry_ms / 1000
-                        inst_expiry = datetime.fromtimestamp(expiry_ms, tz=ist)
+                        if isinstance(expiry_val, str):
+                            # Upstox CSV uses YYYY-MM-DD string format
+                            inst_expiry = ist.localize(datetime.strptime(expiry_val[:10], '%Y-%m-%d'))
+                        elif isinstance(expiry_val, (int, float)):
+                            expiry_ms = expiry_val
+                            if expiry_ms > 1e12:
+                                expiry_ms = expiry_ms / 1000
+                            inst_expiry = datetime.fromtimestamp(expiry_ms, tz=ist)
+                        else:
+                            continue
                     except (ValueError, OSError, OverflowError) as expiry_error:
                         # Skip instruments with invalid expiry timestamps
                         logger.debug(f"Skipping instrument with invalid expiry timestamp for {stock_name}: {expiry_error}")
@@ -541,12 +551,17 @@ def find_option_contract_from_instruments(stock_name: str, option_type: str, sto
         # If no exact match, use best match within tolerance
         if best_match:
             try:
-                inst_strike = best_match.get('strike_price', 0)
-                expiry_ms = best_match.get('expiry', 0)
-                if expiry_ms:
-                    if expiry_ms > 1e12:
-                        expiry_ms = expiry_ms / 1000
-                    inst_expiry = datetime.fromtimestamp(expiry_ms, tz=ist)
+                inst_strike = best_match.get('strike_price') or best_match.get('strike') or 0
+                inst_strike = float(inst_strike) if inst_strike else 0
+                expiry_val = best_match.get('expiry', 0)
+                if expiry_val:
+                    if isinstance(expiry_val, str):
+                        inst_expiry = ist.localize(datetime.strptime(expiry_val[:10], '%Y-%m-%d'))
+                    else:
+                        expiry_ms = expiry_val
+                        if expiry_ms > 1e12:
+                            expiry_ms = expiry_ms / 1000
+                        inst_expiry = datetime.fromtimestamp(expiry_ms, tz=ist)
                 else:
                     logger.warning(f"Best match for {stock_name} {option_type} has no expiry timestamp")
                     logger.info(f"⚠️ WARNING: Best match has no expiry timestamp, skipping")
@@ -931,7 +946,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     import json as json_lib
                     import re
                     
-                    instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
+                    from backend.config import get_instruments_file_path
+                    instruments_file = get_instruments_file_path()
                     
                     if not instruments_file.exists():
                         logger.info(f"⚠️ Instruments JSON file not found: {instruments_file}")
@@ -1232,7 +1248,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     # Try a simpler lookup - search by option contract string directly
                     from pathlib import Path
                     import json as json_lib
-                    instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
+                    from backend.config import get_instruments_file_path
+                    instruments_file = get_instruments_file_path()
                     if instruments_file.exists():
                         with open(instruments_file, 'r') as f:
                             instruments_data = json_lib.load(f)
@@ -1719,10 +1736,11 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         if lot_size <= 0 and stock.get("option_contract"):
                             try:
                                 import json
-                                instruments_file = "/home/ubuntu/trademanthan/data/instruments/nse_instruments.json"
-                                if os.path.exists(instruments_file):
+                                from backend.config import get_instruments_file_path
+                                instruments_file = get_instruments_file_path()
+                                if instruments_file.exists():
                                     with open(instruments_file, 'r') as f:
-                                        instruments_data = json_module.load(f)
+                                        instruments_data = json.load(f)
                                     
                                     # Parse option contract to get symbol and strike
                                     option_contract = stock.get("option_contract", "")
@@ -2987,7 +3005,8 @@ async def process_all_today_stocks(db: Session = Depends(get_db)):
         error_count = 0
         
         # Load instruments.json to get lot_size
-        instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
+        from backend.config import get_instruments_file_path
+        instruments_file = get_instruments_file_path()
         instruments_data = []
         if instruments_file.exists():
             try:
@@ -3118,6 +3137,29 @@ async def process_all_today_stocks(db: Session = Depends(get_db)):
             "error": str(e),
             "timestamp": datetime.now().isoformat()
         }
+
+@router.post("/download-instruments")
+async def download_instruments_now():
+    """
+    Manually trigger download of Upstox NSE instruments.
+    Use when scan shows 'Missing option data' - instruments file may be missing or stale.
+    """
+    try:
+        from backend.services.instruments_downloader import download_daily_instruments
+        success = download_daily_instruments()
+        return {
+            "success": success,
+            "message": "Instruments downloaded successfully" if success else "Instruments download failed",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error downloading instruments: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
 
 @router.get("/scheduler-status")
 async def get_scheduler_status():
@@ -3341,7 +3383,8 @@ async def health_check(db: Session = Depends(get_db)):
             token_error = str(e)
         
         # Check instruments file
-        instruments_exists = os.path.exists("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
+        from backend.config import get_instruments_file_path
+        instruments_exists = get_instruments_file_path().exists()
         
         # Overall health status
         is_healthy = db_healthy and (now.hour < 11 or today_alerts > 0 or now.weekday() >= 5)
@@ -4429,8 +4472,9 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                 # Load instruments JSON if needed
                 from pathlib import Path
                 import json as json_lib
+                from backend.config import get_instruments_file_path
                 
-                instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
+                instruments_file = get_instruments_file_path()
                 
                 if not instruments_file.exists():
                     logger.info(f"Instruments JSON not found")
@@ -5693,8 +5737,9 @@ async def manually_update_vwap(db: Session = Depends(get_db)):
                         # Fetch option LTP using instruments JSON
                         from pathlib import Path
                         import json as json_lib
+                        from backend.config import get_instruments_file_path
                         
-                        instruments_file = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
+                        instruments_file = get_instruments_file_path()
                         
                         if instruments_file.exists():
                             with open(instruments_file, 'r') as f:

@@ -14,14 +14,16 @@ from typing import Optional, Dict
 logger = logging.getLogger(__name__)
 
 # Path to instruments JSON file (downloaded daily at 9:05 AM)
-# Auto-detect path based on environment
-import os
-if os.path.exists("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json"):
-    # Production (EC2)
-    INSTRUMENTS_FILE = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
-else:
-    # Development (local) - relative to project root
-    INSTRUMENTS_FILE = Path(__file__).parent.parent.parent / "data" / "instruments" / "nse_instruments.json"
+# Use centralized path helper - tries EC2 path first, then project-relative
+def _get_instruments_file():
+    try:
+        from backend.config import get_instruments_file_path
+        return get_instruments_file_path()
+    except Exception:
+        ec2 = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
+        return ec2 if ec2.exists() else Path(__file__).parent.parent.parent / "data" / "instruments" / "nse_instruments.json"
+
+INSTRUMENTS_FILE = _get_instruments_file()
 
 # In-memory cache for ISIN mappings (loaded once, reused)
 _ISIN_CACHE: Dict[str, str] = {}

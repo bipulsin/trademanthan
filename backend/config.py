@@ -1,9 +1,24 @@
 from pydantic_settings import BaseSettings
 from typing import Optional
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+def get_instruments_file_path() -> Path:
+    """
+    Return path to nse_instruments.json with fallback for EC2 and local dev.
+    Tries EC2 path first, then project-relative path.
+    """
+    ec2_path = Path("/home/ubuntu/trademanthan/data/instruments/nse_instruments.json")
+    if ec2_path.exists():
+        return ec2_path
+    # Fallback: project root relative to backend package
+    project_root = Path(__file__).resolve().parent.parent
+    return project_root / "data" / "instruments" / "nse_instruments.json"
+
 
 class Settings(BaseSettings):
     DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://trademanthan:trademanthan123@localhost/trademanthan")

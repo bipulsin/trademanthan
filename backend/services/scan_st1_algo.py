@@ -54,7 +54,7 @@ logger.propagate = False  # Only log to scan_st1_algo.log, not to root logger
 
 # Import all the job functions from existing schedulers
 # Master Stock Scheduler removed - no longer downloading from Dhan
-from backend.services.instruments_downloader import download_daily_instruments
+from backend.services.instruments_downloader import download_daily_instruments, ensure_instruments_available
 from backend.services.vwap_updater import (
     update_vwap_for_all_open_positions,
     close_all_open_trades,
@@ -132,6 +132,16 @@ class ScanST1AlgoScheduler:
         logger.info("📝 All scheduler logs will be written to: logs/scan_st1_algo.log")
         
         try:
+            # 0. Ensure instruments file exists on startup (download if missing or stale)
+            logger.info("🔧 Checking instruments file on startup...")
+            try:
+                if ensure_instruments_available():
+                    logger.info("✅ Instruments file ready for scan/option lookups")
+                else:
+                    logger.warning("⚠️ Instruments download failed - scan may show 'Missing option data' for some stocks")
+            except Exception as e:
+                logger.error(f"❌ Startup instruments check failed: {e}", exc_info=True)
+            
             # 1. Instruments Downloader - Daily at 9:05 AM
             def run_instruments_download():
                 logger.info("🔧 Triggering Instruments Download job...")

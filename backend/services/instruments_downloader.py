@@ -8,13 +8,17 @@ import requests
 import gzip
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 from pathlib import Path
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 logger = logging.getLogger(__name__)
+
+# Max age of instruments file before re-download (hours)
+INSTRUMENTS_MAX_AGE_HOURS = 24
+
 
 class InstrumentsDownloader:
     """Downloads and stores Upstox instruments data"""
@@ -24,11 +28,15 @@ class InstrumentsDownloader:
         Initialize the downloader
         
         Args:
-            storage_path: Path to store the instruments file (default: project root)
+            storage_path: Path to store the instruments file (default: from config)
         """
         if storage_path is None:
-            # Default to project root
-            self.storage_path = Path(__file__).parent.parent.parent / "data" / "instruments"
+            try:
+                from backend.config import get_instruments_file_path
+                instruments_path = get_instruments_file_path()
+                self.storage_path = instruments_path.parent
+            except Exception:
+                self.storage_path = Path(__file__).parent.parent.parent / "data" / "instruments"
         else:
             self.storage_path = Path(storage_path)
         
@@ -199,6 +207,38 @@ def download_daily_instruments():
         
     except Exception as e:
         logger.error(f"Error in daily instruments download: {str(e)}")
+        return False
+
+
+def ensure_instruments_available() -> bool:
+    """
+    Download instruments on startup if file is missing or stale (>24h).
+    Prevents 'Missing option data' for scan stocks when instruments weren't downloaded yet.
+    """
+    try:
+        from backend.config import get_instruments_file_path
+        instruments_file = get_instruments_file_path()
+        
+        should_download = False
+        if not instruments_file.exists():
+            logger.info(f"📥 Instruments file missing at {instruments_file} - downloading on startup")
+            should_download = True
+        else:
+            mtime = datetime.fromtimestamp(instruments_file.stat().st_mtime)
+            age_hours = (datetime.now() - mtime).total_seconds() / 3600
+            if age_hours > INSTRUMENTS_MAX_AGE_HOURS:
+                logger.info(f"📥 Instruments file is {age_hours:.1f}h old (>{INSTRUMENTS_MAX_AGE_HOURS}h) - re-downloading")
+                should_download = True
+            else:
+                logger.info(f"✅ Instruments file exists and is fresh ({age_hours:.1f}h old)")
+        
+        if should_download:
+            instruments_file.parent.mkdir(parents=True, exist_ok=True)
+            return instruments_downloader.download_instruments()
+        
+        return True
+    except Exception as e:
+        logger.error(f"Error ensuring instruments available: {str(e)}")
         return False
 
 
