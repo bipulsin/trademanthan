@@ -197,17 +197,40 @@ body.landing-page {
 .landing-hero .hero-content {
   max-width: 1400px;
   margin: 0 auto;
-  display: grid;
-  grid-template-columns: 1fr 1.1fr;
-  gap: 2rem;
-  align-items: center;
   position: relative;
-  z-index: 1;
+  width: 100%;
+  min-height: 70vh;
 }
 
+/* Hero visual - 200% size, behind text */
+.landing-hero .hero-visual {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(2);
+  width: 50%;
+  min-width: 400px;
+  max-width: 600px;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.landing-hero .hero-visual-img {
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  object-position: center;
+}
+
+/* Hero text overlays on the image */
 .landing-hero .hero-text {
   position: relative;
   z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 2rem 0;
+  min-height: 70vh;
 }
 
 .landing-hero .hero-text h1 {
@@ -217,6 +240,7 @@ body.landing-page {
   line-height: 1.15;
   letter-spacing: -0.03em;
   margin-bottom: 1.5rem;
+  text-shadow: 0 2px 20px rgba(0, 0, 0, 0.5);
 }
 
 .landing-hero .hero-ai-powered {
@@ -241,30 +265,12 @@ body.landing-page {
   cursor: pointer;
   transition: transform 0.2s, box-shadow 0.2s;
   box-shadow: 0 4px 20px rgba(59, 130, 246, 0.35);
+  width: fit-content;
 }
 
 .landing-hero .btn-cta:hover {
   transform: translateY(-2px);
   box-shadow: 0 8px 30px rgba(59, 130, 246, 0.5);
-}
-
-/* Hero visual - seamless blend, no background */
-.landing-hero .hero-visual {
-  position: relative;
-  min-height: 420px;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  z-index: 1;
-}
-
-.landing-hero .hero-visual-img {
-  width: 100%;
-  min-width: 400px;
-  max-width: min(58vw, 680px);
-  height: auto;
-  object-fit: contain;
-  object-position: right center;
 }
 
 /* ========== Features Section ========== */
@@ -361,9 +367,9 @@ body.landing-page {
 
 /* ========== Responsive ========== */
 @media (max-width: 1024px) {
-  .landing-hero .hero-content {
-    grid-template-columns: 1fr;
+  .landing-hero .hero-text {
     text-align: center;
+    align-items: center;
   }
 
   .landing-hero .hero-text h1 {
@@ -371,14 +377,8 @@ body.landing-page {
   }
 
   .landing-hero .hero-visual {
-    justify-content: center;
-    order: 1;
-  }
-
-  .landing-hero .hero-visual-img {
-    min-width: auto;
-    max-width: 85%;
-    object-position: center;
+    transform: translate(-50%, -50%) scale(1.5);
+    min-width: 300px;
   }
 
   .landing-hero .btn-cta {
@@ -418,13 +418,8 @@ body.landing-page {
   }
 
   .landing-hero .hero-visual {
-    min-height: 240px;
-    order: 1;
-  }
-
-  .landing-hero .hero-visual-img {
-    min-width: auto;
-    max-width: 95%;
+    transform: translate(-50%, -50%) scale(1.2);
+    min-width: 250px;
   }
 
   .landing-features {
