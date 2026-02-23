@@ -139,7 +139,7 @@ body.landing-page {
   height: 100vh;
   display: flex;
   align-items: center;
-  padding: 7rem 2rem 4rem;
+  padding: 7rem 2rem 0;
   padding-right: 3px;
   position: relative;
   overflow: hidden;
@@ -262,8 +262,8 @@ body.landing-page {
 
 /* ========== Features Section ========== */
 .landing-features {
-  padding: 5rem 2rem;
-  background: var(--bg-darker);
+  padding: 0 2rem 5rem;
+  background: #0f192c;
 }
 
 .landing-features .features-inner {
@@ -396,7 +396,7 @@ body.landing-page {
   }
 
   .landing-hero {
-    padding: 6rem 1rem 3rem;
+    padding: 6rem 1rem 0;
     padding-right: 3px;
   }
 
