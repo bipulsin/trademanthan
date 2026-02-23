@@ -277,6 +277,7 @@ body.landing-page {
 /* ========== Features Section ========== */
 .landing-features {
   padding: 0 2rem 5rem;
+  margin-top: -10px;
   background: #0f192c;
 }
 
