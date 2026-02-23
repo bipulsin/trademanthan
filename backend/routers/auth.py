@@ -22,11 +22,20 @@ class GoogleOAuthRequest(BaseModel):
 class GoogleOAuthCodeRequest(BaseModel):
     code: str
 
-# Google OAuth configuration
-GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+# Google OAuth configuration (uses settings for default)
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID") or settings.GOOGLE_CLIENT_ID
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
+
+@router.get("/config")
+async def get_oauth_config():
+    """Return public OAuth config for frontend (client_id, redirect_uri, domain)"""
+    return {
+        "google_client_id": GOOGLE_CLIENT_ID or "",
+        "redirect_uri": settings.GOOGLE_REDIRECT_URI,
+        "domain": settings.DOMAIN,
+    }
 
 # Only validate Google OAuth credentials when actually needed (not during import)
 def validate_google_oauth():
@@ -231,7 +240,7 @@ async def google_oauth_code(request: GoogleOAuthCodeRequest, db: Session = Depen
             'client_secret': GOOGLE_CLIENT_SECRET,
             'code': request.code,
             'grant_type': 'authorization_code',
-            'redirect_uri': 'https://trademanthan.in/login.html'
+            'redirect_uri': settings.GOOGLE_REDIRECT_URI
         })
         
         if token_response.status_code != 200:

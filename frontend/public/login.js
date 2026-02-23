@@ -136,7 +136,7 @@ function initiateGoogleAuth() {
     if (typeof google !== 'undefined' && google.accounts) {
         try {
             google.accounts.oauth2.initCodeClient({
-                client_id: "822255471884-ihvqhttvtnqjfqtukq1c9msi4n3qjad5.apps.googleusercontent.com",
+                client_id: "428560418671-t59riis4gqkhavnevt9ve6km54ltsba7.apps.googleusercontent.com",
                 scope: 'email profile',
                 ux_mode: 'popup',
                 callback: handleGoogleAuthResponse
@@ -214,7 +214,7 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Initialize with mobile-specific settings
             google.accounts.id.initialize({
-                client_id: "822255471884-ihvqhttvtnqjfqtukq1c9msi4n3qjad5.apps.googleusercontent.com",
+                client_id: "428560418671-t59riis4gqkhavnevt9ve6km54ltsba7.apps.googleusercontent.com",
                 callback: handleCredentialResponse,
                 auto_select: false,
                 cancel_on_tap_outside: false
