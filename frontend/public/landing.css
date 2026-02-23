@@ -56,12 +56,10 @@ body.landing-page {
 }
 
 .landing-nav .brand-logo-img {
-  height: 53px;
+  height: 72px;
   width: auto;
   object-fit: contain;
   display: block;
-  transform: scale(1.1);
-  transform-origin: left center;
 }
 
 .landing-nav .nav-right {
@@ -384,8 +382,7 @@ body.landing-page {
   }
 
   .landing-nav .brand-logo-img {
-    height: 40px;
-    transform: scale(1.1);
+    height: 56px;
   }
 
   .landing-nav .social-icons-squared {
