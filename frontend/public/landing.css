@@ -52,37 +52,14 @@ body.landing-page {
 .landing-nav .brand {
   display: flex;
   align-items: center;
+  text-decoration: none;
 }
 
-.landing-nav .brand-text {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
-
-.landing-nav .brand-title {
-  font-size: 1.5rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-}
-
-.landing-nav .brand-tradentic {
-  color: var(--accent-purple);
-}
-
-.landing-nav .brand-al {
-  color: var(--text-primary);
-}
-
-.landing-nav .brand-tagline {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  font-weight: 400;
-}
-
-.landing-nav .brand-cto {
-  color: var(--accent-teal) !important;
-  font-weight: 700;
+.landing-nav .brand-logo-img {
+  height: 48px;
+  width: auto;
+  object-fit: contain;
+  display: block;
 }
 
 .landing-nav .nav-right {
@@ -223,6 +200,8 @@ body.landing-page {
   max-width: 70vw;
   object-fit: contain;
   object-position: right center;
+  transform: scale(1.6);
+  transform-origin: right center;
 }
 
 /* Hero text overlays on the image */
@@ -252,6 +231,10 @@ body.landing-page {
 
 .landing-hero .hero-algo-trading {
   color: var(--accent-teal);
+}
+
+.landing-hero .hero-algo-trading-sm {
+  font-size: 0.85em;
 }
 
 .landing-hero .btn-cta {
@@ -397,8 +380,8 @@ body.landing-page {
     padding: 0.75rem 1rem;
   }
 
-  .landing-nav .brand-tagline {
-    display: none;
+  .landing-nav .brand-logo-img {
+    height: 36px;
   }
 
   .landing-nav .social-icons-squared {
