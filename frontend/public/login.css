@@ -78,8 +78,10 @@ body {
 }
 
 .logo-image {
-    width: 60px;
     height: 60px;
+    width: auto;
+    max-width: 180px;
+    object-fit: contain;
     border-radius: 12px;
     margin-bottom: 1rem;
     border: 2px solid rgba(25, 118, 210, 0.2);

@@ -13,18 +13,6 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Initialize email login form
     initializeEmailLogin();
-    
-    // Add test button for debugging (remove in production)
-    const loginForm = document.querySelector('.login-form');
-    if (loginForm) {
-        const testBtn = document.createElement('button');
-        testBtn.type = 'button';
-        testBtn.className = 'btn btn-secondary';
-        testBtn.style.marginTop = '1rem';
-        testBtn.textContent = '🔧 Test Login Flow (Debug)';
-        testBtn.onclick = testLoginFlow;
-        loginForm.appendChild(testBtn);
-    }
 });
 
 // Initialize email login form
@@ -355,19 +343,6 @@ document.addEventListener('click', function(event) {
         closeLoginPopup();
     }
 });
-
-// Test function to debug login process
-function testLoginFlow() {
-    console.log("Testing login flow...");
-    console.log("Current localStorage:", {
-        user: localStorage.getItem('trademanthan_user'),
-        token: localStorage.getItem('trademanthan_token')
-    });
-    
-    // Test dashboard redirect
-    console.log("Testing dashboard redirect...");
-    window.location.href = 'dashboard.html';
-}
 
 // Google button styling - use CSS instead of JavaScript
 function styleGoogleButton() {
