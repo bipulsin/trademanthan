@@ -78,7 +78,8 @@
     </div>
 
     <script>
-        const API_BASE = window.location.origin + '/api';
+        // Use /cargpt/ path - nginx proxies directly to backend (avoids /api/ routing issues)
+        const CARGPT_ANALYZE_URL = '/cargpt/analyze';
 
         document.getElementById('menuToggle').addEventListener('click', () => {
             document.getElementById('leftMenu').classList.toggle('mobile-open');
@@ -87,6 +88,14 @@
         function formatCumulativeAvg(arr) {
             if (!arr || arr.length === 0) return '-';
             return arr.map(v => Number(v).toFixed(2)).join(', ');
+        }
+
+        function safeParseJson(text) {
+            try {
+                return JSON.parse(text);
+            } catch (e) {
+                return null;
+            }
         }
 
         document.getElementById('runBtn').addEventListener('click', async () => {
@@ -102,18 +111,26 @@
             wrap.style.display = 'none';
 
             try {
-                const r = await fetch(API_BASE + '/cargpt/analyze');
-                const data = await r.json();
+                const r = await fetch(CARGPT_ANALYZE_URL);
+                const text = await r.text();
+                const data = safeParseJson(text);
+
                 loading.style.display = 'none';
                 overlay.classList.remove('visible');
 
-                if (!r.ok) {
+                if (data === null) {
                     empty.style.display = 'block';
-                    empty.textContent = 'Error: ' + (data.detail || r.statusText);
+                    empty.textContent = 'Error: Server returned invalid response (status ' + r.status + '). Please check that the backend is running and try again.';
                     return;
                 }
 
-                if (!data || data.length === 0) {
+                if (!r.ok) {
+                    empty.style.display = 'block';
+                    empty.textContent = 'Error: ' + (data.detail || (Array.isArray(data) ? r.statusText : String(data)));
+                    return;
+                }
+
+                if (!data || !Array.isArray(data) || data.length === 0) {
                     empty.style.display = 'block';
                     empty.textContent = 'No stocks in list. Add symbols in Setup first.';
                     return;

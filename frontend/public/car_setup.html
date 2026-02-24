@@ -81,7 +81,12 @@
     </div>
 
     <script>
-        const API_BASE = window.location.origin + '/api';
+        // Use /cargpt/ path - nginx proxies directly to backend
+        const CARGPT_BASE = '/cargpt';
+
+        function safeParseJson(text) {
+            try { return JSON.parse(text); } catch (e) { return null; }
+        }
 
         document.getElementById('menuToggle').addEventListener('click', () => {
             document.getElementById('leftMenu').classList.toggle('mobile-open');
@@ -96,9 +101,10 @@
 
         async function loadConfig() {
             try {
-                const r = await fetch(API_BASE + '/cargpt/config');
-                if (r.ok) {
-                    const d = await r.json();
+                const r = await fetch(CARGPT_BASE + '/config');
+                const text = await r.text();
+                const d = safeParseJson(text);
+                if (r.ok && d) {
                     document.getElementById('numWeeks').value = d.number_of_weeks || 52;
                 }
             } catch (e) {
@@ -114,11 +120,15 @@
             wrap.style.display = 'none';
             empty.style.display = 'none';
             try {
-                const r = await fetch(API_BASE + '/cargpt/stock-list');
+                const r = await fetch(CARGPT_BASE + '/stock-list');
+                const text = await r.text();
+                const data = safeParseJson(text);
                 if (!r.ok) {
                     throw new Error('API returned ' + r.status);
                 }
-                const data = await r.json();
+                if (data === null) {
+                    throw new Error('Invalid server response');
+                }
                 loading.style.display = 'none';
                 if (data && Array.isArray(data) && data.length > 0) {
                     wrap.style.display = 'block';
@@ -155,13 +165,16 @@
             btn.disabled = true;
             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
             try {
-                const r = await fetch(API_BASE + '/cargpt/save-stock-list', {
+                const r = await fetch(CARGPT_BASE + '/save-stock-list', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ symbols, number_of_weeks: numWeeks })
                 });
-                const d = await r.json();
-                if (d.success) {
+                const text = await r.text();
+                const d = safeParseJson(text);
+                if (!d) {
+                    alert('Error: Invalid server response. Please try again.');
+                } else if (d.success) {
                     alert(d.message || 'Saved.');
                     loadStockList();
                     loadConfig();
