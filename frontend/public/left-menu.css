@@ -50,7 +50,6 @@
     min-width: var(--left-menu-collapsed);
 }
 
-.left-panel.collapsed .panel-logo-text,
 .left-panel.collapsed .nav-item span,
 .left-panel.collapsed .user-details {
     opacity: 0;
@@ -77,36 +76,36 @@
     margin-right: 0;
 }
 
-/* Toggle button */
+/* Toggle button - prominent collapse/expand */
 .panel-toggle {
     position: absolute;
     right: -14px;
     top: 50%;
     transform: translateY(-50%);
-    width: 28px;
-    height: 28px;
+    width: 36px;
+    height: 36px;
     border-radius: 50%;
-    background: var(--left-menu-bg);
-    border: 1px solid var(--left-menu-border);
-    color: var(--left-menu-text);
+    background: var(--left-menu-accent);
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    color: white;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 10;
     transition: all 0.2s;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 2px 12px rgba(59, 130, 246, 0.5);
 }
 
 .panel-toggle:hover {
-    background: var(--left-menu-accent);
-    border-color: var(--left-menu-accent);
+    background: #2563eb;
+    transform: translateY(-50%) scale(1.1);
+    box-shadow: 0 4px 16px rgba(59, 130, 246, 0.6);
 }
 
-.panel-toggle span {
-    font-size: 0.9rem;
-    font-weight: 700;
-    line-height: 1;
+.panel-toggle i {
+    font-size: 1.1rem;
+    font-weight: 600;
 }
 
 /* Panel header - Logo */
@@ -119,7 +118,7 @@
 .panel-header .logo-link {
     display: flex;
     align-items: center;
-    gap: 12px;
+    justify-content: center;
     text-decoration: none;
     color: var(--left-menu-text);
     transition: opacity 0.2s;
@@ -130,17 +129,10 @@
 }
 
 .panel-logo {
-    height: 44px;
+    height: 48px;
     width: auto;
     object-fit: contain;
     flex-shrink: 0;
-}
-
-.panel-logo-text {
-    font-size: 1.2rem;
-    font-weight: 700;
-    white-space: nowrap;
-    transition: opacity 0.2s;
 }
 
 /* Nav */

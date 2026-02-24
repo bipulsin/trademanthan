@@ -102,11 +102,10 @@ class LeftMenu {
         return `
 <div class="left-menu-wrapper">
     <aside class="left-panel" id="leftPanel">
-        <button class="panel-toggle" id="panelToggle" aria-label="Toggle menu"><span id="panelToggleText">&lt;&lt;</span></button>
+        <button class="panel-toggle" id="panelToggle" aria-label="Toggle menu"><i class="fas fa-angles-left" id="panelToggleIcon"></i></button>
         <div class="panel-header">
             <a href="dashboard.html" class="logo-link">
                 <img src="tradentical-logo.png" alt="Tradentical" class="panel-logo">
-                <span class="panel-logo-text">Tradentical</span>
             </a>
         </div>
         <nav class="panel-nav">
@@ -135,7 +134,7 @@ class LeftMenu {
     setupCollapseToggle() {
         const panel = document.getElementById('leftPanel');
         const toggle = document.getElementById('panelToggle');
-        const toggleText = document.getElementById('panelToggleText');
+        const toggleIcon = document.getElementById('panelToggleIcon');
         const mainContent = this.getMainContent();
 
         if (!panel || !toggle) return;
@@ -143,9 +142,11 @@ class LeftMenu {
         if (this.collapsed) {
             panel.classList.add('collapsed');
             if (mainContent) mainContent.classList.add('menu-collapsed');
-            if (toggleText) toggleText.textContent = '>>';
-        } else if (toggleText) {
-            toggleText.textContent = '<<';
+            if (toggleIcon) {
+                toggleIcon.className = 'fas fa-angles-right';
+            }
+        } else if (toggleIcon) {
+            toggleIcon.className = 'fas fa-angles-left';
         }
 
         toggle.addEventListener('click', () => {
@@ -153,7 +154,7 @@ class LeftMenu {
             localStorage.setItem('leftMenuCollapsed', this.collapsed);
             panel.classList.toggle('collapsed', this.collapsed);
             if (mainContent) mainContent.classList.toggle('menu-collapsed', this.collapsed);
-            if (toggleText) toggleText.textContent = this.collapsed ? '>>' : '<<';
+            if (toggleIcon) toggleIcon.className = this.collapsed ? 'fas fa-angles-right' : 'fas fa-angles-left';
         });
     }
 
