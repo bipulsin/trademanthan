@@ -203,6 +203,15 @@ body {
     line-height: 1.4;
 }
 
+.login-footer a {
+    color: #3b82f6;
+    text-decoration: none;
+}
+
+.login-footer a:hover {
+    text-decoration: underline;
+}
+
 /* Responsive Design */
 @media (max-width: 480px) {
     .login-popup {

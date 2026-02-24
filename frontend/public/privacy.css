@@ -1,0 +1,100 @@
+/* Privacy Policy Page - Tradentical */
+.privacy-main {
+  padding: 7rem 2rem 4rem;
+  min-height: 100vh;
+}
+
+.privacy-inner {
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.privacy-inner h1 {
+  font-family: 'Montserrat', sans-serif;
+  font-size: 2.25rem;
+  font-weight: 700;
+  color: var(--text-primary, #ffffff);
+  margin-bottom: 0.5rem;
+}
+
+.privacy-updated {
+  color: var(--text-muted, rgba(255, 255, 255, 0.6));
+  font-size: 0.95rem;
+  margin-bottom: 2.5rem;
+}
+
+.privacy-section {
+  margin-bottom: 2rem;
+}
+
+.privacy-section h2 {
+  font-family: 'Montserrat', sans-serif;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--accent-teal, #22d3ee);
+  margin-bottom: 0.75rem;
+}
+
+.privacy-section p {
+  color: var(--text-secondary, rgba(255, 255, 255, 0.9));
+  line-height: 1.7;
+  margin-bottom: 0.75rem;
+}
+
+.privacy-section ul {
+  margin: 0.5rem 0 1rem 1.5rem;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.9));
+  line-height: 1.7;
+}
+
+.privacy-section li {
+  margin-bottom: 0.5rem;
+}
+
+.privacy-section a {
+  color: var(--accent-blue-light, #60a5fa);
+  text-decoration: none;
+}
+
+.privacy-section a:hover {
+  text-decoration: underline;
+}
+
+.btn-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary, #ffffff) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  text-decoration: none;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.btn-back:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.landing-footer .footer-copy a {
+  color: var(--accent-blue-light, #60a5fa);
+  text-decoration: none;
+}
+
+.landing-footer .footer-copy a:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 768px) {
+  .privacy-main {
+    padding: 6rem 1rem 3rem;
+  }
+
+  .privacy-inner h1 {
+    font-size: 1.75rem;
+  }
+}
