@@ -6,20 +6,23 @@
     <title>CAR GPT - Analysis Report | Tradentical</title>
     <script src="auth-check.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="stylesheet" href="left-menu.css">
+    <link rel="stylesheet" href="left-menu.css?v=2.1">
     <link rel="stylesheet" href="cargpt.css">
 </head>
 <body class="cargpt-body">
     <div class="mobile-title-bar">
         <button class="mobile-menu-toggle" id="mobileMenuToggle" aria-label="Menu"><i class="fas fa-bars"></i></button>
         <div class="mobile-title-content">
-            <img src="tradentical-logo.png" alt="Tradentical" class="mobile-logo">
             <h1 class="mobile-title">CAR GPT Report</h1>
         </div>
     </div>
     <div class="app-container app-with-left-menu">
         <div id="left-menu-container"></div>
         <main class="main-content-area cargpt-main">
+            <div class="cargpt-page-header">
+                <span></span>
+                <a href="carsetup.html" class="cargpt-setup-link"><i class="fas fa-cog"></i> Setup</a>
+            </div>
             <section class="cargpt-card">
                 <h2>
                     <span><i class="fas fa-chart-bar"></i> CAR Analysis</span>
@@ -63,7 +66,7 @@
         </div>
     </div>
 
-    <script src="left-menu.js"></script>
+    <script src="left-menu.js?v=2.1"></script>
     <script>
         const CARGPT_ANALYZE_URL = '/cargpt/analyze';
 

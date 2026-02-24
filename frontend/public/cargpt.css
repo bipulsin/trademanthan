@@ -71,6 +71,33 @@ body.cargpt-body {
     }
 }
 
+/* Page header - Setup link top right (cargpt.html only) */
+.cargpt-page-header {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.cargpt-setup-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: rgba(59, 130, 246, 0.2);
+    color: var(--cargpt-accent);
+    text-decoration: none;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 0.95rem;
+    transition: background 0.2s, color 0.2s;
+}
+
+.cargpt-setup-link:hover {
+    background: rgba(59, 130, 246, 0.3);
+    color: var(--cargpt-text);
+}
+
 /* Main content */
 .cargpt-main {
     flex: 1;

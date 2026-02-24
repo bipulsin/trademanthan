@@ -112,7 +112,7 @@ class LeftMenu {
         <nav class="panel-nav">
             <ul class="nav-list">
                 <li class="nav-item" data-page="dashboard.html"><i class="fas fa-chart-line"></i><span>Dashboard</span></li>
-                <li class="nav-item" data-page="carsetup.html"><i class="fas fa-chart-area"></i><span>CAR GPT</span></li>
+                <li class="nav-item" data-page="cargpt.html"><i class="fas fa-chart-area"></i><span>CAR GPT</span></li>
                 <li class="nav-item" data-page="broker.html"><i class="fas fa-university"></i><span>Broker Management</span></li>
                 <li class="nav-item" data-page="strategy.html"><i class="fas fa-robot"></i><span>Strategy Management</span></li>
                 <li class="nav-item" data-page="reports.html"><i class="fas fa-chart-bar"></i><span>Reports</span></li>
@@ -234,7 +234,7 @@ class LeftMenu {
     getTargetPageForSection() {
         switch (this.currentPage) {
             case 'dashboard': return 'dashboard.html';
-            case 'cargpt': return 'carsetup.html';
+            case 'cargpt': return 'cargpt.html';
             case 'broker': return 'broker.html';
             case 'strategy': return 'strategy.html';
             case 'reports': return 'reports.html';
