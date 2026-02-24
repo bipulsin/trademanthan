@@ -147,6 +147,7 @@ body.landing-page {
   padding: 0.5rem;
 }
 
+
 /* ========== Hero Section ========== */
 .landing-hero {
   min-height: 100vh;
@@ -391,17 +392,24 @@ body.landing-page {
   }
 }
 
+/* ========== Mobile Responsive (per reference layout) ========== */
 @media (max-width: 768px) {
+  /* Nav: logo + Tradentical text, search + hamburger only */
   .landing-nav {
     padding: 0.75rem 1rem;
   }
 
   .landing-nav .brand-logo-img {
-    height: 56px;
+    height: 40px;
+    width: auto;
   }
 
   .landing-nav .social-icons-squared {
     display: none;
+  }
+
+  .landing-nav .btn-google {
+    display: none !important;
   }
 
   .landing-nav .mobile-toggle {
@@ -410,40 +418,127 @@ body.landing-page {
     justify-content: center;
   }
 
+  /* Hero: vertical stack, tagline → title → description → CTA → graphic */
   .landing-hero {
-    padding: 6rem 1rem 0;
-    padding-right: 3px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: auto;
+    height: auto;
+    padding: 5.5rem 1.25rem 2rem;
+    text-align: center;
+  }
+
+  .landing-hero .hero-content {
+    order: 0;
+    width: 100%;
+    min-height: auto;
+  }
+
+  .landing-hero .hero-text {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 0;
+    min-height: auto;
+  }
+
+  .landing-hero .hero-tagline {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-bottom: 0.75rem;
+    font-weight: 400;
   }
 
   .landing-hero .hero-text h1 {
-    font-size: clamp(1.75rem, 6vw, 2.5rem);
+    font-size: clamp(1.75rem, 7vw, 2.25rem);
+    text-align: center;
+    margin-bottom: 1rem;
+  }
+
+  .landing-hero .hero-description {
+    display: block;
+    font-size: 0.95rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+    margin-bottom: 1.5rem;
+    max-width: 320px;
+  }
+
+  .landing-hero .btn-cta {
+    margin: 0 auto 1.5rem;
+    padding: 0.9rem 1.75rem;
+    font-size: 1rem;
+    box-shadow: 0 4px 20px rgba(59, 130, 246, 0.4);
+  }
+
+  .landing-hero .hero-visual {
+    order: 1;
+    position: static;
+    width: 100%;
+    height: auto;
+    justify-content: center;
+    margin-top: 0.5rem;
   }
 
   .landing-hero .hero-visual-img {
-    max-width: 55vw;
+    max-width: 90%;
+    width: auto;
+    height: auto;
+    max-height: 220px;
+    object-fit: contain;
+    object-position: center;
+    transform: none;
   }
 
+  /* Features: single column, icon left + title/desc right */
   .landing-features {
-    padding: 0 1rem 3rem;
+    padding: 0 1.25rem 3rem;
+    margin-top: 0;
   }
 
   .landing-features .features-grid {
     grid-template-columns: 1fr;
+    gap: 1rem;
   }
 
   .landing-features .feature-block {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 1rem;
     text-align: left;
+    padding: 1.25rem;
+  }
+
+  .landing-features .feature-icon {
+    flex-shrink: 0;
+    margin-bottom: 0;
+    width: 44px;
+    height: 44px;
+  }
+
+  .landing-features .feature-icon-svg {
+    width: 28px;
+    height: 28px;
+  }
+
+  .landing-features .feature-block h3 {
+    font-size: 1rem;
+    margin-bottom: 0.35rem;
+  }
+
+  .landing-features .feature-block p {
+    font-size: 0.8rem;
+    margin: 0;
   }
 }
 
 @media (max-width: 480px) {
-  .landing-nav .brand-title {
-    font-size: 1.2rem;
-  }
-
-  .landing-nav .btn-google {
-    padding: 0.5rem 1rem;
-    font-size: 0.85rem;
+  .landing-hero .hero-text h1 {
+    font-size: 1.6rem;
   }
 }
 
@@ -490,4 +585,26 @@ body.landing-page {
 .landing-page .login-popup .signup-link a,
 .landing-page .login-popup .forgot-password a {
   color: var(--accent-blue);
+}
+
+/* Mobile fallback Google button in login popup */
+.landing-page .login-popup .btn-google {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.25rem;
+  background: #fff;
+  color: #1e40af;
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s, box-shadow 0.2s;
+}
+
+.landing-page .login-popup .btn-google:hover {
+  background: #f8f9fa;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }

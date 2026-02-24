@@ -89,17 +89,74 @@ function initializeFeatureCards() {
     });
 }
 
+// Google OAuth client ID
+const GOOGLE_CLIENT_ID = '428560418671-t59riis4gqkhavnevt9ve6km54ltsba7.apps.googleusercontent.com';
+
+// Detect mobile/touch device (Google button in popup often fails on mobile - popup blocking, touch issues)
+function isMobileView() {
+    return window.matchMedia('(max-width: 768px)').matches ||
+           /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+           ('ontouchstart' in window);
+}
+
+// Render Google Sign-In button when popup is visible (fixes mobile - button in hidden div gets 0 height)
+function renderGoogleButton() {
+    const container = document.getElementById('googleSigninContainer');
+    const fallback = document.getElementById('mobileGoogleFallback');
+    if (!container) return;
+
+    // On mobile: skip Google button in popup, show link to full-page login (works reliably)
+    if (isMobileView() && fallback) {
+        container.innerHTML = '';
+        container.style.display = 'none';
+        fallback.style.display = 'flex';
+        return;
+    }
+
+    function doRender() {
+        if (typeof google === 'undefined' || !google.accounts || !google.accounts.id) {
+            setTimeout(doRender, 100);
+            return;
+        }
+        try {
+            google.accounts.id.initialize({
+                client_id: GOOGLE_CLIENT_ID,
+                callback: handleCredentialResponse,
+                auto_select: false,
+                cancel_on_tap_outside: false
+            });
+            container.innerHTML = '';
+            container.style.display = 'block';
+            const w = Math.max(container.offsetWidth || 0, 280);
+            google.accounts.id.renderButton(container, {
+                type: 'standard',
+                size: 'large',
+                theme: 'outline',
+                text: 'sign_in_with',
+                shape: 'rectangular',
+                logo_alignment: 'left',
+                width: w
+            });
+            if (fallback) fallback.style.display = 'none';
+        } catch (e) {
+            console.warn('Google button render failed, showing fallback:', e);
+            if (fallback) {
+                container.style.display = 'none';
+                fallback.style.display = 'flex';
+            }
+        }
+    }
+    doRender();
+}
+
 // Login popup functionality
 function openLoginPopup() {
     const overlay = document.getElementById('loginOverlay');
     overlay.style.display = 'flex';
     overlay.style.animation = 'slideIn 0.3s ease-out';
-    
-    // Force Google button width after popup opens (if defined)
-    if (typeof forceGoogleButtonWidth === 'function') {
-        setTimeout(forceGoogleButtonWidth, 100);
-        setTimeout(forceGoogleButtonWidth, 500);
-    }
+
+    // Render Google button when popup is visible (critical for mobile - fixes 0-height iframe)
+    setTimeout(renderGoogleButton, 50);
 }
 
 function closeLoginPopup() {
