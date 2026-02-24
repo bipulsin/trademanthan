@@ -139,10 +139,9 @@ body {
     border-color: rgba(244, 67, 54, 0.5);
 }
 
-/* Right Panel Styles */
+/* Right Panel Styles - margin set by left-menu.css when menu present */
 .right-panel {
     flex: 1;
-    margin-left: 280px;
     padding: 2rem;
     overflow-y: auto;
 }
@@ -1066,13 +1065,6 @@ body {
 
 /* Responsive Design */
 @media (max-width: 1024px) {
-    .left-panel {
-        width: 250px;
-    }
-    
-    .right-panel {
-        margin-left: 250px;
-    }
 }
 
 /* Mobile Menu Toggle Button */

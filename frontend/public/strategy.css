@@ -193,7 +193,6 @@ body {
 /* Right Panel Styles */
 .right-panel {
     flex: 1;
-    margin-left: 280px;
     padding: 2rem;
     overflow-y: auto;
     background: white;

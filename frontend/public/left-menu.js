@@ -1,13 +1,18 @@
-// Global authentication state
+/**
+ * Tradentical Left Menu - Unified panel for all post-login pages
+ * Loads left-menu.html, handles collapse/expand, navigation, auth
+ */
 let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-// Left Menu Module
+const MENU_HTML_PATH = 'left-menu.html';
+
 class LeftMenu {
     constructor() {
         this.currentPage = this.getCurrentPage();
         this.isAuthenticated = false;
+        this.collapsed = localStorage.getItem('leftMenuCollapsed') === 'true';
         this.init();
     }
 
@@ -20,53 +25,33 @@ class LeftMenu {
         if (path.includes('scan')) return 'scan';
         if (path.includes('settings')) return 'settings';
         if (path.includes('reports')) return 'reports';
-        if (path.includes('car_setup') || path.includes('car_gpt')) return 'cargpt';
+        if (path.includes('carsetup') || path.includes('cargpt')) return 'cargpt';
         return 'dashboard';
     }
 
-    init() {
-        console.log('LeftMenu: Initializing...');
-        
-        // Prevent multiple authentication checks
-        if (isAuthenticating) {
-            console.log('LeftMenu: Authentication already in progress, skipping...');
-            return;
-        }
-        
+    async init() {
+        if (isAuthenticating) return;
         isAuthenticating = true;
-        
-        // Add a small delay to ensure DOM is fully ready
-        setTimeout(() => {
-            // First check authentication before doing anything
+
+        setTimeout(async () => {
             if (this.checkAuthentication()) {
-                console.log('LeftMenu: Authentication successful, loading menu...');
                 this.isAuthenticated = true;
-                isAuthenticated = true; // Set global flag
-                this.loadLeftMenuHTML();
+                isAuthenticated = true;
+                await this.loadMenu();
+                this.setupCollapseToggle();
                 this.setupMobileMenu();
                 this.loadUserData();
                 this.setupNavigation();
                 this.setActiveNavigation();
-                console.log('LeftMenu: Initialization complete');
+                this.syncMainContentMargin();
             } else {
-                console.log('LeftMenu: Authentication failed');
-                console.log('LeftMenu: Current path:', window.location.pathname);
-                console.log('LeftMenu: Stored token:', localStorage.getItem('trademanthan_token'));
-                console.log('LeftMenu: Stored user:', localStorage.getItem('trademanthan_user'));
-                
-                // Only redirect if we're on a protected page and haven't redirected yet
                 const currentPath = window.location.pathname;
-                const isProtectedPage = currentPath.includes('dashboard') || 
-                                      currentPath.includes('strategy') || 
-                                      currentPath.includes('broker') || 
-                                      currentPath.includes('algo') ||
-                                      currentPath.includes('scan') ||
-                                      currentPath.includes('reports') ||
-                                      currentPath.includes('settings');
-                
-                if (!hasRedirected && isProtectedPage && !isCargptPage) {
+                const isProtectedPage = currentPath.includes('dashboard') || currentPath.includes('strategy') ||
+                    currentPath.includes('broker') || currentPath.includes('algo') || currentPath.includes('scan') ||
+                    currentPath.includes('reports') || currentPath.includes('settings') ||
+                    currentPath.includes('carsetup') || currentPath.includes('cargpt');
+                if (!hasRedirected && isProtectedPage) {
                     hasRedirected = true;
-                    console.log('LeftMenu: Redirecting to login page');
                     window.location.replace('index.html');
                 }
             }
@@ -75,164 +60,143 @@ class LeftMenu {
     }
 
     checkAuthentication() {
-        console.log('LeftMenu: Checking authentication...');
-        
-        // If we're already authenticated globally, skip the check
-        if (isAuthenticated) {
-            console.log('LeftMenu: Already authenticated globally, skipping check');
-            return true;
-        }
-        
+        if (isAuthenticated) return true;
         try {
             const token = localStorage.getItem('trademanthan_token');
-            console.log('LeftMenu: Token found:', token);
-            
-            if (!token) {
-                console.log('LeftMenu: No token found');
-                return false;
-            }
-
-            // Check if token is valid (JWT from backend, Google OAuth fallback, or email token)
-            if (!token.startsWith('google_token_') && !token.startsWith('email_token_') && !token.includes('.')) {
-                console.log('LeftMenu: Invalid token format');
-                localStorage.removeItem('trademanthan_token');
-                return false;
-            }
-
-            // Check if user data exists
             const userData = localStorage.getItem('trademanthan_user');
-            if (!userData) {
-                console.log('LeftMenu: No user data found');
-                return false;
-            }
-
-            try {
-                const user = JSON.parse(userData);
-                console.log('LeftMenu: User data valid:', user);
-                
-                // Additional validation: ensure user has required fields
-                if (!user.email || !user.name) {
-                    console.log('LeftMenu: User data missing required fields');
-                    return false;
-                }
-                
-                return true;
-            } catch (error) {
-                console.error('LeftMenu: Error parsing user data:', error);
-                localStorage.removeItem('trademanthan_user');
+            if (!token || !userData) return false;
+            if (!token.startsWith('google_token_') && !token.startsWith('email_token_') && !token.includes('.')) {
                 localStorage.removeItem('trademanthan_token');
+                localStorage.removeItem('trademanthan_user');
                 return false;
             }
-        } catch (error) {
-            console.error('LeftMenu: Unexpected error during authentication check:', error);
+            const user = JSON.parse(userData);
+            if (!user.email || !user.name) return false;
+            return true;
+        } catch (e) {
             return false;
         }
     }
 
-    loadLeftMenuHTML() {
+    async loadMenu() {
         const container = document.getElementById('left-menu-container');
-        if (container) {
-            container.innerHTML = `
-                <!-- Left Panel Menu -->
-                <aside class="left-panel">
-                    <div class="panel-header">
-                        <img src="./tm_logo.png" alt="Trade Manthan Logo" class="logo-image">
-                        <h2 class="logo-title">
-                            <span class="title-trade">Trade</span>
-                            <span class="title-manthan">Manthan</span>
-                        </h2>
-                    </div>
-                    
-                    <nav class="panel-nav">
-                        <ul class="nav-list">
-                            <li class="nav-item" data-section="dashboard">
-                                <i class="fas fa-chart-line"></i>
-                                <span>Dashboard</span>
-                            </li>
-                            <li class="nav-item" data-section="algo">
-                                <i class="fas fa-brain"></i>
-                                <span>Algorithmic Trading</span>
-                            </li>
-                            <li class="nav-item" data-section="broker">
-                                <i class="fas fa-university"></i>
-                                <span>Broker Management</span>
-                            </li>
-                            <li class="nav-item" data-section="strategy">
-                                <i class="fas fa-robot"></i>
-                                <span>Strategy Management</span>
-                            </li>
-                            <li class="nav-item" data-section="scan">
-                                <i class="fas fa-radar"></i>
-                                <span>Chartink Scans</span>
-                            </li>
-                            <li class="nav-item" data-section="settings">
-                                <i class="fas fa-cog"></i>
-                                <span>Settings</span>
-                            </li>
-                            <li class="nav-item" data-section="reports">
-                                <i class="fas fa-chart-bar"></i>
-                                <span>Reports</span>
-                            </li>
-                            <li class="nav-item" data-section="cargpt">
-                                <i class="fas fa-chart-line"></i>
-                                <span>CAR GPT</span>
-                            </li>
-                        </ul>
-                    </nav>
-                    
-                    <div class="panel-footer">
-                        <div class="user-info">
-                            <img src="https://via.placeholder.com/40" alt="User Avatar" class="user-avatar" id="userAvatar">
-                            <div class="user-details">
-                                <span class="user-name" id="userName">Demo User</span>
-                                <span class="user-email" id="userEmail">demo@trademanthan.com</span>
-                            </div>
-                        </div>
-                        <button class="logout-btn" onclick="logout()">
-                            <i class="fas fa-sign-out-alt"></i>
-                            <span>Logout</span>
-                        </button>
-                    </div>
-                </aside>
+        if (!container) return;
 
-                <!-- Mobile Hamburger Menu -->
-                <div class="mobile-menu-toggle" id="mobileMenuToggle">
-                    <i class="fas fa-bars"></i>
-                </div>
-            `;
-            console.log('LeftMenu: HTML loaded successfully');
-        } else {
-            console.error('LeftMenu: Container not found');
+        try {
+            const res = await fetch(MENU_HTML_PATH);
+            const html = await res.text();
+            container.innerHTML = html;
+        } catch (e) {
+            console.warn('LeftMenu: Could not fetch left-menu.html, using inline', e);
+            container.innerHTML = this.getInlineMenuHTML();
+        }
+
+        // Hide page's mobile toggle if exists - we use our own
+        const pageToggle = document.getElementById('mobileMenuToggle');
+        if (pageToggle && pageToggle.closest('.mobile-title-bar')) {
+            pageToggle.style.display = 'none';
+        }
+    }
+
+    getInlineMenuHTML() {
+        return `
+<div class="left-menu-wrapper">
+    <aside class="left-panel" id="leftPanel">
+        <button class="panel-toggle" id="panelToggle" aria-label="Toggle menu"><span id="panelToggleText">&lt;&lt;</span></button>
+        <div class="panel-header">
+            <a href="dashboard.html" class="logo-link">
+                <img src="tradentical-logo.png" alt="Tradentical" class="panel-logo">
+                <span class="panel-logo-text">Tradentical</span>
+            </a>
+        </div>
+        <nav class="panel-nav">
+            <ul class="nav-list">
+                <li class="nav-item" data-page="dashboard.html"><i class="fas fa-chart-line"></i><span>Dashboard</span></li>
+                <li class="nav-item" data-page="carsetup.html"><i class="fas fa-chart-area"></i><span>CAR GPT</span></li>
+                <li class="nav-item" data-page="broker.html"><i class="fas fa-university"></i><span>Broker Management</span></li>
+                <li class="nav-item" data-page="strategy.html"><i class="fas fa-robot"></i><span>Strategy Management</span></li>
+                <li class="nav-item" data-page="reports.html"><i class="fas fa-chart-bar"></i><span>Reports</span></li>
+                <li class="nav-item" data-page="settings.html"><i class="fas fa-cog"></i><span>Settings</span></li>
+                <li class="nav-item nav-item-logout" data-action="logout"><i class="fas fa-sign-out-alt"></i><span>Logout</span></li>
+            </ul>
+        </nav>
+        <div class="panel-footer">
+            <div class="user-info">
+                <img src="https://via.placeholder.com/40" alt="User" class="user-avatar" id="userAvatar">
+                <div class="user-details"><span class="user-name" id="userName">User</span></div>
+            </div>
+        </div>
+    </aside>
+</div>
+<button class="mobile-menu-toggle" id="leftMenuMobileToggle" aria-label="Open menu"><i class="fas fa-bars"></i></button>
+<div class="mobile-menu-overlay" id="mobileMenuOverlay"></div>`;
+    }
+
+    setupCollapseToggle() {
+        const panel = document.getElementById('leftPanel');
+        const toggle = document.getElementById('panelToggle');
+        const toggleText = document.getElementById('panelToggleText');
+        const mainContent = this.getMainContent();
+
+        if (!panel || !toggle) return;
+
+        if (this.collapsed) {
+            panel.classList.add('collapsed');
+            if (mainContent) mainContent.classList.add('menu-collapsed');
+            if (toggleText) toggleText.textContent = '>>';
+        } else if (toggleText) {
+            toggleText.textContent = '<<';
+        }
+
+        toggle.addEventListener('click', () => {
+            this.collapsed = !this.collapsed;
+            localStorage.setItem('leftMenuCollapsed', this.collapsed);
+            panel.classList.toggle('collapsed', this.collapsed);
+            if (mainContent) mainContent.classList.toggle('menu-collapsed', this.collapsed);
+            if (toggleText) toggleText.textContent = this.collapsed ? '>>' : '<<';
+        });
+    }
+
+    getMainContent() {
+        const container = document.getElementById('left-menu-container');
+        if (!container) return null;
+        const sibling = container.nextElementSibling;
+        if (sibling && (sibling.classList.contains('right-panel') || sibling.classList.contains('main-content-area') || sibling.tagName === 'MAIN')) {
+            sibling.classList.add('main-content-area');
+            return sibling;
+        }
+        return document.querySelector('.right-panel') || document.querySelector('.main-content-area') || document.querySelector('main');
+    }
+
+    syncMainContentMargin() {
+        const mainContent = this.getMainContent();
+        if (mainContent && this.collapsed) {
+            mainContent.classList.add('menu-collapsed');
         }
     }
 
     setupMobileMenu() {
-        const mobileMenuToggle = document.getElementById('mobileMenuToggle');
-        const leftPanel = document.querySelector('.left-panel');
-        
-        if (mobileMenuToggle && leftPanel) {
-            mobileMenuToggle.addEventListener('click', function() {
-                leftPanel.classList.toggle('mobile-open');
-            });
-            
-            // Close mobile menu when clicking outside
-            document.addEventListener('click', function(event) {
-                if (!leftPanel.contains(event.target) && !mobileMenuToggle.contains(event.target)) {
-                    leftPanel.classList.remove('mobile-open');
-                }
-            });
-            
-            // Close mobile menu when navigation item is clicked
-            const navItems = document.querySelectorAll('.nav-item');
-            navItems.forEach(item => {
-                item.addEventListener('click', function() {
-                    // Add a small delay to allow the click to register before hiding
-                    setTimeout(() => {
-                        leftPanel.classList.remove('mobile-open');
-                    }, 150);
-                });
-            });
-        }
+        const panel = document.getElementById('leftPanel');
+        const overlay = document.getElementById('mobileMenuOverlay');
+        const toggle = document.getElementById('leftMenuMobileToggle') || document.getElementById('mobileMenuToggle');
+
+        if (!panel) return;
+
+        const open = () => {
+            panel.classList.add('mobile-open');
+            if (overlay) overlay.classList.add('visible');
+        };
+        const close = () => {
+            panel.classList.remove('mobile-open');
+            if (overlay) overlay.classList.remove('visible');
+        };
+
+        if (toggle) toggle.addEventListener('click', () => panel.classList.contains('mobile-open') ? close() : open());
+        if (overlay) overlay.addEventListener('click', close);
+
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', () => setTimeout(close, 150));
+        });
     }
 
     loadUserData() {
@@ -240,111 +204,54 @@ class LeftMenu {
         if (userData) {
             try {
                 const user = JSON.parse(userData);
-                const userNameElement = document.getElementById('userName');
-                const userEmailElement = document.getElementById('userEmail');
-                const userAvatarElement = document.getElementById('userAvatar');
-                
-                if (userNameElement) userNameElement.textContent = user.name || 'User';
-                if (userEmailElement) userEmailElement.textContent = user.email || 'user@example.com';
-                if (userAvatarElement && user.picture) userAvatarElement.src = user.picture;
-            } catch (error) {
-                console.error('Error loading user data:', error);
-            }
+                const el = document.getElementById('userName');
+                const avatar = document.getElementById('userAvatar');
+                if (el) el.textContent = user.name || 'User';
+                if (avatar && user.picture) avatar.src = user.picture;
+            } catch (e) {}
         }
     }
 
     setupNavigation() {
-        const navItems = document.querySelectorAll('.nav-item');
-        navItems.forEach(item => {
-            item.addEventListener('click', function() {
-                const section = this.dataset.section;
-                console.log('LeftMenu: Navigation clicked for section:', section);
-                
-                // Store current authentication state before navigation
-                const currentUser = localStorage.getItem('trademanthan_user');
-                const currentToken = localStorage.getItem('trademanthan_token');
-                
-                if (!currentUser || !currentToken) {
-                    console.error('LeftMenu: No authentication data found, cannot navigate');
-                    return;
-                }
-                
-                // Navigate to the appropriate page
-                let targetPage = '';
-                switch (section) {
-                    case 'dashboard':
-                        targetPage = 'dashboard.html';
-                        break;
-                    case 'strategy':
-                        targetPage = 'strategy.html';
-                        break;
-                    case 'broker':
-                        targetPage = 'broker.html';
-                        break;
-                    case 'algo':
-                        targetPage = 'algo.html';
-                        break;
-                    case 'scan':
-                        targetPage = 'scan.html';
-                        break;
-                    case 'settings':
-                        targetPage = 'settings.html';
-                        break;
-                    case 'reports':
-                        targetPage = 'reports.html';
-                        break;
-                    case 'cargpt':
-                        targetPage = 'car_setup.html';
-                        break;
-                    default:
-                        console.error('LeftMenu: Unknown section:', section);
-                        return;
-                }
-                
-                console.log('LeftMenu: Navigating to:', targetPage);
-                
-                // Use replace to avoid adding to browser history
-                try {
-                    window.location.replace(targetPage);
-                } catch (e) {
-                    console.error('LeftMenu: Navigation error:', e);
-                    // Fallback to href
-                    window.location.href = targetPage;
-                }
+        document.querySelectorAll('.nav-item[data-page]').forEach(item => {
+            item.addEventListener('click', () => {
+                const page = item.dataset.page;
+                if (page) window.location.replace(page);
             });
+        });
+        document.querySelectorAll('.nav-item[data-action="logout"]').forEach(item => {
+            item.addEventListener('click', () => LeftMenu.logout());
         });
     }
 
     setActiveNavigation() {
-        const navItems = document.querySelectorAll('.nav-item');
-        navItems.forEach(item => {
-            if (item.dataset.section === this.currentPage) {
-                item.classList.add('active');
-            } else {
-                item.classList.remove('active');
-            }
+        const targetPage = this.getTargetPageForSection();
+        document.querySelectorAll('.nav-item[data-page]').forEach(item => {
+            item.classList.toggle('active', item.dataset.page === targetPage);
         });
     }
 
+    getTargetPageForSection() {
+        switch (this.currentPage) {
+            case 'dashboard': return 'dashboard.html';
+            case 'cargpt': return 'carsetup.html';
+            case 'broker': return 'broker.html';
+            case 'strategy': return 'strategy.html';
+            case 'reports': return 'reports.html';
+            case 'settings': return 'settings.html';
+            default: return 'dashboard.html';
+        }
+    }
+
     static logout() {
-        console.log("Logging out...");
-        
-        // Clear user data and token
         localStorage.removeItem('trademanthan_user');
         localStorage.removeItem('trademanthan_token');
-
-        // Redirect to main page
         window.location.href = 'index.html';
     }
 }
 
-// Global logout function
 function logout() {
     LeftMenu.logout();
 }
 
-// Initialize left menu when DOM is loaded
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('DOM loaded, initializing LeftMenu...');
-    new LeftMenu();
-});
+document.addEventListener('DOMContentLoaded', () => new LeftMenu());

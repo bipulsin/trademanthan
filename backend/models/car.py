@@ -9,7 +9,7 @@ from .base import Base
 class CarStockList(Base):
     """
     Stores stock symbols for CAR GPT trailing analysis.
-    Symbols are entered in car_setup page (comma-separated) and used for CAR analysis.
+    Symbols are entered in carsetup page (comma-separated) and used for CAR analysis.
     """
     __tablename__ = "carstocklist"
 

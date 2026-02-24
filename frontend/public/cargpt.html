@@ -3,37 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CAR GPT - Analysis Report | Trade Manthan</title>
-    <link rel="stylesheet" href="cargpt.css">
+    <title>CAR GPT - Analysis Report | Tradentical</title>
+    <script src="auth-check.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="left-menu.css">
+    <link rel="stylesheet" href="cargpt.css">
 </head>
 <body class="cargpt-body">
-    <header class="cargpt-title-bar">
-        <div style="display: flex; align-items: center; gap: 12px;">
-            <button class="cargpt-hamburger" id="menuToggle" aria-label="Menu">
-                <i class="fas fa-bars"></i>
-            </button>
-            <h1>CAR GPT - Report</h1>
+    <div class="mobile-title-bar">
+        <button class="mobile-menu-toggle" id="mobileMenuToggle" aria-label="Menu"><i class="fas fa-bars"></i></button>
+        <div class="mobile-title-content">
+            <img src="tradentical-logo.png" alt="Tradentical" class="mobile-logo">
+            <h1 class="mobile-title">CAR GPT Report</h1>
         </div>
-        <nav class="nav-links">
-            <a href="car_setup.html">Setup</a>
-            <a href="car_gpt.html" class="active">Report</a>
-            <a href="index.html">Home</a>
-        </nav>
-    </header>
-
-    <div class="cargpt-layout">
-        <aside class="cargpt-left-menu" id="leftMenu">
-            <nav>
-                <ul>
-                    <li><a href="car_setup.html"><i class="fas fa-cog"></i> Setup</a></li>
-                    <li><a href="car_gpt.html" class="active"><i class="fas fa-chart-line"></i> CAR Report</a></li>
-                    <li><a href="index.html"><i class="fas fa-home"></i> Home</a></li>
-                </ul>
-            </nav>
-        </aside>
-
-        <main class="cargpt-main">
+    </div>
+    <div class="app-container app-with-left-menu">
+        <div id="left-menu-container"></div>
+        <main class="main-content-area cargpt-main">
             <section class="cargpt-card">
                 <h2>
                     <span><i class="fas fa-chart-bar"></i> CAR Analysis</span>
@@ -77,13 +63,9 @@
         </div>
     </div>
 
+    <script src="left-menu.js"></script>
     <script>
-        // Use /cargpt/ path - nginx proxies directly to backend (avoids /api/ routing issues)
         const CARGPT_ANALYZE_URL = '/cargpt/analyze';
-
-        document.getElementById('menuToggle').addEventListener('click', () => {
-            document.getElementById('leftMenu').classList.toggle('mobile-open');
-        });
 
         function formatCumulativeAvg(arr) {
             if (!arr || arr.length === 0) return '-';
@@ -91,11 +73,7 @@
         }
 
         function safeParseJson(text) {
-            try {
-                return JSON.parse(text);
-            } catch (e) {
-                return null;
-            }
+            try { return JSON.parse(text); } catch (e) { return null; }
         }
 
         document.getElementById('runBtn').addEventListener('click', async () => {

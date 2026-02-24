@@ -3,38 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CAR Setup - CAR GPT | Trade Manthan</title>
-    <link rel="stylesheet" href="cargpt.css">
+    <title>CAR Setup - CAR GPT | Tradentical</title>
+    <script src="auth-check.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="left-menu.css">
+    <link rel="stylesheet" href="cargpt.css">
 </head>
 <body class="cargpt-body">
-    <header class="cargpt-title-bar">
-        <div style="display: flex; align-items: center; gap: 12px;">
-            <button class="cargpt-hamburger" id="menuToggle" aria-label="Menu">
-                <i class="fas fa-bars"></i>
-            </button>
-            <h1>CAR GPT - Setup</h1>
+    <div class="mobile-title-bar">
+        <button class="mobile-menu-toggle" id="mobileMenuToggle" aria-label="Menu"><i class="fas fa-bars"></i></button>
+        <div class="mobile-title-content">
+            <img src="tradentical-logo.png" alt="Tradentical" class="mobile-logo">
+            <h1 class="mobile-title">CAR GPT Setup</h1>
         </div>
-        <nav class="nav-links">
-            <a href="car_setup.html" class="active">Setup</a>
-            <a href="car_gpt.html">Report</a>
-            <a href="index.html">Home</a>
-        </nav>
-    </header>
-
-    <div class="cargpt-layout">
-        <aside class="cargpt-left-menu" id="leftMenu">
-            <nav>
-                <ul>
-                    <li><a href="car_setup.html" class="active"><i class="fas fa-cog"></i> Setup</a></li>
-                    <li><a href="car_gpt.html"><i class="fas fa-chart-line"></i> CAR Report</a></li>
-                    <li><a href="index.html"><i class="fas fa-home"></i> Home</a></li>
-                </ul>
-            </nav>
-        </aside>
-
-        <main class="cargpt-main">
-            <!-- Collapsible Setup Section -->
+    </div>
+    <div class="app-container app-with-left-menu">
+        <div id="left-menu-container"></div>
+        <main class="main-content-area cargpt-main">
             <section class="cargpt-card collapsible" id="setupCard">
                 <h2 id="setupToggle">
                     <span><i class="fas fa-sliders-h"></i> Setup</span>
@@ -55,7 +40,6 @@
                 </div>
             </section>
 
-            <!-- Data List Section -->
             <section class="cargpt-card">
                 <h2><i class="fas fa-list"></i> Stock List</h2>
                 <div class="card-body">
@@ -80,17 +64,13 @@
         </main>
     </div>
 
+    <script src="left-menu.js"></script>
     <script>
-        // Use /cargpt/ path - nginx proxies directly to backend
         const CARGPT_BASE = '/cargpt';
 
         function safeParseJson(text) {
             try { return JSON.parse(text); } catch (e) { return null; }
         }
-
-        document.getElementById('menuToggle').addEventListener('click', () => {
-            document.getElementById('leftMenu').classList.toggle('mobile-open');
-        });
 
         document.getElementById('setupToggle').addEventListener('click', () => {
             const card = document.getElementById('setupCard');
@@ -123,12 +103,8 @@
                 const r = await fetch(CARGPT_BASE + '/stock-list');
                 const text = await r.text();
                 const data = safeParseJson(text);
-                if (!r.ok) {
-                    throw new Error('API returned ' + r.status);
-                }
-                if (data === null) {
-                    throw new Error('Invalid server response');
-                }
+                if (!r.ok) throw new Error('API returned ' + r.status);
+                if (data === null) throw new Error('Invalid server response');
                 loading.style.display = 'none';
                 if (data && Array.isArray(data) && data.length > 0) {
                     wrap.style.display = 'block';
