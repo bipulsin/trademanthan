@@ -123,14 +123,21 @@ def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: st
     """
     logger.info(f"🔍 find_strike_from_option_chain called for {stock_name} {option_type} (LTP: {stock_ltp})")
     try:
+        # Pinpoint failure: check instrument_key before option chain call
+        inst_key = vwap_service.get_instrument_key(stock_name) if vwap_service else None
+        if not inst_key:
+            logger.warning(f"⚠️ INSTRUMENT_KEY CHECK: get_instrument_key('{stock_name}') returned None/empty - option chain will fail")
+        else:
+            logger.info(f"✅ INSTRUMENT_KEY CHECK: get_instrument_key('{stock_name}') = {str(inst_key)[:60]}")
         # Get option chain from Upstox API
         logger.info(f"Calling vwap_service.get_option_chain({stock_name})")
         option_chain = vwap_service.get_option_chain(stock_name)
         logger.info(f"get_option_chain returned: type={type(option_chain)}, is None={option_chain is None}")
         
         if not option_chain:
-            # Log as debug instead of warning - this is expected for some stocks that don't have options
-            logger.debug(f"No option chain data available for {stock_name} (stock may not have options trading)")
+            # Pinpoint: if inst_key was None, failure is instrument_key; else check trademanthan.log for OPTION_CHAIN_FAIL (API error)
+            cause = "instrument_key" if not inst_key else "Upstox API (check trademanthan.log for OPTION_CHAIN_FAIL)"
+            logger.warning(f"No option chain data for {stock_name} - likely cause: {cause}")
             logger.info(f"No option chain data available for {stock_name}")
             return None
         
@@ -219,22 +226,27 @@ def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: st
                 continue
             
             # Get option data based on option type
-            # Try multiple possible structures
+            # Try multiple possible structures (Upstox API: call_options/put_options have instrument_key, market_data)
             option_data = None
+            opt_instrument_key = None
             if option_type == 'CE':
-                if 'call_options' in strike_data:
+                if strike_data.get('call_options'):
                     call_opts = strike_data['call_options']
                     if isinstance(call_opts, dict):
-                        option_data = call_opts.get('market_data', call_opts)  # Try market_data first, fallback to direct
+                        option_data = call_opts.get('market_data', call_opts)
+                        opt_instrument_key = call_opts.get('instrument_key')
                     elif isinstance(call_opts, list) and len(call_opts) > 0:
-                        option_data = call_opts[0]  # If it's a list, take first item
-            else:  # PE
-                if 'put_options' in strike_data:
+                        option_data = call_opts[0] if isinstance(call_opts[0], dict) else None
+                        opt_instrument_key = call_opts[0].get('instrument_key') if isinstance(call_opts[0], dict) else None
+            else:  # PE (Bearish) - ensure put_options is handled robustly
+                if strike_data.get('put_options'):
                     put_opts = strike_data['put_options']
                     if isinstance(put_opts, dict):
-                        option_data = put_opts.get('market_data', put_opts)  # Try market_data first, fallback to direct
+                        option_data = put_opts.get('market_data', put_opts)
+                        opt_instrument_key = put_opts.get('instrument_key')
                     elif isinstance(put_opts, list) and len(put_opts) > 0:
-                        option_data = put_opts[0]  # If it's a list, take first item
+                        option_data = put_opts[0] if isinstance(put_opts[0], dict) else None
+                        opt_instrument_key = put_opts[0].get('instrument_key') if isinstance(put_opts[0], dict) else None
             
             if option_data and isinstance(option_data, dict):
                 volume = option_data.get('volume', 0) or option_data.get('total_volume', 0)
@@ -242,12 +254,16 @@ def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: st
                 ltp = option_data.get('ltp', 0) or option_data.get('last_price', 0)
                 
                 # Always include the strike, even if volume/OI is 0 - we need it for OTM calculation
-                strikes.append({
+                # Include instrument_key from API when available (critical for Bearish/PE - avoids instruments.json lookup failures)
+                strike_entry = {
                     'strike_price': float(strike_price),
                     'volume': float(volume),
                     'oi': float(oi),
                     'ltp': float(ltp)
-                })
+                }
+                if opt_instrument_key:
+                    strike_entry['instrument_key'] = opt_instrument_key
+                strikes.append(strike_entry)
                 logger.debug(f"Added strike {strike_price} {option_type}: vol={volume}, oi={oi}, ltp={ltp}")
             else:
                 logger.warning(f"No option_data found for strike {strike_price} {option_type} in {stock_name} - strike_data keys: {list(strike_data.keys()) if isinstance(strike_data, dict) else 'not a dict'}")
@@ -305,6 +321,8 @@ def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: st
         otm_position = otm_1_to_5.index(selected) + 1
         liquidity_score = selected['volume'] * selected['oi']
         logger.info(f"✅ Selected OTM-{otm_position} strike: {selected['strike_price']} (Volume: {selected['volume']}, OI: {selected['oi']}, Score: {liquidity_score})")
+        if selected.get('instrument_key'):
+            logger.info(f"   instrument_key from API: {selected['instrument_key']} (will use for Bearish/PE)")
         logger.info(f"   Highest liquidity among OTM-1 to OTM-5")
         return selected
         
@@ -350,13 +368,16 @@ def _symbols_to_try_for_underlying(stock_name: str) -> List[str]:
     return list(dict.fromkeys([key] + [a for a in aliases if a != key]))
 
 
-def find_option_contract_from_instruments(stock_name: str, option_type: str, stock_ltp: float, vwap_service=None) -> Optional[str]:
+def find_option_contract_from_instruments(stock_name: str, option_type: str, stock_ltp: float, vwap_service=None) -> tuple:
     """
     Find the correct option contract from instruments.json based on:
     - underlying_symbol matching stock_name (or aliases for LTIM, HINDPETRO, PERSISTENT, etc.)
     - option_type matching (CE/PE)
     - Strike price from option chain API (volume/OI based) - REQUIRED, no fallback
     - Expiry month: If current date > 17th, use next month's expiry; otherwise use current month
+    
+    When option chain API returns instrument_key (Upstox put_options/call_options), use it directly
+    to avoid instruments.json lookup failures - fixes "Missing option data" for Bearish/PE trades.
     
     Args:
         stock_name: Stock symbol (e.g., 'RELIANCE')
@@ -365,9 +386,9 @@ def find_option_contract_from_instruments(stock_name: str, option_type: str, sto
         vwap_service: UpstoxService instance for API calls
         
     Returns:
-        Option contract name (trading_symbol) from instruments.json
-        or None if option chain unavailable or contract not found
-        (Trade will be marked as no_entry when None is returned)
+        Tuple of (option_contract, instrument_key):
+        - (str, str) when found; instrument_key may be from API (preferred) or instruments.json
+        - (None, None) when option chain unavailable or contract not found
     """
     logger.info(f"🔍 find_option_contract_from_instruments called for {stock_name} {option_type} (LTP: {stock_ltp})")
     try:
@@ -380,8 +401,8 @@ def find_option_contract_from_instruments(stock_name: str, option_type: str, sto
         now = datetime.now(ist)
         
         # Determine target expiry month based on current date
-        # If day > 17, use next month's expiry; otherwise use current month
-        if now.day > 17:
+        # Align with Upstox get_monthly_expiry: day <= 18 = current month, day > 18 = next month
+        if now.day > 18:
             # Use next month's expiry
             if now.month == 12:
                 target_expiry_month = 1
@@ -414,11 +435,35 @@ def find_option_contract_from_instruments(stock_name: str, option_type: str, sto
                 logger.error(f"Exception in find_strike_from_option_chain for {stock_name} {option_type}: {str(e)}", exc_info=True)
                 strike_data = None
         
-        # If option chain not available, return None to mark trade as no_entry
+        # If option chain not available, return (None, None) to mark trade as no_entry
         if target_strike is None or target_strike == 0:
             logger.info(f"❌ Option chain not available for {stock_name} - Cannot determine strike. Trade will be marked as no_entry.")
             logger.warning(f"❌ Option chain not available for {stock_name} {option_type} - Cannot determine strike. Trade will be marked as no_entry.")
-            return None
+            return (None, None)
+        
+        # PREFERRED: When option chain API returns instrument_key (Bearish/PE fix), use it directly
+        # This avoids instruments.json lookup failures for Bearish/PE - critical fix for "Missing option data"
+        api_instrument_key = strike_data.get('instrument_key') if strike_data else None
+        if api_instrument_key:
+            logger.info(f"✅ Using instrument_key from option chain API for {stock_name} {option_type}: {api_instrument_key}")
+            # Direct lookup by instrument_key - bypass underlying_symbol/strike matching which can fail for Bearish
+            from backend.config import get_instruments_file_path
+            instruments_file = get_instruments_file_path()
+            if instruments_file.exists():
+                try:
+                    with open(instruments_file, 'r') as f:
+                        instruments_data = json_lib.load(f)
+                    if isinstance(instruments_data, list):
+                        for inst in instruments_data:
+                            if isinstance(inst, dict) and inst.get('instrument_key') == api_instrument_key:
+                                option_contract = inst.get('trading_symbol') or inst.get('tradingsymbol')
+                                if option_contract:
+                                    logger.info(f"✅ Found option by instrument_key for {stock_name} {option_type}: {option_contract}")
+                                    return (option_contract, api_instrument_key)
+                                break
+                except Exception as lookup_err:
+                    logger.warning(f"Direct instrument_key lookup failed: {lookup_err}, falling back to instruments search")
+            # If direct lookup failed, continue with normal flow below
         
         logger.info(f"Looking for {option_type} option with strike {target_strike} for {stock_name}")
         logger.info(f"Looking for {option_type} option with strike {target_strike} for {stock_name}")
@@ -430,7 +475,7 @@ def find_option_contract_from_instruments(stock_name: str, option_type: str, sto
         if not instruments_file.exists():
             logger.info(f"⚠️ Instruments JSON file not found: {instruments_file}")
             logger.error(f"Instruments JSON file not found: {instruments_file}")
-            return None
+            return (None, None)
         
         # Load instruments data with retry logic
         max_retries = 3
@@ -448,19 +493,19 @@ def find_option_contract_from_instruments(stock_name: str, option_type: str, sto
                 else:
                     logger.info(f"❌ ERROR: Failed to read instruments file after {max_retries} attempts: {str(file_error)}")
                     logger.error(f"Failed to read instruments file for {stock_name} after {max_retries} attempts: {str(file_error)}")
-                    return None
+                    return (None, None)
         
         if not instruments_data:
             logger.info(f"⚠️ Instruments data is empty")
             logger.error(f"Instruments data is empty for {stock_name}")
-            return None
+            return (None, None)
         
         # Validate that instruments_data is a list
         if not isinstance(instruments_data, list):
             error_msg = f"Instruments data is not a list (type: {type(instruments_data).__name__})"
             logger.info(f"❌ ERROR: {error_msg}")
             logger.error(f"{error_msg} for {stock_name}")
-            return None
+            return (None, None)
         
         # Calculate target expiry date range (±7 days tolerance)
         target_expiry_start = datetime(target_expiry_year, target_expiry_month, 1, tzinfo=ist)
@@ -537,11 +582,12 @@ def find_option_contract_from_instruments(stock_name: str, option_type: str, sto
                                 logger.warning(f"Exact match found for {stock_name} {option_type} strike {inst_strike} but trading_symbol is missing (instrument_key: {inst.get('instrument_key', 'N/A')})")
                                 logger.info(f"⚠️ WARNING: Exact match found but trading_symbol not found in instrument JSON (strike: {inst_strike}, expiry: {inst_expiry.strftime('%d %b %Y')})")
                                 continue
+                            inst_key = inst.get('instrument_key')
                             logger.info(f"✅ Found EXACT match for {stock_name} {option_type}: {option_contract}")
                             logger.info(f"   Strike: {inst_strike} (requested: {target_strike})")
                             logger.info(f"   Expiry: {inst_expiry.strftime('%d %b %Y')}")
                             logger.info(f"✅ Found EXACT match for {stock_name} {option_type}: {option_contract} (strike: {inst_strike}, expiry: {inst_expiry.strftime('%d %b %Y')})")
-                            return option_contract
+                            return (option_contract, inst_key) if inst_key else (option_contract, None)
                         else:
                             # Track best match (within tolerance)
                             if best_match is None or score < best_match_score:
@@ -565,49 +611,58 @@ def find_option_contract_from_instruments(stock_name: str, option_type: str, sto
                 else:
                     logger.warning(f"Best match for {stock_name} {option_type} has no expiry timestamp")
                     logger.info(f"⚠️ WARNING: Best match has no expiry timestamp, skipping")
-                    return None
+                    return (None, None)
                 
                 # Fetch option contract name from instrument JSON (Upstox may use trading_symbol or tradingsymbol)
                 option_contract = best_match.get('trading_symbol') or best_match.get('tradingsymbol')
                 if not option_contract:
                     logger.warning(f"Best match found for {stock_name} {option_type} but trading_symbol is missing (instrument_key: {best_match.get('instrument_key', 'N/A')}, strike: {inst_strike})")
                     logger.info(f"⚠️ WARNING: trading_symbol not found in best match instrument JSON (strike: {inst_strike}, expiry: {inst_expiry.strftime('%d %b %Y')})")
-                    return None
+                    return (None, None)
+                inst_key = best_match.get('instrument_key')
                 logger.info(f"⚠️ WARNING: Using BEST MATCH (within tolerance) for {stock_name} {option_type}: {option_contract}")
                 logger.info(f"   Strike: {inst_strike} (requested: {target_strike}, diff: {abs(inst_strike - target_strike):.4f})")
                 logger.info(f"   Expiry: {inst_expiry.strftime('%d %b %Y')} (requested: {target_expiry_month}/{target_expiry_year})")
                 logger.info(f"⚠️ WARNING: Using BEST MATCH (within tolerance) for {stock_name} {option_type}: {option_contract} (strike: {inst_strike}, expiry: {inst_expiry.strftime('%d %b %Y')})")
-                return option_contract
+                return (option_contract, inst_key) if inst_key else (option_contract, None)
             except (ValueError, OSError, OverflowError, TypeError) as best_match_error:
                 logger.error(f"Error processing best match for {stock_name} {option_type}: {best_match_error}")
                 logger.info(f"❌ ERROR: Failed to process best match: {str(best_match_error)}")
-                return None
+                return (None, None)
         
         logger.info(f"No option contract found for {stock_name} {option_type} (target strike: {target_strike})")
         logger.warning(f"No option contract found for {stock_name} {option_type} (target strike: {target_strike})")
-        return None
+        return (None, None)
             
     except Exception as e:
         logger.info(f"Error finding option contract for {stock_name}: {str(e)}")
         logger.error(f"❌ EXCEPTION in find_option_contract_from_instruments for {stock_name} {option_type}: {str(e)}", exc_info=True)
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
-        return None
+        return (None, None)
 
 
-def find_option_contract_from_master_stock(db: Session, stock_name: str, option_type: str, stock_ltp: float, vwap_service=None) -> Optional[str]:
+def find_option_contract_from_master_stock(db: Session, stock_name: str, option_type: str, stock_ltp: float, vwap_service=None) -> tuple:
     """
-    DEPRECATED: This function now delegates to find_option_contract_from_instruments().
-    Kept for backward compatibility during transition.
+    Find option contract and instrument_key. Delegates to find_option_contract_from_instruments().
+    Returns:
+        Tuple of (option_contract, instrument_key) - both may be None
     """
     logger.info(f"🔍 find_option_contract_from_master_stock called for {stock_name} {option_type} (LTP: {stock_ltp})")
     try:
         result = find_option_contract_from_instruments(stock_name, option_type, stock_ltp, vwap_service)
-        logger.info(f"find_option_contract_from_master_stock returning: {result}")
-        return result
+        # Ensure we always return tuple for consistent unpacking
+        if result is None or (isinstance(result, tuple) and len(result) == 1):
+            return (None, None)
+        if isinstance(result, tuple) and len(result) >= 2:
+            ik_preview = (result[1][:30] + '...') if result[1] and len(str(result[1])) > 30 else result[1]
+            logger.info(f"find_option_contract_from_master_stock returning: ({result[0]}, {ik_preview})")
+            return result
+        # Legacy: single value (option_contract only)
+        return (result, None) if result else (None, None)
     except Exception as e:
         logger.error(f"❌ EXCEPTION in find_option_contract_from_master_stock for {stock_name} {option_type}: {str(e)}", exc_info=True)
-        return None
+        return (None, None)
 
 
 async def process_webhook_data(data: dict, db: Session, forced_type: str = None):
@@ -626,6 +681,14 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
     import json as json_module  # Use alias to avoid any potential shadowing issues
     
     try:
+        # Ensure instruments file is available before processing (prevents "Missing option data" for Bearish/PE)
+        try:
+            from backend.services.instruments_downloader import ensure_instruments_available
+            if not ensure_instruments_available():
+                logger.warning("⚠️ Instruments file may be stale - Bearish scan may show 'Missing option data'")
+        except Exception as inst_err:
+            logger.warning(f"⚠️ Could not ensure instruments: {inst_err}")
+        
         logger.info(f"Processing webhook data (forced_type={forced_type}): {json_module.dumps(data, indent=2)}")
         
         # Parse triggered_at time and combine with the last trading date
@@ -879,12 +942,15 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             for retry_attempt in range(1, max_retries + 1):
                 try:
                     logger.info(f"Calling find_option_contract_from_master_stock for {stock_name} (attempt {retry_attempt})")
-                    option_contract = find_option_contract_from_master_stock(
+                    contract_result = find_option_contract_from_master_stock(
                         db, stock_name, forced_option_type, stock_ltp, vwap_service
                     )
-                    logger.info(f"find_option_contract_from_master_stock returned: {option_contract}")
+                    option_contract = contract_result[0] if isinstance(contract_result, tuple) else contract_result
+                    instrument_key = contract_result[1] if isinstance(contract_result, tuple) and len(contract_result) >= 2 else None
+                    logger.info(f"find_option_contract_from_master_stock returned: option_contract={option_contract}, instrument_key={'...' + str(instrument_key)[-20:] if instrument_key else None}")
                     if option_contract:
-                        logger.info(f"✅ Option contract found for {stock_name} (attempt {retry_attempt}): {option_contract}")
+                        if instrument_key:
+                            logger.info(f"✅ Using instrument_key from option chain for {stock_name} (Bearish/PE fix)")
                         logger.info(f"✅ Option contract found for {stock_name} (attempt {retry_attempt}): {option_contract}")
                         break
                     else:
@@ -939,6 +1005,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             
             # ====================================================================
             # ACTIVITY 5: Find Instrument Key from instruments.json (Independent - requires option_contract)
+            # When instrument_key from option chain API is available (Bearish/PE fix), use it and only fetch lot_size
             # ====================================================================
             if option_contract:
                 try:
@@ -949,7 +1016,26 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     from backend.config import get_instruments_file_path
                     instruments_file = get_instruments_file_path()
                     
-                    if not instruments_file.exists():
+                    # FAST PATH: When we have instrument_key from option chain (Bearish/PE), just get lot_size and skip full search
+                    skip_full_search = False
+                    if instrument_key and instruments_file.exists():
+                        try:
+                            with open(instruments_file, 'r') as f:
+                                inst_data = json_lib.load(f)
+                            for inst in (inst_data if isinstance(inst_data, list) else []):
+                                if isinstance(inst, dict) and inst.get('instrument_key') == instrument_key:
+                                    inst_lot = inst.get('lot_size')
+                                    if inst_lot and inst_lot > 0:
+                                        qty = int(inst_lot)
+                                        logger.info(f"✅ Got lot_size {qty} from instrument_key for {stock_name} (Bearish/PE fast path)")
+                                    skip_full_search = True
+                                    break
+                        except Exception as fast_err:
+                            logger.warning(f"Fast path lot_size lookup failed: {fast_err}, falling back to full search")
+                    
+                    if skip_full_search:
+                        pass  # instrument_key and lot_size already set
+                    elif not instruments_file.exists():
                         logger.info(f"⚠️ Instruments JSON file not found: {instruments_file}")
                         logger.error(f"Instruments JSON file not found: {instruments_file}")
                     else:
@@ -3936,13 +4022,21 @@ async def manual_stock_entry(request: Request, db: Session = Depends(get_db)):
         )
 
 @router.get("/latest")
-async def get_latest_webhook_data(db: Session = Depends(get_db)):
+async def get_latest_webhook_data(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """
     Get the latest webhook data for both Bullish and Bearish sections from database
     Includes index trend check to determine if trading is allowed
+    Ensures instruments are available in background (fixes "Missing option data" for Bearish)
     """
     import pytz
-    
+
+    # Ensure instruments are available in background - critical for Bearish/PE option chain
+    try:
+        from backend.services.instruments_downloader import ensure_instruments_available
+        background_tasks.add_task(lambda: ensure_instruments_available())
+    except Exception:
+        pass
+
     try:
         ist = pytz.timezone('Asia/Kolkata')
         now = datetime.now(ist)

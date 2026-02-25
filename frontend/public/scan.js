@@ -1457,6 +1457,35 @@ function closeTokenPopup() {
     document.getElementById('tokenExpiredPopup').style.display = 'none';
 }
 
+async function downloadInstruments() {
+    const link = document.querySelector('.instruments-link');
+    const originalHtml = link ? link.innerHTML : '';
+    if (link) {
+        link.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Downloading...';
+        link.style.pointerEvents = 'none';
+    }
+    try {
+        const response = await fetch(`${API_BASE_URL}/scan/download-instruments`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const result = await response.json();
+        if (result.success) {
+            alert('✅ Instruments downloaded successfully! Option data should now be available for Bearish/Bullish scans.');
+            loadLatestData();
+        } else {
+            alert('❌ Download failed: ' + (result.message || result.error || 'Unknown error'));
+        }
+    } catch (err) {
+        alert('❌ Error: ' + err.message);
+    } finally {
+        if (link) {
+            link.innerHTML = originalHtml;
+            link.style.pointerEvents = '';
+        }
+    }
+}
+
 // Initiate Upstox OAuth login flow
 function initiateUpstoxOAuth() {
     console.log('Initiating Upstox OAuth login...');

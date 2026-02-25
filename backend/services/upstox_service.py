@@ -1048,7 +1048,7 @@ class UpstoxService:
             instrument_key = self.get_instrument_key(symbol)
             
             if not instrument_key:
-                logger.error(f"Could not get instrument key for {symbol}")
+                logger.error(f"❌ OPTION_CHAIN_FAIL: Could not get instrument key for {symbol} (get_instrument_key returned None/empty)")
                 return None
             
             # Get monthly expiry date
@@ -1063,7 +1063,7 @@ class UpstoxService:
                 'expiry_date': expiry_date_str  # Monthly expiry date
             }
             
-            logger.info(f"Fetching option chain for {symbol} with expiry {expiry_date_str}")
+            logger.info(f"Fetching option chain for {symbol} with instrument_key={str(instrument_key)[:50]}, expiry={expiry_date_str}")
             response = requests.get(url, headers=self.get_headers(), params=params, timeout=10)
             
             if response.status_code == 200:
@@ -1085,14 +1085,15 @@ class UpstoxService:
                         logger.warning(f"Unexpected option chain data type for {symbol}: {type(option_data)}")
                     return option_data
                 else:
-                    logger.warning(f"No option chain data for {symbol}: {data}")
+                    logger.warning(f"❌ OPTION_CHAIN_FAIL: API status != success for {symbol}: status={data.get('status')}, data={str(data)[:300]}")
                     return None
             else:
-                logger.error(f"Option chain API error for {symbol}: {response.status_code} - {response.text}")
+                err_preview = (response.text[:500] + '...') if len(response.text) > 500 else response.text
+                logger.error(f"❌ OPTION_CHAIN_FAIL: Upstox API error for {symbol}: HTTP {response.status_code}, body={err_preview}")
                 return None
                 
         except Exception as e:
-            logger.error(f"Error fetching option chain for {symbol}: {str(e)}")
+            logger.error(f"❌ OPTION_CHAIN_FAIL: Exception fetching option chain for {symbol}: {str(e)}", exc_info=True)
             return None
     
     def calculate_strike_interval(self, spot_price: float) -> float:
@@ -1111,17 +1112,20 @@ class UpstoxService:
     
     def get_monthly_expiry(self, reference_date: datetime = None) -> datetime:
         """
-        Get the monthly derivative expiry date (last TUESDAY of the month)
+        Get the monthly derivative expiry date (last TUESDAY of the month).
+        If that date is a trading holiday, use the previous trading day.
         
         Logic:
         - If current date <= 18th → Use current month's expiry
         - If current date > 18th → Use next month's expiry
+        - Find last Tuesday of the expiry month
+        - If last Tuesday is a holiday → use previous trading day
         
         Args:
             reference_date: Reference date (default: today)
             
         Returns:
-            Expiry datetime (last Tuesday of the month)
+            Expiry datetime (last Tuesday, or previous trading day if Tuesday is holiday)
         """
         try:
             ist = pytz.timezone('Asia/Kolkata')
@@ -1156,6 +1160,16 @@ class UpstoxService:
             # Go backwards to find last Tuesday (weekday 1)
             while expiry_date.weekday() != 1:  # 1 = Tuesday
                 expiry_date = expiry_date - timedelta(days=1)
+            
+            # If expiry date is a trading holiday, use previous trading day
+            if not self.is_trading_day(expiry_date):
+                logger.info(f"Monthly expiry {expiry_date.strftime('%d %b %Y')} is a trading holiday, using previous trading day")
+                # Go backwards up to 10 days to find previous trading day
+                for _ in range(10):
+                    expiry_date = expiry_date - timedelta(days=1)
+                    if self.is_trading_day(expiry_date):
+                        logger.info(f"Adjusted expiry to previous trading day: {expiry_date.strftime('%d %b %Y %A')}")
+                        break
             
             logger.info(f"Monthly expiry: {expiry_date.strftime('%d %b %Y %A')} (from reference: {reference_date.strftime('%d %b %Y')})")
             
@@ -1693,18 +1707,29 @@ class UpstoxService:
         Convert stock symbol to Upstox instrument key
         Format: NSE_EQ|INE{ISIN_CODE}
         
-        Uses symbol_isin_mapping for proper ISIN codes
+        Uses symbol_isin_mapping for proper ISIN codes.
+        Falls back to instruments_downloader when symbol not found (fixes Bearish "Missing option data").
         """
         try:
             from backend.services.symbol_isin_mapping import get_instrument_key as get_isin_key
-            return get_isin_key(symbol)
+            result = get_isin_key(symbol)
+            # If we got fallback format (NSE_EQ|SYMBOL), try instruments_downloader for actual key
+            if result and '|' in result and not result.split('|')[1].startswith('INE'):
+                try:
+                    from backend.services.instruments_downloader import instruments_downloader
+                    sym_clean = symbol.strip().upper().replace("-EQ", "")
+                    for try_sym in [sym_clean, sym_clean + "-EQ", symbol.strip().upper()]:
+                        ik = instruments_downloader.get_instrument_key_by_symbol(try_sym)
+                        if ik:
+                            return ik
+                except Exception:
+                    pass
+            return result
         except ImportError:
             try:
-                # Fallback 1: Try without backend prefix
                 from services.symbol_isin_mapping import get_instrument_key as get_isin_key
                 return get_isin_key(symbol)
             except ImportError:
-                # Fallback 2: Try direct import
                 try:
                     from symbol_isin_mapping import get_instrument_key as get_isin_key
                     return get_isin_key(symbol)

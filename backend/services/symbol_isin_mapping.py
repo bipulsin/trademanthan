@@ -243,8 +243,8 @@ def load_isin_from_instruments() -> Dict[str, str]:
         
         for inst in instruments:
             if inst.get('segment') == 'NSE_EQ':
-                # Get trading symbol and ISIN
-                trading_symbol = inst.get('trading_symbol', '').strip().upper()
+                # Get trading symbol (Upstox uses trading_symbol or tradingsymbol) and ISIN
+                trading_symbol = (inst.get('trading_symbol') or inst.get('tradingsymbol') or '').strip().upper()
                 name = inst.get('name', '').strip().upper()
                 isin = inst.get('isin', '').strip()
                 
@@ -317,6 +317,37 @@ def get_isin(symbol: str) -> Optional[str]:
         logger.debug(f"No ISIN found for {symbol}")
         return None
 
+def _get_instrument_key_from_file(symbol: str) -> Optional[str]:
+    """
+    Search instruments file directly for instrument_key by trading_symbol.
+    Handles NSE_EQ segment and symbol variations (-EQ suffix, etc).
+    Used when get_isin returns None - ensures option chain works for Bearish/PE.
+    """
+    if not symbol or not INSTRUMENTS_FILE.exists():
+        return None
+    symbol_upper = symbol.strip().upper().replace("-EQ", "").replace(".NS", "").replace(".BO", "")
+    variations = [symbol_upper, symbol_upper + "-EQ", symbol_upper + "-FUT", symbol_upper + "-OPT"]
+    try:
+        with open(INSTRUMENTS_FILE, 'r') as f:
+            instruments = json.load(f)
+        if not isinstance(instruments, list):
+            return None
+        for inst in instruments:
+            if inst.get('segment') != 'NSE_EQ':
+                continue
+            ts = (inst.get('trading_symbol') or inst.get('tradingsymbol') or '').strip().upper()
+            ts_clean = ts.replace("-EQ", "").replace("-FUT", "").replace("-OPT", "")
+            if ts in variations or ts_clean == symbol_upper:
+                ik = inst.get('instrument_key')
+                if ik:
+                    logger.info(f"✅ Found instrument_key from file for {symbol}: {ik}")
+                    return ik
+        return None
+    except Exception as e:
+        logger.debug(f"Could not get instrument_key from file for {symbol}: {e}")
+        return None
+
+
 def get_instrument_key(symbol: str, exchange: str = "NSE_EQ") -> str:
     """
     Get Upstox instrument key for a symbol
@@ -343,15 +374,20 @@ def get_instrument_key(symbol: str, exchange: str = "NSE_EQ") -> str:
         logger.info(f"🔍 Index detected: {symbol_upper} → {index_mappings[symbol_upper]}")
         return index_mappings[symbol_upper]
     
-    # Regular stock handling
+    # Regular stock handling - try ISIN first
     isin = get_isin(symbol)
     
     if isin:
         return f"{exchange}|{isin}"
-    else:
-        # Fallback to simple format (may not work for regular stocks)
-        logger.warning(f"⚠️ No ISIN found for {symbol}, using fallback format")
-        return f"{exchange}|{symbol_upper}"
+    
+    # Fallback: search instruments file directly for instrument_key (fixes "Missing option data" for Bearish)
+    ik_from_file = _get_instrument_key_from_file(symbol)
+    if ik_from_file:
+        return ik_from_file
+    
+    # Last resort: simple format (may not work for option chain)
+    logger.warning(f"⚠️ No ISIN/instrument_key found for {symbol}, using fallback format")
+    return f"{exchange}|{symbol_upper}"
 
 def _load_names_cache() -> Dict[str, str]:
     """Load symbol->name mapping from instruments file (cached)."""
