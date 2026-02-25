@@ -138,24 +138,24 @@
 /* Theme toggle - above nav list */
 .theme-toggle {
     display: flex;
-    align-items: center;
-    justify-content: center;
     gap: 8px;
-    padding: 0.75rem 1rem;
-    border-bottom: 1px solid var(--left-menu-border);
+    padding: 0.75rem 1.25rem 0.5rem;
+    justify-content: center;
+    align-items: center;
 }
 
 .theme-btn {
-    width: 36px;
-    height: 36px;
-    border-radius: 8px;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
     border: 1px solid var(--left-menu-border);
-    background: rgba(148, 163, 184, 0.1);
+    background: rgba(148, 163, 184, 0.15);
     color: var(--left-menu-muted);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
+    font-size: 1.1rem;
     transition: all 0.2s;
 }
 
@@ -165,24 +165,19 @@
 }
 
 .theme-btn.active {
-    background: var(--left-menu-accent);
-    color: white;
+    background: rgba(59, 130, 246, 0.25);
+    color: var(--left-menu-accent);
     border-color: var(--left-menu-accent);
-}
-
-.theme-btn i {
-    font-size: 1rem;
 }
 
 .left-panel.collapsed .theme-toggle {
     flex-direction: column;
-    gap: 4px;
-    padding: 0.5rem;
+    padding: 0.75rem 0.5rem 0.5rem;
 }
 
 .left-panel.collapsed .theme-btn {
-    width: 32px;
-    height: 32px;
+    width: 36px;
+    height: 36px;
 }
 
 /* Nav */
@@ -276,14 +271,11 @@
     display: block;
     color: var(--left-menu-muted);
     font-size: 0.75rem;
+    font-weight: 400;
     margin-top: 4px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-}
-
-.left-panel.collapsed .user-datetime {
-    display: none;
 }
 
 /* Main content area - adjusts when panel expands/collapses */
