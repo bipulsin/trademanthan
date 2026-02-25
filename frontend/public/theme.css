@@ -1,0 +1,302 @@
+/**
+ * Tradentical Light/Dark Theme
+ * Applies to: dashboard, cargpt, broker, strategy, reports, settings
+ */
+
+/* ========== DARK MODE (default) ========== */
+html.theme-dark body,
+html.theme-dark .app-container,
+html.theme-dark .app-with-left-menu {
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%) !important;
+    color: #f1f5f9 !important;
+}
+
+html.theme-dark .main-content-area,
+html.theme-dark .right-panel {
+    background: transparent !important;
+    color: #f1f5f9 !important;
+}
+
+/* Cards - dark */
+html.theme-dark .dashboard-card,
+html.theme-dark .crypto-card,
+html.theme-dark .strategy-card,
+html.theme-dark .broker-card,
+html.theme-dark .report-card,
+html.theme-dark .settings-card,
+html.theme-dark .cargpt-card,
+html.theme-dark .card,
+html.theme-dark section[class*="-card"] {
+    background: rgba(30, 41, 59, 0.8) !important;
+    border-color: rgba(148, 163, 184, 0.2) !important;
+    color: #f1f5f9 !important;
+}
+
+html.theme-dark .dashboard-card h3,
+html.theme-dark .dashboard-card h2,
+html.theme-dark .cargpt-card h2,
+html.theme-dark .strategy-card h2,
+html.theme-dark .broker-card h2,
+html.theme-dark .report-card h2,
+html.theme-dark .settings-card h2,
+html.theme-dark .card-header h3,
+html.theme-dark .card-header h2 {
+    color: #f1f5f9 !important;
+}
+
+html.theme-dark .card-content,
+html.theme-dark .card-body {
+    color: #f1f5f9 !important;
+}
+
+html.theme-dark .crypto-item,
+html.theme-dark .crypto-name,
+html.theme-dark .crypto-price,
+html.theme-dark .crypto-change,
+html.theme-dark .last-updated {
+    color: #f1f5f9 !important;
+}
+
+html.theme-dark .crypto-change.positive { color: #22c55e !important; }
+html.theme-dark .crypto-change.negative { color: #ef4444 !important; }
+
+/* Tables - dark */
+html.theme-dark table,
+html.theme-dark .cargpt-table,
+html.theme-dark .strategy-table,
+html.theme-dark .broker-table,
+html.theme-dark .report-table {
+    color: #f1f5f9 !important;
+    border-color: rgba(148, 163, 184, 0.2) !important;
+}
+
+html.theme-dark th,
+html.theme-dark .cargpt-table th,
+html.theme-dark .strategy-table th {
+    background: rgba(15, 23, 42, 0.8) !important;
+    color: #94a3b8 !important;
+    border-color: rgba(148, 163, 184, 0.2) !important;
+}
+
+html.theme-dark td,
+html.theme-dark .cargpt-table td {
+    border-color: rgba(148, 163, 184, 0.2) !important;
+    color: #f1f5f9 !important;
+}
+
+/* Inputs, buttons - dark */
+html.theme-dark input,
+html.theme-dark select,
+html.theme-dark textarea,
+html.theme-dark .cargpt-input,
+html.theme-dark .cargpt-textarea {
+    background: rgba(15, 23, 42, 0.6) !important;
+    border-color: rgba(148, 163, 184, 0.2) !important;
+    color: #f1f5f9 !important;
+}
+
+html.theme-dark input::placeholder,
+html.theme-dark textarea::placeholder {
+    color: #64748b !important;
+}
+
+/* Mobile title bar - dark */
+html.theme-dark .mobile-title-bar {
+    background: rgba(15, 23, 42, 0.98) !important;
+    border-color: rgba(148, 163, 184, 0.2) !important;
+    color: #f1f5f9 !important;
+}
+
+html.theme-dark .mobile-title {
+    color: #f1f5f9 !important;
+}
+
+/* Muted text - dark */
+html.theme-dark .text-muted,
+html.theme-dark .muted,
+html.theme-dark .cargpt-muted,
+html.theme-dark .last-updated {
+    color: #94a3b8 !important;
+}
+
+/* Links - dark */
+html.theme-dark a {
+    color: #3b82f6 !important;
+}
+
+html.theme-dark a:hover {
+    color: #60a5fa !important;
+}
+
+/* ========== LIGHT MODE ========== */
+html.theme-light body,
+html.theme-light .app-container,
+html.theme-light .app-with-left-menu {
+    background: #f8fafc !important;
+    color: #1e293b !important;
+}
+
+html.theme-light .main-content-area,
+html.theme-light .right-panel {
+    background: transparent !important;
+    color: #1e293b !important;
+}
+
+/* Cards - light */
+html.theme-light .dashboard-card,
+html.theme-light .crypto-card,
+html.theme-light .strategy-card,
+html.theme-light .broker-card,
+html.theme-light .report-card,
+html.theme-light .settings-card,
+html.theme-light .cargpt-card,
+html.theme-light .card,
+html.theme-light section[class*="-card"] {
+    background: #ffffff !important;
+    border-color: #e2e8f0 !important;
+    color: #1e293b !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06) !important;
+}
+
+html.theme-light .dashboard-card h3,
+html.theme-light .dashboard-card h2,
+html.theme-light .cargpt-card h2,
+html.theme-light .strategy-card h2,
+html.theme-light .broker-card h2,
+html.theme-light .report-card h2,
+html.theme-light .settings-card h2,
+html.theme-light .card-header h3,
+html.theme-light .card-header h2 {
+    color: #0f172a !important;
+}
+
+html.theme-light .card-content,
+html.theme-light .card-body {
+    color: #334155 !important;
+}
+
+html.theme-light .crypto-item,
+html.theme-light .crypto-name,
+html.theme-light .crypto-price {
+    color: #1e293b !important;
+}
+
+html.theme-light .crypto-change.positive { color: #16a34a !important; }
+html.theme-light .crypto-change.negative { color: #dc2626 !important; }
+
+/* Tables - light */
+html.theme-light table,
+html.theme-light .cargpt-table,
+html.theme-light .strategy-table,
+html.theme-light .broker-table,
+html.theme-light .report-table {
+    color: #334155 !important;
+    border-color: #e2e8f0 !important;
+}
+
+html.theme-light th,
+html.theme-light .cargpt-table th,
+html.theme-light .strategy-table th {
+    background: #f1f5f9 !important;
+    color: #64748b !important;
+    border-color: #e2e8f0 !important;
+}
+
+html.theme-light td,
+html.theme-light .cargpt-table td {
+    border-color: #e2e8f0 !important;
+    color: #334155 !important;
+}
+
+/* Inputs, buttons - light */
+html.theme-light input,
+html.theme-light select,
+html.theme-light textarea,
+html.theme-light .cargpt-input,
+html.theme-light .cargpt-textarea {
+    background: #ffffff !important;
+    border-color: #e2e8f0 !important;
+    color: #1e293b !important;
+}
+
+html.theme-light input::placeholder,
+html.theme-light textarea::placeholder {
+    color: #94a3b8 !important;
+}
+
+/* Mobile title bar - light */
+html.theme-light .mobile-title-bar {
+    background: #ffffff !important;
+    border-color: #e2e8f0 !important;
+    color: #1e293b !important;
+}
+
+html.theme-light .mobile-title {
+    color: #0f172a !important;
+}
+
+/* Muted text - light */
+html.theme-light .text-muted,
+html.theme-light .muted,
+html.theme-light .cargpt-muted {
+    color: #64748b !important;
+}
+
+/* Links - light */
+html.theme-light a {
+    color: #2563eb !important;
+}
+
+html.theme-light a:hover {
+    color: #1d4ed8 !important;
+}
+
+/* ========== Page-specific overrides ========== */
+/* Section headers, placeholders, content */
+html.theme-dark .section-header h1,
+html.theme-dark .section-header p,
+html.theme-dark .dashboard-placeholder h4,
+html.theme-dark .broker-header h1,
+html.theme-dark .strategy-title,
+html.theme-dark .strategy-subtitle,
+html.theme-dark .reports-title,
+html.theme-dark .settings-title {
+    color: #f1f5f9 !important;
+}
+
+html.theme-dark .dashboard-placeholder p,
+html.theme-dark .dashboard-placeholder {
+    color: #94a3b8 !important;
+}
+
+html.theme-dark .broker-header,
+html.theme-dark .strategy-header,
+html.theme-dark .reports-header,
+html.theme-dark .settings-header {
+    color: #f1f5f9 !important;
+}
+
+/* CAR GPT body - dark mode override */
+html.theme-dark body.cargpt-body {
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%) !important;
+}
+
+/* Light mode - section headers */
+html.theme-light .section-header h1,
+html.theme-light .section-header p,
+html.theme-light .dashboard-placeholder h4,
+html.theme-light .broker-header h1,
+html.theme-light .strategy-title,
+html.theme-light .strategy-subtitle,
+html.theme-light .reports-title,
+html.theme-light .settings-title {
+    color: #0f172a !important;
+}
+
+html.theme-light .dashboard-placeholder p {
+    color: #64748b !important;
+}
+
+html.theme-light body.cargpt-body {
+    background: #f8fafc !important;
+}

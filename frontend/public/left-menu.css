@@ -135,6 +135,56 @@
     flex-shrink: 0;
 }
 
+/* Theme toggle - above nav list */
+.theme-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--left-menu-border);
+}
+
+.theme-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    border: 1px solid var(--left-menu-border);
+    background: rgba(148, 163, 184, 0.1);
+    color: var(--left-menu-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.theme-btn:hover {
+    background: rgba(59, 130, 246, 0.2);
+    color: var(--left-menu-accent);
+}
+
+.theme-btn.active {
+    background: var(--left-menu-accent);
+    color: white;
+    border-color: var(--left-menu-accent);
+}
+
+.theme-btn i {
+    font-size: 1rem;
+}
+
+.left-panel.collapsed .theme-toggle {
+    flex-direction: column;
+    gap: 4px;
+    padding: 0.5rem;
+}
+
+.left-panel.collapsed .theme-btn {
+    width: 32px;
+    height: 32px;
+}
+
 /* Nav */
 .panel-nav {
     flex: 1;
@@ -220,6 +270,20 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.user-datetime {
+    display: block;
+    color: var(--left-menu-muted);
+    font-size: 0.75rem;
+    margin-top: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.left-panel.collapsed .user-datetime {
+    display: none;
 }
 
 /* Main content area - adjusts when panel expands/collapses */

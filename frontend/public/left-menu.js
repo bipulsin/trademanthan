@@ -41,6 +41,8 @@ class LeftMenu {
                 this.setupCollapseToggle();
                 this.setupMobileMenu();
                 this.loadUserData();
+                this.setupThemeToggle();
+                this.setupDateTime();
                 this.setupNavigation();
                 this.setActiveNavigation();
                 this.syncMainContentMargin();
@@ -109,6 +111,10 @@ class LeftMenu {
             </a>
         </div>
         <nav class="panel-nav">
+            <div class="theme-toggle" aria-label="Theme">
+                <button type="button" class="theme-btn" id="themeLight" title="Light mode"><i class="fas fa-sun"></i></button>
+                <button type="button" class="theme-btn" id="themeDark" title="Dark mode"><i class="fas fa-moon"></i></button>
+            </div>
             <ul class="nav-list">
                 <li class="nav-item" data-page="dashboard.html"><i class="fas fa-chart-line"></i><span>Dashboard</span></li>
                 <li class="nav-item" data-page="cargpt.html"><i class="fas fa-chart-area"></i><span>CAR GPT</span></li>
@@ -122,7 +128,7 @@ class LeftMenu {
         <div class="panel-footer">
             <div class="user-info">
                 <img src="https://via.placeholder.com/40" alt="User" class="user-avatar" id="userAvatar">
-                <div class="user-details"><span class="user-name" id="userName">User</span></div>
+                <div class="user-details"><span class="user-name" id="userName">User</span><span class="user-datetime" id="userDateTime">--</span></div>
             </div>
         </div>
     </aside>
@@ -198,6 +204,42 @@ class LeftMenu {
         document.querySelectorAll('.nav-item').forEach(item => {
             item.addEventListener('click', () => setTimeout(close, 150));
         });
+    }
+
+    setupThemeToggle() {
+        const lightBtn = document.getElementById('themeLight');
+        const darkBtn = document.getElementById('themeDark');
+        const html = document.documentElement;
+        const updateActive = () => {
+            const isDark = html.classList.contains('theme-dark');
+            lightBtn?.classList.toggle('active', !isDark);
+            darkBtn?.classList.toggle('active', isDark);
+        };
+        updateActive();
+        lightBtn?.addEventListener('click', () => {
+            html.classList.remove('theme-dark');
+            html.classList.add('theme-light');
+            localStorage.setItem('tradentical_theme', 'theme-light');
+            updateActive();
+        });
+        darkBtn?.addEventListener('click', () => {
+            html.classList.remove('theme-light');
+            html.classList.add('theme-dark');
+            localStorage.setItem('tradentical_theme', 'theme-dark');
+            updateActive();
+        });
+    }
+
+    setupDateTime() {
+        const el = document.getElementById('userDateTime');
+        if (!el) return;
+        const fmt = () => {
+            const d = new Date();
+            const opts = { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: 'numeric', minute: '2-digit' };
+            el.textContent = d.toLocaleDateString('en-IN', opts);
+        };
+        fmt();
+        setInterval(fmt, 60000);
     }
 
     loadUserData() {
