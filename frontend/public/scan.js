@@ -247,8 +247,8 @@ document.addEventListener('DOMContentLoaded', function() {
     checkOAuthSuccess();
     
     loadIndexPrices();
-    loadExpiryInfo();
     loadLatestData();
+    loadExpiryInfo();
     checkTokenHealth(); // Check token status immediately on load
     startAutoRefresh();
     
@@ -283,26 +283,21 @@ function checkOAuthSuccess() {
     }
 }
 
-// Load expiry date used for option chain (for debugging scan errors)
+// Load option expiry date (used for option chain)
 async function loadExpiryInfo() {
     try {
         const response = await fetch(`${API_BASE_URL}/scan/expiry-info`, {
             method: 'GET',
             headers: { 'Content-Type': 'application/json' }
         });
-        const data = await response.json();
-        const el = document.getElementById('expiry-display');
-        if (el) {
-            if (data.expiry_display) {
-                el.textContent = data.expiry_display;
-                el.title = data.is_trading_day !== false ? 'Monthly expiry (trading day)' : 'Adjusted for holiday';
-            } else {
-                el.textContent = data.error || '--';
-            }
+        const result = await response.json();
+        const el = document.getElementById('summaryExpiry');
+        if (el && result.status === 'success' && result.expiry_display) {
+            el.textContent = result.expiry_display;
+            el.title = 'Monthly expiry used for option chain (adjusted for trading holidays)';
         }
     } catch (e) {
-        const el = document.getElementById('expiry-display');
-        if (el) el.textContent = '--';
+        console.warn('Could not load expiry info:', e);
     }
 }
 

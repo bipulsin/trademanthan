@@ -129,12 +129,6 @@
             text-align: center;
             min-width: 120px;
         }
-        .index-item.expiry-info {
-            min-width: 140px;
-        }
-        .index-item.expiry-info .index-price {
-            font-size: 12px;
-        }
         
         .index-name {
             display: flex;
@@ -1178,10 +1172,6 @@
                     </div>
                     <div class="index-price" id="banknifty-price">--</div>
                 </div>
-                <div class="index-item expiry-info" title="Monthly expiry used for option chain">
-                    <div class="index-name"><i class="fas fa-calendar-alt"></i> Expiry</div>
-                    <div class="index-price" id="expiry-display">--</div>
-                </div>
             </div>
             
             <!-- Dropdown Menu -->
@@ -1302,6 +1292,10 @@
                     <div class="summary-card">
                         <div class="summary-label">⏰ Time Exits</div>
                         <div id="summaryTimeExits" class="summary-value">0</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-label">📅 Option Expiry</div>
+                        <div id="summaryExpiry" class="summary-value" title="Monthly expiry used for option chain">--</div>
                     </div>
                 </div>
             </div>
