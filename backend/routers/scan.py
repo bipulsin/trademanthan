@@ -4488,6 +4488,13 @@ async def get_latest_webhook_data(background_tasks: BackgroundTasks, db: Session
                 "message": "Market closed - showing closing prices"
             }
         
+        # Get monthly expiry date used for option chain (for scan page display)
+        monthly_expiry = None
+        try:
+            monthly_expiry = vwap_service.get_monthly_expiry()
+        except Exception:
+            pass
+
         return JSONResponse(
             status_code=200,
             content={
@@ -4496,7 +4503,9 @@ async def get_latest_webhook_data(background_tasks: BackgroundTasks, db: Session
                     "bullish": bullish_data,
                     "bearish": bearish_data,
                     "index_check": index_check,
-                    "allow_trading": index_check['allow_trading']
+                    "allow_trading": index_check['allow_trading'],
+                    "monthly_expiry": monthly_expiry.strftime('%Y-%m-%d') if monthly_expiry else None,
+                    "monthly_expiry_display": monthly_expiry.strftime('%d %b %Y (%A)') if monthly_expiry else None
                 }
             }
         )
@@ -4992,28 +5001,6 @@ async def refresh_current_vwap():
                 "message": f"Failed to refresh VWAP: {str(e)}"
             }
         )
-
-@router.get("/expiry-info")
-async def get_expiry_info():
-    """
-    Get the monthly option expiry date used for option chain and contract lookup.
-    Uses get_monthly_expiry() which accounts for trading holidays (e.g. March 30 vs 31).
-    """
-    try:
-        import pytz
-        ist = pytz.timezone('Asia/Kolkata')
-        now = datetime.now(ist)
-        monthly_expiry = vwap_service.get_monthly_expiry(now)
-        return {
-            "status": "success",
-            "expiry_date": monthly_expiry.strftime('%Y-%m-%d'),
-            "expiry_display": monthly_expiry.strftime('%d %b %Y (%A)'),
-            "reference_date": now.strftime('%Y-%m-%d'),
-        }
-    except Exception as e:
-        logger.error(f"Error getting expiry info: {str(e)}", exc_info=True)
-        return {"status": "error", "message": str(e)}
-
 
 @router.get("/index-prices")
 async def get_index_prices(db: Session = Depends(get_db)):

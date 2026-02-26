@@ -248,7 +248,6 @@ document.addEventListener('DOMContentLoaded', function() {
     
     loadIndexPrices();
     loadLatestData();
-    loadExpiryInfo();
     checkTokenHealth(); // Check token status immediately on load
     startAutoRefresh();
     
@@ -280,24 +279,6 @@ function checkOAuthSuccess() {
         
         // Clean up URL
         window.history.replaceState({}, document.title, window.location.pathname);
-    }
-}
-
-// Load option expiry date (used for option chain)
-async function loadExpiryInfo() {
-    try {
-        const response = await fetch(`${API_BASE_URL}/scan/expiry-info`, {
-            method: 'GET',
-            headers: { 'Content-Type': 'application/json' }
-        });
-        const result = await response.json();
-        const el = document.getElementById('summaryExpiry');
-        if (el && result.status === 'success' && result.expiry_display) {
-            el.textContent = result.expiry_display;
-            el.title = 'Monthly expiry used for option chain (adjusted for trading holidays)';
-        }
-    } catch (e) {
-        console.warn('Could not load expiry info:', e);
     }
 }
 
@@ -490,6 +471,14 @@ async function loadLatestData() {
             currentBearishData = result.data.bearish;
             console.log('Bullish Data:', currentBullishData);
             console.log('Bearish Data:', currentBearishData);
+            
+            // Update monthly expiry display
+            const expiryEl = document.getElementById('summaryMonthlyExpiry');
+            if (expiryEl && result.data.monthly_expiry_display) {
+                expiryEl.textContent = result.data.monthly_expiry_display;
+            } else if (expiryEl) {
+                expiryEl.textContent = result.data.monthly_expiry || '--';
+            }
             
             // ALWAYS display sections regardless of index trends
             // Index trends only affect trade ENTRY status, not alert DISPLAY
