@@ -129,6 +129,12 @@
             text-align: center;
             min-width: 120px;
         }
+        .index-item.expiry-info {
+            min-width: 140px;
+        }
+        .index-item.expiry-info .index-price {
+            font-size: 12px;
+        }
         
         .index-name {
             display: flex;
@@ -1171,6 +1177,10 @@
                         <span>BANKNIFTY</span>
                     </div>
                     <div class="index-price" id="banknifty-price">--</div>
+                </div>
+                <div class="index-item expiry-info" title="Monthly expiry used for option chain">
+                    <div class="index-name"><i class="fas fa-calendar-alt"></i> Expiry</div>
+                    <div class="index-price" id="expiry-display">--</div>
                 </div>
             </div>
             

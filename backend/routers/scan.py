@@ -3422,6 +3422,24 @@ async def get_deployment_status():
             "error": str(e)
         }
 
+@router.get("/expiry-info")
+async def get_expiry_info():
+    """
+    Get the current monthly expiry date used for option chain.
+    Useful for debugging scan errors - verifies expiry (e.g. March 30 vs 31 for holiday).
+    """
+    try:
+        monthly_expiry = vwap_service.get_monthly_expiry()
+        return {
+            "expiry_date": monthly_expiry.strftime("%Y-%m-%d"),
+            "expiry_display": monthly_expiry.strftime("%d %b %Y (%A)"),
+            "is_trading_day": vwap_service.is_trading_day(monthly_expiry),
+        }
+    except Exception as e:
+        logger.error(f"Error getting expiry info: {e}")
+        return {"error": str(e)}
+
+
 @router.get("/health")
 async def health_check(db: Session = Depends(get_db)):
     """
