@@ -7,7 +7,7 @@ set -e
 
 ACTION="${1:-status}"
 EC2_KEY="/Users/bipulsahay/TradeManthan/TradeM.pem"
-EC2_HOST="13.234.119.21"
+EC2_HOST="3.109.48.23"
 EC2_USER="ubuntu"
 # Use longer timeout for restart operations
 if [ "$ACTION" = "restart" ]; then

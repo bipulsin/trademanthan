@@ -10,6 +10,55 @@ import pytz
 
 logger = logging.getLogger(__name__)
 
+# Known NSE equity/derivative holidays (fallback when API omits or returns wrong format).
+# Used so monthly expiry correctly uses previous trading day when last Tuesday is a holiday.
+# Source: NSE holiday circulars. Add new years as they are published.
+NSE_KNOWN_HOLIDAYS = {
+    2025: [
+        "2025-01-26", "2025-02-26", "2025-03-14", "2025-03-26", "2025-04-18", "2025-04-21",
+        "2025-05-01", "2025-06-06", "2025-08-15", "2025-10-02", "2025-10-20", "2025-11-01",
+        "2025-11-04", "2025-11-14", "2025-12-25",
+    ],
+    2026: [
+        "2026-01-15", "2026-01-26", "2026-03-03", "2026-03-26", "2026-03-31",  # Mar 31 = Mahavir Jayanti (expiry day)
+        "2026-04-03", "2026-04-14", "2026-05-01", "2026-05-28", "2026-06-26",
+        "2026-09-14", "2026-10-02", "2026-10-20", "2026-11-10", "2026-11-24", "2026-12-25",
+    ],
+}
+
+
+def _normalize_holiday_date(value: Any) -> Optional[str]:
+    """Normalize holiday date from API (various formats) to YYYY-MM-DD. Returns None if unparseable."""
+    if not value:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    # Already YYYY-MM-DD
+    if len(s) == 10 and s[4] == "-" and s[7] == "-":
+        try:
+            y, m, d = int(s[:4]), int(s[5:7]), int(s[8:10])
+            if 1 <= m <= 12 and 1 <= d <= 31:
+                return f"{y:04d}-{m:02d}-{d:02d}"
+        except ValueError:
+            pass
+    # DD-MM-YYYY or DD/MM/YYYY
+    for sep in ("-", "/", "."):
+        if sep in s and len(s) >= 10:
+            parts = s.split(sep)
+            if len(parts) == 3:
+                try:
+                    if len(parts[2]) == 4:  # year at end
+                        d, m, y = int(parts[0]), int(parts[1]), int(parts[2])
+                    else:
+                        y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
+                    if 1 <= m <= 12 and 1 <= d <= 31 and 2000 <= y <= 2100:
+                        return f"{y:04d}-{m:02d}-{d:02d}"
+                except (ValueError, IndexError):
+                    pass
+    return None
+
+
 class UpstoxService:
     """Service to interact with Upstox API"""
     
@@ -605,7 +654,9 @@ class UpstoxService:
     
     def get_market_holidays(self, year: int = None) -> List[str]:
         """
-        Get list of market holidays from Upstox API
+        Get list of market holidays from Upstox API, with fallback to known NSE holidays.
+        Dates are always returned in 'YYYY-MM-DD' format so is_trading_day and
+        get_monthly_expiry correctly treat days like 31-Mar-2026 (Mahavir Jayanti) as holiday.
         
         Args:
             year: Year for which to fetch holidays (default: current year)
@@ -618,35 +669,32 @@ class UpstoxService:
                 ist = pytz.timezone('Asia/Kolkata')
                 year = datetime.now(ist).year
             
-            # Upstox v2 API endpoint for market holidays (requires date format, not just year)
-            # Use January 1st of the year to get all holidays for that year
+            holiday_set = set()
+            # 1) Known NSE holidays (fallback so expiry-day holidays like 2026-03-31 are never missed)
+            for d in NSE_KNOWN_HOLIDAYS.get(year, []):
+                holiday_set.add(d)
+            
+            # 2) Upstox API (may use different date format or omit future years)
             date_param = f"{year}-01-01"
             url = f"https://api.upstox.com/v2/market/holidays/{date_param}"
-            
             response = requests.get(url, headers=self.get_headers(), timeout=10)
             
             if response.status_code == 200:
                 data = response.json()
-                
                 if data.get('status') == 'success' and 'data' in data:
-                    holidays = []
                     for holiday in data['data']:
-                        # Extract date from holiday entry
-                        if 'date' in holiday:
-                            holidays.append(holiday['date'])
-                    
-                    logger.info(f"Fetched {len(holidays)} market holidays for {year}")
-                    return holidays
-                else:
-                    logger.warning(f"No holiday data in response: {data}")
-                    return []
-            else:
-                logger.warning(f"Failed to fetch holidays: {response.status_code} - {response.text}")
-                return []
+                        raw = holiday.get('date') if isinstance(holiday, dict) else None
+                        normalized = _normalize_holiday_date(raw)
+                        if normalized:
+                            holiday_set.add(normalized)
+            
+            holidays = sorted(holiday_set)
+            logger.info(f"Market holidays for {year}: {len(holidays)} dates (API + known NSE fallback)")
+            return holidays
                 
         except Exception as e:
             logger.error(f"Error fetching market holidays: {str(e)}")
-            return []
+            return list(NSE_KNOWN_HOLIDAYS.get(year, []))
     
     def get_last_trading_date(self, reference_date: datetime = None) -> datetime:
         """
@@ -1034,12 +1082,14 @@ class UpstoxService:
             logger.error(f"❌ Error fetching candles for {instrument_key}: {str(e)}")
             return None
     
-    def get_option_chain(self, symbol: str) -> Optional[Dict]:
+    def get_option_chain(self, symbol: str, use_next_month_expiry: bool = False) -> Optional[Dict]:
         """
         Get option chain data for a symbol from Upstox
         
         Args:
             symbol: Stock symbol (e.g., "RELIANCE")
+            use_next_month_expiry: If True, use next month's expiry (last Tuesday of next month).
+                                  Useful for testing. Default False uses normal get_monthly_expiry logic.
             
         Returns:
             Option chain data or None
@@ -1051,8 +1101,13 @@ class UpstoxService:
                 logger.error(f"❌ OPTION_CHAIN_FAIL: Could not get instrument key for {symbol} (get_instrument_key returned None/empty)")
                 return None
             
-            # Get monthly expiry date
-            monthly_expiry = self.get_monthly_expiry()
+            # Get monthly expiry date (optionally force next month for testing)
+            if use_next_month_expiry:
+                ref = datetime.now(pytz.timezone('Asia/Kolkata'))
+                ref = ref.replace(day=19)  # day > 18 => get_monthly_expiry returns next month
+                monthly_expiry = self.get_monthly_expiry(reference_date=ref)
+            else:
+                monthly_expiry = self.get_monthly_expiry()
             expiry_date_str = monthly_expiry.strftime('%Y-%m-%d')
             
             # Upstox v2 API endpoint for option chain

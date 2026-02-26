@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run this ON the EC2 server to check and fix nginx for tradentical.com
-# Usage: ssh -i TradeM.pem ubuntu@13.234.119.21 "bash -s" < scripts/check_and_fix_nginx_tradentical.sh
+# Usage: ssh -i TradeM.pem ubuntu@3.109.48.23 "bash -s" < scripts/check_and_fix_nginx_tradentical.sh
 # Or: scp this file to EC2 and run: bash check_and_fix_nginx_tradentical.sh
 
 set -e

@@ -1,7 +1,7 @@
 # Auto-deploy to EC2 on push to main
 #
 # Setup: Add these secrets in GitHub repo Settings → Secrets and variables → Actions:
-#   EC2_HOST    - EC2 IP or hostname (e.g. 13.234.119.21)
+#   EC2_HOST    - EC2 IP or hostname (e.g. 3.109.48.23)
 #   EC2_USER   - SSH user (e.g. ubuntu)
 #   EC2_SSH_KEY - Contents of your .pem file (private key)
 

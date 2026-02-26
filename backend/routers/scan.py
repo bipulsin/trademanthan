@@ -6359,7 +6359,8 @@ async def get_daily_trades(
 @router.get("/logs")
 async def get_scan_logs(
     lines: int = Query(100, ge=1, le=10000, description="Number of log lines to retrieve (1-10000)"),
-    log_type: str = Query("scan_st1_algo", description="Log file type: 'scan_st1_algo' (default) or 'trademanthan'")
+    log_type: str = Query("scan_st1_algo", description="Log file type: 'scan_st1_algo' (default) or 'trademanthan'"),
+    grep: Optional[str] = Query(None, description="Optional pattern to filter lines (substring match, case-insensitive). Useful for Cursor agent / API callers.")
 ):
     """
     Get the last N lines from the log file
@@ -6369,6 +6370,7 @@ async def get_scan_logs(
     Args:
         lines: Number of lines to return (default 100, max 10000)
         log_type: Type of log file - 'scan_st1_algo' (default) or 'trademanthan'
+        grep: If set, only return lines containing this string (case-insensitive). Enables Cursor agent to fetch e.g. OPTION_CHAIN_FAIL without SSH.
     
     Returns:
         JSON with log lines
@@ -6427,6 +6429,11 @@ async def get_scan_logs(
             # Get last N lines
             log_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines
             
+            # Optional server-side filter (for API/agent use without SSH)
+            if grep:
+                pattern = grep.lower()
+                log_lines = [ln for ln in log_lines if pattern in ln.lower()]
+            
             # Parse log lines into structured format
             parsed_logs = []
             for line in log_lines:
@@ -6456,12 +6463,15 @@ async def get_scan_logs(
                         'raw': line
                     })
             
-            return {
+            result = {
                 "success": True,
                 "log_file": str(log_file),
                 "total_lines": len(parsed_logs),
                 "logs": parsed_logs
             }
+            if grep:
+                result["grep"] = grep
+            return result
     
     except FileNotFoundError:
         # Return empty logs array instead of error - log file might not exist yet

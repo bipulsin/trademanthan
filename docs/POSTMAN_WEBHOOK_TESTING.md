@@ -4,7 +4,7 @@
 This guide explains how to manually test the Chartink webhook endpoints using Postman to verify the full enrichment flow.
 
 ## Server Information
-- **Base URL**: `http://13.234.119.21:8000`
+- **Base URL**: `http://3.109.48.23:8000`
 - **Endpoints**:
   - Bullish: `/scan/chartink-webhook-bullish`
   - Bearish: `/scan/chartink-webhook-bearish`
@@ -21,9 +21,9 @@ This guide explains how to manually test the Chartink webhook endpoints using Po
 ### Step 2: Configure Request
 1. **Method**: Select `POST`
 2. **URL**: Enter one of the following:
-   - For Bullish alerts: `http://13.234.119.21:8000/scan/chartink-webhook-bullish`
-   - For Bearish alerts: `http://13.234.119.21:8000/scan/chartink-webhook-bearish`
-   - For Auto-detect: `http://13.234.119.21:8000/scan/chartink-webhook`
+   - For Bullish alerts: `http://3.109.48.23:8000/scan/chartink-webhook-bullish`
+   - For Bearish alerts: `http://3.109.48.23:8000/scan/chartink-webhook-bearish`
+   - For Auto-detect: `http://3.109.48.23:8000/scan/chartink-webhook`
 
 ### Step 3: Set Headers
 1. Click on **Headers** tab
@@ -51,9 +51,9 @@ This guide explains how to manually test the Chartink webhook endpoints using Po
      "timestamp": "2025-12-11T..."
    }
    ```
-2. Check backend logs: `ssh ubuntu@13.234.119.21 "tail -f /tmp/uvicorn.log"`
+2. Check backend logs: `ssh ubuntu@3.109.48.23 "tail -f /tmp/uvicorn.log"`
 3. Check database: Query `intraday_stock_options` table for the stocks you sent
-4. Check frontend: Visit `http://13.234.119.21:8000/scan.html` to see the stocks
+4. Check frontend: Visit `http://3.109.48.23:8000/scan.html` to see the stocks
 
 ---
 
@@ -142,7 +142,7 @@ This guide explains how to manually test the Chartink webhook endpoints using Po
 
 ### 2. Backend Processing (Check Logs)
 ```bash
-ssh -i /path/to/TradeM.pem ubuntu@13.234.119.21 "tail -100 /tmp/uvicorn.log | grep -A 5 'Processing stock'"
+ssh -i /path/to/TradeM.pem ubuntu@3.109.48.23 "tail -100 /tmp/uvicorn.log | grep -A 5 'Processing stock'"
 ```
 
 Look for:
@@ -154,7 +154,7 @@ Look for:
 
 ### 3. Database Verification
 ```bash
-ssh -i /path/to/TradeM.pem ubuntu@13.234.119.21 "cd /home/ubuntu/trademanthan && python3 -c \"
+ssh -i /path/to/TradeM.pem ubuntu@3.109.48.23 "cd /home/ubuntu/trademanthan && python3 -c \"
 from backend.database import SessionLocal
 from backend.models.trading import IntradayStockOption
 from datetime import datetime
@@ -176,7 +176,7 @@ db.close()
 ```
 
 ### 4. Frontend Verification
-- Visit: `http://13.234.119.21:8000/scan.html`
+- Visit: `http://3.109.48.23:8000/scan.html`
 - Check if stocks appear in the dashboard
 - Verify:
   - Stock LTP is populated
@@ -202,10 +202,10 @@ db.close()
 **Check**:
 ```bash
 # Check Upstox token status
-curl http://13.234.119.21:8000/scan/upstox/status
+curl http://3.109.48.23:8000/scan/upstox/status
 
 # Check backend logs
-ssh -i /path/to/TradeM.pem ubuntu@13.234.119.21 "tail -200 /tmp/uvicorn.log | grep -i 'error\|enrichment\|failed'"
+ssh -i /path/to/TradeM.pem ubuntu@3.109.48.23 "tail -200 /tmp/uvicorn.log | grep -i 'error\|enrichment\|failed'"
 ```
 
 ### Issue 3: Stock VWAP = 0.0
@@ -217,7 +217,7 @@ ssh -i /path/to/TradeM.pem ubuntu@13.234.119.21 "tail -200 /tmp/uvicorn.log | gr
 **Check**:
 ```bash
 # Test VWAP fetch directly
-ssh -i /path/to/TradeM.pem ubuntu@13.234.119.21 "cd /home/ubuntu/trademanthan && python3 -c \"
+ssh -i /path/to/TradeM.pem ubuntu@3.109.48.23 "cd /home/ubuntu/trademanthan && python3 -c \"
 from backend.services.upstox_service import upstox_service
 result = upstox_service.get_stock_ltp_and_vwap('RELIANCE')
 print(result)
@@ -233,7 +233,7 @@ print(result)
 **Check**:
 ```bash
 # Verify option contract exists
-ssh -i /path/to/TradeM.pem ubuntu@13.234.119.21 "cd /home/ubuntu/trademanthan && python3 -c \"
+ssh -i /path/to/TradeM.pem ubuntu@3.109.48.23 "cd /home/ubuntu/trademanthan && python3 -c \"
 import json
 from pathlib import Path
 
@@ -270,7 +270,7 @@ if reliance:
 
 ### Test Bullish Webhook via cURL
 ```bash
-curl -X POST "http://13.234.119.21:8000/scan/chartink-webhook-bullish" \
+curl -X POST "http://3.109.48.23:8000/scan/chartink-webhook-bullish" \
   -H "Content-Type: application/json" \
   -d '{
     "stocks": "RELIANCE",
@@ -284,7 +284,7 @@ curl -X POST "http://13.234.119.21:8000/scan/chartink-webhook-bullish" \
 
 ### Test Bearish Webhook via cURL
 ```bash
-curl -X POST "http://13.234.119.21:8000/scan/chartink-webhook-bearish" \
+curl -X POST "http://3.109.48.23:8000/scan/chartink-webhook-bearish" \
   -H "Content-Type: application/json" \
   -d '{
     "stocks": "HDFCBANK",
