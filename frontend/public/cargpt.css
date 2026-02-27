@@ -241,6 +241,13 @@ body.cargpt-body {
 .cargpt-signal-buy {
     color: var(--cargpt-buy);
     font-weight: 700;
+    background: rgba(34, 197, 94, 0.2);
+    border: 1px solid rgba(34, 197, 94, 0.45);
+    border-radius: 6px;
+    padding: 6px 10px;
+    text-align: center;
+    display: inline-block;
+    min-width: 140px;
 }
 
 .cargpt-signal-avoid {
