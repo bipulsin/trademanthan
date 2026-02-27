@@ -50,13 +50,6 @@ class SettingsManager {
             this.toggleNotificationMethod('whatsapp', e.target.checked);
         });
 
-        // Theme selection
-        document.querySelectorAll('input[name="theme"]').forEach(radio => {
-            radio.addEventListener('change', (e) => {
-                this.changeTheme(e.target.value);
-            });
-        });
-
         // Language and timezone changes
         document.getElementById('language').addEventListener('change', (e) => {
             this.changeLanguage(e.target.value);
@@ -347,11 +340,7 @@ class SettingsManager {
     }
 
     applyApplicationSettings() {
-        const { theme, language, timezone, currency } = this.settings.application;
-
-        // Theme
-        document.querySelector(`input[name="theme"][value="${theme}"]`).checked = true;
-        this.changeTheme(theme);
+        const { language, timezone, currency } = this.settings.application;
 
         // Language
         document.getElementById('language').value = language;
@@ -397,19 +386,6 @@ class SettingsManager {
         // Update settings
         this.settings.notifications[method].enabled = enabled;
         this.saveSettingsToStorage();
-    }
-
-    changeTheme(theme) {
-        this.settings.application.theme = theme;
-        
-        // Apply theme to body
-        document.body.className = theme === 'dark' ? 'dark-theme' : '';
-        
-        // Save to storage
-        this.saveSettingsToStorage();
-        
-        // Show notification
-        this.showNotification(`Theme changed to ${theme}`, 'success');
     }
 
     changeLanguage(language) {
