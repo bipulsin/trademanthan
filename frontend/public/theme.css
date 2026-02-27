@@ -406,6 +406,38 @@ body.theme-page .log-time {
     color: var(--theme-muted) !important;
 }
 
+body.theme-page .metric-value.positive {
+    color: #22c55e !important;
+}
+
+body.theme-page .metric-value.negative {
+    color: #f87171 !important;
+}
+
+body.theme-page .status-badge.status-active {
+    background: rgba(34, 197, 94, 0.2) !important;
+    color: #86efac !important;
+    border: 1px solid rgba(34, 197, 94, 0.4) !important;
+}
+
+body.theme-page .status-badge.status-inactive {
+    background: rgba(239, 68, 68, 0.2) !important;
+    color: #fca5a5 !important;
+    border: 1px solid rgba(239, 68, 68, 0.4) !important;
+}
+
+body.theme-page .status-badge.execution-live {
+    background: rgba(59, 130, 246, 0.2) !important;
+    color: #93c5fd !important;
+    border: 1px solid rgba(59, 130, 246, 0.4) !important;
+}
+
+body.theme-page .status-badge.execution-stopped {
+    background: rgba(245, 158, 11, 0.25) !important;
+    color: #fde68a !important;
+    border: 1px solid rgba(245, 158, 11, 0.45) !important;
+}
+
 body.theme-page .empty-state,
 body.theme-page .empty-state h3,
 body.theme-page .empty-state h4,
