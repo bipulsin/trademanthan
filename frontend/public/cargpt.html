@@ -286,7 +286,10 @@
 
             try {
                 const userId = getCurrentUserId();
-                const analyzeUrl = userId ? `${CARGPT_BASE_URL}/analyze?user_id=${userId}` : `${CARGPT_BASE_URL}/analyze`;
+                if (!userId) {
+                    throw new Error('Unable to detect logged in user. Please login again.');
+                }
+                const analyzeUrl = `${CARGPT_BASE_URL}/analyze?user_id=${userId}`;
                 const r = await fetch(analyzeUrl);
                 const text = await r.text();
                 const data = safeParseJson(text);

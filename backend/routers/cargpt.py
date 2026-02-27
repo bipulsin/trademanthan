@@ -232,15 +232,17 @@ async def update_config(number_of_weeks: int):
 
 
 @router.get("/analyze", response_model=List[CarAnalysisResult])
-async def run_car_analysis(user_id: Optional[int] = None, db: Session = Depends(get_db)):
+async def run_car_analysis(user_id: int, db: Session = Depends(get_db)):
     """
     Run CAR analysis for all symbols in carstocklist.
     Returns analysis results for each symbol.
     """
-    query = db.query(CarStockList)
-    if user_id is not None:
-        query = query.filter(CarStockList.userid == user_id)
-    rows = query.order_by(CarStockList.created_at.desc()).all()
+    if user_id <= 0:
+        raise HTTPException(status_code=400, detail="Valid user_id is required")
+
+    rows = db.query(CarStockList).filter(
+        CarStockList.userid == user_id
+    ).order_by(CarStockList.created_at.desc()).all()
     symbols = [r.symbol for r in rows]
     if not symbols:
         return []
