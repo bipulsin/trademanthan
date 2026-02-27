@@ -4,12 +4,21 @@
 # Designed to run quickly and return status
 
 set -e
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH}"
 
 LOG_FILE="/tmp/deploy_backend.log"
 TIMEOUT=30
 
 log_message() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+    local ts
+    ts="$(/bin/date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo 'unknown-time')"
+    local line="[$ts] $1"
+    if command -v tee >/dev/null 2>&1; then
+        echo "$line" | tee -a "$LOG_FILE"
+    else
+        echo "$line" >> "$LOG_FILE"
+        echo "$line"
+    fi
 }
 
 # Function to check if backend is responding
