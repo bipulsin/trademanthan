@@ -95,7 +95,7 @@
                         <button id="uploadCsvBtn" class="cargpt-btn cargpt-btn-secondary">
                             <i class="fas fa-upload"></i> Upload CSV
                         </button>
-                        <a id="sampleCsvLink" href="#" class="cargpt-sample-link" download="car_config_sample.csv">
+                        <a id="sampleCsvLink" href="car_config_data.csv" class="cargpt-sample-link" download="car_config_data.csv">
                             <i class="fas fa-download"></i> Download Sample CSV
                         </a>
                     </div>
@@ -270,8 +270,6 @@
         function attachConfigureHandlers() {
             document.getElementById('addSingleStockBtn').addEventListener('click', saveSingleStock);
             document.getElementById('uploadCsvBtn').addEventListener('click', uploadCsvStocks);
-            const sampleCsv = 'symbol,buy_price\\nRELIANCE,2450.50\\nTCS,3985.00\\nINFY,1762.25\\n';
-            document.getElementById('sampleCsvLink').href = `data:text/csv;charset=utf-8,${encodeURIComponent(sampleCsv)}`;
         }
 
         document.getElementById('runBtn').addEventListener('click', async () => {
