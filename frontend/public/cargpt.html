@@ -22,7 +22,7 @@
         <main class="main-content-area cargpt-main">
             <div class="cargpt-page-header">
                 <h1 class="cargpt-page-title">Composite Average Reversal</h1>
-                <a href="carsetup.html" class="cargpt-setup-link"><i class="fas fa-cog"></i> Configure</a>
+                <a href="carsetup.html" class="cargpt-setup-link" onclick="openConfigurePopup(event)"><i class="fas fa-cog"></i> Configure</a>
             </div>
             <section class="cargpt-card">
                 <h2>
@@ -70,6 +70,16 @@
     <script src="left-menu.js?v=2.2"></script>
     <script>
         const CARGPT_ANALYZE_URL = '/cargpt/analyze';
+
+        function openConfigurePopup(event) {
+            event.preventDefault();
+            const popupWidth = 1200;
+            const popupHeight = 850;
+            const left = Math.max(0, Math.round((window.screen.width - popupWidth) / 2));
+            const top = Math.max(0, Math.round((window.screen.height - popupHeight) / 2));
+            const features = `width=${popupWidth},height=${popupHeight},left=${left},top=${top},resizable=yes,scrollbars=yes`;
+            window.open('carsetup.html', 'carSetupPopup', features);
+        }
 
         function formatCumulativeAvg(arr) {
             if (!arr || arr.length === 0) return '-';
