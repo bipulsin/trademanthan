@@ -291,3 +291,141 @@ body[data-theme="light"] .mobile-menu-toggle {
     border-color: var(--left-menu-border) !important;
     color: var(--left-menu-text) !important;
 }
+
+/* ============================================================
+   Common page template overrides (dashboard/cargpt/broker/strategy/reports/settings)
+   Keep this block at the end so page-level CSS cannot override it.
+   ============================================================ */
+body.theme-page {
+    background: var(--theme-bg) !important;
+}
+
+body.theme-page .app-container,
+body.theme-page .dashboard-container,
+body.theme-page .right-panel,
+body.theme-page .main-content-area {
+    background: transparent !important;
+    color: var(--theme-text) !important;
+}
+
+body.theme-page h1,
+body.theme-page h2,
+body.theme-page h3,
+body.theme-page h4,
+body.theme-page h5,
+body.theme-page h6 {
+    color: var(--theme-text) !important;
+}
+
+body.theme-page p,
+body.theme-page span,
+body.theme-page small,
+body.theme-page li,
+body.theme-page strong {
+    color: inherit;
+}
+
+body.theme-page .broker-card,
+body.theme-page .strategy-card,
+body.theme-page .summary-card,
+body.theme-page .trades-table-container,
+body.theme-page .reports-filters,
+body.theme-page .setting-card,
+body.theme-page .settings-section,
+body.theme-page .dashboard-card,
+body.theme-page .crypto-card,
+body.theme-page .modal-content,
+body.theme-page .notification {
+    background: var(--theme-card) !important;
+    border-color: var(--theme-border) !important;
+    color: var(--theme-text) !important;
+}
+
+body.theme-page .info-item,
+body.theme-page .metric-item,
+body.theme-page .trade-condition-group,
+body.theme-page .condition-section,
+body.theme-page .broker-info,
+body.theme-page .table-header,
+body.theme-page .pagination,
+body.theme-page .loading-placeholder,
+body.theme-page .dashboard-placeholder {
+    background: var(--theme-card-alt) !important;
+    border-color: var(--theme-border) !important;
+    color: var(--theme-text) !important;
+}
+
+body.theme-page .trades-table th,
+body.theme-page .trades-table td,
+body.theme-page .cargpt-table th,
+body.theme-page .cargpt-table td {
+    border-color: var(--theme-border) !important;
+    color: var(--theme-text) !important;
+}
+
+body.theme-page .trades-table th,
+body.theme-page .table-header,
+body.theme-page .pagination,
+body.theme-page .reports-filters {
+    background: var(--theme-card-alt) !important;
+}
+
+body.theme-page .trades-table tbody tr:hover td,
+body.theme-page .cargpt-table tr:hover td {
+    background: rgba(59, 130, 246, 0.08) !important;
+}
+
+body.theme-page .filter-group label,
+body.theme-page .info-label,
+body.theme-page .metric-label,
+body.theme-page .summary-content h3,
+body.theme-page .section-header p,
+body.theme-page .reports-subtitle,
+body.theme-page .broker-subtitle,
+body.theme-page .strategy-subtitle,
+body.theme-page .settings-subtitle,
+body.theme-page .toggle-label,
+body.theme-page .form-help,
+body.theme-page .pagination-info,
+body.theme-page .last-updated {
+    color: var(--theme-muted) !important;
+}
+
+body.theme-page .empty-state,
+body.theme-page .empty-state h3,
+body.theme-page .empty-state h4,
+body.theme-page .empty-state p,
+body.theme-page .no-brokers,
+body.theme-page .no-brokers p,
+body.theme-page .no-strategies-content p {
+    color: var(--theme-text) !important;
+}
+
+body.theme-page .empty-state i,
+body.theme-page .no-brokers i,
+body.theme-page .dashboard-placeholder i {
+    color: var(--theme-accent) !important;
+}
+
+body.theme-page .modal-header {
+    background: var(--theme-card) !important;
+    border-color: var(--theme-border) !important;
+}
+
+body.theme-page .modal-body,
+body.theme-page .logs-header,
+body.theme-page .form-actions,
+body.theme-page .modal-actions {
+    border-color: var(--theme-border) !important;
+}
+
+body.theme-page .log-item {
+    border-color: var(--theme-border) !important;
+}
+
+body.theme-page #debugInfo,
+body.theme-page #cryptoDebug {
+    background: var(--theme-card-alt) !important;
+    color: var(--theme-text) !important;
+    border: 1px solid var(--theme-border) !important;
+}
