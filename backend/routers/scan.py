@@ -78,6 +78,28 @@ from backend.config import settings
 
 router = APIRouter(prefix="/scan", tags=["scan"])
 
+DEPLOY_LOG_FILE = Path("/tmp/deploy_backend.log")
+DEPLOY_LOCK_FILE = Path("/tmp/deploy_backend.lock")
+DEPLOY_SCRIPT_PATH = "/home/ubuntu/trademanthan/backend/scripts/deploy_backend.sh"
+
+
+def _is_deploy_running() -> tuple[bool, Optional[int]]:
+    """Check whether a deployment process is currently running via lock PID."""
+    try:
+        if not DEPLOY_LOCK_FILE.exists():
+            return False, None
+        pid_text = DEPLOY_LOCK_FILE.read_text(encoding="utf-8").strip()
+        pid = int(pid_text)
+        os.kill(pid, 0)
+        return True, pid
+    except Exception:
+        # Lock file exists but PID is stale/invalid
+        try:
+            DEPLOY_LOCK_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return False, None
+
 # In-memory storage for Bullish and Bearish webhook data
 # Structure: { "date": "YYYY-MM-DD", "alerts": [list of alerts with timestamps] }
 bullish_data = {"date": None, "alerts": []}
@@ -3365,62 +3387,109 @@ async def set_trading_live(toggle: TradingLiveToggle):
 
 
 @router.post("/deploy-backend")
-async def deploy_backend(background_tasks: BackgroundTasks):
+async def deploy_backend():
     """
-    Trigger backend deployment (git pull + restart)
-    This runs in background and returns immediately
+    Trigger backend deployment (git pull + restart).
+    Starts deploy process immediately with lock + fresh log per run.
     """
     import subprocess
-    
-    def run_deployment():
-        try:
-            # Run deployment script in background (non-blocking)
-            script_path = "/home/ubuntu/trademanthan/backend/scripts/deploy_backend.sh"
-            subprocess.Popen(
-                ["/bin/bash", script_path],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True
-            )
-            logger.info("✅ Backend deployment initiated")
-        except Exception as e:
-            logger.error(f"Error starting deployment: {e}")
-    
-    # Start deployment in background
-    background_tasks.add_task(run_deployment)
-    
-    return {
-        "success": True,
-        "message": "Deployment initiated. Check /tmp/deploy_backend.log for progress.",
-        "status_endpoint": "/scan/deployment-status",
-        "log_file": "/tmp/deploy_backend.log"
-    }
+
+    running, running_pid = _is_deploy_running()
+    if running:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "success": False,
+                "message": "Deployment already in progress",
+                "running_pid": running_pid,
+                "status_endpoint": "/scan/deployment-status",
+            },
+        )
+
+    try:
+        DEPLOY_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        requested_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        DEPLOY_LOG_FILE.write_text(
+            f"[{requested_at}] Deployment requested via /scan/deploy-backend\n",
+            encoding="utf-8",
+        )
+    except Exception as e:
+        logger.error(f"Failed to initialize deployment log: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "message": "Could not initialize deployment log"},
+        )
+
+    wrapper_cmd = (
+        "echo $$ > /tmp/deploy_backend.lock; "
+        f"/bin/bash {DEPLOY_SCRIPT_PATH}; "
+        "EXIT_CODE=$?; "
+        "echo \"[$(date '+%Y-%m-%d %H:%M:%S')] Deployment wrapper exit code: ${EXIT_CODE}\" >> /tmp/deploy_backend.log; "
+        "rm -f /tmp/deploy_backend.lock; "
+        "exit ${EXIT_CODE}"
+    )
+
+    try:
+        proc = subprocess.Popen(
+            ["/bin/bash", "-lc", wrapper_cmd],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        logger.info(f"✅ Backend deployment initiated with pid {proc.pid}")
+        return {
+            "success": True,
+            "message": "Deployment initiated",
+            "deployment_pid": proc.pid,
+            "status_endpoint": "/scan/deployment-status",
+            "log_file": str(DEPLOY_LOG_FILE),
+        }
+    except Exception as e:
+        logger.error(f"Error starting deployment: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "message": f"Error starting deployment: {e}"},
+        )
 
 @router.get("/deployment-status")
 async def get_deployment_status():
     """Get the latest deployment status from log file"""
     try:
-        log_file = "/tmp/deploy_backend.log"
-        if os.path.exists(log_file):
-            # Get last 20 lines
-            with open(log_file, 'r') as f:
+        running, running_pid = _is_deploy_running()
+        if DEPLOY_LOG_FILE.exists():
+            with DEPLOY_LOG_FILE.open('r', encoding='utf-8', errors='replace') as f:
                 lines = f.readlines()
-                recent_lines = lines[-20:] if len(lines) > 20 else lines
-                return {
+            recent_lines = lines[-100:] if len(lines) > 100 else lines
+            stat = DEPLOY_LOG_FILE.stat()
+            response = JSONResponse(
+                content={
                     "success": True,
+                    "running": running,
+                    "running_pid": running_pid,
+                    "last_updated_epoch_ms": int(stat.st_mtime * 1000),
                     "log": "".join(recent_lines),
-                    "total_lines": len(lines)
+                    "total_lines": len(lines),
                 }
-        else:
-            return {
+            )
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+            return response
+
+        response = JSONResponse(
+            content={
                 "success": False,
-                "message": "Deployment log not found"
+                "running": running,
+                "running_pid": running_pid,
+                "message": "Deployment log not found",
             }
+        )
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
     except Exception as e:
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        return {"success": False, "error": str(e)}
 
 @router.get("/health")
 async def health_check(db: Session = Depends(get_db)):
