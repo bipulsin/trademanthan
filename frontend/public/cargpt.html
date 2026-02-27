@@ -22,6 +22,9 @@
         <main class="main-content-area cargpt-main">
             <div class="cargpt-page-header">
                 <h1 class="cargpt-page-title">Cumulative Average Reversal</h1>
+                <button class="cargpt-help-icon-btn" type="button" onclick="openHelpModal()" aria-label="Help to Setup">
+                    <i class="fas fa-question-circle"></i>
+                </button>
                 <a href="carsetup.html" class="cargpt-setup-link" onclick="openConfigureModal(event)"><i class="fas fa-cog"></i> Configure</a>
             </div>
             <section class="cargpt-card">
@@ -32,6 +35,7 @@
                     </button>
                 </h2>
                 <div class="card-body">
+                    <a href="#" class="cargpt-help-link" onclick="openHelpModal(); return false;">Help to Setup</a>
                     <p style="color: var(--cargpt-muted); margin-bottom: 16px; font-size: 0.9rem;">
                         Runs CAR analysis on stocks from Configure. Uses 52-week high date, cumulative average, and BUY signal logic.
                     </p>
@@ -106,6 +110,27 @@
         </div>
     </div>
 
+    <div class="cargpt-config-modal" id="helpModal">
+        <div class="cargpt-help-dialog">
+            <div class="cargpt-config-header">
+                <h3>Help to Setup</h3>
+                <button type="button" class="cargpt-config-close" onclick="closeHelpModal()" aria-label="Close help modal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="cargpt-config-content">
+                <ol class="cargpt-help-list">
+                    <li>Click the Configure button on top right corner of the Cumulative Average Reversal page.</li>
+                    <li>Enter the stock name &amp; its current/bought price and submit.</li>
+                    <li>If you want to upload multiple stocks at one go, please do so by upload file option.</li>
+                    <li>Before upload file, download the sample CSV file, update with your stock data, save it and then upload it.</li>
+                    <li>Now configuring your data is complete, close the popup by clicking outside.</li>
+                    <li>Click the Run Analysis button to get the CAR recommendation.</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+
     <div class="cargpt-overlay" id="loadingOverlay">
         <div class="cargpt-loading" style="font-size: 1.2rem;">
             <i class="fas fa-spinner fa-spin"></i> Running analysis...
@@ -136,9 +161,22 @@
             modal.classList.remove('visible');
         }
 
+        function openHelpModal() {
+            document.getElementById('helpModal').classList.add('visible');
+        }
+
+        function closeHelpModal() {
+            document.getElementById('helpModal').classList.remove('visible');
+        }
+
         document.getElementById('configureModal').addEventListener('click', (event) => {
             if (event.target.id === 'configureModal') {
                 closeConfigureModal();
+            }
+        });
+        document.getElementById('helpModal').addEventListener('click', (event) => {
+            if (event.target.id === 'helpModal') {
+                closeHelpModal();
             }
         });
 

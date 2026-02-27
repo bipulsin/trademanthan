@@ -108,6 +108,33 @@ body.cargpt-body {
     color: var(--cargpt-text);
 }
 
+.cargpt-help-icon-btn {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: 1px solid var(--cargpt-border);
+    background: rgba(148, 163, 184, 0.2);
+    color: var(--cargpt-text);
+    cursor: pointer;
+    margin-right: 8px;
+}
+
+.cargpt-help-icon-btn:hover {
+    background: rgba(59, 130, 246, 0.3);
+}
+
+.cargpt-help-link {
+    display: inline-block;
+    color: var(--cargpt-accent);
+    text-decoration: none;
+    font-size: 0.9rem;
+    margin-bottom: 10px;
+}
+
+.cargpt-help-link:hover {
+    color: var(--cargpt-text);
+}
+
 /* Main content */
 .cargpt-main {
     flex: 1;
@@ -301,6 +328,28 @@ body.cargpt-body {
     overflow: hidden;
     display: flex;
     flex-direction: column;
+}
+
+.cargpt-help-dialog {
+    width: min(760px, 96vw);
+    max-height: min(680px, 92vh);
+    background: rgba(15, 23, 42, 0.98);
+    border: 1px solid var(--cargpt-border);
+    border-radius: 12px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.cargpt-help-list {
+    margin: 0;
+    padding-left: 20px;
+    color: var(--cargpt-text);
+    line-height: 1.6;
+}
+
+.cargpt-help-list li {
+    margin-bottom: 8px;
 }
 
 .cargpt-config-content {
