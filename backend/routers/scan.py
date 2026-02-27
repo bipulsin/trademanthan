@@ -3420,22 +3420,17 @@ async def deploy_backend():
             content={"success": False, "message": "Could not initialize deployment log"},
         )
 
-    wrapper_cmd = (
-        "echo $$ > /tmp/deploy_backend.lock; "
-        f"/bin/bash {DEPLOY_SCRIPT_PATH}; "
-        "EXIT_CODE=$?; "
-        "echo \"[$(date '+%Y-%m-%d %H:%M:%S')] Deployment wrapper exit code: ${EXIT_CODE}\" >> /tmp/deploy_backend.log; "
-        "rm -f /tmp/deploy_backend.lock; "
-        "exit ${EXIT_CODE}"
-    )
-
     try:
+        log_handle = DEPLOY_LOG_FILE.open("a", encoding="utf-8")
         proc = subprocess.Popen(
-            ["/bin/bash", "-lc", wrapper_cmd],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            ["/bin/bash", DEPLOY_SCRIPT_PATH],
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
             start_new_session=True,
         )
+        # Track running deployment by child PID. Stale lock is auto-cleaned in _is_deploy_running().
+        DEPLOY_LOCK_FILE.write_text(str(proc.pid), encoding="utf-8")
+        log_handle.close()
         logger.info(f"✅ Backend deployment initiated with pid {proc.pid}")
         return {
             "success": True,
