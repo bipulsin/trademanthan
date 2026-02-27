@@ -106,12 +106,18 @@ def _run_startup_schema_migrations(db_engine):
             if "userid" not in column_names:
                 conn.execute(text("ALTER TABLE carstocklist ADD COLUMN userid INTEGER DEFAULT 4"))
                 print("Applied migration: added carstocklist.userid column")
+            if "buy_price" not in column_names:
+                conn.execute(text("ALTER TABLE carstocklist ADD COLUMN buy_price NUMERIC(12,2) DEFAULT 0"))
+                print("Applied migration: added carstocklist.buy_price column")
 
             conn.execute(text("UPDATE carstocklist SET userid = 4 WHERE userid IS NULL"))
+            conn.execute(text("UPDATE carstocklist SET buy_price = 0 WHERE buy_price IS NULL"))
 
             # PostgreSQL supports setting NOT NULL/DEFAULT after column creation.
             if db_engine.dialect.name == "postgresql":
                 conn.execute(text("ALTER TABLE carstocklist ALTER COLUMN userid SET DEFAULT 4"))
                 conn.execute(text("ALTER TABLE carstocklist ALTER COLUMN userid SET NOT NULL"))
+                conn.execute(text("ALTER TABLE carstocklist ALTER COLUMN buy_price SET DEFAULT 0"))
+                conn.execute(text("ALTER TABLE carstocklist ALTER COLUMN buy_price SET NOT NULL"))
     except Exception as migration_error:
         print(f"Warning: startup schema migration failed: {migration_error}")

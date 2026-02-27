@@ -4,7 +4,7 @@ Accessible before/after login. No auth required.
 """
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional
 
 from backend.database import get_db
@@ -24,6 +24,8 @@ router = APIRouter(prefix="/cargpt", tags=["cargpt"])
 class SaveStockListRequest(BaseModel):
     symbols: str  # Comma-separated
     number_of_weeks: Optional[int] = None
+    user_id: Optional[int] = None
+    buy_price: Optional[float] = 0.0
 
 
 class SaveStockListResponse(BaseModel):
@@ -35,6 +37,8 @@ class SaveStockListResponse(BaseModel):
 class CarStockItem(BaseModel):
     id: int
     symbol: str
+    userid: int
+    buy_price: float
     stock_name: Optional[str] = None
     created_at: str
 
@@ -47,6 +51,26 @@ class CarAnalysisResult(BaseModel):
     last_10_cumulative_avg: List[float]
     signal: str
     error: Optional[str] = None
+
+
+class AddCarStockRequest(BaseModel):
+    symbol: str
+    buy_price: float = Field(..., ge=0)
+    user_id: int
+
+
+class BulkCarStockRow(BaseModel):
+    symbol: str
+    buy_price: float = Field(..., ge=0)
+
+
+class BulkCarStockUploadRequest(BaseModel):
+    user_id: int
+    rows: List[BulkCarStockRow]
+
+
+def _normalize_symbol(raw_symbol: str) -> str:
+    return (raw_symbol or "").strip().upper()
 
 
 @router.post("/save-stock-list", response_model=SaveStockListResponse)
@@ -65,42 +89,122 @@ async def save_stock_list(
             message="No symbols provided",
             saved_count=0
         )
-    symbols = [s.strip().upper() for s in symbols_raw.split(",") if s.strip()]
+    symbols = [_normalize_symbol(s) for s in symbols_raw.split(",") if s.strip()]
     if not symbols:
         return SaveStockListResponse(
             success=False,
             message="No valid symbols",
             saved_count=0
         )
+    user_id = body.user_id or 4
+    buy_price = float(body.buy_price or 0)
     saved = 0
+    updated = 0
     for sym in symbols:
-        existing = db.query(CarStockList).filter(CarStockList.symbol == sym).first()
+        existing = db.query(CarStockList).filter(
+            CarStockList.symbol == sym,
+            CarStockList.userid == user_id
+        ).first()
         if not existing:
-            row = CarStockList(symbol=sym)
+            row = CarStockList(symbol=sym, userid=user_id, buy_price=buy_price)
             db.add(row)
             saved += 1
+        else:
+            existing.buy_price = buy_price
+            updated += 1
     db.commit()
     if body.number_of_weeks is not None and body.number_of_weeks > 0:
         set_number_of_weeks(body.number_of_weeks)
         settings.CAR_NUMBER_OF_WEEKS = body.number_of_weeks
     return SaveStockListResponse(
         success=True,
-        message=f"Saved {saved} new symbol(s)",
+        message=f"Saved {saved} new symbol(s), updated {updated}",
+        saved_count=saved
+    )
+
+
+@router.post("/add-stock", response_model=SaveStockListResponse)
+async def add_single_stock(
+    body: AddCarStockRequest,
+    db: Session = Depends(get_db)
+):
+    symbol = _normalize_symbol(body.symbol)
+    if not symbol:
+        return SaveStockListResponse(success=False, message="Symbol is required", saved_count=0)
+
+    existing = db.query(CarStockList).filter(
+        CarStockList.symbol == symbol,
+        CarStockList.userid == body.user_id
+    ).first()
+
+    if existing:
+        existing.buy_price = float(body.buy_price)
+        db.commit()
+        return SaveStockListResponse(success=True, message="Stock updated successfully", saved_count=0)
+
+    row = CarStockList(
+        symbol=symbol,
+        userid=body.user_id,
+        buy_price=float(body.buy_price)
+    )
+    db.add(row)
+    db.commit()
+    return SaveStockListResponse(success=True, message="Stock added successfully", saved_count=1)
+
+
+@router.post("/upload-stocks", response_model=SaveStockListResponse)
+async def upload_stocks(
+    body: BulkCarStockUploadRequest,
+    db: Session = Depends(get_db)
+):
+    if not body.rows:
+        return SaveStockListResponse(success=False, message="No rows provided", saved_count=0)
+
+    saved = 0
+    updated = 0
+    for item in body.rows:
+        symbol = _normalize_symbol(item.symbol)
+        if not symbol:
+            continue
+        existing = db.query(CarStockList).filter(
+            CarStockList.symbol == symbol,
+            CarStockList.userid == body.user_id
+        ).first()
+        if existing:
+            existing.buy_price = float(item.buy_price)
+            updated += 1
+        else:
+            db.add(CarStockList(
+                symbol=symbol,
+                userid=body.user_id,
+                buy_price=float(item.buy_price)
+            ))
+            saved += 1
+
+    db.commit()
+    return SaveStockListResponse(
+        success=True,
+        message=f"Processed {saved + updated} rows (saved {saved}, updated {updated})",
         saved_count=saved
     )
 
 
 @router.get("/stock-list", response_model=List[CarStockItem])
-async def get_stock_list(db: Session = Depends(get_db)):
+async def get_stock_list(user_id: Optional[int] = None, db: Session = Depends(get_db)):
     """Get all symbols from carstocklist with stock names from instruments, ordered by created_at desc."""
     try:
-        rows = db.query(CarStockList).order_by(CarStockList.created_at.desc()).all()
+        query = db.query(CarStockList)
+        if user_id is not None:
+            query = query.filter(CarStockList.userid == user_id)
+        rows = query.order_by(CarStockList.created_at.desc()).all()
         symbols = [r.symbol for r in rows]
         names_map = get_stock_names_batch(symbols) if symbols else {}
         return [
             CarStockItem(
                 id=r.id,
                 symbol=r.symbol,
+                userid=r.userid,
+                buy_price=float(r.buy_price or 0),
                 stock_name=names_map.get(r.symbol.upper(), r.symbol) if r.symbol else r.symbol,
                 created_at=r.created_at.isoformat() if r.created_at else ""
             )
@@ -128,12 +232,15 @@ async def update_config(number_of_weeks: int):
 
 
 @router.get("/analyze", response_model=List[CarAnalysisResult])
-async def run_car_analysis(db: Session = Depends(get_db)):
+async def run_car_analysis(user_id: Optional[int] = None, db: Session = Depends(get_db)):
     """
     Run CAR analysis for all symbols in carstocklist.
     Returns analysis results for each symbol.
     """
-    rows = db.query(CarStockList).order_by(CarStockList.created_at.desc()).all()
+    query = db.query(CarStockList)
+    if user_id is not None:
+        query = query.filter(CarStockList.userid == user_id)
+    rows = query.order_by(CarStockList.created_at.desc()).all()
     symbols = [r.symbol for r in rows]
     if not symbols:
         return []

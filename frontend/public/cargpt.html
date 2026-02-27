@@ -69,12 +69,40 @@
                     <i class="fas fa-times"></i>
                 </button>
             </div>
-            <iframe
-                id="configureFrame"
-                class="cargpt-config-frame"
-                title="CAR Configure"
-                src="about:blank"
-            ></iframe>
+            <div class="cargpt-config-content">
+                <section class="cargpt-config-section">
+                    <h4><i class="fas fa-plus-circle"></i> Add Single Stock</h4>
+                    <div class="cargpt-config-grid">
+                        <div>
+                            <label for="singleStockSymbol">Stock Symbol</label>
+                            <input id="singleStockSymbol" class="cargpt-input" type="text" placeholder="e.g. RELIANCE">
+                        </div>
+                        <div>
+                            <label for="singleStockPrice">Buy Price</label>
+                            <input id="singleStockPrice" class="cargpt-input" type="number" min="0" step="0.01" placeholder="e.g. 2450.50">
+                        </div>
+                    </div>
+                    <button id="addSingleStockBtn" class="cargpt-btn cargpt-btn-primary">
+                        <i class="fas fa-save"></i> Save Stock
+                    </button>
+                </section>
+
+                <section class="cargpt-config-section">
+                    <h4><i class="fas fa-file-csv"></i> Upload CSV (Symbol + Buy Price)</h4>
+                    <p class="cargpt-config-help">CSV must include headers: <code>symbol,buy_price</code></p>
+                    <div class="cargpt-upload-row">
+                        <input id="csvFileInput" type="file" accept=".csv,text/csv">
+                        <button id="uploadCsvBtn" class="cargpt-btn cargpt-btn-secondary">
+                            <i class="fas fa-upload"></i> Upload CSV
+                        </button>
+                        <a id="sampleCsvLink" href="#" class="cargpt-sample-link" download="car_config_sample.csv">
+                            <i class="fas fa-download"></i> Download Sample CSV
+                        </a>
+                    </div>
+                </section>
+
+                <div id="configureStatus" class="cargpt-config-status"></div>
+            </div>
         </div>
     </div>
 
@@ -86,21 +114,26 @@
 
     <script src="left-menu.js?v=2.2"></script>
     <script>
-        const CARGPT_ANALYZE_URL = '/cargpt/analyze';
+        const CARGPT_BASE_URL = '/cargpt';
+
+        function getCurrentUserId() {
+            try {
+                const userData = JSON.parse(localStorage.getItem('trademanthan_user') || '{}');
+                return Number(userData.id || userData.user_id || userData.sub || 0);
+            } catch (e) {
+                return 0;
+            }
+        }
 
         function openConfigureModal(event) {
             event.preventDefault();
             const modal = document.getElementById('configureModal');
-            const frame = document.getElementById('configureFrame');
-            frame.src = 'carsetup.html?modal=1';
             modal.classList.add('visible');
         }
 
         function closeConfigureModal() {
             const modal = document.getElementById('configureModal');
-            const frame = document.getElementById('configureFrame');
             modal.classList.remove('visible');
-            frame.src = 'about:blank';
         }
 
         document.getElementById('configureModal').addEventListener('click', (event) => {
@@ -118,6 +151,129 @@
             try { return JSON.parse(text); } catch (e) { return null; }
         }
 
+        function showConfigureStatus(message, type = 'info') {
+            const status = document.getElementById('configureStatus');
+            status.className = `cargpt-config-status ${type}`;
+            status.textContent = message;
+        }
+
+        async function saveSingleStock() {
+            const symbol = document.getElementById('singleStockSymbol').value.trim().toUpperCase();
+            const buyPrice = Number(document.getElementById('singleStockPrice').value);
+            const userId = getCurrentUserId();
+            if (!userId) {
+                showConfigureStatus('Unable to detect logged in user.', 'error');
+                return;
+            }
+            if (!symbol) {
+                showConfigureStatus('Please enter stock symbol.', 'error');
+                return;
+            }
+            if (Number.isNaN(buyPrice) || buyPrice < 0) {
+                showConfigureStatus('Please enter valid buy price.', 'error');
+                return;
+            }
+
+            const btn = document.getElementById('addSingleStockBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+            try {
+                const response = await fetch(`${CARGPT_BASE_URL}/add-stock`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ symbol, buy_price: buyPrice, user_id: userId })
+                });
+                const text = await response.text();
+                const data = safeParseJson(text);
+                if (!response.ok || !data?.success) {
+                    throw new Error(data?.message || `Server returned ${response.status}`);
+                }
+                showConfigureStatus(data.message || 'Stock saved successfully.', 'success');
+                document.getElementById('singleStockSymbol').value = '';
+                document.getElementById('singleStockPrice').value = '';
+            } catch (error) {
+                showConfigureStatus(`Error: ${error.message}`, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-save"></i> Save Stock';
+            }
+        }
+
+        function parseCsvRows(csvText) {
+            const lines = csvText.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+            if (lines.length < 2) {
+                throw new Error('CSV must have header and at least one data row.');
+            }
+            const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+            const symbolIdx = headers.indexOf('symbol');
+            const priceIdx = headers.indexOf('buy_price');
+            if (symbolIdx === -1 || priceIdx === -1) {
+                throw new Error('CSV headers must include symbol,buy_price');
+            }
+
+            const rows = [];
+            for (let i = 1; i < lines.length; i++) {
+                const cols = lines[i].split(',').map(c => c.trim());
+                const symbol = (cols[symbolIdx] || '').toUpperCase();
+                const buyPrice = Number(cols[priceIdx]);
+                if (!symbol) continue;
+                if (Number.isNaN(buyPrice) || buyPrice < 0) {
+                    throw new Error(`Invalid buy_price on row ${i + 1}`);
+                }
+                rows.push({ symbol, buy_price: buyPrice });
+            }
+            if (!rows.length) {
+                throw new Error('No valid CSV rows found.');
+            }
+            return rows;
+        }
+
+        async function uploadCsvStocks() {
+            const fileInput = document.getElementById('csvFileInput');
+            const file = fileInput.files[0];
+            const userId = getCurrentUserId();
+            if (!userId) {
+                showConfigureStatus('Unable to detect logged in user.', 'error');
+                return;
+            }
+            if (!file) {
+                showConfigureStatus('Please choose a CSV file.', 'error');
+                return;
+            }
+
+            const btn = document.getElementById('uploadCsvBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uploading...';
+            try {
+                const csvText = await file.text();
+                const rows = parseCsvRows(csvText);
+                const response = await fetch(`${CARGPT_BASE_URL}/upload-stocks`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: userId, rows })
+                });
+                const text = await response.text();
+                const data = safeParseJson(text);
+                if (!response.ok || !data?.success) {
+                    throw new Error(data?.message || `Server returned ${response.status}`);
+                }
+                showConfigureStatus(data.message || 'CSV uploaded successfully.', 'success');
+                fileInput.value = '';
+            } catch (error) {
+                showConfigureStatus(`Error: ${error.message}`, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-upload"></i> Upload CSV';
+            }
+        }
+
+        function attachConfigureHandlers() {
+            document.getElementById('addSingleStockBtn').addEventListener('click', saveSingleStock);
+            document.getElementById('uploadCsvBtn').addEventListener('click', uploadCsvStocks);
+            const sampleCsv = 'symbol,buy_price\\nRELIANCE,2450.50\\nTCS,3985.00\\nINFY,1762.25\\n';
+            document.getElementById('sampleCsvLink').href = `data:text/csv;charset=utf-8,${encodeURIComponent(sampleCsv)}`;
+        }
+
         document.getElementById('runBtn').addEventListener('click', async () => {
             const overlay = document.getElementById('loadingOverlay');
             const empty = document.getElementById('analysisEmpty');
@@ -131,7 +287,9 @@
             wrap.style.display = 'none';
 
             try {
-                const r = await fetch(CARGPT_ANALYZE_URL);
+                const userId = getCurrentUserId();
+                const analyzeUrl = userId ? `${CARGPT_BASE_URL}/analyze?user_id=${userId}` : `${CARGPT_BASE_URL}/analyze`;
+                const r = await fetch(analyzeUrl);
                 const text = await r.text();
                 const data = safeParseJson(text);
 
@@ -180,6 +338,8 @@
                 console.error(e);
             }
         });
+
+        attachConfigureHandlers();
     </script>
 </body>
 </html>
