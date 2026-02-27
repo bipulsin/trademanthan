@@ -391,6 +391,21 @@ body.theme-page .last-updated {
     color: var(--theme-muted) !important;
 }
 
+/* Strategy page card text clarity in dark mode */
+body.theme-page .strategy-name,
+body.theme-page .metric-value,
+body.theme-page .indicator-info strong,
+body.theme-page .broker-detail-item .value,
+body.theme-page .log-message {
+    color: var(--theme-text) !important;
+}
+
+body.theme-page .indicator-info small,
+body.theme-page .broker-detail-item .label,
+body.theme-page .log-time {
+    color: var(--theme-muted) !important;
+}
+
 body.theme-page .empty-state,
 body.theme-page .empty-state h3,
 body.theme-page .empty-state h4,
