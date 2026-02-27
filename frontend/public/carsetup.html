@@ -9,6 +9,25 @@
     <link rel="stylesheet" href="left-menu.css?v=2.2">
     <link rel="stylesheet" href="cargpt.css">
     <link rel="stylesheet" href="theme.css?v=1.0">
+    <style>
+        body.modal-mode .mobile-title-bar,
+        body.modal-mode #left-menu-container,
+        body.modal-mode .left-panel,
+        body.modal-mode .mobile-menu-toggle,
+        body.modal-mode .mobile-menu-overlay {
+            display: none !important;
+        }
+
+        body.modal-mode .app-container {
+            margin-top: 0 !important;
+        }
+
+        body.modal-mode .cargpt-main {
+            width: 100%;
+            min-height: auto;
+            padding: 16px;
+        }
+    </style>
 </head>
 <body class="cargpt-body">
     <div class="mobile-title-bar">
@@ -64,7 +83,15 @@
         </main>
     </div>
 
-    <script src="left-menu.js?v=2.2"></script>
+    <script>
+        const IS_MODAL_MODE = new URLSearchParams(window.location.search).get('modal') === '1';
+        if (IS_MODAL_MODE) {
+            document.body.classList.add('modal-mode');
+            document.body.setAttribute('data-theme', localStorage.getItem('tradentical_theme') || 'dark');
+        } else {
+            document.write('<script src="left-menu.js?v=2.2"><\/script>');
+        }
+    </script>
     <script>
         const CARGPT_BASE = '/cargpt';
 

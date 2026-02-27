@@ -22,7 +22,7 @@
         <main class="main-content-area cargpt-main">
             <div class="cargpt-page-header">
                 <h1 class="cargpt-page-title">Composite Average Reversal</h1>
-                <a href="carsetup.html" class="cargpt-setup-link" onclick="openConfigurePopup(event)"><i class="fas fa-cog"></i> Configure</a>
+                <a href="carsetup.html" class="cargpt-setup-link" onclick="openConfigureModal(event)"><i class="fas fa-cog"></i> Configure</a>
             </div>
             <section class="cargpt-card">
                 <h2>
@@ -61,6 +61,23 @@
         </main>
     </div>
 
+    <div class="cargpt-config-modal" id="configureModal">
+        <div class="cargpt-config-dialog">
+            <div class="cargpt-config-header">
+                <h3>Configure</h3>
+                <button type="button" class="cargpt-config-close" onclick="closeConfigureModal()" aria-label="Close configure modal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <iframe
+                id="configureFrame"
+                class="cargpt-config-frame"
+                title="CAR Configure"
+                src="about:blank"
+            ></iframe>
+        </div>
+    </div>
+
     <div class="cargpt-overlay" id="loadingOverlay">
         <div class="cargpt-loading" style="font-size: 1.2rem;">
             <i class="fas fa-spinner fa-spin"></i> Running analysis...
@@ -71,15 +88,26 @@
     <script>
         const CARGPT_ANALYZE_URL = '/cargpt/analyze';
 
-        function openConfigurePopup(event) {
+        function openConfigureModal(event) {
             event.preventDefault();
-            const popupWidth = 1200;
-            const popupHeight = 850;
-            const left = Math.max(0, Math.round((window.screen.width - popupWidth) / 2));
-            const top = Math.max(0, Math.round((window.screen.height - popupHeight) / 2));
-            const features = `width=${popupWidth},height=${popupHeight},left=${left},top=${top},resizable=yes,scrollbars=yes`;
-            window.open('carsetup.html', 'carSetupPopup', features);
+            const modal = document.getElementById('configureModal');
+            const frame = document.getElementById('configureFrame');
+            frame.src = 'carsetup.html?modal=1';
+            modal.classList.add('visible');
         }
+
+        function closeConfigureModal() {
+            const modal = document.getElementById('configureModal');
+            const frame = document.getElementById('configureFrame');
+            modal.classList.remove('visible');
+            frame.src = 'about:blank';
+        }
+
+        document.getElementById('configureModal').addEventListener('click', (event) => {
+            if (event.target.id === 'configureModal') {
+                closeConfigureModal();
+            }
+        });
 
         function formatCumulativeAvg(arr) {
             if (!arr || arr.length === 0) return '-';
