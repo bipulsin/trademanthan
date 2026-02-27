@@ -74,7 +74,8 @@ body.cargpt-body {
 /* Page header - Setup link top right (cargpt.html only) */
 .cargpt-page-header {
     display: flex;
-    justify-content: space-between;
+    flex-direction: row;
+    justify-content: flex-start;
     align-items: center;
     margin-bottom: 16px;
 }
@@ -84,6 +85,8 @@ body.cargpt-body {
     font-size: 1.4rem;
     font-weight: 700;
     color: var(--cargpt-text);
+    text-align: left;
+    margin-right: auto;
 }
 
 .cargpt-setup-link {
