@@ -1,12 +1,12 @@
 #!/bin/bash
-# Setup SSL for tradentical.com on EC2
+# Setup SSL for tradentical.com + tradewithcto.com on EC2
 # Run this script ON THE EC2 SERVER: bash setup_ssl_tradentical.sh
-# Prerequisite: tradentical.com and www.tradentical.com must point to this server's IP (A records)
+# Prerequisite: tradentical.com, www.tradentical.com and tradewithcto.com must point to this server's IP (A records)
 
 set -e
 
 echo "=========================================="
-echo "SSL Setup for tradentical.com"
+echo "SSL Setup for tradentical.com + tradewithcto.com"
 echo "=========================================="
 
 # Check if running on EC2 (ubuntu user)
@@ -48,9 +48,9 @@ echo ""
 echo "Obtaining SSL certificate from Let's Encrypt..."
 # Non-interactive: use --register-unsafely-without-email (or set CERTBOT_EMAIL=your@email.com)
 if [ -n "$CERTBOT_EMAIL" ]; then
-    sudo certbot --nginx -d tradentical.com -d www.tradentical.com --non-interactive --agree-tos -m "$CERTBOT_EMAIL"
+    sudo certbot --nginx -d tradentical.com -d www.tradentical.com -d tradewithcto.com --non-interactive --agree-tos -m "$CERTBOT_EMAIL"
 else
-    sudo certbot --nginx -d tradentical.com -d www.tradentical.com --non-interactive --agree-tos --register-unsafely-without-email
+    sudo certbot --nginx -d tradentical.com -d www.tradentical.com -d tradewithcto.com --non-interactive --agree-tos --register-unsafely-without-email
 fi
 
 echo ""
@@ -60,5 +60,5 @@ sudo systemctl reload nginx
 echo ""
 echo "=========================================="
 echo "SSL setup complete!"
-echo "https://tradentical.com and https://www.tradentical.com should now work."
+echo "https://tradentical.com, https://www.tradentical.com and https://tradewithcto.com should now work."
 echo "=========================================="
