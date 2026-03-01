@@ -17,6 +17,7 @@ import backend.routers.products as products
 import backend.routers.algo as algo
 import backend.routers.scan as scan
 import backend.routers.cargpt as cargpt
+import backend.routers.arbitrage as arbitrage
 # OLD SCHEDULERS - DISABLED - Migrated to scan_st1_algo
 # from backend.services.master_stock_scheduler import start_scheduler, stop_scheduler
 # from backend.services.instruments_downloader import start_instruments_scheduler, stop_instruments_scheduler
@@ -26,6 +27,10 @@ import backend.routers.cargpt as cargpt
 
 # NEW UNIFIED SCHEDULER - Scan ST1 Algo
 from backend.services.scan_st1_algo import start_scan_st1_algo, stop_scan_st1_algo
+from backend.services.arbitrage_daily_setup_scheduler import (
+    start_arbitrage_daily_setup_scheduler,
+    stop_arbitrage_daily_setup_scheduler,
+)
 
 load_dotenv()
 
@@ -116,6 +121,15 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"❌ Scan ST1 Algo Scheduler: CRITICAL ERROR - {e}", exc_info=True)
             logger.warning("⚠️ Backend will continue running but scheduled jobs may not work")
+
+        # Start Arbitrage Daily Setup Scheduler (09:16 IST daily)
+        try:
+            logger.info("Starting Arbitrage Daily Setup Scheduler...")
+            start_arbitrage_daily_setup_scheduler()
+            logger.info("✅ Arbitrage Daily Setup Scheduler: STARTED (09:16 Asia/Kolkata)")
+        except Exception as e:
+            logger.error(f"❌ Arbitrage Daily Setup Scheduler: FAILED - {e}", exc_info=True)
+            logger.warning("⚠️ Continuing without arbitrage scheduler")
         
         logger.info("=" * 60)
         logger.info("✅ STARTUP COMPLETE - All Services Active")
@@ -161,6 +175,12 @@ async def lifespan(app: FastAPI):
         logger.info("✅ Scan ST1 Algo Scheduler stopped")
     except Exception as e:
         logger.error(f"⚠️ Error stopping Scan ST1 Algo Scheduler: {e}", exc_info=True)
+
+    try:
+        stop_arbitrage_daily_setup_scheduler()
+        logger.info("✅ Arbitrage Daily Setup Scheduler stopped")
+    except Exception as e:
+        logger.error(f"⚠️ Error stopping Arbitrage Daily Setup Scheduler: {e}", exc_info=True)
     
     logger.info("✅ Shutdown complete")
 
@@ -199,6 +219,7 @@ app.include_router(products.router)
 app.include_router(algo.router)
 app.include_router(scan.router)
 app.include_router(cargpt.router)
+app.include_router(arbitrage.router)
 
 def get_database_info():
     """Get database connection information"""
