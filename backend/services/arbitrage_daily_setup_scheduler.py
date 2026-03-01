@@ -87,15 +87,15 @@ def _ensure_arbitrage_table() -> None:
     create_sql = text(
         """
         CREATE TABLE IF NOT EXISTS arbitrage_master (
-            "Stock" TEXT PRIMARY KEY,
-            "Stock_Instrument_key" TEXT,
-            "Stock_LTP" NUMERIC,
-            "CurrMth_Future_symbol" TEXT,
-            "CurrMth_Future_Instrument_key" TEXT,
-            "CurrMth_Future_LTP" NUMERIC,
-            "NextMth_Future_Symbol" TEXT,
-            "NextMth_Future_Instrement_Key" TEXT,
-            "NextMth_Future_LTP" NUMERIC
+            stock TEXT PRIMARY KEY,
+            stock_instrument_key TEXT,
+            stock_ltp NUMERIC,
+            currmth_future_symbol TEXT,
+            currmth_future_instrument_key TEXT,
+            currmth_future_ltp NUMERIC,
+            nextmth_future_symbol TEXT,
+            nextmth_future_instrement_key TEXT,
+            nextmth_future_ltp NUMERIC
         )
         """
     )
@@ -194,10 +194,10 @@ def run_arbitrage_daily_setup() -> Dict:
             for row in conn.execute(
                 text(
                     """
-                    SELECT "Stock"
+                    SELECT stock
                     FROM arbitrage_master
-                    WHERE "Stock" IS NOT NULL AND TRIM("Stock") <> ''
-                    ORDER BY "Stock"
+                    WHERE stock IS NOT NULL AND TRIM(stock) <> ''
+                    ORDER BY stock
                     """
                 )
             ).fetchall()
@@ -224,12 +224,12 @@ def run_arbitrage_daily_setup() -> Dict:
                     """
                     UPDATE arbitrage_master
                     SET
-                        "Stock_Instrument_key" = :stock_key,
-                        "CurrMth_Future_symbol" = :cm_symbol,
-                        "CurrMth_Future_Instrument_key" = :cm_key,
-                        "NextMth_Future_Symbol" = :nm_symbol,
-                        "NextMth_Future_Instrement_Key" = :nm_key
-                    WHERE "Stock" = :stock
+                        stock_instrument_key = :stock_key,
+                        currmth_future_symbol = :cm_symbol,
+                        currmth_future_instrument_key = :cm_key,
+                        nextmth_future_symbol = :nm_symbol,
+                        nextmth_future_instrement_key = :nm_key
+                    WHERE stock = :stock
                     """
                 ),
                 metadata_updates,
@@ -243,12 +243,12 @@ def run_arbitrage_daily_setup() -> Dict:
             text(
                 """
                 SELECT
-                    "Stock",
-                    "Stock_Instrument_key",
-                    "CurrMth_Future_Instrument_key",
-                    "NextMth_Future_Instrement_Key"
+                    stock,
+                    stock_instrument_key,
+                    currmth_future_instrument_key,
+                    nextmth_future_instrement_key
                 FROM arbitrage_master
-                ORDER BY "Stock"
+                ORDER BY stock
                 """
             )
         ).fetchall()
@@ -269,10 +269,10 @@ def run_arbitrage_daily_setup() -> Dict:
                     """
                     UPDATE arbitrage_master
                     SET
-                        "Stock_LTP" = :stock_ltp,
-                        "CurrMth_Future_LTP" = :cm_ltp,
-                        "NextMth_Future_LTP" = :nm_ltp
-                    WHERE "Stock" = :stock
+                        stock_ltp = :stock_ltp,
+                        currmth_future_ltp = :cm_ltp,
+                        nextmth_future_ltp = :nm_ltp
+                    WHERE stock = :stock
                     """
                 ),
                 price_updates,
@@ -280,22 +280,22 @@ def run_arbitrage_daily_setup() -> Dict:
 
         total_rows = conn.execute(text('SELECT COUNT(*) FROM arbitrage_master')).scalar() or 0
         populated_stock_key = conn.execute(
-            text('SELECT COUNT(*) FROM arbitrage_master WHERE "Stock_Instrument_key" IS NOT NULL')
+            text("SELECT COUNT(*) FROM arbitrage_master WHERE stock_instrument_key IS NOT NULL")
         ).scalar() or 0
         populated_curr_key = conn.execute(
-            text('SELECT COUNT(*) FROM arbitrage_master WHERE "CurrMth_Future_Instrument_key" IS NOT NULL')
+            text("SELECT COUNT(*) FROM arbitrage_master WHERE currmth_future_instrument_key IS NOT NULL")
         ).scalar() or 0
         populated_next_key = conn.execute(
-            text('SELECT COUNT(*) FROM arbitrage_master WHERE "NextMth_Future_Instrement_Key" IS NOT NULL')
+            text("SELECT COUNT(*) FROM arbitrage_master WHERE nextmth_future_instrement_key IS NOT NULL")
         ).scalar() or 0
         populated_stock_ltp = conn.execute(
-            text('SELECT COUNT(*) FROM arbitrage_master WHERE "Stock_LTP" IS NOT NULL')
+            text("SELECT COUNT(*) FROM arbitrage_master WHERE stock_ltp IS NOT NULL")
         ).scalar() or 0
         populated_curr_ltp = conn.execute(
-            text('SELECT COUNT(*) FROM arbitrage_master WHERE "CurrMth_Future_LTP" IS NOT NULL')
+            text("SELECT COUNT(*) FROM arbitrage_master WHERE currmth_future_ltp IS NOT NULL")
         ).scalar() or 0
         populated_next_ltp = conn.execute(
-            text('SELECT COUNT(*) FROM arbitrage_master WHERE "NextMth_Future_LTP" IS NOT NULL')
+            text("SELECT COUNT(*) FROM arbitrage_master WHERE nextmth_future_ltp IS NOT NULL")
         ).scalar() or 0
 
     return {
