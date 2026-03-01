@@ -5,6 +5,7 @@
  */
 (function () {
     const STORAGE_KEY = "tradentical_disclaimer_accepted_v1";
+    const SESSION_KEY = "tradentical_disclaimer_session_ack_v1";
     const STYLE_ID = "tm-disclaimer-style";
     const MODAL_ID = "tmDisclaimerModal";
 
@@ -112,6 +113,11 @@
 
     function markAccepted() {
         localStorage.setItem(STORAGE_KEY, "true");
+        sessionStorage.setItem(SESSION_KEY, "true");
+    }
+
+    function isSessionAccepted() {
+        return sessionStorage.getItem(SESSION_KEY) === "true";
     }
 
     function openModal(opts) {
@@ -159,6 +165,7 @@
     window.TradenticalDisclaimer = {
         open: (required) => openModal({ required: !!required }),
         isAccepted,
+        isSessionAccepted,
         bindLinks,
     };
 

@@ -7,7 +7,7 @@ let hasRedirected = false;
 let isAuthenticated = false;
 
 const MENU_HTML_PATH = 'left-menu.html';
-const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.0';
+const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 
 class LeftMenu {
     constructor() {
@@ -187,9 +187,11 @@ class LeftMenu {
         window.TradenticalDisclaimer.bindLinks();
 
         const isDashboard = this.currentPage === 'dashboard';
-        const alreadyAccepted = window.TradenticalDisclaimer.isAccepted();
-        if (isDashboard && !alreadyAccepted) {
-            // Enforce explicit acknowledgement after sign-in.
+        const sessionAccepted = window.TradenticalDisclaimer.isSessionAccepted
+            ? window.TradenticalDisclaimer.isSessionAccepted()
+            : false;
+        if (isDashboard && !sessionAccepted) {
+            // Enforce acknowledgement once per browser session on dashboard.
             window.TradenticalDisclaimer.open(true);
         }
     }
