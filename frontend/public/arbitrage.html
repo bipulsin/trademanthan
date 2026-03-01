@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arbitrage Selection - Tradentical</title>
+    <script src="auth-check.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="left-menu.css?v=2.2">
+    <link rel="stylesheet" href="theme.css?v=1.1">
+    <link rel="stylesheet" href="arbitrage.css?v=1.0">
+</head>
+<body>
+    <div class="mobile-title-bar">
+        <button class="mobile-menu-toggle" id="mobileMenuToggle">
+            <i class="fas fa-bars"></i>
+        </button>
+        <div class="mobile-title-content">
+            <img src="tradentical-logo.png" alt="Tradentical" class="mobile-logo">
+            <h1 class="mobile-title">Tradentical</h1>
+        </div>
+    </div>
+
+    <div class="app-container app-with-left-menu">
+        <div id="left-menu-container"></div>
+        <main class="right-panel main-content-area">
+            <div class="arbitrage-header">
+                <div>
+                    <h1 class="arbitrage-title">Arbitrage Selection</h1>
+                    <p class="arbitrage-subtitle">
+                        Showing rows where current month future is below stock LTP and next month future is not more than current month future and within 3 points below.
+                    </p>
+                </div>
+                <button class="btn-refresh" id="refreshBtn" type="button">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+            </div>
+
+            <div class="arbitrage-summary" id="summaryBar">Loading data...</div>
+
+            <div class="arbitrage-table-wrap">
+                <table class="arbitrage-table" id="arbitrageTable">
+                    <thead>
+                        <tr>
+                            <th>Stock</th>
+                            <th>Stock LTP</th>
+                            <th>Current Month Future</th>
+                            <th>Curr Mth Future LTP</th>
+                            <th>Nxt Mth Future</th>
+                            <th>Nxt Mth Fut LTP</th>
+                        </tr>
+                    </thead>
+                    <tbody id="arbitrageBody">
+                        <tr><td colspan="6" class="state-cell">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </main>
+    </div>
+
+    <script src="left-menu.js?v=2.4"></script>
+    <script src="arbitrage.js?v=1.0"></script>
+    <script src="version.js?v=1.0"></script>
+    <script src="cache-manager.js?v=1.0"></script>
+</body>
+</html>

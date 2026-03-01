@@ -6,7 +6,7 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html';
+const MENU_HTML_PATH = 'left-menu.html?v=2.4';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 
 class LeftMenu {
@@ -26,7 +26,7 @@ class LeftMenu {
 
     isThemePage() {
         const path = window.location.pathname;
-        return /dashboard|cargpt|broker|strategy|reports|settings|carsetup/.test(path);
+        return /dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage/.test(path);
     }
 
     getCurrentPage() {
@@ -38,6 +38,7 @@ class LeftMenu {
         if (path.includes('scan')) return 'scan';
         if (path.includes('settings')) return 'settings';
         if (path.includes('reports')) return 'reports';
+        if (path.includes('arbitrage')) return 'arbitrage';
         if (path.includes('carsetup') || path.includes('cargpt')) return 'cargpt';
         return 'dashboard';
     }
@@ -63,7 +64,8 @@ class LeftMenu {
                 const isProtectedPage = currentPath.includes('dashboard') || currentPath.includes('strategy') ||
                     currentPath.includes('broker') || currentPath.includes('algo') || currentPath.includes('scan') ||
                     currentPath.includes('reports') || currentPath.includes('settings') ||
-                    currentPath.includes('carsetup') || currentPath.includes('cargpt');
+                    currentPath.includes('carsetup') || currentPath.includes('cargpt') ||
+                    currentPath.includes('arbitrage');
                 if (!hasRedirected && isProtectedPage) {
                     hasRedirected = true;
                     window.location.replace('index.html');
@@ -162,6 +164,7 @@ class LeftMenu {
                 <li class="nav-item" data-page="broker.html"><i class="fas fa-university"></i><span>Broker Management</span></li>
                 <li class="nav-item" data-page="strategy.html"><i class="fas fa-robot"></i><span>Strategy Management</span></li>
                 <li class="nav-item" data-page="reports.html"><i class="fas fa-chart-bar"></i><span>Reports</span></li>
+                <li class="nav-item" data-page="arbitrage.html"><i class="fas fa-shuffle"></i><span>Arbitrage Selection</span></li>
                 <li class="nav-item" data-page="settings.html"><i class="fas fa-cog"></i><span>Settings</span></li>
                 <li class="nav-item nav-item-logout" data-action="logout"><i class="fas fa-sign-out-alt"></i><span>Logout</span></li>
             </ul>
@@ -321,6 +324,7 @@ class LeftMenu {
             case 'broker': return 'broker.html';
             case 'strategy': return 'strategy.html';
             case 'reports': return 'reports.html';
+            case 'arbitrage': return 'arbitrage.html';
             case 'settings': return 'settings.html';
             default: return 'dashboard.html';
         }
