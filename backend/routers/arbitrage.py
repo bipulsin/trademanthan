@@ -5,7 +5,7 @@ from backend.services.arbitrage_daily_setup_scheduler import (
     run_arbitrage_daily_setup_now,
 )
 
-router = APIRouter(prefix="/arbitrage", tags=["arbitrage"])
+router = APIRouter(prefix="/scan/arbitrage", tags=["arbitrage"])
 
 
 @router.post("/daily-setup/run")
