@@ -7,6 +7,7 @@ from jose import jwt
 from typing import Optional
 import os
 from pydantic import BaseModel
+from urllib.parse import urlparse
 
 import backend.models as models
 from backend.database import get_db
@@ -21,6 +22,7 @@ class GoogleOAuthRequest(BaseModel):
 
 class GoogleOAuthCodeRequest(BaseModel):
     code: str
+    redirect_uri: Optional[str] = None
 
 # Google OAuth configuration (uses settings for default)
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID") or settings.GOOGLE_CLIENT_ID
@@ -45,6 +47,25 @@ def validate_google_oauth():
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Google OAuth is not configured. GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set in environment variables"
         )
+
+def resolve_google_redirect_uri(requested_redirect_uri: Optional[str]) -> str:
+    """Allow redirect URIs only from trusted hosted login pages."""
+    allowed_redirect_uris = {
+        "https://tradentical.com/login.html",
+        "https://www.tradentical.com/login.html",
+        "https://tradewithcto.com/login.html",
+        "https://www.tradewithcto.com/login.html",
+        "http://localhost:8000/login.html",
+        "http://localhost:3000/login.html",
+        settings.GOOGLE_REDIRECT_URI,
+    }
+
+    if requested_redirect_uri:
+        parsed = urlparse(requested_redirect_uri)
+        if parsed.scheme in {"http", "https"} and requested_redirect_uri in allowed_redirect_uris:
+            return requested_redirect_uri
+
+    return settings.GOOGLE_REDIRECT_URI
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
@@ -234,13 +255,15 @@ async def google_oauth_code(request: GoogleOAuthCodeRequest, db: Session = Depen
     """Handle Google OAuth code exchange for mobile browsers"""
     validate_google_oauth()  # Validate credentials before use
     try:
+        redirect_uri = resolve_google_redirect_uri(request.redirect_uri)
+
         # Exchange authorization code for access token
         token_response = requests.post(GOOGLE_TOKEN_URL, data={
             'client_id': GOOGLE_CLIENT_ID,
             'client_secret': GOOGLE_CLIENT_SECRET,
             'code': request.code,
             'grant_type': 'authorization_code',
-            'redirect_uri': settings.GOOGLE_REDIRECT_URI
+            'redirect_uri': redirect_uri
         })
         
         if token_response.status_code != 200:

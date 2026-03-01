@@ -1,6 +1,6 @@
-# Google OAuth Setup for tradentical.com
+# Google OAuth Setup for tradentical.com and tradewithcto.com
 
-Configure Google OAuth 2.0 to use **tradentical.com** and **tradentical@gmail.com**.
+Configure Google OAuth 2.0 to use **tradentical.com** and **tradewithcto.com**.
 
 ## Step 1: Google Cloud Console
 
@@ -23,7 +23,9 @@ Configure Google OAuth 2.0 to use **tradentical.com** and **tradentical@gmail.co
 2. Click your **OAuth 2.0 Client ID** (Web application)
 3. Under **Authorized JavaScript origins**, set:
    - `https://tradentical.com`
-   - `https://www.tradentical.com` (if you use www)
+   - `https://www.tradentical.com`
+   - `https://tradewithcto.com`
+   - `https://www.tradewithcto.com`
    - `http://localhost` (for local dev)
 4. Remove any `trademanthan.in` entries
 
@@ -31,7 +33,9 @@ Configure Google OAuth 2.0 to use **tradentical.com** and **tradentical@gmail.co
 
 1. In the same OAuth client, under **Authorized redirect URIs**, set:
    - `https://tradentical.com/login.html`
-   - `https://tradentical.com` (if login is on index)
+   - `https://www.tradentical.com/login.html`
+   - `https://tradewithcto.com/login.html`
+   - `https://www.tradewithcto.com/login.html`
    - `http://localhost/login.html` (for local dev)
 2. Remove any `trademanthan.in` redirect URIs
 3. Click **Save**
@@ -70,8 +74,8 @@ If you prefer a new OAuth client for tradentical.com:
 1. **Credentials** → **+ CREATE CREDENTIALS** → **OAuth client ID**
 2. Application type: **Web application**
 3. Name: e.g. "Tradentical Web"
-4. Authorized JavaScript origins: `https://tradentical.com`, `https://www.tradentical.com`
-5. Authorized redirect URIs: `https://tradentical.com/login.html`
+4. Authorized JavaScript origins: `https://tradentical.com`, `https://www.tradentical.com`, `https://tradewithcto.com`, `https://www.tradewithcto.com`
+5. Authorized redirect URIs: `https://tradentical.com/login.html`, `https://www.tradentical.com/login.html`, `https://tradewithcto.com/login.html`, `https://www.tradewithcto.com/login.html`
 6. Copy the new **Client ID** and **Client Secret**
 7. Update your `.env` with the new values
 8. Update the frontend `data-client_id` in `index.html` and `login.html` with the new Client ID

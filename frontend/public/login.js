@@ -131,6 +131,7 @@ document.head.appendChild(style);
 // Mobile Chrome OAuth fallback function
 function initiateGoogleAuth() {
     console.log('🔄 Initiating Google Auth via fallback method');
+    const redirectUri = `${window.location.origin}/login.html`;
     
     // Try to trigger the Google OAuth popup manually
     if (typeof google !== 'undefined' && google.accounts) {
@@ -139,6 +140,7 @@ function initiateGoogleAuth() {
                 client_id: "428560418671-t59riis4gqkhavnevt9ve6km54ltsba7.apps.googleusercontent.com",
                 scope: 'email profile',
                 ux_mode: 'popup',
+                redirect_uri: redirectUri,
                 callback: handleGoogleAuthResponse
             }).requestCode();
         } catch (error) {
@@ -154,6 +156,7 @@ function initiateGoogleAuth() {
 // Handle Google OAuth response from popup method
 function handleGoogleAuthResponse(response) {
     console.log('Google OAuth popup response:', response);
+    const redirectUri = `${window.location.origin}/login.html`;
     
     if (response.code) {
         // Exchange code for credential
@@ -162,7 +165,10 @@ function handleGoogleAuthResponse(response) {
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ code: response.code })
+            body: JSON.stringify({
+                code: response.code,
+                redirect_uri: redirectUri
+            })
         })
         .then(response => response.json())
         .then(data => {
