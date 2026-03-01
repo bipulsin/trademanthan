@@ -1,11 +1,36 @@
+/* Match base typography/layout with broker/reports pages */
 html, body {
     margin: 0;
     padding: 0;
     min-height: 100%;
+    overflow-x: hidden;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    line-height: 1.6;
 }
 
 .right-panel {
     padding: 1.5rem;
+}
+
+.arbitrage-page-logo {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 1rem;
+}
+
+.arbitrage-logo-img {
+    width: 70px;
+    height: 70px;
+    border-radius: 12px;
+    object-fit: cover;
+    border: 2px solid var(--theme-border, rgba(148, 163, 184, 0.3));
 }
 
 .arbitrage-header {
@@ -83,4 +108,92 @@ html, body {
 .num {
     text-align: right !important;
     font-variant-numeric: tabular-nums;
+}
+
+/* Mobile title bar style consistent with other pages */
+.mobile-title-bar {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    background: linear-gradient(135deg, #1e3c72, #2a5298);
+    color: white;
+    padding: 0.75rem 1rem;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+}
+
+.mobile-menu-toggle {
+    display: none;
+    position: absolute;
+    top: 50%;
+    left: 1rem;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: white;
+    font-size: 1.25rem;
+    cursor: pointer;
+    padding: 0.5rem;
+    border-radius: 4px;
+    transition: background-color 0.3s ease;
+}
+
+.mobile-menu-toggle:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.mobile-title-content {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    gap: 0.75rem;
+}
+
+.mobile-logo {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+}
+
+.mobile-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin: 0;
+    font-family: 'Montserrat', sans-serif;
+}
+
+@media (min-width: 769px) {
+    .mobile-title-bar {
+        display: none !important;
+    }
+
+    .app-container {
+        margin-top: 0;
+    }
+}
+
+@media (max-width: 768px) {
+    .mobile-title-bar {
+        display: block !important;
+    }
+
+    .app-container {
+        margin-top: 60px;
+    }
+
+    .right-panel {
+        padding: 1rem;
+    }
+
+    .arbitrage-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .btn-refresh {
+        align-self: flex-end;
+    }
 }
