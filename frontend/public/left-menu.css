@@ -276,6 +276,20 @@ body[data-theme="light"] .theme-btn.active {
     flex-shrink: 0;
 }
 
+.panel-footer-links {
+    margin-top: 0.75rem;
+}
+
+.panel-footer-links a {
+    font-size: 0.8rem;
+    color: var(--left-menu-muted);
+    text-decoration: underline;
+}
+
+.panel-footer-links a:hover {
+    color: var(--left-menu-text);
+}
+
 .user-info {
     display: flex;
     align-items: center;

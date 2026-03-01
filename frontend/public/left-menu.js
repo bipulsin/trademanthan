@@ -7,6 +7,7 @@ let hasRedirected = false;
 let isAuthenticated = false;
 
 const MENU_HTML_PATH = 'left-menu.html';
+const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.0';
 
 class LeftMenu {
     constructor() {
@@ -56,6 +57,7 @@ class LeftMenu {
                 this.setupNavigation();
                 this.setActiveNavigation();
                 this.syncMainContentMargin();
+                await this.setupDisclaimer();
             } else {
                 const currentPath = window.location.pathname;
                 const isProtectedPage = currentPath.includes('dashboard') || currentPath.includes('strategy') ||
@@ -169,11 +171,44 @@ class LeftMenu {
                 <img src="https://via.placeholder.com/40" alt="User" class="user-avatar" id="userAvatar">
                 <div class="user-details"><span class="user-name" id="userName">User</span><span class="user-datetime" id="userDateTime">--</span></div>
             </div>
+            <div class="panel-footer-links">
+                <a href="#" class="disclaimer-link">Disclaimer</a>
+            </div>
         </div>
     </aside>
 </div>
 <button class="mobile-menu-toggle" id="leftMenuMobileToggle" aria-label="Open menu"><i class="fas fa-bars"></i></button>
 <div class="mobile-menu-overlay" id="mobileMenuOverlay"></div>`;
+    }
+
+    async setupDisclaimer() {
+        await this.loadDisclaimerScript();
+        if (!window.TradenticalDisclaimer) return;
+        window.TradenticalDisclaimer.bindLinks();
+
+        const isDashboard = this.currentPage === 'dashboard';
+        const alreadyAccepted = window.TradenticalDisclaimer.isAccepted();
+        if (isDashboard && !alreadyAccepted) {
+            // Enforce explicit acknowledgement after sign-in.
+            window.TradenticalDisclaimer.open(true);
+        }
+    }
+
+    loadDisclaimerScript() {
+        if (window.TradenticalDisclaimer) return Promise.resolve();
+        if (window.__tmDisclaimerLoading) return window.__tmDisclaimerLoading;
+
+        window.__tmDisclaimerLoading = new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = DISCLAIMER_SCRIPT_PATH;
+            script.onload = () => resolve();
+            script.onerror = () => reject(new Error('Failed to load disclaimer.js'));
+            document.head.appendChild(script);
+        });
+
+        return window.__tmDisclaimerLoading.catch((error) => {
+            console.warn(error);
+        });
     }
 
     setupCollapseToggle() {
