@@ -79,32 +79,7 @@ class BrokerManager {
     }
 
     setupMobileMenu() {
-        const mobileMenuToggle = document.getElementById('mobileMenuToggle');
-        const leftPanel = document.querySelector('.left-panel');
-        
-        if (mobileMenuToggle && leftPanel) {
-            mobileMenuToggle.addEventListener('click', function() {
-                leftPanel.classList.toggle('mobile-open');
-            });
-            
-            // Close mobile menu when clicking outside
-            document.addEventListener('click', function(event) {
-                if (!leftPanel.contains(event.target) && !mobileMenuToggle.contains(event.target)) {
-                    leftPanel.classList.remove('mobile-open');
-                }
-            });
-            
-            // Close mobile menu when navigation item is clicked
-            const navItems = document.querySelectorAll('.nav-item');
-            navItems.forEach(item => {
-                item.addEventListener('click', function() {
-                    // Add a small delay to allow the click to register before hiding
-                    setTimeout(() => {
-                        leftPanel.classList.remove('mobile-open');
-                    }, 150);
-                });
-            });
-        }
+        // Mobile menu interactions are handled centrally in left-menu.js.
     }
 
     async loadBrokers() {
