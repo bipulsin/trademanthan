@@ -7,9 +7,11 @@
     const closedSummaryEl = document.getElementById("closedSummaryBar");
     const refreshBtn = document.getElementById("refreshBtn");
     const ORDER_API = "/scan/arbitrage/order";
+    const EXIT_API = "/scan/arbitrage/order/exit";
     const SELECTION_API = "/scan/arbitrage/selection";
     const ORDER_REPORT_API = "/scan/arbitrage/orders";
     let placingOrder = false;
+    let exitingOrder = false;
 
     function fmt(v) {
         if (v === null || v === undefined || Number.isNaN(Number(v))) return "-";
@@ -63,7 +65,7 @@
 
     function renderOpenOrders(rows) {
         if (!rows || rows.length === 0) {
-            openBodyEl.innerHTML = '<tr><td colspan="7" class="state-cell">No Open positin</td></tr>';
+            openBodyEl.innerHTML = '<tr><td colspan="8" class="state-cell">No Open positin</td></tr>';
             return;
         }
         openBodyEl.innerHTML = rows.map((r) => `
@@ -75,8 +77,19 @@
                 <td class="num">${r.quantity ?? "-"}</td>
                 <td class="num">${fmt(r.trade_entry_value)}</td>
                 <td>${r.trade_status || "-"}</td>
+                <td class="order-cell">
+                    <button class="btn-exit" data-order-id="${r.id}">Exit</button>
+                </td>
             </tr>
         `).join("");
+
+        openBodyEl.querySelectorAll(".btn-exit").forEach((btn) => {
+            btn.addEventListener("click", async () => {
+                const orderId = Number(btn.getAttribute("data-order-id"));
+                if (!orderId || btn.disabled || exitingOrder) return;
+                await exitOrder(orderId, btn);
+            });
+        });
     }
 
     function renderClosedOrders(rows) {
@@ -145,10 +158,36 @@
         }
     }
 
+    async function exitOrder(orderId, btn) {
+        exitingOrder = true;
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "Exiting...";
+        try {
+            const res = await fetch(EXIT_API, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ order_id: orderId }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) {
+                throw new Error(data.detail || data.message || "Failed to exit order");
+            }
+            openSummaryEl.textContent = `${data.message}. Reloading...`;
+            await loadData();
+        } catch (err) {
+            openSummaryEl.textContent = `Exit failed: ${err.message}`;
+            btn.disabled = false;
+            btn.textContent = originalText;
+        } finally {
+            exitingOrder = false;
+        }
+    }
+
     async function loadData() {
         bodyEl.innerHTML = '<tr><td colspan="7" class="state-cell">Loading...</td></tr>';
         summaryEl.textContent = "Loading data...";
-        openBodyEl.innerHTML = '<tr><td colspan="7" class="state-cell">Loading...</td></tr>';
+        openBodyEl.innerHTML = '<tr><td colspan="8" class="state-cell">Loading...</td></tr>';
         openSummaryEl.textContent = "Loading data...";
         closedBodyEl.innerHTML = '<tr><td colspan="9" class="state-cell">Loading...</td></tr>';
         closedSummaryEl.textContent = "Loading data...";
@@ -165,7 +204,7 @@
         } catch (err) {
             bodyEl.innerHTML = `<tr><td colspan="7" class="state-cell">Error loading data: ${err.message}</td></tr>`;
             summaryEl.textContent = "Failed to load data.";
-            openBodyEl.innerHTML = `<tr><td colspan="7" class="state-cell">Error loading data: ${err.message}</td></tr>`;
+            openBodyEl.innerHTML = `<tr><td colspan="8" class="state-cell">Error loading data: ${err.message}</td></tr>`;
             openSummaryEl.textContent = "Failed to load data.";
             closedBodyEl.innerHTML = `<tr><td colspan="9" class="state-cell">Error loading data: ${err.message}</td></tr>`;
             closedSummaryEl.textContent = "Failed to load data.";

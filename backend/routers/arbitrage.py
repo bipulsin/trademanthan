@@ -323,6 +323,101 @@ async def place_arbitrage_order(payload: dict):
         raise HTTPException(status_code=500, detail=f"Failed to place arbitrage order: {exc}")
 
 
+@router.post("/order/exit")
+async def exit_arbitrage_order(payload: dict):
+    """
+    Close an OPEN arbitrage order by id and stamp exit fields.
+    """
+    order_id = (payload or {}).get("order_id")
+    if not order_id:
+        raise HTTPException(status_code=400, detail="order_id is required")
+
+    try:
+        _ensure_arbitrage_order_table()
+        with engine.begin() as conn:
+            order_row = conn.execute(
+                text(
+                    """
+                    SELECT
+                        id,
+                        stock,
+                        stock_instrument_key,
+                        quantity,
+                        buy_cost,
+                        sell_cost,
+                        trade_status
+                    FROM arbitrage_order
+                    WHERE id = :order_id
+                    LIMIT 1
+                    """
+                ),
+                {"order_id": order_id},
+            ).mappings().first()
+            if not order_row:
+                raise HTTPException(status_code=404, detail="Order not found")
+            if (order_row.get("trade_status") or "").upper() != "OPEN":
+                raise HTTPException(status_code=409, detail="Only OPEN orders can be exited")
+
+            master_row = conn.execute(
+                text(
+                    """
+                    SELECT
+                        currmth_future_ltp,
+                        nextmth_future_ltp
+                    FROM arbitrage_master
+                    WHERE stock_instrument_key = :stock_instrument_key
+                    LIMIT 1
+                    """
+                ),
+                {"stock_instrument_key": order_row["stock_instrument_key"]},
+            ).mappings().first()
+
+            buy_exit_cost = (
+                float(master_row["currmth_future_ltp"])
+                if master_row and master_row.get("currmth_future_ltp") is not None
+                else float(order_row["buy_cost"])
+            )
+            sell_exit_cost = (
+                float(master_row["nextmth_future_ltp"])
+                if master_row and master_row.get("nextmth_future_ltp") is not None
+                else float(order_row["sell_cost"])
+            )
+            quantity = int(order_row["quantity"] or 0)
+            trade_exit_value = (sell_exit_cost - buy_exit_cost) * quantity
+
+            conn.execute(
+                text(
+                    """
+                    UPDATE arbitrage_order
+                    SET
+                        buy_exit_cost = :buy_exit_cost,
+                        sell_exit_cost = :sell_exit_cost,
+                        trade_exit_value = :trade_exit_value,
+                        trade_exit_time = CURRENT_TIMESTAMP,
+                        trade_status = 'CLOSED'
+                    WHERE id = :order_id
+                    """
+                ),
+                {
+                    "order_id": order_id,
+                    "buy_exit_cost": buy_exit_cost,
+                    "sell_exit_cost": sell_exit_cost,
+                    "trade_exit_value": trade_exit_value,
+                },
+            )
+
+        return {
+            "success": True,
+            "message": f"Order exited for {order_row['stock']}",
+            "order_id": int(order_id),
+            "trade_exit_value": round(trade_exit_value, 4),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to exit arbitrage order: {exc}")
+
+
 @router.get("/orders")
 async def get_arbitrage_orders(trade_status: str):
     """
