@@ -109,18 +109,34 @@ body.cargpt-body {
 }
 
 .cargpt-help-icon-btn {
-    width: 34px;
-    height: 34px;
+    width: 38px;
+    height: 38px;
     border-radius: 50%;
     border: 1px solid var(--cargpt-border);
-    background: rgba(148, 163, 184, 0.2);
-    color: var(--cargpt-text);
+    background: rgba(59, 130, 246, 0.28);
+    color: #ffffff;
     cursor: pointer;
     margin-right: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.45rem;
+    font-weight: 900;
+    line-height: 1;
 }
 
 .cargpt-help-icon-btn:hover {
-    background: rgba(59, 130, 246, 0.3);
+    background: rgba(59, 130, 246, 0.45);
+}
+
+body[data-theme="light"] .cargpt-help-icon-btn {
+    background: #16a34a;
+    border-color: #15803d;
+    color: #ffffff;
+}
+
+body[data-theme="light"] .cargpt-help-icon-btn:hover {
+    background: #15803d;
 }
 
 .cargpt-help-link {
