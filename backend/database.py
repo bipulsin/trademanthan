@@ -118,11 +118,27 @@ def _run_startup_schema_migrations(db_engine):
                     conn.execute(text("ALTER TABLE carstocklist ALTER COLUMN buy_price SET DEFAULT 0"))
                     conn.execute(text("ALTER TABLE carstocklist ALTER COLUMN buy_price SET NOT NULL"))
 
-            # Arbitrage order book table (name kept as requested: arbiitrage_order).
+            # Rename legacy typo table to the correct table name if required.
             conn.execute(
                 text(
                     """
-                    CREATE TABLE IF NOT EXISTS arbiitrage_order (
+                    DO $$
+                    BEGIN
+                        IF to_regclass('public.arbiitrage_order') IS NOT NULL
+                           AND to_regclass('public.arbitrage_order') IS NULL THEN
+                            ALTER TABLE arbiitrage_order RENAME TO arbitrage_order;
+                        END IF;
+                    END
+                    $$;
+                    """
+                )
+            )
+
+            # Arbitrage order book table.
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS arbitrage_order (
                         id BIGSERIAL PRIMARY KEY,
                         stock TEXT NOT NULL,
                         stock_instrument_key TEXT NOT NULL,
@@ -149,8 +165,8 @@ def _run_startup_schema_migrations(db_engine):
             conn.execute(
                 text(
                     """
-                    CREATE INDEX IF NOT EXISTS idx_arbiitrage_order_stock_trade_status
-                    ON arbiitrage_order (stock_instrument_key, trade_status)
+                    CREATE INDEX IF NOT EXISTS idx_arbitrage_order_stock_trade_status
+                    ON arbitrage_order (stock_instrument_key, trade_status)
                     """
                 )
             )
@@ -158,8 +174,8 @@ def _run_startup_schema_migrations(db_engine):
                 conn.execute(
                     text(
                         """
-                        CREATE UNIQUE INDEX IF NOT EXISTS uq_arbiitrage_order_open_stock
-                        ON arbiitrage_order (stock_instrument_key)
+                        CREATE UNIQUE INDEX IF NOT EXISTS uq_arbitrage_order_open_stock
+                        ON arbitrage_order (stock_instrument_key)
                         WHERE trade_status = 'OPEN'
                         """
                     )

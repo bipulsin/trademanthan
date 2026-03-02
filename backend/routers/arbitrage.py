@@ -21,7 +21,21 @@ def _ensure_arbitrage_order_table() -> None:
         conn.execute(
             text(
                 """
-                CREATE TABLE IF NOT EXISTS arbiitrage_order (
+                DO $$
+                BEGIN
+                    IF to_regclass('public.arbiitrage_order') IS NOT NULL
+                       AND to_regclass('public.arbitrage_order') IS NULL THEN
+                        ALTER TABLE arbiitrage_order RENAME TO arbitrage_order;
+                    END IF;
+                END
+                $$;
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS arbitrage_order (
                     id BIGSERIAL PRIMARY KEY,
                     stock TEXT NOT NULL,
                     stock_instrument_key TEXT NOT NULL,
@@ -48,16 +62,16 @@ def _ensure_arbitrage_order_table() -> None:
         conn.execute(
             text(
                 """
-                CREATE INDEX IF NOT EXISTS idx_arbiitrage_order_stock_trade_status
-                ON arbiitrage_order (stock_instrument_key, trade_status)
+                CREATE INDEX IF NOT EXISTS idx_arbitrage_order_stock_trade_status
+                ON arbitrage_order (stock_instrument_key, trade_status)
                 """
             )
         )
         conn.execute(
             text(
                 """
-                CREATE UNIQUE INDEX IF NOT EXISTS uq_arbiitrage_order_open_stock
-                ON arbiitrage_order (stock_instrument_key)
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_arbitrage_order_open_stock
+                ON arbitrage_order (stock_instrument_key)
                 WHERE trade_status = 'OPEN'
                 """
             )
@@ -136,7 +150,7 @@ async def get_arbitrage_selection():
                         nextmth_future_ltp,
                         EXISTS (
                             SELECT 1
-                            FROM arbiitrage_order ao
+                            FROM arbitrage_order ao
                             WHERE ao.stock_instrument_key = arbitrage_master.stock_instrument_key
                               AND ao.trade_status = 'OPEN'
                         ) AS has_open_order
@@ -165,7 +179,7 @@ async def get_arbitrage_selection():
 @router.post("/order")
 async def place_arbitrage_order(payload: dict):
     """
-    Insert arbitrage order entry in arbiitrage_order for a given stock_instrument_key.
+    Insert arbitrage order entry in arbitrage_order for a given stock_instrument_key.
     One OPEN order per stock_instrument_key is allowed.
     """
     stock_instrument_key = (payload or {}).get("stock_instrument_key")
@@ -180,7 +194,7 @@ async def place_arbitrage_order(payload: dict):
                 text(
                     """
                     SELECT 1
-                    FROM arbiitrage_order
+                    FROM arbitrage_order
                     WHERE stock_instrument_key = :stock_instrument_key
                       AND trade_status = 'OPEN'
                     LIMIT 1
@@ -241,7 +255,7 @@ async def place_arbitrage_order(payload: dict):
             conn.execute(
                 text(
                     """
-                    INSERT INTO arbiitrage_order (
+                    INSERT INTO arbitrage_order (
                         stock,
                         stock_instrument_key,
                         currmth_future_symbol,
