@@ -322,3 +322,58 @@ async def place_arbitrage_order(payload: dict):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to place arbitrage order: {exc}")
 
+
+@router.get("/orders")
+async def get_arbitrage_orders(trade_status: str):
+    """
+    Fetch arbitrage orders by trade_status (OPEN/CLOSED), ordered by trade_entry_time desc.
+    """
+    status = (trade_status or "").strip().upper()
+    if status not in {"OPEN", "CLOSED"}:
+        raise HTTPException(status_code=400, detail="trade_status must be OPEN or CLOSED")
+
+    try:
+        _ensure_arbitrage_order_table()
+        with engine.begin() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT
+                        id,
+                        stock,
+                        stock_instrument_key,
+                        currmth_future_symbol,
+                        currmth_future_instrument_key,
+                        buy_cost,
+                        buy_exit_cost,
+                        current_future_state,
+                        nextmth_future_symbol,
+                        nextmth_future_instrement_key,
+                        sell_cost,
+                        sell_exit_cost,
+                        nextmth_future_state,
+                        quantity,
+                        trade_status,
+                        trade_entry_value,
+                        trade_entry_time,
+                        trade_exit_time,
+                        trade_exit_value
+                    FROM arbitrage_order
+                    WHERE trade_status = :trade_status
+                    ORDER BY trade_entry_time DESC
+                    """
+                ),
+                {"trade_status": status},
+            ).mappings().all()
+
+        return {
+            "success": True,
+            "trade_status": status,
+            "count": len(rows),
+            "rows": [dict(row) for row in rows],
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch arbitrage orders: {exc}")
+

@@ -65,6 +65,17 @@ body {
     background: var(--theme-card, #1e293b);
 }
 
+.arbitrage-report-section {
+    margin-top: 1.4rem;
+}
+
+.arbitrage-report-title {
+    margin: 0 0 0.6rem;
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: var(--theme-text, #f1f5f9);
+}
+
 .arbitrage-table {
     width: 100%;
     border-collapse: collapse;

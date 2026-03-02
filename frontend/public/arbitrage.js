@@ -1,9 +1,14 @@
 (function () {
     const bodyEl = document.getElementById("arbitrageBody");
     const summaryEl = document.getElementById("summaryBar");
+    const openBodyEl = document.getElementById("openArbitrageBody");
+    const openSummaryEl = document.getElementById("openSummaryBar");
+    const closedBodyEl = document.getElementById("closedArbitrageBody");
+    const closedSummaryEl = document.getElementById("closedSummaryBar");
     const refreshBtn = document.getElementById("refreshBtn");
     const ORDER_API = "/scan/arbitrage/order";
     const SELECTION_API = "/scan/arbitrage/selection";
+    const ORDER_REPORT_API = "/scan/arbitrage/orders";
     let placingOrder = false;
 
     function fmt(v) {
@@ -49,6 +54,71 @@
         });
     }
 
+    function fmtDateTime(v) {
+        if (!v) return "-";
+        const d = new Date(v);
+        if (Number.isNaN(d.getTime())) return String(v);
+        return d.toLocaleString("en-IN");
+    }
+
+    function renderOpenOrders(rows) {
+        if (!rows || rows.length === 0) {
+            openBodyEl.innerHTML = '<tr><td colspan="7" class="state-cell">No Open positin</td></tr>';
+            return;
+        }
+        openBodyEl.innerHTML = rows.map((r) => `
+            <tr>
+                <td>${fmtDateTime(r.trade_entry_time)}</td>
+                <td>${r.stock || "-"}</td>
+                <td class="num">${fmt(r.buy_cost)}</td>
+                <td class="num">${fmt(r.sell_cost)}</td>
+                <td class="num">${r.quantity ?? "-"}</td>
+                <td class="num">${fmt(r.trade_entry_value)}</td>
+                <td>${r.trade_status || "-"}</td>
+            </tr>
+        `).join("");
+    }
+
+    function renderClosedOrders(rows) {
+        if (!rows || rows.length === 0) {
+            closedBodyEl.innerHTML = '<tr><td colspan="9" class="state-cell">No Open positin</td></tr>';
+            return;
+        }
+        closedBodyEl.innerHTML = rows.map((r) => `
+            <tr>
+                <td>${fmtDateTime(r.trade_entry_time)}</td>
+                <td>${fmtDateTime(r.trade_exit_time)}</td>
+                <td>${r.stock || "-"}</td>
+                <td class="num">${fmt(r.buy_cost)}</td>
+                <td class="num">${fmt(r.sell_cost)}</td>
+                <td class="num">${r.quantity ?? "-"}</td>
+                <td class="num">${fmt(r.trade_entry_value)}</td>
+                <td class="num">${fmt(r.trade_exit_value)}</td>
+                <td>${r.trade_status || "-"}</td>
+            </tr>
+        `).join("");
+    }
+
+    async function loadOrdersByStatus(tradeStatus) {
+        const targetBody = tradeStatus === "OPEN" ? openBodyEl : closedBodyEl;
+        const targetSummary = tradeStatus === "OPEN" ? openSummaryEl : closedSummaryEl;
+        const emptyColspan = tradeStatus === "OPEN" ? 7 : 9;
+        targetBody.innerHTML = `<tr><td colspan="${emptyColspan}" class="state-cell">Loading...</td></tr>`;
+        targetSummary.textContent = "Loading data...";
+        const res = await fetch(`${ORDER_REPORT_API}?trade_status=${encodeURIComponent(tradeStatus)}`, { cache: "no-store" });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+            throw new Error(data.detail || `Failed to fetch ${tradeStatus} orders`);
+        }
+        if (tradeStatus === "OPEN") {
+            renderOpenOrders(data.rows);
+            targetSummary.textContent = `Total OPEN records: ${data.count}`;
+        } else {
+            renderClosedOrders(data.rows);
+            targetSummary.textContent = `Total CLOSED records: ${data.count}`;
+        }
+    }
+
     async function placeOrder(stockInstrumentKey, btn) {
         placingOrder = true;
         const originalText = btn.textContent;
@@ -78,6 +148,10 @@
     async function loadData() {
         bodyEl.innerHTML = '<tr><td colspan="7" class="state-cell">Loading...</td></tr>';
         summaryEl.textContent = "Loading data...";
+        openBodyEl.innerHTML = '<tr><td colspan="7" class="state-cell">Loading...</td></tr>';
+        openSummaryEl.textContent = "Loading data...";
+        closedBodyEl.innerHTML = '<tr><td colspan="9" class="state-cell">Loading...</td></tr>';
+        closedSummaryEl.textContent = "Loading data...";
         try {
             const res = await fetch(SELECTION_API, { cache: "no-store" });
             const data = await res.json();
@@ -86,9 +160,15 @@
             }
             renderRows(data.rows);
             summaryEl.textContent = `Total matching records: ${data.count}`;
+            await loadOrdersByStatus("OPEN");
+            await loadOrdersByStatus("CLOSED");
         } catch (err) {
             bodyEl.innerHTML = `<tr><td colspan="7" class="state-cell">Error loading data: ${err.message}</td></tr>`;
             summaryEl.textContent = "Failed to load data.";
+            openBodyEl.innerHTML = `<tr><td colspan="7" class="state-cell">Error loading data: ${err.message}</td></tr>`;
+            openSummaryEl.textContent = "Failed to load data.";
+            closedBodyEl.innerHTML = `<tr><td colspan="9" class="state-cell">Error loading data: ${err.message}</td></tr>`;
+            closedSummaryEl.textContent = "Failed to load data.";
         }
     }
 
