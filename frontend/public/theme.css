@@ -493,3 +493,20 @@ body.theme-page #cryptoDebug {
         display: none !important;
     }
 }
+
+/* Desktop: unify primary page header typography across core pages */
+@media (min-width: 769px) {
+    body.theme-page .arbitrage-title,
+    body.theme-page .cargpt-page-title,
+    body.theme-page .broker-title,
+    body.theme-page .strategy-title,
+    body.theme-page .reports-title,
+    body.theme-page .settings-title {
+        font-family: 'Montserrat', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif !important;
+        font-size: 2rem !important;
+        font-weight: 700 !important;
+        font-style: normal !important;
+        line-height: 1.2 !important;
+        letter-spacing: 0 !important;
+    }
+}
