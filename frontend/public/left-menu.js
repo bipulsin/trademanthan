@@ -6,7 +6,7 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html?v=2.6';
+const MENU_HTML_PATH = 'left-menu.html?v=2.7';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 
 class LeftMenu {
@@ -54,6 +54,7 @@ class LeftMenu {
                 await this.loadMenu();
                 this.setupCollapseToggle();
                 this.setupMobileMenu();
+                this.syncMobileTitle();
                 this.loadUserData();
                 this.setupNavigation();
                 this.setActiveNavigation();
@@ -287,6 +288,24 @@ class LeftMenu {
         document.querySelectorAll('.nav-item').forEach(item => {
             item.addEventListener('click', () => setTimeout(close, 150));
         });
+    }
+
+    syncMobileTitle() {
+        const mobileTitle = document.querySelector('.mobile-title');
+        if (!mobileTitle) return;
+
+        const pageTitles = {
+            dashboard: 'Dashboard',
+            arbitrage: 'Arbitrage Selection',
+            cargpt: 'Cumulative Average Reversal',
+            broker: 'Broker Management',
+            strategy: 'Strategy Management',
+            reports: 'Trading Reports',
+            settings: 'Settings',
+            algo: 'Algo Trading',
+        };
+
+        mobileTitle.textContent = pageTitles[this.currentPage] || 'Tradentical';
     }
 
     loadUserData() {
