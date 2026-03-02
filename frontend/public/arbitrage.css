@@ -19,20 +19,6 @@ body {
     padding: 1.5rem;
 }
 
-.arbitrage-page-logo {
-    display: flex;
-    justify-content: center;
-    margin-bottom: 1rem;
-}
-
-.arbitrage-logo-img {
-    width: 70px;
-    height: 70px;
-    border-radius: 12px;
-    object-fit: cover;
-    border: 2px solid var(--theme-border, rgba(148, 163, 184, 0.3));
-}
-
 .arbitrage-header {
     display: flex;
     justify-content: space-between;
@@ -47,7 +33,7 @@ body {
 }
 
 .arbitrage-subtitle {
-    margin: 0.4rem 0 0;
+    margin: 0 0 0.6rem;
     color: var(--theme-muted, #94a3b8);
     font-size: 0.95rem;
 }
