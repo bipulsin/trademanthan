@@ -98,26 +98,71 @@ def _run_startup_schema_migrations(db_engine):
     try:
         inspector = inspect(db_engine)
         table_names = inspector.get_table_names()
-        if "carstocklist" not in table_names:
-            return
-
-        column_names = {col["name"] for col in inspector.get_columns("carstocklist")}
         with db_engine.begin() as conn:
-            if "userid" not in column_names:
-                conn.execute(text("ALTER TABLE carstocklist ADD COLUMN userid INTEGER DEFAULT 4"))
-                print("Applied migration: added carstocklist.userid column")
-            if "buy_price" not in column_names:
-                conn.execute(text("ALTER TABLE carstocklist ADD COLUMN buy_price NUMERIC(12,2) DEFAULT 0"))
-                print("Applied migration: added carstocklist.buy_price column")
+            if "carstocklist" in table_names:
+                column_names = {col["name"] for col in inspector.get_columns("carstocklist")}
+                if "userid" not in column_names:
+                    conn.execute(text("ALTER TABLE carstocklist ADD COLUMN userid INTEGER DEFAULT 4"))
+                    print("Applied migration: added carstocklist.userid column")
+                if "buy_price" not in column_names:
+                    conn.execute(text("ALTER TABLE carstocklist ADD COLUMN buy_price NUMERIC(12,2) DEFAULT 0"))
+                    print("Applied migration: added carstocklist.buy_price column")
 
-            conn.execute(text("UPDATE carstocklist SET userid = 4 WHERE userid IS NULL"))
-            conn.execute(text("UPDATE carstocklist SET buy_price = 0 WHERE buy_price IS NULL"))
+                conn.execute(text("UPDATE carstocklist SET userid = 4 WHERE userid IS NULL"))
+                conn.execute(text("UPDATE carstocklist SET buy_price = 0 WHERE buy_price IS NULL"))
 
-            # PostgreSQL supports setting NOT NULL/DEFAULT after column creation.
+                # PostgreSQL supports setting NOT NULL/DEFAULT after column creation.
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(text("ALTER TABLE carstocklist ALTER COLUMN userid SET DEFAULT 4"))
+                    conn.execute(text("ALTER TABLE carstocklist ALTER COLUMN userid SET NOT NULL"))
+                    conn.execute(text("ALTER TABLE carstocklist ALTER COLUMN buy_price SET DEFAULT 0"))
+                    conn.execute(text("ALTER TABLE carstocklist ALTER COLUMN buy_price SET NOT NULL"))
+
+            # Arbitrage order book table (name kept as requested: arbiitrage_order).
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS arbiitrage_order (
+                        id BIGSERIAL PRIMARY KEY,
+                        stock TEXT NOT NULL,
+                        stock_instrument_key TEXT NOT NULL,
+                        currmth_future_symbol TEXT NOT NULL,
+                        currmth_future_instrument_key TEXT NOT NULL,
+                        buy_cost NUMERIC(16,4) NOT NULL,
+                        buy_exit_cost NUMERIC(16,4),
+                        current_future_state TEXT NOT NULL DEFAULT 'BUY',
+                        nextmth_future_symbol TEXT NOT NULL,
+                        nextmth_future_instrement_key TEXT NOT NULL,
+                        sell_cost NUMERIC(16,4) NOT NULL,
+                        sell_exit_cost NUMERIC(16,4),
+                        nextmth_future_state TEXT NOT NULL DEFAULT 'SELL',
+                        quantity INTEGER NOT NULL,
+                        trade_status TEXT NOT NULL DEFAULT 'OPEN',
+                        trade_entry_value NUMERIC(18,4) NOT NULL,
+                        trade_entry_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        trade_exit_time TIMESTAMP,
+                        trade_exit_value NUMERIC(18,4)
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_arbiitrage_order_stock_trade_status
+                    ON arbiitrage_order (stock_instrument_key, trade_status)
+                    """
+                )
+            )
             if db_engine.dialect.name == "postgresql":
-                conn.execute(text("ALTER TABLE carstocklist ALTER COLUMN userid SET DEFAULT 4"))
-                conn.execute(text("ALTER TABLE carstocklist ALTER COLUMN userid SET NOT NULL"))
-                conn.execute(text("ALTER TABLE carstocklist ALTER COLUMN buy_price SET DEFAULT 0"))
-                conn.execute(text("ALTER TABLE carstocklist ALTER COLUMN buy_price SET NOT NULL"))
+                conn.execute(
+                    text(
+                        """
+                        CREATE UNIQUE INDEX IF NOT EXISTS uq_arbiitrage_order_open_stock
+                        ON arbiitrage_order (stock_instrument_key)
+                        WHERE trade_status = 'OPEN'
+                        """
+                    )
+                )
     except Exception as migration_error:
         print(f"Warning: startup schema migration failed: {migration_error}")

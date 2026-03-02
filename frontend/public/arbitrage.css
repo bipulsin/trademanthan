@@ -96,6 +96,33 @@ body {
     font-variant-numeric: tabular-nums;
 }
 
+.order-cell {
+    text-align: center !important;
+}
+
+.btn-order {
+    border: 1px solid #16a34a;
+    background: #16a34a;
+    color: #ffffff;
+    border-radius: 8px;
+    padding: 0.36rem 0.72rem;
+    font-size: 0.84rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.btn-order:hover {
+    background: #15803d;
+    border-color: #15803d;
+}
+
+.btn-order:disabled {
+    background: rgba(100, 116, 139, 0.35);
+    border-color: rgba(100, 116, 139, 0.35);
+    color: rgba(226, 232, 240, 0.9);
+    cursor: not-allowed;
+}
+
 /* Mobile title bar style consistent with other pages */
 .mobile-title-bar {
     display: none;
