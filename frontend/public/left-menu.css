@@ -398,6 +398,30 @@ body[data-theme="light"] .theme-btn.active {
     .mobile-menu-toggle {
         display: flex;
     }
+
+    /* Keep title text right-aligned in mobile responsive layouts. */
+    .mobile-title-content {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end !important;
+        width: 100%;
+        padding-left: 56px; /* leave room for left hamburger */
+        text-align: right;
+    }
+
+    .mobile-title {
+        text-align: right;
+    }
+
+    /* Ensure page-level hamburger remains visible in responsive mode. */
+    #mobileMenuToggle.mobile-menu-toggle {
+        display: block !important;
+        position: absolute !important;
+        left: 1rem !important;
+        top: 50% !important;
+        transform: translateY(-50%) !important;
+        z-index: 1002 !important;
+    }
 }
 
 .mobile-menu-toggle:hover {

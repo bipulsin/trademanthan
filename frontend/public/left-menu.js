@@ -6,7 +6,7 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html?v=2.5';
+const MENU_HTML_PATH = 'left-menu.html?v=2.6';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 
 class LeftMenu {
@@ -107,10 +107,11 @@ class LeftMenu {
             container.innerHTML = this.getInlineMenuHTML();
         }
 
-        // Hide page's mobile toggle if exists - we use our own
+        // Prefer page title-bar toggle when present; hide shared floating one.
         const pageToggle = document.getElementById('mobileMenuToggle');
-        if (pageToggle && pageToggle.closest('.mobile-title-bar')) {
-            pageToggle.style.display = 'none';
+        const sharedToggle = document.getElementById('leftMenuMobileToggle');
+        if (pageToggle && pageToggle.closest('.mobile-title-bar') && sharedToggle) {
+            sharedToggle.style.display = 'none';
         }
 
         this.setupThemeToggle();
@@ -264,7 +265,8 @@ class LeftMenu {
     setupMobileMenu() {
         const panel = document.getElementById('leftPanel');
         const overlay = document.getElementById('mobileMenuOverlay');
-        const toggle = document.getElementById('leftMenuMobileToggle') || document.getElementById('mobileMenuToggle');
+        const toggles = [document.getElementById('mobileMenuToggle'), document.getElementById('leftMenuMobileToggle')]
+            .filter(Boolean);
 
         if (!panel) return;
 
@@ -277,7 +279,9 @@ class LeftMenu {
             if (overlay) overlay.classList.remove('visible');
         };
 
-        if (toggle) toggle.addEventListener('click', () => panel.classList.contains('mobile-open') ? close() : open());
+        toggles.forEach((toggle) => {
+            toggle.addEventListener('click', () => panel.classList.contains('mobile-open') ? close() : open());
+        });
         if (overlay) overlay.addEventListener('click', close);
 
         document.querySelectorAll('.nav-item').forEach(item => {
