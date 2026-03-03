@@ -21,6 +21,12 @@
         return Number(v).toFixed(2);
     }
 
+    function ellipsize(value, maxLen = 28) {
+        const text = (value || "-").toString().trim();
+        if (text.length <= maxLen) return text;
+        return `${text.slice(0, maxLen - 1)}…`;
+    }
+
     function renderRows(rows) {
         if (!rows || rows.length === 0) {
             bodyEl.innerHTML = '<tr><td colspan="7" class="state-cell">No matching arbitrage records found.</td></tr>';
@@ -59,8 +65,7 @@
                 <article class="arbitrage-card">
                     <div class="arbitrage-card-head">
                         <div>
-                            <p class="arbitrage-card-title">${r.stock || "-"}</p>
-                            <p class="arbitrage-card-subtitle">${r.currmth_future_symbol || "-"}</p>
+                            <p class="arbitrage-card-title">${r.stock || "-"} [${fmt(r.stock_ltp)}]</p>
                         </div>
                         <button
                             class="btn-order"
@@ -69,10 +74,8 @@
                             ${disabledAttr}
                         >${buttonText}</button>
                     </div>
-                    <p class="arbitrage-card-line"><span class="label">Stock LTP</span><span>${fmt(r.stock_ltp)}</span></p>
-                    <p class="arbitrage-card-line"><span class="label">Curr Fut LTP</span><span>${fmt(r.currmth_future_ltp)}</span></p>
-                    <p class="arbitrage-card-line"><span class="label">Next Fut</span><span>${r.nextmth_future_symbol || "-"}</span></p>
-                    <p class="arbitrage-card-line"><span class="label">Next Fut LTP</span><span>${fmt(r.nextmth_future_ltp)}</span></p>
+                    <p class="arbitrage-card-compact-line">${ellipsize(r.currmth_future_symbol)} [${fmt(r.currmth_future_ltp)}]</p>
+                    <p class="arbitrage-card-compact-line">${ellipsize(r.nextmth_future_symbol)} [${fmt(r.nextmth_future_ltp)}]</p>
                 </article>
             `;
         }).join("");
