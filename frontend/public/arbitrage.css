@@ -76,6 +76,61 @@ body {
     color: var(--theme-text, #f1f5f9);
 }
 
+.arbitrage-cards {
+    display: none;
+}
+
+.arbitrage-card {
+    background: var(--theme-card, #1e293b);
+    border: 1px solid var(--theme-border, #334155);
+    border-radius: 10px;
+    padding: 0.7rem 0.75rem;
+    margin-bottom: 0.65rem;
+}
+
+.arbitrage-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.35rem;
+}
+
+.arbitrage-card-title {
+    margin: 0;
+    font-size: 0.98rem;
+    font-weight: 700;
+    color: var(--theme-text, #f1f5f9);
+}
+
+.arbitrage-card-subtitle {
+    margin: 0;
+    font-size: 0.76rem;
+    color: var(--theme-muted, #94a3b8);
+}
+
+.arbitrage-card-line {
+    margin: 0.15rem 0;
+    font-size: 0.83rem;
+    color: var(--theme-text, #f1f5f9);
+    display: grid;
+    grid-template-columns: 98px 1fr;
+    gap: 0.35rem;
+}
+
+.arbitrage-card-line .label {
+    color: var(--theme-muted, #94a3b8);
+}
+
+.arbitrage-card-state {
+    border: 1px dashed var(--theme-border, #334155);
+    border-radius: 10px;
+    padding: 0.9rem;
+    text-align: center;
+    color: var(--theme-muted, #94a3b8);
+    font-size: 0.9rem;
+}
+
 .arbitrage-table {
     width: 100%;
     border-collapse: collapse;
@@ -242,5 +297,13 @@ body {
 
     .btn-refresh {
         align-self: flex-end;
+    }
+
+    .arbitrage-table-wrap {
+        display: none;
+    }
+
+    .arbitrage-cards {
+        display: block;
     }
 }
