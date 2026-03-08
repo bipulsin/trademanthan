@@ -264,13 +264,31 @@ async def get_pivot_breakout():
                 "s3_pivot": round(s3, 4),
             }
 
-            if abs(ltp - r3) / r3 <= 0.05:
-                bullish.append(payload)
-            if abs(ltp - s3) / s3 <= 0.05:
-                bearish.append(payload)
+            # Bullish: LTP is up to 5% lower than R3 (nearest from below).
+            if (ltp <= r3) and (ltp >= (r3 * 0.95)):
+                diff_r3 = r3 - ltp
+                bullish.append(
+                    {
+                        **payload,
+                        "difference_from_r3": round(diff_r3, 4),
+                        "difference_from_r3_pct": round((diff_r3 / r3) * 100.0, 4),
+                    }
+                )
 
-        bullish.sort(key=lambda x: x["stock"])
-        bearish.sort(key=lambda x: x["stock"])
+            # Bearish: LTP is up to 5% higher than S3 (nearest from above).
+            if (ltp >= s3) and (ltp <= (s3 * 1.05)):
+                diff_s3 = ltp - s3
+                bearish.append(
+                    {
+                        **payload,
+                        "difference_from_s3": round(diff_s3, 4),
+                        "difference_from_s3_pct": round((diff_s3 / s3) * 100.0, 4),
+                    }
+                )
+
+        # Nearest candidates first.
+        bullish.sort(key=lambda x: (x.get("difference_from_r3", 10**9), x.get("stock", "")))
+        bearish.sort(key=lambda x: (x.get("difference_from_s3", 10**9), x.get("stock", "")))
         return {
             "success": True,
             "bullish_count": len(bullish),
