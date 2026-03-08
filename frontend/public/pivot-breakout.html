@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pivot Breakout - Tradentical</title>
+    <script src="auth-check.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="left-menu.css?v=2.2">
+    <link rel="stylesheet" href="theme.css?v=1.3">
+    <link rel="stylesheet" href="pivot-breakout.css?v=1.0">
+</head>
+<body>
+    <div class="mobile-title-bar">
+        <button class="mobile-menu-toggle" id="mobileMenuToggle">
+            <i class="fas fa-bars"></i>
+        </button>
+        <div class="mobile-title-content">
+            <h1 class="mobile-title">Tradentical</h1>
+        </div>
+    </div>
+
+    <div class="app-container app-with-left-menu">
+        <div id="left-menu-container"></div>
+        <main class="right-panel main-content-area">
+            <div class="pivot-header">
+                <div>
+                    <h1 class="pivot-title">Pivot Breakout</h1>
+                    <p class="pivot-subtitle">Screens current month futures near pivot breakout zones.</p>
+                </div>
+                <button class="btn-refresh" id="refreshBtn" type="button">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+            </div>
+
+            <section class="pivot-section">
+                <h2 class="pivot-section-title bullish"><i class="fas fa-arrow-trend-up"></i> Bullish</h2>
+                <div class="pivot-summary" id="bullishSummary">Loading data...</div>
+                <div class="pivot-table-wrap">
+                    <table class="pivot-table">
+                        <thead>
+                            <tr>
+                                <th>Stock</th>
+                                <th>Current Month Future</th>
+                                <th>Future LTP</th>
+                                <th>R3 Pivot</th>
+                            </tr>
+                        </thead>
+                        <tbody id="bullishBody">
+                            <tr><td colspan="4" class="state-cell">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="pivot-section">
+                <h2 class="pivot-section-title bearish"><i class="fas fa-arrow-trend-down"></i> Bearish</h2>
+                <div class="pivot-summary" id="bearishSummary">Loading data...</div>
+                <div class="pivot-table-wrap">
+                    <table class="pivot-table">
+                        <thead>
+                            <tr>
+                                <th>Stock</th>
+                                <th>Current Month Future</th>
+                                <th>Future LTP</th>
+                                <th>S3 Pivot</th>
+                            </tr>
+                        </thead>
+                        <tbody id="bearishBody">
+                            <tr><td colspan="4" class="state-cell">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="left-menu.js?v=2.8"></script>
+    <script src="pivot-breakout.js?v=1.0"></script>
+    <script src="version.js?v=1.0"></script>
+    <script src="cache-manager.js?v=1.0"></script>
+</body>
+</html>

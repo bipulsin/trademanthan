@@ -1,0 +1,129 @@
+html, body {
+    margin: 0;
+    padding: 0;
+    min-height: 100%;
+    overflow-x: hidden;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    line-height: 1.6;
+}
+
+.right-panel {
+    padding: 1.5rem;
+}
+
+.pivot-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.pivot-title {
+    margin: 0;
+    font-size: 1.8rem;
+}
+
+.pivot-subtitle {
+    margin: 0.3rem 0 0;
+    color: var(--theme-muted, #94a3b8);
+    font-size: 0.95rem;
+}
+
+.btn-refresh {
+    border: 1px solid var(--theme-border, #334155);
+    background: var(--theme-card, #1e293b);
+    color: var(--theme-text, #f1f5f9);
+    border-radius: 8px;
+    padding: 0.55rem 0.85rem;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.pivot-section {
+    margin-top: 1.2rem;
+}
+
+.pivot-section-title {
+    margin: 0 0 0.5rem;
+    font-size: 1.2rem;
+    font-weight: 700;
+}
+
+.pivot-section-title.bullish {
+    color: #22c55e;
+}
+
+.pivot-section-title.bearish {
+    color: #ef4444;
+}
+
+.pivot-summary {
+    margin-bottom: 0.8rem;
+    color: var(--theme-muted, #94a3b8);
+    font-size: 0.92rem;
+}
+
+.pivot-table-wrap {
+    border: 1px solid var(--theme-border, #334155);
+    border-radius: 10px;
+    overflow: auto;
+    background: var(--theme-card, #1e293b);
+}
+
+.pivot-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 760px;
+}
+
+.pivot-table th,
+.pivot-table td {
+    padding: 0.7rem;
+    border-bottom: 1px solid var(--theme-border, #334155);
+    text-align: left;
+    white-space: nowrap;
+}
+
+.pivot-table thead th {
+    position: sticky;
+    top: 0;
+    background: var(--theme-bg, #0f172a);
+    z-index: 1;
+}
+
+.num {
+    text-align: right !important;
+    font-variant-numeric: tabular-nums;
+}
+
+.state-cell {
+    text-align: center !important;
+    color: var(--theme-muted, #94a3b8);
+}
+
+@media (max-width: 768px) {
+    .mobile-title-bar {
+        display: block !important;
+    }
+    .app-container {
+        margin-top: 60px;
+    }
+    .right-panel {
+        padding: 1rem;
+    }
+    .pivot-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .btn-refresh {
+        align-self: flex-end;
+    }
+}

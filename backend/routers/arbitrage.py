@@ -1,12 +1,16 @@
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Dict
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import text
 
 from backend.config import get_instruments_file_path
 from backend.database import engine
+from backend.services.upstox_service import UpstoxService
+from backend.config import settings
 
 from backend.services.arbitrage_daily_setup_scheduler import (
     arbitrage_daily_setup_scheduler,
@@ -118,7 +122,7 @@ async def get_daily_setup_status():
     try:
         status = arbitrage_daily_setup_scheduler.get_status()
         status["job_name"] = "arbitrage_dailySetup"
-        status["schedule"] = "09:16 Asia/Kolkata (daily)"
+        status["schedule"] = "Every 15 minutes, 09:15-15:45 Asia/Kolkata (Mon-Fri)"
         return status
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to get scheduler status: {exc}")
@@ -174,6 +178,108 @@ async def get_arbitrage_selection():
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to fetch arbitrage selection: {exc}")
+
+
+def _parse_candle_dt(ts: str) -> datetime:
+    cleaned = (ts or "").replace("Z", "+00:00")
+    return datetime.fromisoformat(cleaned)
+
+
+def _pick_previous_day_candle(candles: list[dict]) -> dict | None:
+    if not candles:
+        return None
+    ordered = sorted(candles, key=lambda c: c.get("timestamp") or "", reverse=True)
+    first = ordered[0]
+    try:
+        first_dt = _parse_candle_dt(first.get("timestamp"))
+        today_ist = datetime.now(ZoneInfo("Asia/Kolkata")).date()
+        if first_dt.astimezone(ZoneInfo("Asia/Kolkata")).date() == today_ist and len(ordered) > 1:
+            return ordered[1]
+    except Exception:
+        pass
+    return first
+
+
+@router.get("/pivot-breakout")
+async def get_pivot_breakout():
+    """
+    Return bullish and bearish pivot breakout candidates based on current month future LTP:
+    - Bullish: within 5% range of R3
+    - Bearish: within 5% range of S3
+    """
+    try:
+        with engine.begin() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT
+                        stock,
+                        currmth_future_symbol,
+                        currmth_future_instrument_key,
+                        currmth_future_ltp
+                    FROM arbitrage_master
+                    WHERE currmth_future_symbol IS NOT NULL
+                      AND currmth_future_instrument_key IS NOT NULL
+                      AND currmth_future_ltp IS NOT NULL
+                    ORDER BY stock ASC
+                    """
+                )
+            ).mappings().all()
+
+        upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+        bullish: list[dict] = []
+        bearish: list[dict] = []
+
+        for row in rows:
+            ltp = float(row["currmth_future_ltp"])
+            candles = upstox.get_historical_candles_by_instrument_key(
+                row["currmth_future_instrument_key"],
+                interval="days/1",
+                days_back=7,
+            ) or []
+            prev = _pick_previous_day_candle(candles)
+            if not prev:
+                continue
+
+            high = float(prev.get("high", 0) or 0)
+            low = float(prev.get("low", 0) or 0)
+            close = float(prev.get("close", 0) or 0)
+            if high <= 0 or low <= 0 or close <= 0:
+                continue
+
+            pivot = (high + low + close) / 3.0
+            r3 = high + 2.0 * (pivot - low)
+            s3 = low - 2.0 * (high - pivot)
+            if r3 <= 0 or s3 <= 0:
+                continue
+
+            payload = {
+                "stock": row["stock"],
+                "currmth_future_symbol": row["currmth_future_symbol"],
+                "currmth_future_ltp": ltp,
+                "previous_day_high": round(high, 4),
+                "previous_day_low": round(low, 4),
+                "previous_day_close": round(close, 4),
+                "r3_pivot": round(r3, 4),
+                "s3_pivot": round(s3, 4),
+            }
+
+            if abs(ltp - r3) / r3 <= 0.05:
+                bullish.append(payload)
+            if abs(ltp - s3) / s3 <= 0.05:
+                bearish.append(payload)
+
+        bullish.sort(key=lambda x: x["stock"])
+        bearish.sort(key=lambda x: x["stock"])
+        return {
+            "success": True,
+            "bullish_count": len(bullish),
+            "bearish_count": len(bearish),
+            "bullish": bullish,
+            "bearish": bearish,
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch pivot breakout: {exc}")
 
 
 @router.post("/order")

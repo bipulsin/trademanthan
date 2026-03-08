@@ -1,7 +1,11 @@
 """
 Arbitrage Daily Setup Scheduler
 
-Runs daily at 09:16 AM (Asia/Kolkata):
+Runs every 15 minutes on trading days (Asia/Kolkata):
+- 09:15, 09:30, 09:45
+- 10:00 through 15:45 (every 15 minutes)
+
+Tasks:
 1) Updates instrument/symbol fields in arbitrage_master from instruments JSON.
 2) Updates LTP columns using Upstox API by instrument key.
 
@@ -37,16 +41,25 @@ class ArbitrageDailySetupScheduler:
 
         self.scheduler.add_job(
             self.run_job,
-            trigger=CronTrigger(hour=9, minute=16, timezone="Asia/Kolkata"),
+            trigger=CronTrigger(day_of_week="mon-fri", hour=9, minute="15,30,45", timezone="Asia/Kolkata"),
             id="arbitrage_dailySetup",
             name="Arbitrage Daily Setup",
             replace_existing=True,
             max_instances=1,
             coalesce=True,
         )
+        self.scheduler.add_job(
+            self.run_job,
+            trigger=CronTrigger(day_of_week="mon-fri", hour="10-15", minute="0,15,30,45", timezone="Asia/Kolkata"),
+            id="arbitrage_dailySetup_intraday",
+            name="Arbitrage Daily Setup Intraday",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
         self.scheduler.start()
         self.is_running = True
-        logger.info("Arbitrage daily setup scheduler started (09:16 Asia/Kolkata)")
+        logger.info("Arbitrage daily setup scheduler started (every 15 min, 09:15-15:45 Asia/Kolkata, Mon-Fri)")
 
     def stop(self) -> None:
         if not self.is_running:

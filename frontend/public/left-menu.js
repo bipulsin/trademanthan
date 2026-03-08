@@ -6,7 +6,7 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html?v=2.7';
+const MENU_HTML_PATH = 'left-menu.html?v=2.8';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 
 class LeftMenu {
@@ -26,7 +26,7 @@ class LeftMenu {
 
     isThemePage() {
         const path = window.location.pathname;
-        return /dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage/.test(path);
+        return /dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout/.test(path);
     }
 
     getCurrentPage() {
@@ -38,6 +38,7 @@ class LeftMenu {
         if (path.includes('scan')) return 'scan';
         if (path.includes('settings')) return 'settings';
         if (path.includes('reports')) return 'reports';
+        if (path.includes('pivot-breakout')) return 'pivot-breakout';
         if (path.includes('arbitrage')) return 'arbitrage';
         if (path.includes('carsetup') || path.includes('cargpt')) return 'cargpt';
         return 'dashboard';
@@ -66,7 +67,7 @@ class LeftMenu {
                     currentPath.includes('broker') || currentPath.includes('algo') || currentPath.includes('scan') ||
                     currentPath.includes('reports') || currentPath.includes('settings') ||
                     currentPath.includes('carsetup') || currentPath.includes('cargpt') ||
-                    currentPath.includes('arbitrage');
+                    currentPath.includes('arbitrage') || currentPath.includes('pivot-breakout');
                 if (!hasRedirected && isProtectedPage) {
                     hasRedirected = true;
                     window.location.replace('index.html');
@@ -162,6 +163,7 @@ class LeftMenu {
             <div class="theme-toggle" id="themeToggle"><button class="theme-btn" data-theme="light" aria-label="Light mode"><i class="fas fa-sun"></i></button><button class="theme-btn" data-theme="dark" aria-label="Dark mode"><i class="fas fa-moon"></i></button></div>
             <ul class="nav-list">
                 <li class="nav-item" data-page="dashboard.html"><i class="fas fa-chart-line"></i><span>Dashboard</span></li>
+                <li class="nav-item" data-page="pivot-breakout.html"><i class="fas fa-bullseye"></i><span>Pivot Breakout</span></li>
                 <li class="nav-item" data-page="arbitrage.html"><i class="fas fa-shuffle"></i><span>Arbitrage Selection</span></li>
                 <li class="nav-item" data-page="cargpt.html"><i class="fas fa-chart-area"></i><span>Cumulative Avg</span></li>
                 <li class="nav-item" data-page="broker.html"><i class="fas fa-university"></i><span>Broker Management</span></li>
@@ -296,6 +298,7 @@ class LeftMenu {
 
         const pageTitles = {
             dashboard: 'Dashboard',
+            'pivot-breakout': 'Pivot Breakout',
             arbitrage: 'Arbitrage Selection',
             cargpt: 'Cumulative Average Reversal',
             broker: 'Broker Management',
@@ -347,6 +350,7 @@ class LeftMenu {
             case 'broker': return 'broker.html';
             case 'strategy': return 'strategy.html';
             case 'reports': return 'reports.html';
+            case 'pivot-breakout': return 'pivot-breakout.html';
             case 'arbitrage': return 'arbitrage.html';
             case 'settings': return 'settings.html';
             default: return 'dashboard.html';
