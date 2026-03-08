@@ -189,15 +189,19 @@ def _pick_previous_day_candle(candles: list[dict]) -> dict | None:
     if not candles:
         return None
     ordered = sorted(candles, key=lambda c: c.get("timestamp") or "", reverse=True)
-    first = ordered[0]
-    try:
-        first_dt = _parse_candle_dt(first.get("timestamp"))
-        today_ist = datetime.now(ZoneInfo("Asia/Kolkata")).date()
-        if first_dt.astimezone(ZoneInfo("Asia/Kolkata")).date() == today_ist and len(ordered) > 1:
-            return ordered[1]
-    except Exception:
-        pass
-    return first
+    today_ist = datetime.now(ZoneInfo("Asia/Kolkata")).date()
+
+    # Prefer the latest candle strictly before today (previous trading day).
+    for candle in ordered:
+        try:
+            c_date_ist = _parse_candle_dt(candle.get("timestamp")).astimezone(ZoneInfo("Asia/Kolkata")).date()
+            if c_date_ist < today_ist:
+                return candle
+        except Exception:
+            continue
+
+    # Fallback for environments where feed only contains older/latest candle.
+    return ordered[0]
 
 
 @router.get("/pivot-breakout")
@@ -257,6 +261,7 @@ async def get_pivot_breakout():
                 "stock": row["stock"],
                 "currmth_future_symbol": row["currmth_future_symbol"],
                 "currmth_future_ltp": ltp,
+                "pivot_candle_date": (prev.get("timestamp") or "")[:10],
                 "previous_day_high": round(high, 4),
                 "previous_day_low": round(low, 4),
                 "previous_day_close": round(close, 4),
