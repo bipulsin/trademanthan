@@ -404,11 +404,12 @@ async def get_pivot_breakout_debug(symbol: str):
         upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
         target_date_str, use_same_day = _pivot_breakout_candle_mode(upstox)
         ltp = float(row["currmth_future_ltp"])
-        candles = upstox.get_monthly_candles_by_instrument_key(
+        candles = upstox.get_historical_candles_by_instrument_key(
             row["currmth_future_instrument_key"],
-            months_back=4,
+            interval="days/1",
+            days_back=15,
         ) or []
-        prev = _pick_previous_month_candle(candles, target_date_str)
+        prev = _pick_previous_trading_day_candle(candles, target_date_str)
         all_candle_dates = [_candle_date_ist(c) for c in candles if _candle_date_ist(c)]
         if not prev:
             return {
