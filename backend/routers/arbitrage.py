@@ -273,37 +273,26 @@ def _process_pivot_batch(
 ) -> tuple[list[dict], list[dict]]:
     """
     Process a batch of rows and return (bullish, bearish) lists.
-    - use_same_day=True: OHLC from market-quote API (today's live OHLC). Historical candles = T-1 only.
-    - use_same_day=False: OHLC from historical candles (previous trading day).
+    R3/S3 always from PREVIOUS trading day OHLC (historical candles) to match TradingView
+    Traditional Pivot Auto: pivot levels use previous day's OHLC for current day's levels.
+    LTP = from arbitrage_master (today's close or live).
     """
     bullish: list[dict] = []
     bearish: list[dict] = []
     for row in rows:
         ltp = float(row["currmth_future_ltp"])
-        high, low, close, candle_date = 0.0, 0.0, 0.0, target_date_str
-
-        if use_same_day:
-            # Same-day: use market-quote OHLC API (today's live OHLC). Historical candles API is T-1 only.
-            ohlc = upstox.get_ohlc_data(row["currmth_future_instrument_key"])
-            if not ohlc:
-                continue
-            high = float(ohlc.get("high", 0) or 0)
-            low = float(ohlc.get("low", 0) or 0)
-            close = float(ohlc.get("close", 0) or 0)
-        else:
-            # Previous day: use historical candles (T-1).
-            candles = upstox.get_historical_candles_by_instrument_key(
-                row["currmth_future_instrument_key"],
-                interval="days/1",
-                days_back=15,
-            ) or []
-            prev = _pick_previous_trading_day_candle(candles, target_date_str)
-            if not prev:
-                continue
-            high = float(prev.get("high", 0) or 0)
-            low = float(prev.get("low", 0) or 0)
-            close = float(prev.get("close", 0) or 0)
-            candle_date = _candle_date_ist(prev) or (prev.get("timestamp") or "")[:10]
+        candles = upstox.get_historical_candles_by_instrument_key(
+            row["currmth_future_instrument_key"],
+            interval="days/1",
+            days_back=15,
+        ) or []
+        prev = _pick_previous_trading_day_candle(candles, target_date_str)
+        if not prev:
+            continue
+        high = float(prev.get("high", 0) or 0)
+        low = float(prev.get("low", 0) or 0)
+        close = float(prev.get("close", 0) or 0)
+        candle_date = _candle_date_ist(prev) or (prev.get("timestamp") or "")[:10]
         if high <= 0 or low <= 0 or close <= 0:
             continue
         pivot = (high + low + close) / 3.0
@@ -322,10 +311,20 @@ def _process_pivot_batch(
             "r3_pivot": round(r3, 4),
             "s3_pivot": round(s3, 4),
         }
-        if (ltp <= r3) and (ltp >= (r3 * 0.95)):
+        in_bullish = (ltp <= r3) and (ltp >= (r3 * 0.95))
+        in_bearish = (ltp >= s3) and (ltp <= (s3 * 1.05))
+        if in_bullish and in_bearish:
+            # LTP in overlap zone: assign to the level it's closer to (by % distance)
+            dist_r3_pct = (r3 - ltp) / r3 if r3 > 0 else 1.0
+            dist_s3_pct = (ltp - s3) / s3 if s3 > 0 else 1.0
+            if dist_r3_pct <= dist_s3_pct:
+                in_bearish = False
+            else:
+                in_bullish = False
+        if in_bullish:
             diff_r3 = r3 - ltp
             bullish.append({**payload, "difference_from_r3": round(diff_r3, 4), "difference_from_r3_pct": round((diff_r3 / r3) * 100.0, 4)})
-        if (ltp >= s3) and (ltp <= (s3 * 1.05)):
+        if in_bearish:
             diff_s3 = ltp - s3
             bearish.append({**payload, "difference_from_s3": round(diff_s3, 4), "difference_from_s3_pct": round((diff_s3 / s3) * 100.0, 4)})
     return bullish, bearish
@@ -335,9 +334,10 @@ def _process_pivot_batch(
 async def get_pivot_breakout():
     """
     Return bullish and bearish pivot breakout candidates.
-    - After 15:45 (or non-trading day): Future LTP = closing price of same trading date; R3/S3 from same date OHLC.
-    - 9:15–15:45: Future LTP = same trading date (live); R3/S3 from previous trading day OHLC.
-    - Bullish: within 5% range of R3; Bearish: within 5% range of S3.
+    R3/S3 always from PREVIOUS trading day OHLC (matches TradingView Traditional Pivot Auto).
+    - After 15:45: LTP = today's close; R3/S3 from previous day OHLC.
+    - 9:15–15:45: LTP = today's live; R3/S3 from previous day OHLC.
+    - Bullish: LTP within 5% below R3; Bearish: LTP within 5% above S3.
     """
     try:
         with engine.begin() as conn:
@@ -408,51 +408,30 @@ async def get_pivot_breakout_debug(symbol: str):
         upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
         target_date_str, use_same_day = _pivot_breakout_candle_mode(upstox)
         ltp = float(row["currmth_future_ltp"])
-        high, low, close, candle_date = 0.0, 0.0, 0.0, None
-
-        if use_same_day:
-            ohlc = upstox.get_ohlc_data(row["currmth_future_instrument_key"])
-            if not ohlc:
-                return {
-                    "success": True,
-                    "symbol": row["stock"],
-                    "instrument_key": row["currmth_future_instrument_key"],
-                    "target_date_str": target_date_str,
-                    "use_same_day": use_same_day,
-                    "ltp": ltp,
-                    "candle_found": False,
-                    "ohlc_source": "market-quote (same-day)",
-                    "note": "R3/S3 and OHLC use FUTURE contract. Same-day uses market-quote OHLC API.",
-                }
-            high = float(ohlc.get("high", 0) or 0)
-            low = float(ohlc.get("low", 0) or 0)
-            close = float(ohlc.get("close", 0) or 0)
-            candle_date = target_date_str
-        else:
-            candles = upstox.get_historical_candles_by_instrument_key(
-                row["currmth_future_instrument_key"],
-                interval="days/1",
-                days_back=15,
-            ) or []
-            prev = _pick_previous_trading_day_candle(candles, target_date_str)
-            all_candle_dates = [_candle_date_ist(c) for c in candles if _candle_date_ist(c)]
-            if not prev:
-                return {
-                    "success": True,
-                    "symbol": row["stock"],
-                    "instrument_key": row["currmth_future_instrument_key"],
-                    "target_date_str": target_date_str,
-                    "use_same_day": use_same_day,
-                    "ltp": ltp,
-                    "candle_found": False,
-                    "available_candle_dates": sorted(set(all_candle_dates)),
-                    "ohlc_source": "historical (T-1)",
-                    "note": "R3/S3 and OHLC use FUTURE contract. Historical candles API is T-1 only.",
-                }
-            high = float(prev.get("high", 0) or 0)
-            low = float(prev.get("low", 0) or 0)
-            close = float(prev.get("close", 0) or 0)
-            candle_date = _candle_date_ist(prev) or (prev.get("timestamp") or "")[:10]
+        candles = upstox.get_historical_candles_by_instrument_key(
+            row["currmth_future_instrument_key"],
+            interval="days/1",
+            days_back=15,
+        ) or []
+        prev = _pick_previous_trading_day_candle(candles, target_date_str)
+        all_candle_dates = [_candle_date_ist(c) for c in candles if _candle_date_ist(c)]
+        if not prev:
+            return {
+                "success": True,
+                "symbol": row["stock"],
+                "instrument_key": row["currmth_future_instrument_key"],
+                "target_date_str": target_date_str,
+                "use_same_day": use_same_day,
+                "ltp": ltp,
+                "candle_found": False,
+                "available_candle_dates": sorted(set(all_candle_dates)),
+                "ohlc_source": "historical (T-1, previous trading day)",
+                "note": "R3/S3 from previous day OHLC to match TradingView Traditional Pivot Auto.",
+            }
+        high = float(prev.get("high", 0) or 0)
+        low = float(prev.get("low", 0) or 0)
+        close = float(prev.get("close", 0) or 0)
+        candle_date = _candle_date_ist(prev) or (prev.get("timestamp") or "")[:10]
         pivot = (high + low + close) / 3.0
         r3 = high + 2.0 * (pivot - low)
         s3 = low - 2.0 * (high - pivot)
@@ -477,11 +456,10 @@ async def get_pivot_breakout_debug(symbol: str):
             "bearish_range": f"LTP in [{s3:.2f}, {s3_max:.2f}]",
             "bullish_pass": bullish_ok,
             "bearish_pass": bearish_ok,
-            "ohlc_source": "market-quote (same-day)" if use_same_day else "historical (T-1)",
-            "note": "R3/S3 and OHLC are from the FUTURE contract, not Spot/Equity.",
+            "ohlc_source": "historical (T-1, previous trading day)",
+            "available_candle_dates": sorted(set(all_candle_dates)),
+            "note": "R3/S3 from previous day OHLC to match TradingView Traditional Pivot Auto.",
         }
-        if not use_same_day:
-            out["available_candle_dates"] = sorted(set(all_candle_dates))
         return out
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
