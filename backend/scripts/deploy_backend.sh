@@ -46,6 +46,9 @@ fi
 # Clear Python cache to avoid stale bytecode
 find /home/ubuntu/trademanthan -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
+# Log deployed commit for verification
+log_message "Deployed commit: $(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
+
 # Kill existing backend process (match both patterns to catch all instances)
 log_message "Stopping existing backend..."
 pkill -f "uvicorn.*main:app" || true
@@ -60,22 +63,24 @@ if pgrep -f "uvicorn.*main:app" > /dev/null || pgrep -f "uvicorn.*backend.main:a
     sleep 1
 fi
 
-# Start backend in screen session (consistent with how it's run manually)
-log_message "Starting backend in screen session..."
-cd /home/ubuntu/trademanthan
-source backend/venv/bin/activate
+# Prefer systemd restart if service exists (ensures clean reload of new code)
+if systemctl list-unit-files 2>/dev/null | grep -q "trademanthan-backend.service"; then
+    log_message "Restarting via systemd..."
+    sudo systemctl restart trademanthan-backend 2>>"$LOG_FILE" || true
+    sleep 3
+else
+    # Fallback: screen session
+    log_message "Starting backend in screen session..."
+    cd /home/ubuntu/trademanthan
+    source backend/venv/bin/activate
 
-# Clean up any dead screens
-screen -wipe 2>/dev/null || true
+    screen -wipe 2>/dev/null || true
+    screen -S trademanthan -X quit 2>/dev/null || true
+    sleep 1
 
-# Kill existing screen session if it exists
-screen -S trademanthan -X quit 2>/dev/null || true
-sleep 1
-
-# Start backend in screen session - Use main:app (root main.py now imports from backend.main)
-# Run from project root so imports work correctly
-screen -dmS trademanthan bash -c 'cd /home/ubuntu/trademanthan && source backend/venv/bin/activate && python3 -u -m uvicorn main:app --host 0.0.0.0 --port 8000'
-sleep 3
+    screen -dmS trademanthan bash -c 'cd /home/ubuntu/trademanthan && source backend/venv/bin/activate && python3 -u -m uvicorn main:app --host 0.0.0.0 --port 8000'
+    sleep 3
+fi
 BACKEND_PID=$(pgrep -f "uvicorn.*main:app" | head -1)
 
 log_message "Backend started with PID: $BACKEND_PID"

@@ -20,6 +20,12 @@ from backend.services.arbitrage_daily_setup_scheduler import (
 router = APIRouter(prefix="/scan/arbitrage", tags=["arbitrage"])
 
 
+@router.get("/version")
+async def get_arbitrage_version():
+    """Return API version for deployment verification."""
+    return {"arbitrage_api": "v2", "pivot_ltp_source": "arbitrage_master"}
+
+
 def _ensure_arbitrage_order_table() -> None:
     with engine.begin() as conn:
         conn.execute(
