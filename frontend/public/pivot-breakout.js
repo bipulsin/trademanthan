@@ -11,6 +11,36 @@
         return Number(v).toFixed(2);
     }
 
+    function toDdMmYy(isoDate) {
+        if (!isoDate || typeof isoDate !== "string") return "";
+        const m = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (!m) return "";
+        return `${m[3]}/${m[2]}/${m[1].slice(-2)}`;
+    }
+
+    function todayDdMmYy() {
+        const d = new Date();
+        const day = String(d.getDate()).padStart(2, "0");
+        const month = String(d.getMonth() + 1).padStart(2, "0");
+        const year = String(d.getFullYear()).slice(-2);
+        return `${day}/${month}/${year}`;
+    }
+
+    function updateHeaderDates(data) {
+        const ltpDate = todayDdMmYy();
+        const pivotDate = data.bullish?.[0]?.pivot_candle_date || data.bearish?.[0]?.pivot_candle_date || "";
+        const pivotDateFmt = toDdMmYy(pivotDate);
+
+        ["bullishLtpDate", "bearishLtpDate"].forEach((id) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = ltpDate || "";
+        });
+        const r3El = document.getElementById("bullishR3Date");
+        if (r3El) r3El.textContent = pivotDateFmt || "";
+        const s3El = document.getElementById("bearishS3Date");
+        if (s3El) s3El.textContent = pivotDateFmt || "";
+    }
+
     function renderRows(tbody, rows, pivotKey) {
         if (!rows || rows.length === 0) {
             tbody.innerHTML = '<tr><td colspan="4" class="state-cell">No records found.</td></tr>';
@@ -39,6 +69,7 @@
                 throw new Error(data.detail || "Failed to fetch pivot breakout data");
             }
 
+            updateHeaderDates(data);
             renderRows(bullishBody, data.bullish || [], "r3_pivot");
             renderRows(bearishBody, data.bearish || [], "s3_pivot");
             bullishSummary.textContent = `Total bullish records: ${data.bullish_count || 0}`;

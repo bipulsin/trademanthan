@@ -99,6 +99,18 @@ body {
     z-index: 1;
 }
 
+.pivot-table thead th .th-label {
+    display: block;
+}
+
+.pivot-table thead th .th-date {
+    display: block;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--theme-muted, #94a3b8);
+    margin-top: 0.15rem;
+}
+
 .num {
     text-align: right !important;
     font-variant-numeric: tabular-nums;
