@@ -1679,6 +1679,62 @@ class UpstoxService:
             
         return None
 
+    def get_market_quotes_batch_by_keys(
+        self, instrument_keys: list[str], max_per_request: int = 500
+    ) -> dict[str, float]:
+        """
+        Get real-time LTP (today's last traded price) for multiple instruments in one request.
+        Upstox API supports up to 500 instrument keys per request.
+
+        Returns:
+            Dict mapping instrument_key -> last_price (float). Missing/failed keys are omitted.
+        """
+        if not instrument_keys:
+            return {}
+        result: dict[str, float] = {}
+        keys_batch = instrument_keys[:max_per_request]
+        try:
+            # Comma-separated instrument keys (encode | etc, preserve comma)
+            from urllib.parse import quote
+            keys_param = ",".join(keys_batch)
+            url = f"https://api.upstox.com/v2/market-quote/quotes?instrument_key={quote(keys_param, safe=',')}"
+            data = self.make_api_request(url, method="GET", timeout=15, max_retries=2)
+            if not data or data.get("status") != "success" or "data" not in data:
+                return result
+            raw = data.get("data") or {}
+            if not isinstance(raw, dict):
+                return result
+
+            def normalize_key(k: str) -> str:
+                return k.replace(" ", "").replace(":", "|").upper()
+
+            def find_last_price(req_key: str) -> float | None:
+                if req_key in raw:
+                    lp = raw[req_key].get("last_price", 0)
+                    return float(lp) if lp and float(lp) > 0 else None
+                alt1 = req_key.replace("|", ":")
+                if alt1 in raw:
+                    lp = raw[alt1].get("last_price", 0)
+                    return float(lp) if lp and float(lp) > 0 else None
+                alt2 = req_key.replace(":", "|")
+                if alt2 in raw:
+                    lp = raw[alt2].get("last_price", 0)
+                    return float(lp) if lp and float(lp) > 0 else None
+                norm_req = normalize_key(req_key)
+                for resp_key, quote_data in raw.items():
+                    if normalize_key(resp_key) == norm_req:
+                        lp = quote_data.get("last_price", 0)
+                        return float(lp) if lp and float(lp) > 0 else None
+                return None
+
+            for req_key in keys_batch:
+                lp = find_last_price(req_key)
+                if lp is not None:
+                    result[req_key] = lp
+        except Exception as e:
+            logger.error(f"❌ Error fetching batch market quotes: {str(e)}")
+        return result
+
     def get_market_quote(self, symbol: str) -> Optional[Dict]:
         """
         Get real-time market quote (LTP) for a symbol
