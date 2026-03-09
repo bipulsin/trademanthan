@@ -84,9 +84,9 @@ if ssh -i "$EC2_KEY" -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" "bash -s"
     # Navigate to app directory
     cd /home/ubuntu/trademanthan
     
-    echo "Pulling latest changes from GitHub..."
-    git stash > /dev/null 2>&1 || true
-    git pull origin main
+    echo "Fetching and resetting to latest from GitHub..."
+    git fetch origin
+    git reset --hard origin/main
     
     echo "Running migrations..."
     python3 backend/migrations/add_carstocklist.py 2>/dev/null || true
