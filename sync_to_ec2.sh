@@ -87,6 +87,10 @@ if ssh -i "$EC2_KEY" -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" "bash -s"
     echo "Fetching and resetting to latest from GitHub..."
     git fetch origin
     git reset --hard origin/main
+    echo "Commit: $(git rev-parse --short HEAD)"
+    
+    echo "Clearing Python cache..."
+    find /home/ubuntu/trademanthan -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
     
     echo "Running migrations..."
     python3 backend/migrations/add_carstocklist.py 2>/dev/null || true
@@ -96,6 +100,10 @@ if ssh -i "$EC2_KEY" -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" "bash -s"
     source venv/bin/activate
     pip install -r requirements.txt -q 2>/dev/null || echo "⚠ pip install had issues (deps may already be installed)"
     
+    echo "Stopping any uvicorn processes (screen, etc)..."
+    pkill -f "uvicorn.*main:app" 2>/dev/null || true
+    pkill -f "uvicorn.*backend.main:app" 2>/dev/null || true
+    sleep 2
     echo "Restarting backend service..."
     sudo sed -i 's|WorkingDirectory=${BACKEND_DIR}|WorkingDirectory=${PROJECT_DIR}|' /etc/systemd/system/trademanthan-backend.service 2>/dev/null || true
     sudo sed -i 's|WorkingDirectory=/home/ubuntu/trademanthan/backend|WorkingDirectory=/home/ubuntu/trademanthan|' /etc/systemd/system/trademanthan-backend.service 2>/dev/null || true
