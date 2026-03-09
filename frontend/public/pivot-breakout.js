@@ -18,22 +18,13 @@
         return `${m[3]}/${m[2]}/${m[1].slice(-2)}`;
     }
 
-    function todayDdMmYy() {
-        const d = new Date();
-        const day = String(d.getDate()).padStart(2, "0");
-        const month = String(d.getMonth() + 1).padStart(2, "0");
-        const year = String(d.getFullYear()).slice(-2);
-        return `${day}/${month}/${year}`;
-    }
-
     function updateHeaderDates(data) {
-        const ltpDate = todayDdMmYy();
-        const pivotDate = data.bullish?.[0]?.pivot_candle_date || data.bearish?.[0]?.pivot_candle_date || "";
-        const pivotDateFmt = toDdMmYy(pivotDate);
+        const ltpDateFmt = toDdMmYy(data.ltp_date || "");
+        const pivotDateFmt = toDdMmYy(data.pivot_date || "");
 
         ["bullishLtpDate", "bearishLtpDate"].forEach((id) => {
             const el = document.getElementById(id);
-            if (el) el.textContent = ltpDate || "";
+            if (el) el.textContent = ltpDateFmt || "";
         });
         const r3El = document.getElementById("bullishR3Date");
         if (r3El) r3El.textContent = pivotDateFmt || "";

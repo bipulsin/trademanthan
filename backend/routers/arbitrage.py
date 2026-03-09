@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict
 from zoneinfo import ZoneInfo
@@ -191,33 +191,68 @@ def _parse_candle_dt(ts: str) -> datetime:
     return datetime.fromisoformat(cleaned)
 
 
-def _pick_previous_day_candle(candles: list[dict]) -> dict | None:
-    if not candles:
+def _pick_candle_for_date(candles: list[dict], target_date_str: str) -> dict | None:
+    """Return the candle matching target_date_str (YYYY-MM-DD), or None."""
+    if not candles or not target_date_str:
+        return None
+    for c in candles:
+        ts = (c.get("timestamp") or "")[:10]
+        if ts == target_date_str:
+            return c
+    return None
+
+
+def _pick_previous_trading_day_candle(candles: list[dict], before_date_str: str) -> dict | None:
+    """Return the latest candle with date strictly before before_date_str."""
+    if not candles or not before_date_str:
         return None
     ordered = sorted(candles, key=lambda c: c.get("timestamp") or "", reverse=True)
-    today_ist = datetime.now(ZoneInfo("Asia/Kolkata")).date()
-
-    # Prefer the latest candle strictly before today (previous trading day).
     for candle in ordered:
-        try:
-            c_date_ist = _parse_candle_dt(candle.get("timestamp")).astimezone(ZoneInfo("Asia/Kolkata")).date()
-            if c_date_ist < today_ist:
-                return candle
-        except Exception:
-            continue
+        ts = (candle.get("timestamp") or "")[:10]
+        if ts < before_date_str:
+            return candle
+    return ordered[0] if ordered else None
 
-    # Fallback for environments where feed only contains older/latest candle.
-    return ordered[0]
+
+def _pivot_breakout_candle_mode(upstox: UpstoxService) -> tuple[str, bool]:
+    """
+    Determine which candle to use for R3/S3 based on current time (IST).
+    Returns (target_date_str, use_same_day).
+    - use_same_day=True: use OHLC of target_date for R3/S3 (same day as LTP/close).
+    - use_same_day=False: use OHLC of previous trading day (target_date is today; we need prev day).
+    """
+    ist = ZoneInfo("Asia/Kolkata")
+    now = datetime.now(ist)
+    today_str = now.strftime("%Y-%m-%d")
+    hour, minute = now.hour, now.minute
+
+    is_trading_today = upstox.is_trading_day(now)
+    after_close = (hour > 15) or (hour == 15 and minute >= 45)
+    during_market = (hour > 9 or (hour == 9 and minute >= 15)) and (
+        hour < 15 or (hour == 15 and minute < 45)
+    )
+
+    # After 15:45 on a trading day, or on a non-trading day: use same day (ref date) for both LTP and R3/S3.
+    if (is_trading_today and after_close) or not is_trading_today:
+        ref = upstox.get_last_trading_date(now)
+        return ref.strftime("%Y-%m-%d"), True
+
+    # 9:15 - 15:45 on a trading day: LTP = today, R3/S3 = previous trading day.
+    if is_trading_today and during_market:
+        return today_str, False
+
+    # Before 9:15 on a trading day: show previous day's close and R3/S3 (same as post-close of prev day).
+    prev_ref = upstox.get_last_trading_date(now - timedelta(days=1))
+    return prev_ref.strftime("%Y-%m-%d"), True
 
 
 @router.get("/pivot-breakout")
 async def get_pivot_breakout():
     """
     Return bullish and bearish pivot breakout candidates.
-    - R3 & S3: calculated from previous trading day OHLC.
-    - LTP for comparison: today's live LTP from Upstox (falls back to arbitrage_master if unavailable).
-    - Bullish: within 5% range of R3
-    - Bearish: within 5% range of S3
+    - After 15:45 (or non-trading day): Future LTP = closing price of same trading date; R3/S3 from same date OHLC.
+    - 9:15–15:45: Future LTP = same trading date (live); R3/S3 from previous trading day OHLC.
+    - Bullish: within 5% range of R3; Bearish: within 5% range of S3.
     """
     try:
         with engine.begin() as conn:
@@ -239,19 +274,23 @@ async def get_pivot_breakout():
             ).mappings().all()
 
         upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+        target_date_str, use_same_day = _pivot_breakout_candle_mode(upstox)
 
         bullish: list[dict] = []
         bearish: list[dict] = []
 
         for row in rows:
-            # Use arbitrage_master.currmth_future_ltp (today's LTP, updated every 15 min by scheduler).
             ltp = float(row["currmth_future_ltp"])
             candles = upstox.get_historical_candles_by_instrument_key(
                 row["currmth_future_instrument_key"],
                 interval="days/1",
                 days_back=7,
             ) or []
-            prev = _pick_previous_day_candle(candles)
+            prev = (
+                _pick_candle_for_date(candles, target_date_str)
+                if use_same_day
+                else _pick_previous_trading_day_candle(candles, target_date_str)
+            )
             if not prev:
                 continue
 
@@ -304,8 +343,11 @@ async def get_pivot_breakout():
         # Nearest candidates first.
         bullish.sort(key=lambda x: (x.get("difference_from_r3", 10**9), x.get("stock", "")))
         bearish.sort(key=lambda x: (x.get("difference_from_s3", 10**9), x.get("stock", "")))
+        pivot_date = (bullish[0]["pivot_candle_date"] if bullish else bearish[0]["pivot_candle_date"]) if (bullish or bearish) else target_date_str
         return {
             "success": True,
+            "ltp_date": target_date_str,
+            "pivot_date": pivot_date,
             "bullish_count": len(bullish),
             "bearish_count": len(bearish),
             "bullish": bullish,
