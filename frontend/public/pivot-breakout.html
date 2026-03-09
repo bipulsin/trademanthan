@@ -30,9 +30,10 @@
                 </div>
                 <div class="pivot-header-actions">
                     <label for="ohlcInterval">OHLC:</label>
-                    <select id="ohlcInterval" title="Daily = day candles; Hourly = aggregate 1h candles (may match TradingView better)">
+                    <select id="ohlcInterval" title="Daily = day candles; 1-Hour / 15-Min = aggregate intraday candles into daily OHLC">
                         <option value="daily">Daily</option>
                         <option value="hourly">1-Hour</option>
+                        <option value="15min">15-Min</option>
                     </select>
                     <button class="btn-refresh" id="refreshBtn" type="button">
                         <i class="fas fa-sync-alt"></i> Refresh

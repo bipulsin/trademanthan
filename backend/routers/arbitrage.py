@@ -236,14 +236,14 @@ def _pick_previous_trading_day_candle(candles: list[dict], before_date_str: str)
     return None  # Do not fallback to wrong candle when no date < before_date_str
 
 
-def _aggregate_hourly_to_daily(hourly_candles: list[dict]) -> list[dict]:
+def _aggregate_intraday_to_daily(intraday_candles: list[dict]) -> list[dict]:
     """
-    Aggregate 1-hour candles into daily OHLC by date (IST).
+    Aggregate intraday candles (15min, 1h, etc.) into daily OHLC by date (IST).
     Returns list of {date, open, high, low, close} sorted by date asc.
     """
     from collections import defaultdict
     by_date: dict[str, list[dict]] = defaultdict(list)
-    for c in hourly_candles:
+    for c in intraday_candles:
         d = _candle_date_ist(c)
         if d:
             by_date[d].append(c)
@@ -302,13 +302,14 @@ def _get_prev_day_ohlc(
 ) -> tuple[float, float, float, str] | None:
     """
     Get previous trading day OHLC. Returns (high, low, close, candle_date) or None.
-    ohlc_interval: "daily" | "hourly" - daily uses days/1 candles; hourly aggregates hours/1.
+    ohlc_interval: "daily" | "hourly" | "15min" - daily uses days/1; hourly/15min aggregate intraday.
     """
-    if ohlc_interval == "hourly":
+    if ohlc_interval in ("hourly", "15min"):
+        interval = "hours/1" if ohlc_interval == "hourly" else "minutes/15"
         candles = upstox.get_historical_candles_by_instrument_key(
-            instrument_key, interval="hours/1", days_back=5
+            instrument_key, interval=interval, days_back=5
         ) or []
-        daily = _aggregate_hourly_to_daily(candles)
+        daily = _aggregate_intraday_to_daily(candles)
         prev = None
         for d in reversed(daily):
             if d["date"] < target_date_str:
@@ -340,7 +341,7 @@ def _process_pivot_batch(
 ) -> tuple[list[dict], list[dict]]:
     """
     Process a batch of rows and return (bullish, bearish) lists.
-    R3/S3 from previous trading day OHLC. ohlc_interval: "daily" | "hourly".
+    R3/S3 from previous trading day OHLC. ohlc_interval: "daily" | "hourly" | "15min".
     """
     bullish: list[dict] = []
     bearish: list[dict] = []
@@ -391,13 +392,14 @@ def _process_pivot_batch(
 
 @router.get("/pivot-breakout")
 async def get_pivot_breakout(
-    ohlc_interval: str = Query("daily", description="OHLC source: 'daily' or 'hourly' (aggregate 1h candles)"),
+    ohlc_interval: str = Query("daily", description="OHLC source: 'daily', 'hourly', or '15min'"),
 ):
     """
     Return bullish and bearish pivot breakout candidates.
     R3/S3 from previous trading day OHLC.
     - ohlc_interval=daily: use daily candles (default)
-    - ohlc_interval=hourly: aggregate 1-hour candles into daily OHLC (may match TradingView better)
+    - ohlc_interval=hourly: aggregate 1-hour candles into daily OHLC
+    - ohlc_interval=15min: aggregate 15-minute candles into daily OHLC
     - Bullish: LTP within 5% below R3; Bearish: LTP within 5% above S3.
     """
     try:
@@ -421,7 +423,7 @@ async def get_pivot_breakout(
 
         upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
         target_date_str, use_same_day = _pivot_breakout_candle_mode(upstox)
-        interval = ohlc_interval if ohlc_interval in ("daily", "hourly") else "daily"
+        interval = ohlc_interval if ohlc_interval in ("daily", "hourly", "15min") else "daily"
         bullish, bearish = _process_pivot_batch(
             rows, upstox, target_date_str, use_same_day, ohlc_interval=interval
         )
@@ -439,7 +441,7 @@ async def get_pivot_breakout(
             "bearish_count": len(bearish),
             "bullish": bullish,
             "bearish": bearish,
-            "note": "LTP and R3/S3 use current-month FUTURE contract. Use ?ohlc_interval=hourly for 1h-aggregated OHLC.",
+            "note": "LTP and R3/S3 use current-month FUTURE contract. Use ?ohlc_interval=hourly or 15min for intraday-aggregated OHLC.",
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to fetch pivot breakout: {exc}")
@@ -448,7 +450,7 @@ async def get_pivot_breakout(
 @router.get("/pivot-breakout/debug/{symbol}")
 async def get_pivot_breakout_debug(
     symbol: str,
-    ohlc_interval: str = Query("daily", description="OHLC source: 'daily' or 'hourly'"),
+        ohlc_interval: str = Query("daily", description="OHLC source: 'daily', 'hourly', or '15min'"),
 ):
     """
     Debug endpoint: trace pivot-breakout logic for a given symbol (e.g. NHPC).
@@ -476,19 +478,19 @@ async def get_pivot_breakout_debug(
         upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
         target_date_str, use_same_day = _pivot_breakout_candle_mode(upstox)
         ltp = float(row["currmth_future_ltp"])
-        interval = ohlc_interval if ohlc_interval in ("daily", "hourly") else "daily"
+        interval = ohlc_interval if ohlc_interval in ("daily", "hourly", "15min") else "daily"
         ohlc = _get_prev_day_ohlc(
             upstox, row["currmth_future_instrument_key"], target_date_str, interval
         )
         if not ohlc:
             candles = upstox.get_historical_candles_by_instrument_key(
                 row["currmth_future_instrument_key"],
-                interval="hours/1" if interval == "hourly" else "days/1",
-                days_back=5 if interval == "hourly" else 15,
+                interval="minutes/15" if interval == "15min" else "hours/1" if interval == "hourly" else "days/1",
+                days_back=5 if interval in ("hourly", "15min") else 15,
             ) or []
             all_dates = (
-                [d["date"] for d in _aggregate_hourly_to_daily(candles)]
-                if interval == "hourly"
+                [d["date"] for d in _aggregate_intraday_to_daily(candles)]
+                if interval in ("hourly", "15min")
                 else [_candle_date_ist(c) for c in candles if _candle_date_ist(c)]
             )
             return {
@@ -530,7 +532,7 @@ async def get_pivot_breakout_debug(
             "bearish_pass": bearish_ok,
             "ohlc_source": f"{interval} (previous trading day)",
             "ohlc_interval": interval,
-            "note": f"R3/S3 from previous day OHLC ({interval} candles). Use ?ohlc_interval=hourly to try 1h-aggregated.",
+            "note": f"R3/S3 from previous day OHLC ({interval} candles). Use ?ohlc_interval=hourly or 15min for intraday-aggregated.",
         }
         if interval == "daily":
             candles = upstox.get_historical_candles_by_instrument_key(
@@ -549,11 +551,11 @@ BATCH_SIZE = 10
 
 @router.get("/pivot-breakout-stream")
 async def get_pivot_breakout_stream(
-    ohlc_interval: str = Query("daily", description="OHLC source: 'daily' or 'hourly'"),
+    ohlc_interval: str = Query("daily", description="OHLC source: 'daily', 'hourly', or '15min'"),
 ):
     """
     Streaming pivot breakout: process in batches of 10, yield NDJSON chunks.
-    Use ?ohlc_interval=hourly for 1h-aggregated OHLC.
+    Use ?ohlc_interval=hourly or 15min for intraday-aggregated OHLC.
     """
     async def generate():
         try:
@@ -573,7 +575,7 @@ async def get_pivot_breakout_stream(
 
             upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
             target_date_str, use_same_day = _pivot_breakout_candle_mode(upstox)
-            interval = ohlc_interval if ohlc_interval in ("daily", "hourly") else "daily"
+            interval = ohlc_interval if ohlc_interval in ("daily", "hourly", "15min") else "daily"
             all_bullish: list[dict] = []
             all_bearish: list[dict] = []
 
@@ -602,7 +604,7 @@ async def get_pivot_breakout_stream(
                 "ohlc_interval": interval,
                 "bullish_count": len(all_bullish),
                 "bearish_count": len(all_bearish),
-                "note": "LTP and R3/S3 use current-month FUTURE contract. Use ?ohlc_interval=hourly for 1h-aggregated OHLC.",
+                "note": "LTP and R3/S3 use current-month FUTURE contract. Use ?ohlc_interval=hourly or 15min for intraday-aggregated OHLC.",
             }
             yield json.dumps(final) + "\n"
         except Exception as exc:
