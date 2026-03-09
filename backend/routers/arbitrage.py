@@ -235,8 +235,17 @@ async def get_pivot_breakout():
         upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
 
         # Fetch today's live LTP from Upstox for all current-month futures.
-        instrument_keys = [r["currmth_future_instrument_key"] for r in rows]
-        today_ltp_map = upstox.get_market_quotes_batch_by_keys(instrument_keys) if instrument_keys else {}
+        today_ltp_map: dict[str, float] = {}
+        for r in rows:
+            key = r["currmth_future_instrument_key"]
+            quote = upstox.get_market_quote_by_key(key)
+            if quote and (lp := quote.get("last_price")):
+                try:
+                    val = float(lp)
+                    if val > 0:
+                        today_ltp_map[key] = val
+                except (TypeError, ValueError):
+                    pass
 
         bullish: list[dict] = []
         bearish: list[dict] = []
