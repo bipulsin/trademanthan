@@ -236,29 +236,6 @@ def _pick_previous_trading_day_candle(candles: list[dict], before_date_str: str)
     return None  # Do not fallback to wrong candle when no date < before_date_str
 
 
-def _candle_year_month(candle: dict) -> str | None:
-    """Extract YYYY-MM from candle timestamp for monthly candles."""
-    d = _candle_date_ist(candle)
-    return d[:7] if d and len(d) >= 7 else None
-
-
-def _pick_previous_month_candle(candles: list[dict], target_date_str: str) -> dict | None:
-    """
-    Return the candle for the month strictly before target_date_str's month.
-    For target 2026-03-09, returns Feb 2026 candle. Matches TradingView 1D Auto pivot.
-    """
-    if not candles or not target_date_str or len(target_date_str) < 7:
-        return None
-    target_ym = target_date_str[:7]  # YYYY-MM
-    candidates = [(c, _candle_year_month(c)) for c in candles]
-    valid = [(c, ym) for c, ym in candidates if ym]
-    ordered = sorted(valid, key=lambda x: x[1] or "", reverse=True)
-    for candle, ym in ordered:
-        if ym and ym < target_ym:
-            return candle
-    return None
-
-
 def _pivot_breakout_candle_mode(upstox: UpstoxService) -> tuple[str, bool]:
     """
     Determine which candle to use for R3/S3 based on current time (IST).
@@ -296,19 +273,18 @@ def _process_pivot_batch(
 ) -> tuple[list[dict], list[dict]]:
     """
     Process a batch of rows and return (bullish, bearish) lists.
-    R3/S3 from PREVIOUS MONTH OHLC (monthly candles) to match TradingView 1D chart.
-    TradingView Auto pivot on 1D uses monthly pivot (previous month's OHLC).
-    LTP = from arbitrage_master (today's close or live).
+    R3/S3 from PREVIOUS trading day OHLC (daily candles). LTP = from arbitrage_master.
     """
     bullish: list[dict] = []
     bearish: list[dict] = []
     for row in rows:
         ltp = float(row["currmth_future_ltp"])
-        candles = upstox.get_monthly_candles_by_instrument_key(
+        candles = upstox.get_historical_candles_by_instrument_key(
             row["currmth_future_instrument_key"],
-            months_back=4,
+            interval="days/1",
+            days_back=15,
         ) or []
-        prev = _pick_previous_month_candle(candles, target_date_str)
+        prev = _pick_previous_trading_day_candle(candles, target_date_str)
         if not prev:
             continue
         high = float(prev.get("high", 0) or 0)
@@ -356,7 +332,7 @@ def _process_pivot_batch(
 async def get_pivot_breakout():
     """
     Return bullish and bearish pivot breakout candidates.
-    R3/S3 from PREVIOUS MONTH OHLC (matches TradingView 1D Traditional Pivot Auto).
+    R3/S3 from previous trading day OHLC (daily candles).
     - Bullish: LTP within 5% below R3; Bearish: LTP within 5% above S3.
     """
     try:
@@ -444,8 +420,8 @@ async def get_pivot_breakout_debug(symbol: str):
                 "ltp": ltp,
                 "candle_found": False,
                 "available_candle_dates": sorted(set(all_candle_dates)),
-                "ohlc_source": "monthly (previous month)",
-                "note": "R3/S3 from previous month OHLC to match TradingView 1D Traditional Pivot Auto.",
+                "ohlc_source": "daily (previous trading day)",
+                "note": "R3/S3 from previous day OHLC (daily candles).",
             }
         high = float(prev.get("high", 0) or 0)
         low = float(prev.get("low", 0) or 0)
@@ -475,9 +451,9 @@ async def get_pivot_breakout_debug(symbol: str):
             "bearish_range": f"LTP in [{s3:.2f}, {s3_max:.2f}]",
             "bullish_pass": bullish_ok,
             "bearish_pass": bearish_ok,
-            "ohlc_source": "monthly (previous month)",
+            "ohlc_source": "daily (previous trading day)",
             "available_candle_dates": sorted(set(all_candle_dates)),
-            "note": "R3/S3 from previous month OHLC to match TradingView 1D Traditional Pivot Auto.",
+            "note": "R3/S3 from previous day OHLC (daily candles).",
         }
         return out
     except Exception as exc:
