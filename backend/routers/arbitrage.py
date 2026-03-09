@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Dict
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 
@@ -236,6 +236,32 @@ def _pick_previous_trading_day_candle(candles: list[dict], before_date_str: str)
     return None  # Do not fallback to wrong candle when no date < before_date_str
 
 
+def _aggregate_hourly_to_daily(hourly_candles: list[dict]) -> list[dict]:
+    """
+    Aggregate 1-hour candles into daily OHLC by date (IST).
+    Returns list of {date, open, high, low, close} sorted by date asc.
+    """
+    from collections import defaultdict
+    by_date: dict[str, list[dict]] = defaultdict(list)
+    for c in hourly_candles:
+        d = _candle_date_ist(c)
+        if d:
+            by_date[d].append(c)
+    result = []
+    for date_str in sorted(by_date.keys()):
+        candles = by_date[date_str]
+        candles.sort(key=lambda x: (x.get("timestamp") or ""))
+        if not candles:
+            continue
+        high = max(float(c.get("high", 0) or 0) for c in candles)
+        low = min(float(c.get("low", 0) or 0) for c in candles)
+        open_ = float(candles[0].get("open", 0) or 0)
+        close = float(candles[-1].get("close", 0) or 0)
+        if high > 0 and low > 0:
+            result.append({"date": date_str, "high": high, "low": low, "open": open_, "close": close})
+    return result
+
+
 def _pivot_breakout_candle_mode(upstox: UpstoxService) -> tuple[str, bool]:
     """
     Determine which candle to use for R3/S3 based on current time (IST).
@@ -268,29 +294,64 @@ def _pivot_breakout_candle_mode(upstox: UpstoxService) -> tuple[str, bool]:
     return prev_ref.strftime("%Y-%m-%d"), True
 
 
+def _get_prev_day_ohlc(
+    upstox: UpstoxService,
+    instrument_key: str,
+    target_date_str: str,
+    ohlc_interval: str,
+) -> tuple[float, float, float, str] | None:
+    """
+    Get previous trading day OHLC. Returns (high, low, close, candle_date) or None.
+    ohlc_interval: "daily" | "hourly" - daily uses days/1 candles; hourly aggregates hours/1.
+    """
+    if ohlc_interval == "hourly":
+        candles = upstox.get_historical_candles_by_instrument_key(
+            instrument_key, interval="hours/1", days_back=5
+        ) or []
+        daily = _aggregate_hourly_to_daily(candles)
+        prev = None
+        for d in reversed(daily):
+            if d["date"] < target_date_str:
+                prev = d
+                break
+        if not prev:
+            return None
+        return (prev["high"], prev["low"], prev["close"], prev["date"])
+    # daily (default)
+    candles = upstox.get_historical_candles_by_instrument_key(
+        instrument_key, interval="days/1", days_back=15
+    ) or []
+    prev = _pick_previous_trading_day_candle(candles, target_date_str)
+    if not prev:
+        return None
+    high = float(prev.get("high", 0) or 0)
+    low = float(prev.get("low", 0) or 0)
+    close = float(prev.get("close", 0) or 0)
+    candle_date = _candle_date_ist(prev) or (prev.get("timestamp") or "")[:10]
+    return (high, low, close, candle_date)
+
+
 def _process_pivot_batch(
-    rows: list, upstox: UpstoxService, target_date_str: str, use_same_day: bool
+    rows: list,
+    upstox: UpstoxService,
+    target_date_str: str,
+    use_same_day: bool,
+    ohlc_interval: str = "daily",
 ) -> tuple[list[dict], list[dict]]:
     """
     Process a batch of rows and return (bullish, bearish) lists.
-    R3/S3 from PREVIOUS trading day OHLC (daily candles). LTP = from arbitrage_master.
+    R3/S3 from previous trading day OHLC. ohlc_interval: "daily" | "hourly".
     """
     bullish: list[dict] = []
     bearish: list[dict] = []
     for row in rows:
         ltp = float(row["currmth_future_ltp"])
-        candles = upstox.get_historical_candles_by_instrument_key(
-            row["currmth_future_instrument_key"],
-            interval="days/1",
-            days_back=15,
-        ) or []
-        prev = _pick_previous_trading_day_candle(candles, target_date_str)
-        if not prev:
+        ohlc = _get_prev_day_ohlc(
+            upstox, row["currmth_future_instrument_key"], target_date_str, ohlc_interval
+        )
+        if not ohlc:
             continue
-        high = float(prev.get("high", 0) or 0)
-        low = float(prev.get("low", 0) or 0)
-        close = float(prev.get("close", 0) or 0)
-        candle_date = _candle_date_ist(prev) or (prev.get("timestamp") or "")[:10]
+        high, low, close, candle_date = ohlc
         if high <= 0 or low <= 0 or close <= 0:
             continue
         pivot = (high + low + close) / 3.0
@@ -329,10 +390,14 @@ def _process_pivot_batch(
 
 
 @router.get("/pivot-breakout")
-async def get_pivot_breakout():
+async def get_pivot_breakout(
+    ohlc_interval: str = Query("daily", description="OHLC source: 'daily' or 'hourly' (aggregate 1h candles)"),
+):
     """
     Return bullish and bearish pivot breakout candidates.
-    R3/S3 from previous trading day OHLC (daily candles).
+    R3/S3 from previous trading day OHLC.
+    - ohlc_interval=daily: use daily candles (default)
+    - ohlc_interval=hourly: aggregate 1-hour candles into daily OHLC (may match TradingView better)
     - Bullish: LTP within 5% below R3; Bearish: LTP within 5% above S3.
     """
     try:
@@ -356,7 +421,10 @@ async def get_pivot_breakout():
 
         upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
         target_date_str, use_same_day = _pivot_breakout_candle_mode(upstox)
-        bullish, bearish = _process_pivot_batch(rows, upstox, target_date_str, use_same_day)
+        interval = ohlc_interval if ohlc_interval in ("daily", "hourly") else "daily"
+        bullish, bearish = _process_pivot_batch(
+            rows, upstox, target_date_str, use_same_day, ohlc_interval=interval
+        )
 
         # Nearest candidates first.
         bullish.sort(key=lambda x: (x.get("difference_from_r3", 10**9), x.get("stock", "")))
@@ -366,18 +434,22 @@ async def get_pivot_breakout():
             "success": True,
             "ltp_date": target_date_str,
             "pivot_date": pivot_date,
+            "ohlc_interval": interval,
             "bullish_count": len(bullish),
             "bearish_count": len(bearish),
             "bullish": bullish,
             "bearish": bearish,
-            "note": "LTP and R3/S3 use current-month FUTURE contract, not Spot/Equity.",
+            "note": "LTP and R3/S3 use current-month FUTURE contract. Use ?ohlc_interval=hourly for 1h-aggregated OHLC.",
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to fetch pivot breakout: {exc}")
 
 
 @router.get("/pivot-breakout/debug/{symbol}")
-async def get_pivot_breakout_debug(symbol: str):
+async def get_pivot_breakout_debug(
+    symbol: str,
+    ohlc_interval: str = Query("daily", description="OHLC source: 'daily' or 'hourly'"),
+):
     """
     Debug endpoint: trace pivot-breakout logic for a given symbol (e.g. NHPC).
     Returns LTP, candle used, computed R3/S3, and why it passed or failed the filter.
@@ -404,14 +476,21 @@ async def get_pivot_breakout_debug(symbol: str):
         upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
         target_date_str, use_same_day = _pivot_breakout_candle_mode(upstox)
         ltp = float(row["currmth_future_ltp"])
-        candles = upstox.get_historical_candles_by_instrument_key(
-            row["currmth_future_instrument_key"],
-            interval="days/1",
-            days_back=15,
-        ) or []
-        prev = _pick_previous_trading_day_candle(candles, target_date_str)
-        all_candle_dates = [_candle_date_ist(c) for c in candles if _candle_date_ist(c)]
-        if not prev:
+        interval = ohlc_interval if ohlc_interval in ("daily", "hourly") else "daily"
+        ohlc = _get_prev_day_ohlc(
+            upstox, row["currmth_future_instrument_key"], target_date_str, interval
+        )
+        if not ohlc:
+            candles = upstox.get_historical_candles_by_instrument_key(
+                row["currmth_future_instrument_key"],
+                interval="hours/1" if interval == "hourly" else "days/1",
+                days_back=5 if interval == "hourly" else 15,
+            ) or []
+            all_dates = (
+                [d["date"] for d in _aggregate_hourly_to_daily(candles)]
+                if interval == "hourly"
+                else [_candle_date_ist(c) for c in candles if _candle_date_ist(c)]
+            )
             return {
                 "success": True,
                 "symbol": row["stock"],
@@ -420,14 +499,11 @@ async def get_pivot_breakout_debug(symbol: str):
                 "use_same_day": use_same_day,
                 "ltp": ltp,
                 "candle_found": False,
-                "available_candle_dates": sorted(set(all_candle_dates)),
-                "ohlc_source": "daily (previous trading day)",
-                "note": "R3/S3 from previous day OHLC (daily candles).",
+                "available_candle_dates": sorted(set(all_dates)),
+                "ohlc_source": f"{interval} (previous trading day)",
+                "note": f"R3/S3 from previous day OHLC ({interval} candles).",
             }
-        high = float(prev.get("high", 0) or 0)
-        low = float(prev.get("low", 0) or 0)
-        close = float(prev.get("close", 0) or 0)
-        candle_date = _candle_date_ist(prev) or (prev.get("timestamp") or "")[:10]
+        high, low, close, candle_date = ohlc
         pivot = (high + low + close) / 3.0
         r3 = high + 2.0 * (pivot - low)
         s3 = low - 2.0 * (high - pivot)
@@ -452,10 +528,17 @@ async def get_pivot_breakout_debug(symbol: str):
             "bearish_range": f"LTP in [{s3:.2f}, {s3_max:.2f}]",
             "bullish_pass": bullish_ok,
             "bearish_pass": bearish_ok,
-            "ohlc_source": "daily (previous trading day)",
-            "available_candle_dates": sorted(set(all_candle_dates)),
-            "note": "R3/S3 from previous day OHLC (daily candles).",
+            "ohlc_source": f"{interval} (previous trading day)",
+            "ohlc_interval": interval,
+            "note": f"R3/S3 from previous day OHLC ({interval} candles). Use ?ohlc_interval=hourly to try 1h-aggregated.",
         }
+        if interval == "daily":
+            candles = upstox.get_historical_candles_by_instrument_key(
+                row["currmth_future_instrument_key"], interval="days/1", days_back=15
+            ) or []
+            out["available_candle_dates"] = sorted(
+                set(_candle_date_ist(c) for c in candles if _candle_date_ist(c))
+            )
         return out
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
@@ -465,10 +548,12 @@ BATCH_SIZE = 10
 
 
 @router.get("/pivot-breakout-stream")
-async def get_pivot_breakout_stream():
+async def get_pivot_breakout_stream(
+    ohlc_interval: str = Query("daily", description="OHLC source: 'daily' or 'hourly'"),
+):
     """
     Streaming pivot breakout: process in batches of 10, yield NDJSON chunks.
-    Client receives progressive updates and can extend the page as data arrives.
+    Use ?ohlc_interval=hourly for 1h-aggregated OHLC.
     """
     async def generate():
         try:
@@ -488,12 +573,15 @@ async def get_pivot_breakout_stream():
 
             upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
             target_date_str, use_same_day = _pivot_breakout_candle_mode(upstox)
+            interval = ohlc_interval if ohlc_interval in ("daily", "hourly") else "daily"
             all_bullish: list[dict] = []
             all_bearish: list[dict] = []
 
             for i in range(0, len(rows), BATCH_SIZE):
                 batch = rows[i : i + BATCH_SIZE]
-                b, be = _process_pivot_batch(batch, upstox, target_date_str, use_same_day)
+                b, be = _process_pivot_batch(
+                    batch, upstox, target_date_str, use_same_day, ohlc_interval=interval
+                )
                 all_bullish.extend(b)
                 all_bearish.extend(be)
                 chunk = {
@@ -511,9 +599,10 @@ async def get_pivot_breakout_stream():
                 "done": True,
                 "ltp_date": target_date_str,
                 "pivot_date": pivot_date,
+                "ohlc_interval": interval,
                 "bullish_count": len(all_bullish),
                 "bearish_count": len(all_bearish),
-                "note": "LTP and R3/S3 use current-month FUTURE contract, not Spot/Equity.",
+                "note": "LTP and R3/S3 use current-month FUTURE contract. Use ?ohlc_interval=hourly for 1h-aggregated OHLC.",
             }
             yield json.dumps(final) + "\n"
         except Exception as exc:

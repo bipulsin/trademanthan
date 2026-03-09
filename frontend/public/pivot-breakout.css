@@ -37,6 +37,27 @@ body {
     font-size: 0.95rem;
 }
 
+.pivot-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.pivot-header-actions label {
+    font-size: 0.9rem;
+    color: var(--theme-muted, #94a3b8);
+}
+
+.pivot-header-actions select {
+    background: var(--theme-card, #1e293b);
+    color: var(--theme-text, #f1f5f9);
+    border: 1px solid var(--theme-border, #334155);
+    border-radius: 6px;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+
 .btn-refresh {
     border: 1px solid var(--theme-border, #334155);
     background: var(--theme-card, #1e293b);

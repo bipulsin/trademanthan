@@ -28,9 +28,16 @@
                     <h1 class="pivot-title">Pivot Breakout</h1>
                     <p class="pivot-subtitle">Screens current month futures near pivot breakout zones.</p>
                 </div>
-                <button class="btn-refresh" id="refreshBtn" type="button">
-                    <i class="fas fa-sync-alt"></i> Refresh
-                </button>
+                <div class="pivot-header-actions">
+                    <label for="ohlcInterval">OHLC:</label>
+                    <select id="ohlcInterval" title="Daily = day candles; Hourly = aggregate 1h candles (may match TradingView better)">
+                        <option value="daily">Daily</option>
+                        <option value="hourly">1-Hour</option>
+                    </select>
+                    <button class="btn-refresh" id="refreshBtn" type="button">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
             </div>
 
             <section class="pivot-section">

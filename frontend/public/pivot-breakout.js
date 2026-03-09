@@ -53,8 +53,10 @@
         const allBullish = [];
         const allBearish = [];
 
+        const ohlcInterval = (document.getElementById("ohlcInterval") || {}).value || "daily";
+        const streamUrl = `${STREAM_API}?ohlc_interval=${encodeURIComponent(ohlcInterval)}`;
         try {
-            const res = await fetch(STREAM_API, { cache: "no-store" });
+            const res = await fetch(streamUrl, { cache: "no-store" });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const reader = res.body.getReader();
             const decoder = new TextDecoder();
@@ -145,5 +147,7 @@
     }
 
     refreshBtn.addEventListener("click", () => loadDataStream());
+    const ohlcIntervalEl = document.getElementById("ohlcInterval");
+    if (ohlcIntervalEl) ohlcIntervalEl.addEventListener("change", () => loadDataStream());
     document.addEventListener("DOMContentLoaded", () => loadDataStream());
 })();
