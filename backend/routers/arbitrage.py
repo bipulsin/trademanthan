@@ -233,7 +233,7 @@ def _pick_previous_trading_day_candle(candles: list[dict], before_date_str: str)
     for candle, d in ordered:
         if d and d < before_date_str:
             return candle
-    return ordered[0][0] if ordered else None
+    return None  # Do not fallback to wrong candle when no date < before_date_str
 
 
 def _pivot_breakout_candle_mode(upstox: UpstoxService) -> tuple[str, bool]:
@@ -363,9 +363,102 @@ async def get_pivot_breakout():
             "bearish_count": len(bearish),
             "bullish": bullish,
             "bearish": bearish,
+            "note": "LTP and R3/S3 use current-month FUTURE contract, not Spot/Equity.",
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to fetch pivot breakout: {exc}")
+
+
+@router.get("/pivot-breakout/debug/{symbol}")
+async def get_pivot_breakout_debug(symbol: str):
+    """
+    Debug endpoint: trace pivot-breakout logic for a given symbol (e.g. NHPC).
+    Returns LTP, candle used, computed R3/S3, and why it passed or failed the filter.
+    Note: R3/S3 and OHLC are from the FUTURE contract, not Spot/Equity.
+    """
+    try:
+        with engine.begin() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT stock, currmth_future_symbol, currmth_future_instrument_key, currmth_future_ltp
+                    FROM arbitrage_master
+                    WHERE UPPER(stock) = UPPER(:symbol)
+                      AND currmth_future_symbol IS NOT NULL
+                      AND currmth_future_instrument_key IS NOT NULL
+                      AND currmth_future_ltp IS NOT NULL
+                    """
+                ),
+                {"symbol": symbol},
+            ).mappings().first()
+        if not row:
+            return {"success": False, "error": f"Symbol {symbol} not found in arbitrage_master"}
+
+        upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+        target_date_str, use_same_day = _pivot_breakout_candle_mode(upstox)
+        candles = upstox.get_historical_candles_by_instrument_key(
+            row["currmth_future_instrument_key"],
+            interval="days/1",
+            days_back=15,
+        ) or []
+
+        prev = (
+            _pick_candle_for_date(candles, target_date_str)
+            if use_same_day
+            else _pick_previous_trading_day_candle(candles, target_date_str)
+        )
+        if not prev and use_same_day:
+            prev = _pick_previous_trading_day_candle(candles, target_date_str)
+
+        ltp = float(row["currmth_future_ltp"])
+        candle_date = _candle_date_ist(prev) if prev else None
+        all_candle_dates = [_candle_date_ist(c) for c in candles if _candle_date_ist(c)]
+
+        if not prev:
+            return {
+                "success": True,
+                "symbol": row["stock"],
+                "instrument_key": row["currmth_future_instrument_key"],
+                "target_date_str": target_date_str,
+                "use_same_day": use_same_day,
+                "ltp": ltp,
+                "candle_found": False,
+                "available_candle_dates": sorted(set(all_candle_dates)),
+                "note": "R3/S3 and OHLC use FUTURE contract, not Spot/Equity.",
+            }
+
+        high = float(prev.get("high", 0) or 0)
+        low = float(prev.get("low", 0) or 0)
+        close = float(prev.get("close", 0) or 0)
+        pivot = (high + low + close) / 3.0
+        r3 = high + 2.0 * (pivot - low)
+        s3 = low - 2.0 * (high - pivot)
+
+        bullish_ok = (ltp <= r3) and (ltp >= (r3 * 0.95))
+        bearish_ok = (ltp >= s3) and (ltp <= (s3 * 1.05))
+        r3_min = r3 * 0.95
+        s3_max = s3 * 1.05
+
+        return {
+            "success": True,
+            "symbol": row["stock"],
+            "instrument_key": row["currmth_future_instrument_key"],
+            "target_date_str": target_date_str,
+            "use_same_day": use_same_day,
+            "ltp": ltp,
+            "candle_date": candle_date,
+            "candle_ohlc": {"high": high, "low": low, "close": close},
+            "r3": round(r3, 4),
+            "s3": round(s3, 4),
+            "bullish_range": f"LTP in [{r3_min:.2f}, {r3:.2f}]",
+            "bearish_range": f"LTP in [{s3:.2f}, {s3_max:.2f}]",
+            "bullish_pass": bullish_ok,
+            "bearish_pass": bearish_ok,
+            "available_candle_dates": sorted(set(all_candle_dates)),
+            "note": "R3/S3 and OHLC are from the FUTURE contract, not Spot/Equity.",
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 BATCH_SIZE = 10
@@ -420,6 +513,7 @@ async def get_pivot_breakout_stream():
                 "pivot_date": pivot_date,
                 "bullish_count": len(all_bullish),
                 "bearish_count": len(all_bearish),
+                "note": "LTP and R3/S3 use current-month FUTURE contract, not Spot/Equity.",
             }
             yield json.dumps(final) + "\n"
         except Exception as exc:
