@@ -286,8 +286,8 @@ def _process_pivot_batch(
             if use_same_day
             else _pick_previous_trading_day_candle(candles, target_date_str)
         )
-        if not prev and use_same_day:
-            prev = _pick_previous_trading_day_candle(candles, target_date_str)
+        # When use_same_day: do NOT fallback to prev-day candle. LTP is from target_date;
+        # using a different day's R3 would mix dates (e.g. 9-Mar LTP vs 6-Mar R3).
         if not prev:
             continue
         high = float(prev.get("high", 0) or 0)
@@ -407,8 +407,7 @@ async def get_pivot_breakout_debug(symbol: str):
             if use_same_day
             else _pick_previous_trading_day_candle(candles, target_date_str)
         )
-        if not prev and use_same_day:
-            prev = _pick_previous_trading_day_candle(candles, target_date_str)
+        # No fallback when use_same_day: avoid mixing LTP (target_date) with R3 (other date)
 
         ltp = float(row["currmth_future_ltp"])
         candle_date = _candle_date_ist(prev) if prev else None
