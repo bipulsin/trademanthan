@@ -1081,6 +1081,38 @@ class UpstoxService:
         except Exception as e:
             logger.error(f"❌ Error fetching candles for {instrument_key}: {str(e)}")
             return None
+
+    def get_monthly_candles_by_instrument_key(self, instrument_key: str, months_back: int = 4) -> Optional[List[Dict]]:
+        """
+        Fetch monthly candle data for pivot calculation (matches TradingView 1D chart).
+        TradingView Auto pivot on 1D uses previous month's OHLC.
+        """
+        try:
+            ist = pytz.timezone('Asia/Kolkata')
+            end_date = datetime.now(ist)
+            start_date = end_date - timedelta(days=months_back * 31)
+            to_date = end_date.strftime("%Y-%m-%d")
+            from_date = start_date.strftime("%Y-%m-%d")
+            url = f"{self.base_url}/historical-candle/{instrument_key}/months/1/{to_date}/{from_date}"
+            data = self.make_api_request(url, method="GET", timeout=15, max_retries=2)
+            if data and data.get('status') == 'success' and 'data' in data:
+                candles = data['data'].get('candles', [])
+                structured = []
+                for candle in candles:
+                    if len(candle) >= 6:
+                        structured.append({
+                            'timestamp': candle[0],
+                            'open': float(candle[1]),
+                            'high': float(candle[2]),
+                            'low': float(candle[3]),
+                            'close': float(candle[4]),
+                            'volume': float(candle[5])
+                        })
+                return structured
+            return None
+        except Exception as e:
+            logger.error(f"❌ Error fetching monthly candles for {instrument_key}: {str(e)}")
+            return None
     
     def get_option_chain(self, symbol: str, use_next_month_expiry: bool = False) -> Optional[Dict]:
         """
