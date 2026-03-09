@@ -207,7 +207,9 @@ def _pick_previous_day_candle(candles: list[dict]) -> dict | None:
 @router.get("/pivot-breakout")
 async def get_pivot_breakout():
     """
-    Return bullish and bearish pivot breakout candidates based on current month future LTP:
+    Return bullish and bearish pivot breakout candidates.
+    - R3 & S3: calculated from previous trading day OHLC.
+    - LTP for comparison: today's live LTP from Upstox (falls back to arbitrage_master if unavailable).
     - Bullish: within 5% range of R3
     - Bearish: within 5% range of S3
     """
@@ -231,11 +233,18 @@ async def get_pivot_breakout():
             ).mappings().all()
 
         upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+
+        # Fetch today's live LTP from Upstox for all current-month futures.
+        instrument_keys = [r["currmth_future_instrument_key"] for r in rows]
+        today_ltp_map = upstox.get_market_quotes_batch_by_keys(instrument_keys) if instrument_keys else {}
+
         bullish: list[dict] = []
         bearish: list[dict] = []
 
         for row in rows:
-            ltp = float(row["currmth_future_ltp"])
+            # Prefer today's live LTP; fallback to arbitrage_master if market closed or API unavailable.
+            live_ltp = today_ltp_map.get(row["currmth_future_instrument_key"])
+            ltp = float(live_ltp) if live_ltp is not None and live_ltp > 0 else float(row["currmth_future_ltp"])
             candles = upstox.get_historical_candles_by_instrument_key(
                 row["currmth_future_instrument_key"],
                 interval="days/1",
