@@ -5,6 +5,7 @@ from typing import Dict
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 
 from backend.config import get_instruments_file_path
@@ -191,27 +192,48 @@ def _parse_candle_dt(ts: str) -> datetime:
     return datetime.fromisoformat(cleaned)
 
 
+def _candle_date_ist(candle: dict) -> str | None:
+    """Extract YYYY-MM-DD (IST) from candle timestamp. Handles ISO string, epoch ms, or plain date."""
+    ts = candle.get("timestamp")
+    if ts is None:
+        return None
+    if isinstance(ts, str):
+        if len(ts) >= 10 and ts[4] == "-" and ts[7] == "-":
+            return ts[:10]
+        try:
+            dt = _parse_candle_dt(ts)
+            return dt.astimezone(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d")
+        except Exception:
+            return ts[:10] if len(ts) >= 10 else None
+    if isinstance(ts, (int, float)):
+        sec = ts / 1000.0 if ts > 1e12 else ts
+        dt = datetime.fromtimestamp(sec, tz=ZoneInfo("Asia/Kolkata"))
+        return dt.strftime("%Y-%m-%d")
+    return None
+
+
 def _pick_candle_for_date(candles: list[dict], target_date_str: str) -> dict | None:
-    """Return the candle matching target_date_str (YYYY-MM-DD), or None."""
+    """Return the candle matching target_date_str (YYYY-MM-DD) in IST, or None."""
     if not candles or not target_date_str:
         return None
     for c in candles:
-        ts = (c.get("timestamp") or "")[:10]
-        if ts == target_date_str:
+        d = _candle_date_ist(c)
+        if d == target_date_str:
             return c
     return None
 
 
 def _pick_previous_trading_day_candle(candles: list[dict], before_date_str: str) -> dict | None:
-    """Return the latest candle with date strictly before before_date_str."""
+    """Return the latest candle with date strictly before before_date_str (IST)."""
     if not candles or not before_date_str:
         return None
-    ordered = sorted(candles, key=lambda c: c.get("timestamp") or "", reverse=True)
-    for candle in ordered:
-        ts = (candle.get("timestamp") or "")[:10]
-        if ts < before_date_str:
+    candidates = [(c, _candle_date_ist(c)) for c in candles]
+    valid = [(c, d) for c, d in candidates if d]
+    ordered = sorted(valid, key=lambda x: x[1] or "", reverse=True)
+    for candle, d in ordered:
+        if d and d < before_date_str:
             return candle
-    return ordered[0] if ordered else None
+    return ordered[0][0] if ordered else None
 
 
 def _pivot_breakout_candle_mode(upstox: UpstoxService) -> tuple[str, bool]:
@@ -246,6 +268,58 @@ def _pivot_breakout_candle_mode(upstox: UpstoxService) -> tuple[str, bool]:
     return prev_ref.strftime("%Y-%m-%d"), True
 
 
+def _process_pivot_batch(
+    rows: list, upstox: UpstoxService, target_date_str: str, use_same_day: bool
+) -> tuple[list[dict], list[dict]]:
+    """Process a batch of rows and return (bullish, bearish) lists."""
+    bullish: list[dict] = []
+    bearish: list[dict] = []
+    for row in rows:
+        ltp = float(row["currmth_future_ltp"])
+        candles = upstox.get_historical_candles_by_instrument_key(
+            row["currmth_future_instrument_key"],
+            interval="days/1",
+            days_back=15,
+        ) or []
+        prev = (
+            _pick_candle_for_date(candles, target_date_str)
+            if use_same_day
+            else _pick_previous_trading_day_candle(candles, target_date_str)
+        )
+        if not prev and use_same_day:
+            prev = _pick_previous_trading_day_candle(candles, target_date_str)
+        if not prev:
+            continue
+        high = float(prev.get("high", 0) or 0)
+        low = float(prev.get("low", 0) or 0)
+        close = float(prev.get("close", 0) or 0)
+        if high <= 0 or low <= 0 or close <= 0:
+            continue
+        pivot = (high + low + close) / 3.0
+        r3 = high + 2.0 * (pivot - low)
+        s3 = low - 2.0 * (high - pivot)
+        if r3 <= 0 or s3 <= 0:
+            continue
+        payload = {
+            "stock": row["stock"],
+            "currmth_future_symbol": row["currmth_future_symbol"],
+            "currmth_future_ltp": ltp,
+            "pivot_candle_date": _candle_date_ist(prev) or (prev.get("timestamp") or "")[:10],
+            "previous_day_high": round(high, 4),
+            "previous_day_low": round(low, 4),
+            "previous_day_close": round(close, 4),
+            "r3_pivot": round(r3, 4),
+            "s3_pivot": round(s3, 4),
+        }
+        if (ltp <= r3) and (ltp >= (r3 * 0.95)):
+            diff_r3 = r3 - ltp
+            bullish.append({**payload, "difference_from_r3": round(diff_r3, 4), "difference_from_r3_pct": round((diff_r3 / r3) * 100.0, 4)})
+        if (ltp >= s3) and (ltp <= (s3 * 1.05)):
+            diff_s3 = ltp - s3
+            bearish.append({**payload, "difference_from_s3": round(diff_s3, 4), "difference_from_s3_pct": round((diff_s3 / s3) * 100.0, 4)})
+    return bullish, bearish
+
+
 @router.get("/pivot-breakout")
 async def get_pivot_breakout():
     """
@@ -275,70 +349,7 @@ async def get_pivot_breakout():
 
         upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
         target_date_str, use_same_day = _pivot_breakout_candle_mode(upstox)
-
-        bullish: list[dict] = []
-        bearish: list[dict] = []
-
-        for row in rows:
-            ltp = float(row["currmth_future_ltp"])
-            candles = upstox.get_historical_candles_by_instrument_key(
-                row["currmth_future_instrument_key"],
-                interval="days/1",
-                days_back=7,
-            ) or []
-            prev = (
-                _pick_candle_for_date(candles, target_date_str)
-                if use_same_day
-                else _pick_previous_trading_day_candle(candles, target_date_str)
-            )
-            if not prev:
-                continue
-
-            high = float(prev.get("high", 0) or 0)
-            low = float(prev.get("low", 0) or 0)
-            close = float(prev.get("close", 0) or 0)
-            if high <= 0 or low <= 0 or close <= 0:
-                continue
-
-            pivot = (high + low + close) / 3.0
-            r3 = high + 2.0 * (pivot - low)
-            s3 = low - 2.0 * (high - pivot)
-            if r3 <= 0 or s3 <= 0:
-                continue
-
-            payload = {
-                "stock": row["stock"],
-                "currmth_future_symbol": row["currmth_future_symbol"],
-                "currmth_future_ltp": ltp,
-                "pivot_candle_date": (prev.get("timestamp") or "")[:10],
-                "previous_day_high": round(high, 4),
-                "previous_day_low": round(low, 4),
-                "previous_day_close": round(close, 4),
-                "r3_pivot": round(r3, 4),
-                "s3_pivot": round(s3, 4),
-            }
-
-            # Bullish: LTP is up to 5% lower than R3 (nearest from below).
-            if (ltp <= r3) and (ltp >= (r3 * 0.95)):
-                diff_r3 = r3 - ltp
-                bullish.append(
-                    {
-                        **payload,
-                        "difference_from_r3": round(diff_r3, 4),
-                        "difference_from_r3_pct": round((diff_r3 / r3) * 100.0, 4),
-                    }
-                )
-
-            # Bearish: LTP is up to 5% higher than S3 (nearest from above).
-            if (ltp >= s3) and (ltp <= (s3 * 1.05)):
-                diff_s3 = ltp - s3
-                bearish.append(
-                    {
-                        **payload,
-                        "difference_from_s3": round(diff_s3, 4),
-                        "difference_from_s3_pct": round((diff_s3 / s3) * 100.0, 4),
-                    }
-                )
+        bullish, bearish = _process_pivot_batch(rows, upstox, target_date_str, use_same_day)
 
         # Nearest candidates first.
         bullish.sort(key=lambda x: (x.get("difference_from_r3", 10**9), x.get("stock", "")))
@@ -355,6 +366,70 @@ async def get_pivot_breakout():
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to fetch pivot breakout: {exc}")
+
+
+BATCH_SIZE = 10
+
+
+@router.get("/pivot-breakout-stream")
+async def get_pivot_breakout_stream():
+    """
+    Streaming pivot breakout: process in batches of 10, yield NDJSON chunks.
+    Client receives progressive updates and can extend the page as data arrives.
+    """
+    async def generate():
+        try:
+            with engine.begin() as conn:
+                rows = conn.execute(
+                    text(
+                        """
+                        SELECT stock, currmth_future_symbol, currmth_future_instrument_key, currmth_future_ltp
+                        FROM arbitrage_master
+                        WHERE currmth_future_symbol IS NOT NULL
+                          AND currmth_future_instrument_key IS NOT NULL
+                          AND currmth_future_ltp IS NOT NULL
+                        ORDER BY stock ASC
+                        """
+                    )
+                ).mappings().all()
+
+            upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+            target_date_str, use_same_day = _pivot_breakout_candle_mode(upstox)
+            all_bullish: list[dict] = []
+            all_bearish: list[dict] = []
+
+            for i in range(0, len(rows), BATCH_SIZE):
+                batch = rows[i : i + BATCH_SIZE]
+                b, be = _process_pivot_batch(batch, upstox, target_date_str, use_same_day)
+                all_bullish.extend(b)
+                all_bearish.extend(be)
+                chunk = {
+                    "batch": i // BATCH_SIZE,
+                    "bullish": b,
+                    "bearish": be,
+                    "done": False,
+                }
+                yield json.dumps(chunk) + "\n"
+
+            all_bullish.sort(key=lambda x: (x.get("difference_from_r3", 10**9), x.get("stock", "")))
+            all_bearish.sort(key=lambda x: (x.get("difference_from_s3", 10**9), x.get("stock", "")))
+            pivot_date = (all_bullish[0]["pivot_candle_date"] if all_bullish else all_bearish[0]["pivot_candle_date"]) if (all_bullish or all_bearish) else target_date_str
+            final = {
+                "done": True,
+                "ltp_date": target_date_str,
+                "pivot_date": pivot_date,
+                "bullish_count": len(all_bullish),
+                "bearish_count": len(all_bearish),
+            }
+            yield json.dumps(final) + "\n"
+        except Exception as exc:
+            yield json.dumps({"done": True, "error": str(exc)}) + "\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/order")
