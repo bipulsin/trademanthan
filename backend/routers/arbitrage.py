@@ -234,27 +234,12 @@ async def get_pivot_breakout():
 
         upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
 
-        # Fetch today's live LTP from Upstox (get_market_quote_by_key exists on all deployed versions).
-        today_ltp_map: dict[str, float] = {}
-        for r in rows:
-            q = upstox.get_market_quote_by_key(r["currmth_future_instrument_key"])
-            if q:
-                lp = q.get("last_price")
-                if lp is not None:
-                    try:
-                        v = float(lp)
-                        if v > 0:
-                            today_ltp_map[r["currmth_future_instrument_key"]] = v
-                    except (TypeError, ValueError):
-                        pass
-
         bullish: list[dict] = []
         bearish: list[dict] = []
 
         for row in rows:
-            # Prefer today's live LTP; fallback to arbitrage_master if market closed or API unavailable.
-            live_ltp = today_ltp_map.get(row["currmth_future_instrument_key"])
-            ltp = float(live_ltp) if live_ltp is not None and live_ltp > 0 else float(row["currmth_future_ltp"])
+            # Use arbitrage_master.currmth_future_ltp (today's LTP, updated every 15 min by scheduler).
+            ltp = float(row["currmth_future_ltp"])
             candles = upstox.get_historical_candles_by_instrument_key(
                 row["currmth_future_instrument_key"],
                 interval="days/1",
