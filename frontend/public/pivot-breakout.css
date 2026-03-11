@@ -132,8 +132,18 @@ body {
     margin-top: 0.15rem;
 }
 
+.pivot-table th.num {
+    text-align: right;
+}
+
 .pivot-table th.sortable {
     cursor: pointer;
+}
+
+.pivot-table th .sort-indicator {
+    display: inline-block;
+    margin-left: 0.25rem;
+    font-size: 0.75rem;
 }
 
 .num {

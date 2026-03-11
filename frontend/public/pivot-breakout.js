@@ -10,6 +10,7 @@
     let bullishData = [];
     let bearishData = [];
     let bullishSortDir = "asc";
+    let bearishSortDir = "asc";
 
     function fmt(v) {
         if (v === null || v === undefined || Number.isNaN(Number(v))) return "-";
@@ -51,11 +52,15 @@
             const pct = r.difference_from_r3_pct;
             return `<tr>${cells}<td class="num">${fmtPct(pct)}</td></tr>`;
         }
+        if (opts.showPct && pivotKey === "s3_pivot") {
+            const pct = r.difference_from_s3_pct;
+            return `<tr>${cells}<td class="num">${fmtPct(pct)}</td></tr>`;
+        }
         return `<tr>${cells}</tr>`;
     }
 
     function renderRows(tbody, rows, pivotKey, opts = {}) {
-        const colspan = opts.colspan || (opts.showPct && pivotKey === "r3_pivot" ? 5 : 4);
+        const colspan = opts.colspan || (opts.showPct ? 5 : 4);
         if (!rows || rows.length === 0) {
             tbody.innerHTML = `<tr><td colspan="${colspan}" class="state-cell">No records found.</td></tr>`;
             return;
@@ -77,9 +82,30 @@
         renderRows(bullishBody, bullishData, "r3_pivot", { showPct: true });
     }
 
+    function applyBearishSort(usePct) {
+        if (!bearishData || bearishData.length === 0) {
+            renderRows(bearishBody, [], "s3_pivot", { showPct: true });
+            return;
+        }
+        bearishData.sort((a, b) => {
+            const aVal = usePct ? (a.difference_from_s3_pct ?? 1e9) : (a.difference_from_s3 ?? 1e9);
+            const bVal = usePct ? (b.difference_from_s3_pct ?? 1e9) : (b.difference_from_s3 ?? 1e9);
+            const cmp = aVal - bVal || (a.stock || "").localeCompare(b.stock || "");
+            return bearishSortDir === "asc" ? cmp : -cmp;
+        });
+        renderRows(bearishBody, bearishData, "s3_pivot", { showPct: true });
+    }
+
+    function updateSortIndicators() {
+        const bullishEl = document.getElementById("bullishPctSort");
+        const bearishEl = document.getElementById("bearishPctSort");
+        if (bullishEl) bullishEl.textContent = bullishData.length ? (bullishSortDir === "asc" ? "▲" : "▼") : "";
+        if (bearishEl) bearishEl.textContent = bearishData.length ? (bearishSortDir === "asc" ? "▲" : "▼") : "";
+    }
+
     async function loadDataStream() {
         bullishBody.innerHTML = '<tr><td colspan="5" class="state-cell">Loading...</td></tr>';
-        bearishBody.innerHTML = '<tr><td colspan="4" class="state-cell">Loading...</td></tr>';
+        bearishBody.innerHTML = '<tr><td colspan="5" class="state-cell">Loading...</td></tr>';
         bullishSummary.textContent = "Loading...";
         bearishSummary.textContent = "Loading...";
 
@@ -130,8 +156,7 @@
                     }
                     if (data.bearish && data.bearish.length > 0) {
                         data.bearish.forEach((r) => bearishData.push(r));
-                        bearishData.sort((a, b) => (a.difference_from_s3 ?? 1e9) - (b.difference_from_s3 ?? 1e9) || (a.stock || "").localeCompare(b.stock || ""));
-                        renderRows(bearishBody, bearishData, "s3_pivot");
+                        applyBearishSort(false);
                         bearishSummary.textContent = `Bearish: ${bearishData.length} (loading...)`;
                     }
                 }
@@ -148,8 +173,9 @@
             }
             if (bullishData.length === 0 && bearishData.length === 0) {
                 bullishBody.innerHTML = '<tr><td colspan="5" class="state-cell">No records found.</td></tr>';
-                bearishBody.innerHTML = '<tr><td colspan="4" class="state-cell">No records found.</td></tr>';
+                bearishBody.innerHTML = '<tr><td colspan="5" class="state-cell">No records found.</td></tr>';
             }
+            updateSortIndicators();
         } catch (err) {
             bullishBody.innerHTML = `<tr><td colspan="4" class="state-cell">Error: ${err.message}</td></tr>`;
             bearishBody.innerHTML = `<tr><td colspan="4" class="state-cell">Error: ${err.message}</td></tr>`;
@@ -160,7 +186,7 @@
 
     async function loadData() {
         bullishBody.innerHTML = '<tr><td colspan="5" class="state-cell">Loading...</td></tr>';
-        bearishBody.innerHTML = '<tr><td colspan="4" class="state-cell">Loading...</td></tr>';
+        bearishBody.innerHTML = '<tr><td colspan="5" class="state-cell">Loading...</td></tr>';
         bullishSummary.textContent = "Loading data...";
         bearishSummary.textContent = "Loading data...";
 
@@ -180,12 +206,13 @@
             bullishData = data.bullish || [];
             bearishData = data.bearish || [];
             applyBullishSort(false);
-            renderRows(bearishBody, bearishData, "s3_pivot");
+            applyBearishSort(false);
             bullishSummary.textContent = `Total bullish records: ${data.bullish_count || 0}`;
             bearishSummary.textContent = `Total bearish records: ${data.bearish_count || 0}`;
+            updateSortIndicators();
         } catch (err) {
-            bullishBody.innerHTML = `<tr><td colspan="4" class="state-cell">Error: ${err.message}</td></tr>`;
-            bearishBody.innerHTML = `<tr><td colspan="4" class="state-cell">Error: ${err.message}</td></tr>`;
+            bullishBody.innerHTML = `<tr><td colspan="5" class="state-cell">Error: ${err.message}</td></tr>`;
+            bearishBody.innerHTML = `<tr><td colspan="5" class="state-cell">Error: ${err.message}</td></tr>`;
             bullishSummary.textContent = "Failed to load data.";
             bearishSummary.textContent = "Failed to load data.";
         }
@@ -201,6 +228,15 @@
         bullishPctHeader.addEventListener("click", () => {
             bullishSortDir = bullishSortDir === "asc" ? "desc" : "asc";
             applyBullishSort(true);
+            updateSortIndicators();
+        });
+    }
+    const bearishPctHeader = document.getElementById("bearishPctHeader");
+    if (bearishPctHeader) {
+        bearishPctHeader.addEventListener("click", () => {
+            bearishSortDir = bearishSortDir === "asc" ? "desc" : "asc";
+            applyBearishSort(true);
+            updateSortIndicators();
         });
     }
     document.addEventListener("DOMContentLoaded", () => {
