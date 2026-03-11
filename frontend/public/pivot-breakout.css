@@ -27,14 +27,23 @@ body {
 }
 
 .pivot-title {
-    margin: 0;
-    font-size: 1.8rem;
+    margin: 0 0 0.6rem;
+    font-size: 1.7rem;
 }
 
 .pivot-subtitle {
     margin: 0 0 0.6rem;
     color: var(--theme-muted, #94a3b8);
     font-size: 0.95rem;
+}
+
+.pivot-subtitle-inline {
+    display: inline-block;
+    margin-left: 0.75rem;
+    font-size: 0.95rem;
+    color: var(--theme-muted, #94a3b8);
+    font-weight: 400;
+    vertical-align: baseline;
 }
 
 .pivot-header-actions {
