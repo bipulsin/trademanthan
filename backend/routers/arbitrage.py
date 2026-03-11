@@ -338,11 +338,16 @@ def _process_pivot_batch(
     target_date_str: str,
     use_same_day: bool,
     ohlc_interval: str = "daily",
+    threshold_pct: float = 5.0,
 ) -> tuple[list[dict], list[dict]]:
     """
     Process a batch of rows and return (bullish, bearish) lists.
     R3/S3 from previous trading day OHLC. ohlc_interval: "daily" | "hourly" | "15min".
+    threshold_pct: percentage distance band for R3/S3 (e.g. 5.0 for 5%).
     """
+    # Sanitize threshold to a reasonable band (0.1% .. 10%).
+    band_pct = max(0.1, min(threshold_pct or 5.0, 10.0))
+    band = band_pct / 100.0
     bullish: list[dict] = []
     bearish: list[dict] = []
     for row in rows:
@@ -371,8 +376,8 @@ def _process_pivot_batch(
             "r3_pivot": round(r3, 4),
             "s3_pivot": round(s3, 4),
         }
-        in_bullish = (ltp <= r3) and (ltp >= (r3 * 0.95))
-        in_bearish = (ltp >= s3) and (ltp <= (s3 * 1.05))
+        in_bullish = (ltp <= r3) and (ltp >= (r3 * (1.0 - band)))
+        in_bearish = (ltp >= s3) and (ltp <= (s3 * (1.0 + band)))
         if in_bullish and in_bearish:
             # LTP in overlap zone: assign to the level it's closer to (by % distance)
             dist_r3_pct = (r3 - ltp) / r3 if r3 > 0 else 1.0
@@ -393,6 +398,12 @@ def _process_pivot_batch(
 @router.get("/pivot-breakout")
 async def get_pivot_breakout(
     ohlc_interval: str = Query("daily", description="OHLC source: 'daily', 'hourly', or '15min'"),
+    threshold_pct: float = Query(
+        5.0,
+        ge=0.1,
+        le=10.0,
+        description="Percentage band for closeness to R3/S3 (e.g. 5.0 for 5%).",
+    ),
 ):
     """
     Return bullish and bearish pivot breakout candidates.
@@ -400,7 +411,7 @@ async def get_pivot_breakout(
     - ohlc_interval=daily: use daily candles (default)
     - ohlc_interval=hourly: aggregate 1-hour candles into daily OHLC
     - ohlc_interval=15min: aggregate 15-minute candles into daily OHLC
-    - Bullish: LTP within 5% below R3; Bearish: LTP within 5% above S3.
+    - threshold_pct: band in % for distance from R3/S3 (default 5.0).
     """
     try:
         with engine.begin() as conn:
@@ -425,7 +436,12 @@ async def get_pivot_breakout(
         target_date_str, use_same_day = _pivot_breakout_candle_mode(upstox)
         interval = ohlc_interval if ohlc_interval in ("daily", "hourly", "15min") else "daily"
         bullish, bearish = _process_pivot_batch(
-            rows, upstox, target_date_str, use_same_day, ohlc_interval=interval
+            rows,
+            upstox,
+            target_date_str,
+            use_same_day,
+            ohlc_interval=interval,
+            threshold_pct=threshold_pct,
         )
 
         # Nearest candidates first.
@@ -437,11 +453,12 @@ async def get_pivot_breakout(
             "ltp_date": target_date_str,
             "pivot_date": pivot_date,
             "ohlc_interval": interval,
+            "threshold_pct": threshold_pct,
             "bullish_count": len(bullish),
             "bearish_count": len(bearish),
             "bullish": bullish,
             "bearish": bearish,
-            "note": "LTP and R3/S3 use current-month FUTURE contract. Use ?ohlc_interval=hourly or 15min for intraday-aggregated OHLC.",
+            "note": "LTP and R3/S3 use current-month FUTURE contract. Use ?ohlc_interval=hourly or 15min for intraday-aggregated OHLC. Use ?threshold_pct=1|2|3|5 to control closeness band.",
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to fetch pivot breakout: {exc}")
@@ -450,7 +467,13 @@ async def get_pivot_breakout(
 @router.get("/pivot-breakout/debug/{symbol}")
 async def get_pivot_breakout_debug(
     symbol: str,
-        ohlc_interval: str = Query("daily", description="OHLC source: 'daily', 'hourly', or '15min'"),
+    ohlc_interval: str = Query("daily", description="OHLC source: 'daily', 'hourly', or '15min'"),
+    threshold_pct: float = Query(
+        5.0,
+        ge=0.1,
+        le=10.0,
+        description="Percentage band for closeness to R3/S3 (e.g. 5.0 for 5%).",
+    ),
 ):
     """
     Debug endpoint: trace pivot-breakout logic for a given symbol (e.g. NHPC).
@@ -510,10 +533,12 @@ async def get_pivot_breakout_debug(
         r3 = high + 2.0 * (pivot - low)
         s3 = low - 2.0 * (high - pivot)
 
-        bullish_ok = (ltp <= r3) and (ltp >= (r3 * 0.95))
-        bearish_ok = (ltp >= s3) and (ltp <= (s3 * 1.05))
-        r3_min = r3 * 0.95
-        s3_max = s3 * 1.05
+        band_pct = max(0.1, min(threshold_pct or 5.0, 10.0))
+        band = band_pct / 100.0
+        bullish_ok = (ltp <= r3) and (ltp >= (r3 * (1.0 - band)))
+        bearish_ok = (ltp >= s3) and (ltp <= (s3 * (1.0 + band)))
+        r3_min = r3 * (1.0 - band)
+        s3_max = s3 * (1.0 + band)
 
         out = {
             "success": True,
@@ -532,7 +557,8 @@ async def get_pivot_breakout_debug(
             "bearish_pass": bearish_ok,
             "ohlc_source": f"{interval} (previous trading day)",
             "ohlc_interval": interval,
-            "note": f"R3/S3 from previous day OHLC ({interval} candles). Use ?ohlc_interval=hourly or 15min for intraday-aggregated.",
+            "threshold_pct": band_pct,
+            "note": f"R3/S3 from previous day OHLC ({interval} candles). Use ?ohlc_interval=hourly or 15min for intraday-aggregated, and ?threshold_pct=1|2|3|5 for band.",
         }
         if interval == "daily":
             candles = upstox.get_historical_candles_by_instrument_key(
@@ -552,10 +578,17 @@ BATCH_SIZE = 10
 @router.get("/pivot-breakout-stream")
 async def get_pivot_breakout_stream(
     ohlc_interval: str = Query("daily", description="OHLC source: 'daily', 'hourly', or '15min'"),
+    threshold_pct: float = Query(
+        5.0,
+        ge=0.1,
+        le=10.0,
+        description="Percentage band for closeness to R3/S3 (e.g. 5.0 for 5%).",
+    ),
 ):
     """
     Streaming pivot breakout: process in batches of 10, yield NDJSON chunks.
     Use ?ohlc_interval=hourly or 15min for intraday-aggregated OHLC.
+    Use ?threshold_pct=1|2|3|5 for band of closeness to R3/S3.
     """
     async def generate():
         try:
@@ -576,13 +609,19 @@ async def get_pivot_breakout_stream(
             upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
             target_date_str, use_same_day = _pivot_breakout_candle_mode(upstox)
             interval = ohlc_interval if ohlc_interval in ("daily", "hourly", "15min") else "daily"
+            band_pct = max(0.1, min(threshold_pct or 5.0, 10.0))
             all_bullish: list[dict] = []
             all_bearish: list[dict] = []
 
             for i in range(0, len(rows), BATCH_SIZE):
                 batch = rows[i : i + BATCH_SIZE]
                 b, be = _process_pivot_batch(
-                    batch, upstox, target_date_str, use_same_day, ohlc_interval=interval
+                    batch,
+                    upstox,
+                    target_date_str,
+                    use_same_day,
+                    ohlc_interval=interval,
+                    threshold_pct=band_pct,
                 )
                 all_bullish.extend(b)
                 all_bearish.extend(be)
@@ -602,9 +641,10 @@ async def get_pivot_breakout_stream(
                 "ltp_date": target_date_str,
                 "pivot_date": pivot_date,
                 "ohlc_interval": interval,
+                "threshold_pct": band_pct,
                 "bullish_count": len(all_bullish),
                 "bearish_count": len(all_bearish),
-                "note": "LTP and R3/S3 use current-month FUTURE contract. Use ?ohlc_interval=hourly or 15min for intraday-aggregated OHLC.",
+                "note": "LTP and R3/S3 use current-month FUTURE contract. Use ?ohlc_interval=hourly or 15min for intraday-aggregated OHLC and ?threshold_pct=1|2|3|5 for band.",
             }
             yield json.dumps(final) + "\n"
         except Exception as exc:

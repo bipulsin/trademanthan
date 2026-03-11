@@ -29,16 +29,23 @@
                     <p class="pivot-subtitle">Screens current month futures near pivot breakout zones.</p>
                 </div>
                 <div class="pivot-header-actions">
-                    <label for="ohlcInterval">OHLC:</label>
-                    <select id="ohlcInterval" title="Daily = day candles; 1-Hour / 15-Min = aggregate intraday candles into daily OHLC">
-                        <option value="daily">Daily</option>
-                        <option value="hourly">1-Hour</option>
-                        <option value="15min">15-Min</option>
-                    </select>
-                    <button class="btn-refresh" id="refreshBtn" type="button">
-                        <i class="fas fa-sync-alt"></i> Refresh
-                    </button>
-                </div>
+                        <label for="ohlcInterval">OHLC:</label>
+                        <select id="ohlcInterval" title="Daily = day candles; 1-Hour / 15-Min = aggregate intraday candles into daily OHLC">
+                            <option value="daily">Daily</option>
+                            <option value="hourly">1-Hour</option>
+                            <option value="15min">15-Min</option>
+                        </select>
+                        <label for="thresholdPct">Close to R3/S3:</label>
+                        <select id="thresholdPct" title="Allowed distance band from R3/S3">
+                            <option value="1">1%</option>
+                            <option value="2">2%</option>
+                            <option value="3">3%</option>
+                            <option value="5" selected>5%</option>
+                        </select>
+                        <button class="btn-refresh" id="refreshBtn" type="button">
+                            <i class="fas fa-sync-alt"></i> Refresh
+                        </button>
+                    </div>
             </div>
 
             <section class="pivot-section">

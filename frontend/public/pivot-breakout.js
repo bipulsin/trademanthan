@@ -54,7 +54,12 @@
         const allBearish = [];
 
         const ohlcInterval = (document.getElementById("ohlcInterval") || {}).value || "daily";
-        const streamUrl = `${STREAM_API}?ohlc_interval=${encodeURIComponent(ohlcInterval)}`;
+        const thresholdPct = (document.getElementById("thresholdPct") || {}).value || "5";
+        const params = new URLSearchParams({
+            ohlc_interval: ohlcInterval,
+            threshold_pct: thresholdPct,
+        });
+        const streamUrl = `${STREAM_API}?${params.toString()}`;
         try {
             const res = await fetch(streamUrl, { cache: "no-store" });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -128,7 +133,13 @@
         bearishSummary.textContent = "Loading data...";
 
         try {
-            const res = await fetch(API, { cache: "no-store" });
+            const ohlcInterval = (document.getElementById("ohlcInterval") || {}).value || "daily";
+            const thresholdPct = (document.getElementById("thresholdPct") || {}).value || "5";
+            const params = new URLSearchParams({
+                ohlc_interval: ohlcInterval,
+                threshold_pct: thresholdPct,
+            });
+            const res = await fetch(`${API}?${params.toString()}`, { cache: "no-store" });
             const data = await res.json();
             if (!res.ok || !data.success) {
                 throw new Error(data.detail || "Failed to fetch pivot breakout data");
@@ -149,6 +160,8 @@
     refreshBtn.addEventListener("click", () => loadDataStream());
     const ohlcIntervalEl = document.getElementById("ohlcInterval");
     if (ohlcIntervalEl) ohlcIntervalEl.addEventListener("change", () => loadDataStream());
+    const thresholdEl = document.getElementById("thresholdPct");
+    if (thresholdEl) thresholdEl.addEventListener("change", () => loadDataStream());
     document.addEventListener("DOMContentLoaded", () => {
         document.title = "Pivot Breakout - Tradentical";
         loadDataStream();
