@@ -132,6 +132,10 @@ body {
     margin-top: 0.15rem;
 }
 
+.pivot-table th.sortable {
+    cursor: pointer;
+}
+
 .num {
     text-align: right !important;
     font-variant-numeric: tabular-nums;
