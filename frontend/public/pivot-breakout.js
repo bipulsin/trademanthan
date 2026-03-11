@@ -149,5 +149,8 @@
     refreshBtn.addEventListener("click", () => loadDataStream());
     const ohlcIntervalEl = document.getElementById("ohlcInterval");
     if (ohlcIntervalEl) ohlcIntervalEl.addEventListener("change", () => loadDataStream());
-    document.addEventListener("DOMContentLoaded", () => loadDataStream());
+    document.addEventListener("DOMContentLoaded", () => {
+        document.title = "Pivot Breakout - Tradentical";
+        loadDataStream();
+    });
 })();
