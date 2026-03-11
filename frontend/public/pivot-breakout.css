@@ -32,7 +32,7 @@ body {
 }
 
 .pivot-subtitle {
-    margin: 0.3rem 0 0;
+    margin: 0 0 0.6rem;
     color: var(--theme-muted, #94a3b8);
     font-size: 0.95rem;
 }
