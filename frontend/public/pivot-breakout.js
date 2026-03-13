@@ -114,9 +114,11 @@
 
         const ohlcInterval = (document.getElementById("ohlcInterval") || {}).value || "daily";
         const thresholdPct = (document.getElementById("thresholdPct") || {}).value || "5";
+        const vwapFilter = (document.getElementById("vwapFilter") || {}).checked ? "5" : "0";
         const params = new URLSearchParams({
             ohlc_interval: ohlcInterval,
             threshold_pct: thresholdPct,
+            vwap_filter_pct: vwapFilter,
         });
         const streamUrl = `${STREAM_API}?${params.toString()}`;
         try {
@@ -177,8 +179,8 @@
             }
             updateSortIndicators();
         } catch (err) {
-            bullishBody.innerHTML = `<tr><td colspan="4" class="state-cell">Error: ${err.message}</td></tr>`;
-            bearishBody.innerHTML = `<tr><td colspan="4" class="state-cell">Error: ${err.message}</td></tr>`;
+            bullishBody.innerHTML = `<tr><td colspan="5" class="state-cell">Error: ${err.message}</td></tr>`;
+            bearishBody.innerHTML = `<tr><td colspan="5" class="state-cell">Error: ${err.message}</td></tr>`;
             bullishSummary.textContent = "Failed to load data.";
             bearishSummary.textContent = "Failed to load data.";
         }
@@ -193,9 +195,11 @@
         try {
             const ohlcInterval = (document.getElementById("ohlcInterval") || {}).value || "daily";
             const thresholdPct = (document.getElementById("thresholdPct") || {}).value || "5";
+            const vwapFilter = (document.getElementById("vwapFilter") || {}).checked ? "5" : "0";
             const params = new URLSearchParams({
                 ohlc_interval: ohlcInterval,
                 threshold_pct: thresholdPct,
+                vwap_filter_pct: vwapFilter,
             });
             const res = await fetch(`${API}?${params.toString()}`, { cache: "no-store" });
             const data = await res.json();
@@ -223,6 +227,8 @@
     if (ohlcIntervalEl) ohlcIntervalEl.addEventListener("change", () => loadDataStream());
     const thresholdEl = document.getElementById("thresholdPct");
     if (thresholdEl) thresholdEl.addEventListener("change", () => loadDataStream());
+    const vwapFilterEl = document.getElementById("vwapFilter");
+    if (vwapFilterEl) vwapFilterEl.addEventListener("change", () => loadDataStream());
     const bullishPctHeader = document.getElementById("bullishPctHeader");
     if (bullishPctHeader) {
         bullishPctHeader.addEventListener("click", () => {

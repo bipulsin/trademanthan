@@ -67,6 +67,19 @@ body {
     cursor: pointer;
 }
 
+.pivot-header-actions .vwap-filter-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: var(--theme-muted, #94a3b8);
+}
+
+.pivot-header-actions .vwap-filter-label input[type="checkbox"] {
+    cursor: pointer;
+}
+
 .btn-refresh {
     border: 1px solid var(--theme-border, #334155);
     background: var(--theme-card, #1e293b);

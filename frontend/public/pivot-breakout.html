@@ -46,6 +46,10 @@
                             <option value="3">3%</option>
                             <option value="5" selected>5%</option>
                         </select>
+                        <label class="vwap-filter-label" for="vwapFilter">
+                            <input type="checkbox" id="vwapFilter" title="Only show stocks whose future LTP is within ±5% of 1-hour candle VWAP">
+                            Within 5% of 1H VWAP
+                        </label>
                         <button class="btn-refresh" id="refreshBtn" type="button">
                             <i class="fas fa-sync-alt"></i> Refresh
                         </button>
@@ -103,7 +107,7 @@
     </div>
 
     <script src="left-menu.js?v=2.8"></script>
-    <script src="pivot-breakout.js?v=1.5"></script>
+    <script src="pivot-breakout.js?v=1.6"></script>
     <script src="version.js?v=1.0"></script>
     <script src="cache-manager.js?v=1.0"></script>
 </body>
