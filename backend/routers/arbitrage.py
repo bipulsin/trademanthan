@@ -339,15 +339,19 @@ def _process_pivot_batch(
     use_same_day: bool,
     ohlc_interval: str = "daily",
     threshold_pct: float = 5.0,
+    vwap_filter_pct: float = 0.0,
 ) -> tuple[list[dict], list[dict]]:
     """
     Process a batch of rows and return (bullish, bearish) lists.
     R3/S3 from previous trading day OHLC. ohlc_interval: "daily" | "hourly" | "15min".
     threshold_pct: percentage distance band for R3/S3 (e.g. 5.0 for 5%).
+    vwap_filter_pct: if > 0, only include rows where LTP is within ±vwap_filter_pct% of VWAP,
+    using the same candle duration as selected by ohlc_interval ("daily" -> days/1, "hourly" -> hours/1, "15min" -> minutes/15).
     """
     # Sanitize threshold to a reasonable band (0.1% .. 10%).
     band_pct = max(0.1, min(threshold_pct or 5.0, 10.0))
     band = band_pct / 100.0
+    vwap_band = max(0.0, min(vwap_filter_pct or 0.0, 20.0)) / 100.0  # cap at 20%
     bullish: list[dict] = []
     bearish: list[dict] = []
     for row in rows:
@@ -386,6 +390,24 @@ def _process_pivot_batch(
                 in_bearish = False
             else:
                 in_bullish = False
+        if vwap_band > 0 and (in_bullish or in_bearish):
+            # Align VWAP candle duration with selected OHLC interval
+            if ohlc_interval == "hourly":
+                vwap_interval = "hours/1"
+            elif ohlc_interval == "15min":
+                vwap_interval = "minutes/15"
+            else:
+                vwap_interval = "days/1"
+            vwap_val = upstox.get_candle_vwap_by_instrument_key(
+                row["currmth_future_instrument_key"], interval=vwap_interval, days_back=2
+            )
+            if vwap_val is None or vwap_val <= 0:
+                continue
+            low_bound = vwap_val * (1.0 - vwap_band)
+            high_bound = vwap_val * (1.0 + vwap_band)
+            if not (low_bound <= ltp <= high_bound):
+                continue
+            payload["vwap_price"] = round(vwap_val, 4)
         if in_bullish:
             diff_r3 = r3 - ltp
             bullish.append({**payload, "difference_from_r3": round(diff_r3, 4), "difference_from_r3_pct": round((diff_r3 / r3) * 100.0, 4)})
@@ -404,6 +426,12 @@ async def get_pivot_breakout(
         le=10.0,
         description="Percentage band for closeness to R3/S3 (e.g. 5.0 for 5%).",
     ),
+    vwap_filter_pct: float = Query(
+        0.0,
+        ge=0.0,
+        le=20.0,
+        description="If > 0, only show rows where LTP is within ±this % of 1h candle VWAP (e.g. 5 = within 5%).",
+    ),
 ):
     """
     Return bullish and bearish pivot breakout candidates.
@@ -412,6 +440,7 @@ async def get_pivot_breakout(
     - ohlc_interval=hourly: aggregate 1-hour candles into daily OHLC
     - ohlc_interval=15min: aggregate 15-minute candles into daily OHLC
     - threshold_pct: band in % for distance from R3/S3 (default 5.0).
+    - vwap_filter_pct: if 5, only show candidates within ±5% of 1h candle VWAP.
     """
     try:
         with engine.begin() as conn:
@@ -442,6 +471,7 @@ async def get_pivot_breakout(
             use_same_day,
             ohlc_interval=interval,
             threshold_pct=threshold_pct,
+            vwap_filter_pct=vwap_filter_pct,
         )
 
         # Nearest candidates first.
@@ -458,7 +488,8 @@ async def get_pivot_breakout(
             "bearish_count": len(bearish),
             "bullish": bullish,
             "bearish": bearish,
-            "note": "LTP and R3/S3 use current-month FUTURE contract. Use ?ohlc_interval=hourly or 15min for intraday-aggregated OHLC. Use ?threshold_pct=1|2|3|5 to control closeness band.",
+            "vwap_filter_pct": vwap_filter_pct,
+            "note": "LTP and R3/S3 use current-month FUTURE contract. Use ?ohlc_interval=hourly or 15min for intraday-aggregated OHLC. Use ?threshold_pct=1|2|3|5 to control closeness band. Use ?vwap_filter_pct=5 to filter by 1h VWAP.",
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to fetch pivot breakout: {exc}")
@@ -584,11 +615,18 @@ async def get_pivot_breakout_stream(
         le=10.0,
         description="Percentage band for closeness to R3/S3 (e.g. 5.0 for 5%).",
     ),
+    vwap_filter_pct: float = Query(
+        0.0,
+        ge=0.0,
+        le=20.0,
+        description="If > 0, only show rows where LTP is within ±this % of 1h candle VWAP (e.g. 5 = within 5%).",
+    ),
 ):
     """
     Streaming pivot breakout: process in batches of 10, yield NDJSON chunks.
     Use ?ohlc_interval=hourly or 15min for intraday-aggregated OHLC.
     Use ?threshold_pct=1|2|3|5 for band of closeness to R3/S3.
+    Use ?vwap_filter_pct=5 to filter by 1h VWAP.
     """
     async def generate():
         try:
@@ -622,6 +660,7 @@ async def get_pivot_breakout_stream(
                     use_same_day,
                     ohlc_interval=interval,
                     threshold_pct=band_pct,
+                    vwap_filter_pct=vwap_filter_pct,
                 )
                 all_bullish.extend(b)
                 all_bearish.extend(be)
@@ -642,9 +681,10 @@ async def get_pivot_breakout_stream(
                 "pivot_date": pivot_date,
                 "ohlc_interval": interval,
                 "threshold_pct": band_pct,
+                "vwap_filter_pct": vwap_filter_pct,
                 "bullish_count": len(all_bullish),
                 "bearish_count": len(all_bearish),
-                "note": "LTP and R3/S3 use current-month FUTURE contract. Use ?ohlc_interval=hourly or 15min for intraday-aggregated OHLC and ?threshold_pct=1|2|3|5 for band.",
+                "note": "LTP and R3/S3 use current-month FUTURE contract. Use ?ohlc_interval=hourly or 15min for intraday-aggregated OHLC, ?threshold_pct=1|2|3|5 for band, ?vwap_filter_pct=5 for 1h VWAP filter.",
             }
             yield json.dumps(final) + "\n"
         except Exception as exc:

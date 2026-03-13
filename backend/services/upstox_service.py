@@ -1082,6 +1082,37 @@ class UpstoxService:
             logger.error(f"❌ Error fetching candles for {instrument_key}: {str(e)}")
             return None
 
+    def get_candle_vwap_by_instrument_key(
+        self, instrument_key: str, interval: str = "hours/1", days_back: int = 2
+    ) -> Optional[float]:
+        """
+        Get VWAP-like typical price for the latest candle of the given interval.
+
+        - If interval="days/1"  -> daily candle VWAP (previous/latest day in range)
+        - If interval="hours/1" -> 1-hour candle VWAP
+        - If interval="minutes/15" -> 15-minute candle VWAP
+
+        Returns (high + low + close) / 3 for the most recent candle, or None if unavailable.
+        """
+        try:
+            candles = self.get_historical_candles_by_instrument_key(
+                instrument_key, interval=interval, days_back=days_back
+            )
+            if not candles:
+                return None
+            candles_sorted = sorted(candles, key=lambda c: c.get("timestamp") or "")
+            latest = candles_sorted[-1]
+            high = float(latest.get("high", 0) or 0)
+            low = float(latest.get("low", 0) or 0)
+            close = float(latest.get("close", 0) or 0)
+            if high <= 0 or low <= 0 or close <= 0:
+                return None
+            vwap = (high + low + close) / 3.0
+            return round(vwap, 4)
+        except Exception as e:
+            logger.debug(f"Candle VWAP ({interval}) for {instrument_key}: {e}")
+            return None
+
     def get_monthly_candles_by_instrument_key(self, instrument_key: str, months_back: int = 4) -> Optional[List[Dict]]:
         """
         Fetch monthly candle data for pivot calculation (matches TradingView 1D chart).
