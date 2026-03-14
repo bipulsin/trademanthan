@@ -38,17 +38,17 @@
                         <h2>
                             <span><i class="fas fa-chart-line"></i> NIFTY250</span>
                             <button class="cargpt-btn cargpt-btn-primary" id="runNifty250Btn">
-                                <i class="fas fa-play"></i> Run Analysis
+                                <i class="fas fa-sync-alt"></i> Load
                             </button>
                         </h2>
                         <div class="card-body">
                             <p style="color: var(--cargpt-muted); margin-bottom: 16px; font-size: 0.9rem;">
-                                Runs CAR analysis on all stocks from arbitrage_master. Uses 52-week high date, cumulative average, and BUY signal logic. Data via Upstox API.
+                                Lists data from table car_nifty200 where signal is set. Sorted by signal (reverse). No calculations on this tab; data is updated by the backend scheduler.
                             </p>
                             <div id="nifty250Container">
-                                <div class="cargpt-empty" id="nifty250Empty">Click "Run Analysis" to generate the report.</div>
+                                <div class="cargpt-empty" id="nifty250Empty">Click "Load" to fetch from car_nifty200.</div>
                                 <div class="cargpt-loading" id="nifty250Loading" style="display: none;">
-                                    <i class="fas fa-spinner fa-spin"></i> Analyzing...
+                                    <i class="fas fa-spinner fa-spin"></i> Loading...
                                 </div>
                                 <div class="cargpt-table-wrap" id="nifty250TableWrap" style="display: none;">
                                     <table class="cargpt-table">
@@ -404,7 +404,7 @@
             wrap.style.display = 'none';
 
             try {
-                const r = await fetch(CARGPT_BASE_URL + '/analyze-nifty250');
+                const r = await fetch(CARGPT_BASE_URL + '/nifty250-list');
                 const text = await r.text();
                 const data = safeParseJson(text);
 
@@ -423,7 +423,7 @@
                 }
                 if (!data || !Array.isArray(data) || data.length === 0) {
                     empty.style.display = 'block';
-                    empty.textContent = 'No stocks in arbitrage_master or no data returned.';
+                    empty.textContent = 'No records with signal in car_nifty200.';
                     return;
                 }
                 wrap.style.display = 'block';

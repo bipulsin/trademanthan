@@ -281,32 +281,38 @@ async def run_car_analysis_for_input(body: AnalyzeSymbolsRequest):
     return [CarAnalysisResult(**r) for r in results]
 
 
-@router.get("/analyze-nifty250", response_model=List[CarAnalysisResult])
-async def run_car_analysis_nifty250():
+@router.get("/nifty250-list", response_model=List[dict])
+async def get_nifty250_list():
     """
-    Run CAR analysis for all stocks listed in arbitrage_master.
-    Uses Upstox API for historical and current data. Same logic as CAR Analysis tab.
+    Return rows from car_nifty200 where signal is not null/blank.
+    Sorted by signal in reverse order (e.g. BUY first). No CAR calculation - read-only from table.
     """
     with engine.begin() as conn:
         rows = conn.execute(
             text(
                 """
-                SELECT DISTINCT stock
-                FROM arbitrage_master
-                WHERE stock IS NOT NULL AND TRIM(stock) <> ''
-                  AND stock_instrument_key IS NOT NULL
-                ORDER BY stock ASC
+                SELECT stock, stock_ltp, date_52weekhigh, last10daycummavg, signal
+                FROM car_nifty200
+                WHERE signal IS NOT NULL AND TRIM(signal) <> ''
+                ORDER BY signal DESC
                 """
             )
         ).mappings().all()
-    symbols = [(r["stock"] or "").strip().upper() for r in rows if (r.get("stock") or "").strip()]
-    if not symbols:
-        return []
-    upstox = get_upstox_service()
-    weeks = get_number_of_weeks()
-    results = run_car_analysis_for_symbols(
-        symbols=symbols,
-        upstox_service=upstox,
-        number_of_weeks=weeks
-    )
-    return [CarAnalysisResult(**r) for r in results]
+    out = []
+    for r in rows:
+        stock = (r.get("stock") or "").strip()
+        if not stock:
+            continue
+        last10 = (r.get("last10daycummavg") or "").strip()
+        last10_list = [x.strip() for x in last10.split(",") if x.strip()] if last10 else []
+        d = r.get("date_52weekhigh")
+        date_str = d.strftime("%Y-%m-%d") if d and hasattr(d, "strftime") else (str(d) if d else "")
+        out.append({
+            "symbol": stock,
+            "stock_name": stock,
+            "week_52_high_date": date_str,
+            "current_price": float(r["stock_ltp"]) if r.get("stock_ltp") is not None else None,
+            "last_10_cumulative_avg": last10_list,
+            "signal": (r.get("signal") or "").strip(),
+        })
+    return out
