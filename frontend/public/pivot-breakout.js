@@ -285,6 +285,46 @@
         }
     }
 
+    function syncMainToMobile() {
+        const o = document.getElementById("ohlcInterval");
+        const t = document.getElementById("thresholdPct");
+        const v = document.getElementById("vwapFilter");
+        const oM = document.getElementById("ohlcIntervalMobile");
+        const tM = document.getElementById("thresholdPctMobile");
+        const vM = document.getElementById("vwapFilterMobile");
+        if (oM && o) oM.value = o.value;
+        if (tM && t) tM.value = t.value;
+        if (vM && v) vM.checked = v.checked;
+    }
+    function syncMobileToMain() {
+        const o = document.getElementById("ohlcInterval");
+        const t = document.getElementById("thresholdPct");
+        const v = document.getElementById("vwapFilter");
+        const oM = document.getElementById("ohlcIntervalMobile");
+        const tM = document.getElementById("thresholdPctMobile");
+        const vM = document.getElementById("vwapFilterMobile");
+        if (o && oM) o.value = oM.value;
+        if (t && tM) t.value = tM.value;
+        if (v && vM) v.checked = vM.checked;
+    }
+    function triggerReloadFromFilterChange() {
+        loadedBullish = false;
+        loadedBearish = false;
+        if (activeTab === "bullish") loadDataStream("bullish");
+        else loadDataStream("bearish");
+    }
+
+    const filtersToggle = document.getElementById("pivotFiltersToggle");
+    const mobileFiltersWrap = document.getElementById("pivotMobileFilters");
+    const filtersPanel = document.getElementById("pivotFiltersPanel");
+    if (filtersToggle && mobileFiltersWrap) {
+        filtersToggle.addEventListener("click", () => {
+            const expanded = mobileFiltersWrap.classList.toggle("expanded");
+            filtersToggle.setAttribute("aria-expanded", String(expanded));
+            if (filtersPanel) filtersPanel.setAttribute("aria-hidden", String(!expanded));
+        });
+    }
+
     refreshBtn.addEventListener("click", () => {
         if (activeTab === "bullish") loadedBullish = false;
         else loadedBearish = false;
@@ -292,25 +332,25 @@
     });
     const ohlcIntervalEl = document.getElementById("ohlcInterval");
     if (ohlcIntervalEl) ohlcIntervalEl.addEventListener("change", () => {
-        loadedBullish = false;
-        loadedBearish = false;
-        if (activeTab === "bullish") loadDataStream("bullish");
-        else loadDataStream("bearish");
+        syncMainToMobile();
+        triggerReloadFromFilterChange();
     });
     const thresholdEl = document.getElementById("thresholdPct");
     if (thresholdEl) thresholdEl.addEventListener("change", () => {
-        loadedBullish = false;
-        loadedBearish = false;
-        if (activeTab === "bullish") loadDataStream("bullish");
-        else loadDataStream("bearish");
+        syncMainToMobile();
+        triggerReloadFromFilterChange();
     });
     const vwapFilterEl = document.getElementById("vwapFilter");
     if (vwapFilterEl) vwapFilterEl.addEventListener("change", () => {
-        loadedBullish = false;
-        loadedBearish = false;
-        if (activeTab === "bullish") loadDataStream("bullish");
-        else loadDataStream("bearish");
+        syncMainToMobile();
+        triggerReloadFromFilterChange();
     });
+    const ohlcMobile = document.getElementById("ohlcIntervalMobile");
+    const thresholdMobile = document.getElementById("thresholdPctMobile");
+    const vwapMobile = document.getElementById("vwapFilterMobile");
+    if (ohlcMobile) ohlcMobile.addEventListener("change", () => { syncMobileToMain(); triggerReloadFromFilterChange(); });
+    if (thresholdMobile) thresholdMobile.addEventListener("change", () => { syncMobileToMain(); triggerReloadFromFilterChange(); });
+    if (vwapMobile) vwapMobile.addEventListener("change", () => { syncMobileToMain(); triggerReloadFromFilterChange(); });
     const bullishPctHeader = document.getElementById("bullishPctHeader");
     if (bullishPctHeader) {
         bullishPctHeader.addEventListener("click", () => {
@@ -338,6 +378,7 @@
 
     document.addEventListener("DOMContentLoaded", () => {
         document.title = "Pivot Breakout - Tradentical";
+        syncMainToMobile();
         setActiveTab("bullish");
         ensureTabLoaded("bullish");
     });

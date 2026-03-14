@@ -219,6 +219,78 @@ body {
     }
 }
 
+/* Mobile-only collapsible filters above tabs */
+.pivot-mobile-filters {
+    display: none;
+    margin-bottom: 0.75rem;
+}
+
+.pivot-filters-toggle {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.6rem 0.9rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--theme-text, #f1f5f9);
+    background: var(--theme-card, #1e293b);
+    border: 1px solid var(--theme-border, #334155);
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.pivot-filters-toggle:hover {
+    background: var(--theme-border, #334155);
+}
+
+.pivot-filters-toggle-icon {
+    transition: transform 0.2s ease;
+}
+
+.pivot-mobile-filters.expanded .pivot-filters-toggle-icon {
+    transform: rotate(180deg);
+}
+
+.pivot-filters-panel {
+    display: none;
+    padding: 0.75rem;
+    margin-top: 0.25rem;
+    border: 1px solid var(--theme-border, #334155);
+    border-radius: 8px;
+    background: var(--theme-card, #1e293b);
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.pivot-mobile-filters.expanded .pivot-filters-panel {
+    display: flex;
+}
+
+.pivot-filters-panel label {
+    font-size: 0.88rem;
+    color: var(--theme-muted, #94a3b8);
+}
+
+.pivot-filters-panel select {
+    background: var(--theme-bg, #0f172a);
+    color: var(--theme-text, #f1f5f9);
+    border: 1px solid var(--theme-border, #334155);
+    border-radius: 6px;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.9rem;
+    width: 100%;
+    max-width: 100%;
+}
+
+.pivot-filters-panel .vwap-filter-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+
 @media (max-width: 768px) {
     .mobile-title-bar {
         display: block !important;
@@ -233,7 +305,76 @@ body {
         flex-direction: column;
         align-items: flex-start;
     }
+    .pivot-header-actions {
+        display: none !important;
+    }
+    .pivot-mobile-filters {
+        display: block;
+    }
     .btn-refresh {
         align-self: flex-end;
+    }
+    /* Tabs: touch-friendly on mobile */
+    .pivot-tab-list {
+        display: flex;
+    }
+    .pivot-tab {
+        flex: 1;
+        min-height: 44px;
+        padding: 0.65rem 0.5rem;
+        font-size: 0.95rem;
+        text-align: center;
+    }
+    /* Mobile table: only Current Month Future + % Diff; one row per record */
+    .pivot-table-wrap {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    .pivot-table {
+        min-width: 200px;
+    }
+    .pivot-table thead th:nth-child(1),
+    .pivot-table thead th:nth-child(3),
+    .pivot-table thead th:nth-child(4) {
+        display: none;
+    }
+    .pivot-table tbody td:nth-child(1),
+    .pivot-table tbody td:nth-child(3),
+    .pivot-table tbody td:nth-child(4) {
+        display: none;
+    }
+    .pivot-table th,
+    .pivot-table td {
+        padding: 0.5rem 0.4rem;
+        font-size: 0.8rem;
+        white-space: nowrap;
+        line-height: 1.25;
+    }
+    .pivot-table thead th:nth-child(2) .th-label {
+        font-size: 0.75rem;
+    }
+    .pivot-table thead th:nth-child(2) .th-date,
+    .pivot-table thead th:nth-child(5) .th-date,
+    .pivot-table thead th:nth-child(5) .sort-indicator {
+        display: none;
+    }
+    .pivot-table thead th:nth-child(5) .th-label {
+        font-size: 0.75rem;
+    }
+    .pivot-table tbody td:nth-child(2) {
+        max-width: 140px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-size: 0.8rem;
+    }
+    .pivot-table tbody td:nth-child(5) {
+        font-size: 0.8rem;
+        font-variant-numeric: tabular-nums;
+    }
+}
+
+@media (min-width: 769px) {
+    .pivot-mobile-filters {
+        display: none !important;
     }
 }

@@ -1,17 +1,17 @@
 ---
-description: Auto push and deploy workflow after requested changes
+description: Auto push and deploy workflow after code changes
 alwaysApply: true
 ---
 
 # Auto Push + EC2 Deploy Workflow
 
-When a task includes code changes and the user asks to push/deploy, execute the full release flow without extra prompting:
+After completing code changes that affect the running app (backend or frontend), run the full release flow unless the user explicitly says not to deploy:
 
-1. Commit relevant changes with a clear message.
-2. Push to `origin/main` (or current target branch requested by user).
-3. Trigger backend deployment via `POST /scan/deploy-backend`.
-4. Verify deployment via `/scan/deployment-status` and report result.
+1. Stage and commit relevant changes with a clear message.
+2. Push to `origin main`.
+3. Trigger backend deployment via `POST https://trademanthan.in/scan/deploy-backend`.
+4. Optionally verify via `/scan/deployment-status` and report.
 
-For TradeManthan deployments, prefer the API-based deploy endpoint over SSH.
+Use the API-based deploy endpoint; the EC2 server pulls from GitHub on deploy. Frontend is served from the same server, so one deploy updates both.
 
 If deployment fails, surface the exact failure and next remediation step.
