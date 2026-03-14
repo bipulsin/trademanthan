@@ -125,7 +125,53 @@ class YahooVWAPService:
         except Exception as e:
             logger.error(f"Error fetching candles for {symbol}: {str(e)}")
             return None
-    
+
+    def get_historical_daily_1y(self, symbol: str) -> Optional[List[Dict]]:
+        """
+        Fetch ~1 year of daily OHLC for CAR analysis (52-week high, cumulative avg).
+        symbol: e.g. RELIANCE (will use RELIANCE.NS).
+        Returns list of {"date": "YYYY-MM-DD", "close": float}, sorted by date ascending, or None.
+        """
+        try:
+            yahoo_symbol = self.get_symbol_suffix(symbol)
+            url = f"{self.base_url}/{yahoo_symbol}"
+            params = {"range": "1y", "interval": "1d", "includePrePost": "false"}
+            response = requests.get(url, params=params, timeout=15)
+            if response.status_code != 200:
+                logger.warning(f"Yahoo chart 1y daily for {symbol}: HTTP {response.status_code}")
+                return None
+            data = response.json()
+            if "chart" not in data or "result" not in data["chart"] or not data["chart"]["result"]:
+                logger.warning(f"Yahoo chart 1y daily for {symbol}: no result")
+                return None
+            result = data["chart"]["result"][0]
+            timestamps = result.get("timestamp") or []
+            indicators = (result.get("indicators") or {}).get("quote", [{}])
+            quote = indicators[0] if indicators else {}
+            closes = quote.get("close") or []
+            if not timestamps or not closes or len(timestamps) != len(closes):
+                logger.warning(f"Yahoo chart 1y daily for {symbol}: incomplete data")
+                return None
+            rows = []
+            for i in range(len(timestamps)):
+                ts = timestamps[i]
+                close = closes[i]
+                if close is None:
+                    continue
+                try:
+                    dt = datetime.fromtimestamp(ts, tz=pytz.UTC).astimezone(pytz.timezone("Asia/Kolkata"))
+                    date_str = dt.strftime("%Y-%m-%d")
+                    rows.append({"date": date_str, "close": float(close)})
+                except (TypeError, ValueError):
+                    continue
+            if not rows:
+                return None
+            rows.sort(key=lambda x: x["date"])
+            return rows
+        except Exception as e:
+            logger.error(f"Error fetching 1y daily for {symbol}: {str(e)}")
+            return None
+
     def get_vwap_data(self, symbol: str) -> Dict[str, float]:
         """
         Get current hour VWAP and previous hour VWAP for a symbol

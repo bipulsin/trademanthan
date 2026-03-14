@@ -67,6 +67,9 @@ from backend.services.health_monitor import health_monitor
 # Import index price scheduler instance and method
 from backend.services.index_price_scheduler import index_price_scheduler
 
+# CAR NIFTY200 updater (Yahoo + Upstox fallback)
+from backend.services.car_nifty200_updater import run_car_nifty200_update_job
+
 # Configure job function loggers to write ONLY to scan_st1_algo.log
 # This ensures all scan algorithm logs (webhooks, option contracts, trades, exits) go to scan_st1_algo.log
 job_loggers = [
@@ -452,10 +455,39 @@ class ScanST1AlgoScheduler:
                 coalesce=True
             )
             logger.info("✅ Scheduled: Index Price at Market Open/Close (9:15 AM, 3:30 PM)")
+
+            # 6. CAR NIFTY200 Updater - Every 3 hours (Yahoo first, Upstox fallback)
+            def run_car_nifty200_update():
+                logger.info("🔧 Triggering CAR NIFTY200 Update job...")
+                try:
+                    run_car_nifty200_update_job()
+                    logger.info("✅ CAR NIFTY200 Update job completed")
+                except Exception as e:
+                    logger.error(f"❌ CAR NIFTY200 Update job failed: {e}", exc_info=True)
+
+            self.scheduler.add_job(
+                run_car_nifty200_update,
+                trigger=IntervalTrigger(hours=3),
+                id='scan_st1_car_nifty200_update',
+                name='CAR NIFTY200 Update (Every 3 hours)',
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=600,
+                coalesce=True
+            )
+            logger.info("✅ Scheduled: CAR NIFTY200 Update (Every 3 hours)")
             
             # Start the scheduler
             self.scheduler.start()
             self.is_running = True
+
+            # Run CAR NIFTY200 update once immediately after startup (e.g. after deploy)
+            try:
+                logger.info("🔧 Running CAR NIFTY200 Update once on startup...")
+                run_car_nifty200_update_job()
+                logger.info("✅ CAR NIFTY200 startup run completed")
+            except Exception as e:
+                logger.error(f"❌ CAR NIFTY200 startup run failed: {e}", exc_info=True)
             
             total_jobs = len(self.scheduler.get_jobs())
             logger.info("=" * 60)

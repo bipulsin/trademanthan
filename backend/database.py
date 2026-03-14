@@ -180,5 +180,55 @@ def _run_startup_schema_migrations(db_engine):
                         """
                     )
                 )
+
+            # CAR NIFTY200 table: CAR analysis cache for stocks from arbitrage_master
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS car_nifty200 (
+                        stock TEXT PRIMARY KEY,
+                        stock_instrument_key TEXT,
+                        stock_ltp NUMERIC(16,4),
+                        date_52weekhigh DATE,
+                        last10daycummavg TEXT,
+                        signal TEXT,
+                        last_updated_date DATE
+                    )
+                    """
+                )
+            )
+            # One-time seed: copy from arbitrage_master (only if car_nifty200 is empty)
+            row_count = conn.execute(text("SELECT COUNT(*) FROM car_nifty200")).scalar() or 0
+            if row_count == 0:
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            INSERT INTO car_nifty200 (stock, stock_instrument_key, stock_ltp)
+                            SELECT stock, stock_instrument_key, stock_ltp
+                            FROM arbitrage_master
+                            WHERE stock IS NOT NULL AND TRIM(stock) <> ''
+                              AND stock_instrument_key IS NOT NULL
+                            ON CONFLICT (stock) DO NOTHING
+                            """
+                        )
+                    )
+                else:
+                    conn.execute(
+                        text(
+                            """
+                            INSERT INTO car_nifty200 (stock, stock_instrument_key, stock_ltp)
+                            SELECT stock, stock_instrument_key, stock_ltp
+                            FROM arbitrage_master
+                            WHERE stock IS NOT NULL AND TRIM(stock) <> ''
+                              AND stock_instrument_key IS NOT NULL
+                            """
+                        )
+                    )
+                try:
+                    seed_count = conn.execute(text("SELECT COUNT(*) FROM car_nifty200")).scalar() or 0
+                    print(f"car_nifty200 one-time seed: {seed_count} rows from arbitrage_master")
+                except Exception:
+                    pass
     except Exception as migration_error:
         print(f"Warning: startup schema migration failed: {migration_error}")
