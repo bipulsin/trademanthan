@@ -332,6 +332,18 @@ def _get_prev_day_ohlc(
     return (high, low, close, candle_date)
 
 
+def _dedupe_pivot_by_stock(items: list[dict], key: str = "stock") -> list[dict]:
+    """Keep first occurrence of each stock to avoid duplicate rows."""
+    seen: set[str] = set()
+    out: list[dict] = []
+    for r in items:
+        s = (r.get(key) or "").strip()
+        if s and s not in seen:
+            seen.add(s)
+            out.append(r)
+    return out
+
+
 def _process_pivot_batch(
     rows: list,
     upstox: UpstoxService,
@@ -410,10 +422,14 @@ def _process_pivot_batch(
             payload["vwap_price"] = round(vwap_val, 4)
         if in_bullish:
             diff_r3 = r3 - ltp
-            bullish.append({**payload, "difference_from_r3": round(diff_r3, 4), "difference_from_r3_pct": round((diff_r3 / r3) * 100.0, 4)})
+            pct_r3 = (diff_r3 / r3) * 100.0
+            if pct_r3 <= band_pct:  # only include if % diff within threshold
+                bullish.append({**payload, "difference_from_r3": round(diff_r3, 4), "difference_from_r3_pct": round(pct_r3, 4)})
         if in_bearish:
             diff_s3 = ltp - s3
-            bearish.append({**payload, "difference_from_s3": round(diff_s3, 4), "difference_from_s3_pct": round((diff_s3 / s3) * 100.0, 4)})
+            pct_s3 = (diff_s3 / s3) * 100.0
+            if pct_s3 <= band_pct:  # only include if % diff within threshold
+                bearish.append({**payload, "difference_from_s3": round(diff_s3, 4), "difference_from_s3_pct": round(pct_s3, 4)})
     return bullish, bearish
 
 
@@ -473,6 +489,8 @@ async def get_pivot_breakout(
             threshold_pct=threshold_pct,
             vwap_filter_pct=vwap_filter_pct,
         )
+        bullish = _dedupe_pivot_by_stock(bullish)
+        bearish = _dedupe_pivot_by_stock(bearish)
 
         # Nearest candidates first.
         bullish.sort(key=lambda x: (x.get("difference_from_r3", 10**9), x.get("stock", "")))
@@ -656,6 +674,8 @@ async def get_pivot_breakout_stream(
             band_pct = max(0.1, min(threshold_pct or 5.0, 10.0))
             all_bullish: list[dict] = []
             all_bearish: list[dict] = []
+            seen_bullish: set[str] = set()
+            seen_bearish: set[str] = set()
 
             for i in range(0, len(rows), BATCH_SIZE):
                 batch = rows[i : i + BATCH_SIZE]
@@ -668,13 +688,19 @@ async def get_pivot_breakout_stream(
                     threshold_pct=band_pct,
                     vwap_filter_pct=vwap_filter_pct,
                 )
-                all_bullish.extend(b)
-                all_bearish.extend(be)
+                new_b = [r for r in b if (r.get("stock") or "").strip() not in seen_bullish]
+                for r in new_b:
+                    seen_bullish.add((r.get("stock") or "").strip())
+                new_be = [r for r in be if (r.get("stock") or "").strip() not in seen_bearish]
+                for r in new_be:
+                    seen_bearish.add((r.get("stock") or "").strip())
+                all_bullish.extend(new_b)
+                all_bearish.extend(new_be)
                 chunk = {"batch": i // BATCH_SIZE, "done": False}
-                if seg in ("bullish", "both") and b:
-                    chunk["bullish"] = b
-                if seg in ("bearish", "both") and be:
-                    chunk["bearish"] = be
+                if seg in ("bullish", "both") and new_b:
+                    chunk["bullish"] = new_b
+                if seg in ("bearish", "both") and new_be:
+                    chunk["bearish"] = new_be
                 yield json.dumps(chunk) + "\n"
 
             all_bullish.sort(key=lambda x: (x.get("difference_from_r3", 10**9), x.get("stock", "")))
