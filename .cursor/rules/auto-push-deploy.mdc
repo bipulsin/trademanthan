@@ -3,9 +3,9 @@ description: Auto push and deploy workflow after code changes
 alwaysApply: true
 ---
 
-# Auto Push + EC2 Deploy Workflow
+# Auto Push + EC2 Deploy Workflow (Default Process)
 
-After completing code changes that affect the running app (backend or frontend), run the full release flow unless the user explicitly says not to deploy:
+**Commit to GitHub and deploy to EC2 is the default process always.** After any code changes that affect the running app (backend or frontend), run the full release flow unless the user explicitly says not to deploy:
 
 1. Stage and commit relevant changes with a clear message.
 2. Push to `origin main`.
