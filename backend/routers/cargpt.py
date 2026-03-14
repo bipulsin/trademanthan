@@ -4,10 +4,11 @@ Accessible before/after login. No auth required.
 """
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
-from backend.database import get_db
+from backend.database import get_db, engine
 from backend.models.car import CarStockList
 from backend.config import settings
 from backend.services.car_config_loader import get_number_of_weeks, set_number_of_weeks
@@ -268,6 +269,37 @@ async def run_car_analysis_for_input(body: AnalyzeSymbolsRequest):
     Does not require symbols to be in DB.
     """
     symbols = [s.strip().upper() for s in (body.symbols or []) if (s or "").strip()]
+    if not symbols:
+        return []
+    upstox = get_upstox_service()
+    weeks = get_number_of_weeks()
+    results = run_car_analysis_for_symbols(
+        symbols=symbols,
+        upstox_service=upstox,
+        number_of_weeks=weeks
+    )
+    return [CarAnalysisResult(**r) for r in results]
+
+
+@router.get("/analyze-nifty250", response_model=List[CarAnalysisResult])
+async def run_car_analysis_nifty250():
+    """
+    Run CAR analysis for all stocks listed in arbitrage_master.
+    Uses Upstox API for historical and current data. Same logic as CAR Analysis tab.
+    """
+    with engine.begin() as conn:
+        rows = conn.execute(
+            text(
+                """
+                SELECT DISTINCT stock
+                FROM arbitrage_master
+                WHERE stock IS NOT NULL AND TRIM(stock) <> ''
+                  AND stock_instrument_key IS NOT NULL
+                ORDER BY stock ASC
+                """
+            )
+        ).mappings().all()
+    symbols = [(r["stock"] or "").strip().upper() for r in rows if (r.get("stock") or "").strip()]
     if not symbols:
         return []
     upstox = get_upstox_service()

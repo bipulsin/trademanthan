@@ -139,6 +139,48 @@ body[data-theme="light"] .cargpt-help-icon-btn:hover {
     background: #15803d;
 }
 
+/* Tabs: NIFTY250 | CAR Analysis */
+.cargpt-tabs {
+    margin-top: 0.5rem;
+}
+
+.cargpt-tab-list {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--cargpt-border);
+    margin-bottom: 0;
+}
+
+.cargpt-tab {
+    padding: 0.6rem 1.2rem;
+    font-size: 1rem;
+    font-weight: 600;
+    background: transparent;
+    color: var(--cargpt-muted);
+    border: none;
+    border-bottom: 3px solid transparent;
+    cursor: pointer;
+    transition: color 0.2s, border-color 0.2s;
+}
+
+.cargpt-tab:hover {
+    color: var(--cargpt-text);
+}
+
+.cargpt-tab.active {
+    color: var(--cargpt-text);
+    border-bottom-color: var(--cargpt-accent);
+}
+
+.cargpt-tab-panel {
+    display: none;
+    padding-top: 1rem;
+}
+
+.cargpt-tab-panel.active {
+    display: block;
+}
+
 .cargpt-help-link {
     display: inline-block;
     color: var(--cargpt-accent);
