@@ -112,8 +112,10 @@ def run_car_for_symbol_upstox(stock: str, instrument_key: str) -> Optional[Dict[
 def update_car_nifty200_batch() -> Dict[str, int]:
     """
     Update car_nifty200 rows where last_updated_date is not today (IST).
-    Try Yahoo first; for any row that fails or stays unupdated, use Upstox.
-    Process in batches of BATCH_SIZE. Returns {"updated": n, "failed": m}.
+    For rows with NULL signal (never filled): try Upstox first, then Yahoo (to backfill).
+    For rows already having data: try Yahoo first, then Upstox fallback.
+    Yahoo tries .NS then .BO (BSE) when NSE returns no data.
+    Returns {"updated": n, "failed": m}.
     """
     from backend.database import engine
     from sqlalchemy import text
@@ -127,7 +129,7 @@ def update_car_nifty200_batch() -> Dict[str, int]:
         rows = conn.execute(
             text(
                 """
-                SELECT stock, stock_instrument_key
+                SELECT stock, stock_instrument_key, signal
                 FROM car_nifty200
                 WHERE last_updated_date IS NULL OR last_updated_date < :today
                 ORDER BY stock ASC
@@ -140,19 +142,30 @@ def update_car_nifty200_batch() -> Dict[str, int]:
         logger.info("car_nifty200: no rows to update (all up to date)")
         return {"updated": 0, "failed": 0}
 
-    logger.info(f"car_nifty200: updating {len(rows)} rows (Yahoo first, Upstox fallback)")
+    logger.info(f"car_nifty200: updating {len(rows)} rows (Upstox first for NULL signal, else Yahoo then Upstox)")
 
     for i in range(0, len(rows), BATCH_SIZE):
         batch = rows[i : i + BATCH_SIZE]
         for row in batch:
             stock = (row["stock"] or "").strip()
             instrument_key = (row["stock_instrument_key"] or "").strip()
+            signal_null = (row.get("signal") or "").strip() == ""
             if not stock:
                 failed += 1
                 continue
-            data = run_car_for_symbol_yahoo(stock)
+            data = None
+            # Rows with NULL signal: try Upstox first to backfill (Yahoo often has no .NS data for some symbols)
+            if signal_null and instrument_key:
+                data = run_car_for_symbol_upstox(stock, instrument_key)
+                if data and all([data.get("stock_ltp"), data.get("date_52weekhigh"), data.get("last10daycummavg"), data.get("signal")]):
+                    logger.info(f"car_nifty200: {stock} backfilled via Upstox (was NULL signal)")
+            # If still no valid data, try Yahoo (NSE then BSE .BO)
+            if data is None or not all([data.get("stock_ltp"), data.get("date_52weekhigh"), data.get("last10daycummavg"), data.get("signal")]):
+                data = run_car_for_symbol_yahoo(stock)
+            # If Yahoo failed, try Upstox (for rows we didn't try Upstox first, or retry)
             if data is None or not all([data.get("stock_ltp"), data.get("date_52weekhigh"), data.get("last10daycummavg"), data.get("signal")]):
                 if instrument_key:
+                    logger.info(f"car_nifty200: Yahoo no/incomplete data for {stock}, trying Upstox")
                     data = run_car_for_symbol_upstox(stock, instrument_key)
                 else:
                     data = None
@@ -183,6 +196,10 @@ def update_car_nifty200_batch() -> Dict[str, int]:
                     logger.warning(f"car_nifty200 update DB for {stock}: {e}")
                     failed += 1
             else:
+                if instrument_key:
+                    logger.warning(f"car_nifty200: both Yahoo and Upstox failed for {stock}")
+                else:
+                    logger.warning(f"car_nifty200: no instrument_key for {stock}, Yahoo failed")
                 failed += 1
 
     logger.info(f"car_nifty200: updated={updated}, failed={failed}")

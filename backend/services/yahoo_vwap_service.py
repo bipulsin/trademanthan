@@ -126,22 +126,30 @@ class YahooVWAPService:
             logger.error(f"Error fetching candles for {symbol}: {str(e)}")
             return None
 
-    def get_historical_daily_1y(self, symbol: str) -> Optional[List[Dict]]:
+    def get_historical_daily_1y(self, symbol: str, try_bse_if_nse_fails: bool = True) -> Optional[List[Dict]]:
         """
         Fetch ~1 year of daily OHLC for CAR analysis (52-week high, cumulative avg).
-        symbol: e.g. RELIANCE (will use RELIANCE.NS).
+        symbol: e.g. RELIANCE (will use RELIANCE.NS, or RELIANCE.BO if try_bse_if_nse_fails and NSE returns no data).
         Returns list of {"date": "YYYY-MM-DD", "close": float}, sorted by date ascending, or None.
         """
         try:
-            yahoo_symbol = self.get_symbol_suffix(symbol)
+            sym = (symbol or "").strip().upper()
+            if not sym:
+                return None
+            # Try NSE first
+            yahoo_symbol = f"{sym}.NS"
             url = f"{self.base_url}/{yahoo_symbol}"
             params = {"range": "1y", "interval": "1d", "includePrePost": "false"}
             response = requests.get(url, params=params, timeout=15)
             if response.status_code != 200:
+                if try_bse_if_nse_fails:
+                    return self._fetch_1y_daily_with_symbol(f"{sym}.BO", symbol)
                 logger.warning(f"Yahoo chart 1y daily for {symbol}: HTTP {response.status_code}")
                 return None
             data = response.json()
             if "chart" not in data or "result" not in data["chart"] or not data["chart"]["result"]:
+                if try_bse_if_nse_fails:
+                    return self._fetch_1y_daily_with_symbol(f"{sym}.BO", symbol)
                 logger.warning(f"Yahoo chart 1y daily for {symbol}: no result")
                 return None
             result = data["chart"]["result"][0]
@@ -150,6 +158,8 @@ class YahooVWAPService:
             quote = indicators[0] if indicators else {}
             closes = quote.get("close") or []
             if not timestamps or not closes or len(timestamps) != len(closes):
+                if try_bse_if_nse_fails:
+                    return self._fetch_1y_daily_with_symbol(f"{sym}.BO", symbol)
                 logger.warning(f"Yahoo chart 1y daily for {symbol}: incomplete data")
                 return None
             rows = []
@@ -164,12 +174,55 @@ class YahooVWAPService:
                     rows.append({"date": date_str, "close": float(close)})
                 except (TypeError, ValueError):
                     continue
-            if not rows:
+            if not rows or len(rows) < 10:
+                if try_bse_if_nse_fails:
+                    return self._fetch_1y_daily_with_symbol(f"{sym}.BO", symbol)
                 return None
             rows.sort(key=lambda x: x["date"])
             return rows
         except Exception as e:
             logger.error(f"Error fetching 1y daily for {symbol}: {str(e)}")
+            if try_bse_if_nse_fails and (symbol or "").strip().upper():
+                return self._fetch_1y_daily_with_symbol(f"{(symbol or '').strip().upper()}.BO", symbol)
+            return None
+
+    def _fetch_1y_daily_with_symbol(self, yahoo_symbol: str, log_symbol: str) -> Optional[List[Dict]]:
+        """Fetch 1y daily for a specific Yahoo symbol (e.g. SYMBOL.BO). Used as BSE fallback after NSE fails."""
+        try:
+            url = f"{self.base_url}/{yahoo_symbol}"
+            params = {"range": "1y", "interval": "1d", "includePrePost": "false"}
+            response = requests.get(url, params=params, timeout=15)
+            if response.status_code != 200:
+                return None
+            data = response.json()
+            if "chart" not in data or "result" not in data["chart"] or not data["chart"]["result"]:
+                return None
+            result = data["chart"]["result"][0]
+            timestamps = result.get("timestamp") or []
+            indicators = (result.get("indicators") or {}).get("quote", [{}])
+            quote = indicators[0] if indicators else {}
+            closes = quote.get("close") or []
+            if not timestamps or not closes or len(timestamps) != len(closes):
+                return None
+            rows = []
+            for i in range(len(timestamps)):
+                ts = timestamps[i]
+                close = closes[i]
+                if close is None:
+                    continue
+                try:
+                    dt = datetime.fromtimestamp(ts, tz=pytz.UTC).astimezone(pytz.timezone("Asia/Kolkata"))
+                    date_str = dt.strftime("%Y-%m-%d")
+                    rows.append({"date": date_str, "close": float(close)})
+                except (TypeError, ValueError):
+                    continue
+            if not rows or len(rows) < 10:
+                return None
+            rows.sort(key=lambda x: x["date"])
+            logger.info(f"Yahoo 1y daily for {log_symbol}: used {yahoo_symbol} (BSE fallback)")
+            return rows
+        except Exception as e:
+            logger.debug(f"Yahoo BSE fallback for {log_symbol} ({yahoo_symbol}): {e}")
             return None
 
     def get_vwap_data(self, symbol: str) -> Dict[str, float]:
