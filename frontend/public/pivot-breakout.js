@@ -11,6 +11,11 @@
     let bearishData = [];
     let bullishSortDir = "asc";
     let bearishSortDir = "asc";
+    let activeTab = "bullish";
+    let loadedBullish = false;
+    let loadedBearish = false;
+    let loadingBullish = false;
+    let loadingBearish = false;
 
     function fmt(v) {
         if (v === null || v === undefined || Number.isNaN(Number(v))) return "-";
@@ -103,14 +108,39 @@
         if (bearishEl) bearishEl.textContent = bearishData.length ? (bearishSortDir === "asc" ? "▲" : "▼") : "";
     }
 
-    async function loadDataStream() {
-        bullishBody.innerHTML = '<tr><td colspan="5" class="state-cell">Loading...</td></tr>';
-        bearishBody.innerHTML = '<tr><td colspan="5" class="state-cell">Loading...</td></tr>';
-        bullishSummary.textContent = "Loading...";
-        bearishSummary.textContent = "Loading...";
+    function setActiveTab(tab) {
+        activeTab = tab;
+        document.querySelectorAll(".pivot-tab").forEach((t) => t.classList.remove("active"));
+        document.querySelectorAll(".pivot-tab-panel").forEach((p) => p.classList.remove("active"));
+        const tabEl = document.getElementById(tab === "bullish" ? "tabBullish" : "tabBearish");
+        const panelEl = document.getElementById(tab === "bullish" ? "panelBullish" : "panelBearish");
+        if (tabEl) tabEl.classList.add("active");
+        if (tabEl) tabEl.setAttribute("aria-selected", "true");
+        document.getElementById("tabBearish")?.setAttribute("aria-selected", tab === "bearish" ? "true" : "false");
+        document.getElementById("tabBullish")?.setAttribute("aria-selected", tab === "bullish" ? "true" : "false");
+        if (panelEl) panelEl.classList.add("active");
+        if (tab === "bullish") {
+            applyBullishSort(false);
+            updateSortIndicators();
+        } else {
+            applyBearishSort(false);
+            updateSortIndicators();
+        }
+    }
 
-        bullishData = [];
-        bearishData = [];
+    async function loadDataStream(segment) {
+        const isBullish = segment === "bullish";
+        if (isBullish) {
+            loadingBullish = true;
+            bullishData = [];
+            bullishSummary.textContent = "Loading...";
+            bullishBody.innerHTML = '<tr><td colspan="5" class="state-cell">Loading...</td></tr>';
+        } else {
+            loadingBearish = true;
+            bearishData = [];
+            bearishSummary.textContent = "Loading...";
+            bearishBody.innerHTML = '<tr><td colspan="5" class="state-cell">Loading...</td></tr>';
+        }
 
         const ohlcInterval = (document.getElementById("ohlcInterval") || {}).value || "daily";
         const thresholdPct = (document.getElementById("thresholdPct") || {}).value || "5";
@@ -119,6 +149,7 @@
             ohlc_interval: ohlcInterval,
             threshold_pct: thresholdPct,
             vwap_filter_pct: vwapFilter,
+            segment: segment,
         });
         const streamUrl = `${STREAM_API}?${params.toString()}`;
         try {
@@ -147,16 +178,26 @@
                     }
                     if (data.done) {
                         updateHeaderDates(data);
-                        bullishSummary.textContent = `Total bullish records: ${data.bullish_count || 0}`;
-                        bearishSummary.textContent = `Total bearish records: ${data.bearish_count || 0}`;
+                        if (isBullish) {
+                            bullishSummary.textContent = `Total bullish records: ${data.bullish_count ?? 0}`;
+                            loadedBullish = true;
+                            loadingBullish = false;
+                            if (activeTab === "bullish") applyBullishSort(false);
+                        } else {
+                            bearishSummary.textContent = `Total bearish records: ${data.bearish_count ?? 0}`;
+                            loadedBearish = true;
+                            loadingBearish = false;
+                            if (activeTab === "bearish") applyBearishSort(false);
+                        }
+                        updateSortIndicators();
                         continue;
                     }
-                    if (data.bullish && data.bullish.length > 0) {
+                    if (data.bullish && data.bullish.length > 0 && isBullish) {
                         data.bullish.forEach((r) => bullishData.push(r));
                         applyBullishSort(false);
                         bullishSummary.textContent = `Bullish: ${bullishData.length} (loading...)`;
                     }
-                    if (data.bearish && data.bearish.length > 0) {
+                    if (data.bearish && data.bearish.length > 0 && !isBullish) {
                         data.bearish.forEach((r) => bearishData.push(r));
                         applyBearishSort(false);
                         bearishSummary.textContent = `Bearish: ${bearishData.length} (loading...)`;
@@ -168,22 +209,44 @@
                     const data = JSON.parse(buffer);
                     if (data.done) {
                         updateHeaderDates(data);
-                        bullishSummary.textContent = `Total bullish records: ${data.bullish_count || 0}`;
-                        bearishSummary.textContent = `Total bearish records: ${data.bearish_count || 0}`;
+                        if (isBullish) {
+                            bullishSummary.textContent = `Total bullish records: ${data.bullish_count ?? 0}`;
+                            loadedBullish = true;
+                            loadingBullish = false;
+                            if (activeTab === "bullish") applyBullishSort(false);
+                        } else {
+                            bearishSummary.textContent = `Total bearish records: ${data.bearish_count ?? 0}`;
+                            loadedBearish = true;
+                            loadingBearish = false;
+                            if (activeTab === "bearish") applyBearishSort(false);
+                        }
+                        updateSortIndicators();
                     }
                 } catch (_) {}
             }
-            if (bullishData.length === 0 && bearishData.length === 0) {
+            if (isBullish && bullishData.length === 0) {
                 bullishBody.innerHTML = '<tr><td colspan="5" class="state-cell">No records found.</td></tr>';
+            }
+            if (!isBullish && bearishData.length === 0) {
                 bearishBody.innerHTML = '<tr><td colspan="5" class="state-cell">No records found.</td></tr>';
             }
             updateSortIndicators();
         } catch (err) {
-            bullishBody.innerHTML = `<tr><td colspan="5" class="state-cell">Error: ${err.message}</td></tr>`;
-            bearishBody.innerHTML = `<tr><td colspan="5" class="state-cell">Error: ${err.message}</td></tr>`;
-            bullishSummary.textContent = "Failed to load data.";
-            bearishSummary.textContent = "Failed to load data.";
+            if (isBullish) {
+                bullishBody.innerHTML = `<tr><td colspan="5" class="state-cell">Error: ${err.message}</td></tr>`;
+                bullishSummary.textContent = "Failed to load data.";
+                loadingBullish = false;
+            } else {
+                bearishBody.innerHTML = `<tr><td colspan="5" class="state-cell">Error: ${err.message}</td></tr>`;
+                bearishSummary.textContent = "Failed to load data.";
+                loadingBearish = false;
+            }
         }
+    }
+
+    function ensureTabLoaded(tab) {
+        if (tab === "bullish" && !loadedBullish && !loadingBullish) loadDataStream("bullish");
+        if (tab === "bearish" && !loadedBearish && !loadingBearish) loadDataStream("bearish");
     }
 
     async function loadData() {
@@ -222,13 +285,32 @@
         }
     }
 
-    refreshBtn.addEventListener("click", () => loadDataStream());
+    refreshBtn.addEventListener("click", () => {
+        if (activeTab === "bullish") loadedBullish = false;
+        else loadedBearish = false;
+        ensureTabLoaded(activeTab);
+    });
     const ohlcIntervalEl = document.getElementById("ohlcInterval");
-    if (ohlcIntervalEl) ohlcIntervalEl.addEventListener("change", () => loadDataStream());
+    if (ohlcIntervalEl) ohlcIntervalEl.addEventListener("change", () => {
+        loadedBullish = false;
+        loadedBearish = false;
+        if (activeTab === "bullish") loadDataStream("bullish");
+        else loadDataStream("bearish");
+    });
     const thresholdEl = document.getElementById("thresholdPct");
-    if (thresholdEl) thresholdEl.addEventListener("change", () => loadDataStream());
+    if (thresholdEl) thresholdEl.addEventListener("change", () => {
+        loadedBullish = false;
+        loadedBearish = false;
+        if (activeTab === "bullish") loadDataStream("bullish");
+        else loadDataStream("bearish");
+    });
     const vwapFilterEl = document.getElementById("vwapFilter");
-    if (vwapFilterEl) vwapFilterEl.addEventListener("change", () => loadDataStream());
+    if (vwapFilterEl) vwapFilterEl.addEventListener("change", () => {
+        loadedBullish = false;
+        loadedBearish = false;
+        if (activeTab === "bullish") loadDataStream("bullish");
+        else loadDataStream("bearish");
+    });
     const bullishPctHeader = document.getElementById("bullishPctHeader");
     if (bullishPctHeader) {
         bullishPctHeader.addEventListener("click", () => {
@@ -245,8 +327,18 @@
             updateSortIndicators();
         });
     }
+    document.getElementById("tabBullish")?.addEventListener("click", () => {
+        setActiveTab("bullish");
+        ensureTabLoaded("bullish");
+    });
+    document.getElementById("tabBearish")?.addEventListener("click", () => {
+        setActiveTab("bearish");
+        ensureTabLoaded("bearish");
+    });
+
     document.addEventListener("DOMContentLoaded", () => {
         document.title = "Pivot Breakout - Tradentical";
-        loadDataStream();
+        setActiveTab("bullish");
+        ensureTabLoaded("bullish");
     });
 })();

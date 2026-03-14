@@ -3246,6 +3246,56 @@ async def process_all_today_stocks(db: Session = Depends(get_db)):
             "timestamp": datetime.now().isoformat()
         }
 
+@router.get("/instruments-status")
+async def get_instruments_status():
+    """
+    Return status of the instruments JSON file: path, exists, last updated (UTC/IST), and whether it is from today (IST).
+    """
+    try:
+        from backend.config import get_instruments_file_path
+        from datetime import timezone
+        import pytz
+
+        instruments_file = get_instruments_file_path()
+        ist = pytz.timezone("Asia/Kolkata")
+        out = {
+            "success": True,
+            "path": str(instruments_file),
+            "exists": instruments_file.exists(),
+            "last_modified_utc": None,
+            "last_modified_ist": None,
+            "date_ist": None,
+            "today_ist": datetime.now(ist).strftime("%Y-%m-%d"),
+            "is_from_today": False,
+            "instrument_count": None,
+        }
+        if not instruments_file.exists():
+            return out
+        mtime_utc = datetime.fromtimestamp(instruments_file.stat().st_mtime, tz=timezone.utc)
+        mtime_ist = mtime_utc.astimezone(ist)
+        file_date_ist = mtime_ist.date()
+        today_ist = datetime.now(ist).date()
+        out["last_modified_utc"] = mtime_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
+        out["last_modified_ist"] = mtime_ist.strftime("%Y-%m-%d %H:%M:%S IST")
+        out["date_ist"] = file_date_ist.strftime("%Y-%m-%d")
+        out["is_from_today"] = file_date_ist >= today_ist
+        try:
+            with open(instruments_file, "r") as f:
+                data = json.load(f)
+            out["instrument_count"] = len(data) if isinstance(data, list) else None
+        except Exception:
+            pass
+        return out
+    except Exception as e:
+        logger.error(f"Error getting instruments status: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e),
+            "path": None,
+            "exists": False,
+        }
+
+
 @router.post("/download-instruments")
 async def download_instruments_now():
     """

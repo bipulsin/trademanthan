@@ -621,13 +621,19 @@ async def get_pivot_breakout_stream(
         le=20.0,
         description="If > 0, only show rows where LTP is within ±this % of 1h candle VWAP (e.g. 5 = within 5%).",
     ),
+    segment: str = Query(
+        "both",
+        description="Return only 'bullish', only 'bearish', or 'both' (default). Use for tab lazy-load.",
+    ),
 ):
     """
     Streaming pivot breakout: process in batches of 10, yield NDJSON chunks.
     Use ?ohlc_interval=hourly or 15min for intraday-aggregated OHLC.
     Use ?threshold_pct=1|2|3|5 for band of closeness to R3/S3.
     Use ?vwap_filter_pct=5 to filter by 1h VWAP.
+    Use ?segment=bullish or ?segment=bearish to load only that segment (e.g. for tab focus).
     """
+    seg = segment if segment in ("bullish", "bearish", "both") else "both"
     async def generate():
         try:
             with engine.begin() as conn:
@@ -664,12 +670,11 @@ async def get_pivot_breakout_stream(
                 )
                 all_bullish.extend(b)
                 all_bearish.extend(be)
-                chunk = {
-                    "batch": i // BATCH_SIZE,
-                    "bullish": b,
-                    "bearish": be,
-                    "done": False,
-                }
+                chunk = {"batch": i // BATCH_SIZE, "done": False}
+                if seg in ("bullish", "both") and b:
+                    chunk["bullish"] = b
+                if seg in ("bearish", "both") and be:
+                    chunk["bearish"] = be
                 yield json.dumps(chunk) + "\n"
 
             all_bullish.sort(key=lambda x: (x.get("difference_from_r3", 10**9), x.get("stock", "")))
@@ -684,7 +689,8 @@ async def get_pivot_breakout_stream(
                 "vwap_filter_pct": vwap_filter_pct,
                 "bullish_count": len(all_bullish),
                 "bearish_count": len(all_bearish),
-                "note": "LTP and R3/S3 use current-month FUTURE contract. Use ?ohlc_interval=hourly or 15min for intraday-aggregated OHLC, ?threshold_pct=1|2|3|5 for band, ?vwap_filter_pct=5 for 1h VWAP filter.",
+                "segment": seg,
+                "note": "LTP and R3/S3 use current-month FUTURE contract. Use ?segment=bullish|bearish for tab lazy-load.",
             }
             yield json.dumps(final) + "\n"
         except Exception as exc:

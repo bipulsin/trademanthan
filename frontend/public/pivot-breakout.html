@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="left-menu.css?v=2.2">
     <link rel="stylesheet" href="theme.css?v=1.3">
-    <link rel="stylesheet" href="pivot-breakout.css?v=1.3">
+    <link rel="stylesheet" href="pivot-breakout.css?v=1.5">
 </head>
 <body>
     <div class="mobile-title-bar">
@@ -25,89 +25,88 @@
         <main class="right-panel main-content-area">
             <div class="pivot-header">
                 <div>
-                    <h1 class="pivot-title">
-                        Pivot Breakout
-                        <span class="pivot-subtitle-inline">
-                            Screens current month futures near pivot breakout zones.
-                        </span>
-                    </h1>
+                    <h1 class="pivot-title">Pivot Breakout</h1>
+                    <p class="pivot-subtitle">Screens current month futures near pivot breakout zones.</p>
                 </div>
                 <div class="pivot-header-actions">
-                        <label for="ohlcInterval">OHLC:</label>
-                        <select id="ohlcInterval" title="Daily = day candles; 1-Hour / 15-Min = aggregate intraday candles into daily OHLC">
-                            <option value="daily">Daily</option>
-                            <option value="hourly">1-Hour</option>
-                            <option value="15min">15-Min</option>
-                        </select>
-                        <label for="thresholdPct">Close to R3/S3:</label>
-                        <select id="thresholdPct" title="Allowed distance band from R3/S3">
-                            <option value="1">1%</option>
-                            <option value="2">2%</option>
-                            <option value="3">3%</option>
-                            <option value="5" selected>5%</option>
-                        </select>
-                        <label class="vwap-filter-label" for="vwapFilter">
-                            <input type="checkbox" id="vwapFilter" title="Only show stocks whose future LTP is within ±5% of 1-hour candle VWAP">
-                            Within 5% of 1H VWAP
-                        </label>
-                        <button class="btn-refresh" id="refreshBtn" type="button">
-                            <i class="fas fa-sync-alt"></i> Refresh
-                        </button>
-                    </div>
+                    <label for="ohlcInterval">OHLC:</label>
+                    <select id="ohlcInterval" title="Daily = day candles; 1-Hour / 15-Min = aggregate intraday candles into daily OHLC">
+                        <option value="daily">Daily</option>
+                        <option value="hourly">1-Hour</option>
+                        <option value="15min">15-Min</option>
+                    </select>
+                    <label for="thresholdPct">Close to R3/S3:</label>
+                    <select id="thresholdPct" title="Allowed distance band from R3/S3">
+                        <option value="1">1%</option>
+                        <option value="2">2%</option>
+                        <option value="3">3%</option>
+                        <option value="5" selected>5%</option>
+                    </select>
+                    <label class="vwap-filter-label" for="vwapFilter">
+                        <input type="checkbox" id="vwapFilter" title="Only show stocks whose future LTP is within ±5% of 1-hour candle VWAP">
+                        Within 5% of 1H VWAP
+                    </label>
+                    <button class="btn-refresh" id="refreshBtn" type="button">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
             </div>
 
-            <section class="pivot-section">
-                <h2 class="pivot-section-title bullish"><i class="fas fa-arrow-trend-up"></i> Bullish</h2>
-                <div class="pivot-summary" id="bullishSummary">Loading data...</div>
-                <div class="pivot-table-wrap">
-                    <table class="pivot-table">
-                        <thead>
-                            <tr>
-                                <th>Stock</th>
-                                <th>Current Month Future</th>
-                                <th class="num"><span class="th-label">Future LTP</span><span class="th-date" id="bullishLtpDate"></span></th>
-                                <th class="num"><span class="th-label">R3 Pivot</span><span class="th-date" id="bullishR3Date"></span></th>
-                                <th id="bullishPctHeader" class="num sortable">
-                                    <span class="th-label">% Diff (LTP vs R3)</span>
-                                    <span class="sort-indicator" id="bullishPctSort"></span>
-                                </th>
-                            </tr>
-                        </thead>
-                        <tbody id="bullishBody">
-                            <tr><td colspan="5" class="state-cell">Loading...</td></tr>
-                        </tbody>
-                    </table>
+            <div class="pivot-tabs">
+                <div class="pivot-tab-list" role="tablist">
+                    <button type="button" class="pivot-tab bullish active" id="tabBullish" role="tab" aria-selected="true" aria-controls="panelBullish"><i class="fas fa-arrow-trend-up"></i> Bullish</button>
+                    <button type="button" class="pivot-tab bearish" id="tabBearish" role="tab" aria-selected="false" aria-controls="panelBearish"><i class="fas fa-arrow-trend-down"></i> Bearish</button>
                 </div>
-            </section>
-
-            <section class="pivot-section">
-                <h2 class="pivot-section-title bearish"><i class="fas fa-arrow-trend-down"></i> Bearish</h2>
-                <div class="pivot-summary" id="bearishSummary">Loading data...</div>
-                <div class="pivot-table-wrap">
-                    <table class="pivot-table">
-                        <thead>
-                            <tr>
-                                <th>Stock</th>
-                                <th>Current Month Future</th>
-                                <th class="num"><span class="th-label">Future LTP</span><span class="th-date" id="bearishLtpDate"></span></th>
-                                <th class="num"><span class="th-label">S3 Pivot</span><span class="th-date" id="bearishS3Date"></span></th>
-                                <th id="bearishPctHeader" class="num sortable">
-                                    <span class="th-label">% Diff (LTP vs S3)</span>
-                                    <span class="sort-indicator" id="bearishPctSort"></span>
-                                </th>
-                            </tr>
-                        </thead>
-                        <tbody id="bearishBody">
-                            <tr><td colspan="5" class="state-cell">Loading...</td></tr>
-                        </tbody>
-                    </table>
+                <div class="pivot-tab-panel active" id="panelBullish" role="tabpanel" aria-labelledby="tabBullish">
+                    <div class="pivot-summary" id="bullishSummary">Select tab to load data.</div>
+                    <div class="pivot-table-wrap">
+                        <table class="pivot-table">
+                            <thead>
+                                <tr>
+                                    <th>Stock</th>
+                                    <th>Current Month Future</th>
+                                    <th class="num"><span class="th-label">Future LTP</span><span class="th-date" id="bullishLtpDate"></span></th>
+                                    <th class="num"><span class="th-label">R3 Pivot</span><span class="th-date" id="bullishR3Date"></span></th>
+                                    <th id="bullishPctHeader" class="num sortable">
+                                        <span class="th-label">% Diff (LTP vs R3)</span>
+                                        <span class="sort-indicator" id="bullishPctSort"></span>
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody id="bullishBody">
+                                <tr><td colspan="5" class="state-cell">Click Bullish tab to load.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
-            </section>
+                <div class="pivot-tab-panel" id="panelBearish" role="tabpanel" aria-labelledby="tabBearish">
+                    <div class="pivot-summary" id="bearishSummary">Select tab to load data.</div>
+                    <div class="pivot-table-wrap">
+                        <table class="pivot-table">
+                            <thead>
+                                <tr>
+                                    <th>Stock</th>
+                                    <th>Current Month Future</th>
+                                    <th class="num"><span class="th-label">Future LTP</span><span class="th-date" id="bearishLtpDate"></span></th>
+                                    <th class="num"><span class="th-label">S3 Pivot</span><span class="th-date" id="bearishS3Date"></span></th>
+                                    <th id="bearishPctHeader" class="num sortable">
+                                        <span class="th-label">% Diff (LTP vs S3)</span>
+                                        <span class="sort-indicator" id="bearishPctSort"></span>
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody id="bearishBody">
+                                <tr><td colspan="5" class="state-cell">Click Bearish tab to load.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
         </main>
     </div>
 
     <script src="left-menu.js?v=2.8"></script>
-    <script src="pivot-breakout.js?v=1.6"></script>
+    <script src="pivot-breakout.js?v=1.7"></script>
     <script src="version.js?v=1.0"></script>
     <script src="cache-manager.js?v=1.0"></script>
 </body>

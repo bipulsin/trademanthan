@@ -8,16 +8,18 @@ import requests
 import gzip
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 from pathlib import Path
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+import pytz
 
 logger = logging.getLogger(__name__)
 
-# Max age of instruments file before re-download (hours)
+# Max age of instruments file before re-download (hours) - fallback if date check not used
 INSTRUMENTS_MAX_AGE_HOURS = 24
+IST = pytz.timezone("Asia/Kolkata")
 
 
 class InstrumentsDownloader:
@@ -217,30 +219,34 @@ def download_daily_instruments():
 
 def ensure_instruments_available() -> bool:
     """
-    Download instruments on startup if file is missing or stale (>24h).
+    Download instruments on startup if file is missing or not from today (IST).
+    If the instruments JSON file's date is not today, download and refresh it.
     Prevents 'Missing option data' for scan stocks when instruments weren't downloaded yet.
     """
     try:
         from backend.config import get_instruments_file_path
         instruments_file = get_instruments_file_path()
-        
+
         should_download = False
         if not instruments_file.exists():
             logger.info(f"📥 Instruments file missing at {instruments_file} - downloading on startup")
             should_download = True
         else:
-            mtime = datetime.fromtimestamp(instruments_file.stat().st_mtime)
-            age_hours = (datetime.now() - mtime).total_seconds() / 3600
-            if age_hours > INSTRUMENTS_MAX_AGE_HOURS:
-                logger.info(f"📥 Instruments file is {age_hours:.1f}h old (>{INSTRUMENTS_MAX_AGE_HOURS}h) - re-downloading")
+            # Check if file date (in IST) is not today — if so, refresh
+            mtime_utc = datetime.fromtimestamp(instruments_file.stat().st_mtime, tz=timezone.utc)
+            file_date_ist = mtime_utc.astimezone(IST).date()
+            today_ist = datetime.now(IST).date()
+            if file_date_ist < today_ist:
+                logger.info(
+                    f"📥 Instruments file is not from today (file date: {file_date_ist}, today: {today_ist} IST) - downloading now"
+                )
                 should_download = True
             else:
-                logger.info(f"✅ Instruments file exists and is fresh ({age_hours:.1f}h old)")
-        
+                logger.info(f"✅ Instruments file is from today ({file_date_ist} IST) - no download needed")
         if should_download:
             instruments_file.parent.mkdir(parents=True, exist_ok=True)
             return instruments_downloader.download_instruments()
-        
+
         return True
     except Exception as e:
         logger.error(f"Error ensuring instruments available: {str(e)}")
