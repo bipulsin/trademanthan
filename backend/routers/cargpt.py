@@ -232,11 +232,55 @@ async def update_config(number_of_weeks: int):
     return {"number_of_weeks": settings.CAR_NUMBER_OF_WEEKS}
 
 
+@router.get("/car-analysis-list")
+async def get_car_analysis_list(user_id: int):
+    """
+    Return carstocklist rows for the given user_id only (no other users' data).
+    Joins with car_nifty200 to show 52w high, ltp, last10 cumm avg, signal when available.
+    No CAR computation - read-only from DB. Used by CAR Analysis tab.
+    """
+    if user_id <= 0:
+        raise HTTPException(status_code=400, detail="Valid user_id is required")
+    with engine.begin() as conn:
+        rows = conn.execute(
+            text(
+                """
+                SELECT c.symbol, c.userid,
+                       n.date_52weekhigh, n.stock_ltp, n.last10daycummavg, n.signal
+                FROM carstocklist c
+                LEFT JOIN car_nifty200 n ON n.stock = c.symbol
+                WHERE c.userid = :user_id
+                ORDER BY c.created_at DESC
+                """
+            ),
+            {"user_id": user_id},
+        ).mappings().all()
+    symbols = [(r["symbol"] or "").strip() for r in rows if (r.get("symbol") or "").strip()]
+    names_map = get_stock_names_batch(symbols) if symbols else {}
+    out = []
+    for r in rows:
+        symbol = (r.get("symbol") or "").strip()
+        if not symbol:
+            continue
+        last10 = (r.get("last10daycummavg") or "").strip()
+        last10_list = [x.strip() for x in last10.split(",") if x.strip()] if last10 else []
+        d = r.get("date_52weekhigh")
+        date_str = d.strftime("%Y-%m-%d") if d and hasattr(d, "strftime") else (str(d) if d else "")
+        out.append({
+            "symbol": symbol,
+            "stock_name": names_map.get(symbol.upper(), symbol),
+            "week_52_high_date": date_str,
+            "current_price": float(r["stock_ltp"]) if r.get("stock_ltp") is not None else None,
+            "last_10_cumulative_avg": last10_list,
+            "signal": (r.get("signal") or "").strip() or None,
+        })
+    return out
+
+
 @router.get("/analyze", response_model=List[CarAnalysisResult])
 async def run_car_analysis(user_id: int, db: Session = Depends(get_db)):
     """
-    Run CAR analysis for all symbols in carstocklist.
-    Returns analysis results for each symbol.
+    Run CAR analysis for all symbols in carstocklist (legacy; CAR Analysis tab now uses car-analysis-list).
     """
     if user_id <= 0:
         raise HTTPException(status_code=400, detail="Valid user_id is required")

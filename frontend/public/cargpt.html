@@ -22,6 +22,7 @@
         <main class="main-content-area cargpt-main">
             <div class="cargpt-page-header">
                 <h1 class="cargpt-page-title">Cumulative Average Reversal</h1>
+                <span class="cargpt-session-info" id="cargptSessionInfo" aria-label="Session">Session: User ID —</span>
                 <button class="cargpt-help-icon-btn" type="button" onclick="openHelpModal()" aria-label="Help to Setup">
                     ?
                 </button>
@@ -454,8 +455,8 @@
                 if (!userId) {
                     throw new Error('Unable to detect logged in user. Please login again.');
                 }
-                const analyzeUrl = `${CARGPT_BASE_URL}/analyze?user_id=${userId}`;
-                const r = await fetch(analyzeUrl);
+                const listUrl = `${CARGPT_BASE_URL}/car-analysis-list?user_id=${userId}`;
+                const r = await fetch(listUrl);
                 const text = await r.text();
                 const data = safeParseJson(text);
 
@@ -476,12 +477,12 @@
 
                 if (!data || !Array.isArray(data) || data.length === 0) {
                     empty.style.display = 'block';
-                    empty.textContent = 'No stocks in list. Add symbols in Configure first.';
+                    empty.textContent = 'No stocks in your list. Add symbols in Configure first.';
                     return;
                 }
 
                 wrap.style.display = 'block';
-                renderCarResults(tbody, data, 'No stocks in list.');
+                renderCarResults(tbody, data);
             } catch (e) {
                 loading.style.display = 'none';
                 overlay.classList.remove('visible');
@@ -492,6 +493,11 @@
         });
 
         attachConfigureHandlers();
+
+        (function setSessionInHeader() {
+            var el = document.getElementById('cargptSessionInfo');
+            if (el) el.textContent = 'Session: User ID ' + (getCurrentUserId() || '—');
+        })();
     </script>
 </body>
 </html>

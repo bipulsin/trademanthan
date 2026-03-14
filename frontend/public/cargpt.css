@@ -89,6 +89,12 @@ body.cargpt-body {
     margin-right: auto;
 }
 
+.cargpt-session-info {
+    font-size: 0.85rem;
+    color: var(--cargpt-muted);
+    margin-right: 12px;
+}
+
 .cargpt-setup-link {
     display: inline-flex;
     align-items: center;
