@@ -305,6 +305,9 @@ body {
         flex-direction: column;
         align-items: flex-start;
     }
+    .pivot-title {
+        display: none !important;
+    }
     .pivot-header-actions {
         display: none !important;
     }
