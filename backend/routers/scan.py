@@ -3650,12 +3650,24 @@ async def run_car_nifty200_update():
 
 
 @router.post("/run-car-nifty200-full-refresh")
-async def run_car_nifty200_full_refresh():
+async def run_car_nifty200_full_refresh(background: bool = True):
     """
     One-time full refresh: update every row in car_nifty200 (CAR + DMA50/DMA100/DMA200),
     irrespective of last_updated_date.
+    If background=true (default), starts the job in a background thread and returns immediately
+    to avoid gateway timeout; otherwise runs in request (may timeout on large tables).
     """
+    import threading
+
+    def _run():
+        from backend.services.car_nifty200_updater import update_car_nifty200_batch
+        update_car_nifty200_batch(only_blank_last10=False, force_refresh_all=True)
+
     try:
+        if background:
+            t = threading.Thread(target=_run, daemon=True)
+            t.start()
+            return {"success": True, "message": "Full refresh started in background. Check logs for result."}
         from backend.services.car_nifty200_updater import update_car_nifty200_batch
         result = update_car_nifty200_batch(only_blank_last10=False, force_refresh_all=True)
         return {"success": True, "result": result}
