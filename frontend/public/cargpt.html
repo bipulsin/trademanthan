@@ -56,7 +56,6 @@
                                         <thead>
                                             <tr>
                                                 <th>Symbol</th>
-                                                <th>Stock Name</th>
                                                 <th>52 Week High Date</th>
                                                 <th>Current Price</th>
                                                 <th>Last 10 Day Cumulative Avg</th>
@@ -93,7 +92,6 @@
                                         <thead>
                                             <tr>
                                                 <th>Symbol</th>
-                                                <th>Stock Name</th>
                                                 <th>52 Week High Date</th>
                                                 <th>Current Price</th>
                                                 <th>Last 10 Day Cumulative Avg</th>
@@ -382,7 +380,6 @@
                 html += `
                     <tr>
                         <td>${row.symbol || '-'}</td>
-                        <td>${row.stock_name || row.symbol || '-'}</td>
                         <td>${row.week_52_high_date || '-'}${err}</td>
                         <td>${row.current_price != null ? '₹' + row.current_price : '-'}</td>
                         <td style="font-size: 0.85rem;">${formatCumulativeAvg(row.last_10_cumulative_avg)}</td>
