@@ -80,7 +80,8 @@ def _fetch_cholafin_nse_direct():
     import requests
     url = f"{YAHOO_BASE}/CHOLAFIN.NS?range=1y&interval=1d&includePrePost=false"
     try:
-        r = requests.get(url, timeout=25)
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0"}
+        r = requests.get(url, headers=headers, timeout=30)
         if r.status_code != 200:
             return None
         data = r.json()
@@ -88,16 +89,23 @@ def _fetch_cholafin_nse_direct():
             return None
         result = data["chart"]["result"][0]
         timestamps = result.get("timestamp") or []
-        indicators = (result.get("indicators") or {}).get("quote", [{}])
-        quote = indicators[0] if indicators else {}
-        closes = quote.get("close") or []
+        indicators = result.get("indicators") or {}
+        # Prefer quote[0].close; fallback to adjclose[0].adjclose (Yahoo sometimes returns only adjclose)
+        closes = []
+        quote_list = indicators.get("quote", [{}])
+        if quote_list:
+            closes = quote_list[0].get("close") or []
+        if not closes and indicators.get("adjclose"):
+            adj_list = indicators["adjclose"]
+            if adj_list and isinstance(adj_list[0], dict) and "adjclose" in adj_list[0]:
+                closes = adj_list[0]["adjclose"] or []
         if not timestamps or not closes or len(timestamps) != len(closes):
             return None
         ist = __import__("pytz").timezone("Asia/Kolkata")
         rows = []
         for i in range(len(timestamps)):
             ts = timestamps[i]
-            close = closes[i]
+            close = closes[i] if i < len(closes) else None
             if close is None:
                 continue
             try:
