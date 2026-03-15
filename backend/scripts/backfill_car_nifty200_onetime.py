@@ -75,6 +75,89 @@ def _date_52_to_str(v) -> str:
     return str(v)[:10]
 
 
+def _fetch_cholafin_nse_direct():
+    """Fetch CHOLAFIN.NS directly from Yahoo chart API (same URL as user); return list of {date, close} or None."""
+    import requests
+    url = f"{YAHOO_BASE}/CHOLAFIN.NS?range=1y&interval=1d&includePrePost=false"
+    try:
+        r = requests.get(url, timeout=25)
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        if not data or "chart" not in data or "result" not in data.get("chart", {}) or not data["chart"]["result"]:
+            return None
+        result = data["chart"]["result"][0]
+        timestamps = result.get("timestamp") or []
+        indicators = (result.get("indicators") or {}).get("quote", [{}])
+        quote = indicators[0] if indicators else {}
+        closes = quote.get("close") or []
+        if not timestamps or not closes or len(timestamps) != len(closes):
+            return None
+        ist = __import__("pytz").timezone("Asia/Kolkata")
+        rows = []
+        for i in range(len(timestamps)):
+            ts = timestamps[i]
+            close = closes[i]
+            if close is None:
+                continue
+            try:
+                from datetime import datetime as dt
+                d = dt.fromtimestamp(ts, tz=__import__("pytz").UTC).astimezone(ist)
+                rows.append({"date": d.strftime("%Y-%m-%d"), "close": float(close)})
+            except (TypeError, ValueError):
+                continue
+        if not rows or len(rows) < 10:
+            return None
+        rows.sort(key=lambda x: x["date"])
+        return rows
+    except Exception:
+        return None
+
+
+def _run_car_from_rows(rows):
+    """Run CAR logic on pre-fetched rows; return same dict as run_car_for_symbol_yahoo or None."""
+    import pandas as pd
+    from backend.services.car_nifty200_updater import (
+        _compute_cumulative_avg,
+        _compute_buy_signal,
+        PARTIAL_SIGNAL,
+    )
+    if not rows or len(rows) < 10:
+        return None
+    try:
+        df = pd.DataFrame(rows)
+        idx_max = df["close"].idxmax()
+        week_52_date = df.loc[idx_max, "date"]
+        df_from_high = df[df["date"] >= week_52_date].copy().sort_values("date").reset_index(drop=True)
+        last_close = float(df["close"].iloc[-1])
+        if len(df_from_high) < 10:
+            return {
+                "stock_ltp": round(last_close, 4),
+                "date_52weekhigh": week_52_date,
+                "last10daycummavg": "",
+                "signal": PARTIAL_SIGNAL,
+            }
+        df_from_high = _compute_cumulative_avg(df_from_high)
+        if df_from_high is None or len(df_from_high) < 10:
+            return {
+                "stock_ltp": round(last_close, 4),
+                "date_52weekhigh": week_52_date,
+                "last10daycummavg": "",
+                "signal": PARTIAL_SIGNAL,
+            }
+        last_10 = df_from_high["cumulative_avg"].tail(10).tolist()
+        last10_str = ",".join(f"{round(float(x), 2)}" for x in last_10)
+        signal = _compute_buy_signal(df_from_high)
+        return {
+            "stock_ltp": round(last_close, 4),
+            "date_52weekhigh": week_52_date,
+            "last10daycummavg": last10_str,
+            "signal": signal,
+        }
+    except Exception:
+        return None
+
+
 def main():
     from backend.database import engine
     from sqlalchemy import text
@@ -131,7 +214,16 @@ def main():
         else:
             log(f"Yahoo Finance outcome for {symbol}: FAILED or incomplete (no/invalid data)")
             data = None
-            if instrument_key:
+            # For CHOLAFIN, try direct fetch of CHOLAFIN.NS (same URL) in case server env differs
+            if symbol == "CHOLAFIN":
+                log(f"CHOLAFIN: trying direct Yahoo NSE fetch GET {YAHOO_BASE}/CHOLAFIN.NS?range=1y&interval=1d&includePrePost=false")
+                rows = _fetch_cholafin_nse_direct()
+                if rows:
+                    data = _run_car_from_rows(rows)
+                    if data and _is_valid_car_data(data):
+                        log(f"CHOLAFIN: SUCCESS via direct Yahoo NSE fetch")
+                        log(f"  date_52weekhigh={data.get('date_52weekhigh')}, signal={data.get('signal')}, stock_ltp={data.get('stock_ltp')}")
+            if not data and instrument_key:
                 # Try Upstox
                 end_d = datetime.now(ist)
                 start_d = end_d - timedelta(days=400)
