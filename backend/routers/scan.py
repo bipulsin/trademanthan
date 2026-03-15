@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request, HTTPException, Depends, Query, BackgroundTasks
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, PlainTextResponse
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
@@ -3578,6 +3578,16 @@ async def run_backfill_car_nifty200_onetime():
         return {"success": False, "error": "Script timed out (600s)", "cargpt_log_path": str(cwd / "logs" / "cargpt.log")}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+@router.get("/cargpt-log", response_class=PlainTextResponse)
+async def get_cargpt_log():
+    """Return the full cargpt.log file from the server (for download to local workspace)."""
+    cwd = _PROJECT_ROOT if _PROJECT_ROOT.exists() else Path(__file__).resolve().parent.parent.parent
+    log_path = cwd / "logs" / "cargpt.log"
+    if not log_path.exists():
+        raise HTTPException(status_code=404, detail=f"Log file not found: {log_path}")
+    with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+        return f.read()
 
 @router.get("/health")
 async def health_check(db: Session = Depends(get_db)):
