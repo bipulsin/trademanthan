@@ -17,7 +17,12 @@ from backend.services.car_service import (
     run_car_analysis_for_symbols,
     get_stock_name,
 )
-from backend.services.symbol_isin_mapping import get_stock_names_batch
+from backend.services.symbol_isin_mapping import get_stock_names_batch, get_instrument_key
+from backend.services.car_nifty200_updater import (
+    run_car_for_symbol_yahoo,
+    run_car_for_symbol_upstox,
+    _is_valid_car_result,
+)
 
 router = APIRouter(prefix="/cargpt", tags=["cargpt"])
 
@@ -72,6 +77,51 @@ class BulkCarStockUploadRequest(BaseModel):
 
 def _normalize_symbol(raw_symbol: str) -> str:
     return (raw_symbol or "").strip().upper()
+
+
+def _run_car_for_symbol_on_the_fly(symbol: str):
+    """
+    Run CAR for one symbol (Yahoo first, then Upstox if needed). Return dict with
+    week_52_high_date, current_price, last_10_cumulative_avg (list), signal, or None.
+    """
+    symbol = _normalize_symbol(symbol)
+    if not symbol:
+        return None
+    data = run_car_for_symbol_yahoo(symbol)
+    if not data or not _is_valid_car_result(data):
+        instrument_key = None
+        with engine.begin() as conn:
+            row = conn.execute(
+                text("SELECT stock_instrument_key FROM arbitrage_master WHERE stock = :s"),
+                {"s": symbol},
+            ).mappings().first()
+            if row and (row.get("stock_instrument_key") or "").strip():
+                instrument_key = (row["stock_instrument_key"] or "").strip()
+        if not instrument_key:
+            instrument_key = get_instrument_key(symbol) or ""
+            if instrument_key and "|" in instrument_key:
+                pass
+            else:
+                instrument_key = ""
+        if instrument_key:
+            data = run_car_for_symbol_upstox(symbol, instrument_key)
+    if not data or not _is_valid_car_result(data):
+        return None
+    d52 = data.get("date_52weekhigh")
+    if d52 is not None and hasattr(d52, "strftime"):
+        date_str = d52.strftime("%Y-%m-%d")
+    elif isinstance(d52, str) and d52.strip():
+        date_str = d52.strip()[:10]
+    else:
+        date_str = str(d52)[:10] if d52 else ""
+    last10_raw = (data.get("last10daycummavg") or "").strip()
+    last10_list = [x.strip() for x in last10_raw.split(",") if x.strip()] if last10_raw else []
+    return {
+        "week_52_high_date": date_str or None,
+        "current_price": data.get("stock_ltp"),
+        "last_10_cumulative_avg": last10_list,
+        "signal": (data.get("signal") or "").strip() or None,
+    }
 
 
 @router.post("/save-stock-list", response_model=SaveStockListResponse)
@@ -237,7 +287,8 @@ async def get_car_analysis_list(user_id: int):
     """
     Return carstocklist rows for the given user_id only (no other users' data).
     Joins with car_nifty200 to show 52w high, ltp, last10 cumm avg, signal when available.
-    No CAR computation - read-only from DB. Used by CAR Analysis tab.
+    For stocks not in car_nifty200 (blank data), runs CAR analysis on-the-fly (Yahoo then Upstox)
+    so the CAR Analysis tab shows full data for all configured stocks.
     """
     if user_id <= 0:
         raise HTTPException(status_code=400, detail="Valid user_id is required")
@@ -266,13 +317,23 @@ async def get_car_analysis_list(user_id: int):
         last10_list = [x.strip() for x in last10.split(",") if x.strip()] if last10 else []
         d = r.get("date_52weekhigh")
         date_str = d.strftime("%Y-%m-%d") if d and hasattr(d, "strftime") else (str(d) if d else "")
+        current_price = float(r["stock_ltp"]) if r.get("stock_ltp") is not None else None
+        signal = (r.get("signal") or "").strip() or None
+        # If CAR data is missing (stock not in car_nifty200 or nulls), run analysis on-the-fly
+        if (not date_str and not signal) or current_price is None:
+            computed = _run_car_for_symbol_on_the_fly(symbol)
+            if computed:
+                date_str = date_str or computed.get("week_52_high_date") or ""
+                current_price = current_price if current_price is not None else computed.get("current_price")
+                last10_list = last10_list or computed.get("last_10_cumulative_avg") or []
+                signal = signal or computed.get("signal")
         out.append({
             "symbol": symbol,
             "stock_name": names_map.get(symbol.upper(), symbol),
-            "week_52_high_date": date_str,
-            "current_price": float(r["stock_ltp"]) if r.get("stock_ltp") is not None else None,
+            "week_52_high_date": date_str or None,
+            "current_price": current_price,
             "last_10_cumulative_avg": last10_list,
-            "signal": (r.get("signal") or "").strip() or None,
+            "signal": signal,
         })
     return out
 
