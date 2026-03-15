@@ -39,10 +39,29 @@ def _compute_buy_signal(df: pd.DataFrame) -> str:
     return "BUY / AVERAGE OUT"
 
 
+# When 52w high is within last 10 trading days we cannot compute cumulative avg; use this signal and blank last10.
+PARTIAL_SIGNAL = "AVOID/HOLD"
+
+
+def _is_valid_car_result(data: Optional[Dict[str, Any]]) -> bool:
+    """True if we have enough to update DB: stock_ltp, date_52weekhigh, signal (last10daycummavg may be blank for partial)."""
+    if not data:
+        return False
+    if data.get("stock_ltp") is None:
+        return False
+    date_52 = data.get("date_52weekhigh")
+    if date_52 is None or (isinstance(date_52, str) and not date_52.strip()):
+        return False
+    signal = data.get("signal")
+    if signal is None or (isinstance(signal, str) and not signal.strip()):
+        return False
+    return True
+
 def run_car_for_symbol_yahoo(symbol: str) -> Optional[Dict[str, Any]]:
     """
     Run CAR logic using Yahoo Finance (symbol.NS). No instrument_key needed.
-    Returns dict with stock_ltp, date_52weekhigh, last10daycummavg (comma-separated), signal; or None on failure.
+    Returns dict with stock_ltp, date_52weekhigh, last10daycummavg (comma-separated or "" if <10 days), signal; or None on failure.
+    When 52w high is within last 10 trading days: still returns date_52weekhigh, stock_ltp, last10daycummavg="", signal=PARTIAL_SIGNAL.
     """
     try:
         from backend.services.yahoo_vwap_service import yahoo_vwap_service
@@ -54,12 +73,22 @@ def run_car_for_symbol_yahoo(symbol: str) -> Optional[Dict[str, Any]]:
         idx_max = df["close"].idxmax()
         week_52_date = df.loc[idx_max, "date"]
         df_from_high = df[df["date"] >= week_52_date].copy().sort_values("date").reset_index(drop=True)
+        last_close = float(df["close"].iloc[-1])
         if len(df_from_high) < 10:
-            return None
+            return {
+                "stock_ltp": round(last_close, 4),
+                "date_52weekhigh": week_52_date,
+                "last10daycummavg": "",
+                "signal": PARTIAL_SIGNAL,
+            }
         df_from_high = _compute_cumulative_avg(df_from_high)
         if df_from_high is None or len(df_from_high) < 10:
-            return None
-        last_close = float(df_from_high["close"].iloc[-1])
+            return {
+                "stock_ltp": round(last_close, 4),
+                "date_52weekhigh": week_52_date,
+                "last10daycummavg": "",
+                "signal": PARTIAL_SIGNAL,
+            }
         last_10 = df_from_high["cumulative_avg"].tail(10).tolist()
         last10_str = ",".join(f"{round(float(x), 2)}" for x in last_10)
         signal = _compute_buy_signal(df_from_high)
@@ -77,6 +106,7 @@ def run_car_for_symbol_yahoo(symbol: str) -> Optional[Dict[str, Any]]:
 def run_car_for_symbol_upstox(stock: str, instrument_key: str) -> Optional[Dict[str, Any]]:
     """
     Run CAR logic using Upstox (existing car_service). Returns same shape as run_car_for_symbol_yahoo.
+    When 52w high is within last 10 trading days: returns date_52weekhigh, stock_ltp, last10daycummavg="", signal=PARTIAL_SIGNAL.
     """
     try:
         from backend.services.car_service import (
@@ -91,8 +121,16 @@ def run_car_for_symbol_upstox(stock: str, instrument_key: str) -> Optional[Dict[
         if not week_52_date:
             return None
         df = get_historical_close_from_date(instrument_key, week_52_date, upstox)
-        if df is None or df.empty or len(df) < 10:
+        if df is None or df.empty:
             return None
+        if len(df) < 10:
+            last_close = float(df["close"].iloc[-1])
+            return {
+                "stock_ltp": round(last_close, 4),
+                "date_52weekhigh": week_52_date,
+                "last10daycummavg": "",
+                "signal": PARTIAL_SIGNAL,
+            }
         df = compute_cumulative_avg(df)
         last_close = float(df["close"].iloc[-1])
         last_10 = df["cumulative_avg"].tail(10).tolist()
@@ -157,20 +195,23 @@ def update_car_nifty200_batch() -> Dict[str, int]:
             # Rows with NULL signal: try Upstox first to backfill (Yahoo often has no .NS data for some symbols)
             if signal_null and instrument_key:
                 data = run_car_for_symbol_upstox(stock, instrument_key)
-                if data and all([data.get("stock_ltp"), data.get("date_52weekhigh"), data.get("last10daycummavg"), data.get("signal")]):
+                if data and _is_valid_car_result(data):
                     logger.info(f"car_nifty200: {stock} backfilled via Upstox (was NULL signal)")
             # If still no valid data, try Yahoo (NSE then BSE .BO)
-            if data is None or not all([data.get("stock_ltp"), data.get("date_52weekhigh"), data.get("last10daycummavg"), data.get("signal")]):
+            if data is None or not _is_valid_car_result(data):
                 data = run_car_for_symbol_yahoo(stock)
             # If Yahoo failed, try Upstox (for rows we didn't try Upstox first, or retry)
-            if data is None or not all([data.get("stock_ltp"), data.get("date_52weekhigh"), data.get("last10daycummavg"), data.get("signal")]):
+            if data is None or not _is_valid_car_result(data):
                 if instrument_key:
                     logger.info(f"car_nifty200: Yahoo no/incomplete data for {stock}, trying Upstox")
                     data = run_car_for_symbol_upstox(stock, instrument_key)
                 else:
                     data = None
-            if data and all([data.get("stock_ltp"), data.get("date_52weekhigh"), data.get("last10daycummavg"), data.get("signal")]):
+            if data and _is_valid_car_result(data):
                 try:
+                    last10 = data.get("last10daycummavg")
+                    if last10 is None:
+                        last10 = ""
                     with engine.begin() as conn:
                         conn.execute(
                             text(
@@ -186,7 +227,7 @@ def update_car_nifty200_batch() -> Dict[str, int]:
                                 "stock": stock,
                                 "stock_ltp": data["stock_ltp"],
                                 "date_52weekhigh": data["date_52weekhigh"],
-                                "last10daycummavg": data["last10daycummavg"],
+                                "last10daycummavg": last10,
                                 "signal": data["signal"],
                                 "last_updated_date": today_str,
                             },

@@ -43,12 +43,51 @@ YAHOO_BASE = "https://query1.finance.yahoo.com/v8/finance/chart"
 UPSTOX_BASE = "https://api.upstox.com/v3"
 
 
+def _is_valid_car_data(data: dict) -> bool:
+    """Check that CAR result has enough to update DB: stock_ltp, date_52weekhigh, signal (last10daycummavg may be blank for partial)."""
+    if not data:
+        return False
+    stock_ltp = data.get("stock_ltp")
+    date_52 = data.get("date_52weekhigh")
+    signal = data.get("signal")
+    if stock_ltp is None:
+        return False
+    if date_52 is None or (isinstance(date_52, str) and not date_52.strip()):
+        return False
+    if signal is None or (isinstance(signal, str) and not signal.strip()):
+        return False
+    return True
+
+
+def _date_52_to_str(v) -> str:
+    """Normalize date_52weekhigh to YYYY-MM-DD string (handles pandas/numpy types from Yahoo)."""
+    if v is None:
+        return ""
+    if isinstance(v, str):
+        return v.strip()[:10]
+    try:
+        if hasattr(v, "strftime"):
+            return v.strftime("%Y-%m-%d")
+        if hasattr(v, "isoformat"):
+            return str(v).split("T")[0][:10]
+    except Exception:
+        pass
+    return str(v)[:10]
+
+
 def main():
     from backend.database import engine
     from sqlalchemy import text
     from backend.services.car_nifty200_updater import run_car_for_symbol_yahoo, run_car_for_symbol_upstox
     ist = __import__("pytz").timezone("Asia/Kolkata")
     today_str = datetime.now(ist).date().isoformat()
+
+    # Clear cargpt.log so this run is the only content (latest execution log only)
+    try:
+        with open(cargpt_log_file, "w", encoding="utf-8"):
+            pass
+    except Exception as e:
+        print(f"Warning: could not clear {cargpt_log_file}: {e}")
 
     log("=" * 60)
     log("CAR NIFTY200 one-time backfill started")
@@ -86,7 +125,7 @@ def main():
         yahoo_url_nse = f"{YAHOO_BASE}/{symbol}.NS?range=1y&interval=1d&includePrePost=false"
         log(f"Yahoo Finance API call (NSE): GET {yahoo_url_nse}")
         data = run_car_for_symbol_yahoo(symbol)
-        if data and all([data.get("stock_ltp"), data.get("date_52weekhigh"), data.get("last10daycummavg"), data.get("signal")]):
+        if data and _is_valid_car_data(data):
             log(f"Yahoo Finance outcome for {symbol}: SUCCESS (source: NSE or BSE fallback)")
             log(f"  date_52weekhigh={data.get('date_52weekhigh')}, signal={data.get('signal')}, stock_ltp={data.get('stock_ltp')}")
         else:
@@ -101,15 +140,18 @@ def main():
                 upstox_url = f"{UPSTOX_BASE}/historical-candle/{instrument_key}/days/1/{to_date}/{from_date}"
                 log(f"Upstox API call: GET {upstox_url}")
                 data = run_car_for_symbol_upstox(symbol, instrument_key)
-                if data and all([data.get("stock_ltp"), data.get("date_52weekhigh"), data.get("last10daycummavg"), data.get("signal")]):
+                if data and _is_valid_car_data(data):
                     log(f"Upstox outcome for {symbol}: SUCCESS")
                     log(f"  date_52weekhigh={data.get('date_52weekhigh')}, signal={data.get('signal')}, stock_ltp={data.get('stock_ltp')}")
                 else:
                     log(f"Upstox outcome for {symbol}: FAILED or incomplete")
 
-        if data and all([data.get("stock_ltp"), data.get("date_52weekhigh"), data.get("last10daycummavg"), data.get("signal")]):
+        if data and _is_valid_car_data(data):
             try:
                 stock_ltp_val = 1514.0 if symbol == "CHOLAFIN" else data["stock_ltp"]
+                last10_val = data.get("last10daycummavg")
+                if last10_val is None:
+                    last10_val = ""
                 with engine.begin() as conn:
                     conn.execute(
                         text(
@@ -124,8 +166,8 @@ def main():
                         {
                             "stock": symbol,
                             "stock_ltp": stock_ltp_val,
-                            "date_52weekhigh": data["date_52weekhigh"],
-                            "last10daycummavg": data["last10daycummavg"],
+                            "date_52weekhigh": _date_52_to_str(data["date_52weekhigh"]),
+                            "last10daycummavg": last10_val,
                             "signal": data["signal"],
                             "last_updated_date": today_str,
                         },
