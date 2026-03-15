@@ -3536,6 +3536,49 @@ async def get_deployment_status():
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+# Project root on EC2 (same as deploy script)
+_PROJECT_ROOT = Path("/home/ubuntu/trademanthan")
+_CARGPT_LOG = _PROJECT_ROOT / "logs" / "cargpt.log"
+
+@router.post("/run-backfill-car-nifty200-onetime")
+async def run_backfill_car_nifty200_onetime():
+    """
+    One-time: run car_nifty200 backfill script on this server (CHOLAFIN LTP + Yahoo/Upstox CAR for listed symbols).
+    Logs to logs/cargpt.log. Returns script stdout/stderr and tail of cargpt.log.
+    """
+    import subprocess
+    script_cmd = ["python3", "-m", "backend.scripts.backfill_car_nifty200_onetime"]
+    cwd = _PROJECT_ROOT if _PROJECT_ROOT.exists() else Path(__file__).resolve().parent.parent.parent
+    try:
+        proc = subprocess.run(
+            script_cmd,
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=600,
+            env={**os.environ, "PYTHONPATH": str(cwd)},
+        )
+        out = (proc.stdout or "").strip()
+        err = (proc.stderr or "").strip()
+        cargpt_tail = ""
+        log_path = cwd / "logs" / "cargpt.log"
+        if log_path.exists():
+            with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+                lines = f.readlines()
+            cargpt_tail = "".join(lines[-200:]) if len(lines) > 200 else "".join(lines)
+        return {
+            "success": proc.returncode == 0,
+            "returncode": proc.returncode,
+            "stdout": out,
+            "stderr": err,
+            "cargpt_log_tail": cargpt_tail,
+            "cargpt_log_path": str(log_path),
+        }
+    except subprocess.TimeoutExpired:
+        return {"success": False, "error": "Script timed out (600s)", "cargpt_log_path": str(cwd / "logs" / "cargpt.log")}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 @router.get("/health")
 async def health_check(db: Session = Depends(get_db)):
     """
