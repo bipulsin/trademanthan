@@ -193,10 +193,11 @@ def run_car_for_symbol_upstox(stock: str, instrument_key: str) -> Optional[Dict[
         return None
 
 
-def update_car_nifty200_batch(only_blank_last10: bool = False) -> Dict[str, int]:
+def update_car_nifty200_batch(only_blank_last10: bool = False, force_refresh_all: bool = False) -> Dict[str, int]:
     """
     Update car_nifty200 rows where last_updated_date is not today (IST).
     If only_blank_last10=True, process only rows where last10daycummavg IS NULL or blank (off-cycle fill).
+    If force_refresh_all=True, process every row regardless of last_updated_date (one-time full refresh).
     For rows with NULL signal (never filled): try Upstox first, then Yahoo (to backfill).
     For rows already having data: try Yahoo first, then Upstox fallback.
     Yahoo tries .NS then .BO (BSE) when NSE returns no data.
@@ -210,13 +211,21 @@ def update_car_nifty200_batch(only_blank_last10: bool = False) -> Dict[str, int]
     updated = 0
     failed = 0
 
-    if only_blank_last10:
+    if force_refresh_all:
+        sql = """
+            SELECT stock, stock_instrument_key, signal
+            FROM car_nifty200
+            ORDER BY stock ASC
+            """
+        params = {}
+    elif only_blank_last10:
         sql = """
             SELECT stock, stock_instrument_key, signal
             FROM car_nifty200
             WHERE (last10daycummavg IS NULL OR TRIM(COALESCE(last10daycummavg, '')) = '')
             ORDER BY stock ASC
             """
+        params = {}
     else:
         sql = """
             SELECT stock, stock_instrument_key, signal
@@ -224,17 +233,25 @@ def update_car_nifty200_batch(only_blank_last10: bool = False) -> Dict[str, int]
             WHERE last_updated_date IS NULL OR last_updated_date < :today
             ORDER BY stock ASC
             """
+        params = {"today": today_str}
     with engine.begin() as conn:
         rows = conn.execute(
             text(sql),
-            {"today": today_str} if not only_blank_last10 else {},
+            params,
         ).mappings().all()
 
     if not rows:
-        logger.info("car_nifty200: no rows to update (all up to date)" if not only_blank_last10 else "car_nifty200: no rows with blank last10daycummavg")
+        logger.info(
+            "car_nifty200: no rows to update (all up to date)"
+            if not only_blank_last10 and not force_refresh_all
+            else "car_nifty200: no rows with blank last10daycummavg"
+            if only_blank_last10
+            else "car_nifty200: table is empty"
+        )
         return {"updated": 0, "failed": 0}
 
-    logger.info(f"car_nifty200: updating {len(rows)} rows (Upstox first for NULL signal, else Yahoo then Upstox)" + (" [blank last10 only]" if only_blank_last10 else ""))
+    suffix = " [blank last10 only]" if only_blank_last10 else (" [full refresh all rows]" if force_refresh_all else "")
+    logger.info(f"car_nifty200: updating {len(rows)} rows (Upstox first for NULL signal, else Yahoo then Upstox){suffix}")
 
     for i in range(0, len(rows), BATCH_SIZE):
         batch = rows[i : i + BATCH_SIZE]

@@ -3649,6 +3649,20 @@ async def run_car_nifty200_update():
         return {"success": False, "error": str(e)}
 
 
+@router.post("/run-car-nifty200-full-refresh")
+async def run_car_nifty200_full_refresh():
+    """
+    One-time full refresh: update every row in car_nifty200 (CAR + DMA50/DMA100/DMA200),
+    irrespective of last_updated_date.
+    """
+    try:
+        from backend.services.car_nifty200_updater import update_car_nifty200_batch
+        result = update_car_nifty200_batch(only_blank_last10=False, force_refresh_all=True)
+        return {"success": True, "result": result}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 @router.get("/health")
 async def health_check(db: Session = Depends(get_db)):
     """
