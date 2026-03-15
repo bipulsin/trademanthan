@@ -3589,6 +3589,38 @@ async def get_cargpt_log():
     with open(log_path, "r", encoding="utf-8", errors="replace") as f:
         return f.read()
 
+
+@router.post("/fix-cholafin-instrument-key")
+async def run_fix_cholafin_instrument_key():
+    """
+    One-time: Run fix_cholafin_instrument_key script on this server.
+    Reads instrument_key for CHOLAFIN from instruments JSON and updates
+    arbitrage_master, car_nifty200, arbitrage_order.
+    """
+    import subprocess
+    script_cmd = ["python3", "-m", "backend.scripts.fix_cholafin_instrument_key"]
+    cwd = _PROJECT_ROOT if _PROJECT_ROOT.exists() else Path(__file__).resolve().parent.parent.parent
+    try:
+        proc = subprocess.run(
+            script_cmd,
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env={**os.environ, "PYTHONPATH": str(cwd)},
+        )
+        return {
+            "success": proc.returncode == 0,
+            "returncode": proc.returncode,
+            "stdout": (proc.stdout or "").strip(),
+            "stderr": (proc.stderr or "").strip(),
+        }
+    except subprocess.TimeoutExpired:
+        return {"success": False, "error": "Script timed out (60s)"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 @router.get("/health")
 async def health_check(db: Session = Depends(get_db)):
     """
