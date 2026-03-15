@@ -38,6 +38,11 @@
                     <section class="cargpt-card">
                         <h2>
                             <span><i class="fas fa-chart-line"></i> NIFTY250</span>
+                            <span class="cargpt-dma-filters" id="nifty250DmaFilters">
+                                <label><input type="checkbox" id="nifty250Dma50" checked> 50-DMA</label>
+                                <label><input type="checkbox" id="nifty250Dma100" checked> 100-DMA</label>
+                                <label><input type="checkbox" id="nifty250Dma200" checked> 200-DMA</label>
+                            </span>
                             <button class="cargpt-btn cargpt-btn-primary" id="runNifty250Btn">
                                 <i class="fas fa-sync-alt"></i> Load
                             </button>
@@ -73,6 +78,11 @@
                     <section class="cargpt-card">
                         <h2>
                             <span><i class="fas fa-chart-bar"></i> CAR Analysis</span>
+                            <span class="cargpt-dma-filters" id="carDmaFilters">
+                                <label><input type="checkbox" id="carDma50" checked> 50-DMA</label>
+                                <label><input type="checkbox" id="carDma100" checked> 100-DMA</label>
+                                <label><input type="checkbox" id="carDma200" checked> 200-DMA</label>
+                            </span>
                             <button class="cargpt-btn cargpt-btn-primary" id="runBtn">
                                 <i class="fas fa-play"></i> Run Analysis
                             </button>
@@ -369,13 +379,37 @@
         document.getElementById('tabNifty250').addEventListener('click', () => setActiveCargptTab('panelNifty250'));
         document.getElementById('tabCarAnalysis').addEventListener('click', () => setActiveCargptTab('panelCarAnalysis'));
 
-        function renderCarResults(tbody, data, emptyMsg) {
+        function getDisplaySignal(row, dma50On, dma100On, dma200On) {
+            const raw = (row.signal || '').trim();
+            const isBuy = /BUY\s*\/?\s*(AVERAGE\s*OUT|AVERAGE OUT)/i.test(raw) || raw.includes('BUY');
+            if (!isBuy) return raw || '-';
+            if (!dma50On || !dma100On || !dma200On) return raw;
+            const price = row.current_price;
+            const d50 = row.dma50, d100 = row.dma100, d200 = row.dma200;
+            if (price == null || d50 == null || d100 == null || d200 == null) return 'AVOID / HOLD';
+            if (!(price > d50 && d50 > d100 && d100 > d200)) return 'AVOID / HOLD';
+            const pct = (price - d200) / d200;
+            if (pct < 0.01 || pct > 0.10) return 'AVOID / HOLD';
+            return 'BUY/Average Out';
+        }
+
+        function getDmaFilter(prefix) {
+            return {
+                dma50: document.getElementById(prefix + 'Dma50').checked,
+                dma100: document.getElementById(prefix + 'Dma100').checked,
+                dma200: document.getElementById(prefix + 'Dma200').checked
+            };
+        }
+
+        function renderCarResults(tbody, data, emptyMsg, dmaFilter) {
             if (!data || !Array.isArray(data) || data.length === 0) {
                 return emptyMsg || 'No records.';
             }
+            const f = dmaFilter || { dma50: true, dma100: true, dma200: true };
             let html = '';
             for (const row of data) {
-                const signalClass = (row.signal || '').includes('BUY') ? 'cargpt-signal-buy' : 'cargpt-signal-avoid';
+                const displaySignal = getDisplaySignal(row, f.dma50, f.dma100, f.dma200);
+                const signalClass = displaySignal.includes('BUY') ? 'cargpt-signal-buy' : 'cargpt-signal-avoid';
                 const err = row.error ? '<br><small style="color: var(--cargpt-avoid);">' + (row.error || '') + '</small>' : '';
                 html += `
                     <tr>
@@ -383,7 +417,7 @@
                         <td>${row.week_52_high_date || '-'}${err}</td>
                         <td>${row.current_price != null ? '₹' + row.current_price : '-'}</td>
                         <td style="font-size: 0.85rem;">${formatCumulativeAvg(row.last_10_cumulative_avg)}</td>
-                        <td class="${signalClass}">${row.signal || '-'}</td>
+                        <td class="${signalClass}">${displaySignal || '-'}</td>
                     </tr>`;
             }
             tbody.innerHTML = html;
@@ -424,8 +458,9 @@
                     empty.textContent = 'No records with signal in car_nifty200.';
                     return;
                 }
+                window._nifty250Data = data;
                 wrap.style.display = 'block';
-                renderCarResults(tbody, data);
+                renderCarResults(tbody, data, null, getDmaFilter('nifty250'));
             } catch (e) {
                 loading.style.display = 'none';
                 overlay.classList.remove('visible');
@@ -478,8 +513,9 @@
                     return;
                 }
 
+                window._analysisData = data;
                 wrap.style.display = 'block';
-                renderCarResults(tbody, data);
+                renderCarResults(tbody, data, null, getDmaFilter('car'));
             } catch (e) {
                 loading.style.display = 'none';
                 overlay.classList.remove('visible');
@@ -487,6 +523,31 @@
                 empty.textContent = 'Error: ' + (e.message || 'Network error');
                 console.error(e);
             }
+        });
+
+        function reRenderNifty250() {
+            const data = window._nifty250Data;
+            const wrap = document.getElementById('nifty250TableWrap');
+            const tbody = document.getElementById('nifty250TableBody');
+            if (data && wrap && wrap.style.display !== 'none' && tbody) {
+                renderCarResults(tbody, data, null, getDmaFilter('nifty250'));
+            }
+        }
+        function reRenderCarAnalysis() {
+            const data = window._analysisData;
+            const wrap = document.getElementById('analysisTableWrap');
+            const tbody = document.getElementById('analysisTableBody');
+            if (data && wrap && wrap.style.display !== 'none' && tbody) {
+                renderCarResults(tbody, data, null, getDmaFilter('car'));
+            }
+        }
+        ['nifty250Dma50','nifty250Dma100','nifty250Dma200'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('change', reRenderNifty250);
+        });
+        ['carDma50','carDma100','carDma200'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('change', reRenderCarAnalysis);
         });
 
         attachConfigureHandlers();

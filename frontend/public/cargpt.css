@@ -231,6 +231,26 @@ body[data-theme="light"] .cargpt-help-icon-btn:hover {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    cursor: pointer;
+}
+
+.cargpt-dma-filters {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-right: 8px;
+}
+.cargpt-dma-filters label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.85rem;
+    color: var(--cargpt-muted);
+    cursor: pointer;
+}
+.cargpt-dma-filters input[type="checkbox"] {
     cursor: pointer;
 }
 

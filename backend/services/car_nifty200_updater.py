@@ -4,7 +4,7 @@ Uses same CAR logic as cargpt: 52-week high date, cumulative average from that d
 Runs every 3 hours; processes rows where last_updated_date is not current date (IST).
 """
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import Optional, List, Dict, Any
 import pytz
 import pandas as pd
@@ -25,6 +25,20 @@ def _compute_cumulative_avg(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df["cumulative_avg"] = df["close"].expanding().mean()
     return df
+
+
+def _compute_dma(df: pd.DataFrame) -> tuple:
+    """
+    Compute 50, 100, 200 day simple moving averages from close (last row = latest).
+    Returns (dma50, dma100, dma200); None for each if insufficient data.
+    """
+    if df is None or df.empty or "close" not in df.columns:
+        return (None, None, None)
+    closes = df["close"].astype(float)
+    dma50 = float(closes.tail(50).mean()) if len(closes) >= 50 else None
+    dma100 = float(closes.tail(100).mean()) if len(closes) >= 100 else None
+    dma200 = float(closes.tail(200).mean()) if len(closes) >= 200 else None
+    return (dma50, dma100, dma200)
 
 
 def _compute_buy_signal(df: pd.DataFrame) -> str:
@@ -79,6 +93,8 @@ def run_car_for_symbol_yahoo(symbol: str) -> Optional[Dict[str, Any]]:
         if not rows or len(rows) < 10:
             return None
         df = pd.DataFrame(rows)
+        df = df.sort_values("date").reset_index(drop=True)
+        dma50, dma100, dma200 = _compute_dma(df)
         # 52-week high date = date where close was maximum
         idx_max = df["close"].idxmax()
         week_52_date = df.loc[idx_max, "date"]
@@ -97,6 +113,9 @@ def run_car_for_symbol_yahoo(symbol: str) -> Optional[Dict[str, Any]]:
                 "date_52weekhigh": week_52_date,
                 "last10daycummavg": last10_str,
                 "signal": signal,
+                "dma50": round(dma50, 4) if dma50 is not None else None,
+                "dma100": round(dma100, 4) if dma100 is not None else None,
+                "dma200": round(dma200, 4) if dma200 is not None else None,
             }
         last_10 = df_from_high["cumulative_avg"].tail(10).tolist()
         last10_str = ",".join(f"{round(float(x), 2)}" for x in last_10)
@@ -106,6 +125,9 @@ def run_car_for_symbol_yahoo(symbol: str) -> Optional[Dict[str, Any]]:
             "date_52weekhigh": week_52_date,
             "last10daycummavg": last10_str,
             "signal": signal,
+            "dma50": round(dma50, 4) if dma50 is not None else None,
+            "dma100": round(dma100, 4) if dma100 is not None else None,
+            "dma200": round(dma200, 4) if dma200 is not None else None,
         }
     except Exception as e:
         logger.debug(f"Yahoo CAR for {symbol}: {e}")
@@ -114,8 +136,7 @@ def run_car_for_symbol_yahoo(symbol: str) -> Optional[Dict[str, Any]]:
 
 def run_car_for_symbol_upstox(stock: str, instrument_key: str) -> Optional[Dict[str, Any]]:
     """
-    Run CAR logic using Upstox (existing car_service). Returns same shape as run_car_for_symbol_yahoo.
-    When 52w high is within last 10 trading days: returns date_52weekhigh, stock_ltp, last10daycummavg="", signal=PARTIAL_SIGNAL.
+    Run CAR logic using Upstox (existing car_service). Returns same shape as run_car_for_symbol_yahoo (incl. dma50, dma100, dma200).
     """
     try:
         from backend.services.car_service import (
@@ -129,14 +150,19 @@ def run_car_for_symbol_upstox(stock: str, instrument_key: str) -> Optional[Dict[
         week_52_date = get_52_week_high_date(stock, instrument_key, upstox)
         if not week_52_date:
             return None
-        df = get_historical_close_from_date(instrument_key, week_52_date, upstox)
-        if df is None or df.empty:
+        week_52_str = week_52_date.strftime("%Y-%m-%d") if hasattr(week_52_date, "strftime") else str(week_52_date)[:10]
+        start_400 = (datetime.now(IST).date() - timedelta(days=400)).strftime("%Y-%m-%d")
+        df_full = get_historical_close_from_date(instrument_key, start_400, upstox)
+        if df_full is None or df_full.empty:
+            return None
+        dma50, dma100, dma200 = _compute_dma(df_full)
+        df = df_full[df_full["date"] >= week_52_str].copy().sort_values("date").reset_index(drop=True)
+        if df.empty:
             return None
         df = compute_cumulative_avg(df)
         if df is None or len(df) < 1:
             return None
         last_close = float(df["close"].iloc[-1])
-        # When fewer than 10 trading days from 52w high to last day: use all available days for cumm avg and signal
         if len(df) < 10:
             cumm_vals = df["cumulative_avg"].tolist()
             last10_str = ",".join(f"{round(float(x), 2)}" for x in cumm_vals)
@@ -146,6 +172,9 @@ def run_car_for_symbol_upstox(stock: str, instrument_key: str) -> Optional[Dict[
                 "date_52weekhigh": week_52_date,
                 "last10daycummavg": last10_str,
                 "signal": signal,
+                "dma50": round(dma50, 4) if dma50 is not None else None,
+                "dma100": round(dma100, 4) if dma100 is not None else None,
+                "dma200": round(dma200, 4) if dma200 is not None else None,
             }
         last_10 = df["cumulative_avg"].tail(10).tolist()
         last10_str = ",".join(f"{round(float(x), 2)}" for x in last_10)
@@ -155,6 +184,9 @@ def run_car_for_symbol_upstox(stock: str, instrument_key: str) -> Optional[Dict[
             "date_52weekhigh": week_52_date,
             "last10daycummavg": last10_str,
             "signal": signal,
+            "dma50": round(dma50, 4) if dma50 is not None else None,
+            "dma100": round(dma100, 4) if dma100 is not None else None,
+            "dma200": round(dma200, 4) if dma200 is not None else None,
         }
     except Exception as e:
         logger.debug(f"Upstox CAR for {stock}: {e}")
@@ -234,6 +266,9 @@ def update_car_nifty200_batch(only_blank_last10: bool = False) -> Dict[str, int]
                     last10 = data.get("last10daycummavg")
                     if last10 is None:
                         last10 = ""
+                    dma50 = data.get("dma50")
+                    dma100 = data.get("dma100")
+                    dma200 = data.get("dma200")
                     with engine.begin() as conn:
                         conn.execute(
                             text(
@@ -241,7 +276,8 @@ def update_car_nifty200_batch(only_blank_last10: bool = False) -> Dict[str, int]
                                 UPDATE car_nifty200
                                 SET stock_ltp = :stock_ltp, date_52weekhigh = :date_52weekhigh,
                                     last10daycummavg = :last10daycummavg, signal = :signal,
-                                    last_updated_date = :last_updated_date
+                                    last_updated_date = :last_updated_date,
+                                    dma50 = :dma50, dma100 = :dma100, dma200 = :dma200
                                 WHERE stock = :stock
                                 """
                             ),
@@ -252,6 +288,9 @@ def update_car_nifty200_batch(only_blank_last10: bool = False) -> Dict[str, int]
                                 "last10daycummavg": last10,
                                 "signal": data["signal"],
                                 "last_updated_date": today_str,
+                                "dma50": dma50,
+                                "dma100": dma100,
+                                "dma200": dma200,
                             },
                         )
                     updated += 1

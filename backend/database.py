@@ -192,11 +192,21 @@ def _run_startup_schema_migrations(db_engine):
                         date_52weekhigh DATE,
                         last10daycummavg TEXT,
                         signal TEXT,
-                        last_updated_date DATE
+                        last_updated_date DATE,
+                        dma50 NUMERIC(16,4),
+                        dma100 NUMERIC(16,4),
+                        dma200 NUMERIC(16,4)
                     )
                     """
                 )
             )
+            # Add DMA columns if table already existed without them (PostgreSQL)
+            if db_engine.dialect.name == "postgresql":
+                for col in ("dma50", "dma100", "dma200"):
+                    try:
+                        conn.execute(text(f"ALTER TABLE car_nifty200 ADD COLUMN IF NOT EXISTS {col} NUMERIC(16,4)"))
+                    except Exception:
+                        pass
             # One-time seed: copy from arbitrage_master (only if car_nifty200 is empty)
             row_count = conn.execute(text("SELECT COUNT(*) FROM car_nifty200")).scalar() or 0
             if row_count == 0:

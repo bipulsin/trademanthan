@@ -123,17 +123,19 @@ def _fetch_cholafin_nse_direct():
 
 
 def _run_car_from_rows(rows):
-    """Run CAR logic on pre-fetched rows; return same dict as run_car_for_symbol_yahoo or None."""
+    """Run CAR logic on pre-fetched rows; return same dict as run_car_for_symbol_yahoo or None (incl. dma50, dma100, dma200)."""
     import pandas as pd
     from backend.services.car_nifty200_updater import (
         _compute_cumulative_avg,
         _compute_buy_signal,
         _compute_buy_signal_from_values,
+        _compute_dma,
     )
     if not rows or len(rows) < 10:
         return None
     try:
-        df = pd.DataFrame(rows)
+        df = pd.DataFrame(rows).sort_values("date").reset_index(drop=True)
+        dma50, dma100, dma200 = _compute_dma(df)
         idx_max = df["close"].idxmax()
         week_52_date = df.loc[idx_max, "date"]
         df_from_high = df[df["date"] >= week_52_date].copy().sort_values("date").reset_index(drop=True)
@@ -141,6 +143,8 @@ def _run_car_from_rows(rows):
         df_from_high = _compute_cumulative_avg(df_from_high)
         if df_from_high is None or len(df_from_high) < 1:
             return None
+        def _round_dma(x):
+            return round(x, 4) if x is not None else None
         if len(df_from_high) < 10:
             cumm_vals = df_from_high["cumulative_avg"].tolist()
             last10_str = ",".join(f"{round(float(x), 2)}" for x in cumm_vals)
@@ -150,6 +154,7 @@ def _run_car_from_rows(rows):
                 "date_52weekhigh": week_52_date,
                 "last10daycummavg": last10_str,
                 "signal": signal,
+                "dma50": _round_dma(dma50), "dma100": _round_dma(dma100), "dma200": _round_dma(dma200),
             }
         last_10 = df_from_high["cumulative_avg"].tail(10).tolist()
         last10_str = ",".join(f"{round(float(x), 2)}" for x in last_10)
@@ -159,6 +164,7 @@ def _run_car_from_rows(rows):
             "date_52weekhigh": week_52_date,
             "last10daycummavg": last10_str,
             "signal": signal,
+            "dma50": _round_dma(dma50), "dma100": _round_dma(dma100), "dma200": _round_dma(dma200),
         }
     except Exception:
         return None
@@ -250,6 +256,9 @@ def main():
                 last10_val = data.get("last10daycummavg")
                 if last10_val is None:
                     last10_val = ""
+                dma50 = data.get("dma50")
+                dma100 = data.get("dma100")
+                dma200 = data.get("dma200")
                 with engine.begin() as conn:
                     conn.execute(
                         text(
@@ -257,7 +266,8 @@ def main():
                             UPDATE car_nifty200
                             SET stock_ltp = :stock_ltp, date_52weekhigh = :date_52weekhigh,
                                 last10daycummavg = :last10daycummavg, signal = :signal,
-                                last_updated_date = :last_updated_date
+                                last_updated_date = :last_updated_date,
+                                dma50 = :dma50, dma100 = :dma100, dma200 = :dma200
                             WHERE stock = :stock
                             """
                         ),
@@ -268,6 +278,7 @@ def main():
                             "last10daycummavg": last10_val,
                             "signal": data["signal"],
                             "last_updated_date": today_str,
+                            "dma50": dma50, "dma100": dma100, "dma200": dma200,
                         },
                     )
                 log(f"DB updated for {symbol}")

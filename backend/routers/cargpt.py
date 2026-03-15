@@ -121,6 +121,9 @@ def _run_car_for_symbol_on_the_fly(symbol: str):
         "current_price": data.get("stock_ltp"),
         "last_10_cumulative_avg": last10_list,
         "signal": (data.get("signal") or "").strip() or None,
+        "dma50": data.get("dma50"),
+        "dma100": data.get("dma100"),
+        "dma200": data.get("dma200"),
     }
 
 
@@ -297,7 +300,7 @@ async def get_car_analysis_list(user_id: int):
             text(
                 """
                 SELECT c.symbol, c.userid,
-                       n.date_52weekhigh, n.stock_ltp, n.last10daycummavg, n.signal
+                       n.date_52weekhigh, n.stock_ltp, n.last10daycummavg, n.signal, n.dma50, n.dma100, n.dma200
                 FROM carstocklist c
                 LEFT JOIN car_nifty200 n ON n.stock = c.symbol
                 WHERE c.userid = :user_id
@@ -319,6 +322,9 @@ async def get_car_analysis_list(user_id: int):
         date_str = d.strftime("%Y-%m-%d") if d and hasattr(d, "strftime") else (str(d) if d else "")
         current_price = float(r["stock_ltp"]) if r.get("stock_ltp") is not None else None
         signal = (r.get("signal") or "").strip() or None
+        dma50 = float(r["dma50"]) if r.get("dma50") is not None else None
+        dma100 = float(r["dma100"]) if r.get("dma100") is not None else None
+        dma200 = float(r["dma200"]) if r.get("dma200") is not None else None
         # If CAR data is missing (stock not in car_nifty200 or nulls), run analysis on-the-fly
         if (not date_str and not signal) or current_price is None:
             computed = _run_car_for_symbol_on_the_fly(symbol)
@@ -327,6 +333,9 @@ async def get_car_analysis_list(user_id: int):
                 current_price = current_price if current_price is not None else computed.get("current_price")
                 last10_list = last10_list or computed.get("last_10_cumulative_avg") or []
                 signal = signal or computed.get("signal")
+                dma50 = dma50 if dma50 is not None else computed.get("dma50")
+                dma100 = dma100 if dma100 is not None else computed.get("dma100")
+                dma200 = dma200 if dma200 is not None else computed.get("dma200")
         out.append({
             "symbol": symbol,
             "stock_name": names_map.get(symbol.upper(), symbol),
@@ -334,6 +343,9 @@ async def get_car_analysis_list(user_id: int):
             "current_price": current_price,
             "last_10_cumulative_avg": last10_list,
             "signal": signal,
+            "dma50": dma50,
+            "dma100": dma100,
+            "dma200": dma200,
         })
     return out
 
@@ -396,7 +408,7 @@ async def get_nifty250_list():
         rows = conn.execute(
             text(
                 """
-                SELECT stock, stock_ltp, date_52weekhigh, last10daycummavg, signal
+                SELECT stock, stock_ltp, date_52weekhigh, last10daycummavg, signal, dma50, dma100, dma200
                 FROM car_nifty200
                 WHERE signal IS NOT NULL AND TRIM(signal) <> ''
                 ORDER BY signal DESC
@@ -419,5 +431,8 @@ async def get_nifty250_list():
             "current_price": float(r["stock_ltp"]) if r.get("stock_ltp") is not None else None,
             "last_10_cumulative_avg": last10_list,
             "signal": (r.get("signal") or "").strip(),
+            "dma50": float(r["dma50"]) if r.get("dma50") is not None else None,
+            "dma100": float(r["dma100"]) if r.get("dma100") is not None else None,
+            "dma200": float(r["dma200"]) if r.get("dma200") is not None else None,
         })
     return out
