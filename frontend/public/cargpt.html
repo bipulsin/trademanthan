@@ -198,13 +198,14 @@
                 <button type="button" class="cargpt-dma-popup-close" id="cargptDmaPopupClose" aria-label="Close">&times;</button>
             </div>
             <div class="cargpt-dma-popup-body">
-                <dl class="cargpt-dma-popup-list">
-                    <dt>50-DMA</dt><dd id="cargptDma50">—</dd>
-                    <dt>100-DMA</dt><dd id="cargptDma100">—</dd>
-                    <dt>200-DMA</dt><dd id="cargptDma200">—</dd>
-                    <dt>Current Price</dt><dd id="cargptDmaCurrentPrice">—</dd>
-                    <dt>Difference from 200-DMA</dt><dd id="cargptDmaDiff">—</dd>
-                </dl>
+                <table class="cargpt-dma-popup-table">
+                    <tr><td>Current Price</td><td id="cargptDmaCurrentPrice">—</td><td id="cargptDmaCurrentPriceCheck">—</td></tr>
+                    <tr><td>50-DMA</td><td id="cargptDma50">—</td><td id="cargptDma50Check">—</td></tr>
+                    <tr><td>100-DMA</td><td id="cargptDma100">—</td><td id="cargptDma100Check">—</td></tr>
+                    <tr><td>200-DMA</td><td id="cargptDma200">—</td><td id="cargptDma200Check">—</td></tr>
+                    <tr><td>Difference from 200-DMA</td><td id="cargptDmaDiff">—</td><td id="cargptDmaDiffCheck">—</td></tr>
+                    <tr><td>CAR Signal</td><td id="cargptDmaCarSignal" colspan="2">—</td></tr>
+                </table>
             </div>
         </div>
     </div>
@@ -454,27 +455,43 @@
         function showDmaPopup(row) {
             if (!row) return;
             const title = document.getElementById('cargptDmaPopupTitle');
+            const priceEl = document.getElementById('cargptDmaCurrentPrice');
             const d50 = document.getElementById('cargptDma50');
             const d100 = document.getElementById('cargptDma100');
             const d200 = document.getElementById('cargptDma200');
-            const priceEl = document.getElementById('cargptDmaCurrentPrice');
             const diffEl = document.getElementById('cargptDmaDiff');
+            const carSignalEl = document.getElementById('cargptDmaCarSignal');
+            const p = row.current_price, d50v = row.dma50, d100v = row.dma100, d200v = row.dma200;
+
             if (title) title.textContent = row.symbol || '—';
-            if (d50) d50.textContent = row.dma50 != null ? '₹' + Number(row.dma50).toFixed(2) : '—';
-            if (d100) d100.textContent = row.dma100 != null ? '₹' + Number(row.dma100).toFixed(2) : '—';
-            if (d200) d200.textContent = row.dma200 != null ? '₹' + Number(row.dma200).toFixed(2) : '—';
-            if (priceEl) priceEl.textContent = row.current_price != null ? '₹' + Number(row.current_price).toFixed(2) : '—';
+            if (priceEl) priceEl.textContent = p != null ? '₹' + Number(p).toFixed(2) : '—';
+            if (d50) d50.textContent = d50v != null ? '₹' + Number(d50v).toFixed(2) : '—';
+            if (d100) d100.textContent = d100v != null ? '₹' + Number(d100v).toFixed(2) : '—';
+            if (d200) d200.textContent = d200v != null ? '₹' + Number(d200v).toFixed(2) : '—';
+
+            var diffPct = null;
             if (diffEl) {
-                const p = row.current_price, d = row.dma200;
-                if (p != null && d != null && d !== 0) {
-                    const diff = p - d;
-                    const pct = (diff / d * 100).toFixed(2);
-                    diffEl.textContent = (diff >= 0 ? '+' : '') + '₹' + diff.toFixed(2) + ' (' + (diff >= 0 ? '+' : '') + pct + '%)';
+                if (p != null && d200v != null && d200v !== 0) {
+                    var diff = p - d200v;
+                    diffPct = (diff / d200v) * 100;
+                    var pctStr = diffPct.toFixed(2);
+                    diffEl.textContent = (diff >= 0 ? '+' : '') + '₹' + diff.toFixed(2) + ' (' + (diff >= 0 ? '+' : '') + pctStr + '%)';
                 } else {
                     diffEl.textContent = '—';
                 }
             }
-            const overlay = document.getElementById('cargptDmaPopupOverlay');
+            if (carSignalEl) carSignalEl.textContent = (row.signal || '—').trim() || '—';
+
+            var el50Check = document.getElementById('cargptDma50Check');
+            var el100Check = document.getElementById('cargptDma100Check');
+            var el200Check = document.getElementById('cargptDma200Check');
+            var elDiffCheck = document.getElementById('cargptDmaDiffCheck');
+            if (el50Check) el50Check.textContent = (p != null && d50v != null && p > d50v) ? 'YES' : 'NO';
+            if (el100Check) el100Check.textContent = (d50v != null && d100v != null && d50v > d100v) ? 'YES' : 'NO';
+            if (el200Check) el200Check.textContent = (d100v != null && d200v != null && d100v > d200v) ? 'YES' : 'NO';
+            if (elDiffCheck) elDiffCheck.textContent = (diffPct != null && diffPct > 0 && diffPct <= 10) ? 'YES' : 'NO';
+
+            var overlay = document.getElementById('cargptDmaPopupOverlay');
             if (overlay) {
                 overlay.classList.add('visible');
                 overlay.setAttribute('aria-hidden', 'false');

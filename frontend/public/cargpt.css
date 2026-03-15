@@ -325,6 +325,30 @@ body[data-theme="light"] .cargpt-help-icon-btn:hover {
 .cargpt-dma-popup-body {
     padding: 16px;
 }
+.cargpt-dma-popup-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+}
+.cargpt-dma-popup-table td {
+    padding: 6px 12px 6px 0;
+    vertical-align: top;
+    color: var(--cargpt-text);
+}
+.cargpt-dma-popup-table td:first-child {
+    color: var(--cargpt-muted);
+    font-weight: 500;
+    white-space: nowrap;
+}
+.cargpt-dma-popup-table td:nth-child(2) {
+    text-align: right;
+    min-width: 90px;
+}
+.cargpt-dma-popup-table td:nth-child(3) {
+    text-align: right;
+    min-width: 44px;
+    font-weight: 500;
+}
 .cargpt-dma-popup-list {
     display: grid;
     grid-template-columns: auto 1fr;
