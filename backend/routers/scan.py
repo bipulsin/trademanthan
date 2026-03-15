@@ -3621,6 +3621,20 @@ async def run_fix_cholafin_instrument_key():
         return {"success": False, "error": str(e)}
 
 
+@router.post("/run-car-nifty200-blank-last10")
+async def run_car_nifty200_blank_last10():
+    """
+    Off-cycle: run CAR update only for car_nifty200 rows where last10daycummavg is blank.
+    Recomputes cumulative avg and signal using available trading days from 52w high to last day.
+    """
+    try:
+        from backend.services.car_nifty200_updater import run_car_nifty200_update_blank_last10_job
+        result = run_car_nifty200_update_blank_last10_job()
+        return {"success": True, "result": result}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 @router.get("/health")
 async def health_check(db: Session = Depends(get_db)):
     """

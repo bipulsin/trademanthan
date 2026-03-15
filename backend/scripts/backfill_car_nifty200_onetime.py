@@ -128,7 +128,7 @@ def _run_car_from_rows(rows):
     from backend.services.car_nifty200_updater import (
         _compute_cumulative_avg,
         _compute_buy_signal,
-        PARTIAL_SIGNAL,
+        _compute_buy_signal_from_values,
     )
     if not rows or len(rows) < 10:
         return None
@@ -138,20 +138,18 @@ def _run_car_from_rows(rows):
         week_52_date = df.loc[idx_max, "date"]
         df_from_high = df[df["date"] >= week_52_date].copy().sort_values("date").reset_index(drop=True)
         last_close = float(df["close"].iloc[-1])
-        if len(df_from_high) < 10:
-            return {
-                "stock_ltp": round(last_close, 4),
-                "date_52weekhigh": week_52_date,
-                "last10daycummavg": "",
-                "signal": PARTIAL_SIGNAL,
-            }
         df_from_high = _compute_cumulative_avg(df_from_high)
-        if df_from_high is None or len(df_from_high) < 10:
+        if df_from_high is None or len(df_from_high) < 1:
+            return None
+        if len(df_from_high) < 10:
+            cumm_vals = df_from_high["cumulative_avg"].tolist()
+            last10_str = ",".join(f"{round(float(x), 2)}" for x in cumm_vals)
+            signal = _compute_buy_signal_from_values([float(x) for x in cumm_vals])
             return {
                 "stock_ltp": round(last_close, 4),
                 "date_52weekhigh": week_52_date,
-                "last10daycummavg": "",
-                "signal": PARTIAL_SIGNAL,
+                "last10daycummavg": last10_str,
+                "signal": signal,
             }
         last_10 = df_from_high["cumulative_avg"].tail(10).tolist()
         last10_str = ",".join(f"{round(float(x), 2)}" for x in last_10)

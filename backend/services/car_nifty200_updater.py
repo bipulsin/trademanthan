@@ -39,7 +39,17 @@ def _compute_buy_signal(df: pd.DataFrame) -> str:
     return "BUY / AVERAGE OUT"
 
 
-# When 52w high is within last 10 trading days we cannot compute cumulative avg; use this signal and blank last10.
+def _compute_buy_signal_from_values(values: List[float]) -> str:
+    """Strictly increasing (oldest to newest) -> BUY / AVERAGE OUT else AVOID / HOLD. Works with 1 to 10 values."""
+    if not values or len(values) < 1:
+        return "AVOID / HOLD"
+    for i in range(len(values) - 1):
+        if values[i] >= values[i + 1]:
+            return "AVOID / HOLD"
+    return "BUY / AVERAGE OUT"
+
+
+# When 52w high is within last 10 trading days we use cumulative avg over available days only (no longer blank).
 PARTIAL_SIGNAL = "AVOID/HOLD"
 
 
@@ -74,20 +84,19 @@ def run_car_for_symbol_yahoo(symbol: str) -> Optional[Dict[str, Any]]:
         week_52_date = df.loc[idx_max, "date"]
         df_from_high = df[df["date"] >= week_52_date].copy().sort_values("date").reset_index(drop=True)
         last_close = float(df["close"].iloc[-1])
-        if len(df_from_high) < 10:
-            return {
-                "stock_ltp": round(last_close, 4),
-                "date_52weekhigh": week_52_date,
-                "last10daycummavg": "",
-                "signal": PARTIAL_SIGNAL,
-            }
         df_from_high = _compute_cumulative_avg(df_from_high)
-        if df_from_high is None or len(df_from_high) < 10:
+        if df_from_high is None or len(df_from_high) < 1:
+            return None
+        # When fewer than 10 trading days from 52w high to last day: use all available days for cumm avg and signal
+        if len(df_from_high) < 10:
+            cumm_vals = df_from_high["cumulative_avg"].tolist()
+            last10_str = ",".join(f"{round(float(x), 2)}" for x in cumm_vals)
+            signal = _compute_buy_signal_from_values([float(x) for x in cumm_vals])
             return {
                 "stock_ltp": round(last_close, 4),
                 "date_52weekhigh": week_52_date,
-                "last10daycummavg": "",
-                "signal": PARTIAL_SIGNAL,
+                "last10daycummavg": last10_str,
+                "signal": signal,
             }
         last_10 = df_from_high["cumulative_avg"].tail(10).tolist()
         last10_str = ",".join(f"{round(float(x), 2)}" for x in last_10)
@@ -123,16 +132,21 @@ def run_car_for_symbol_upstox(stock: str, instrument_key: str) -> Optional[Dict[
         df = get_historical_close_from_date(instrument_key, week_52_date, upstox)
         if df is None or df.empty:
             return None
+        df = compute_cumulative_avg(df)
+        if df is None or len(df) < 1:
+            return None
+        last_close = float(df["close"].iloc[-1])
+        # When fewer than 10 trading days from 52w high to last day: use all available days for cumm avg and signal
         if len(df) < 10:
-            last_close = float(df["close"].iloc[-1])
+            cumm_vals = df["cumulative_avg"].tolist()
+            last10_str = ",".join(f"{round(float(x), 2)}" for x in cumm_vals)
+            signal = _compute_buy_signal_from_values([float(x) for x in cumm_vals])
             return {
                 "stock_ltp": round(last_close, 4),
                 "date_52weekhigh": week_52_date,
-                "last10daycummavg": "",
-                "signal": PARTIAL_SIGNAL,
+                "last10daycummavg": last10_str,
+                "signal": signal,
             }
-        df = compute_cumulative_avg(df)
-        last_close = float(df["close"].iloc[-1])
         last_10 = df["cumulative_avg"].tail(10).tolist()
         last10_str = ",".join(f"{round(float(x), 2)}" for x in last_10)
         signal = compute_buy_signal(df)
@@ -147,9 +161,10 @@ def run_car_for_symbol_upstox(stock: str, instrument_key: str) -> Optional[Dict[
         return None
 
 
-def update_car_nifty200_batch() -> Dict[str, int]:
+def update_car_nifty200_batch(only_blank_last10: bool = False) -> Dict[str, int]:
     """
     Update car_nifty200 rows where last_updated_date is not today (IST).
+    If only_blank_last10=True, process only rows where last10daycummavg IS NULL or blank (off-cycle fill).
     For rows with NULL signal (never filled): try Upstox first, then Yahoo (to backfill).
     For rows already having data: try Yahoo first, then Upstox fallback.
     Yahoo tries .NS then .BO (BSE) when NSE returns no data.
@@ -163,24 +178,31 @@ def update_car_nifty200_batch() -> Dict[str, int]:
     updated = 0
     failed = 0
 
+    if only_blank_last10:
+        sql = """
+            SELECT stock, stock_instrument_key, signal
+            FROM car_nifty200
+            WHERE (last10daycummavg IS NULL OR TRIM(COALESCE(last10daycummavg, '')) = '')
+            ORDER BY stock ASC
+            """
+    else:
+        sql = """
+            SELECT stock, stock_instrument_key, signal
+            FROM car_nifty200
+            WHERE last_updated_date IS NULL OR last_updated_date < :today
+            ORDER BY stock ASC
+            """
     with engine.begin() as conn:
         rows = conn.execute(
-            text(
-                """
-                SELECT stock, stock_instrument_key, signal
-                FROM car_nifty200
-                WHERE last_updated_date IS NULL OR last_updated_date < :today
-                ORDER BY stock ASC
-                """
-            ),
-            {"today": today_str},
+            text(sql),
+            {"today": today_str} if not only_blank_last10 else {},
         ).mappings().all()
 
     if not rows:
-        logger.info("car_nifty200: no rows to update (all up to date)")
+        logger.info("car_nifty200: no rows to update (all up to date)" if not only_blank_last10 else "car_nifty200: no rows with blank last10daycummavg")
         return {"updated": 0, "failed": 0}
 
-    logger.info(f"car_nifty200: updating {len(rows)} rows (Upstox first for NULL signal, else Yahoo then Upstox)")
+    logger.info(f"car_nifty200: updating {len(rows)} rows (Upstox first for NULL signal, else Yahoo then Upstox)" + (" [blank last10 only]" if only_blank_last10 else ""))
 
     for i in range(0, len(rows), BATCH_SIZE):
         batch = rows[i : i + BATCH_SIZE]
@@ -254,3 +276,14 @@ def run_car_nifty200_update_job():
         logger.info(f"CAR NIFTY200 job completed: {result}")
     except Exception as e:
         logger.error(f"CAR NIFTY200 job failed: {e}", exc_info=True)
+
+
+def run_car_nifty200_update_blank_last10_job() -> Dict[str, int]:
+    """Off-cycle: update only car_nifty200 rows where last10daycummavg is blank (recompute with new logic)."""
+    try:
+        result = update_car_nifty200_batch(only_blank_last10=True)
+        logger.info(f"CAR NIFTY200 blank-last10 job completed: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"CAR NIFTY200 blank-last10 job failed: {e}", exc_info=True)
+        return {"updated": 0, "failed": 0}
