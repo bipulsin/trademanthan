@@ -191,6 +191,24 @@
         </div>
     </div>
 
+    <div class="cargpt-dma-popup-overlay" id="cargptDmaPopupOverlay" aria-hidden="true">
+        <div class="cargpt-dma-popup" id="cargptDmaPopup" role="dialog" aria-labelledby="cargptDmaPopupTitle">
+            <div class="cargpt-dma-popup-header">
+                <h3 id="cargptDmaPopupTitle" class="cargpt-dma-popup-title"></h3>
+                <button type="button" class="cargpt-dma-popup-close" id="cargptDmaPopupClose" aria-label="Close">&times;</button>
+            </div>
+            <div class="cargpt-dma-popup-body">
+                <dl class="cargpt-dma-popup-list">
+                    <dt>50-DMA</dt><dd id="cargptDma50">—</dd>
+                    <dt>100-DMA</dt><dd id="cargptDma100">—</dd>
+                    <dt>200-DMA</dt><dd id="cargptDma200">—</dd>
+                    <dt>Current Price</dt><dd id="cargptDmaCurrentPrice">—</dd>
+                    <dt>Difference from 200-DMA</dt><dd id="cargptDmaDiff">—</dd>
+                </dl>
+            </div>
+        </div>
+    </div>
+
     <script src="left-menu.js?v=2.8"></script>
     <script>
         const CARGPT_BASE_URL = '/cargpt';
@@ -407,13 +425,16 @@
             }
             const f = dmaFilter || { dma50: true, dma100: true, dma200: true };
             let html = '';
+            const sym = (row) => (row.symbol || '-').replace(/[&<>"']/g, function(c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] || c;
+            });
             for (const row of data) {
                 const displaySignal = getDisplaySignal(row, f.dma50, f.dma100, f.dma200);
                 const signalClass = displaySignal.includes('BUY') ? 'cargpt-signal-buy' : 'cargpt-signal-avoid';
                 const err = row.error ? '<br><small style="color: var(--cargpt-avoid);">' + (row.error || '') + '</small>' : '';
                 html += `
                     <tr>
-                        <td>${row.symbol || '-'}</td>
+                        <td><span class="cargpt-symbol-link" data-symbol="${sym(row)}" role="button" tabindex="0">${sym(row)}</span></td>
                         <td>${row.week_52_high_date || '-'}${err}</td>
                         <td>${row.current_price != null ? '₹' + row.current_price : '-'}</td>
                         <td style="font-size: 0.85rem;">${formatCumulativeAvg(row.last_10_cumulative_avg)}</td>
@@ -422,6 +443,77 @@
             }
             tbody.innerHTML = html;
         }
+
+        function getRowDataForSymbol(symbol, tableBodyId) {
+            const data = tableBodyId === 'nifty250TableBody' ? window._nifty250Data : window._analysisData;
+            if (!data || !Array.isArray(data)) return null;
+            const s = (symbol || '').trim().toUpperCase();
+            return data.find(function(r) { return (r.symbol || '').trim().toUpperCase() === s; }) || null;
+        }
+
+        function showDmaPopup(row) {
+            if (!row) return;
+            const title = document.getElementById('cargptDmaPopupTitle');
+            const d50 = document.getElementById('cargptDma50');
+            const d100 = document.getElementById('cargptDma100');
+            const d200 = document.getElementById('cargptDma200');
+            const priceEl = document.getElementById('cargptDmaCurrentPrice');
+            const diffEl = document.getElementById('cargptDmaDiff');
+            if (title) title.textContent = row.symbol || '—';
+            if (d50) d50.textContent = row.dma50 != null ? '₹' + Number(row.dma50).toFixed(2) : '—';
+            if (d100) d100.textContent = row.dma100 != null ? '₹' + Number(row.dma100).toFixed(2) : '—';
+            if (d200) d200.textContent = row.dma200 != null ? '₹' + Number(row.dma200).toFixed(2) : '—';
+            if (priceEl) priceEl.textContent = row.current_price != null ? '₹' + Number(row.current_price).toFixed(2) : '—';
+            if (diffEl) {
+                const p = row.current_price, d = row.dma200;
+                if (p != null && d != null && d !== 0) {
+                    const diff = p - d;
+                    const pct = (diff / d * 100).toFixed(2);
+                    diffEl.textContent = (diff >= 0 ? '+' : '') + '₹' + diff.toFixed(2) + ' (' + (diff >= 0 ? '+' : '') + pct + '%)';
+                } else {
+                    diffEl.textContent = '—';
+                }
+            }
+            const overlay = document.getElementById('cargptDmaPopupOverlay');
+            if (overlay) {
+                overlay.classList.add('visible');
+                overlay.setAttribute('aria-hidden', 'false');
+            }
+        }
+
+        function closeDmaPopup() {
+            const overlay = document.getElementById('cargptDmaPopupOverlay');
+            if (overlay) {
+                overlay.classList.remove('visible');
+                overlay.setAttribute('aria-hidden', 'true');
+            }
+        }
+
+        document.addEventListener('click', function(e) {
+            const link = e.target.closest('.cargpt-symbol-link');
+            if (!link) return;
+            e.preventDefault();
+            const symbol = link.getAttribute('data-symbol') || '';
+            const tbody = link.closest('tbody');
+            const tableBodyId = tbody ? tbody.id : '';
+            const row = getRowDataForSymbol(symbol, tableBodyId);
+            showDmaPopup(row);
+        });
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') closeDmaPopup();
+            const link = e.target.closest('.cargpt-symbol-link');
+            if (link && (e.key === 'Enter' || e.key === ' ')) {
+                e.preventDefault();
+                const symbol = link.getAttribute('data-symbol') || '';
+                const tbody = link.closest('tbody');
+                const row = getRowDataForSymbol(symbol, tbody ? tbody.id : '');
+                showDmaPopup(row);
+            }
+        });
+        document.getElementById('cargptDmaPopupClose').addEventListener('click', closeDmaPopup);
+        document.getElementById('cargptDmaPopupOverlay').addEventListener('click', function(e) {
+            if (e.target === this) closeDmaPopup();
+        });
 
         document.getElementById('runNifty250Btn').addEventListener('click', async () => {
             const overlay = document.getElementById('loadingOverlay');
