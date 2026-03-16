@@ -419,9 +419,10 @@ def _process_pivot_batch(
     vwap_filter_pct: if > 0, only include rows where LTP is within ±vwap_filter_pct% of VWAP,
     using the same candle duration as selected by ohlc_interval ("daily" -> days/1, "hourly" -> hours/1, "15min" -> minutes/15).
     """
-    # Sanitize threshold to a reasonable band (0.1% .. 10%).
-    band_pct = max(0.1, min(threshold_pct or 5.0, 10.0))
-    band = band_pct / 100.0
+    # Sanitize threshold to a reasonable band (0.1% .. 10%), 0 = Disabled.
+    raw_band = threshold_pct or 0.0
+    band_pct = 0.0 if raw_band <= 0 else max(0.1, min(raw_band, 10.0))
+    band = band_pct / 100.0 if band_pct > 0 else 0.0
     vwap_band = max(0.0, min(vwap_filter_pct or 0.0, 20.0)) / 100.0  # cap at 20%
     bullish: list[dict] = []
     bearish: list[dict] = []
@@ -502,9 +503,14 @@ def _process_pivot_batch(
             "r2_pivot": round(r2, 4),
             "s2_pivot": round(s2, 4),
         }
-        in_bullish = (ltp <= r3) and (ltp >= (r3 * (1.0 - band)))
-        in_bearish = (ltp >= s3) and (ltp <= (s3 * (1.0 + band)))
-        if in_bullish and in_bearish:
+        if band_pct > 0:
+            in_bullish = (ltp <= r3) and (ltp >= (r3 * (1.0 - band)))
+            in_bearish = (ltp >= s3) and (ltp <= (s3 * (1.0 + band)))
+        else:
+            # Disabled: start as potential candidates; rely on 50% R2–R3, 50% S2–S3, and VWAP filters.
+            in_bullish = True
+            in_bearish = True
+        if band_pct > 0 and in_bullish and in_bearish:
             # LTP in overlap zone: assign to the level it's closer to (by % distance)
             dist_r3_pct = (r3 - ltp) / r3 if r3 > 0 else 1.0
             dist_s3_pct = (ltp - s3) / s3 if s3 > 0 else 1.0
@@ -525,8 +531,12 @@ def _process_pivot_batch(
                 in_bearish = False
 
         if log_enabled:
-            _pb_log(target_date_str, "Bullish", f"{stock} | Near R3 band pass? {_pb_bool(in_bullish)} | 50% R2–R3 filter pass? {_pb_bool(bull_mid_ok)}")
-            _pb_log(target_date_str, "Bearish", f"{stock} | Near S3 band pass? {_pb_bool(in_bearish)} | 50% S2–S3 filter pass? {_pb_bool(bear_mid_ok)}")
+            if band_pct > 0:
+                _pb_log(target_date_str, "Bullish", f"{stock} | Near R3 band pass? {_pb_bool(in_bullish)} | 50% R2–R3 filter pass? {_pb_bool(bull_mid_ok)}")
+                _pb_log(target_date_str, "Bearish", f"{stock} | Near S3 band pass? {_pb_bool(in_bearish)} | 50% S2–S3 filter pass? {_pb_bool(bear_mid_ok)}")
+            else:
+                _pb_log(target_date_str, "Bullish", f"{stock} | R3/S3 distance filter DISABLED | 50% R2–R3 filter pass? {_pb_bool(bull_mid_ok)}")
+                _pb_log(target_date_str, "Bearish", f"{stock} | R3/S3 distance filter DISABLED | 50% S2–S3 filter pass? {_pb_bool(bear_mid_ok)}")
 
         vwap_ok = True
         vwap_val = None
@@ -581,8 +591,8 @@ def _process_pivot_batch(
                 "band_pct": band_pct,
                 "vwap_filter_pct": vwap_filter_pct,
                 "vwap": round(vwap_val, 4) if vwap_val else None,
-                "fail_bullish": "" if in_bullish else ("VWAP" if vwap_band > 0 and not vwap_ok else "R3 band / 50% R2–R3"),
-                "fail_bearish": "" if in_bearish else ("VWAP" if vwap_band > 0 and not vwap_ok else "S3 band / 50% S2–S3"),
+                "fail_bullish": "" if in_bullish else ("VWAP" if vwap_band > 0 and not vwap_ok else ("R3 band / 50% R2-R3" if band_pct > 0 else "50% R2-R3 only")),
+                "fail_bearish": "" if in_bearish else ("VWAP" if vwap_band > 0 and not vwap_ok else ("S3 band / 50% S2-S3" if band_pct > 0 else "50% S2-S3 only")),
             })
     return bullish, bearish
 
@@ -592,9 +602,9 @@ async def get_pivot_breakout(
     ohlc_interval: str = Query("daily", description="OHLC source: 'daily', 'hourly', or '15min'"),
     threshold_pct: float = Query(
         5.0,
-        ge=0.1,
+        ge=0.0,
         le=10.0,
-        description="Percentage band for closeness to R3/S3 (e.g. 5.0 for 5%).",
+        description="Percentage band for closeness to R3/S3 (0 = Disabled, e.g. 5.0 for 5%).",
     ),
     vwap_filter_pct: float = Query(
         0.0,
@@ -877,9 +887,9 @@ async def get_pivot_breakout_stream(
     ohlc_interval: str = Query("daily", description="OHLC source: 'daily', 'hourly', or '15min'"),
     threshold_pct: float = Query(
         5.0,
-        ge=0.1,
+        ge=0.0,
         le=10.0,
-        description="Percentage band for closeness to R3/S3 (e.g. 5.0 for 5%).",
+        description="Percentage band for closeness to R3/S3 (0 = Disabled, e.g. 5.0 for 5%).",
     ),
     vwap_filter_pct: float = Query(
         0.0,

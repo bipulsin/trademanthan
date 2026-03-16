@@ -36,11 +36,12 @@
                         <option value="15min">15-Min</option>
                     </select>
                     <label for="thresholdPct">Close to R3/S3:</label>
-                    <select id="thresholdPct" title="Allowed distance band from R3/S3">
+                    <select id="thresholdPct" title="Allowed distance band from R3/S3 (select Disabled to skip this filter)">
+                        <option value="0" selected>Disabled</option>
                         <option value="1">1%</option>
                         <option value="2">2%</option>
                         <option value="3">3%</option>
-                        <option value="5" selected>5%</option>
+                        <option value="5">5%</option>
                     </select>
                     <label class="vwap-filter-label" for="vwapFilter">
                         <input type="checkbox" id="vwapFilter" title="Only show stocks whose future LTP is within ±5% of VWAP">
@@ -65,11 +66,12 @@
                         <option value="15min">15-Min</option>
                     </select>
                     <label for="thresholdPctMobile">Close to R3/S3:</label>
-                    <select id="thresholdPctMobile" title="Distance band" aria-label="Close to R3/S3">
+                    <select id="thresholdPctMobile" title="Distance band (Disabled to skip)" aria-label="Close to R3/S3">
+                        <option value="0" selected>Disabled</option>
                         <option value="1">1%</option>
                         <option value="2">2%</option>
                         <option value="3">3%</option>
-                        <option value="5" selected>5%</option>
+                        <option value="5">5%</option>
                     </select>
                     <label class="vwap-filter-label" for="vwapFilterMobile">
                         <input type="checkbox" id="vwapFilterMobile" title="Within 5% of VWAP">

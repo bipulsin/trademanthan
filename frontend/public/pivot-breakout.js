@@ -147,7 +147,7 @@
         }
 
         const ohlcInterval = (document.getElementById("ohlcInterval") || {}).value || "daily";
-        const thresholdPct = (document.getElementById("thresholdPct") || {}).value || "5";
+        const thresholdPct = (document.getElementById("thresholdPct") || {}).value || "0";
         const vwapFilter = (document.getElementById("vwapFilter") || {}).checked ? "5" : "0";
         const params = new URLSearchParams({
             ohlc_interval: ohlcInterval,
@@ -261,7 +261,7 @@
 
         try {
             const ohlcInterval = (document.getElementById("ohlcInterval") || {}).value || "daily";
-            const thresholdPct = (document.getElementById("thresholdPct") || {}).value || "5";
+            const thresholdPct = (document.getElementById("thresholdPct") || {}).value || "0";
             const vwapFilter = (document.getElementById("vwapFilter") || {}).checked ? "5" : "0";
             const params = new URLSearchParams({
                 ohlc_interval: ohlcInterval,
