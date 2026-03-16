@@ -4,8 +4,12 @@
     const bullishSummary = document.getElementById("bullishSummary");
     const bearishSummary = document.getElementById("bearishSummary");
     const refreshBtn = document.getElementById("refreshBtn");
-    const API = "/scan/arbitrage/pivot-breakout";
-    const STREAM_API = "/scan/arbitrage/pivot-breakout-stream";
+    // Use same API base as scan: when on tradewithcto.com, backend is at trademanthan.in
+    const API_BASE = (typeof window !== "undefined" && window.location.hostname === "localhost")
+        ? ""
+        : "https://trademanthan.in";
+    const API = API_BASE + "/scan/arbitrage/pivot-breakout";
+    const STREAM_API = API_BASE + "/scan/arbitrage/pivot-breakout-stream";
 
     let bullishData = [];
     let bearishData = [];
