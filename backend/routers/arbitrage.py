@@ -1,12 +1,14 @@
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional, Any
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from fastapi.responses import PlainTextResponse
 from sqlalchemy import text
+import logging
 
 from backend.config import get_instruments_file_path
 from backend.database import engine
@@ -19,6 +21,45 @@ from backend.services.arbitrage_daily_setup_scheduler import (
 )
 
 router = APIRouter(prefix="/scan/arbitrage", tags=["arbitrage"])
+
+
+def _pivot_breakout_logger() -> logging.Logger:
+    """
+    Dedicated file logger for pivot breakout diagnostics.
+    Writes to logs/pivot_breakout.log (same folder as other server logs).
+    """
+    logger = logging.getLogger("pivot_breakout")
+    if getattr(logger, "_pivot_breakout_configured", False):
+        return logger
+    logger.setLevel(logging.INFO)
+    try:
+        # repo_root/backend/routers/arbitrage.py -> repo_root/logs/pivot_breakout.log
+        repo_root = Path(__file__).resolve().parent.parent.parent
+        logs_dir = repo_root / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        fh = logging.FileHandler(str(logs_dir / "pivot_breakout.log"), encoding="utf-8")
+        fh.setLevel(logging.INFO)
+        fh.setFormatter(logging.Formatter("%(message)s"))
+        logger.addHandler(fh)
+        logger.propagate = False
+    except Exception:
+        # If file logging fails, keep logger usable without crashing.
+        logger.propagate = True
+    logger._pivot_breakout_configured = True  # type: ignore[attr-defined]
+    return logger
+
+
+def _pb_log(prefix_date: str, side: str, msg: str) -> None:
+    """
+    Write one line to pivot_breakout.log.
+    Prefix format: [YYYY-MM-DD][Bullish|Bearish]
+    """
+    side_norm = "Bullish" if (side or "").lower().startswith("bull") else "Bearish"
+    _pivot_breakout_logger().info(f"[{prefix_date}][{side_norm}] {msg}")
+
+
+def _pb_bool(v: bool) -> str:
+    return "YES" if v else "NO"
 
 
 @router.get("/version")
@@ -368,6 +409,8 @@ def _process_pivot_batch(
     ohlc_interval: str = "daily",
     threshold_pct: float = 5.0,
     vwap_filter_pct: float = 0.0,
+    failures_out: Optional[list[dict]] = None,
+    log_enabled: bool = True,
 ) -> tuple[list[dict], list[dict]]:
     """
     Process a batch of rows and return (bullish, bearish) lists.
@@ -383,33 +426,72 @@ def _process_pivot_batch(
     bullish: list[dict] = []
     bearish: list[dict] = []
     for row in rows:
-        # Always prefer live future LTP from Upstox; fall back to DB value on error.
-        live_ltp = None
+        stock = (row.get("stock") or "").strip()
+        fut_symbol = (row.get("currmth_future_symbol") or "").strip()
+        ikey = (row.get("currmth_future_instrument_key") or "").strip()
+        if not stock or not fut_symbol or not ikey:
+            continue
+
+        # Always prefer live future LTP from Upstox; fall back to stored DB value on error.
+        ltp_api_stmt = f"GET https://api.upstox.com/v2/market-quote/quotes?instrument_key={ikey}"
+        live_ltp: Optional[float] = None
+        quote_last_price: Optional[float] = None
         try:
-            quote = upstox.get_market_quote_by_key(row["currmth_future_instrument_key"])
+            quote = upstox.get_market_quote_by_key(ikey)
             if quote:
                 live_price = float(quote.get("last_price", 0) or 0)
+                quote_last_price = live_price
                 if live_price > 0:
                     live_ltp = live_price
         except Exception:
             live_ltp = None
-        ltp = float(live_ltp if live_ltp is not None else row["currmth_future_ltp"])
-        ohlc = _get_prev_day_ohlc(
-            upstox, row["currmth_future_instrument_key"], target_date_str, ohlc_interval, use_same_day
-        )
+            quote_last_price = None
+
+        stored_ltp = float(row.get("currmth_future_ltp") or 0)
+        ltp = float(live_ltp if live_ltp is not None else stored_ltp)
+
+        if log_enabled:
+            if quote_last_price == 0:
+                _pb_log(target_date_str, "Bullish", f"{stock} | {fut_symbol} | LTP API: {ltp_api_stmt} | last_price=0 (using stored price={stored_ltp})")
+                _pb_log(target_date_str, "Bearish", f"{stock} | {fut_symbol} | LTP API: {ltp_api_stmt} | last_price=0 (using stored price={stored_ltp})")
+            elif live_ltp is None:
+                _pb_log(target_date_str, "Bullish", f"{stock} | {fut_symbol} | LTP API: {ltp_api_stmt} | last_price={(quote_last_price if quote_last_price is not None else '<error>')} (using stored price={stored_ltp})")
+                _pb_log(target_date_str, "Bearish", f"{stock} | {fut_symbol} | LTP API: {ltp_api_stmt} | last_price={(quote_last_price if quote_last_price is not None else '<error>')} (using stored price={stored_ltp})")
+            else:
+                _pb_log(target_date_str, "Bullish", f"{stock} | {fut_symbol} | LTP API: {ltp_api_stmt} | last_price={live_ltp}")
+                _pb_log(target_date_str, "Bearish", f"{stock} | {fut_symbol} | LTP API: {ltp_api_stmt} | last_price={live_ltp}")
+
+        ohlc = _get_prev_day_ohlc(upstox, ikey, target_date_str, ohlc_interval, use_same_day)
         if not ohlc:
+            if failures_out is not None:
+                failures_out.append({"stock": stock, "future": fut_symbol, "timeframe": ohlc_interval, "fail_bullish": "NO OHLC", "fail_bearish": "NO OHLC"})
+            if log_enabled:
+                _pb_log(target_date_str, "Bullish", f"{stock} | Pivot TF={ohlc_interval} | OHLC: NOT FOUND -> SKIP")
+                _pb_log(target_date_str, "Bearish", f"{stock} | Pivot TF={ohlc_interval} | OHLC: NOT FOUND -> SKIP")
             continue
         high, low, close, candle_date = ohlc
         if high <= 0 or low <= 0 or close <= 0:
+            if failures_out is not None:
+                failures_out.append({"stock": stock, "future": fut_symbol, "timeframe": ohlc_interval, "fail_bullish": "INVALID OHLC", "fail_bearish": "INVALID OHLC"})
             continue
         pivot = (high + low + close) / 3.0
+        rng = high - low
+        r2 = pivot + rng
+        s2 = pivot - rng
         r3 = high + 2.0 * (pivot - low)
         s3 = low - 2.0 * (high - pivot)
         if r3 <= 0 or s3 <= 0:
+            if failures_out is not None:
+                failures_out.append({"stock": stock, "future": fut_symbol, "timeframe": ohlc_interval, "fail_bullish": "INVALID PIVOT", "fail_bearish": "INVALID PIVOT"})
             continue
+
+        if log_enabled:
+            _pb_log(target_date_str, "Bullish", f"{stock} | Pivot TF={ohlc_interval} | OHLC({candle_date}) H={round(high,4)}, L={round(low,4)}, C={round(close,4)} | P={round(pivot,4)}, R2={round(r2,4)}, R3={round(r3,4)} | Band={band_pct}%")
+            _pb_log(target_date_str, "Bearish", f"{stock} | Pivot TF={ohlc_interval} | OHLC({candle_date}) H={round(high,4)}, L={round(low,4)}, C={round(close,4)} | P={round(pivot,4)}, S2={round(s2,4)}, S3={round(s3,4)} | Band={band_pct}%")
+
         payload = {
-            "stock": row["stock"],
-            "currmth_future_symbol": row["currmth_future_symbol"],
+            "stock": stock,
+            "currmth_future_symbol": fut_symbol,
             "currmth_future_ltp": ltp,
             "pivot_candle_date": candle_date,
             "previous_day_high": round(high, 4),
@@ -417,6 +499,8 @@ def _process_pivot_batch(
             "previous_day_close": round(close, 4),
             "r3_pivot": round(r3, 4),
             "s3_pivot": round(s3, 4),
+            "r2_pivot": round(r2, 4),
+            "s2_pivot": round(s2, 4),
         }
         in_bullish = (ltp <= r3) and (ltp >= (r3 * (1.0 - band)))
         in_bearish = (ltp >= s3) and (ltp <= (s3 * (1.0 + band)))
@@ -428,6 +512,24 @@ def _process_pivot_batch(
                 in_bearish = False
             else:
                 in_bullish = False
+        # Apply 50% R2–R3 / S2–S3 filters (as requested earlier)
+        bull_mid_ok = True
+        if in_bullish and r3 > r2 > 0:
+            bull_mid_ok = ltp > ((r2 + r3) / 2.0)
+            if not bull_mid_ok:
+                in_bullish = False
+        bear_mid_ok = True
+        if in_bearish and s2 > 0 and s3 > 0 and s2 > s3:
+            bear_mid_ok = ltp < ((s2 + s3) / 2.0)
+            if not bear_mid_ok:
+                in_bearish = False
+
+        if log_enabled:
+            _pb_log(target_date_str, "Bullish", f"{stock} | Near R3 band pass? {_pb_bool(in_bullish)} | 50% R2–R3 filter pass? {_pb_bool(bull_mid_ok)}")
+            _pb_log(target_date_str, "Bearish", f"{stock} | Near S3 band pass? {_pb_bool(in_bearish)} | 50% S2–S3 filter pass? {_pb_bool(bear_mid_ok)}")
+
+        vwap_ok = True
+        vwap_val = None
         if vwap_band > 0 and (in_bullish or in_bearish):
             # Align VWAP candle duration with selected OHLC interval
             if ohlc_interval == "hourly":
@@ -436,16 +538,23 @@ def _process_pivot_batch(
                 vwap_interval = "minutes/15"
             else:
                 vwap_interval = "days/1"
-            vwap_val = upstox.get_candle_vwap_by_instrument_key(
-                row["currmth_future_instrument_key"], interval=vwap_interval, days_back=2
-            )
+            vwap_val = upstox.get_candle_vwap_by_instrument_key(ikey, interval=vwap_interval, days_back=2)
             if vwap_val is None or vwap_val <= 0:
-                continue
-            low_bound = vwap_val * (1.0 - vwap_band)
-            high_bound = vwap_val * (1.0 + vwap_band)
-            if not (low_bound <= ltp <= high_bound):
-                continue
-            payload["vwap_price"] = round(vwap_val, 4)
+                vwap_ok = False
+                in_bullish = False
+                in_bearish = False
+            else:
+                low_bound = vwap_val * (1.0 - vwap_band)
+                high_bound = vwap_val * (1.0 + vwap_band)
+                vwap_ok = low_bound <= ltp <= high_bound
+                if vwap_ok:
+                    payload["vwap_price"] = round(vwap_val, 4)
+                else:
+                    in_bullish = False
+                    in_bearish = False
+            if log_enabled:
+                _pb_log(target_date_str, "Bullish", f"{stock} | VWAP enabled ({vwap_filter_pct}%) | VWAP={round(vwap_val,4) if vwap_val else vwap_val} | pass? {_pb_bool(vwap_ok)}")
+                _pb_log(target_date_str, "Bearish", f"{stock} | VWAP enabled ({vwap_filter_pct}%) | VWAP={round(vwap_val,4) if vwap_val else vwap_val} | pass? {_pb_bool(vwap_ok)}")
         if in_bullish:
             diff_r3 = r3 - ltp
             pct_r3 = (diff_r3 / r3) * 100.0
@@ -456,6 +565,25 @@ def _process_pivot_batch(
             pct_s3 = (diff_s3 / s3) * 100.0
             if pct_s3 <= band_pct:  # only include if % diff within threshold
                 bearish.append({**payload, "difference_from_s3": round(diff_s3, 4), "difference_from_s3_pct": round(pct_s3, 4)})
+
+        if failures_out is not None:
+            failures_out.append({
+                "stock": stock,
+                "future": fut_symbol,
+                "timeframe": ohlc_interval,
+                "pivot_candle_date": candle_date,
+                "ltp": round(ltp, 4),
+                "p": round(pivot, 4),
+                "r2": round(r2, 4),
+                "r3": round(r3, 4),
+                "s2": round(s2, 4),
+                "s3": round(s3, 4),
+                "band_pct": band_pct,
+                "vwap_filter_pct": vwap_filter_pct,
+                "vwap": round(vwap_val, 4) if vwap_val else None,
+                "fail_bullish": "" if in_bullish else ("VWAP" if vwap_band > 0 and not vwap_ok else "R3 band / 50% R2–R3"),
+                "fail_bearish": "" if in_bearish else ("VWAP" if vwap_band > 0 and not vwap_ok else "S3 band / 50% S2–S3"),
+            })
     return bullish, bearish
 
 
@@ -485,6 +613,14 @@ async def get_pivot_breakout(
     - vwap_filter_pct: if 5, only show candidates within ±5% of 1h candle VWAP.
     """
     try:
+        # Clear pivot_breakout.log for a clean run log on each request.
+        try:
+            repo_root = Path(__file__).resolve().parent.parent.parent
+            (repo_root / "logs").mkdir(parents=True, exist_ok=True)
+            (repo_root / "logs" / "pivot_breakout.log").write_text("", encoding="utf-8")
+        except Exception:
+            pass
+
         with engine.begin() as conn:
             rows = conn.execute(
                 text(
@@ -656,6 +792,83 @@ async def get_pivot_breakout_debug(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@router.get("/pivot-breakout-log", response_class=PlainTextResponse)
+async def get_pivot_breakout_log():
+    """Download latest pivot_breakout.log content."""
+    try:
+        repo_root = Path(__file__).resolve().parent.parent.parent
+        p = repo_root / "logs" / "pivot_breakout.log"
+        if not p.exists():
+            return ""
+        return p.read_text(encoding="utf-8")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/pivot-breakout-report")
+async def get_pivot_breakout_report(
+    ohlc_interval: str = Query("daily", description="OHLC source: 'daily', 'hourly', or '15min'"),
+    threshold_pct: float = Query(5.0, ge=0.1, le=10.0),
+    vwap_filter_pct: float = Query(0.0, ge=0.0, le=20.0),
+):
+    """
+    Runs the same pivot-breakout computation but returns a tabular report
+    of which criteria each stock fails on bullish/bearish sides.
+    Also generates pivot_breakout.log for the run.
+    """
+    try:
+        # Clear log for this report run
+        try:
+            repo_root = Path(__file__).resolve().parent.parent.parent
+            (repo_root / "logs").mkdir(parents=True, exist_ok=True)
+            (repo_root / "logs" / "pivot_breakout.log").write_text("", encoding="utf-8")
+        except Exception:
+            pass
+
+        with engine.begin() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT stock, currmth_future_symbol, currmth_future_instrument_key, currmth_future_ltp
+                    FROM arbitrage_master
+                    WHERE currmth_future_symbol IS NOT NULL
+                      AND currmth_future_instrument_key IS NOT NULL
+                      AND currmth_future_ltp IS NOT NULL
+                    ORDER BY stock ASC
+                    """
+                )
+            ).mappings().all()
+
+        upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+        target_date_str, use_same_day = _pivot_breakout_candle_mode(upstox)
+        interval = ohlc_interval if ohlc_interval in ("daily", "hourly", "15min") else "daily"
+        failures: list[dict] = []
+        bullish, bearish = _process_pivot_batch(
+            rows,
+            upstox,
+            target_date_str,
+            use_same_day,
+            ohlc_interval=interval,
+            threshold_pct=threshold_pct,
+            vwap_filter_pct=vwap_filter_pct,
+            failures_out=failures,
+            log_enabled=True,
+        )
+        return {
+            "success": True,
+            "ltp_date": target_date_str,
+            "pivot_timeframe": interval,
+            "threshold_pct": threshold_pct,
+            "vwap_filter_pct": vwap_filter_pct,
+            "bullish_count": len(bullish),
+            "bearish_count": len(bearish),
+            "failure_table": failures,
+            "log_download": "/scan/arbitrage/pivot-breakout-log",
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 BATCH_SIZE = 10
 
 
@@ -689,6 +902,14 @@ async def get_pivot_breakout_stream(
     seg = segment if segment in ("bullish", "bearish", "both") else "both"
     async def generate():
         try:
+            # Clear pivot_breakout.log for a clean run log on each request.
+            try:
+                repo_root = Path(__file__).resolve().parent.parent.parent
+                (repo_root / "logs").mkdir(parents=True, exist_ok=True)
+                (repo_root / "logs" / "pivot_breakout.log").write_text("", encoding="utf-8")
+            except Exception:
+                pass
+
             with engine.begin() as conn:
                 rows = conn.execute(
                     text(
