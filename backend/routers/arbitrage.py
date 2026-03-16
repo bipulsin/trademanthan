@@ -303,31 +303,12 @@ def _get_prev_day_ohlc(
 ) -> tuple[float, float, float, str] | None:
     """
     Get OHLC for the candle used for R3/S3. Returns (high, low, close, candle_date) or None.
-    - use_same_day=True: return candle for target_date_str (same day as ref/close).
-    - use_same_day=False: return candle strictly before target_date_str (previous trading day).
-    ohlc_interval: "daily" | "hourly" | "15min" - daily uses days/1; hourly/15min aggregate intraday.
+    NOTE: Pivots are ALWAYS based on daily candles from the previous trading day,
+    matching TradingView "Traditional" pivots on a 1D basis.
+    - use_same_day=True: use daily candle for target_date_str.
+    - use_same_day=False: use daily candle strictly before target_date_str (previous trading day).
+    ohlc_interval is kept for signature compatibility but ignored for pivot OHLC selection.
     """
-    if ohlc_interval in ("hourly", "15min"):
-        interval = "hours/1" if ohlc_interval == "hourly" else "minutes/15"
-        candles = upstox.get_historical_candles_by_instrument_key(
-            instrument_key, interval=interval, days_back=5
-        ) or []
-        daily = _aggregate_intraday_to_daily(candles)
-        prev = None
-        if use_same_day:
-            for d in daily:
-                if d["date"] == target_date_str:
-                    prev = d
-                    break
-        else:
-            for d in reversed(daily):
-                if d["date"] < target_date_str:
-                    prev = d
-                    break
-        if not prev:
-            return None
-        return (prev["high"], prev["low"], prev["close"], prev["date"])
-    # daily (default)
     candles = upstox.get_historical_candles_by_instrument_key(
         instrument_key, interval="days/1", days_back=15
     ) or []
@@ -393,10 +374,6 @@ def _process_pivot_batch(
         s3 = low - 2.0 * (high - pivot)
         if r3 <= 0 or s3 <= 0:
             continue
-        # Classic R2/S2 (for additional 50% band filter between R2-R3 and S2-S3)
-        rng = high - low
-        r2 = pivot + rng
-        s2 = pivot - rng
         payload = {
             "stock": row["stock"],
             "currmth_future_symbol": row["currmth_future_symbol"],
@@ -407,8 +384,6 @@ def _process_pivot_batch(
             "previous_day_close": round(close, 4),
             "r3_pivot": round(r3, 4),
             "s3_pivot": round(s3, 4),
-            "r2_pivot": round(r2, 4),
-            "s2_pivot": round(s2, 4),
         }
         in_bullish = (ltp <= r3) and (ltp >= (r3 * (1.0 - band)))
         in_bearish = (ltp >= s3) and (ltp <= (s3 * (1.0 + band)))
@@ -420,17 +395,6 @@ def _process_pivot_batch(
                 in_bearish = False
             else:
                 in_bullish = False
-        # Additional filter: only keep bullish if price is above 50% of the distance between R2 and R3.
-        if in_bullish and r3 > r2 > 0:
-            mid_r = (r2 + r3) / 2.0
-            if not (ltp > mid_r):
-                in_bullish = False
-        # Additional filter: only keep bearish if price is below 50% of the distance between S2 and S3.
-        if in_bearish and s2 > 0 and s3 > 0 and s2 > s3:
-            mid_s = (s2 + s3) / 2.0
-            if not (ltp < mid_s):
-                in_bearish = False
-
         if vwap_band > 0 and (in_bullish or in_bearish):
             # Align VWAP candle duration with selected OHLC interval
             if ohlc_interval == "hourly":
