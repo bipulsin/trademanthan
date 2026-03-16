@@ -360,7 +360,17 @@ def _process_pivot_batch(
     bullish: list[dict] = []
     bearish: list[dict] = []
     for row in rows:
-        ltp = float(row["currmth_future_ltp"])
+        # Always prefer live future LTP from Upstox; fall back to DB value on error.
+        live_ltp = None
+        try:
+            quote = upstox.get_market_quote_by_key(row["currmth_future_instrument_key"])
+            if quote:
+                live_price = float(quote.get("last_price", 0) or 0)
+                if live_price > 0:
+                    live_ltp = live_price
+        except Exception:
+            live_ltp = None
+        ltp = float(live_ltp if live_ltp is not None else row["currmth_future_ltp"])
         ohlc = _get_prev_day_ohlc(
             upstox, row["currmth_future_instrument_key"], target_date_str, ohlc_interval, use_same_day
         )
@@ -542,7 +552,16 @@ async def get_pivot_breakout_debug(
 
         upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
         target_date_str, use_same_day = _pivot_breakout_candle_mode(upstox)
-        ltp = float(row["currmth_future_ltp"])
+        live_ltp = None
+        try:
+            quote = upstox.get_market_quote_by_key(row["currmth_future_instrument_key"])
+            if quote:
+                live_price = float(quote.get("last_price", 0) or 0)
+                if live_price > 0:
+                    live_ltp = live_price
+        except Exception:
+            live_ltp = None
+        ltp = float(live_ltp if live_ltp is not None else row["currmth_future_ltp"])
         interval = ohlc_interval if ohlc_interval in ("daily", "hourly", "15min") else "daily"
         ohlc = _get_prev_day_ohlc(
             upstox, row["currmth_future_instrument_key"], target_date_str, interval, use_same_day
