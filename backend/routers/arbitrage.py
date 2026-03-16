@@ -299,9 +299,12 @@ def _get_prev_day_ohlc(
     instrument_key: str,
     target_date_str: str,
     ohlc_interval: str,
+    use_same_day: bool = False,
 ) -> tuple[float, float, float, str] | None:
     """
-    Get previous trading day OHLC. Returns (high, low, close, candle_date) or None.
+    Get OHLC for the candle used for R3/S3. Returns (high, low, close, candle_date) or None.
+    - use_same_day=True: return candle for target_date_str (same day as ref/close).
+    - use_same_day=False: return candle strictly before target_date_str (previous trading day).
     ohlc_interval: "daily" | "hourly" | "15min" - daily uses days/1; hourly/15min aggregate intraday.
     """
     if ohlc_interval in ("hourly", "15min"):
@@ -311,10 +314,16 @@ def _get_prev_day_ohlc(
         ) or []
         daily = _aggregate_intraday_to_daily(candles)
         prev = None
-        for d in reversed(daily):
-            if d["date"] < target_date_str:
-                prev = d
-                break
+        if use_same_day:
+            for d in daily:
+                if d["date"] == target_date_str:
+                    prev = d
+                    break
+        else:
+            for d in reversed(daily):
+                if d["date"] < target_date_str:
+                    prev = d
+                    break
         if not prev:
             return None
         return (prev["high"], prev["low"], prev["close"], prev["date"])
@@ -322,7 +331,10 @@ def _get_prev_day_ohlc(
     candles = upstox.get_historical_candles_by_instrument_key(
         instrument_key, interval="days/1", days_back=15
     ) or []
-    prev = _pick_previous_trading_day_candle(candles, target_date_str)
+    if use_same_day:
+        prev = _pick_candle_for_date(candles, target_date_str)
+    else:
+        prev = _pick_previous_trading_day_candle(candles, target_date_str)
     if not prev:
         return None
     high = float(prev.get("high", 0) or 0)
@@ -369,7 +381,7 @@ def _process_pivot_batch(
     for row in rows:
         ltp = float(row["currmth_future_ltp"])
         ohlc = _get_prev_day_ohlc(
-            upstox, row["currmth_future_instrument_key"], target_date_str, ohlc_interval
+            upstox, row["currmth_future_instrument_key"], target_date_str, ohlc_interval, use_same_day
         )
         if not ohlc:
             continue
@@ -552,7 +564,7 @@ async def get_pivot_breakout_debug(
         ltp = float(row["currmth_future_ltp"])
         interval = ohlc_interval if ohlc_interval in ("daily", "hourly", "15min") else "daily"
         ohlc = _get_prev_day_ohlc(
-            upstox, row["currmth_future_instrument_key"], target_date_str, interval
+            upstox, row["currmth_future_instrument_key"], target_date_str, interval, use_same_day
         )
         if not ohlc:
             candles = upstox.get_historical_candles_by_instrument_key(
