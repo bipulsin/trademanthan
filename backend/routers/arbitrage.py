@@ -518,17 +518,22 @@ def _process_pivot_batch(
                 in_bearish = False
             else:
                 in_bullish = False
-        # Apply 50% R2–R3 / S2–S3 filters (as requested earlier)
-        bull_mid_ok = True
-        if in_bullish and r3 > r2 > 0:
-            bull_mid_ok = ltp > ((r2 + r3) / 2.0)
-            if not bull_mid_ok:
-                in_bullish = False
-        bear_mid_ok = True
-        if in_bearish and s2 > 0 and s3 > 0 and s2 > s3:
-            bear_mid_ok = ltp < ((s2 + s3) / 2.0)
-            if not bear_mid_ok:
-                in_bearish = False
+        # Apply 50% R2–R3 / S2–S3 filters:
+        # Bullish: LTP >= R2 + (R3-R2)/2  => LTP >= midpoint of R2-R3
+        # Bearish: LTP <= S2 - (S2-S3)/2  => LTP <= midpoint of S2-S3
+        bull_mid_ok = False
+        if r3 > r2 > 0:
+            mid_r = (r2 + r3) / 2.0
+            bull_mid_ok = ltp >= mid_r
+        bear_mid_ok = False
+        if s2 > 0 and s3 > 0 and s2 > s3:
+            mid_s = (s2 + s3) / 2.0
+            bear_mid_ok = ltp <= mid_s
+        # Only enforce mid filters on the respective sides
+        if in_bullish and not bull_mid_ok:
+            in_bullish = False
+        if in_bearish and not bear_mid_ok:
+            in_bearish = False
 
         if log_enabled:
             if band_pct > 0:
@@ -568,12 +573,12 @@ def _process_pivot_batch(
         if in_bullish:
             diff_r3 = r3 - ltp
             pct_r3 = (diff_r3 / r3) * 100.0
-            if pct_r3 <= band_pct:  # only include if % diff within threshold
+            if band_pct == 0 or pct_r3 <= band_pct:
                 bullish.append({**payload, "difference_from_r3": round(diff_r3, 4), "difference_from_r3_pct": round(pct_r3, 4)})
         if in_bearish:
             diff_s3 = ltp - s3
             pct_s3 = (diff_s3 / s3) * 100.0
-            if pct_s3 <= band_pct:  # only include if % diff within threshold
+            if band_pct == 0 or pct_s3 <= band_pct:
                 bearish.append({**payload, "difference_from_s3": round(diff_s3, 4), "difference_from_s3_pct": round(pct_s3, 4)})
 
         if failures_out is not None:
