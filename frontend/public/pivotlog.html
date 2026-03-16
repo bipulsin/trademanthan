@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pivot Breakout Log - Tradentical</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #020617;
+            color: #e5e7eb;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 16px;
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+        .header h1 {
+            font-size: 20px;
+            margin: 0;
+        }
+        .controls {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .btn {
+            border: none;
+            border-radius: 6px;
+            padding: 6px 12px;
+            font-size: 13px;
+            cursor: pointer;
+            background: #0ea5e9;
+            color: #020617;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn.secondary {
+            background: #1f2937;
+            color: #e5e7eb;
+        }
+        .btn i {
+            font-size: 12px;
+        }
+        .status {
+            font-size: 12px;
+            color: #9ca3af;
+            margin-top: 4px;
+        }
+        .log-wrapper {
+            margin-top: 8px;
+            border-radius: 8px;
+            background: #020617;
+            border: 1px solid #1f2937;
+            overflow: hidden;
+        }
+        .log-header {
+            padding: 6px 10px;
+            font-size: 12px;
+            background: #020617;
+            border-bottom: 1px solid #1f2937;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: #9ca3af;
+        }
+        .log-content {
+            padding: 10px;
+            max-height: 70vh;
+            overflow: auto;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 12px;
+            line-height: 1.4;
+            white-space: pre;
+            background: #020617;
+            color: #e5e7eb;
+        }
+        .badge {
+            background: #111827;
+            color: #9ca3af;
+            border-radius: 999px;
+            padding: 2px 8px;
+            font-size: 11px;
+        }
+        a {
+            color: #38bdf8;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Pivot Breakout Log</h1>
+            <div class="controls">
+                <button class="btn" id="runReportBtn">
+                    <i class="fas fa-play"></i> Run Report &amp; Refresh Log
+                </button>
+                <button class="btn secondary" id="refreshLogBtn">
+                    <i class="fas fa-sync-alt"></i> Refresh Log Only
+                </button>
+            </div>
+        </div>
+        <div class="status" id="statusText">
+            Loads server-side pivot_breakout.log for the latest Pivot Breakout analysis.
+        </div>
+        <div class="log-wrapper">
+            <div class="log-header">
+                <span id="logMeta">No log loaded.</span>
+                <span class="badge"><a href="/scan/arbitrage/pivot-breakout-log" target="_blank" rel="noopener">Download raw log</a></span>
+            </div>
+            <pre class="log-content" id="logContent">(no log loaded)</pre>
+        </div>
+    </div>
+
+    <script>
+        async function fetchLog() {
+            const status = document.getElementById('statusText');
+            const meta = document.getElementById('logMeta');
+            const pre = document.getElementById('logContent');
+            try {
+                status.textContent = 'Fetching pivot_breakout.log from server...';
+                const res = await fetch('/scan/arbitrage/pivot-breakout-log', { cache: 'no-store' });
+                const text = await res.text();
+                pre.textContent = text || '(log is empty)';
+                const lines = text ? text.split('\n').filter(Boolean).length : 0;
+                meta.textContent = lines ? lines + ' log lines' : 'Log is empty';
+                status.textContent = 'Log loaded from server.';
+            } catch (e) {
+                status.textContent = 'Error fetching log: ' + (e.message || e.toString());
+            }
+        }
+
+        async function runReportAndLog() {
+            const status = document.getElementById('statusText');
+            status.textContent = 'Running pivot-breakout report on server (this may take some time)...';
+            try {
+                const params = new URLSearchParams({
+                    ohlc_interval: 'hourly',
+                    threshold_pct: '5',
+                    vwap_filter_pct: '0'
+                });
+                const res = await fetch('/scan/arbitrage/pivot-breakout-report?' + params.toString(), { cache: 'no-store' });
+                const data = await res.json();
+                if (!res.ok || !data.success) {
+                    throw new Error(data.detail || data.error || 'Report failed');
+                }
+                status.textContent = 'Report finished: bullish=' + data.bullish_count +
+                    ', bearish=' + data.bearish_count + '. Loading log...';
+                await fetchLog();
+            } catch (e) {
+                status.textContent = 'Error running report: ' + (e.message || e.toString());
+            }
+        }
+
+        document.getElementById('refreshLogBtn').addEventListener('click', fetchLog);
+        document.getElementById('runReportBtn').addEventListener('click', runReportAndLog);
+
+        // Initial load: just fetch existing log (if any)
+        fetchLog();
+    </script>
+</body>
+</html>
+
