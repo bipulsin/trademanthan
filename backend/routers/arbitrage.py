@@ -303,12 +303,35 @@ def _get_prev_day_ohlc(
 ) -> tuple[float, float, float, str] | None:
     """
     Get OHLC for the candle used for R3/S3. Returns (high, low, close, candle_date) or None.
-    NOTE: Pivots are ALWAYS based on daily candles from the previous trading day,
-    matching TradingView "Traditional" pivots on a 1D basis.
-    - use_same_day=True: use daily candle for target_date_str.
-    - use_same_day=False: use daily candle strictly before target_date_str (previous trading day).
-    ohlc_interval is kept for signature compatibility but ignored for pivot OHLC selection.
+    Timeframe behaviour:
+    - ohlc_interval='daily': use daily futures candles (days/1), same/previous trading day.
+    - ohlc_interval='hourly' or '15min': aggregate intraday futures candles into daily OHLC
+      and use that aggregated bar (same/previous day). This mimics how intraday pivots vary
+      by timeframe on TradingView.
     """
+    # Intraday: fetch intraday futures candles and aggregate to daily OHLC
+    if ohlc_interval in ("hourly", "15min"):
+        interval = "hours/1" if ohlc_interval == "hourly" else "minutes/15"
+        candles = upstox.get_historical_candles_by_instrument_key(
+            instrument_key, interval=interval, days_back=5
+        ) or []
+        daily = _aggregate_intraday_to_daily(candles)
+        prev = None
+        if use_same_day:
+            for d in daily:
+                if d["date"] == target_date_str:
+                    prev = d
+                    break
+        else:
+            for d in reversed(daily):
+                if d["date"] < target_date_str:
+                    prev = d
+                    break
+        if not prev:
+            return None
+        return (prev["high"], prev["low"], prev["close"], prev["date"])
+
+    # Daily (default): use daily futures candles directly
     candles = upstox.get_historical_candles_by_instrument_key(
         instrument_key, interval="days/1", days_back=15
     ) or []
