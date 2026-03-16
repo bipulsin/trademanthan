@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pivot Breakout Log - Tradentical</title>
+    <title>Pivot Breakout Diagnostics - Tradentical</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         body {
@@ -58,33 +58,39 @@
             color: #9ca3af;
             margin-top: 4px;
         }
-        .log-wrapper {
-            margin-top: 8px;
+        .table-wrapper {
+            margin-top: 10px;
             border-radius: 8px;
             background: #020617;
             border: 1px solid #1f2937;
-            overflow: hidden;
-        }
-        .log-header {
-            padding: 6px 10px;
-            font-size: 12px;
-            background: #020617;
-            border-bottom: 1px solid #1f2937;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            color: #9ca3af;
-        }
-        .log-content {
-            padding: 10px;
-            max-height: 70vh;
             overflow: auto;
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-            font-size: 12px;
-            line-height: 1.4;
-            white-space: pre;
+            max-height: 75vh;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+        }
+        thead {
+            position: sticky;
+            top: 0;
             background: #020617;
-            color: #e5e7eb;
+            z-index: 1;
+        }
+        th, td {
+            padding: 6px 8px;
+            border-bottom: 1px solid #111827;
+            text-align: right;
+            white-space: nowrap;
+        }
+        th:first-child, td:first-child {
+            text-align: left;
+        }
+        tr:nth-child(even) td {
+            background: #020617;
+        }
+        tr:nth-child(odd) td {
+            background: #020617;
         }
         .badge {
             background: #111827;
@@ -93,65 +99,144 @@
             padding: 2px 8px;
             font-size: 11px;
         }
-        a {
-            color: #38bdf8;
-            text-decoration: none;
+        .yes {
+            color: #22c55e;
+            font-weight: 600;
         }
-        a:hover {
-            text-decoration: underline;
+        .no {
+            color: #ef4444;
+            font-weight: 600;
+        }
+        .na {
+            color: #6b7280;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>Pivot Breakout Log</h1>
+            <h1>Pivot Breakout Diagnostics</h1>
             <div class="controls">
                 <button class="btn" id="runReportBtn">
-                    <i class="fas fa-play"></i> Run Report &amp; Refresh Log
+                    <i class="fas fa-play"></i> Run Report
                 </button>
-                <button class="btn secondary" id="refreshLogBtn">
-                    <i class="fas fa-sync-alt"></i> Refresh Log Only
+                <button class="btn secondary" id="refreshTableBtn">
+                    <i class="fas fa-sync-alt"></i> Refresh Table
                 </button>
             </div>
         </div>
         <div class="status" id="statusText">
-            Loads server-side pivot_breakout.log for the latest Pivot Breakout analysis.
+            Runs server-side Pivot Breakout analysis and shows one row per futures contract with all pivot conditions.
         </div>
-        <div class="log-wrapper">
-            <div class="log-header">
-                <span id="logMeta">No log loaded.</span>
-                <span class="badge"><a href="/scan/arbitrage/pivot-breakout-log" target="_blank" rel="noopener">Download raw log</a></span>
-            </div>
-            <pre class="log-content" id="logContent">(no log loaded)</pre>
+        <div class="table-wrapper">
+            <table id="pivotTable">
+                <thead>
+                    <tr>
+                        <th>Stock Future</th>
+                        <th>Last Price</th>
+                        <th>Pivot TF</th>
+                        <th>Date</th>
+                        <th>H</th>
+                        <th>L</th>
+                        <th>C</th>
+                        <th>P</th>
+                        <th>R2</th>
+                        <th>R3</th>
+                        <th>S2</th>
+                        <th>S3</th>
+                        <th>Near R3 band</th>
+                        <th>Near S3 band</th>
+                        <th>50% R2–R3</th>
+                        <th>50% S2–S3</th>
+                    </tr>
+                </thead>
+                <tbody id="pivotTbody">
+                    <tr><td colspan="16">No data loaded yet.</td></tr>
+                </tbody>
+            </table>
         </div>
     </div>
 
     <script>
-        async function fetchLog() {
-            const status = document.getElementById('statusText');
-            const meta = document.getElementById('logMeta');
-            const pre = document.getElementById('logContent');
-            try {
-                status.textContent = 'Fetching pivot_breakout.log from server...';
-                const res = await fetch('/scan/arbitrage/pivot-breakout-log', { cache: 'no-store' });
-                const text = await res.text();
-                pre.textContent = text || '(log is empty)';
-                const lines = text ? text.split('\n').filter(Boolean).length : 0;
-                meta.textContent = lines ? lines + ' log lines' : 'Log is empty';
-                status.textContent = 'Log loaded from server.';
-            } catch (e) {
-                status.textContent = 'Error fetching log: ' + (e.message || e.toString());
-            }
+        function boolCell(v) {
+            if (v === null || v === undefined) return '<span class="na">NA</span>';
+            return v ? '<span class="yes">YES</span>' : '<span class="no">NO</span>';
         }
 
-        async function runReportAndLog() {
+        function renderTable(data) {
+            const tbody = document.getElementById('pivotTbody');
             const status = document.getElementById('statusText');
-            status.textContent = 'Running pivot-breakout report on server (this may take some time)...';
+            const tf = data.pivot_timeframe || 'daily';
+            const rows = data.failure_table || [];
+            if (!rows.length) {
+                tbody.innerHTML = '<tr><td colspan="16">No rows (no eligible futures or all filters disabled).</td></tr>';
+                status.textContent = 'Report completed: no rows.';
+                return;
+            }
+            const bandPct = rows[0].band_pct || 0;
+            const html = rows.map((r) => {
+                const ltp = Number(r.ltp || 0);
+                const r2 = Number(r.r2 || 0);
+                const r3 = Number(r.r3 || 0);
+                const s2 = Number(r.s2 || 0);
+                const s3 = Number(r.s3 || 0);
+                const band = Number(r.band_pct || 0);
+
+                let nearR3 = null;
+                let nearS3 = null;
+                if (band > 0 && r3 > 0) {
+                    const pctR3 = ((r3 - ltp) / r3) * 100;
+                    nearR3 = pctR3 >= 0 && pctR3 <= band;
+                }
+                if (band > 0 && s3 > 0) {
+                    const pctS3 = ((ltp - s3) / s3) * 100;
+                    nearS3 = pctS3 >= 0 && pctS3 <= band;
+                }
+
+                let midRPass = null;
+                if (r3 > r2 && r2 > 0) {
+                    const midR = (r2 + r3) / 2;
+                    midRPass = ltp >= midR;
+                }
+                let midSPass = null;
+                if (s2 > s3 && s3 > 0) {
+                    const midS = (s2 + s3) / 2;
+                    midSPass = ltp <= midS;
+                }
+
+                const tfLabel = tf;
+                const date = r.pivot_candle_date || '';
+
+                return `<tr>
+                    <td>${(r.stock || '')} FUT</td>
+                    <td>${ltp.toFixed(2)}</td>
+                    <td>${tfLabel}</td>
+                    <td>${date}</td>
+                    <td>${(r.high ?? '').toString()}</td>
+                    <td>${(r.low ?? '').toString()}</td>
+                    <td>${(r.close ?? '').toString()}</td>
+                    <td>${(r.p ?? '').toString()}</td>
+                    <td>${(r.r2 ?? '').toString()}</td>
+                    <td>${(r.r3 ?? '').toString()}</td>
+                    <td>${(r.s2 ?? '').toString()}</td>
+                    <td>${(r.s3 ?? '').toString()}</td>
+                    <td>${band > 0 ? boolCell(nearR3) : '<span class="na">NA</span>'}</td>
+                    <td>${band > 0 ? boolCell(nearS3) : '<span class="na">NA</span>'}</td>
+                    <td>${boolCell(midRPass)}</td>
+                    <td>${boolCell(midSPass)}</td>
+                </tr>`;
+            }).join('');
+            tbody.innerHTML = html;
+            status.textContent = 'Report completed: ' + rows.length + ' rows, timeframe=' + tf + ', band=' + bandPct + '%.';
+        }
+
+        async function runReport() {
+            const status = document.getElementById('statusText');
+            status.textContent = 'Running pivot-breakout report on server (hourly, band Disabled, VWAP off)...';
             try {
                 const params = new URLSearchParams({
                     ohlc_interval: 'hourly',
-                    threshold_pct: '5',
+                    threshold_pct: '0',
                     vwap_filter_pct: '0'
                 });
                 const res = await fetch('/scan/arbitrage/pivot-breakout-report?' + params.toString(), { cache: 'no-store' });
@@ -159,19 +244,17 @@
                 if (!res.ok || !data.success) {
                     throw new Error(data.detail || data.error || 'Report failed');
                 }
-                status.textContent = 'Report finished: bullish=' + data.bullish_count +
-                    ', bearish=' + data.bearish_count + '. Loading log...';
-                await fetchLog();
+                renderTable(data);
             } catch (e) {
                 status.textContent = 'Error running report: ' + (e.message || e.toString());
             }
         }
 
-        document.getElementById('refreshLogBtn').addEventListener('click', fetchLog);
-        document.getElementById('runReportBtn').addEventListener('click', runReportAndLog);
+        document.getElementById('runReportBtn').addEventListener('click', runReport);
+        document.getElementById('refreshTableBtn').addEventListener('click', runReport);
 
-        // Initial load: just fetch existing log (if any)
-        fetchLog();
+        // Initial load: run a report immediately with default parameters
+        runReport();
     </script>
 </body>
 </html>
