@@ -393,6 +393,10 @@ def _process_pivot_batch(
         s3 = low - 2.0 * (high - pivot)
         if r3 <= 0 or s3 <= 0:
             continue
+        # Classic R2/S2 (for additional 50% band filter between R2-R3 and S2-S3)
+        rng = high - low
+        r2 = pivot + rng
+        s2 = pivot - rng
         payload = {
             "stock": row["stock"],
             "currmth_future_symbol": row["currmth_future_symbol"],
@@ -403,6 +407,8 @@ def _process_pivot_batch(
             "previous_day_close": round(close, 4),
             "r3_pivot": round(r3, 4),
             "s3_pivot": round(s3, 4),
+            "r2_pivot": round(r2, 4),
+            "s2_pivot": round(s2, 4),
         }
         in_bullish = (ltp <= r3) and (ltp >= (r3 * (1.0 - band)))
         in_bearish = (ltp >= s3) and (ltp <= (s3 * (1.0 + band)))
@@ -414,6 +420,17 @@ def _process_pivot_batch(
                 in_bearish = False
             else:
                 in_bullish = False
+        # Additional filter: only keep bullish if price is above 50% of the distance between R2 and R3.
+        if in_bullish and r3 > r2 > 0:
+            mid_r = (r2 + r3) / 2.0
+            if not (ltp > mid_r):
+                in_bullish = False
+        # Additional filter: only keep bearish if price is below 50% of the distance between S2 and S3.
+        if in_bearish and s2 > 0 and s3 > 0 and s2 > s3:
+            mid_s = (s2 + s3) / 2.0
+            if not (ltp < mid_s):
+                in_bearish = False
+
         if vwap_band > 0 and (in_bullish or in_bearish):
             # Align VWAP candle duration with selected OHLC interval
             if ohlc_interval == "hourly":
