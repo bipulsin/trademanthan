@@ -242,7 +242,9 @@
                 const res = await fetch('/scan/arbitrage/pivot-breakout-report?' + params.toString(), { cache: 'no-store' });
                 const data = await res.json();
                 if (!res.ok || !data.success) {
-                    throw new Error(data.detail || data.error || 'Report failed');
+                    const raw = data.detail || data.error || 'Report failed';
+                    const msg = typeof raw === 'string' ? raw : JSON.stringify(raw);
+                    throw new Error(msg);
                 }
                 renderTable(data);
             } catch (e) {

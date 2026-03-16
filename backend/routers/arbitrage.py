@@ -826,7 +826,12 @@ async def get_pivot_breakout_log():
 @router.get("/pivot-breakout-report")
 async def get_pivot_breakout_report(
     ohlc_interval: str = Query("daily", description="OHLC source: 'daily', 'hourly', or '15min'"),
-    threshold_pct: float = Query(5.0, ge=0.1, le=10.0),
+    threshold_pct: float = Query(
+        5.0,
+        ge=0.0,
+        le=10.0,
+        description="Percentage band for closeness to R3/S3 (0 = Disabled, e.g. 5.0 for 5%).",
+    ),
     vwap_filter_pct: float = Query(0.0, ge=0.0, le=20.0),
 ):
     """
