@@ -299,13 +299,16 @@
             .join(" ");
     }
 
+    /** Local date for the first day of the current calendar month (start of day). */
+    function firstDayOfCurrentMonth() {
+        const d = new Date();
+        return new Date(d.getFullYear(), d.getMonth(), 1);
+    }
+
     function clearFilters() {
         const today = new Date();
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(today.getDate() - 30);
-
         $("endDate").valueAsDate = today;
-        $("startDate").valueAsDate = thirtyDaysAgo;
+        $("startDate").valueAsDate = firstDayOfCurrentMonth();
         $("alertType").value = "";
 
         loadReport();
@@ -371,11 +374,8 @@
         if (!root) return;
 
         const today = new Date();
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(today.getDate() - 30);
-
         $("endDate").valueAsDate = today;
-        $("startDate").valueAsDate = thirtyDaysAgo;
+        $("startDate").valueAsDate = firstDayOfCurrentMonth();
 
         loadReport();
     }
