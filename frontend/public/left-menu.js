@@ -58,9 +58,6 @@ class LeftMenu {
                 this.injectPanelSheetHandle();
                 this.setupCollapseToggle();
                 this.setupMobileMenu();
-                if (this.currentPage === 'intraoption') {
-                    this.injectIntraoptionNavExtras();
-                }
                 this.setupMobileFooterIndices();
                 this.syncMobileTitle();
                 this.loadUserData();
@@ -386,38 +383,6 @@ class LeftMenu {
             }
         });
         panel.insertBefore(handle, panel.firstChild);
-    }
-
-    injectIntraoptionNavExtras() {
-        const navList = document.querySelector('#leftPanel .nav-list');
-        if (!navList || navList.querySelector('[data-intraoption-extra="help"]')) return;
-
-        const close = () => {
-            if (typeof this.closeMobileNav === 'function') this.closeMobileNav();
-        };
-
-        const mk = (icon, label, action) => {
-            const li = document.createElement('li');
-            li.className = 'nav-item nav-item-intraoption-extra';
-            li.setAttribute('data-intraoption-extra', action);
-            li.innerHTML = `<i class="${icon}"></i><span>${label}</span>`;
-            li.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                close();
-                if (action === 'help' && typeof window.openIntraoptionHelpModal === 'function') {
-                    window.openIntraoptionHelpModal();
-                } else if (action === 'manual' && typeof window.openManualEntryModal === 'function') {
-                    window.openManualEntryModal();
-                }
-            });
-            return li;
-        };
-
-        const helpLi = mk('fas fa-question-circle', 'Help Guide', 'help');
-        const manualLi = mk('fas fa-edit', 'Manual Entry', 'manual');
-        navList.insertBefore(helpLi, navList.firstChild);
-        navList.insertBefore(manualLi, helpLi.nextSibling);
     }
 
     setupMobileFooterIndices() {

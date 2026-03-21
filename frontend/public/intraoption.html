@@ -10,7 +10,7 @@
     <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
     <script src="auth-check.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="stylesheet" href="left-menu.css?v=3.4">
+    <link rel="stylesheet" href="left-menu.css?v=3.5">
     <link rel="stylesheet" href="theme.css?v=1.3">
     <link rel="stylesheet" href="scan.css?v=20251126281000">
     <link rel="stylesheet" href="styles.css">
@@ -910,7 +910,7 @@
             }
         }
     </style>
-    <link rel="stylesheet" href="intraoption.css?v=8">
+    <link rel="stylesheet" href="intraoption.css?v=9">
 </head>
 <body class="theme-page intraoption-body">
     <script>window.__INTRAOPTION_PAGE = true;</script>
@@ -1044,13 +1044,10 @@
         </div>
     </div>
 
-    <!-- Help embed modal -->
-    <div id="intraoptionHelpModal" class="intraoption-embed-overlay" role="dialog" aria-modal="true" aria-labelledby="intraoptionHelpTitle">
-        <div class="intraoption-embed-dialog">
-            <div class="intraoption-embed-header">
-                <span id="intraoptionHelpTitle">Help Guide</span>
-                <button type="button" class="intraoption-embed-close" onclick="closeIntraoptionEmbed('intraoptionHelpModal')" aria-label="Close">&times;</button>
-            </div>
+    <!-- Help embed modal (no title bar; help.html uses ?embed=1 to hide its own header) -->
+    <div id="intraoptionHelpModal" class="intraoption-embed-overlay" role="dialog" aria-modal="true" aria-label="Help">
+        <div class="intraoption-embed-dialog intraoption-embed-dialog--help">
+            <button type="button" class="intraoption-embed-close intraoption-embed-close-floating" onclick="closeIntraoptionEmbed('intraoptionHelpModal')" aria-label="Close">&times;</button>
             <iframe class="intraoption-embed-frame" id="intraoptionHelpFrame" title="Help Guide" src="about:blank"></iframe>
         </div>
     </div>
@@ -1073,7 +1070,11 @@
         function openIntraoptionHelpModal() {
             const frame = document.getElementById('intraoptionHelpFrame');
             const modal = document.getElementById('intraoptionHelpModal');
-            if (frame) frame.src = new URL('help.html', window.location.href).href;
+            if (frame) {
+                const u = new URL('help.html', window.location.href);
+                u.searchParams.set('embed', '1');
+                frame.src = u.href;
+            }
             if (modal) {
                 modal.classList.add('show');
                 document.body.style.overflow = 'hidden';
@@ -1545,7 +1546,7 @@
 
         </main>
     </div>
-    <script src="left-menu.js?v=3.4"></script>
+    <script src="left-menu.js?v=3.5"></script>
 </body>
 </html>
 

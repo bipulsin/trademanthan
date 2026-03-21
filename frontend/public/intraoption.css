@@ -243,6 +243,7 @@ body.theme-page.intraoption-body .no-data p {
 }
 
 .intraoption-embed-dialog {
+    position: relative;
     background: var(--theme-card);
     border: 1px solid var(--theme-border);
     border-radius: 14px;
@@ -253,6 +254,29 @@ body.theme-page.intraoption-body .no-data p {
     flex-direction: column;
     overflow: hidden;
     box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+/* Help modal: full iframe, close control only (no title bar) */
+.intraoption-embed-dialog--help .intraoption-embed-frame {
+    flex: 1;
+    min-height: 0;
+}
+
+.intraoption-embed-close-floating {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    z-index: 3;
+    background: rgba(15, 23, 42, 0.55);
+    border-radius: 8px;
+    color: #f8fafc !important;
+    line-height: 1;
+    padding: 4px 10px;
+}
+
+.intraoption-embed-close-floating:hover {
+    background: rgba(15, 23, 42, 0.75);
+    color: #fff !important;
 }
 
 .intraoption-embed-header {
