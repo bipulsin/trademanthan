@@ -697,3 +697,13 @@ body[data-theme="light"] .theme-btn.active {
         text-align: center !important;
     }
 }
+
+/* TradeWithCTO logo in mobile title bar (stacked PNG; overrides per-page square icons) */
+.mobile-title-bar .mobile-title-content .mobile-logo {
+    width: auto;
+    height: 28px;
+    max-width: min(44vw, 160px);
+    max-height: 32px;
+    object-fit: contain;
+    flex-shrink: 0;
+}

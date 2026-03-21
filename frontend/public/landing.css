@@ -56,8 +56,10 @@ body.landing-page {
 }
 
 .landing-nav .brand-logo-img {
-  height: 72px;
+  height: auto;
+  max-height: 80px;
   width: auto;
+  max-width: min(52vw, 280px);
   object-fit: contain;
   display: block;
 }
@@ -400,8 +402,11 @@ body.landing-page {
   }
 
   .landing-nav .brand-logo-img {
-    height: 40px;
+    height: auto;
+    max-height: 48px;
+    max-width: min(58vw, 220px);
     width: auto;
+    object-fit: contain;
   }
 
   .landing-nav .social-icons-squared {

@@ -6,8 +6,8 @@
     <title>CAR Setup - CAR GPT | Tradentical</title>
     <script src="auth-check.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="stylesheet" href="left-menu.css?v=3.3">
-    <link rel="stylesheet" href="cargpt.css">
+    <link rel="stylesheet" href="left-menu.css?v=3.4">
+    <link rel="stylesheet" href="cargpt.css?v=1.2">
     <link rel="stylesheet" href="theme.css?v=1.0">
     <style>
         body.modal-mode .mobile-title-bar,
@@ -33,6 +33,7 @@
     <div class="mobile-title-bar">
         <button class="mobile-menu-toggle" id="mobileMenuToggle" aria-label="Menu"><i class="fas fa-bars"></i></button>
         <div class="mobile-title-content">
+            <img src="tradewithcto-logo.png" alt="TradeWithCTO" class="mobile-logo">
             <h1 class="mobile-title">CAR GPT Setup</h1>
         </div>
     </div>
@@ -89,7 +90,7 @@
             document.body.classList.add('modal-mode');
             document.body.setAttribute('data-theme', localStorage.getItem('tradentical_theme') || 'dark');
         } else {
-            document.write('<script src="left-menu.js?v=3.3"><\/script>');
+            document.write('<script src="left-menu.js?v=3.4"><\/script>');
         }
     </script>
     <script>

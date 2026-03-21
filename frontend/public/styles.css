@@ -363,9 +363,10 @@ body {
 }
 
 .logo-container .logo-image {
-    height: 50px;
+    height: auto;
+    max-height: 72px;
     width: auto;
-    max-width: 160px;
+    max-width: min(92vw, 240px);
     object-fit: contain;
     margin-bottom: 0.75rem;
     background: transparent;

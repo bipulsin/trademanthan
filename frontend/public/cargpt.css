@@ -44,8 +44,10 @@ body.cargpt-body {
 }
 
 .mobile-title-bar .mobile-logo {
-    width: 32px;
-    height: 32px;
+    width: auto;
+    height: 28px;
+    max-width: min(42vw, 150px);
+    max-height: 32px;
     object-fit: contain;
 }
 
