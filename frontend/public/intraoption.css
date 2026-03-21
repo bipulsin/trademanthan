@@ -31,18 +31,9 @@ body.theme-page.intraoption-body .scan-container {
     box-sizing: border-box;
 }
 
-/* Help button row — directly under mobile title bar, above .scan-container */
-.intraoption-help-toolbar {
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-    width: 100%;
-    box-sizing: border-box;
-    padding: 0 0 0.65rem;
-    margin: 0 0 0.35rem;
-}
-
-.intraoption-help-btn {
+/* Help — in mobile title bar (right) */
+body.theme-page.intraoption-body main.intraoption-embedded .mobile-title-bar .intraoption-help-btn {
+    flex-shrink: 0;
     width: 38px;
     height: 38px;
     border-radius: 50%;
@@ -57,9 +48,10 @@ body.theme-page.intraoption-body .scan-container {
     align-items: center;
     justify-content: center;
     transition: background 0.2s, border-color 0.2s;
+    margin-left: 0.35rem;
 }
 
-.intraoption-help-btn:hover {
+body.theme-page.intraoption-body main.intraoption-embedded .mobile-title-bar .intraoption-help-btn:hover {
     background: rgba(59, 130, 246, 0.12);
     border-color: var(--theme-accent);
 }
@@ -357,12 +349,15 @@ body.theme-page.intraoption-body .mobile-title {
     }
 }
 
+/* Mobile (phone): hide NIFTY 50 / BANKNIFTY chips in Day Summary header */
 @media (max-width: 768px) {
-    .intraoption-help-toolbar {
-        padding-bottom: 0.5rem;
+    body.theme-page.intraoption-body .intraoption-dsum-center {
+        display: none !important;
     }
+}
 
-    .intraoption-help-btn {
+@media (max-width: 1024px) {
+    body.theme-page.intraoption-body main.intraoption-embedded .mobile-title-bar .intraoption-help-btn {
         width: 34px;
         height: 34px;
         font-size: 1rem;
