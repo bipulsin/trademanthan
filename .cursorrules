@@ -32,3 +32,17 @@ grep pattern file.log
 - Prefer API endpoints for status checks when available
 - Use `timeout 5` for quick log checks, `timeout 10` for longer operations
 
+## After Every Code Change (GitHub + EC2)
+
+**Unless the user explicitly says not to deploy**, after finishing edits that affect the app:
+
+1. **Commit** the changed files with a clear message: `git add … && git commit -m "…"`
+2. **Push** to GitHub: `git push origin main`
+3. **Deploy** to EC2 (pulls `origin/main` on the server + restarts backend):
+   ```bash
+   curl -s --max-time 30 -X POST "https://trademanthan.in/scan/deploy-backend" -H "Content-Type: application/json"
+   ```
+   Expect `{"success":true,...}` in the response.
+
+Do **not** leave fixes only in the working tree—production is updated from Git + deploy, not from local files alone.
+
