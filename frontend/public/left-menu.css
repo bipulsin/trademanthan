@@ -65,6 +65,10 @@
     padding: 1rem 0.5rem;
 }
 
+.left-panel.collapsed .panel-logo {
+    max-height: 44px;
+}
+
 .left-panel.collapsed .nav-item {
     justify-content: center;
     padding: 0.65rem 1rem;
@@ -131,8 +135,10 @@
 }
 
 .panel-logo {
-    height: 48px;
-    width: auto;
+    height: auto;
+    max-height: 76px;
+    width: 100%;
+    max-width: 100%;
     object-fit: contain;
     flex-shrink: 0;
 }

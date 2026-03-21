@@ -6,7 +6,7 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html?v=3.2';
+const MENU_HTML_PATH = 'left-menu.html?v=3.3';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 
 class LeftMenu {
@@ -157,7 +157,7 @@ class LeftMenu {
         <button class="panel-toggle" id="panelToggle" aria-label="Toggle menu"><i class="fas fa-angles-left" id="panelToggleIcon"></i></button>
         <div class="panel-header">
             <a href="dashboard.html" class="logo-link">
-                <img src="tradentical-logo.png" alt="Tradentical" class="panel-logo">
+                <img src="tradewithcto-logo.png" alt="TradeWithCTO" class="panel-logo">
             </a>
         </div>
         <nav class="panel-nav">
