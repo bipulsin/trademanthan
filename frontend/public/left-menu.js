@@ -6,7 +6,7 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html?v=3.0';
+const MENU_HTML_PATH = 'left-menu.html?v=3.2';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 
 class LeftMenu {
@@ -54,8 +54,14 @@ class LeftMenu {
                 this.isAuthenticated = true;
                 isAuthenticated = true;
                 await this.loadMenu();
+                this.injectMobileFooter();
+                this.injectPanelSheetHandle();
                 this.setupCollapseToggle();
                 this.setupMobileMenu();
+                if (this.currentPage === 'intraoption') {
+                    this.injectIntraoptionNavExtras();
+                }
+                this.setupMobileFooterIndices();
                 this.syncMobileTitle();
                 this.loadUserData();
                 this.setupNavigation();
@@ -109,13 +115,6 @@ class LeftMenu {
         } catch (e) {
             console.warn('LeftMenu: Could not fetch left-menu.html, using inline', e);
             container.innerHTML = this.getInlineMenuHTML();
-        }
-
-        // Prefer page title-bar toggle when present; hide shared floating one.
-        const pageToggle = document.getElementById('mobileMenuToggle');
-        const sharedToggle = document.getElementById('leftMenuMobileToggle');
-        if (pageToggle && pageToggle.closest('.mobile-title-bar') && sharedToggle) {
-            sharedToggle.style.display = 'none';
         }
 
         this.setupThemeToggle();
@@ -271,28 +270,229 @@ class LeftMenu {
     setupMobileMenu() {
         const panel = document.getElementById('leftPanel');
         const overlay = document.getElementById('mobileMenuOverlay');
-        const toggles = [document.getElementById('mobileMenuToggle'), document.getElementById('leftMenuMobileToggle')]
-            .filter(Boolean);
+        const toggles = [
+            document.getElementById('mobileMenuToggle'),
+            document.getElementById('leftMenuMobileToggle'),
+            document.getElementById('tmFooterNavToggle'),
+        ].filter(Boolean);
 
         if (!panel) return;
+
+        const footerBtn = document.getElementById('tmFooterNavToggle');
+
+        const setExpanded = (open) => {
+            if (footerBtn) footerBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        };
 
         const open = () => {
             panel.classList.add('mobile-open');
             if (overlay) overlay.classList.add('visible');
+            document.body.classList.add('left-menu-mobile-open');
+            setExpanded(true);
         };
         const close = () => {
             panel.classList.remove('mobile-open');
             if (overlay) overlay.classList.remove('visible');
+            document.body.classList.remove('left-menu-mobile-open');
+            setExpanded(false);
         };
 
+        this.closeMobileNav = close;
+        window.closeMobileNavSheet = close;
+
         toggles.forEach((toggle) => {
-            toggle.addEventListener('click', () => panel.classList.contains('mobile-open') ? close() : open());
+            toggle.addEventListener('click', () => (panel.classList.contains('mobile-open') ? close() : open()));
         });
         if (overlay) overlay.addEventListener('click', close);
 
-        document.querySelectorAll('.nav-item').forEach(item => {
+        document.querySelectorAll('.nav-item').forEach((item) => {
             item.addEventListener('click', () => setTimeout(close, 150));
         });
+
+        document.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Escape' && panel.classList.contains('mobile-open')) close();
+        });
+    }
+
+    injectMobileFooter() {
+        if (document.getElementById('tmMobileFooter')) return;
+
+        const liveBadge =
+            this.currentPage === 'intraoption'
+                ? '<span id="mobileLiveBadge" class="mobile-live-badge" aria-hidden="true">L</span>'
+                : '';
+
+        const html = `
+<div id="tmMobileFooter" class="tm-mobile-footer" role="navigation" aria-label="Indices and app menu">
+    <div class="tm-footer-index tm-footer-index-left" id="tmFooterNiftyWrap" role="button" tabindex="0">
+        <div class="footer-index-row">
+            <span class="footer-index-name">NIFTY50</span>
+            <span class="footer-index-arrow" id="footer-nifty-arrow">↑</span>
+        </div>
+        <div class="footer-index-price" id="footer-nifty-price">...</div>
+    </div>
+    <div class="tm-footer-center">
+        ${liveBadge}
+        <button type="button" id="tmFooterNavToggle" class="tm-footer-nav-btn" aria-label="Open navigation menu" aria-expanded="false">
+            <i class="fas fa-bars"></i>
+        </button>
+    </div>
+    <div class="tm-footer-index tm-footer-index-right" id="tmFooterBankWrap" role="button" tabindex="0">
+        <div class="footer-index-row">
+            <span class="footer-index-name">BANKNIFTY</span>
+            <span class="footer-index-arrow" id="footer-banknifty-arrow">↑</span>
+        </div>
+        <div class="footer-index-price" id="footer-banknifty-price">...</div>
+    </div>
+</div>`;
+
+        document.body.insertAdjacentHTML('beforeend', html);
+        document.body.classList.add('left-menu-footer-mode');
+
+        const refresh = () => {
+            if (typeof window.loadIndexPrices === 'function') {
+                window.loadIndexPrices();
+            } else {
+                this.refreshMobileFooterIndices();
+            }
+        };
+
+        document.getElementById('tmFooterNiftyWrap')?.addEventListener('click', refresh);
+        document.getElementById('tmFooterBankWrap')?.addEventListener('click', refresh);
+        document.getElementById('tmFooterNiftyWrap')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                refresh();
+            }
+        });
+        document.getElementById('tmFooterBankWrap')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                refresh();
+            }
+        });
+    }
+
+    injectPanelSheetHandle() {
+        const panel = document.getElementById('leftPanel');
+        if (!panel || panel.querySelector('.left-panel-sheet-handle')) return;
+        const handle = document.createElement('div');
+        handle.className = 'left-panel-sheet-handle';
+        handle.setAttribute('aria-hidden', 'true');
+        handle.innerHTML = '<div class="left-panel-sheet-handle-bar"></div>';
+        handle.addEventListener('click', () => {
+            if (window.innerWidth <= 1024 && typeof this.closeMobileNav === 'function') {
+                this.closeMobileNav();
+            }
+        });
+        panel.insertBefore(handle, panel.firstChild);
+    }
+
+    injectIntraoptionNavExtras() {
+        const navList = document.querySelector('#leftPanel .nav-list');
+        if (!navList || navList.querySelector('[data-intraoption-extra="help"]')) return;
+
+        const close = () => {
+            if (typeof this.closeMobileNav === 'function') this.closeMobileNav();
+        };
+
+        const mk = (icon, label, action) => {
+            const li = document.createElement('li');
+            li.className = 'nav-item nav-item-intraoption-extra';
+            li.setAttribute('data-intraoption-extra', action);
+            li.innerHTML = `<i class="${icon}"></i><span>${label}</span>`;
+            li.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                close();
+                if (action === 'help' && typeof window.openIntraoptionHelpModal === 'function') {
+                    window.openIntraoptionHelpModal();
+                } else if (action === 'manual' && typeof window.openManualEntryModal === 'function') {
+                    window.openManualEntryModal();
+                }
+            });
+            return li;
+        };
+
+        const helpLi = mk('fas fa-question-circle', 'Help Guide', 'help');
+        const manualLi = mk('fas fa-edit', 'Manual Entry', 'manual');
+        navList.insertBefore(helpLi, navList.firstChild);
+        navList.insertBefore(manualLi, helpLi.nextSibling);
+    }
+
+    setupMobileFooterIndices() {
+        const run = () => {
+            if (typeof window.loadIndexPrices === 'function') {
+                window.loadIndexPrices();
+            } else {
+                this.refreshMobileFooterIndices();
+            }
+        };
+        run();
+        setInterval(run, 60000);
+    }
+
+    refreshMobileFooterIndices() {
+        const API_BASE =
+            window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+                ? 'http://localhost:8000'
+                : 'https://trademanthan.in';
+
+        const formatPrice = (price) => {
+            if (price === null || price === undefined || Number.isNaN(Number(price))) return '--';
+            return Number(price).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        };
+
+        fetch(`${API_BASE}/scan/index-prices`, {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
+        })
+            .then((r) => r.json())
+            .then((result) => {
+                if (result.status === 'success' && result.data) {
+                    this.updateFooterIndicesFromData(result.data, formatPrice);
+                }
+            })
+            .catch(() => {});
+    }
+
+    updateFooterIndicesFromData(data, formatPrice) {
+        const footerNiftyPrice = document.getElementById('footer-nifty-price');
+        const footerNiftyArrow = document.getElementById('footer-nifty-arrow');
+        const footerBankPrice = document.getElementById('footer-banknifty-price');
+        const footerBankArrow = document.getElementById('footer-banknifty-arrow');
+
+        if (footerNiftyPrice && footerNiftyArrow && data.nifty) {
+            const price = data.market_status === 'closed' ? data.nifty.close_price : data.nifty.ltp;
+            footerNiftyPrice.textContent = '₹' + formatPrice(price);
+            footerNiftyArrow.className = 'footer-index-arrow';
+            if (data.nifty.trend === 'bullish') {
+                footerNiftyArrow.textContent = '↑';
+                footerNiftyArrow.classList.add('bullish');
+            } else if (data.nifty.trend === 'bearish') {
+                footerNiftyArrow.textContent = '↓';
+                footerNiftyArrow.classList.add('bearish');
+            } else {
+                footerNiftyArrow.textContent = '→';
+                footerNiftyArrow.classList.add('neutral');
+            }
+        }
+
+        if (footerBankPrice && footerBankArrow && data.banknifty) {
+            const price = data.market_status === 'closed' ? data.banknifty.close_price : data.banknifty.ltp;
+            footerBankPrice.textContent = '₹' + formatPrice(price);
+            footerBankArrow.className = 'footer-index-arrow';
+            if (data.banknifty.trend === 'bullish') {
+                footerBankArrow.textContent = '↑';
+                footerBankArrow.classList.add('bullish');
+            } else if (data.banknifty.trend === 'bearish') {
+                footerBankArrow.textContent = '↓';
+                footerBankArrow.classList.add('bearish');
+            } else {
+                footerBankArrow.textContent = '→';
+                footerBankArrow.classList.add('neutral');
+            }
+        }
     }
 
     syncMobileTitle() {
