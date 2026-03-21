@@ -313,3 +313,18 @@ body {
         display: block;
     }
 }
+
+/* Golden star when |Stock LTP − Curr Mth Future LTP| > 4 */
+.arbitrage-ltp-star {
+    display: inline-block;
+    color: #d4af37;
+    text-shadow: 0 0 1px rgba(180, 140, 20, 0.5);
+    margin-right: 0.35rem;
+    font-size: 1em;
+    line-height: 1;
+    vertical-align: middle;
+}
+
+.arbitrage-stock-cell {
+    white-space: nowrap;
+}

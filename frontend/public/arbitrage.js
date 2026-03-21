@@ -5,9 +5,6 @@
     const openBodyEl = document.getElementById("openArbitrageBody");
     const openSummaryEl = document.getElementById("openSummaryBar");
     const openCardsEl = document.getElementById("openArbitrageCards");
-    const closedBodyEl = document.getElementById("closedArbitrageBody");
-    const closedSummaryEl = document.getElementById("closedSummaryBar");
-    const closedCardsEl = document.getElementById("closedArbitrageCards");
     const refreshBtn = document.getElementById("refreshBtn");
     const ORDER_API = "/scan/arbitrage/order";
     const EXIT_API = "/scan/arbitrage/order/exit";
@@ -15,6 +12,18 @@
     const ORDER_REPORT_API = "/scan/arbitrage/orders";
     let placingOrder = false;
     let exitingOrder = false;
+
+    /** |Stock LTP − Curr Mth Future LTP| > 4 (points) */
+    function isLtpSpreadOver4(stockLtp, currFutLtp) {
+        const s = Number(stockLtp);
+        const f = Number(currFutLtp);
+        if (Number.isNaN(s) || Number.isNaN(f)) return false;
+        return Math.abs(s - f) > 4;
+    }
+
+    function starMarkup(title) {
+        return `<span class="arbitrage-ltp-star" title="${title}" aria-label="${title}">★</span>`;
+    }
 
     function fmt(v) {
         if (v === null || v === undefined || Number.isNaN(Number(v))) return "-";
@@ -38,9 +47,13 @@
             const hasOpenOrder = Boolean(r.has_open_order);
             const disabledAttr = hasOpenOrder ? "disabled" : "";
             const buttonText = hasOpenOrder ? "Ordered" : "Order";
+            const highlight = isLtpSpreadOver4(r.stock_ltp, r.currmth_future_ltp);
+            const star = highlight
+                ? starMarkup("|Stock LTP − Curr Mth Future LTP| is more than 4 points")
+                : "";
             return `
                 <tr>
-                    <td>${r.stock || "-"}</td>
+                    <td class="arbitrage-stock-cell">${star}${r.stock || "-"}</td>
                     <td class="num">${fmt(r.stock_ltp)}</td>
                     <td>${r.currmth_future_symbol || "-"}</td>
                     <td class="num">${fmt(r.currmth_future_ltp)}</td>
@@ -61,11 +74,15 @@
             const hasOpenOrder = Boolean(r.has_open_order);
             const disabledAttr = hasOpenOrder ? "disabled" : "";
             const buttonText = hasOpenOrder ? "Ordered" : "Order";
+            const highlight = isLtpSpreadOver4(r.stock_ltp, r.currmth_future_ltp);
+            const star = highlight
+                ? starMarkup("|Stock LTP − Curr Mth Future LTP| is more than 4 points")
+                : "";
             return `
                 <article class="arbitrage-card">
                     <div class="arbitrage-card-head">
                         <div>
-                            <p class="arbitrage-card-title">${r.stock || "-"} [${fmt(r.stock_ltp)}]</p>
+                            <p class="arbitrage-card-title">${star}${r.stock || "-"} [${fmt(r.stock_ltp)}]</p>
                         </div>
                         <button
                             class="btn-order"
@@ -80,13 +97,15 @@
             `;
         }).join("");
 
-        document.querySelectorAll("[data-order-btn='1']").forEach((btn) => {
+        const bindOrder = (btn) => {
             btn.addEventListener("click", async () => {
                 const stockKey = btn.getAttribute("data-stock-key");
                 if (!stockKey || btn.disabled || placingOrder) return;
                 await placeOrder(stockKey, btn);
             });
-        });
+        };
+        bodyEl.querySelectorAll(".btn-order[data-stock-key]").forEach(bindOrder);
+        document.querySelectorAll("[data-order-btn='1']").forEach(bindOrder);
     }
 
     function fmtDateTime(v) {
@@ -143,62 +162,19 @@
         });
     }
 
-    function renderClosedOrders(rows) {
-        if (!rows || rows.length === 0) {
-            closedBodyEl.innerHTML = '<tr><td colspan="9" class="state-cell">No Open positin</td></tr>';
-            closedCardsEl.innerHTML = '<div class="arbitrage-card-state">No Open positin</div>';
-            return;
-        }
-        closedBodyEl.innerHTML = rows.map((r) => `
-            <tr>
-                <td>${fmtDateTime(r.trade_entry_time)}</td>
-                <td>${fmtDateTime(r.trade_exit_time)}</td>
-                <td>${r.stock || "-"}</td>
-                <td class="num">${fmt(r.buy_cost)}</td>
-                <td class="num">${fmt(r.sell_cost)}</td>
-                <td class="num">${r.quantity ?? "-"}</td>
-                <td class="num">${fmt(r.trade_entry_value)}</td>
-                <td class="num">${fmt(r.trade_exit_value)}</td>
-                <td>${r.trade_status || "-"}</td>
-            </tr>
-        `).join("");
-
-        closedCardsEl.innerHTML = rows.map((r) => `
-            <article class="arbitrage-card">
-                <div class="arbitrage-card-head">
-                    <div>
-                        <p class="arbitrage-card-title">${r.stock || "-"}</p>
-                        <p class="arbitrage-card-subtitle">Entry ${fmtDateTime(r.trade_entry_time)}</p>
-                    </div>
-                </div>
-                <p class="arbitrage-card-line"><span class="label">Exit Time</span><span>${fmtDateTime(r.trade_exit_time)}</span></p>
-                <p class="arbitrage-card-line"><span class="label">Buy/Sell</span><span>${fmt(r.buy_cost)} / ${fmt(r.sell_cost)}</span></p>
-                <p class="arbitrage-card-line"><span class="label">Quantity</span><span>${r.quantity ?? "-"}</span></p>
-                <p class="arbitrage-card-line"><span class="label">Entry Value</span><span>${fmt(r.trade_entry_value)}</span></p>
-                <p class="arbitrage-card-line"><span class="label">Exit Value</span><span>${fmt(r.trade_exit_value)}</span></p>
-                <p class="arbitrage-card-line"><span class="label">Status</span><span>${r.trade_status || "-"}</span></p>
-            </article>
-        `).join("");
-    }
-
     async function loadOrdersByStatus(tradeStatus) {
-        const targetBody = tradeStatus === "OPEN" ? openBodyEl : closedBodyEl;
-        const targetSummary = tradeStatus === "OPEN" ? openSummaryEl : closedSummaryEl;
-        const emptyColspan = tradeStatus === "OPEN" ? 7 : 9;
-        targetBody.innerHTML = `<tr><td colspan="${emptyColspan}" class="state-cell">Loading...</td></tr>`;
+        if (tradeStatus !== "OPEN") return;
+        const targetBody = openBodyEl;
+        const targetSummary = openSummaryEl;
+        targetBody.innerHTML = '<tr><td colspan="8" class="state-cell">Loading...</td></tr>';
         targetSummary.textContent = "Loading data...";
         const res = await fetch(`${ORDER_REPORT_API}?trade_status=${encodeURIComponent(tradeStatus)}`, { cache: "no-store" });
         const data = await res.json();
         if (!res.ok || !data.success) {
             throw new Error(data.detail || `Failed to fetch ${tradeStatus} orders`);
         }
-        if (tradeStatus === "OPEN") {
-            renderOpenOrders(data.rows);
-            targetSummary.textContent = `Total OPEN records: ${data.count}`;
-        } else {
-            renderClosedOrders(data.rows);
-            targetSummary.textContent = `Total CLOSED records: ${data.count}`;
-        }
+        renderOpenOrders(data.rows);
+        targetSummary.textContent = `Total OPEN records: ${data.count}`;
     }
 
     async function placeOrder(stockInstrumentKey, btn) {
@@ -260,9 +236,6 @@
         openBodyEl.innerHTML = '<tr><td colspan="8" class="state-cell">Loading...</td></tr>';
         openCardsEl.innerHTML = '<div class="arbitrage-card-state">Loading...</div>';
         openSummaryEl.textContent = "Loading data...";
-        closedBodyEl.innerHTML = '<tr><td colspan="9" class="state-cell">Loading...</td></tr>';
-        closedCardsEl.innerHTML = '<div class="arbitrage-card-state">Loading...</div>';
-        closedSummaryEl.textContent = "Loading data...";
         try {
             const res = await fetch(SELECTION_API, { cache: "no-store" });
             const data = await res.json();
@@ -272,7 +245,6 @@
             renderRows(data.rows);
             summaryEl.textContent = `Total matching records: ${data.count}`;
             await loadOrdersByStatus("OPEN");
-            await loadOrdersByStatus("CLOSED");
         } catch (err) {
             bodyEl.innerHTML = `<tr><td colspan="7" class="state-cell">Error loading data: ${err.message}</td></tr>`;
             cardsEl.innerHTML = `<div class="arbitrage-card-state">Error loading data: ${err.message}</div>`;
@@ -280,9 +252,6 @@
             openBodyEl.innerHTML = `<tr><td colspan="8" class="state-cell">Error loading data: ${err.message}</td></tr>`;
             openCardsEl.innerHTML = `<div class="arbitrage-card-state">Error loading data: ${err.message}</div>`;
             openSummaryEl.textContent = "Failed to load data.";
-            closedBodyEl.innerHTML = `<tr><td colspan="9" class="state-cell">Error loading data: ${err.message}</td></tr>`;
-            closedCardsEl.innerHTML = `<div class="arbitrage-card-state">Error loading data: ${err.message}</div>`;
-            closedSummaryEl.textContent = "Failed to load data.";
         }
     }
 
