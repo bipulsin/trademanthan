@@ -14,9 +14,9 @@
             padding: 0;
         }
         .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 16px;
+            max-width: none;
+            margin: 0;
+            padding: 16px 0;
         }
         .header {
             display: flex;
@@ -133,7 +133,6 @@
                 <thead>
                     <tr>
                         <th>Stock Future</th>
-                        <th>Last Price</th>
                         <th>Pivot TF</th>
                         <th>Date</th>
                         <th>H</th>
@@ -146,12 +145,15 @@
                         <th>S3</th>
                         <th>Near R3 band</th>
                         <th>Near S3 band</th>
+                        <th>Last Price</th>
+                        <th>R2-R3</th>
+                        <th>S2-S3</th>
                         <th>50% R2–R3</th>
                         <th>50% S2–S3</th>
                     </tr>
                 </thead>
                 <tbody id="pivotTbody">
-                    <tr><td colspan="16">No data loaded yet.</td></tr>
+                    <tr><td colspan="18">No data loaded yet.</td></tr>
                 </tbody>
             </table>
         </div>
@@ -169,7 +171,7 @@
             const tf = data.pivot_timeframe || 'daily';
             const rows = data.failure_table || [];
             if (!rows.length) {
-                tbody.innerHTML = '<tr><td colspan="16">No rows (no eligible futures or all filters disabled).</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="18">No rows (no eligible futures or all filters disabled).</td></tr>';
                 status.textContent = 'Report completed: no rows.';
                 return;
             }
@@ -204,12 +206,14 @@
                     midSPass = ltp <= midS;
                 }
 
+                const r2r3 = (r2 != null && r3 != null && !isNaN(r2) && !isNaN(r3)) ? (r2 + (r3 - r2) / 2).toFixed(2) : '';
+                const s2s3 = (s2 != null && s3 != null && !isNaN(s2) && !isNaN(s3)) ? (s2 - (s2 - s3) / 2).toFixed(2) : '';
+
                 const tfLabel = tf;
                 const date = r.pivot_candle_date || '';
 
                 return `<tr>
                     <td>${(r.stock || '')} FUT</td>
-                    <td>${ltp.toFixed(2)}</td>
                     <td>${tfLabel}</td>
                     <td>${date}</td>
                     <td>${(r.high ?? '').toString()}</td>
@@ -222,6 +226,9 @@
                     <td>${(r.s3 ?? '').toString()}</td>
                     <td>${band > 0 ? boolCell(nearR3) : '<span class="na">NA</span>'}</td>
                     <td>${band > 0 ? boolCell(nearS3) : '<span class="na">NA</span>'}</td>
+                    <td>${ltp.toFixed(2)}</td>
+                    <td>${r2r3}</td>
+                    <td>${s2s3}</td>
                     <td>${boolCell(midRPass)}</td>
                     <td>${boolCell(midSPass)}</td>
                 </tr>`;
