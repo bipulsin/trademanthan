@@ -5,6 +5,9 @@ const API_BASE_URL = window.location.hostname === 'localhost'
     ? 'http://localhost:8000' 
     : 'https://trademanthan.in';
 
+/** Set on intraoption.html — hide Upstox token banner/popup and OAuth refresh UX */
+const SCAN_SKIP_TOKEN_UI = typeof window !== 'undefined' && window.__INTRAOPTION_PAGE === true;
+
 let autoRefreshInterval = null;
 let currentBullishData = null;
 let currentBearishData = null;
@@ -216,6 +219,7 @@ function updateDaySummary(bullishData, bearishData) {
 
 // Check token health periodically
 async function checkTokenHealth() {
+    if (SCAN_SKIP_TOKEN_UI) return;
     try {
         const response = await fetch(`${API_BASE_URL}/scan/upstox/status`, {
             method: 'GET',
@@ -257,6 +261,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Check if returning from successful OAuth
 function checkOAuthSuccess() {
+    if (SCAN_SKIP_TOKEN_UI) {
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('auth')) {
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+        return;
+    }
     const urlParams = new URLSearchParams(window.location.search);
     const authStatus = urlParams.get('auth');
     
@@ -298,8 +309,12 @@ async function loadIndexPrices() {
         
         // Check for 401 status code (Unauthorized) or error_type
         if (response.status === 401 || result.error_type === 'token_expired') {
-            console.log('Token expired, showing expired message');
-            showTokenExpiredMessage();
+            if (SCAN_SKIP_TOKEN_UI) {
+                showIndexError();
+            } else {
+                console.log('Token expired, showing expired message');
+                showTokenExpiredMessage();
+            }
             return;
         }
         
@@ -314,8 +329,12 @@ async function loadIndexPrices() {
         
         // Check if it's a 401 error (Unauthorized)
         if (error.toString().includes('401') || error.toString().includes('Unauthorized')) {
-            console.log('Token expired, showing expired message');
-            showTokenExpiredMessage();
+            if (SCAN_SKIP_TOKEN_UI) {
+                showIndexError();
+            } else {
+                console.log('Token expired, showing expired message');
+                showTokenExpiredMessage();
+            }
         } else {
             showIndexError();
         }
@@ -461,8 +480,13 @@ async function loadLatestData() {
         
         // Check for 401 (Unauthorized) or token expired
         if (response.status === 401 || result.error_type === 'token_expired') {
-            console.log('Token expired detected in loadLatestData');
-            showTokenExpiredMessage();
+            if (SCAN_SKIP_TOKEN_UI) {
+                console.log('Token/API issue on intraoption page — showing empty state');
+                displayNoData();
+            } else {
+                console.log('Token expired detected in loadLatestData');
+                showTokenExpiredMessage();
+            }
             return;
         }
         
@@ -1428,6 +1452,7 @@ if (typeof module !== 'undefined' && module.exports) {
 
 // Token Expiration Handling Functions
 function showTokenExpiredMessage() {
+    if (SCAN_SKIP_TOKEN_UI) return;
     // Show the banner between title bar and alert sections
     const banner = document.getElementById('tokenExpiredBanner');
     if (banner) {
@@ -1458,11 +1483,15 @@ function hideTokenExpiredMessage() {
 }
 
 function openTokenPopup() {
-    document.getElementById('tokenExpiredPopup').style.display = 'flex';
+    if (SCAN_SKIP_TOKEN_UI) return;
+    const el = document.getElementById('tokenExpiredPopup');
+    if (el) el.style.display = 'flex';
 }
 
 function closeTokenPopup() {
-    document.getElementById('tokenExpiredPopup').style.display = 'none';
+    if (SCAN_SKIP_TOKEN_UI) return;
+    const el = document.getElementById('tokenExpiredPopup');
+    if (el) el.style.display = 'none';
 }
 
 async function downloadInstruments() {
