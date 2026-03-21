@@ -300,15 +300,43 @@ body.theme-page.intraoption-body .no-data p {
     background: #fff;
 }
 
-/* Mobile title bar — match theme */
-body.theme-page.intraoption-body .mobile-title-bar {
+/* Mobile title bar — inside <main> so width tracks left menu expand/collapse (same as .main-content-area margin) */
+body.theme-page.intraoption-body main.intraoption-embedded .mobile-title-bar {
+    display: flex;
+    align-items: center;
+    position: relative;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    min-height: 52px;
+    /* Bleed to main edges (negate main padding) */
+    margin: -1rem -1.25rem 0.75rem;
+    padding: 0.65rem 1rem;
     background: var(--theme-card) !important;
     border-bottom: 1px solid var(--theme-border) !important;
     color: var(--theme-text) !important;
+    z-index: 998;
+}
+
+body.theme-page.intraoption-body main.intraoption-embedded .mobile-title-content {
+    flex: 1;
+    min-width: 0;
 }
 
 body.theme-page.intraoption-body .mobile-title {
     color: var(--theme-text) !important;
+    font-size: clamp(0.95rem, 2vw, 1.15rem);
+    line-height: 1.25;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+@media (max-width: 1024px) {
+    body.theme-page.intraoption-body main.intraoption-embedded .mobile-title-bar {
+        position: sticky;
+        top: 0;
+    }
 }
 
 @media (max-width: 900px) {
