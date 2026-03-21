@@ -17,6 +17,18 @@ router = APIRouter(prefix="/auth", tags=["authentication"])
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
+
+def user_to_client_dict(user: models.User) -> dict:
+    """Serialize user for login /me responses (includes admin flags)."""
+    return {
+        "id": user.id,
+        "email": user.email,
+        "name": user.full_name,
+        "picture": user.avatar_url,
+        "isAdmin": (getattr(user, "is_admin", None) or "").strip(),
+        "page_permitted": (getattr(user, "page_permitted", None) or "").strip(),
+    }
+
 class GoogleOAuthRequest(BaseModel):
     credential: str
 
@@ -134,12 +146,7 @@ async def google_oauth(request: GoogleOAuthRequest, db: Session = Depends(get_db
         return {
             "access_token": access_token,
             "token_type": "bearer",
-            "user": {
-                "id": user.id,
-                "email": user.email,
-                "name": user.full_name,
-                "picture": user.avatar_url
-            }
+            "user": user_to_client_dict(user),
         }
         
     except HTTPException:
@@ -234,16 +241,12 @@ async def google_oauth_verify(user_data: dict, db: Session = Depends(get_db)):
         
         print(f"Authentication successful for user: {user.id}")
         
+        u = user_to_client_dict(user)
+        u["google_id"] = user.google_id
         return {
             "access_token": access_token,
             "token_type": "bearer",
-            "user": {
-                "id": user.id,
-                "email": user.email,
-                "name": user.full_name,
-                "picture": user.avatar_url,
-                "google_id": user.google_id
-            }
+            "user": u,
         }
         
     except Exception as e:
@@ -324,12 +327,7 @@ async def google_oauth_code(request: GoogleOAuthCodeRequest, db: Session = Depen
         return {
             "access_token": jwt_token,
             "token_type": "bearer",
-            "user": {
-                "id": user.id,
-                "email": user.email,
-                "name": user.full_name,
-                "picture": user.avatar_url
-            }
+            "user": user_to_client_dict(user),
         }
         
     except HTTPException:
@@ -351,12 +349,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         if user is None:
             raise HTTPException(status_code=401, detail="User not found")
         
-        return {
-            "id": user.id,
-            "email": user.email,
-            "name": user.full_name,
-            "picture": user.avatar_url
-        }
+        return user_to_client_dict(user)
         
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")

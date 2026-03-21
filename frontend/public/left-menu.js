@@ -6,7 +6,7 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html?v=3.3';
+const MENU_HTML_PATH = 'left-menu.html?v=3.6';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 
 class LeftMenu {
@@ -26,7 +26,7 @@ class LeftMenu {
 
     isThemePage() {
         const path = window.location.pathname;
-        return /dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption/.test(path);
+        return /dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|admintwc/.test(path);
     }
 
     getCurrentPage() {
@@ -42,6 +42,7 @@ class LeftMenu {
         if (path.includes('pivot-breakout')) return 'pivot-breakout';
         if (path.includes('arbitrage')) return 'arbitrage';
         if (path.includes('carsetup') || path.includes('cargpt')) return 'cargpt';
+        if (path.includes('admintwc')) return 'admin';
         return 'dashboard';
     }
 
@@ -54,6 +55,8 @@ class LeftMenu {
                 this.isAuthenticated = true;
                 isAuthenticated = true;
                 await this.loadMenu();
+                await this.refreshUserProfileFromApi();
+                this.applyAdminNavVisibility();
                 this.injectMobileFooter();
                 this.injectPanelSheetHandle();
                 this.setupCollapseToggle();
@@ -72,7 +75,7 @@ class LeftMenu {
                     currentPath.includes('reports') || currentPath.includes('settings') ||
                     currentPath.includes('carsetup') || currentPath.includes('cargpt') ||
                     currentPath.includes('arbitrage') || currentPath.includes('pivot-breakout') ||
-                    currentPath.includes('intraoption');
+                    currentPath.includes('intraoption') || currentPath.includes('admintwc');
                 if (!hasRedirected && isProtectedPage) {
                     hasRedirected = true;
                     window.location.replace('index.html');
@@ -117,6 +120,36 @@ class LeftMenu {
         this.setupThemeToggle();
         this.updateDateTime();
         setInterval(() => this.updateDateTime(), 1000);
+    }
+
+    /** Merge /api/auth/me into localStorage so isAdmin / page_permitted stay current */
+    async refreshUserProfileFromApi() {
+        try {
+            const token = localStorage.getItem('trademanthan_token');
+            if (!token || !token.includes('.')) return;
+            const res = await fetch('/api/auth/me', {
+                headers: { Authorization: `Bearer ${token}` },
+                cache: 'no-store',
+            });
+            if (!res.ok) return;
+            const me = await res.json();
+            const prev = JSON.parse(localStorage.getItem('trademanthan_user') || '{}');
+            localStorage.setItem('trademanthan_user', JSON.stringify({ ...prev, ...me }));
+        } catch (e) {
+            console.warn('LeftMenu: refreshUserProfileFromApi', e);
+        }
+    }
+
+    /** Show Admin nav link only when isAdmin === "Yes" */
+    applyAdminNavVisibility() {
+        let user = {};
+        try {
+            user = JSON.parse(localStorage.getItem('trademanthan_user') || '{}');
+        } catch (e) {}
+        const show = user.isAdmin === 'Yes';
+        document.querySelectorAll('.nav-item.nav-item-admin[data-page="admintwc.html"]').forEach((el) => {
+            el.style.display = show ? 'flex' : 'none';
+        });
     }
 
     setupThemeToggle() {
@@ -169,6 +202,7 @@ class LeftMenu {
                 <li class="nav-item" data-page="strategy.html"><i class="fas fa-robot"></i><span>Strategy Management</span></li>
                 <li class="nav-item" data-page="reports.html"><i class="fas fa-chart-bar"></i><span>Reports</span></li>
                 <li class="nav-item" data-page="settings.html"><i class="fas fa-cog"></i><span>Settings</span></li>
+                <li class="nav-item nav-item-admin" data-page="admintwc.html" style="display: none;" title="Administrator only"><i class="fas fa-user-shield"></i><span>Admin</span></li>
                 <li class="nav-item nav-item-logout" data-action="logout"><i class="fas fa-sign-out-alt"></i><span>Logout</span></li>
             </ul>
         </nav>
@@ -475,6 +509,7 @@ class LeftMenu {
             reports: 'Trading Reports',
             settings: 'Settings',
             algo: 'Algo Trading',
+            admin: 'Admin',
         };
 
         mobileTitle.textContent = pageTitles[this.currentPage] || 'Tradentical';
@@ -523,6 +558,7 @@ class LeftMenu {
             case 'pivot-breakout': return 'pivot-breakout.html';
             case 'arbitrage': return 'arbitrage.html';
             case 'settings': return 'settings.html';
+            case 'admin': return 'admintwc.html';
             default: return 'dashboard.html';
         }
     }

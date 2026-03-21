@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - Tradentical</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
+    <script src="auth-check.js"></script>
+    <script>
+        (function () {
+            try {
+                var u = JSON.parse(localStorage.getItem('trademanthan_user') || '{}');
+                if (u.isAdmin !== 'Yes') {
+                    window.location.replace('dashboard.html');
+                }
+            } catch (e) {
+                window.location.replace('index.html');
+            }
+        })();
+    </script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="settings.css">
+    <link rel="stylesheet" href="left-menu.css?v=3.6">
+    <link rel="stylesheet" href="theme.css?v=1.3">
+</head>
+<body class="theme-page">
+    <div class="mobile-title-bar">
+        <button class="mobile-menu-toggle" id="mobileMenuToggle" aria-label="Menu">
+            <i class="fas fa-bars"></i>
+        </button>
+        <div class="mobile-title-content">
+            <img src="tradewithcto-logo.png" alt="TradeWithCTO" class="mobile-logo">
+            <h1 class="mobile-title">Tradentical</h1>
+        </div>
+    </div>
+
+    <div class="app-container app-with-left-menu">
+        <div id="left-menu-container"></div>
+        <main class="right-panel main-content-area">
+            <div class="settings-header">
+                <div class="settings-title-section">
+                    <h1 class="settings-title">
+                        <i class="fas fa-user-shield"></i>
+                        Admin
+                    </h1>
+                    <p class="settings-subtitle">Administrator tools and system configuration (restricted access)</p>
+                </div>
+            </div>
+
+            <div class="settings-content">
+                <div class="settings-section">
+                    <div class="section-header">
+                        <h2><i class="fas fa-info-circle"></i> Welcome</h2>
+                        <p>This area is visible only to users with <strong>isAdmin = Yes</strong> in the database.</p>
+                    </div>
+                    <div class="setting-card">
+                        <div class="setting-header">
+                            <div class="setting-icon"><i class="fas fa-check-circle"></i></div>
+                            <div class="setting-info">
+                                <h3>Access granted</h3>
+                                <p>Add admin-only features and API links here as needed.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="left-menu.js?v=3.6"></script>
+    <script src="version.js?v=1.0"></script>
+    <script src="cache-manager.js?v=1.1"></script>
+</body>
+</html>

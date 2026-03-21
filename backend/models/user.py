@@ -14,6 +14,10 @@ class User(Base):
     full_name = Column(String(255), nullable=True)
     avatar_url = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
+    # DB column "isAdmin": "Yes" = system admin; blank otherwise
+    is_admin = Column("isAdmin", String(10), nullable=True)
+    # Optional comma-separated or JSON-ish page allowlist (up to 255 chars)
+    page_permitted = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
