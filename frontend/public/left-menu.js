@@ -165,7 +165,7 @@ class LeftMenu {
             <div class="theme-toggle" id="themeToggle"><button class="theme-btn" data-theme="light" aria-label="Light mode"><i class="fas fa-sun"></i></button><button class="theme-btn" data-theme="dark" aria-label="Dark mode"><i class="fas fa-moon"></i></button></div>
             <ul class="nav-list">
                 <li class="nav-item" data-page="dashboard.html"><i class="fas fa-chart-line"></i><span>Dashboard</span></li>
-                <li class="nav-item" data-page="intraoption.html"><i class="fas fa-bolt"></i><span>Intraday Option</span></li>
+                <li class="nav-item" data-page="intraoption.html"><i class="fas fa-bolt"></i><span>Intraday Stock Options Algo</span></li>
                 <li class="nav-item" data-page="pivot-breakout.html"><i class="fas fa-bullseye"></i><span>Pivot Breakout</span></li>
                 <li class="nav-item" data-page="arbitrage.html"><i class="fas fa-shuffle"></i><span>Arbitrage Selection</span></li>
                 <li class="nav-item" data-page="cargpt.html"><i class="fas fa-chart-area"></i><span>Cumulative Avg</span></li>
@@ -301,7 +301,7 @@ class LeftMenu {
 
         const pageTitles = {
             dashboard: 'Dashboard',
-            intraoption: 'Intraday Option',
+            intraoption: 'Intraday Stock Options Algo',
             'pivot-breakout': 'Pivot Breakout',
             arbitrage: 'Arbitrage Selection',
             cargpt: 'Cumulative Average Reversal',

@@ -31,67 +31,15 @@ body.theme-page.intraoption-body .scan-container {
     box-sizing: border-box;
 }
 
-/* Top page header */
-.intraoption-page-header {
+/* Help button row — directly under mobile title bar, above .scan-container */
+.intraoption-help-toolbar {
     display: flex;
+    justify-content: flex-end;
     align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    flex-wrap: wrap;
-    padding: 1rem 1.35rem;
-    margin-bottom: 1rem;
-    background: var(--theme-card);
-    border: 1px solid var(--theme-border);
-    border-radius: 14px;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
-}
-
-body[data-theme="dark"].theme-page.intraoption-body .intraoption-page-header {
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
-}
-
-.intraoption-title-block {
-    flex: 1;
-    min-width: 200px;
-    text-align: center;
-}
-
-.intraoption-main-title {
-    margin: 0;
-    font-size: clamp(1.05rem, 2.2vw, 1.4rem);
-    font-weight: 700;
-    color: var(--theme-text);
-    line-height: 1.3;
-}
-
-.intraoption-byline {
-    margin: 0.4rem 0 0;
-    font-size: 0.88rem;
-    color: var(--theme-muted);
-    font-style: italic;
-}
-
-.intraoption-header-actions {
-    flex: 0 0 auto;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-}
-
-.intraoption-link-btn {
-    background: var(--theme-accent);
-    color: #fff !important;
-    border: none;
-    border-radius: 10px;
-    padding: 0.5rem 1rem;
-    font-weight: 600;
-    font-size: 0.9rem;
-    cursor: pointer;
-    transition: background 0.2s, transform 0.15s;
-}
-
-.intraoption-link-btn:hover {
-    background: var(--theme-accent-hover);
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0 0 0.65rem;
+    margin: 0 0 0.35rem;
 }
 
 .intraoption-help-btn {
@@ -382,23 +330,8 @@ body.theme-page.intraoption-body .mobile-title {
 }
 
 @media (max-width: 768px) {
-    .intraoption-page-header {
-        padding: 0.85rem 1rem;
-    }
-
-    .intraoption-title-block {
-        text-align: left;
-        width: 100%;
-    }
-
-    .intraoption-header-actions {
-        width: 100%;
-        justify-content: flex-end;
-    }
-
-    .intraoption-link-btn {
-        padding: 0.45rem 0.85rem;
-        font-size: 0.85rem;
+    .intraoption-help-toolbar {
+        padding-bottom: 0.5rem;
     }
 
     .intraoption-help-btn {

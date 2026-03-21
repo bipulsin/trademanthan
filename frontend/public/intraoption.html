@@ -1103,7 +1103,7 @@
             }
         }
     </style>
-    <link rel="stylesheet" href="intraoption.css?v=3">
+    <link rel="stylesheet" href="intraoption.css?v=4">
 </head>
 <body class="theme-page intraoption-body">
     <script>window.__INTRAOPTION_PAGE = true;</script>
@@ -1112,23 +1112,16 @@
             <i class="fas fa-bars"></i>
         </button>
         <div class="mobile-title-content">
-            <h1 class="mobile-title">Intraday Option</h1>
+            <h1 class="mobile-title">Intraday Stock Options Algo</h1>
         </div>
     </div>
 
     <div class="app-container app-with-left-menu">
         <div id="left-menu-container"></div>
         <main class="right-panel main-content-area intraoption-embedded">
-    <header class="intraoption-page-header">
-        <div class="intraoption-title-block">
-            <h1 class="intraoption-main-title">Intraday Stock Options Algo powered by GPT</h1>
-            <p class="intraoption-byline">-by Bipul Sahay</p>
-        </div>
-        <div class="intraoption-header-actions">
-            <button type="button" class="intraoption-link-btn" id="intraoptionOpenReport">Report</button>
-            <button type="button" class="intraoption-help-btn" id="intraoptionOpenHelp" title="Help" aria-label="Help">?</button>
-        </div>
-    </header>
+    <div class="intraoption-help-toolbar">
+        <button type="button" class="intraoption-help-btn" id="intraoptionOpenHelp" title="Help" aria-label="Help">?</button>
+    </div>
     
     <div class="scan-container">
         <!-- Opposite Trends Banner -->
@@ -1245,16 +1238,7 @@
         </div>
     </div>
 
-    <!-- Report / Help embed modals -->
-    <div id="intraoptionReportModal" class="intraoption-embed-overlay" role="dialog" aria-modal="true" aria-labelledby="intraoptionReportTitle">
-        <div class="intraoption-embed-dialog">
-            <div class="intraoption-embed-header">
-                <span id="intraoptionReportTitle">Trading Report</span>
-                <button type="button" class="intraoption-embed-close" onclick="closeIntraoptionEmbed('intraoptionReportModal')" aria-label="Close">&times;</button>
-            </div>
-            <iframe class="intraoption-embed-frame" id="intraoptionReportFrame" title="Trading Report" src="about:blank"></iframe>
-        </div>
-    </div>
+    <!-- Help embed modal -->
     <div id="intraoptionHelpModal" class="intraoption-embed-overlay" role="dialog" aria-modal="true" aria-labelledby="intraoptionHelpTitle">
         <div class="intraoption-embed-dialog">
             <div class="intraoption-embed-header">
@@ -1280,15 +1264,6 @@
             }
         });
 
-        function openIntraoptionReportModal() {
-            const frame = document.getElementById('intraoptionReportFrame');
-            const modal = document.getElementById('intraoptionReportModal');
-            if (frame) frame.src = new URL('reportscan.html', window.location.href).href;
-            if (modal) {
-                modal.classList.add('show');
-                document.body.style.overflow = 'hidden';
-            }
-        }
         function openIntraoptionHelpModal() {
             const frame = document.getElementById('intraoptionHelpFrame');
             const modal = document.getElementById('intraoptionHelpModal');
@@ -1304,20 +1279,13 @@
             document.body.style.overflow = '';
         }
         document.addEventListener('DOMContentLoaded', function() {
-            document.getElementById('intraoptionOpenReport')?.addEventListener('click', openIntraoptionReportModal);
             document.getElementById('intraoptionOpenHelp')?.addEventListener('click', openIntraoptionHelpModal);
-            document.getElementById('intraoptionReportModal')?.addEventListener('click', function(e) {
-                if (e.target === this) closeIntraoptionEmbed('intraoptionReportModal');
-            });
             document.getElementById('intraoptionHelpModal')?.addEventListener('click', function(e) {
                 if (e.target === this) closeIntraoptionEmbed('intraoptionHelpModal');
             });
         });
         document.addEventListener('keydown', function(ev) {
             if (ev.key !== 'Escape') return;
-            if (document.getElementById('intraoptionReportModal')?.classList.contains('show')) {
-                closeIntraoptionEmbed('intraoptionReportModal');
-            }
             if (document.getElementById('intraoptionHelpModal')?.classList.contains('show')) {
                 closeIntraoptionEmbed('intraoptionHelpModal');
             }
@@ -1525,10 +1493,6 @@
             <h3><i class="fas fa-compass"></i> Navigation</h3>
         </div>
         <div class="drawer-menu">
-            <a href="#" class="report-link" onclick="closeMobileDrawer(); openIntraoptionReportModal(); return false;">
-                <i class="fas fa-chart-bar"></i>
-                <span>Trading Report</span>
-            </a>
             <a href="#" class="help-link" onclick="closeMobileDrawer(); openIntraoptionHelpModal(); return false;">
                 <i class="fas fa-question-circle"></i>
                 <span>Help Guide</span>
