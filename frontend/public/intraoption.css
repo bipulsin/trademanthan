@@ -9,6 +9,11 @@ body.theme-page.intraoption-body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
+/* Left menu: scan.css sets body to 14px; nav labels inherit it and look smaller than other pages */
+body.theme-page.intraoption-body #leftPanel {
+    font-size: 1rem !important;
+}
+
 /* Fill space beside sidebar; margin-left on .main-content-area tracks expand/collapse */
 body.theme-page.intraoption-body main.main-content-area.intraoption-embedded {
     width: 100%;
