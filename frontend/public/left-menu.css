@@ -341,6 +341,14 @@ body[data-theme="light"] .theme-btn.active {
 }
 
 /* Main content area - adjusts when panel expands/collapses */
+.app-with-left-menu > .main-content-area {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
 .main-content-area {
     flex: 1;
     margin-left: clamp(var(--left-menu-min), var(--left-menu-width), var(--left-menu-max));
