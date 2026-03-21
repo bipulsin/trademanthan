@@ -1,0 +1,372 @@
+/* Intraday option report embed — uses theme vars on body.theme-page */
+
+#intradayReportRoot {
+    --intraday-accent: var(--theme-accent, #3b82f6);
+    --intraday-accent-dark: var(--theme-accent-hover, #2563eb);
+    --intraday-table-head: linear-gradient(135deg, var(--theme-accent-hover, #2563eb) 0%, var(--theme-accent, #3b82f6) 100%);
+}
+
+.intraday-filters {
+    padding: 1.25rem 1.5rem;
+    background: var(--theme-card-alt, rgba(248, 250, 252, 0.9));
+    border: 1px solid var(--theme-border, rgba(148, 163, 184, 0.35));
+    border-radius: 12px;
+    margin-bottom: 1rem;
+}
+
+.intraday-filter-row {
+    display: flex;
+    gap: 1rem;
+    align-items: flex-end;
+    flex-wrap: wrap;
+}
+
+.intraday-filter-group {
+    flex: 1;
+    min-width: 150px;
+    max-width: 260px;
+}
+
+.intraday-filter-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+    font-size: 0.88rem;
+    color: var(--theme-muted, #64748b);
+}
+
+.intraday-filter-group input,
+.intraday-filter-group select {
+    width: 100%;
+    padding: 0.65rem 0.85rem;
+    border: 1px solid var(--theme-border, #cbd5e1);
+    border-radius: 8px;
+    font-size: 0.9rem;
+    background: var(--theme-card-alt, #fff);
+    color: var(--theme-text, #1e293b);
+}
+
+.intraday-filter-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.intraday-btn {
+    padding: 0.55rem 1rem;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    transition: opacity 0.2s, transform 0.15s;
+}
+
+.intraday-btn-primary {
+    background: var(--intraday-accent);
+    color: #fff;
+}
+
+.intraday-btn-secondary {
+    background: var(--theme-card, #e2e8f0);
+    color: var(--theme-text, #1e293b);
+    border: 1px solid var(--theme-border, #cbd5e1);
+}
+
+.intraday-btn-success {
+    background: var(--theme-success, #22c55e);
+    color: #fff;
+}
+
+.intraday-btn:hover {
+    opacity: 0.92;
+    transform: translateY(-1px);
+}
+
+.intraday-content {
+    padding: 0.25rem 0 0;
+}
+
+.intraday-summary-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+}
+
+.intraday-summary-card {
+    background: var(--theme-card, rgba(30, 41, 59, 0.85));
+    border: 1px solid var(--theme-border, rgba(148, 163, 184, 0.25));
+    color: var(--theme-text, #f1f5f9);
+    padding: 1rem 1.1rem;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.intraday-summary-card h3 {
+    font-size: 0.78rem;
+    font-weight: 600;
+    margin: 0 0 0.5rem;
+    color: var(--theme-muted, #94a3b8);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.intraday-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--theme-text, #f1f5f9);
+}
+
+.intraday-table-wrap {
+    overflow-x: auto;
+    border-radius: 12px;
+    border: 1px solid var(--theme-border, #e2e8f0);
+    background: var(--theme-card, #fff);
+}
+
+.intraday-table-wrap table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--theme-card, #fff);
+    color: var(--theme-text, #1e293b);
+}
+
+.intraday-table-wrap thead {
+    background: var(--intraday-table-head);
+    color: #fff;
+}
+
+.intraday-table-wrap th {
+    padding: 0.85rem 0.65rem;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.82rem;
+    white-space: nowrap;
+}
+
+.intraday-table-wrap td {
+    padding: 0.65rem;
+    border-bottom: 1px solid var(--theme-border, #f1f5f9);
+    font-size: 0.86rem;
+}
+
+.intraday-table-wrap tbody tr:hover {
+    background: var(--theme-card-alt, rgba(248, 250, 252, 0.8));
+}
+
+.intraday-data-row {
+    cursor: pointer;
+}
+
+.intraday-date-cell {
+    color: var(--intraday-accent);
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.intraday-date-cell:hover {
+    color: var(--intraday-accent-dark);
+    font-weight: 700;
+}
+
+.intraday-expandable-row {
+    display: none;
+    background: var(--theme-card-alt, #f8fafc);
+}
+
+.intraday-expandable-row.expanded {
+    display: table-row;
+}
+
+.intraday-expandable-row td {
+    padding: 0 !important;
+    border-bottom: none !important;
+}
+
+.intraday-trade-details {
+    padding: 1rem 1.25rem;
+    background: var(--theme-card-alt, rgba(248, 250, 252, 0.95));
+}
+
+.intraday-trade-details-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--theme-card, #fff);
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--theme-border, #e2e8f0);
+}
+
+.intraday-trade-details-table th {
+    background: var(--intraday-accent);
+    color: #fff;
+    padding: 0.6rem 0.5rem;
+    font-size: 0.78rem;
+    text-align: left;
+}
+
+.intraday-trade-details-table td {
+    padding: 0.5rem;
+    border-bottom: 1px solid var(--theme-border, #e9ecef);
+    font-size: 0.8rem;
+    color: var(--theme-text, #334155);
+}
+
+.intraday-contract {
+    font-size: 0.72rem;
+    color: var(--theme-muted, #64748b);
+}
+
+.intraday-positive {
+    color: var(--theme-success, #22c55e);
+    font-weight: 600;
+}
+
+.intraday-negative {
+    color: var(--theme-danger, #ef4444);
+    font-weight: 600;
+}
+
+.intraday-trend-up {
+    color: var(--theme-success, #22c55e);
+}
+
+.intraday-trend-down {
+    color: var(--theme-danger, #ef4444);
+}
+
+.intraday-trend-sideways {
+    color: var(--theme-muted, #64748b);
+}
+
+.intraday-badge {
+    display: inline-block;
+    padding: 0.2rem 0.45rem;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    font-weight: 600;
+}
+
+.intraday-badge-success {
+    background: rgba(34, 197, 94, 0.15);
+    color: var(--theme-success, #16a34a);
+}
+
+.intraday-badge-danger {
+    background: rgba(239, 68, 68, 0.12);
+    color: var(--theme-danger, #dc2626);
+}
+
+.intraday-badge-warning {
+    background: rgba(245, 158, 11, 0.15);
+    color: #d97706;
+}
+
+.intraday-badge-secondary {
+    background: var(--theme-card-alt, #e2e8f0);
+    color: var(--theme-muted, #64748b);
+}
+
+.intraday-loading {
+    text-align: center;
+    padding: 2.5rem;
+    color: var(--theme-muted, #64748b);
+}
+
+.intraday-loading-spinner {
+    border: 3px solid var(--theme-border, #e2e8f0);
+    border-top: 3px solid var(--intraday-accent);
+    border-radius: 50%;
+    width: 44px;
+    height: 44px;
+    animation: intraday-spin 1s linear infinite;
+    margin: 0 auto 1rem;
+}
+
+@keyframes intraday-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.intraday-no-data {
+    text-align: center;
+    padding: 2.5rem;
+    color: var(--theme-muted, #64748b);
+}
+
+.intraday-no-data svg {
+    width: 64px;
+    height: 64px;
+    margin-bottom: 1rem;
+    opacity: 0.45;
+}
+
+.intraday-details-loading,
+.intraday-details-empty,
+.intraday-details-error {
+    text-align: center;
+    padding: 1.25rem;
+    color: var(--theme-muted, #64748b);
+}
+
+.intraday-details-error {
+    color: var(--theme-danger, #ef4444);
+}
+
+.intraday-muted-italic {
+    color: var(--theme-success, #22c55e);
+    font-style: italic;
+    font-size: 0.85rem;
+}
+
+@media (max-width: 768px) {
+    .intraday-filter-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .intraday-filter-group {
+        min-width: 100%;
+        max-width: none;
+    }
+
+    .intraday-filter-actions {
+        width: 100%;
+    }
+
+    .intraday-filter-actions .intraday-btn {
+        flex: 1;
+        justify-content: center;
+    }
+
+    .intraday-summary-cards {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.5rem;
+    }
+
+    .intraday-summary-card {
+        padding: 0.65rem 0.5rem;
+    }
+
+    .intraday-summary-card h3 {
+        font-size: 0.65rem;
+    }
+
+    .intraday-value {
+        font-size: 1.15rem;
+    }
+
+    .intraday-mobile-hide {
+        display: none !important;
+    }
+
+    .intraday-table-wrap {
+        margin: 0 -0.25rem;
+    }
+}

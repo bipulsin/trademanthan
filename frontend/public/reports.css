@@ -814,3 +814,106 @@ body {
         padding: 1rem;
     }
 }
+
+/* ——— Multi-report accordion (reports.html) ——— */
+.reports-page-intro {
+    margin-bottom: 1.5rem;
+}
+
+.reports-page-intro .reports-title {
+    margin: 0 0 0.35rem;
+}
+
+.reports-section-heading {
+    font-size: 1.35rem;
+    font-weight: 700;
+    margin: 0 0 0.35rem;
+    color: inherit;
+}
+
+.reports-accordion {
+    border: 1px solid #e9ecef;
+    border-radius: 14px;
+    margin-bottom: 1rem;
+    background: #fff;
+    overflow: hidden;
+}
+
+body.theme-page .reports-accordion {
+    border-color: var(--theme-border, rgba(148, 163, 184, 0.35));
+    background: var(--theme-card, rgba(30, 41, 59, 0.5));
+}
+
+.reports-accordion-summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 1rem 1.15rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    font-weight: 600;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e9ecef;
+}
+
+body.theme-page .reports-accordion-summary {
+    background: var(--theme-card-alt, rgba(15, 23, 42, 0.6));
+    border-color: var(--theme-border, rgba(148, 163, 184, 0.25));
+    color: var(--theme-text, #f1f5f9);
+}
+
+.reports-accordion-summary::-webkit-details-marker {
+    display: none;
+}
+
+.reports-accordion-summary::after {
+    content: "\f078";
+    font-family: "Font Awesome 6 Free";
+    font-weight: 900;
+    font-size: 0.75rem;
+    opacity: 0.65;
+    transition: transform 0.2s ease;
+}
+
+.reports-accordion[open] > .reports-accordion-summary::after {
+    transform: rotate(180deg);
+}
+
+.reports-accordion-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 1.05rem;
+}
+
+.reports-accordion-hint {
+    font-size: 0.82rem;
+    font-weight: 500;
+    opacity: 0.75;
+}
+
+.reports-accordion-body {
+    padding: 1rem 1.15rem 1.25rem;
+}
+
+.reports-arbitrage-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 0.75rem;
+}
+
+.reports-btn-compact {
+    padding: 0.45rem 0.85rem;
+    font-size: 0.88rem;
+}
+
+.reports-arbitrage-embed {
+    margin-top: 0;
+}
+
+.reports-crypto-section .reports-header {
+    margin-top: 0;
+    padding-top: 0;
+}
