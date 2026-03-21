@@ -6,7 +6,7 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html?v=2.9';
+const MENU_HTML_PATH = 'left-menu.html?v=3.0';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 
 class LeftMenu {

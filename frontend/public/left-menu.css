@@ -43,6 +43,8 @@
     z-index: 1000;
     transition: width 0.3s ease, min-width 0.3s ease;
     overflow: hidden;
+    /* Isolate from page CSS (e.g. body { line-height: 1.6 } in broker/dashboard) */
+    line-height: 1.25;
 }
 
 .left-panel.collapsed {
@@ -65,7 +67,7 @@
 
 .left-panel.collapsed .nav-item {
     justify-content: center;
-    padding: 1rem;
+    padding: 0.65rem 1rem;
 }
 
 .left-panel.collapsed .user-info {
@@ -233,24 +235,33 @@ body[data-theme="light"] .theme-btn.active {
 .nav-item {
     display: flex;
     align-items: center;
-    padding: 0.9rem 1.25rem;
+    padding: 0.55rem 1.25rem;
     color: var(--left-menu-muted);
     cursor: pointer;
     transition: all 0.2s;
     border-left: 3px solid transparent;
     gap: 12px;
+    line-height: 1.25;
+}
+
+.left-panel .nav-item {
+    /* Win over duplicate rules in broker.css / dashboard.css / strategy.css */
+    padding: 0.55rem 1.25rem !important;
+    line-height: 1.25 !important;
 }
 
 .nav-item i {
     width: 22px;
     text-align: center;
     flex-shrink: 0;
-    font-size: 1.1rem;
+    font-size: 1.05rem;
+    line-height: 1;
 }
 
 .nav-item span {
     white-space: nowrap;
     transition: opacity 0.2s;
+    line-height: 1.25;
 }
 
 .nav-item:hover {

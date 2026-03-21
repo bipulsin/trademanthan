@@ -1,0 +1,394 @@
+/**
+ * intraoption.html — Tradentical dark/light theme + layout
+ * (Replaces legacy white scan title bar + moves indices into Day Summary header)
+ */
+
+body.theme-page.intraoption-body {
+    background: var(--theme-bg) !important;
+    color: var(--theme-text) !important;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+body.theme-page.intraoption-body .intraoption-embedded {
+    background: transparent !important;
+    padding: 1rem 1.25rem 2.5rem;
+    max-width: 1680px;
+    margin: 0 auto;
+}
+
+/* Top page header */
+.intraoption-page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    padding: 1rem 1.35rem;
+    margin-bottom: 1rem;
+    background: var(--theme-card);
+    border: 1px solid var(--theme-border);
+    border-radius: 14px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+}
+
+body[data-theme="dark"].theme-page.intraoption-body .intraoption-page-header {
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+}
+
+.intraoption-title-block {
+    flex: 1;
+    min-width: 200px;
+    text-align: center;
+}
+
+.intraoption-main-title {
+    margin: 0;
+    font-size: clamp(1.05rem, 2.2vw, 1.4rem);
+    font-weight: 700;
+    color: var(--theme-text);
+    line-height: 1.3;
+}
+
+.intraoption-byline {
+    margin: 0.4rem 0 0;
+    font-size: 0.88rem;
+    color: var(--theme-muted);
+    font-style: italic;
+}
+
+.intraoption-header-actions {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.intraoption-link-btn {
+    background: var(--theme-accent);
+    color: #fff !important;
+    border: none;
+    border-radius: 10px;
+    padding: 0.5rem 1rem;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.15s;
+}
+
+.intraoption-link-btn:hover {
+    background: var(--theme-accent-hover);
+}
+
+.intraoption-help-btn {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    border: 2px solid var(--theme-border);
+    background: var(--theme-card-alt);
+    color: var(--theme-accent);
+    font-size: 1.1rem;
+    font-weight: 800;
+    cursor: pointer;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s, border-color 0.2s;
+}
+
+.intraoption-help-btn:hover {
+    background: rgba(59, 130, 246, 0.12);
+    border-color: var(--theme-accent);
+}
+
+/* Day Summary card + header row with indices in center */
+body.theme-page.intraoption-body .day-summary-container {
+    background: var(--theme-card);
+    border: 1px solid var(--theme-border);
+    border-radius: 14px;
+    overflow: hidden;
+    margin-bottom: 1.25rem;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+}
+
+body[data-theme="dark"].theme-page.intraoption-body .day-summary-container {
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+}
+
+.intraoption-day-summary-head {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center;
+    gap: 0.75rem 1rem;
+    padding: 12px 16px !important;
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.22) 0%, rgba(139, 92, 246, 0.18) 100%) !important;
+    border-bottom: 1px solid var(--theme-border);
+    cursor: pointer;
+}
+
+body[data-theme="light"].theme-page.intraoption-body .intraoption-day-summary-head {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.12) 0%, rgba(139, 92, 246, 0.1) 100%) !important;
+}
+
+.intraoption-day-summary-head:hover {
+    filter: brightness(1.03);
+}
+
+.intraoption-dsum-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.intraoption-dsum-left h3 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--theme-text);
+}
+
+.intraoption-dsum-center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.65rem 1rem;
+    flex-wrap: wrap;
+}
+
+.intraoption-idx-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: var(--theme-card-alt);
+    border: 1px solid var(--theme-border);
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--theme-text);
+}
+
+.intraoption-idx-chip .intraoption-idx-label {
+    opacity: 0.92;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.intraoption-idx-chip .index-price {
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    color: var(--theme-accent);
+    font-size: 0.9rem;
+}
+
+.intraoption-dsum-center .trend-arrow {
+    font-size: 1rem;
+    font-weight: 900;
+    line-height: 1;
+}
+
+.intraoption-dsum-center .trend-arrow.up {
+    color: var(--theme-success);
+}
+
+.intraoption-dsum-center .trend-arrow.down {
+    color: var(--theme-danger);
+}
+
+.intraoption-dsum-center .trend-arrow.neutral {
+    color: var(--theme-muted);
+}
+
+/* LIVE pill */
+body.theme-page.intraoption-body .live-indicator {
+    display: none;
+    font-weight: 800;
+    color: #fbbf24;
+    font-size: 0.95rem;
+    margin-left: 4px;
+    letter-spacing: 0.5px;
+    text-shadow: 0 0 8px rgba(251, 191, 36, 0.5);
+}
+
+body.theme-page.intraoption-body .live-indicator.active {
+    display: inline-block;
+    animation: intraLiveBlink 1.2s infinite;
+}
+
+@keyframes intraLiveBlink {
+    0%, 48% { opacity: 1; }
+    50%, 100% { opacity: 0.35; }
+}
+
+/* Day summary expanded content */
+body.theme-page.intraoption-body .day-summary-content {
+    background: var(--theme-card-alt) !important;
+    color: var(--theme-text);
+}
+
+body.theme-page.intraoption-body .summary-card {
+    background: var(--theme-card) !important;
+    border: 1px solid var(--theme-border) !important;
+    color: var(--theme-text);
+}
+
+body.theme-page.intraoption-body .summary-label {
+    color: var(--theme-muted) !important;
+}
+
+body.theme-page.intraoption-body .summary-value {
+    color: var(--theme-text) !important;
+}
+
+/* Alert sections & tables — theme tint */
+body.theme-page.intraoption-body .alert-section,
+body.theme-page.intraoption-body .stock-card {
+    background: var(--theme-card) !important;
+    border-color: var(--theme-border) !important;
+    color: var(--theme-text);
+}
+
+body.theme-page.intraoption-body .stocks-table {
+    color: var(--theme-text);
+}
+
+body.theme-page.intraoption-body .stocks-table th {
+    background: var(--theme-card-alt) !important;
+    color: var(--theme-muted) !important;
+    border-color: var(--theme-border) !important;
+}
+
+body.theme-page.intraoption-body .stocks-table td {
+    border-color: var(--theme-border) !important;
+    color: var(--theme-text) !important;
+}
+
+body.theme-page.intraoption-body .no-data h3,
+body.theme-page.intraoption-body .no-data p {
+    color: var(--theme-muted) !important;
+}
+
+/* Embed modals */
+.intraoption-embed-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    background: rgba(15, 23, 42, 0.65);
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+    box-sizing: border-box;
+    backdrop-filter: blur(4px);
+}
+
+.intraoption-embed-overlay.show {
+    display: flex;
+}
+
+.intraoption-embed-dialog {
+    background: var(--theme-card);
+    border: 1px solid var(--theme-border);
+    border-radius: 14px;
+    width: 100%;
+    max-width: min(1200px, 100vw - 24px);
+    height: min(90vh, 900px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+.intraoption-embed-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    background: var(--theme-card-alt);
+    color: var(--theme-text);
+    border-bottom: 1px solid var(--theme-border);
+    flex-shrink: 0;
+}
+
+.intraoption-embed-header span {
+    font-weight: 600;
+    font-size: 15px;
+}
+
+.intraoption-embed-close {
+    background: transparent;
+    border: none;
+    color: var(--theme-muted);
+    font-size: 26px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 4px 8px;
+}
+
+.intraoption-embed-close:hover {
+    color: var(--theme-text);
+}
+
+.intraoption-embed-frame {
+    flex: 1;
+    width: 100%;
+    border: 0;
+    background: #fff;
+}
+
+/* Mobile title bar — match theme */
+body.theme-page.intraoption-body .mobile-title-bar {
+    background: var(--theme-card) !important;
+    border-bottom: 1px solid var(--theme-border) !important;
+    color: var(--theme-text) !important;
+}
+
+body.theme-page.intraoption-body .mobile-title {
+    color: var(--theme-text) !important;
+}
+
+@media (max-width: 900px) {
+    .intraoption-day-summary-head {
+        grid-template-columns: 1fr;
+        justify-items: stretch;
+    }
+
+    .intraoption-dsum-center {
+        order: 3;
+        justify-content: flex-start;
+    }
+
+    .summary-quick-stats {
+        justify-self: end;
+        width: 100%;
+        justify-content: flex-end;
+    }
+}
+
+@media (max-width: 768px) {
+    .intraoption-page-header {
+        padding: 0.85rem 1rem;
+    }
+
+    .intraoption-title-block {
+        text-align: left;
+        width: 100%;
+    }
+
+    .intraoption-header-actions {
+        width: 100%;
+        justify-content: flex-end;
+    }
+
+    .intraoption-link-btn {
+        padding: 0.45rem 0.85rem;
+        font-size: 0.85rem;
+    }
+
+    .intraoption-help-btn {
+        width: 34px;
+        height: 34px;
+        font-size: 1rem;
+    }
+}
