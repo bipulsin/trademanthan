@@ -26,7 +26,7 @@
         .header {
             background: linear-gradient(135deg, #1e40af 20%, #000000 80%);
             color: white;
-            padding: 30px 20px;
+            padding: 0 20px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
             position: sticky;
             top: 0;
@@ -37,19 +37,62 @@
             max-width: 1200px;
             margin: 0 auto;
             display: flex;
-            align-items: center;
+            align-items: stretch;
             justify-content: space-between;
+            gap: 16px;
+            min-height: 88px;
+            box-sizing: border-box;
+        }
+
+        .header-brand {
+            display: flex;
+            align-items: stretch;
+            gap: 16px;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .header-logo-wrap {
+            flex: 0 0 auto;
+            display: flex;
+            align-items: stretch;
+            margin: 0;
+            padding: 0;
+            line-height: 0;
+            align-self: stretch;
+        }
+
+        .scan-ecosystem-logo {
+            height: 100%;
+            width: auto;
+            max-height: 88px;
+            object-fit: contain;
+            object-position: left center;
+            display: block;
+            margin: 0;
+            padding: 0;
+        }
+
+        .header-titles {
+            align-self: center;
+            text-align: left;
         }
 
         .header h1 {
             font-size: 28px;
             font-weight: 600;
+            margin: 0;
         }
 
         .header-subtitle {
             font-size: 14px;
             opacity: 0.9;
             margin-top: 5px;
+        }
+
+        .header .menu-dropdown {
+            align-self: center;
+            flex: 0 0 auto;
         }
 
         /* Dropdown Menu Styles */
@@ -624,13 +667,33 @@
             }
 
             .header {
-                padding: 20px 15px;
+                padding: 0 12px;
                 position: relative;
             }
 
             .header-content {
                 flex-direction: column;
-                gap: 15px;
+                gap: 12px;
+                text-align: center;
+                align-items: stretch;
+                min-height: 0;
+            }
+
+            .header-brand {
+                flex-direction: column;
+                align-items: center;
+                text-align: center;
+            }
+
+            .header-logo-wrap {
+                align-self: center;
+            }
+
+            .scan-ecosystem-logo {
+                max-height: 48px;
+            }
+
+            .header-titles {
                 text-align: center;
             }
 
@@ -890,9 +953,14 @@
     <!-- Header -->
     <div class="header">
         <div class="header-content">
-            <div>
-                <h1><i class="fas fa-book"></i> TradeManthan - Help Guide</h1>
-                <div class="header-subtitle">Complete guide for Scan Page - For Users & Developers</div>
+            <div class="header-brand">
+                <div class="header-logo-wrap">
+                    <img src="tradewithcto_logo.png?v=20260228twc" alt="TradeWithCTO" class="scan-ecosystem-logo">
+                </div>
+                <div class="header-titles">
+                    <h1><i class="fas fa-book"></i> TradeManthan - Help Guide</h1>
+                    <div class="header-subtitle">Complete guide for Scan Page - For Users & Developers</div>
+                </div>
             </div>
             <div class="menu-dropdown menu-dropdown-desktop" id="menu-dropdown">
                 <button class="menu-btn" onclick="toggleMenu()" title="Menu">
@@ -906,9 +974,10 @@
                         <i class="fas fa-chart-bar"></i> Trading Report
                     </a>
                     <a href="scanlog.html" class="logs-link">
+                        <i class="fas fa-file-alt"></i> Scan Logs
+                    </a>
                     <a href="manual-entry.html" class="manual-link">
                         <i class="fas fa-edit"></i> Manual Entry
-                    </a>                        <i class="fas fa-file-alt"></i> Scan Logs
                     </a>
                     <a href="help.html" class="help-link">
                         <i class="fas fa-question-circle"></i> Help Guide

@@ -31,15 +31,54 @@
         .header {
             background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
             color: white;
-            padding: 20px 30px;
+            padding: 0 16px;
             position: relative;
             text-align: center;
+            display: flex;
+            align-items: stretch;
+            justify-content: space-between;
+            gap: 12px;
+            min-height: 88px;
+            box-sizing: border-box;
+        }
+
+        .header-logo-wrap {
+            flex: 0 0 auto;
+            display: flex;
+            align-items: stretch;
+            margin: 0;
+            padding: 0;
+            line-height: 0;
+            align-self: stretch;
+        }
+
+        .scan-ecosystem-logo {
+            height: 100%;
+            width: auto;
+            max-height: 88px;
+            object-fit: contain;
+            object-position: left center;
+            display: block;
+            margin: 0;
+            padding: 0;
+        }
+
+        .header-main-title {
+            flex: 1;
+            text-align: center;
+            align-self: center;
+            margin: 0;
+            padding: 0 8px;
+            font-size: 32px;
+            font-weight: 600;
         }
 
         .header .menu-dropdown {
-            position: absolute;
-            top: 20px;
-            right: 30px;
+            position: relative;
+            top: auto;
+            right: auto;
+            flex: 0 0 auto;
+            align-self: center;
         }
 
         .header h1 {
@@ -644,15 +683,27 @@
             }
 
             .header {
-                padding: 15px;
+                padding: 0 10px;
+                min-height: 56px;
+                flex-wrap: wrap;
+            }
+
+            .header-logo-wrap {
+                align-self: center;
+            }
+
+            .scan-ecosystem-logo {
+                max-height: 48px;
             }
 
             .header .menu-dropdown {
                 display: none;
             }
 
-            .header h1 {
-                font-size: 24px;
+            .header h1,
+            .header-main-title {
+                font-size: 18px;
+                padding: 8px 4px;
             }
 
             .filters {
@@ -824,11 +875,17 @@
             }
 
             .header {
-                padding: 12px;
+                padding: 0 8px;
+                min-height: 52px;
             }
 
-            .header h1 {
-                font-size: 20px;
+            .scan-ecosystem-logo {
+                max-height: 44px;
+            }
+
+            .header h1,
+            .header-main-title {
+                font-size: 16px;
             }
 
             .filters {
@@ -925,8 +982,10 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>📊 Trading Report</h1>
-            
+            <div class="header-logo-wrap">
+                <img src="tradewithcto_logo.png?v=20260228twc" alt="TradeWithCTO" class="scan-ecosystem-logo">
+            </div>
+            <h1 class="header-main-title">📊 Trading Report</h1>
             <div class="menu-dropdown menu-dropdown-desktop" id="menu-dropdown">
                 <button class="menu-btn" onclick="toggleMenu()" title="Menu">
                     <i class="fas fa-bars"></i> Menu <i class="fas fa-chevron-down" style="font-size: 10px;"></i>
@@ -939,9 +998,10 @@
                         <i class="fas fa-chart-bar"></i> Trading Report
                     </a>
                     <a href="scanlog.html" class="logs-link">
+                        <i class="fas fa-file-alt"></i> Scan Logs
+                    </a>
                     <a href="manual-entry.html" class="manual-link">
                         <i class="fas fa-edit"></i> Manual Entry
-                    </a>                        <i class="fas fa-file-alt"></i> Scan Logs
                     </a>
                     <a href="help.html" class="help-link">
                         <i class="fas fa-question-circle"></i> Help Guide
