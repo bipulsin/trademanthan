@@ -6,7 +6,7 @@ import requests
 from jose import jwt
 from typing import Optional
 import os
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from urllib.parse import urlparse
 
 import backend.models as models
@@ -63,6 +63,12 @@ def _send_telegram_trade_channel_message(text: str) -> bool:
 
 class NotifyTradeChannelRequest(BaseModel):
     context: str  # intraoption | pivot_breakout
+
+
+class NotifyTelegramUserMessageRequest(BaseModel):
+    """User-typed message; server appends DB user display name and posts to TradeWithCTO channel."""
+
+    message: str = Field(..., min_length=1, max_length=2000)
 
 
 _NOTIFY_TRADE_CHANNEL_MESSAGES = {
@@ -413,3 +419,27 @@ async def notify_trade_channel(
             detail="Telegram channel notify is not configured or failed. Set TELEGRAM_BOT_TOKEN and TELEGRAM_TRADEWITHCTO_CHAT_ID.",
         )
     return {"success": True, "message": "Notification sent to TradeWithCTO channel"}
+
+
+@router.post("/notify-telegram-user-message")
+async def notify_telegram_user_message(
+    body: NotifyTelegramUserMessageRequest,
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+):
+    """
+    Send a custom user message to Telegram channel TradeWithCTO, concatenated with the logged-in user's name.
+    Uses TELEGRAM_BOT_TOKEN and TELEGRAM_TRADEWITHCTO_CHAT_ID (same as other notify endpoints).
+    """
+    text = (body.message or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+    user = get_user_from_token(token, db)
+    display_name = (user.full_name or user.username or user.email or f"user_{user.id}").strip()
+    full_text = f"{text}\n\n— {display_name}"
+    if not _send_telegram_trade_channel_message(full_text):
+        raise HTTPException(
+            status_code=503,
+            detail="Telegram channel notify is not configured or failed. Set TELEGRAM_BOT_TOKEN and TELEGRAM_TRADEWITHCTO_CHAT_ID.",
+        )
+    return {"success": True, "message": "Message sent to TradeWithCTO channel"}

@@ -6,8 +6,9 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html?v=3.6';
+const MENU_HTML_PATH = 'left-menu.html?v=3.7';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
+const NOTIFY_TRADE_CHANNEL_SCRIPT = 'notify-trade-channel.js?v=3';
 
 class LeftMenu {
     constructor() {
@@ -68,6 +69,7 @@ class LeftMenu {
                 this.setActiveNavigation();
                 this.syncMainContentMargin();
                 await this.setupDisclaimer();
+                await this.setupTelegramNotifyModal();
             } else {
                 const currentPath = window.location.pathname;
                 const isProtectedPage = currentPath.includes('dashboard') || currentPath.includes('strategy') ||
@@ -212,6 +214,9 @@ class LeftMenu {
                 <div class="user-details"><span class="user-name" id="userName">User</span><span class="user-datetime" id="userDateTime">--</span></div>
             </div>
             <div class="panel-footer-links">
+                <button type="button" class="panel-footer-telegram-btn" id="leftMenuTelegramBtn" title="Send a message to TradeWithCTO on Telegram" aria-label="Telegram notify">
+                    <i class="fab fa-telegram" aria-hidden="true"></i>
+                </button>
                 <a href="#" class="disclaimer-link">Disclaimer</a>
             </div>
         </div>
@@ -250,6 +255,105 @@ class LeftMenu {
 
         return window.__tmDisclaimerLoading.catch((error) => {
             console.warn(error);
+        });
+    }
+
+    loadNotifyTradeChannelScript() {
+        if (typeof window.notifyTelegramUserMessage === 'function') return Promise.resolve();
+        if (window.__tmNotifyScriptLoading) return window.__tmNotifyScriptLoading;
+        window.__tmNotifyScriptLoading = new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = NOTIFY_TRADE_CHANNEL_SCRIPT;
+            script.onload = () => resolve();
+            script.onerror = () => reject(new Error('Failed to load notify-trade-channel.js'));
+            document.head.appendChild(script);
+        });
+        return window.__tmNotifyScriptLoading.catch((e) => {
+            console.warn('LeftMenu:', e);
+        });
+    }
+
+    injectTelegramNotifyModal() {
+        if (document.getElementById('tmTelegramNotifyModal')) return;
+        const wrap = document.createElement('div');
+        wrap.innerHTML = `
+<div id="tmTelegramNotifyModal" class="tm-telegram-modal" role="dialog" aria-modal="true" aria-labelledby="tmTelegramNotifyTitle">
+    <div class="tm-telegram-modal__backdrop" aria-hidden="true"></div>
+    <div class="tm-telegram-modal__box">
+        <h2 id="tmTelegramNotifyTitle" class="tm-telegram-modal__title">Message TradeWithCTO</h2>
+        <p class="tm-telegram-modal__hint">Your text is sent to the Telegram channel <strong>@TradeWithCTO</strong>, with your account name appended.</p>
+        <label class="tm-telegram-modal__label" for="tmTelegramNotifyText">Message</label>
+        <textarea id="tmTelegramNotifyText" class="tm-telegram-modal__textarea" rows="5" maxlength="2000" placeholder="Type your message…"></textarea>
+        <div class="tm-telegram-modal__actions">
+            <button type="button" class="tm-telegram-modal__btn tm-telegram-modal__btn--primary" id="tmTelegramNotifySend">Notify</button>
+            <button type="button" class="tm-telegram-modal__btn tm-telegram-modal__btn--secondary" id="tmTelegramNotifyClose">Close</button>
+        </div>
+        <p id="tmTelegramNotifyStatus" class="tm-telegram-modal__status" role="status"></p>
+    </div>
+</div>`;
+        document.body.appendChild(wrap.firstElementChild);
+    }
+
+    async setupTelegramNotifyModal() {
+        try {
+            await this.loadNotifyTradeChannelScript();
+        } catch (e) {
+            console.warn('LeftMenu: notify script', e);
+        }
+        this.injectTelegramNotifyModal();
+        const btn = document.getElementById('leftMenuTelegramBtn');
+        const modal = document.getElementById('tmTelegramNotifyModal');
+        const closeBtn = document.getElementById('tmTelegramNotifyClose');
+        const notifyBtn = document.getElementById('tmTelegramNotifySend');
+        const textarea = document.getElementById('tmTelegramNotifyText');
+        const statusEl = document.getElementById('tmTelegramNotifyStatus');
+        if (!btn || !modal) return;
+
+        const close = () => {
+            modal.classList.remove('show');
+            document.body.style.overflow = '';
+        };
+
+        const open = () => {
+            if (statusEl) statusEl.textContent = '';
+            if (textarea) textarea.value = '';
+            modal.classList.add('show');
+            document.body.style.overflow = 'hidden';
+            setTimeout(() => textarea?.focus(), 50);
+        };
+
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            open();
+        });
+
+        closeBtn?.addEventListener('click', close);
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) close();
+        });
+
+        notifyBtn?.addEventListener('click', async () => {
+            const msg = (textarea?.value || '').trim();
+            if (!msg) {
+                if (statusEl) statusEl.textContent = 'Please enter a message.';
+                return;
+            }
+            if (typeof window.notifyTelegramUserMessage !== 'function') {
+                if (statusEl) statusEl.textContent = 'Notify unavailable. Refresh the page.';
+                return;
+            }
+            if (statusEl) statusEl.textContent = 'Sending...';
+            try {
+                await window.notifyTelegramUserMessage(msg);
+                if (statusEl) statusEl.textContent = 'Sent. Thank you.';
+            } catch (err) {
+                if (statusEl) statusEl.textContent = err.message || 'Failed to send.';
+            }
+        });
+
+        document.addEventListener('keydown', (ev) => {
+            if (ev.key !== 'Escape') return;
+            if (modal.classList.contains('show')) close();
         });
     }
 
