@@ -6,7 +6,7 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html?v=3.8';
+const MENU_HTML_PATH = 'left-menu.html?v=3.9';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 const NOTIFY_TRADE_CHANNEL_SCRIPT = 'notify-trade-channel.js?v=3';
 
@@ -56,6 +56,8 @@ class LeftMenu {
                 this.isAuthenticated = true;
                 isAuthenticated = true;
                 await this.loadMenu();
+                // Show Admin from login payload before /auth/me returns
+                this.applyAdminNavVisibility();
                 await this.refreshUserProfileFromApi();
                 this.applyAdminNavVisibility();
                 this.injectMobileFooter();
@@ -124,31 +126,54 @@ class LeftMenu {
         setInterval(() => this.updateDateTime(), 1000);
     }
 
-    /** Merge /api/auth/me into localStorage so isAdmin / page_permitted stay current */
+    /**
+     * True if user is system admin (DB isAdmin column "Yes"; API exposes camelCase isAdmin).
+     * Accepts case/whitespace variants and legacy is_admin key.
+     */
+    static isUserAdmin(user) {
+        if (!user || typeof user !== 'object') return false;
+        const raw = user.isAdmin != null ? user.isAdmin : user.is_admin;
+        if (raw == null || raw === '') return false;
+        return String(raw).trim().toLowerCase() === 'yes';
+    }
+
+    /** Merge /auth/me into localStorage so isAdmin / page_permitted stay current */
     async refreshUserProfileFromApi() {
         try {
             const token = localStorage.getItem('trademanthan_token');
             if (!token || !token.includes('.')) return;
-            const res = await fetch('/api/auth/me', {
-                headers: { Authorization: `Bearer ${token}` },
-                cache: 'no-store',
-            });
-            if (!res.ok) return;
-            const me = await res.json();
+            const paths = ['/api/auth/me', '/auth/me'];
+            let me = null;
+            for (const path of paths) {
+                try {
+                    const res = await fetch(path, {
+                        headers: { Authorization: `Bearer ${token}` },
+                        cache: 'no-store',
+                    });
+                    if (res.ok) {
+                        me = await res.json();
+                        break;
+                    }
+                } catch (err) {
+                    console.warn('LeftMenu: auth/me try', path, err);
+                }
+            }
+            if (!me) return;
             const prev = JSON.parse(localStorage.getItem('trademanthan_user') || '{}');
             localStorage.setItem('trademanthan_user', JSON.stringify({ ...prev, ...me }));
+            this.applyAdminNavVisibility();
         } catch (e) {
             console.warn('LeftMenu: refreshUserProfileFromApi', e);
         }
     }
 
-    /** Show Admin nav link only when isAdmin === "Yes" */
+    /** Show Admin nav link when user is admin (isAdmin Yes in DB) */
     applyAdminNavVisibility() {
         let user = {};
         try {
             user = JSON.parse(localStorage.getItem('trademanthan_user') || '{}');
         } catch (e) {}
-        const show = user.isAdmin === 'Yes';
+        const show = LeftMenu.isUserAdmin(user);
         document.querySelectorAll('.nav-item.nav-item-admin[data-page="admintwc.html"]').forEach((el) => {
             el.style.display = show ? 'flex' : 'none';
         });
