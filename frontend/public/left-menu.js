@@ -6,7 +6,7 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html?v=3.7';
+const MENU_HTML_PATH = 'left-menu.html?v=3.8';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 const NOTIFY_TRADE_CHANNEL_SCRIPT = 'notify-trade-channel.js?v=3';
 
@@ -214,9 +214,6 @@ class LeftMenu {
                 <div class="user-details"><span class="user-name" id="userName">User</span><span class="user-datetime" id="userDateTime">--</span></div>
             </div>
             <div class="panel-footer-links">
-                <button type="button" class="panel-footer-telegram-btn" id="leftMenuTelegramBtn" title="Send a message to TradeWithCTO on Telegram" aria-label="Telegram notify">
-                    <i class="fab fa-telegram" aria-hidden="true"></i>
-                </button>
                 <a href="#" class="disclaimer-link">Disclaimer</a>
             </div>
         </div>

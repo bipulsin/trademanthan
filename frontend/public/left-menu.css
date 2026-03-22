@@ -143,7 +143,21 @@
     flex-shrink: 0;
 }
 
-/* Theme toggle - above nav list */
+/* Theme toggle + Telegram — top of nav */
+.panel-nav-toolbar {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 0.65rem;
+    padding: 0.75rem 1.25rem 0.5rem;
+    flex-wrap: wrap;
+}
+
+.panel-nav-toolbar .theme-toggle {
+    padding: 0;
+}
+
 .theme-toggle {
     display: flex;
     gap: 8px;
@@ -295,36 +309,34 @@ body[data-theme="light"] .theme-btn.active {
 
 .panel-footer-links {
     margin-top: 0.75rem;
-    display: flex;
-    align-items: center;
-    gap: 0.65rem;
-    flex-wrap: wrap;
 }
 
-.panel-footer-telegram-btn {
+/* Telegram (next to theme sun/moon) */
+.panel-nav-telegram-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 2rem;
-    height: 2rem;
+    width: 40px;
+    height: 40px;
     padding: 0;
     border: none;
-    border-radius: 50%;
+    border-radius: 10px;
     background: linear-gradient(135deg, #229ed9 0%, #0088cc 100%);
     color: #fff;
     cursor: pointer;
-    font-size: 1.1rem;
+    font-size: 1.15rem;
     flex-shrink: 0;
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
-    box-shadow: 0 2px 8px rgba(34, 158, 217, 0.4);
+    transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+    box-shadow: 0 2px 8px rgba(34, 158, 217, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
-.panel-footer-telegram-btn:hover {
-    transform: scale(1.06);
-    box-shadow: 0 4px 12px rgba(34, 158, 217, 0.55);
+.panel-nav-telegram-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 4px 12px rgba(34, 158, 217, 0.5);
 }
 
-.panel-footer-telegram-btn:focus-visible {
+.panel-nav-telegram-btn:focus-visible {
     outline: 2px solid var(--left-menu-accent, #3b82f6);
     outline-offset: 2px;
 }
