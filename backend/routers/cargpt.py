@@ -2,11 +2,17 @@
 CAR GPT Router - Cumulative Average Return analysis.
 Accessible before/after login. No auth required.
 """
+import logging
+from decimal import Decimal, InvalidOperation
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from pydantic import BaseModel, Field
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 from backend.database import get_db, engine
 from backend.models.car import CarStockList
@@ -214,32 +220,74 @@ async def upload_stocks(
     if not body.rows:
         return SaveStockListResponse(success=False, message="No rows provided", saved_count=0)
 
+    if body.user_id is None or body.user_id < 1:
+        raise HTTPException(status_code=400, detail="Valid user_id is required")
+
     saved = 0
     updated = 0
-    for item in body.rows:
-        symbol = _normalize_symbol(item.symbol)
-        if not symbol:
-            continue
-        existing = db.query(CarStockList).filter(
-            CarStockList.symbol == symbol,
-            CarStockList.userid == body.user_id
-        ).first()
-        if existing:
-            existing.buy_price = float(item.buy_price)
-            updated += 1
-        else:
-            db.add(CarStockList(
-                symbol=symbol,
-                userid=body.user_id,
-                buy_price=float(item.buy_price)
-            ))
-            saved += 1
+    try:
+        for item in body.rows:
+            symbol = _normalize_symbol(item.symbol)
+            if not symbol:
+                continue
+            try:
+                price_dec = Decimal(str(item.buy_price))
+            except (InvalidOperation, ValueError, TypeError):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid buy_price for symbol {symbol!r}",
+                )
+            if not price_dec.is_finite() or price_dec < 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid buy_price for symbol {symbol!r}",
+                )
 
-    db.commit()
+            existing = db.query(CarStockList).filter(
+                CarStockList.symbol == symbol,
+                CarStockList.userid == body.user_id
+            ).first()
+            if existing:
+                existing.buy_price = price_dec
+                updated += 1
+            else:
+                db.add(
+                    CarStockList(
+                        symbol=symbol,
+                        userid=body.user_id,
+                        buy_price=price_dec,
+                    )
+                )
+                saved += 1
+
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as e:
+        db.rollback()
+        logger.exception("upload-stocks integrity error")
+        raise HTTPException(
+            status_code=409,
+            detail="Database constraint conflict (duplicate symbol or invalid user). "
+            "Ensure your CSV has unique symbols per user.",
+        ) from e
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.exception("upload-stocks database error")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Database error while saving CSV: {e!s}",
+        ) from e
+    except Exception as e:
+        db.rollback()
+        logger.exception("upload-stocks unexpected error")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
     return SaveStockListResponse(
         success=True,
         message=f"Processed {saved + updated} rows (saved {saved}, updated {updated})",
-        saved_count=saved
+        saved_count=saved,
     )
 
 
