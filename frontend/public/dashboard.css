@@ -1292,3 +1292,58 @@ body {
     cursor: pointer;
     color: #666;
 }
+
+/* Market Sentiments (dashboard home) */
+.market-sentiment-intro {
+    font-size: 0.9rem;
+    color: #64748b;
+    margin-bottom: 1rem;
+    line-height: 1.5;
+}
+
+body[data-theme="dark"] .market-sentiment-intro {
+    color: #94a3b8;
+}
+
+.market-sentiment-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1rem;
+}
+
+.market-sentiment-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 1rem;
+    border-radius: 12px;
+    background: rgba(59, 130, 246, 0.08);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+body[data-theme="dark"] .market-sentiment-item {
+    background: rgba(30, 41, 59, 0.6);
+    border-color: rgba(148, 163, 184, 0.2);
+}
+
+.market-sentiment-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+body[data-theme="dark"] .market-sentiment-label {
+    color: #94a3b8;
+}
+
+.market-sentiment-value {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+body[data-theme="dark"] .market-sentiment-value {
+    color: #f1f5f9;
+}
