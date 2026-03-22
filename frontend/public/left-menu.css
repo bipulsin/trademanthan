@@ -42,7 +42,9 @@
     top: 0;
     z-index: 1000;
     transition: width 0.3s ease, min-width 0.3s ease;
-    overflow: hidden;
+    /* overflow visible so toolbar tooltips (below buttons) are not clipped */
+    overflow-x: hidden;
+    overflow-y: visible;
     /* Isolate from page CSS (e.g. body { line-height: 1.6 } in broker/dashboard) */
     line-height: 1.25;
 }
@@ -246,9 +248,14 @@ body[data-theme="light"] .theme-btn.active {
 }
 
 .left-panel.collapsed .panel-nav-telegram-btn {
-    width: 38px;
-    height: 38px;
-    font-size: 1.05rem;
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    min-height: 40px;
+}
+
+.left-panel.collapsed .panel-nav-telegram-btn i {
+    font-size: 1.38rem;
 }
 
 /* Nav */
@@ -313,10 +320,34 @@ body[data-theme="light"] .theme-btn.active {
 }
 
 /* Panel footer - User */
+.left-panel .panel-footer {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    box-sizing: border-box;
+}
+
 .panel-footer {
     padding: 1rem 1.25rem;
     border-top: 1px solid var(--left-menu-border);
     flex-shrink: 0;
+}
+
+.left-panel .panel-footer-links {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-top: 0.75rem;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    text-align: center;
+}
+
+.left-panel .panel-footer-links .disclaimer-link {
+    display: inline-block;
+    text-align: center;
 }
 
 .panel-footer-links {
@@ -325,26 +356,33 @@ body[data-theme="light"] .theme-btn.active {
     text-align: center;
 }
 
-/* Telegram — circular pill, distinct from square-rounded theme buttons */
+/* Telegram — circular button, larger plane icon vs square theme chips */
 .panel-nav-telegram-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 44px;
-    height: 44px;
+    width: 46px;
+    height: 46px;
+    min-width: 46px;
+    min-height: 46px;
     padding: 0;
-    border: none;
+    box-sizing: border-box;
     border-radius: 50%;
+    aspect-ratio: 1;
     background: linear-gradient(135deg, #229ed9 0%, #0088cc 100%);
     color: #fff;
     cursor: pointer;
-    font-size: 1.15rem;
     flex-shrink: 0;
     transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
     box-shadow:
         0 2px 10px rgba(34, 158, 217, 0.4),
         inset 0 0 0 1px rgba(255, 255, 255, 0.22);
     border: 1px solid rgba(255, 255, 255, 0.28);
+}
+
+.panel-nav-telegram-btn i {
+    font-size: 1.55rem;
+    line-height: 1;
 }
 
 .panel-nav-telegram-btn:hover {
@@ -355,6 +393,56 @@ body[data-theme="light"] .theme-btn.active {
 .panel-nav-telegram-btn:focus-visible {
     outline: 2px solid var(--left-menu-accent, #3b82f6);
     outline-offset: 2px;
+}
+
+/* Desktop / fine pointer: visible tooltips (below buttons — stays inside panel; avoids overflow clip) */
+.panel-nav-toolbar .theme-btn,
+.panel-nav-telegram-btn {
+    position: relative;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .panel-nav-toolbar .theme-btn[data-tooltip]::after,
+    .panel-nav-telegram-btn[data-tooltip]::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        z-index: 5000;
+        left: 50%;
+        top: 100%;
+        bottom: auto;
+        margin-top: 6px;
+        transform: translateX(-50%);
+        padding: 0.35rem 0.6rem;
+        font-size: 0.72rem;
+        font-weight: 600;
+        line-height: 1.2;
+        letter-spacing: 0.02em;
+        white-space: nowrap;
+        color: #f8fafc;
+        background: rgba(15, 23, 42, 0.96);
+        border: 1px solid rgba(148, 163, 184, 0.4);
+        border-radius: 6px;
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.28);
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        transition: opacity 0.12s ease, visibility 0.12s ease;
+    }
+
+    body[data-theme="light"] .panel-nav-toolbar .theme-btn[data-tooltip]::after,
+    body[data-theme="light"] .panel-nav-telegram-btn[data-tooltip]::after {
+        background: #0f172a;
+        color: #f8fafc;
+        border-color: rgba(148, 163, 184, 0.45);
+    }
+
+    .panel-nav-toolbar .theme-btn[data-tooltip]:hover::after,
+    .panel-nav-toolbar .theme-btn[data-tooltip]:focus-visible::after,
+    .panel-nav-telegram-btn[data-tooltip]:hover::after,
+    .panel-nav-telegram-btn[data-tooltip]:focus-visible::after {
+        opacity: 1;
+        visibility: visible;
+    }
 }
 
 /* Telegram custom message modal (injected by left-menu.js) */

@@ -6,7 +6,7 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html?v=3.10';
+const MENU_HTML_PATH = 'left-menu.html?v=3.11';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 const NOTIFY_TRADE_CHANNEL_SCRIPT = 'notify-trade-channel.js?v=3';
 
@@ -220,10 +220,10 @@ class LeftMenu {
         <nav class="panel-nav">
             <div class="panel-nav-toolbar">
                 <div class="theme-toggle" id="themeToggle">
-                    <button class="theme-btn" data-theme="light" title="Light Theme" aria-label="Light Theme"><i class="fas fa-sun"></i></button>
-                    <button class="theme-btn active" data-theme="dark" title="Dark Theme" aria-label="Dark Theme"><i class="fas fa-moon"></i></button>
+                    <button type="button" class="theme-btn" data-theme="light" data-tooltip="Light Theme" title="Light Theme" aria-label="Light Theme"><i class="fas fa-sun"></i></button>
+                    <button type="button" class="theme-btn active" data-theme="dark" data-tooltip="Dark Theme" title="Dark Theme" aria-label="Dark Theme"><i class="fas fa-moon"></i></button>
                 </div>
-                <button type="button" class="panel-nav-telegram-btn" id="leftMenuTelegramBtn" title="Support" aria-label="Support"><i class="fab fa-telegram" aria-hidden="true"></i></button>
+                <button type="button" class="panel-nav-telegram-btn" id="leftMenuTelegramBtn" data-tooltip="Support" title="Support" aria-label="Support"><i class="fab fa-telegram" aria-hidden="true"></i></button>
             </div>
             <ul class="nav-list">
                 <li class="nav-item" data-page="dashboard.html"><i class="fas fa-chart-line"></i><span>Dashboard</span></li>
