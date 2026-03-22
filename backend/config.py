@@ -1,10 +1,9 @@
+import backend.env_bootstrap  # noqa: F401 — load `<project_root>/.env` before Settings
+
 from pydantic_settings import BaseSettings
 from typing import Optional
 import os
 from pathlib import Path
-from dotenv import load_dotenv
-
-load_dotenv()
 
 
 def get_instruments_file_path() -> Path:

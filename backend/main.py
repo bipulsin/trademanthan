@@ -5,7 +5,8 @@ from sqlalchemy.orm import sessionmaker
 from contextlib import asynccontextmanager
 import os
 import logging
-from dotenv import load_dotenv
+
+import backend.env_bootstrap  # noqa: F401 — load `<project_root>/.env` before other backend imports
 
 from backend.database import engine, SessionLocal, create_tables
 import backend.models as models
@@ -31,8 +32,6 @@ from backend.services.arbitrage_daily_setup_scheduler import (
     start_arbitrage_daily_setup_scheduler,
     stop_arbitrage_daily_setup_scheduler,
 )
-
-load_dotenv()
 
 # Configure logging with file handler - MUST be done before any loggers are created
 log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')

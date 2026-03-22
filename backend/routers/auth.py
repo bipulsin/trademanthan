@@ -8,12 +8,14 @@ from typing import Optional
 import os
 from pydantic import BaseModel, Field
 from urllib.parse import urlparse
+import logging
 
 import backend.models as models
 from backend.database import get_db
 from backend.config import settings
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
+logger = logging.getLogger(__name__)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -52,12 +54,23 @@ def _send_telegram_trade_channel_message(text: str) -> bool:
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_NOTIFY_BOT_TOKEN")
     chat_id = os.getenv("TELEGRAM_TRADEWITHCTO_CHAT_ID", "@TradeWithCTO")
     if not bot_token or not chat_id:
+        logger.warning(
+            "Telegram notify skipped: TELEGRAM_BOT_TOKEN / TELEGRAM_TRADEWITHCTO_CHAT_ID not set in "
+            "environment after load (check /home/ubuntu/trademanthan/.env and backend.env_bootstrap)."
+        )
         return False
     try:
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
         r = requests.post(url, json={"chat_id": chat_id, "text": text}, timeout=15)
+        if r.status_code != 200:
+            logger.warning(
+                "Telegram sendMessage failed: status=%s body=%s",
+                r.status_code,
+                (r.text or "")[:800],
+            )
         return r.status_code == 200
-    except Exception:
+    except Exception as e:
+        logger.warning("Telegram sendMessage exception: %s", e)
         return False
 
 

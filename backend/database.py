@@ -1,9 +1,9 @@
+import os
+
+import backend.env_bootstrap  # noqa: F401 — load `<project_root>/.env` before os.getenv
+
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
 
 # Database configuration - PostgreSQL production database (configurable via DATABASE_URL env var)
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://trademanthan:trademanthan123@localhost/trademanthan")

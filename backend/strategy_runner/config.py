@@ -7,10 +7,13 @@ including database connections, API settings, and trading parameters.
 
 import os
 from typing import Dict, Any
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+try:
+    import backend.env_bootstrap  # noqa: F401 — project root `.env`
+except ImportError:
+    from dotenv import load_dotenv
+
+    load_dotenv()
 
 # Database Configuration
 DATABASE_CONFIG = {
