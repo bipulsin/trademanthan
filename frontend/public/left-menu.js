@@ -6,7 +6,7 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html?v=3.9';
+const MENU_HTML_PATH = 'left-menu.html?v=3.10';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 const NOTIFY_TRADE_CHANNEL_SCRIPT = 'notify-trade-channel.js?v=3';
 
@@ -218,10 +218,16 @@ class LeftMenu {
             </a>
         </div>
         <nav class="panel-nav">
-            <div class="theme-toggle" id="themeToggle"><button class="theme-btn" data-theme="light" aria-label="Light mode"><i class="fas fa-sun"></i></button><button class="theme-btn" data-theme="dark" aria-label="Dark mode"><i class="fas fa-moon"></i></button></div>
+            <div class="panel-nav-toolbar">
+                <div class="theme-toggle" id="themeToggle">
+                    <button class="theme-btn" data-theme="light" title="Light Theme" aria-label="Light Theme"><i class="fas fa-sun"></i></button>
+                    <button class="theme-btn active" data-theme="dark" title="Dark Theme" aria-label="Dark Theme"><i class="fas fa-moon"></i></button>
+                </div>
+                <button type="button" class="panel-nav-telegram-btn" id="leftMenuTelegramBtn" title="Support" aria-label="Support"><i class="fab fa-telegram" aria-hidden="true"></i></button>
+            </div>
             <ul class="nav-list">
                 <li class="nav-item" data-page="dashboard.html"><i class="fas fa-chart-line"></i><span>Dashboard</span></li>
-                <li class="nav-item" data-page="intraoption.html"><i class="fas fa-bolt"></i><span>Intraday Stock Options Algo</span></li>
+                <li class="nav-item" data-page="intraoption.html"><i class="fas fa-bolt"></i><span>Intraday Option</span></li>
                 <li class="nav-item" data-page="pivot-breakout.html"><i class="fas fa-bullseye"></i><span>Pivot Breakout</span></li>
                 <li class="nav-item" data-page="arbitrage.html"><i class="fas fa-shuffle"></i><span>Arbitrage Selection</span></li>
                 <li class="nav-item" data-page="cargpt.html"><i class="fas fa-chart-area"></i><span>Cumulative Avg</span></li>
