@@ -29,6 +29,47 @@ def user_to_client_dict(user: models.User) -> dict:
         "page_permitted": (getattr(user, "page_permitted", None) or "").strip(),
     }
 
+
+def get_user_from_token(token: str, db: Session) -> models.User:
+    """Resolve authenticated user from Bearer JWT (same subject as /me)."""
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user_id = payload.get("sub")
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user = db.query(models.User).filter(models.User.id == int(user_id)).first()
+    if user is None:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+
+def _send_telegram_trade_channel_message(text: str) -> bool:
+    """Post to Telegram channel (bot must be admin). Env: TELEGRAM_BOT_TOKEN, TELEGRAM_TRADEWITHCTO_CHAT_ID (@TradeWithCTO)."""
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_NOTIFY_BOT_TOKEN")
+    chat_id = os.getenv("TELEGRAM_TRADEWITHCTO_CHAT_ID", "@TradeWithCTO")
+    if not bot_token or not chat_id:
+        return False
+    try:
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        r = requests.post(url, json={"chat_id": chat_id, "text": text}, timeout=15)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
+class NotifyTradeChannelRequest(BaseModel):
+    context: str  # intraoption | pivot_breakout
+
+
+_NOTIFY_TRADE_CHANNEL_MESSAGES = {
+    "intraoption": "Check the Broker API for Intraday Stock Options. Notified by user {name}.",
+    "pivot_breakout": "Check the Broker API for Pivot Breakout. Notified by user {name}.",
+}
+
 class GoogleOAuthRequest(BaseModel):
     credential: str
 
@@ -340,20 +381,35 @@ async def google_oauth_code(request: GoogleOAuthCodeRequest, db: Session = Depen
 async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     """Get current user information"""
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
-        user_id: str = payload.get("sub")
-        if user_id is None:
-            raise HTTPException(status_code=401, detail="Invalid token")
-        
-        user = db.query(models.User).filter(models.User.id == int(user_id)).first()
-        if user is None:
-            raise HTTPException(status_code=401, detail="User not found")
-        
-        return user_to_client_dict(user)
-        
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired")
-    except jwt.JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        return user_to_client_dict(get_user_from_token(token, db))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/notify-trade-channel")
+async def notify_trade_channel(
+    body: NotifyTradeChannelRequest,
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+):
+    """
+    Send admin alert to Telegram channel TradeWithCTO (configure TELEGRAM_BOT_TOKEN + TELEGRAM_TRADEWITHCTO_CHAT_ID).
+    Authenticated users only; message includes DB user display name.
+    """
+    raw = (body.context or "").strip().lower().replace("-", "_")
+    if raw not in _NOTIFY_TRADE_CHANNEL_MESSAGES:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid context (use intraoption or pivot_breakout)",
+        )
+    user = get_user_from_token(token, db)
+    display_name = (user.full_name or user.username or user.email or f"user_{user.id}").strip()
+    text = _NOTIFY_TRADE_CHANNEL_MESSAGES[raw].format(name=display_name)
+    if not _send_telegram_trade_channel_message(text):
+        raise HTTPException(
+            status_code=503,
+            detail="Telegram channel notify is not configured or failed. Set TELEGRAM_BOT_TOKEN and TELEGRAM_TRADEWITHCTO_CHAT_ID.",
+        )
+    return {"success": True, "message": "Notification sent to TradeWithCTO channel"}

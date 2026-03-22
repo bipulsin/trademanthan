@@ -14,6 +14,7 @@
     <link rel="stylesheet" href="theme.css?v=1.3">
     <link rel="stylesheet" href="scan.css?v=20251126281000">
     <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="twc-notify-modal.css?v=1">
     <style>
         /* Legacy scan UI (tables/cards); page chrome in intraoption.css */
         /* Title Bar Styles — not used on intraoption (replaced by header); kept for class names referenced in scan.css */
@@ -1044,6 +1045,20 @@
         </div>
     </div>
 
+    <!-- Index / broker handshake — shown when NIFTY/BANKNIFTY price or trend cannot be determined -->
+    <div id="engineHandshakeModal" class="twc-notify-modal" role="dialog" aria-modal="true" aria-labelledby="engineHandshakeTitle">
+        <div class="twc-notify-modal__backdrop" aria-hidden="true"></div>
+        <div class="twc-notify-modal__box">
+            <h2 id="engineHandshakeTitle" style="margin:0 0 0.75rem 0;font-size:1.15rem;">Index data unavailable</h2>
+            <p class="twc-notify-modal__text">Backend Engine of Intraday Stock Options is trying to connect to the leading AI engines. Please notify the site administrator to enable this handshake earliest.</p>
+            <div class="twc-notify-modal__actions">
+                <button type="button" class="twc-notify-modal__btn twc-notify-modal__btn--primary" id="engineHandshakeNotifyBtn">Notify</button>
+                <button type="button" class="twc-notify-modal__btn twc-notify-modal__btn--secondary" id="engineHandshakeCloseBtn">Close</button>
+            </div>
+            <p id="engineHandshakeNotifyStatus" class="twc-notify-modal__status" role="status"></p>
+        </div>
+    </div>
+
     <!-- Help embed modal (no title bar; help.html uses ?embed=1 to hide its own header) -->
     <div id="intraoptionHelpModal" class="intraoption-embed-overlay" role="dialog" aria-modal="true" aria-label="Help">
         <div class="intraoption-embed-dialog intraoption-embed-dialog--help">
@@ -1052,7 +1067,48 @@
         </div>
     </div>
     
-    <script src="scan.js?v=20260321160000"></script>
+    <script src="scan.js?v=20260327120000"></script>
+    <script src="notify-trade-channel.js?v=1"></script>
+    <script>
+    (function () {
+        var KEY = 'intraoption_engine_modal_shown_v1';
+        window.addEventListener('scanIndexPricesLoaded', function (ev) {
+            if (!window.__INTRAOPTION_PAGE) return;
+            if (!ev.detail || ev.detail.determined !== false) return;
+            if (sessionStorage.getItem(KEY)) return;
+            sessionStorage.setItem(KEY, '1');
+            var m = document.getElementById('engineHandshakeModal');
+            if (m) {
+                m.classList.add('show');
+                document.body.style.overflow = 'hidden';
+            }
+        });
+        function wireEngineModal() {
+            document.getElementById('engineHandshakeCloseBtn')?.addEventListener('click', function () {
+                document.getElementById('engineHandshakeModal')?.classList.remove('show');
+                document.body.style.overflow = '';
+            });
+            document.getElementById('engineHandshakeModal')?.addEventListener('click', function (e) {
+                if (e.target === this) {
+                    this.classList.remove('show');
+                    document.body.style.overflow = '';
+                }
+            });
+            document.getElementById('engineHandshakeNotifyBtn')?.addEventListener('click', async function () {
+                var st = document.getElementById('engineHandshakeNotifyStatus');
+                if (st) st.textContent = 'Sending...';
+                try {
+                    await window.notifyTradeChannel('intraoption');
+                    if (st) st.textContent = 'Notification sent. Thank you.';
+                } catch (err) {
+                    if (st) st.textContent = err.message || 'Failed to notify.';
+                }
+            });
+        }
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wireEngineModal);
+        else wireEngineModal();
+    })();
+    </script>
     <script>
         function toggleMenu() {
             const dropdown = document.getElementById('menu-dropdown');
@@ -1094,6 +1150,12 @@
         });
         document.addEventListener('keydown', function(ev) {
             if (ev.key !== 'Escape') return;
+            const eng = document.getElementById('engineHandshakeModal');
+            if (eng?.classList.contains('show')) {
+                eng.classList.remove('show');
+                document.body.style.overflow = '';
+                return;
+            }
             if (document.getElementById('intraoptionHelpModal')?.classList.contains('show')) {
                 closeIntraoptionEmbed('intraoptionHelpModal');
             }

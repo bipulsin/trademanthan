@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="left-menu.css?v=3.6">
     <link rel="stylesheet" href="theme.css?v=1.3">
     <link rel="stylesheet" href="pivot-breakout.css?v=1.7">
+    <link rel="stylesheet" href="twc-notify-modal.css?v=1">
 </head>
 <body>
     <div class="mobile-title-bar">
@@ -135,8 +136,22 @@
         </main>
     </div>
 
+    <div id="pivotBrokerModal" class="twc-notify-modal" role="dialog" aria-modal="true" aria-labelledby="pivotBrokerTitle">
+        <div class="twc-notify-modal__backdrop" aria-hidden="true"></div>
+        <div class="twc-notify-modal__box">
+            <h2 id="pivotBrokerTitle" style="margin:0 0 0.75rem 0;font-size:1.15rem;">Broker data unavailable</h2>
+            <p class="twc-notify-modal__text">Backend Engine for Pivot Breakout could not load data from the Upstox broker API. Please notify the site administrator to enable this handshake earliest.</p>
+            <div class="twc-notify-modal__actions">
+                <button type="button" class="twc-notify-modal__btn twc-notify-modal__btn--primary" id="pivotBrokerNotifyBtn">Notify</button>
+                <button type="button" class="twc-notify-modal__btn twc-notify-modal__btn--secondary" id="pivotBrokerCloseBtn">Close</button>
+            </div>
+            <p id="pivotBrokerNotifyStatus" class="twc-notify-modal__status" role="status"></p>
+        </div>
+    </div>
+
     <script src="left-menu.js?v=3.6"></script>
-    <script src="pivot-breakout.js?v=1.9"></script>
+    <script src="notify-trade-channel.js?v=1"></script>
+    <script src="pivot-breakout.js?v=2.0"></script>
     <script src="version.js?v=1.0"></script>
     <script src="cache-manager.js?v=1.1"></script>
 </body>

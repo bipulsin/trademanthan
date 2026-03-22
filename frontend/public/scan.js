@@ -293,8 +293,23 @@ function checkOAuthSuccess() {
     }
 }
 
+/** True when NIFTY & BANKNIFTY have numeric LTP/close and valid trend (for intraoption modal). */
+function indicesDataDetermined(data) {
+    if (!data || !data.nifty || !data.banknifty) return false;
+    const n = data.nifty;
+    const b = data.banknifty;
+    const nPrice = data.market_status === 'closed' ? n.close_price : n.ltp;
+    const bPrice = data.market_status === 'closed' ? b.close_price : b.ltp;
+    if (nPrice == null || bPrice == null) return false;
+    if (Number.isNaN(Number(nPrice)) || Number.isNaN(Number(bPrice))) return false;
+    const tOk = (t) => t === 'bullish' || t === 'bearish' || t === 'neutral';
+    if (!tOk(n.trend) || !tOk(b.trend)) return false;
+    return true;
+}
+
 // Load index prices (NIFTY and BANKNIFTY)
 async function loadIndexPrices() {
+    let determined = false;
     try {
         const response = await fetch(`${API_BASE_URL}/scan/index-prices`, {
             method: 'GET',
@@ -320,6 +335,7 @@ async function loadIndexPrices() {
         
         if (result.status === 'success' && result.data) {
             updateIndexDisplay(result.data);
+            determined = indicesDataDetermined(result.data);
         } else {
             console.error('Failed to load index prices:', result.message);
             showIndexError();
@@ -337,6 +353,12 @@ async function loadIndexPrices() {
             }
         } else {
             showIndexError();
+        }
+    } finally {
+        if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+            try {
+                window.dispatchEvent(new CustomEvent('scanIndexPricesLoaded', { detail: { determined } }));
+            } catch (e) { /* ignore */ }
         }
     }
 }

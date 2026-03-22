@@ -1,4 +1,44 @@
 (function () {
+    const PIVOT_BROKER_MODAL_KEY = "pivot_broker_api_modal_v1";
+
+    function showPivotBrokerFailureModalOnce() {
+        if (sessionStorage.getItem(PIVOT_BROKER_MODAL_KEY)) return;
+        sessionStorage.setItem(PIVOT_BROKER_MODAL_KEY, "1");
+        const el = document.getElementById("pivotBrokerModal");
+        if (el) {
+            el.classList.add("show");
+            document.body.style.overflow = "hidden";
+        }
+    }
+
+    function wirePivotBrokerModal() {
+        const m = document.getElementById("pivotBrokerModal");
+        if (!m) return;
+        document.getElementById("pivotBrokerCloseBtn")?.addEventListener("click", () => {
+            m.classList.remove("show");
+            document.body.style.overflow = "";
+        });
+        m.addEventListener("click", (e) => {
+            if (e.target === m) {
+                m.classList.remove("show");
+                document.body.style.overflow = "";
+            }
+        });
+        document.getElementById("pivotBrokerNotifyBtn")?.addEventListener("click", async () => {
+            const st = document.getElementById("pivotBrokerNotifyStatus");
+            if (st) st.textContent = "Sending...";
+            try {
+                if (typeof window.notifyTradeChannel !== "function") {
+                    throw new Error("Notify unavailable. Please refresh the page.");
+                }
+                await window.notifyTradeChannel("pivot_breakout");
+                if (st) st.textContent = "Notification sent. Thank you.";
+            } catch (err) {
+                if (st) st.textContent = err.message || "Failed to notify.";
+            }
+        });
+    }
+
     const bullishBody = document.getElementById("bullishBody");
     const bearishBody = document.getElementById("bearishBody");
     const bullishSummary = document.getElementById("bullishSummary");
@@ -236,6 +276,7 @@
             }
             updateSortIndicators();
         } catch (err) {
+            showPivotBrokerFailureModalOnce();
             if (isBullish) {
                 bullishBody.innerHTML = `<tr><td colspan="5" class="state-cell">Error: ${err.message}</td></tr>`;
                 bullishSummary.textContent = "Failed to load data.";
@@ -282,6 +323,7 @@
             bearishSummary.textContent = `Total bearish records: ${data.bearish_count || 0}`;
             updateSortIndicators();
         } catch (err) {
+            showPivotBrokerFailureModalOnce();
             bullishBody.innerHTML = `<tr><td colspan="5" class="state-cell">Error: ${err.message}</td></tr>`;
             bearishBody.innerHTML = `<tr><td colspan="5" class="state-cell">Error: ${err.message}</td></tr>`;
             bullishSummary.textContent = "Failed to load data.";
@@ -380,8 +422,18 @@
         ensureTabLoaded("bearish");
     });
 
+    document.addEventListener("keydown", (ev) => {
+        if (ev.key !== "Escape") return;
+        const m = document.getElementById("pivotBrokerModal");
+        if (m?.classList.contains("show")) {
+            m.classList.remove("show");
+            document.body.style.overflow = "";
+        }
+    });
+
     document.addEventListener("DOMContentLoaded", () => {
         document.title = "Pivot Breakout - Tradentical";
+        wirePivotBrokerModal();
         syncMainToMobile();
         setActiveTab("bullish");
         ensureTabLoaded("bullish");

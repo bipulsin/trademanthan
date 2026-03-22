@@ -1,0 +1,72 @@
+/* Shared modal: intraoption engine handshake + pivot broker API failure */
+.twc-notify-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    box-sizing: border-box;
+}
+.twc-notify-modal.show {
+    display: flex;
+}
+.twc-notify-modal__backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.72);
+    backdrop-filter: blur(6px);
+}
+.twc-notify-modal__box {
+    position: relative;
+    max-width: 520px;
+    width: 100%;
+    background: var(--card-bg, #fff);
+    color: var(--text-primary, #1e293b);
+    border-radius: 16px;
+    padding: 1.5rem 1.75rem;
+    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(148, 163, 184, 0.35);
+}
+body[data-theme="dark"] .twc-notify-modal__box {
+    background: #1e293b;
+    color: #f1f5f9;
+    border-color: rgba(148, 163, 184, 0.25);
+}
+.twc-notify-modal__text {
+    margin: 0 0 1.25rem 0;
+    font-size: 1rem;
+    line-height: 1.55;
+}
+.twc-notify-modal__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    justify-content: flex-end;
+}
+.twc-notify-modal__btn {
+    border: none;
+    border-radius: 10px;
+    padding: 0.65rem 1.25rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s ease, transform 0.1s ease;
+}
+.twc-notify-modal__btn:active {
+    transform: scale(0.98);
+}
+.twc-notify-modal__btn--primary {
+    background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+    color: #fff;
+}
+.twc-notify-modal__btn--secondary {
+    background: rgba(148, 163, 184, 0.35);
+    color: inherit;
+}
+.twc-notify-modal__status {
+    margin: 1rem 0 0 0;
+    font-size: 0.875rem;
+    min-height: 1.25em;
+}
