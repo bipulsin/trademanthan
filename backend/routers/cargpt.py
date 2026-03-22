@@ -82,7 +82,11 @@ class BulkCarStockUploadRequest(BaseModel):
 
 
 def _normalize_symbol(raw_symbol: str) -> str:
-    return (raw_symbol or "").strip().upper()
+    """Uppercase, trim, and fit VARCHAR(50) to avoid DB errors on long symbols."""
+    s = (raw_symbol or "").strip().upper()
+    if not s:
+        return ""
+    return s[:50]
 
 
 def _run_car_for_symbol_on_the_fly(symbol: str):
@@ -223,47 +227,79 @@ async def upload_stocks(
     if body.user_id is None or body.user_id < 1:
         raise HTTPException(status_code=400, detail="Valid user_id is required")
 
+    # Merge rows: last occurrence wins for duplicate symbols in the same CSV.
+    merged: dict[str, Decimal] = {}
+    for item in body.rows:
+        symbol = _normalize_symbol(item.symbol)
+        if not symbol:
+            continue
+        try:
+            price_dec = Decimal(str(item.buy_price))
+        except (InvalidOperation, ValueError, TypeError):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid buy_price for symbol {symbol!r}",
+            )
+        if not price_dec.is_finite() or price_dec < 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid buy_price for symbol {symbol!r}",
+            )
+        merged[symbol] = price_dec
+
+    if not merged:
+        return SaveStockListResponse(
+            success=False,
+            message="No valid symbols in CSV (check symbol column).",
+            saved_count=0,
+        )
+
     saved = 0
     updated = 0
-    try:
-        for item in body.rows:
-            symbol = _normalize_symbol(item.symbol)
-            if not symbol:
-                continue
-            try:
-                price_dec = Decimal(str(item.buy_price))
-            except (InvalidOperation, ValueError, TypeError):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Invalid buy_price for symbol {symbol!r}",
-                )
-            if not price_dec.is_finite() or price_dec < 0:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Invalid buy_price for symbol {symbol!r}",
-                )
+    dialect = db.get_bind().dialect.name
 
-            existing = db.query(CarStockList).filter(
-                CarStockList.symbol == symbol,
-                CarStockList.userid == body.user_id
-            ).first()
-            if existing:
-                existing.buy_price = price_dec
-                updated += 1
-            else:
-                db.add(
-                    CarStockList(
-                        symbol=symbol,
-                        userid=body.user_id,
-                        buy_price=price_dec,
-                    )
+    upsert_sql = text(
+        """
+        INSERT INTO carstocklist (symbol, userid, buy_price)
+        VALUES (:symbol, :user_id, :buy_price)
+        ON CONFLICT (userid, symbol) DO UPDATE SET
+          buy_price = EXCLUDED.buy_price
+        """
+    )
+
+    try:
+        if dialect == "postgresql":
+            for symbol, price_dec in merged.items():
+                db.execute(
+                    upsert_sql,
+                    {
+                        "symbol": symbol,
+                        "user_id": body.user_id,
+                        "buy_price": price_dec,
+                    },
                 )
-                saved += 1
+            saved = len(merged)
+            updated = 0
+        else:
+            for symbol, price_dec in merged.items():
+                existing = db.query(CarStockList).filter(
+                    CarStockList.symbol == symbol,
+                    CarStockList.userid == body.user_id,
+                ).first()
+                if existing:
+                    existing.buy_price = price_dec
+                    updated += 1
+                else:
+                    db.add(
+                        CarStockList(
+                            symbol=symbol,
+                            userid=body.user_id,
+                            buy_price=price_dec,
+                        )
+                    )
+                    saved += 1
 
         db.commit()
-    except HTTPException:
-        db.rollback()
-        raise
     except IntegrityError as e:
         db.rollback()
         logger.exception("upload-stocks integrity error")
@@ -284,11 +320,11 @@ async def upload_stocks(
         logger.exception("upload-stocks unexpected error")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
-    return SaveStockListResponse(
-        success=True,
-        message=f"Processed {saved + updated} rows (saved {saved}, updated {updated})",
-        saved_count=saved,
-    )
+    if dialect == "postgresql":
+        msg = f"Processed {saved} symbols from CSV (insert or update)."
+    else:
+        msg = f"Processed {saved + updated} rows (saved {saved}, updated {updated})"
+    return SaveStockListResponse(success=True, message=msg, saved_count=saved)
 
 
 @router.get("/stock-list", response_model=List[CarStockItem])

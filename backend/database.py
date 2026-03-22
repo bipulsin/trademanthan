@@ -117,6 +117,24 @@ def _run_startup_schema_migrations(db_engine):
                     conn.execute(text("ALTER TABLE carstocklist ALTER COLUMN userid SET NOT NULL"))
                     conn.execute(text("ALTER TABLE carstocklist ALTER COLUMN buy_price SET DEFAULT 0"))
                     conn.execute(text("ALTER TABLE carstocklist ALTER COLUMN buy_price SET NOT NULL"))
+                    # Dedupe then unique (userid, symbol) so CSV upload can use ON CONFLICT upsert.
+                    conn.execute(
+                        text(
+                            """
+                            DELETE FROM carstocklist a
+                            USING carstocklist b
+                            WHERE a.id > b.id AND a.userid = b.userid AND a.symbol = b.symbol
+                            """
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            """
+                            CREATE UNIQUE INDEX IF NOT EXISTS uq_carstocklist_user_symbol
+                            ON carstocklist (userid, symbol)
+                            """
+                        )
+                    )
 
             # Rename legacy typo table to the correct table name if required.
             conn.execute(
