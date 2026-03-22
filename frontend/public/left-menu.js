@@ -6,7 +6,7 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html?v=3.11';
+const MENU_HTML_PATH = 'left-menu.html?v=3.12';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 const NOTIFY_TRADE_CHANNEL_SCRIPT = 'notify-trade-channel.js?v=3';
 
@@ -137,11 +137,12 @@ class LeftMenu {
         return String(raw).trim().toLowerCase() === 'yes';
     }
 
-    /** Merge /auth/me into localStorage so isAdmin / page_permitted stay current */
+    /** Merge /auth/me into localStorage so id / isAdmin / page_permitted stay current */
     async refreshUserProfileFromApi() {
         try {
             const token = localStorage.getItem('trademanthan_token');
-            if (!token || !token.includes('.')) return;
+            // Always try JWT-capable sessions. Legacy google_token_/demo_token_ will 401 — ignored.
+            if (!token) return;
             const paths = ['/api/auth/me', '/auth/me'];
             let me = null;
             for (const path of paths) {
@@ -160,8 +161,13 @@ class LeftMenu {
             }
             if (!me) return;
             const prev = JSON.parse(localStorage.getItem('trademanthan_user') || '{}');
-            localStorage.setItem('trademanthan_user', JSON.stringify({ ...prev, ...me }));
+            const merged = { ...prev, ...me };
+            localStorage.setItem('trademanthan_user', JSON.stringify(merged));
             this.applyAdminNavVisibility();
+            this.loadUserData();
+            try {
+                window.dispatchEvent(new CustomEvent('tradentical:user-updated', { detail: { user: merged } }));
+            } catch (e) { /* ignore */ }
         } catch (e) {
             console.warn('LeftMenu: refreshUserProfileFromApi', e);
         }
@@ -242,7 +248,7 @@ class LeftMenu {
         <div class="panel-footer">
             <div class="user-info">
                 <img src="https://via.placeholder.com/40" alt="User" class="user-avatar" id="userAvatar">
-                <div class="user-details"><span class="user-name" id="userName">User</span><span class="user-datetime" id="userDateTime">--</span></div>
+                <div class="user-details"><span class="user-name" id="userName">User</span><span class="user-meta" id="userMetaLine" hidden></span><span class="user-datetime" id="userDateTime">--</span></div>
             </div>
             <div class="panel-footer-links">
                 <a href="#" class="disclaimer-link">Disclaimer</a>
@@ -649,15 +655,38 @@ class LeftMenu {
 
     loadUserData() {
         const userData = localStorage.getItem('trademanthan_user');
-        if (userData) {
-            try {
-                const user = JSON.parse(userData);
-                const el = document.getElementById('userName');
-                const avatar = document.getElementById('userAvatar');
-                if (el) el.textContent = user.name || 'User';
-                if (avatar && user.picture) avatar.src = user.picture;
-            } catch (e) {}
-        }
+        if (!userData) return;
+        try {
+            const user = JSON.parse(userData);
+            const el = document.getElementById('userName');
+            const avatar = document.getElementById('userAvatar');
+            const meta = document.getElementById('userMetaLine');
+            if (el) el.textContent = user.name || user.full_name || 'User';
+            if (avatar && user.picture) avatar.src = user.picture;
+
+            let uid = user.id ?? user.user_id;
+            if (uid == null || uid === '') {
+                try {
+                    const token = localStorage.getItem('trademanthan_token');
+                    if (token && token.includes('.')) {
+                        const parts = String(token).split('.');
+                        if (parts.length === 3) {
+                            let b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+                            while (b64.length % 4) b64 += '=';
+                            const payload = JSON.parse(atob(b64));
+                            if (payload && payload.sub != null) uid = payload.sub;
+                        }
+                    }
+                } catch (e) { /* ignore */ }
+            }
+            if (meta) {
+                const parts = [];
+                if (uid != null && uid !== '') parts.push(`User ID: ${uid}`);
+                if (LeftMenu.isUserAdmin(user)) parts.push('Admin');
+                meta.textContent = parts.join(' · ');
+                meta.hidden = parts.length === 0;
+            }
+        } catch (e) {}
     }
 
     setupNavigation() {

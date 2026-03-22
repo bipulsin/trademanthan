@@ -7,7 +7,7 @@
     <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
     <script src="auth-check.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="stylesheet" href="left-menu.css?v=3.11">
+    <link rel="stylesheet" href="left-menu.css?v=3.12">
     <link rel="stylesheet" href="cargpt.css?v=1.5">
     <link rel="stylesheet" href="theme.css?v=1.3">
 </head>
@@ -212,7 +212,7 @@
         </div>
     </div>
 
-    <script src="left-menu.js?v=3.11"></script>
+    <script src="left-menu.js?v=3.12"></script>
     <script>
         const CARGPT_BASE_URL = '/cargpt';
 
@@ -717,10 +717,19 @@
 
         attachConfigureHandlers();
 
-        (function setSessionInHeader() {
+        function updateCargptSessionHeader() {
             var el = document.getElementById('cargptSessionInfo');
-            if (el) el.textContent = 'Session: User ID ' + (getCurrentUserId() || '—');
-        })();
+            if (!el) return;
+            var id = getCurrentUserId();
+            el.textContent = 'Session: User ID ' + (id ? id : '—');
+        }
+        window.addEventListener('tradentical:user-updated', updateCargptSessionHeader);
+        document.addEventListener('DOMContentLoaded', function () {
+            updateCargptSessionHeader();
+            setTimeout(updateCargptSessionHeader, 400);
+            setTimeout(updateCargptSessionHeader, 1200);
+        });
+        updateCargptSessionHeader();
     </script>
 </body>
 </html>

@@ -600,6 +600,22 @@ body[data-theme="light"] .tm-telegram-modal__textarea {
     text-overflow: ellipsis;
 }
 
+.user-meta {
+    display: block;
+    color: var(--left-menu-accent);
+    font-size: 0.72rem;
+    font-weight: 600;
+    margin-top: 2px;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.user-meta[hidden] {
+    display: none !important;
+}
+
 .user-datetime {
     display: block;
     color: var(--left-menu-muted);
