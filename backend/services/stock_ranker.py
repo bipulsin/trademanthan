@@ -45,10 +45,10 @@ def _flatten_breakdown(bd: Dict) -> Dict[str, float]:
 def _schedule_ranking_email(csv_path: Path) -> None:
     """Non-blocking: daemon thread sends CSV to tradentical@gmail.com (or CHARTINK_RANKING_EMAIL)."""
     try:
-        from services.chartink_ranking_email import schedule_chartink_ranking_email
+        from backend.services.chartink_ranking_email import schedule_chartink_ranking_email
     except ImportError:
         try:
-            from backend.services.chartink_ranking_email import schedule_chartink_ranking_email
+            from services.chartink_ranking_email import schedule_chartink_ranking_email
         except ImportError as e:
             logger.warning("chartink_ranking_email not available: %s", e)
             return
@@ -59,6 +59,7 @@ def log_and_export_full_ranking(
     sorted_scored: List[Tuple[float, Dict]],
     alert_type: Optional[str] = None,
     export_meta: Optional[Dict[str, Any]] = None,
+    send_email: bool = True,
 ) -> Optional[Path]:
     """
     Log ASCII table + write JSON + CSV under logs/scan_rankings/ for ALL stocks (e.g. 36 rows).
@@ -154,6 +155,7 @@ def export_full_ranking_only(
     stocks: List[Dict],
     alert_type: Optional[str] = None,
     export_meta: Optional[Dict[str, Any]] = None,
+    send_email: bool = True,
 ) -> List[Dict[str, Any]]:
     """
     Score every stock and export table/JSON/CSV (used when count <= MAX_STOCKS_PER_ALERT, no trimming).
@@ -170,7 +172,9 @@ def export_full_ranking_only(
         stock_copy["_score_breakdown"] = breakdown
         scored.append((score, stock_copy))
     scored.sort(key=lambda x: x[0], reverse=True)
-    log_and_export_full_ranking(scored, alert_type=alert_type, export_meta=export_meta)
+    log_and_export_full_ranking(
+        scored, alert_type=alert_type, export_meta=export_meta, send_email=send_email
+    )
     return [
         {
             "rank": i,
