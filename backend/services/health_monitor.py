@@ -275,41 +275,87 @@ class HealthMonitor:
         if self.api_token_failures == 0 and "api_token_failures" in self.alert_sent_for:
             self.alert_sent_for.remove("api_token_failures")
     
+    def send_daily_report_email(self, subject: str, body: str) -> bool:
+        """
+        Send routine daily report via SMTP only (no WhatsApp/Telegram).
+        Subject is used as-is (e.g. 'TradeManthan Daily Report - Mar 27, 2026').
+        """
+        try:
+            email_to = os.getenv("ALERT_EMAIL")
+            email_from = os.getenv("SMTP_FROM_EMAIL", "alerts@trademanthan.in")
+            smtp_server = os.getenv("SMTP_SERVER", "localhost")
+            smtp_port = int(os.getenv("SMTP_PORT", "25"))
+            smtp_user = os.getenv("SMTP_USER", "")
+            smtp_password = os.getenv("SMTP_PASSWORD", "")
+
+            if not email_to:
+                logger.warning("Daily report email skipped: ALERT_EMAIL not set")
+                return False
+
+            msg = MIMEMultipart()
+            msg['From'] = email_from
+            msg['To'] = email_to
+            msg['Subject'] = subject
+            msg.attach(MIMEText(body, 'plain'))
+
+            if smtp_user:
+                server = smtplib.SMTP(smtp_server, smtp_port)
+                server.starttls()
+                server.login(smtp_user, smtp_password)
+                server.send_message(msg)
+                server.quit()
+            else:
+                server = smtplib.SMTP(smtp_server, smtp_port)
+                server.send_message(msg)
+                server.quit()
+            logger.info(f"✅ Daily report email sent to {email_to}")
+            return True
+        except Exception as e:
+            logger.warning(f"Could not send daily report email: {str(e)}", exc_info=True)
+            return False
+
     def send_daily_health_report(self):
         """Send daily health report at 4 PM after market close"""
         try:
-            from database import SessionLocal
-            from models.trading import IntradayStockOption
+            from backend.database import SessionLocal
+            from backend.models.trading import IntradayStockOption
             import pytz
             
             ist = pytz.timezone('Asia/Kolkata')
             now = datetime.now(ist)
             today = now.date()
+            day_start = datetime.combine(today, datetime.min.time())
+            day_end = day_start + timedelta(days=1)
             
             db = SessionLocal()
             
-            # Get today's stats
+            # Get today's stats (same calendar day as trade_date)
             total_alerts = db.query(IntradayStockOption).filter(
-                IntradayStockOption.trade_date >= datetime.combine(today, datetime.min.time())
+                IntradayStockOption.trade_date >= day_start,
+                IntradayStockOption.trade_date < day_end,
             ).count()
             
             bullish_count = db.query(IntradayStockOption).filter(
-                IntradayStockOption.trade_date >= datetime.combine(today, datetime.min.time()),
+                IntradayStockOption.trade_date >= day_start,
+                IntradayStockOption.trade_date < day_end,
                 IntradayStockOption.alert_type == 'Bullish'
             ).count()
             
             bearish_count = db.query(IntradayStockOption).filter(
-                IntradayStockOption.trade_date >= datetime.combine(today, datetime.min.time()),
+                IntradayStockOption.trade_date >= day_start,
+                IntradayStockOption.trade_date < day_end,
                 IntradayStockOption.alert_type == 'Bearish'
             ).count()
             
             trades_entered = db.query(IntradayStockOption).filter(
-                IntradayStockOption.trade_date >= datetime.combine(today, datetime.min.time()),
+                IntradayStockOption.trade_date >= day_start,
+                IntradayStockOption.trade_date < day_end,
                 IntradayStockOption.status == 'bought'
             ).count()
             
             no_entry = db.query(IntradayStockOption).filter(
-                IntradayStockOption.trade_date >= datetime.combine(today, datetime.min.time()),
+                IntradayStockOption.trade_date >= day_start,
+                IntradayStockOption.trade_date < day_end,
                 IntradayStockOption.status == 'no_entry'
             ).count()
             
@@ -339,17 +385,13 @@ Generated: {now.strftime('%Y-%m-%d %H:%M:%S IST')}
             
             logger.info(report)
             
-            # Send email if configured (only on weekdays with no alerts)
-            # Skip alert if it's likely a holiday or weekend
+            # Send email on weekdays when ALERT_EMAIL is set (even if zero alerts — routine heartbeat)
             is_weekday = now.weekday() < 5  # Mon-Fri
             
-            # Send daily report summary (non-critical) on weekdays
-            alert_email = os.getenv("ALERT_EMAIL")
-            if alert_email and is_weekday and total_alerts > 0:
-                # Normal trading day - send summary
-                self.send_critical_alert(
-                    f"📊 TradeManthan Daily Report - {today.strftime('%b %d, %Y')}",
-                    report
+            if os.getenv("ALERT_EMAIL") and is_weekday:
+                self.send_daily_report_email(
+                    f"TradeManthan Daily Report - {today.strftime('%b %d, %Y')}",
+                    report.strip(),
                 )
             
             # Only send critical alert if NO webhooks AND consecutive failures
@@ -367,7 +409,7 @@ Generated: {now.strftime('%Y-%m-%d %H:%M:%S IST')}
                 )
             
         except Exception as e:
-            logger.error(f"Daily health report failed: {str(e)}")
+            logger.error(f"Daily health report failed: {str(e)}", exc_info=True)
     
     def send_whatsapp_message(self, message: str) -> bool:
         """Send WhatsApp message via CallMeBot API"""
