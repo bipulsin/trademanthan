@@ -43,7 +43,7 @@ def _flatten_breakdown(bd: Dict) -> Dict[str, float]:
 
 
 def _schedule_ranking_email(csv_path: Path) -> None:
-    """Non-blocking: daemon thread sends CSV to tradentical@gmail.com (or CHARTINK_RANKING_EMAIL)."""
+    """Background thread sends CSV (see chartink_ranking_email)."""
     try:
         from backend.services.chartink_ranking_email import schedule_chartink_ranking_email
     except ImportError:
@@ -64,7 +64,7 @@ def log_and_export_full_ranking(
     """
     Log ASCII table + write JSON + CSV under logs/scan_rankings/ for ALL stocks (e.g. 36 rows).
     sorted_scored: list of (composite_score, stock_dict with _score_breakdown).
-    Returns path to CSV if written (email scheduled asynchronously; does not block callers).
+    Returns path to CSV if written. If send_email, ranking CSV is sent in a background thread (non-daemon so CLI scripts wait for SMTP).
     """
     if not sorted_scored:
         return None
@@ -143,7 +143,8 @@ def log_and_export_full_ranking(
             for r in rows_out:
                 w.writerow({k: r.get(k) for k in fieldnames})
         logger.info("📁 Full ranking CSV (open in Excel): %s", csv_path)
-        _schedule_ranking_email(csv_path)
+        if send_email:
+            _schedule_ranking_email(csv_path)
     except OSError as e:
         logger.warning("Could not write ranking CSV: %s", e)
         csv_path = None

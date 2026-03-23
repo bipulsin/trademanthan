@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import os
 import smtplib
+import sys
 import threading
 from datetime import datetime
 from email import encoders
@@ -88,15 +89,21 @@ This is an automated message from TradeManthan scan processing.
         finally:
             server.quit()
         logger.info("ChartInk ranking CSV emailed to %s (subject: %s)", email_to, subject)
+        # Visible when running one-off scripts (stderr); uvicorn also shows in logs
+        print(f"[chartink_ranking_email] Sent CSV to {email_to}", file=sys.stderr, flush=True)
         return True
     except Exception as e:
         logger.warning("ChartInk ranking email failed: %s", e, exc_info=True)
+        print(f"[chartink_ranking_email] FAILED: {e}", file=sys.stderr, flush=True)
         return False
 
 
 def schedule_chartink_ranking_email(csv_path: Optional[Path]) -> None:
     """
-    Fire-and-forget: send email in a daemon thread so webhook/order path is not blocked.
+    Send CSV email in a background thread so webhook/order path is not blocked.
+
+    Uses a **non-daemon** thread so one-off CLI scripts (e.g. regenerate_ranking_csv_email.py)
+    do not exit before SMTP completes — daemon threads are killed on interpreter shutdown.
     """
     if not csv_path:
         return
@@ -110,5 +117,6 @@ def schedule_chartink_ranking_email(csv_path: Optional[Path]) -> None:
         except Exception as e:
             logger.warning("ChartInk ranking email thread error: %s", e, exc_info=True)
 
-    t = threading.Thread(target=_run, name="chartink-ranking-email", daemon=True)
+    # daemon=False: allow SMTP to finish when the main script exits (CLI). Webhook still returns immediately.
+    t = threading.Thread(target=_run, name="chartink-ranking-email", daemon=False)
     t.start()
