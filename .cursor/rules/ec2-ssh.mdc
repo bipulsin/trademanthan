@@ -1,0 +1,42 @@
+---
+description: EC2 SSH connection — host, user, key path (TradeManthan production)
+alwaysApply: true
+---
+
+# EC2 SSH (TradeManthan)
+
+Use these defaults when running remote commands, deployment checks, or `ssh`/`scp` to the production server.
+
+| Setting | Value |
+|--------|--------|
+| **Host** | `3.109.48.23` |
+| **User** | `ubuntu` |
+| **Private key** | **`${workspaceFolder}/TradeM.pem`** (same as `/Users/bipulsahay/TradeManthan/TradeM.pem` on this machine) |
+
+## Commands
+
+```bash
+# Interactive shell
+ssh -i "${workspaceFolder}/TradeM.pem" ubuntu@3.109.48.23
+
+# One-off remote command (wrap remote in quotes; use timeout for long-running tails)
+ssh -i "${workspaceFolder}/TradeM.pem" -o ConnectTimeout=20 ubuntu@3.109.48.23 'hostname && uptime'
+```
+
+Or from repo root:
+
+```bash
+ssh -i ./TradeM.pem ubuntu@3.109.48.23
+./scripts/ec2-ssh.sh 'tail -50 /tmp/deploy_backend.log'
+```
+
+## Security
+
+- **`*.pem` is gitignored** — never commit the key or paste its contents into the repo or rules.
+- If the key path differs on another machine, set `EC2_KEY` or use `scripts/ec2-ssh.sh`.
+
+## Project paths on server
+
+- App: `/home/ubuntu/trademanthan`
+- Deploy log: `/tmp/deploy_backend.log`
+- Scan algo log: `/home/ubuntu/trademanthan/logs/scan_st1_algo.log`
