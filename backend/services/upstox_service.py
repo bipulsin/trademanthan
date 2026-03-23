@@ -223,7 +223,7 @@ class UpstoxService:
         
         Args:
             url: API endpoint URL
-            method: HTTP method (GET or POST)
+            method: HTTP method (GET, POST, or DELETE with JSON body)
             params: Query parameters
             data: Request body data
             timeout: Request timeout in seconds
@@ -248,6 +248,13 @@ class UpstoxService:
                     )
                 elif method.upper() == "POST":
                     response = requests.post(
+                        url,
+                        headers=headers,
+                        json=data,
+                        timeout=timeout
+                    )
+                elif method.upper() == "DELETE":
+                    response = requests.delete(
                         url,
                         headers=headers,
                         json=data,
@@ -524,6 +531,14 @@ class UpstoxService:
                     data = response.get("data") or {}
                     if isinstance(data, dict):
                         order_id = data.get("order_id") or data.get("gtt_order_id") or data.get("id")
+                        # Upstox v3 GTT: { "data": { "gtt_order_ids": ["GTT-..."] } }
+                        inner = data.get("data") if isinstance(data.get("data"), dict) else {}
+                        if not order_id and isinstance(inner, dict):
+                            ids = inner.get("gtt_order_ids")
+                            if isinstance(ids, list) and ids:
+                                order_id = ids[0]
+                            if not order_id:
+                                order_id = inner.get("order_id") or inner.get("gtt_order_id")
                 return {"success": True, "data": response, "order_id": order_id}
 
             # Extract error message from API response (handles 400 JSON body or None)
@@ -606,6 +621,37 @@ class UpstoxService:
             }
         except Exception as e:
             logger.error(f"❌ Exception cancelling order: {str(e)}")
+            return {"success": False, "error": str(e)}
+
+    def cancel_gtt_order(self, gtt_order_id: str) -> Dict[str, Any]:
+        """
+        Cancel a GTT order by id (Upstox v3). IDs typically start with GTT-.
+        See: https://upstox.com/developer/api-documentation/cancel-gtt-order
+        """
+        if not self.access_token:
+            return {"success": False, "error": "Missing access token"}
+        if not gtt_order_id or not str(gtt_order_id).strip():
+            return {"success": False, "error": "Missing gtt_order_id"}
+        url = "https://api.upstox.com/v3/order/gtt/cancel"
+        try:
+            response = self.make_api_request(
+                url=url,
+                method="DELETE",
+                data={"gtt_order_id": str(gtt_order_id).strip()},
+                timeout=15,
+                max_retries=2,
+            )
+            if response and response.get("status") == "success":
+                logger.warning(f"🛑 GTT CANCELLED: {gtt_order_id}")
+                return {"success": True, "data": response}
+            err = (
+                (response or {}).get("message")
+                if isinstance(response, dict)
+                else "GTT cancel failed"
+            )
+            return {"success": False, "error": str(err), "data": response}
+        except Exception as e:
+            logger.error(f"❌ Exception cancelling GTT: {str(e)}")
             return {"success": False, "error": str(e)}
 
     def get_tick_size_by_instrument_key(self, instrument_key: str) -> Optional[float]:

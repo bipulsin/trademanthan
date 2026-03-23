@@ -182,6 +182,11 @@ def place_live_upstox_exit(
     if not upstox_service:
         return {"success": False, "error": "Upstox service unavailable"}
 
+    # GTT bundle ids (Upstox v3) are not regular order ids — cancel via GTT API
+    oid = str(buy_order_id).strip()
+    if oid.upper().startswith("GTT"):
+        return upstox_service.cancel_gtt_order(oid)
+
     details = upstox_service.get_order_details(buy_order_id)
     if not details.get("success"):
         return {"success": False, "error": details.get("error", "Order details failed")}
