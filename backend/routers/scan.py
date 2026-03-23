@@ -1485,6 +1485,13 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         
         processed_data["stocks"] = enriched_stocks
         logger.info(f"Successfully processed {len(enriched_stocks)} stocks")
+
+        ranking_export_meta = {
+            "triggered_at": processed_data.get("triggered_at"),
+            "triggered_at_display": processed_data.get("triggered_at_time"),
+            "scan_name": processed_data.get("scan_name"),
+            "alert_name": processed_data.get("alert_name"),
+        }
         
         # ====================================================================
         # STOCK RANKING & SELECTION (If too many stocks)
@@ -1502,7 +1509,8 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 selected_stocks, summary = rank_and_select_stocks(
                     enriched_stocks, 
                     max_stocks=MAX_STOCKS_PER_ALERT,
-                    alert_type=forced_option_type
+                    alert_type=forced_option_type,
+                    export_meta=ranking_export_meta,
                 )
                 
                 logger.info(f"✅ RANKING COMPLETE:")
@@ -1518,8 +1526,19 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 
             except ImportError as e:
                 logger.info(f"⚠️ Stock ranker not available, using all stocks: {str(e)}")
+        elif len(enriched_stocks) >= 1:
+            logger.info(f"✅ Stock count ({len(enriched_stocks)}) within limit ({MAX_STOCKS_PER_ALERT}), using all stocks — exporting scores + email")
+            try:
+                from services.stock_ranker import export_full_ranking_only
+                export_full_ranking_only(
+                    enriched_stocks,
+                    alert_type=forced_option_type,
+                    export_meta=ranking_export_meta,
+                )
+            except ImportError as e:
+                logger.info(f"⚠️ Stock ranker export not available: {str(e)}")
         else:
-            logger.info(f"✅ Stock count ({len(enriched_stocks)}) within limit ({MAX_STOCKS_PER_ALERT}), using all stocks")
+            logger.info("⚠️ No enriched stocks from webhook — skipping ranking CSV/email")
         
         # Get current date for grouping
         current_date = trading_date.strftime('%Y-%m-%d')

@@ -3,12 +3,183 @@ Stock Ranking System
 Scores and ranks stocks to select the best trading candidates when capacity is limited
 """
 
+import csv
+import json
 import logging
-from typing import List, Dict, Tuple
+import re
+from pathlib import Path
+from typing import List, Dict, Tuple, Any, Optional
 from datetime import datetime
 import pytz
 
 logger = logging.getLogger(__name__)
+
+# Project root: backend/services/stock_ranker.py -> parents[2] = repo root
+_RANKING_EXPORT_DIR = Path(__file__).resolve().parent.parent.parent / "logs" / "scan_rankings"
+
+
+def _safe_ts_for_filename(s: str) -> str:
+    return re.sub(r"[^\w\-]+", "_", (s or "na")[: 40])
+
+
+def _flatten_breakdown(bd: Dict) -> Dict[str, float]:
+    """Normalize breakdown dict for tabular export."""
+    out = {
+        "momentum": float(bd.get("momentum") or 0),
+        "liquidity": float(bd.get("liquidity") or 0),
+        "premium": float(bd.get("premium") or 0),
+        "strike": float(bd.get("strike") or 0),
+        "completeness": float(bd.get("completeness") or 0),
+        "extreme_bonus": float(bd.get("extreme_bonus") or 0),
+    }
+    hb = bd.get("hold_bonus_total")
+    if hb is None:
+        hb = sum(
+            float(bd.get(k) or 0)
+            for k in ("hold_bonus_premium", "hold_bonus_stable", "hold_bonus_liquidity")
+        )
+    out["hold_bonus"] = float(hb or 0)
+    return out
+
+
+def _schedule_ranking_email(csv_path: Path) -> None:
+    """Non-blocking: daemon thread sends CSV to tradentical@gmail.com (or CHARTINK_RANKING_EMAIL)."""
+    try:
+        from services.chartink_ranking_email import schedule_chartink_ranking_email
+    except ImportError:
+        try:
+            from backend.services.chartink_ranking_email import schedule_chartink_ranking_email
+        except ImportError as e:
+            logger.warning("chartink_ranking_email not available: %s", e)
+            return
+    schedule_chartink_ranking_email(csv_path)
+
+
+def log_and_export_full_ranking(
+    sorted_scored: List[Tuple[float, Dict]],
+    alert_type: Optional[str] = None,
+    export_meta: Optional[Dict[str, Any]] = None,
+) -> Optional[Path]:
+    """
+    Log ASCII table + write JSON + CSV under logs/scan_rankings/ for ALL stocks (e.g. 36 rows).
+    sorted_scored: list of (composite_score, stock_dict with _score_breakdown).
+    Returns path to CSV if written (email scheduled asynchronously; does not block callers).
+    """
+    if not sorted_scored:
+        return None
+
+    _RANKING_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+    rows_out: List[Dict[str, Any]] = []
+    lines = []
+    hdr = (
+        f"{'#':>4}  {'Symbol':<14}  {'Total':>7}  {'Mom':>5}  {'Liq':>5}  {'Prem':>5}  "
+        f"{'Strk':>5}  {'Cmp':>5}  {'ExB':>5}  {'HB':>5}"
+    )
+    lines.append(hdr)
+    lines.append("-" * len(hdr))
+
+    for rank, (score, stock) in enumerate(sorted_scored, start=1):
+        name = str(stock.get("stock_name") or "?")[:14]
+        bd = stock.get("_score_breakdown") or {}
+        f = _flatten_breakdown(bd)
+        total = round(float(score), 2)
+        line = (
+            f"{rank:>4}  {name:<14}  {total:>7.2f}  {f['momentum']:>5.0f}  {f['liquidity']:>5.0f}  "
+            f"{f['premium']:>5.0f}  {f['strike']:>5.0f}  {f['completeness']:>5.1f}  "
+            f"{f['extreme_bonus']:>5.0f}  {f['hold_bonus']:>5.0f}"
+        )
+        lines.append(line)
+        sym = stock.get("stock_name") or ""
+        row = {
+            "stock_symbol": sym,
+            "rank": rank,
+            "composite_score": total,
+            **{k: round(v, 2) if k != "completeness" else round(v, 2) for k, v in f.items()},
+            "breakdown_raw": bd,
+        }
+        rows_out.append(row)
+
+    table = "\n".join(lines)
+    logger.info("\n📋 FULL STOCK RANKING (all symbols, composite + factor scores):\n%s", table)
+
+    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    disp = (export_meta or {}).get("triggered_at_display") or ""
+    ts_part = _safe_ts_for_filename(disp.replace(" ", "_")) if disp else ts
+    prefix = f"scan_ranking_{ts}_{ts_part}_{alert_type or 'NA'}"
+
+    payload = {
+        "exported_at_utc": datetime.utcnow().isoformat() + "Z",
+        "alert_type": alert_type,
+        "meta": export_meta or {},
+        "stock_count": len(rows_out),
+        "rows": rows_out,
+    }
+    json_path = _RANKING_EXPORT_DIR / f"{prefix}.json"
+    try:
+        with open(json_path, "w", encoding="utf-8") as jf:
+            json.dump(payload, jf, indent=2, default=str)
+        logger.info("📁 Full ranking JSON: %s", json_path)
+    except OSError as e:
+        logger.warning("Could not write ranking JSON: %s", e)
+
+    csv_path = _RANKING_EXPORT_DIR / f"{prefix}.csv"
+    try:
+        fieldnames = [
+            "stock_symbol",
+            "rank",
+            "composite_score",
+            "momentum",
+            "liquidity",
+            "premium",
+            "strike",
+            "completeness",
+            "extreme_bonus",
+            "hold_bonus",
+        ]
+        with open(csv_path, "w", encoding="utf-8", newline="") as cf:
+            w = csv.DictWriter(cf, fieldnames=fieldnames, extrasaction="ignore")
+            w.writeheader()
+            for r in rows_out:
+                w.writerow({k: r.get(k) for k in fieldnames})
+        logger.info("📁 Full ranking CSV (open in Excel): %s", csv_path)
+        _schedule_ranking_email(csv_path)
+    except OSError as e:
+        logger.warning("Could not write ranking CSV: %s", e)
+        csv_path = None
+
+    return csv_path
+
+
+def export_full_ranking_only(
+    stocks: List[Dict],
+    alert_type: Optional[str] = None,
+    export_meta: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Score every stock and export table/JSON/CSV (used when count <= MAX_STOCKS_PER_ALERT, no trimming).
+    Returns row dicts for testing.
+    """
+    if not stocks:
+        return []
+    ranker = StockRanker(max_stocks=10**9)
+    scored: List[Tuple[float, Dict]] = []
+    for stock in stocks:
+        score, breakdown = ranker.calculate_score(stock)
+        stock_copy = stock.copy()
+        stock_copy["_rank_score"] = score
+        stock_copy["_score_breakdown"] = breakdown
+        scored.append((score, stock_copy))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    log_and_export_full_ranking(scored, alert_type=alert_type, export_meta=export_meta)
+    return [
+        {
+            "rank": i,
+            "stock_name": s[1].get("stock_name"),
+            "composite_score": round(s[0], 2),
+            **_flatten_breakdown(s[1].get("_score_breakdown") or {}),
+        }
+        for i, s in enumerate(scored, start=1)
+    ]
 
 class StockRanker:
     """
@@ -240,13 +411,19 @@ class StockRanker:
         
         return score, breakdown
     
-    def rank_stocks(self, stocks: List[Dict], alert_type: str = None) -> List[Dict]:
+    def rank_stocks(
+        self,
+        stocks: List[Dict],
+        alert_type: str = None,
+        export_meta: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict]:
         """
         Rank stocks and return top N based on scoring
         
         Args:
             stocks: List of stock dictionaries
             alert_type: 'Bullish' or 'Bearish' (optional, for logging)
+            export_meta: Optional context (triggered_at_display, scan_name) for JSON/CSV filename and payload
             
         Returns:
             List of top N ranked stocks with scores
@@ -267,6 +444,9 @@ class StockRanker:
         
         # Sort by score (descending)
         scored_stocks.sort(key=lambda x: x[0], reverse=True)
+
+        # Full table + JSON + CSV for every symbol (e.g. all 36 before trimming to top N)
+        log_and_export_full_ranking(scored_stocks, alert_type=alert_type, export_meta=export_meta)
         
         # Select top N
         selected_stocks = [stock for score, stock in scored_stocks[:self.max_stocks]]
@@ -333,7 +513,12 @@ class StockRanker:
 stock_ranker = StockRanker(max_stocks=15)
 
 
-def rank_and_select_stocks(stocks: List[Dict], max_stocks: int = 15, alert_type: str = None) -> Tuple[List[Dict], Dict]:
+def rank_and_select_stocks(
+    stocks: List[Dict],
+    max_stocks: int = 15,
+    alert_type: str = None,
+    export_meta: Optional[Dict[str, Any]] = None,
+) -> Tuple[List[Dict], Dict]:
     """
     Convenience function to rank and select stocks
     
@@ -341,12 +526,13 @@ def rank_and_select_stocks(stocks: List[Dict], max_stocks: int = 15, alert_type:
         stocks: List of stock dictionaries
         max_stocks: Maximum number to select
         alert_type: Alert type for logging
+        export_meta: Optional context written into ranking JSON/CSV
         
     Returns:
         Tuple of (selected_stocks, summary_dict)
     """
     ranker = StockRanker(max_stocks=max_stocks)
-    selected = ranker.rank_stocks(stocks, alert_type=alert_type)
+    selected = ranker.rank_stocks(stocks, alert_type=alert_type, export_meta=export_meta)
     summary = ranker.get_selection_summary(selected, len(stocks))
     
     return selected, summary
