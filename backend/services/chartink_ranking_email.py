@@ -21,8 +21,20 @@ import pytz
 
 logger = logging.getLogger(__name__)
 
+# Used only if CHARTINK_RANKING_EMAIL and ALERT_EMAIL are both unset
 DEFAULT_RANKING_EMAIL_TO = "tradentical@gmail.com"
 IST = pytz.timezone("Asia/Kolkata")
+
+
+def _ranking_email_to() -> str:
+    """Prefer explicit CHARTINK_RANKING_EMAIL, else same inbox as daily alerts (ALERT_EMAIL), else legacy default."""
+    explicit = (os.getenv("CHARTINK_RANKING_EMAIL") or "").strip()
+    if explicit:
+        return explicit
+    alert = (os.getenv("ALERT_EMAIL") or "").strip()
+    if alert:
+        return alert
+    return DEFAULT_RANKING_EMAIL_TO
 
 
 def _send_chartink_ranking_email_sync(csv_path: Path) -> bool:
@@ -35,7 +47,7 @@ def _send_chartink_ranking_email_sync(csv_path: Path) -> bool:
         logger.warning("ChartInk ranking email: missing file %s", csv_path)
         return False
 
-    email_to = (os.getenv("CHARTINK_RANKING_EMAIL") or DEFAULT_RANKING_EMAIL_TO).strip()
+    email_to = _ranking_email_to()
     email_from = os.getenv("SMTP_FROM_EMAIL", "alerts@trademanthan.in")
     smtp_server = os.getenv("SMTP_SERVER", "localhost")
     smtp_port = int(os.getenv("SMTP_PORT", "587"))
