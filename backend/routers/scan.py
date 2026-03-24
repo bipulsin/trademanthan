@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Request, HTTPException, Depends, Query, BackgroundTasks
 from fastapi.responses import JSONResponse, RedirectResponse, PlainTextResponse
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -4808,6 +4808,7 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
         ist = pytz.timezone('Asia/Kolkata')
         now = datetime.now(ist)
         today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        tomorrow = today + timedelta(days=1)
         
         # Check if it's time-based exit time (3:25 PM IST)
         current_time = now.time()
@@ -4818,12 +4819,13 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
             logger.info(f"⏰ TIME-BASED EXIT: Current time {current_time.strftime('%H:%M')} >= 15:25 - Exiting all open trades")
         
         # Get all OPEN records for today (not exited, not no_entry)
-        # Only update trades that are still open
+        # Only update trades that are still open (bought + no exit_reason)
         records = db.query(IntradayStockOption).filter(
             and_(
-                IntradayStockOption.trade_date == today,
+                IntradayStockOption.trade_date >= today,
+                IntradayStockOption.trade_date < tomorrow,
                 IntradayStockOption.option_contract.isnot(None),
-                IntradayStockOption.status != 'no_entry',  # Skip no_entry trades
+                IntradayStockOption.status == 'bought',
                 IntradayStockOption.exit_reason == None  # CRITICAL: Only update open trades, not exited ones
             )
         ).all()
@@ -4831,8 +4833,11 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
         updated_count = 0
         failed_count = 0
         skipped_no_entry = db.query(IntradayStockOption).filter(
-            IntradayStockOption.trade_date == today,
-            IntradayStockOption.status == 'no_entry'
+            and_(
+                IntradayStockOption.trade_date >= today,
+                IntradayStockOption.trade_date < tomorrow,
+                IntradayStockOption.status == 'no_entry'
+            )
         ).count()
         
         logger.info(f"Refreshing {len(records)} records (skipped {skipped_no_entry} 'no_entry' trades)...")
@@ -4954,8 +4959,8 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                             # Only update sell_price if trade is not already closed
                             if not record.exit_reason:
                                 # CHECK ALL EXIT CONDITIONS INDEPENDENTLY
-                                # Then apply the highest priority exit
-                                # Priority: Time > Stop Loss > VWAP Cross > Profit Target
+                                # Apply exit in priority order below (price-based before EOD time sweep)
+                                # Priority: Stop Loss > VWAP Cross > Profit Target > Time (3:25 PM)
                                 
                                 live_instrument_key = instrument_key or record.instrument_key
                                 exit_conditions = {
@@ -4965,17 +4970,12 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                     'profit_target': False
                                 }
                                 
-                                # 1. CHECK TIME-BASED EXIT (3:25 PM) - HIGHEST PRIORITY
-                                if is_exit_time:
-                                    exit_conditions['time_based'] = True
-                                    logger.info(f"⏰ TIME EXIT CONDITION MET for {record.stock_name}: Current time >= 3:25 PM")
-                                
-                                # 2. CHECK STOP LOSS
+                                # 1. CHECK STOP LOSS
                                 if record.stop_loss and new_option_ltp <= record.stop_loss:
                                     exit_conditions['stop_loss'] = True
                                     logger.info(f"🛑 STOP LOSS CONDITION MET for {record.stock_name}: LTP ₹{new_option_ltp} <= SL ₹{record.stop_loss}")
                                 
-                                # 3. CHECK VWAP CROSS (only after 11:15 AM)
+                                # 2. CHECK VWAP CROSS (only after 11:15 AM)
                                 vwap_check_time = datetime.strptime("11:15", "%H:%M").time()
                                 current_time_check = now.time()
                                 
@@ -4996,37 +4996,20 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                 elif current_time_check < vwap_check_time:
                                     logger.info(f"⏰ VWAP check skipped for {record.stock_name} (time {current_time_check.strftime('%H:%M')} < 11:15 AM)")
                                 
-                                # 4. CHECK PROFIT TARGET (50% gain)
+                                # 3. CHECK PROFIT TARGET (50% gain)
                                 if record.buy_price and new_option_ltp >= (record.buy_price * 1.5):
                                     exit_conditions['profit_target'] = True
                                     logger.info(f"🎯 PROFIT TARGET CONDITION MET for {record.stock_name}: LTP ₹{new_option_ltp} >= Target ₹{record.buy_price * 1.5}")
                                 
-                                # APPLY THE HIGHEST PRIORITY EXIT CONDITION
+                                # 4. CHECK TIME-BASED EXIT (3:25 PM) — last resort after price rules
+                                if is_exit_time:
+                                    exit_conditions['time_based'] = True
+                                    logger.info(f"⏰ TIME EXIT CONDITION MET for {record.stock_name}: Current time >= 3:25 PM")
+                                
+                                # APPLY EXIT IN PRIORITY ORDER (stop_loss → vwap → profit → time)
                                 exit_applied = False
                                 
-                                if exit_conditions['time_based']:
-                                    live_exit_result = live_trading.place_live_upstox_exit(
-                                        instrument_key=live_instrument_key,
-                                        qty=record.qty,
-                                        stock_name=record.stock_name,
-                                        option_contract=option_contract,
-                                        buy_order_id=record.buy_order_id,
-                                        tag=f"scan_st1_exit_time:{record.buy_order_id or 'no_buy_id'}"
-                                    )
-                                    if not live_exit_result.get("skipped") and not live_exit_result.get("success"):
-                                        logger.error(f"🚨 LIVE EXIT FAILED (time_based) for {record.stock_name} - keeping trade OPEN")
-                                    else:
-                                        record.sell_price = new_option_ltp
-                                        record.sell_time = now
-                                        record.exit_reason = 'time_based'
-                                        record.status = 'sold'
-                                        record.sell_order_id = live_exit_result.get("order_id")
-                                        if record.buy_price and record.qty:
-                                            record.pnl = (new_option_ltp - record.buy_price) * record.qty
-                                        logger.info(f"✅ APPLIED: TIME EXIT for {record.stock_name}: PnL=₹{record.pnl}")
-                                        exit_applied = True
-                                
-                                elif exit_conditions['stop_loss']:
+                                if exit_conditions['stop_loss']:
                                     live_exit_result = live_trading.place_live_upstox_exit(
                                         instrument_key=live_instrument_key,
                                         qty=record.qty,
@@ -5090,6 +5073,28 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                         if record.qty:
                                             record.pnl = (new_option_ltp - record.buy_price) * record.qty
                                         logger.info(f"✅ APPLIED: PROFIT TARGET EXIT for {record.stock_name}: PnL=₹{record.pnl}")
+                                        exit_applied = True
+                                
+                                elif exit_conditions['time_based']:
+                                    live_exit_result = live_trading.place_live_upstox_exit(
+                                        instrument_key=live_instrument_key,
+                                        qty=record.qty,
+                                        stock_name=record.stock_name,
+                                        option_contract=option_contract,
+                                        buy_order_id=record.buy_order_id,
+                                        tag=f"scan_st1_exit_time:{record.buy_order_id or 'no_buy_id'}"
+                                    )
+                                    if not live_exit_result.get("skipped") and not live_exit_result.get("success"):
+                                        logger.error(f"🚨 LIVE EXIT FAILED (time_based) for {record.stock_name} - keeping trade OPEN")
+                                    else:
+                                        record.sell_price = new_option_ltp
+                                        record.sell_time = now
+                                        record.exit_reason = 'time_based'
+                                        record.status = 'sold'
+                                        record.sell_order_id = live_exit_result.get("order_id")
+                                        if record.buy_price and record.qty:
+                                            record.pnl = (new_option_ltp - record.buy_price) * record.qty
+                                        logger.info(f"✅ APPLIED: TIME EXIT for {record.stock_name}: PnL=₹{record.pnl}")
                                         exit_applied = True
                                 
                                 # If no exit was applied, just update current price and PnL (trade still OPEN)
