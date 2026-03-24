@@ -98,6 +98,101 @@ def place_live_upstox_order(
         )
     return result
 
+
+def place_live_upstox_entry_market_first(
+    instrument_key: str,
+    qty: int,
+    stock_name: str,
+    option_contract: str,
+    buy_price: float,
+    stop_loss: float,
+    risk_reward: float = 2.5,
+) -> Dict[str, Any]:
+    """
+    Primary: MARKET BUY at LTP (executes at exchange; order_id is a normal order id).
+    Backup: GTT (entry + SL + target) if market order fails and buy_price/stop_loss are valid.
+    """
+    if not is_trading_live_enabled():
+        return {"success": False, "skipped": True, "error": "Live trading disabled"}
+    if not upstox_service:
+        return {"success": False, "error": "Upstox service unavailable"}
+    if not instrument_key:
+        return {"success": False, "error": "Missing instrument_key"}
+    if not qty or qty <= 0:
+        return {"success": False, "error": "Invalid quantity"}
+
+    market_tag = f"entry_mkt|{stock_name}"[:200]
+    market_res = place_live_upstox_order(
+        "BUY",
+        instrument_key=instrument_key,
+        qty=qty,
+        stock_name=stock_name,
+        option_contract=option_contract,
+        tag=market_tag,
+        product="I",
+    )
+    if market_res.get("success"):
+        oid = market_res.get("order_id")
+        logger.warning(
+            "🚨 LIVE MARKET ENTRY: %s %s | buy_order_id=%s | method=market",
+            stock_name,
+            option_contract,
+            oid,
+        )
+        return {
+            "success": True,
+            "order_id": oid,
+            "method": "market",
+            "market_response": market_res,
+        }
+    if market_res.get("skipped"):
+        return market_res
+
+    m_err = market_res.get("error") or "Market BUY failed"
+    logger.warning(
+        "Market entry failed for %s (%s), trying GTT backup: %s",
+        stock_name,
+        option_contract,
+        m_err,
+    )
+    if not buy_price or buy_price <= 0 or not stop_loss or stop_loss <= 0:
+        return {
+            "success": False,
+            "error": f"Market failed ({m_err}); GTT backup skipped (invalid buy_price/stop_loss)",
+            "market_error": m_err,
+        }
+
+    gtt_res = place_live_upstox_gtt_entry(
+        instrument_key=instrument_key,
+        qty=qty,
+        stock_name=stock_name,
+        option_contract=option_contract,
+        buy_price=buy_price,
+        stop_loss=stop_loss,
+        risk_reward=risk_reward,
+    )
+    if gtt_res.get("success"):
+        logger.warning(
+            "🚨 LIVE GTT BACKUP ENTRY: %s %s | gtt_id=%s",
+            stock_name,
+            option_contract,
+            gtt_res.get("order_id"),
+        )
+        return {
+            "success": True,
+            "order_id": gtt_res.get("order_id"),
+            "method": "gtt_backup",
+            "market_error": m_err,
+            "gtt_response": gtt_res,
+        }
+    return {
+        "success": False,
+        "error": gtt_res.get("error") or "GTT backup failed",
+        "market_error": m_err,
+        "gtt_error": gtt_res.get("error"),
+    }
+
+
 def place_live_upstox_gtt_entry(
     instrument_key: str,
     qty: int,
@@ -158,16 +253,6 @@ def place_live_upstox_gtt_entry(
         )
     return result
 
-def _extract_order_status(details: Dict[str, Any]) -> Optional[str]:
-    data = details.get("data") if isinstance(details, dict) else None
-    if isinstance(data, dict):
-        payload = data.get("data")
-        if isinstance(payload, list) and payload:
-            return payload[0].get("status")
-        if isinstance(payload, dict):
-            return payload.get("status")
-    return None
-
 def place_live_upstox_exit(
     instrument_key: str,
     qty: int,
@@ -176,6 +261,13 @@ def place_live_upstox_exit(
     buy_order_id: Optional[str],
     tag: Optional[str] = None
 ) -> Dict[str, Any]:
+    """
+    Exit: always use a MARKET SELL at the broker for the open option qty.
+
+    - Market entry positions: `buy_order_id` is the exchange order id from the BUY; we pass it in the
+      order tag for traceability (`exit|ref_buy:<id>`). Exit order id is the new SELL's order_id.
+    - Legacy GTT-only rows (`GTT-...`): cancel GTT bundle, then market SELL (product D to match GTT).
+    """
     if not is_trading_live_enabled():
         return {"success": False, "skipped": True, "error": "Live trading disabled"}
     if not buy_order_id:
@@ -183,9 +275,8 @@ def place_live_upstox_exit(
     if not upstox_service:
         return {"success": False, "error": "Upstox service unavailable"}
 
-    # GTT bundle ids (Upstox v3): cancel removes SL/target legs but does NOT sell a filled option.
-    # After cancel, place a market SELL (product D matches place_gtt_order entry).
     oid = str(buy_order_id).strip()
+    # Legacy GTT entry ids
     if oid.upper().startswith("GTT"):
         cancel_result = upstox_service.cancel_gtt_order(oid)
         if not cancel_result.get("success"):
@@ -199,22 +290,21 @@ def place_live_upstox_exit(
             qty=qty,
             stock_name=stock_name,
             option_contract=option_contract,
-            tag=tag,
+            tag=tag or f"exit_gtt_legacy|ref:{oid}"[:256],
             product="D",
         )
         if sell_result.get("success"):
-            out: Dict[str, Any] = {
+            return {
                 "success": True,
                 "order_id": sell_result.get("order_id"),
                 "gtt_cancel": cancel_result,
+                "exit_method": "market_sell_after_gtt_cancel",
             }
-            return out
         err = sell_result.get("error") or "Market SELL failed after GTT cancel"
         logger.error(
-            "❌ GTT exit: SELL failed for %s %s | cancel=%s | err=%s",
+            "❌ GTT legacy exit: SELL failed for %s %s | err=%s",
             stock_name,
             option_contract,
-            cancel_result.get("success"),
             err,
         )
         return {
@@ -224,28 +314,31 @@ def place_live_upstox_exit(
             "sell": sell_result,
         }
 
-    details = upstox_service.get_order_details(buy_order_id)
-    if not details.get("success"):
-        return {"success": False, "error": details.get("error", "Order details failed")}
-
-    status = _extract_order_status(details.get("data", {})) or ""
-    status = status.upper()
-
-    if status == "COMPLETE":
-        return place_live_upstox_order(
-            action="SELL",
-            instrument_key=instrument_key,
-            qty=qty,
-            stock_name=stock_name,
-            option_contract=option_contract,
-            tag=tag
+    # Primary path: market SELL (same product as market BUY entry)
+    exit_tag = tag or f"exit|ref_buy:{oid}"
+    if len(exit_tag) > 250:
+        exit_tag = exit_tag[:250]
+    sell_result = place_live_upstox_order(
+        action="SELL",
+        instrument_key=instrument_key,
+        qty=qty,
+        stock_name=stock_name,
+        option_contract=option_contract,
+        tag=exit_tag,
+        product="I",
+    )
+    if sell_result.get("success"):
+        logger.warning(
+            "🚨 LIVE MARKET EXIT: %s %s | sell_order_id=%s | ref_buy_order_id=%s",
+            stock_name,
+            option_contract,
+            sell_result.get("order_id"),
+            oid,
         )
-    if status == "OPEN":
-        cancel = upstox_service.cancel_order(buy_order_id)
-        if cancel.get("success"):
-            return {"success": False, "skipped": True, "info": "Buy order open; canceled"}
-        return {"success": False, "error": cancel.get("error", "Cancel failed")}
-    if status in {"REJECTED", "CANCELLED", "CANCELED"}:
-        return {"success": False, "skipped": True, "info": f"Buy order {status}"}
-
-    return {"success": False, "skipped": True, "info": f"Buy order status {status or 'UNKNOWN'}"}
+        return {
+            "success": True,
+            "order_id": sell_result.get("order_id"),
+            "ref_buy_order_id": oid,
+            "exit_method": "market_sell",
+        }
+    return sell_result

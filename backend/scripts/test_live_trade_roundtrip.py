@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-End-to-end test: resolve an option → place_live_upstox_gtt_entry → place_live_upstox_exit
+End-to-end test: resolve an option → place_live_upstox_entry_market_first → place_live_upstox_exit
 (same code paths as scan algo live trading).
 
 Usage (from project root, PYTHONPATH=.):
@@ -108,12 +108,12 @@ def main() -> int:
 
     if args.dry_run or not args.execute:
         print("\n[DRY-RUN] Would call:")
-        print(f"  place_live_upstox_gtt_entry({ikey!r}, qty={args.qty}, ..., buy_price={buy_price}, stop_loss={stop_loss})")
+        print(f"  place_live_upstox_entry_market_first({ikey!r}, qty={args.qty}, ..., buy_price={buy_price}, stop_loss={stop_loss})")
         print("  then place_live_upstox_exit(..., buy_order_id=<from entry>)")
         return 0
 
-    print("\n--- ENTRY (GTT) ---")
-    entry = live_trading.place_live_upstox_gtt_entry(
+    print("\n--- ENTRY (market first, GTT backup) ---")
+    entry = live_trading.place_live_upstox_entry_market_first(
         instrument_key=ikey,
         qty=args.qty,
         stock_name=args.symbol.upper(),

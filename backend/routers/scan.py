@@ -1943,7 +1943,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     pnl = 0.0
                     no_entry_reason = None
 
-                    live_entry_result = live_trading.place_live_upstox_gtt_entry(
+                    live_entry_result = live_trading.place_live_upstox_entry_market_first(
                         instrument_key=stock_instrument_key,
                         qty=qty,
                         stock_name=stock_name,
@@ -3201,7 +3201,7 @@ async def process_all_today_stocks(db: Session = Depends(get_db)):
                 trade.stop_loss = current_ltp * 0.95  # 5% below buy_price
                 trade.no_entry_reason = None  # Clear no_entry_reason since we're entering
 
-                live_entry_result = live_trading.place_live_upstox_gtt_entry(
+                live_entry_result = live_trading.place_live_upstox_entry_market_first(
                     instrument_key=instrument_key or trade.instrument_key,
                     qty=lot_size,
                     stock_name=stock_name,

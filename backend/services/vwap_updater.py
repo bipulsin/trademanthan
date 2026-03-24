@@ -534,7 +534,7 @@ def update_vwap_for_all_open_positions():
                                 stop_loss_price = current_option_ltp * 0.95
                                 logger.warning(f"   Stop Loss: ₹{stop_loss_price:.2f} (5% below buy price, error fetching candles: {str(sl_error)})")
 
-                            live_entry_result = live_trading.place_live_upstox_gtt_entry(
+                            live_entry_result = live_trading.place_live_upstox_entry_market_first(
                                 instrument_key=no_entry_trade.instrument_key,
                                 qty=no_entry_trade.qty or 0,
                                 stock_name=stock_name,
@@ -810,7 +810,7 @@ def update_vwap_for_all_open_positions():
                                 stop_loss_price = current_option_ltp * 0.95
                                 logger.warning(f"   Stop Loss: ₹{stop_loss_price:.2f} (5% below buy price, error fetching candles: {str(sl_error)})")
 
-                            live_entry_result = live_trading.place_live_upstox_gtt_entry(
+                            live_entry_result = live_trading.place_live_upstox_entry_market_first(
                                 instrument_key=no_entry_trade.instrument_key,
                                 qty=no_entry_trade.qty or 0,
                                 stock_name=stock_name,
@@ -3606,7 +3606,7 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                                 stop_loss_price = current_option_ltp * 0.95
                                 logger.warning(f"   Stop Loss: ₹{stop_loss_price:.2f} (5% below buy price, error fetching candles: {str(sl_error)})")
 
-                            live_entry_result = live_trading.place_live_upstox_gtt_entry(
+                            live_entry_result = live_trading.place_live_upstox_entry_market_first(
                                 instrument_key=trade.instrument_key,
                                 qty=trade.qty or 0,
                                 stock_name=stock_name,
