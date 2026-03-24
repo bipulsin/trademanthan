@@ -66,7 +66,8 @@ def place_live_upstox_order(
     qty: int,
     stock_name: str,
     option_contract: str,
-    tag: Optional[str] = None
+    tag: Optional[str] = None,
+    product: str = "I",
 ) -> Dict[str, Any]:
     if not is_trading_live_enabled():
         return {"success": False, "skipped": True, "error": "Live trading disabled"}
@@ -82,7 +83,7 @@ def place_live_upstox_order(
         quantity=qty,
         transaction_type=action,
         order_type="MARKET",
-        product="I",
+        product=product,
         validity="DAY",
         tag=tag
     )
@@ -182,10 +183,46 @@ def place_live_upstox_exit(
     if not upstox_service:
         return {"success": False, "error": "Upstox service unavailable"}
 
-    # GTT bundle ids (Upstox v3) are not regular order ids — cancel via GTT API
+    # GTT bundle ids (Upstox v3): cancel removes SL/target legs but does NOT sell a filled option.
+    # After cancel, place a market SELL (product D matches place_gtt_order entry).
     oid = str(buy_order_id).strip()
     if oid.upper().startswith("GTT"):
-        return upstox_service.cancel_gtt_order(oid)
+        cancel_result = upstox_service.cancel_gtt_order(oid)
+        if not cancel_result.get("success"):
+            logger.warning(
+                "GTT cancel non-success (order may already be complete): %s — still attempting SELL",
+                cancel_result.get("error"),
+            )
+        sell_result = place_live_upstox_order(
+            action="SELL",
+            instrument_key=instrument_key,
+            qty=qty,
+            stock_name=stock_name,
+            option_contract=option_contract,
+            tag=tag,
+            product="D",
+        )
+        if sell_result.get("success"):
+            out: Dict[str, Any] = {
+                "success": True,
+                "order_id": sell_result.get("order_id"),
+                "gtt_cancel": cancel_result,
+            }
+            return out
+        err = sell_result.get("error") or "Market SELL failed after GTT cancel"
+        logger.error(
+            "❌ GTT exit: SELL failed for %s %s | cancel=%s | err=%s",
+            stock_name,
+            option_contract,
+            cancel_result.get("success"),
+            err,
+        )
+        return {
+            "success": False,
+            "error": err,
+            "gtt_cancel": cancel_result,
+            "sell": sell_result,
+        }
 
     details = upstox_service.get_order_details(buy_order_id)
     if not details.get("success"):

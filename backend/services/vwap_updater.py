@@ -33,11 +33,11 @@ def _ensure_ist(dt_value: datetime, ist_tz) -> datetime:
     return dt_value
 
 def _try_live_exit(position, reason: str, option_contract: str):
-    """Attempt live exit; return (ok, order_id)."""
+    """Attempt live exit; return (ok, order_id). ok is False if broker exit did not succeed (do not mark sold)."""
     buy_order_id = getattr(position, "buy_order_id", None)
     if not buy_order_id:
-        logger.warning(f"⚠️ Skipping LIVE exit for {position.stock_name} - missing buy_order_id")
-        return True, None
+        logger.warning(f"⚠️ LIVE exit aborted for {position.stock_name} - missing buy_order_id (cannot place SELL)")
+        return False, None
     result = live_trading.place_live_upstox_exit(
         instrument_key=position.instrument_key,
         qty=position.qty,
