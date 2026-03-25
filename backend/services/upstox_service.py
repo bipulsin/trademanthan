@@ -564,6 +564,9 @@ class UpstoxService:
                                 order_id = ids[0]
                             if not order_id:
                                 order_id = inner.get("order_id") or inner.get("gtt_order_id")
+                        # Some responses nest gtt_order_ids at data level
+                        if not order_id and isinstance(data.get("gtt_order_ids"), list) and data["gtt_order_ids"]:
+                            order_id = data["gtt_order_ids"][0]
                 return {"success": True, "data": response, "order_id": order_id}
 
             # Extract error message from API response (handles 400 JSON body or None)

@@ -322,35 +322,50 @@ def sync_trade_buy_fill_from_broker(db, trade) -> bool:
     if not new_avg or new_avg <= 0:
         return False
 
+    fill_oid = str(row.get("order_id") or row.get("order_ref_id") or "").strip()
+    oid_stored = (getattr(trade, "buy_order_id", None) or "").strip()
     old = float(trade.buy_price)
-    if abs(new_avg - old) < 0.005:
-        return False
 
-    trade.buy_price = round(new_avg, 2)
-    trade.option_ltp = trade.buy_price
-    if trade.stop_loss and float(trade.stop_loss) >= float(trade.buy_price) * 0.999:
-        trade.stop_loss = round(float(trade.buy_price) * 0.95, 2)
-    if getattr(trade, "sell_price", None) is not None and trade.qty:
-        try:
-            trade.pnl = (float(trade.sell_price) - float(trade.buy_price)) * int(trade.qty)
-            flag_modified(trade, "pnl")
-        except (TypeError, ValueError):
-            pass
+    updated = False
 
-    flag_modified(trade, "buy_price")
-    flag_modified(trade, "option_ltp")
-    flag_modified(trade, "stop_loss")
+    # Persist broker BUY leg id so API exit (place_live_upstox_exit) is not blocked when GTT place returned no id
+    if not oid_stored and fill_oid:
+        trade.buy_order_id = fill_oid
+        flag_modified(trade, "buy_order_id")
+        updated = True
+        logger.warning(
+            "📌 BUY fill sync: %s buy_order_id set → %s (was empty; broker fill leg)",
+            getattr(trade, "stock_name", "?"),
+            fill_oid,
+        )
 
-    fill_oid = row.get("order_id") or row.get("order_ref_id")
-    logger.warning(
-        "📌 BUY fill sync: %s buy_price ₹%.2f → ₹%.2f (broker avg, fill_order_id=%s, stored_buy_order_id=%s)",
-        getattr(trade, "stock_name", "?"),
-        old,
-        new_avg,
-        fill_oid,
-        oid or "none",
-    )
-    return True
+    if abs(new_avg - old) >= 0.005:
+        trade.buy_price = round(new_avg, 2)
+        trade.option_ltp = trade.buy_price
+        if trade.stop_loss and float(trade.stop_loss) >= float(trade.buy_price) * 0.999:
+            trade.stop_loss = round(float(trade.buy_price) * 0.95, 2)
+        if getattr(trade, "sell_price", None) is not None and trade.qty:
+            try:
+                trade.pnl = (float(trade.sell_price) - float(trade.buy_price)) * int(trade.qty)
+                flag_modified(trade, "pnl")
+            except (TypeError, ValueError):
+                pass
+
+        flag_modified(trade, "buy_price")
+        flag_modified(trade, "option_ltp")
+        flag_modified(trade, "stop_loss")
+
+        logger.warning(
+            "📌 BUY fill sync: %s buy_price ₹%.2f → ₹%.2f (broker avg, fill_order_id=%s, stored_buy_order_id=%s)",
+            getattr(trade, "stock_name", "?"),
+            old,
+            new_avg,
+            fill_oid or "none",
+            oid or "none",
+        )
+        updated = True
+
+    return updated
 
 
 def place_live_upstox_entry_market_first(
