@@ -106,6 +106,43 @@ for job_logger in job_loggers:
         job_logger.propagate = False
 
 
+def _attach_scan_st1_mirror_loggers() -> None:
+    """
+    Add scan_st1_algo.log handler to selected loggers without disabling propagation,
+    so the same messages also reach trademanthan.log via the root logger.
+    Used for live entry/exit lines (market, limit fallback, GTT backup).
+    """
+    mirror_names = [
+        "backend.services.live_trading",
+    ]
+    for name in mirror_names:
+        ml = logging.getLogger(name)
+        handler_exists = False
+        for h in ml.handlers:
+            if isinstance(h, logging.FileHandler):
+                handler_path = getattr(h, "baseFilename", None) or (
+                    getattr(h.stream, "name", None) if getattr(h, "stream", None) else None
+                )
+                if handler_path and "scan_st1_algo.log" in str(handler_path):
+                    handler_exists = True
+                    break
+        if handler_exists:
+            continue
+        mirror_handler = FlushingFileHandler(log_file, mode="a", encoding="utf-8")
+        mirror_handler.setLevel(logging.INFO)
+        mirror_handler.setFormatter(
+            logging.Formatter(
+                "%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
+        )
+        ml.addHandler(mirror_handler)
+        # propagate stays True: logs go to scan_st1_algo.log AND root/trademanthan.log
+
+
+_attach_scan_st1_mirror_loggers()
+
+
 class ScanST1AlgoScheduler:
     """Unified scheduler controller for all scan algorithm jobs"""
     
