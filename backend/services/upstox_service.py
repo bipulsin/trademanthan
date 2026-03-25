@@ -59,6 +59,30 @@ def _normalize_holiday_date(value: Any) -> Optional[str]:
     return None
 
 
+def _format_upstox_place_order_error(response: Any) -> str:
+    """Build a single error string from Upstox v2 order/place JSON (top-level or errors[])."""
+    if not isinstance(response, dict):
+        return "Order failed"
+    msg = response.get("message") or response.get("error")
+    if msg and not isinstance(msg, dict):
+        return str(msg)[:500]
+    errs = response.get("errors")
+    if isinstance(errs, list) and errs:
+        first = errs[0]
+        if isinstance(first, dict):
+            piece = (
+                first.get("message")
+                or first.get("error_code")
+                or first.get("errorCode")
+            )
+            if piece:
+                code = first.get("error_code") or first.get("errorCode")
+                if code and str(code) not in str(piece):
+                    return f"{piece} ({code})"[:500]
+                return str(piece)[:500]
+    return str(response.get("status") or "Order failed")[:500]
+
+
 class UpstoxService:
     """Service to interact with Upstox API"""
     
@@ -452,10 +476,11 @@ class UpstoxService:
                     if isinstance(data, dict):
                         order_id = data.get("order_id") or data.get("orderId")
                 return {"success": True, "data": response, "order_id": order_id}
+            err_msg = _format_upstox_place_order_error(response) if isinstance(response, dict) else "Order failed"
             return {
                 "success": False,
-                "error": response.get("message") if isinstance(response, dict) else "Order failed",
-                "data": response
+                "error": err_msg,
+                "data": response if isinstance(response, dict) else None,
             }
         except Exception as e:
             logger.error(f"❌ Exception placing order: {str(e)}")

@@ -1,5 +1,6 @@
 import logging
 import json
+import math
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -60,6 +61,90 @@ def is_trading_live_enabled() -> bool:
     return trading_live == "YES"
 
 
+def _market_orders_disallowed_by_upstox(order_result: Dict[str, Any]) -> bool:
+    """True when Upstox rejects MARKET because the scrip disallows market orders (e.g. UDAPI100500)."""
+    parts: list[str] = []
+    err = order_result.get("error")
+    if err:
+        parts.append(str(err).lower())
+    data = order_result.get("data")
+    if isinstance(data, dict):
+        parts.append(str(data).lower())
+        errs = data.get("errors")
+        if isinstance(errs, list):
+            for er in errs:
+                if isinstance(er, dict):
+                    parts.append(str(er.get("message", "")).lower())
+                    parts.append(str(er.get("error_code", "")).lower())
+                    parts.append(str(er.get("errorCode", "")).lower())
+    blob = " ".join(parts)
+    if "udapi100500" in blob:
+        return True
+    if "market" in blob and "not allowed" in blob:
+        return True
+    return False
+
+
+def place_live_upstox_limit_buy_at_ltp(
+    instrument_key: str,
+    qty: int,
+    stock_name: str,
+    option_contract: str,
+    buy_price: float,
+    tag: Optional[str] = None,
+    product: str = "I",
+) -> Dict[str, Any]:
+    """
+    LIMIT BUY at the smallest tick >= LTP (aggressive) for scrips that reject MARKET orders.
+    """
+    if not is_trading_live_enabled():
+        return {"success": False, "skipped": True, "error": "Live trading disabled"}
+    if not upstox_service:
+        return {"success": False, "error": "Upstox service unavailable"}
+    if not instrument_key:
+        return {"success": False, "error": "Missing instrument_key"}
+    if not buy_price or buy_price <= 0:
+        return {"success": False, "error": "Invalid buy_price for limit entry"}
+
+    tick = float(upstox_service.get_tick_size_by_instrument_key(instrument_key) or 0.05)
+    if tick <= 0:
+        tick = 0.05
+    limit_px = round(math.ceil(float(buy_price) / tick - 1e-12) * tick, 2)
+    if limit_px <= 0:
+        limit_px = round(buy_price, 2)
+
+    lim_tag = (tag or f"entry_lmt|{stock_name}")[:200]
+    result = upstox_service.place_order(
+        instrument_key=instrument_key,
+        quantity=qty,
+        transaction_type="BUY",
+        order_type="LIMIT",
+        product=product,
+        validity="DAY",
+        price=limit_px,
+        tag=lim_tag,
+    )
+    out = dict(result)
+    out["limit_price"] = limit_px
+    if result.get("success"):
+        logger.warning(
+            "🚨 LIVE LIMIT ENTRY (LTP ceiling): %s %s | limit_price=₹%s | buy_order_id=%s",
+            stock_name,
+            option_contract,
+            limit_px,
+            result.get("order_id"),
+        )
+    else:
+        logger.error(
+            "❌ LIVE LIMIT ENTRY FAILED: %s %s | limit_price=₹%s | Error=%s",
+            stock_name,
+            option_contract,
+            limit_px,
+            result.get("error"),
+        )
+    return out
+
+
 def place_live_upstox_order(
     action: str,
     instrument_key: str,
@@ -109,8 +194,9 @@ def place_live_upstox_entry_market_first(
     risk_reward: float = 2.5,
 ) -> Dict[str, Any]:
     """
-    Primary: MARKET BUY at LTP (executes at exchange; order_id is a normal order id).
-    Backup: GTT (entry + SL + target) if market order fails and buy_price/stop_loss are valid.
+    Primary: MARKET BUY at LTP.
+    If Upstox returns market-not-allowed on this scrip: LIMIT BUY at LTP (tick-rounded up).
+    Else if market fails for other reasons: GTT backup when buy_price/stop_loss are valid.
     """
     if not is_trading_live_enabled():
         return {"success": False, "skipped": True, "error": "Live trading disabled"}
@@ -149,6 +235,38 @@ def place_live_upstox_entry_market_first(
         return market_res
 
     m_err = market_res.get("error") or "Market BUY failed"
+
+    if _market_orders_disallowed_by_upstox(market_res):
+        limit_tag = f"entry_lmt_mktblk|{stock_name}"[:200]
+        limit_res = place_live_upstox_limit_buy_at_ltp(
+            instrument_key=instrument_key,
+            qty=qty,
+            stock_name=stock_name,
+            option_contract=option_contract,
+            buy_price=buy_price,
+            tag=limit_tag,
+            product="I",
+        )
+        if limit_res.get("skipped"):
+            return limit_res
+        if limit_res.get("success"):
+            oid = limit_res.get("order_id")
+            logger.warning(
+                "🚨 LIVE ENTRY via LIMIT (market disallowed on scrip): %s %s | buy_order_id=%s",
+                stock_name,
+                option_contract,
+                oid,
+            )
+            return {
+                "success": True,
+                "order_id": oid,
+                "method": "limit_after_market_disallowed",
+                "market_error": m_err,
+                "limit_price": limit_res.get("limit_price"),
+                "limit_response": limit_res,
+            }
+        m_err = f"{m_err}; limit fallback failed: {limit_res.get('error') or 'unknown'}"
+
     logger.warning(
         "Market entry failed for %s (%s), trying GTT backup: %s",
         stock_name,
