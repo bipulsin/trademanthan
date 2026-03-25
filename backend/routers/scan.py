@@ -6017,31 +6017,120 @@ async def upstox_postback(request: Request, background_tasks: BackgroundTasks, d
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=200)
 
 
+def _flatten_upstox_notifier_payload(payload: dict) -> dict:
+    """Merge nested `data` from Upstox notifier/postback JSON into top-level fields."""
+    if not isinstance(payload, dict):
+        return {}
+    out = dict(payload)
+    inner = payload.get("data")
+    if isinstance(inner, dict):
+        for k, v in inner.items():
+            if v is not None and (k not in out or out.get(k) in (None, "", 0)):
+                out[k] = v
+    return out
+
+
+def _upstox_status_is_filled(status: str) -> bool:
+    s = (status or "").lower()
+    if not s or "cancel" in s or "reject" in s:
+        return False
+    if s in ("complete", "filled"):
+        return True
+    return "complete" in s and "cancel" not in s
+
+
 def _process_upstox_order_update(db: Session, payload: dict):
-    """Process Upstox order update - sync buy/sell price to IntradayStockOption when order completes."""
+    """Sync buy/sell average fill to IntradayStockOption. Resolves GTT child legs by instrument + open row."""
     from backend.models.trading import IntradayStockOption
-    
-    order_id = payload.get("order_id") or payload.get("order_ref_id")
-    if not order_id:
+    from sqlalchemy import and_
+    from sqlalchemy.orm.attributes import flag_modified
+    from datetime import timedelta
+    import pytz
+
+    flat = _flatten_upstox_notifier_payload(payload)
+    raw_oid = flat.get("order_id") if flat.get("order_id") is not None else flat.get("order_ref_id")
+    if raw_oid is None or raw_oid == "":
         return
-    
-    status = (payload.get("status") or "").lower()
-    average_price = payload.get("average_price") or payload.get("price") or 0
-    completed_statuses = ("complete", "filled", "cancelled", "rejected", "triggered")
-    is_complete = any(s in status for s in completed_statuses)
-    
+    order_id = str(raw_oid).strip()
+
+    status = flat.get("status") or ""
+    txn = (flat.get("transaction_type") or "").upper()
+    avg_raw = flat.get("average_price") or flat.get("average_traded_price") or flat.get("price")
+    try:
+        avg = float(avg_raw) if avg_raw is not None else 0.0
+    except (TypeError, ValueError):
+        avg = 0.0
+
+    inst = flat.get("instrument_token") or flat.get("instrument_key")
+
+    if not _upstox_status_is_filled(status) or avg <= 0:
+        return
+
     trade = db.query(IntradayStockOption).filter(
-        (IntradayStockOption.buy_order_id == order_id) | (IntradayStockOption.sell_order_id == order_id)
+        (IntradayStockOption.buy_order_id == order_id)
+        | (IntradayStockOption.sell_order_id == order_id)
     ).first()
-    
-    if trade and is_complete and average_price and float(average_price) > 0:
+
+    updated = False
+
+    def _apply_buy_price(t, label: str):
+        nonlocal updated
+        old = t.buy_price
+        t.buy_price = round(avg, 2)
+        t.option_ltp = t.buy_price
+        if t.stop_loss and float(t.stop_loss) >= float(t.buy_price) * 0.999:
+            t.stop_loss = round(float(t.buy_price) * 0.95, 2)
+        if t.sell_price is not None and t.qty:
+            t.pnl = (float(t.sell_price) - float(t.buy_price)) * int(t.qty)
+            flag_modified(t, "pnl")
+        flag_modified(t, "buy_price")
+        flag_modified(t, "option_ltp")
+        flag_modified(t, "stop_loss")
+        logger.info(f"✅ Postback: {t.stock_name} buy_price ₹{old} → ₹{t.buy_price} ({label})")
+        updated = True
+
+    if trade:
+        if txn == "BUY" and str(trade.buy_order_id) == order_id:
+            _apply_buy_price(trade, f"order_id={order_id}")
+        elif txn == "SELL" and str(trade.sell_order_id) == order_id:
+            trade.sell_price = round(avg, 2)
+            if trade.buy_price and trade.qty:
+                trade.pnl = (float(trade.sell_price) - float(trade.buy_price)) * int(trade.qty)
+                flag_modified(trade, "pnl")
+            flag_modified(trade, "sell_price")
+            logger.info(f"✅ Postback: {trade.stock_name} sell_price=₹{trade.sell_price}")
+            updated = True
+
+    elif txn == "BUY" and inst:
+        ist = pytz.timezone("Asia/Kolkata")
+        now = datetime.now(ist)
+        today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        tomorrow = today + timedelta(days=1)
+        rows = (
+            db.query(IntradayStockOption)
+            .filter(
+                and_(
+                    IntradayStockOption.instrument_key == inst,
+                    IntradayStockOption.trade_date >= today,
+                    IntradayStockOption.trade_date < tomorrow,
+                    IntradayStockOption.status == "bought",
+                    IntradayStockOption.exit_reason.is_(None),
+                )
+            )
+            .order_by(IntradayStockOption.buy_time.desc())
+            .all()
+        )
+        gtt_rows = [r for r in rows if (r.buy_order_id or "").upper().startswith("GTT")]
+        trade2 = None
+        if len(gtt_rows) == 1:
+            trade2 = gtt_rows[0]
+        elif len(rows) == 1:
+            trade2 = rows[0]
+        if trade2:
+            _apply_buy_price(trade2, f"child leg order_id={order_id}, GTT row")
+
+    if updated:
         try:
-            if trade.buy_order_id == order_id:
-                trade.buy_price = float(average_price)
-                logger.info(f"✅ Postback: Updated {trade.stock_name} buy_price=₹{average_price}")
-            elif trade.sell_order_id == order_id:
-                trade.sell_price = float(average_price)
-                logger.info(f"✅ Postback: Updated {trade.stock_name} sell_price=₹{average_price}")
             db.commit()
         except Exception as commit_err:
             logger.warning(f"Postback commit error: {commit_err}")

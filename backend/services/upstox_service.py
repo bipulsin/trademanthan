@@ -620,6 +620,38 @@ class UpstoxService:
             logger.error(f"❌ Exception fetching order details: {str(e)}")
             return {"success": False, "error": str(e)}
 
+    def get_order_book_today(self) -> Dict[str, Any]:
+        """
+        Today's orders (v2/order/retrieve-all). Used to find GTT child BUY fills by instrument_token.
+        """
+        if not self.access_token:
+            return {"success": False, "error": "Missing access token", "orders": []}
+        url = "https://api.upstox.com/v2/order/retrieve-all"
+        try:
+            response = self.make_api_request(
+                url=url,
+                method="GET",
+                timeout=15,
+                max_retries=2,
+            )
+            if response and response.get("status") == "success":
+                raw = response.get("data")
+                orders: List[Any] = []
+                if isinstance(raw, list):
+                    orders = raw
+                elif isinstance(raw, dict) and isinstance(raw.get("orders"), list):
+                    orders = raw["orders"]
+                return {"success": True, "orders": orders, "data": response}
+            return {
+                "success": False,
+                "error": response.get("message") if isinstance(response, dict) else "Order book failed",
+                "orders": [],
+                "data": response,
+            }
+        except Exception as e:
+            logger.error(f"❌ Exception fetching order book: {str(e)}")
+            return {"success": False, "error": str(e), "orders": []}
+
     def cancel_order(self, order_id: str) -> Dict[str, Any]:
         """
         Cancel order by order_id.

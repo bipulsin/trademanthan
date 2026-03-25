@@ -983,6 +983,14 @@ def update_vwap_for_all_open_positions():
                     logger.warning(f"⚠️ Skipping {stock_name} - status already 'sold' (trade closed)")
                     continue
                 
+                if position.status == 'bought' and position.buy_price and position.instrument_key:
+                    try:
+                        live_trading.sync_trade_buy_fill_from_broker(db, position)
+                    except Exception as sync_err:
+                        logger.warning(
+                            f"⚠️ Buy fill sync failed for {stock_name}: {sync_err}"
+                        )
+                
                 # Check if this position was updated recently (within last 30 minutes)
                 # This helps detect if multiple update systems are running simultaneously
                 if position.updated_at:
