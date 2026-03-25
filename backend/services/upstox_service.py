@@ -582,10 +582,20 @@ class UpstoxService:
                 if isinstance(err_msg, dict):
                     err_msg = err_msg.get("message") or str(err_msg)
 
-            # Normalize insufficient-fund type errors and log gracefully (no retry)
+            # Normalize fund/margin RMS errors — log as warning (no retry). Avoid matching bare "fund"
+            # (e.g. inside unrelated words) which mislabeled non-funding errors as insufficient funds.
             err_lower = (err_msg or "").lower()
-            if "insufficient" in err_lower or "fund" in err_lower or "margin" in err_lower or "balance" in err_lower:
-                logger.warning(f"⚠️ GTT order skipped (insufficient funds): {err_msg}")
+            looks_like_funding = (
+                "insufficient" in err_lower
+                or "funds" in err_lower
+                or "margin" in err_lower
+                or (
+                    "balance" in err_lower
+                    and ("insufficient" in err_lower or "low" in err_lower)
+                )
+            )
+            if looks_like_funding:
+                logger.warning(f"⚠️ GTT order skipped (funds/margin): {err_msg}")
                 err_msg = f"Insufficient funds: {err_msg}" if "insufficient" not in err_lower else err_msg
             else:
                 logger.error(f"❌ GTT order failed: {err_msg}")
