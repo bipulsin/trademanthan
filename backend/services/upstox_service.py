@@ -5,7 +5,7 @@ import requests
 import logging
 import time
 from datetime import datetime, timedelta
-from typing import Dict, Optional, List, Any
+from typing import Dict, Optional, List, Any, Tuple
 import pytz
 
 logger = logging.getLogger(__name__)
@@ -1719,6 +1719,54 @@ class UpstoxService:
             
         return None
 
+    @staticmethod
+    def extract_bid_ask_from_quote_data(quote_data: dict) -> Tuple[Optional[float], Optional[float]]:
+        """Best bid/ask from Upstox market-quote payload (depth or flat fields)."""
+        if not isinstance(quote_data, dict):
+            return None, None
+        depth = quote_data.get("depth") or {}
+        buys = depth.get("buy") or []
+        sells = depth.get("sell") or []
+        bid = None
+        ask = None
+        if isinstance(buys, list) and buys:
+            p = buys[0].get("price") if isinstance(buys[0], dict) else None
+            if p is not None:
+                try:
+                    bid = float(p)
+                except (TypeError, ValueError):
+                    bid = None
+        if isinstance(sells, list) and sells:
+            p = sells[0].get("price") if isinstance(sells[0], dict) else None
+            if p is not None:
+                try:
+                    ask = float(p)
+                except (TypeError, ValueError):
+                    ask = None
+        if bid is None or bid <= 0:
+            for k in ("best_bid_price", "bid_price"):
+                v = quote_data.get(k)
+                if v is not None:
+                    try:
+                        fv = float(v)
+                        if fv > 0:
+                            bid = fv
+                            break
+                    except (TypeError, ValueError):
+                        pass
+        if ask is None or ask <= 0:
+            for k in ("best_ask_price", "ask_price"):
+                v = quote_data.get(k)
+                if v is not None:
+                    try:
+                        fv = float(v)
+                        if fv > 0:
+                            ask = fv
+                            break
+                    except (TypeError, ValueError):
+                        pass
+        return bid, ask
+
     def get_market_quote_by_key(self, instrument_key: str) -> Optional[Dict]:
         """
         Get real-time market quote (LTP) using instrument key directly
@@ -1728,7 +1776,8 @@ class UpstoxService:
             {
                 'last_price': float,
                 'close_price': float,
-                'ohlc': {...}
+                'ohlc': {...},
+                optional 'bid_price', 'ask_price', 'spread_pct' when depth is present
             }
         """
         try:
@@ -1840,16 +1889,23 @@ class UpstoxService:
                         logger.warning(f"⚠️ Invalid LTP (₹{ltp}) for {instrument_key} - returning None")
                         return None
                     
-                    logger.info(f"✅ Market quote for {instrument_key}: LTP=₹{ltp}, Close=₹{close_price}")
-                    
-                    return {
+                    bid_px, ask_px = self.extract_bid_ask_from_quote_data(quote_data)
+                    out = {
                         'last_price': ltp,
                         'close_price': close_price,
                         'ohlc': ohlc,
                         'open': float(ohlc.get('open', 0)),
                         'high': float(ohlc.get('high', 0)),
-                        'low': float(ohlc.get('low', 0))
+                        'low': float(ohlc.get('low', 0)),
                     }
+                    if bid_px is not None and ask_px is not None and ask_px > 0 and bid_px <= ask_px:
+                        out['bid_price'] = bid_px
+                        out['ask_price'] = ask_px
+                        out['spread_pct'] = (ask_px - bid_px) / ask_px * 100.0
+                    
+                    logger.info(f"✅ Market quote for {instrument_key}: LTP=₹{ltp}, Close=₹{close_price}")
+                    
+                    return out
             
             logger.warning(f"⚠️ No valid quote data for {instrument_key}")
                 

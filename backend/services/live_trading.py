@@ -146,6 +146,67 @@ def place_live_upstox_limit_buy_at_ltp(
     return out
 
 
+def place_live_upstox_limit_buy_at_price(
+    instrument_key: str,
+    qty: int,
+    stock_name: str,
+    option_contract: str,
+    limit_price: float,
+    tag: Optional[str] = None,
+    product: str = "I",
+) -> Dict[str, Any]:
+    """
+    LIMIT BUY at an explicit price (rounded to instrument tick).
+    Used for bid + (ask - bid) * 0.6 style entries.
+    """
+    if not is_trading_live_enabled():
+        return {"success": False, "skipped": True, "error": "Live trading disabled"}
+    if not upstox_service:
+        return {"success": False, "error": "Upstox service unavailable"}
+    if not instrument_key:
+        return {"success": False, "error": "Missing instrument_key"}
+    if not limit_price or limit_price <= 0:
+        return {"success": False, "error": "Invalid limit_price for limit entry"}
+
+    tick = float(upstox_service.get_tick_size_by_instrument_key(instrument_key) or 0.05)
+    if tick <= 0:
+        tick = 0.05
+    limit_px = round(round(float(limit_price) / tick) * tick, 2)
+    if limit_px <= 0:
+        limit_px = round(float(limit_price), 2)
+
+    lim_tag = (tag or f"entry_lmt_px|{stock_name}")[:200]
+    result = upstox_service.place_order(
+        instrument_key=instrument_key,
+        quantity=qty,
+        transaction_type="BUY",
+        order_type="LIMIT",
+        product=product,
+        validity="DAY",
+        price=limit_px,
+        tag=lim_tag,
+    )
+    out = dict(result)
+    out["limit_price"] = limit_px
+    if result.get("success"):
+        logger.warning(
+            "🚨 LIVE LIMIT ENTRY (explicit): %s %s | limit_price=₹%s | buy_order_id=%s",
+            stock_name,
+            option_contract,
+            limit_px,
+            result.get("order_id"),
+        )
+    else:
+        logger.error(
+            "❌ LIVE LIMIT ENTRY FAILED: %s %s | limit_price=₹%s | Error=%s",
+            stock_name,
+            option_contract,
+            limit_px,
+            result.get("error"),
+        )
+    return out
+
+
 def place_live_upstox_order(
     action: str,
     instrument_key: str,
@@ -378,9 +439,10 @@ def place_live_upstox_entry_market_first(
     risk_reward: float = 2.5,
 ) -> Dict[str, Any]:
     """
-    Primary: MARKET BUY at LTP.
-    If Upstox returns market-not-allowed on this scrip: LIMIT BUY at LTP (tick-rounded up).
-    Else if market fails for other reasons: GTT backup when buy_price/stop_loss are valid.
+    Primary: LIMIT BUY at bid_price + (ask_price - bid_price) * 0.6 when bid/ask exist and
+    spread_pct = (ask-bid)/ask*100 <= 1%.
+    Then MARKET BUY; if Upstox disallows market: LIMIT BUY at LTP (tick ceiling).
+    Else if those fail: GTT backup when buy_price/stop_loss are valid.
     """
     if not is_trading_live_enabled():
         return {"success": False, "skipped": True, "error": "Live trading disabled"}
@@ -390,6 +452,65 @@ def place_live_upstox_entry_market_first(
         return {"success": False, "error": "Missing instrument_key"}
     if not qty or qty <= 0:
         return {"success": False, "error": "Invalid quantity"}
+
+    entry_spread_max_pct = 1.0
+    quote = upstox_service.get_market_quote_by_key(instrument_key)
+    if quote:
+        bid = quote.get("bid_price")
+        ask = quote.get("ask_price")
+        sp = quote.get("spread_pct")
+        if bid is not None and ask is not None:
+            try:
+                bid_f = float(bid)
+                ask_f = float(ask)
+            except (TypeError, ValueError):
+                bid_f = ask_f = 0.0
+            else:
+                if bid_f > 0 and ask_f > 0 and bid_f <= ask_f:
+                    if sp is None:
+                        sp = (ask_f - bid_f) / ask_f * 100.0
+                    if sp <= entry_spread_max_pct:
+                        raw_limit = bid_f + (ask_f - bid_f) * 0.6
+                        lim_tag = f"entry_lmt_spread|{stock_name}"[:200]
+                        lim_first = place_live_upstox_limit_buy_at_price(
+                            instrument_key=instrument_key,
+                            qty=qty,
+                            stock_name=stock_name,
+                            option_contract=option_contract,
+                            limit_price=raw_limit,
+                            tag=lim_tag,
+                            product="I",
+                        )
+                        if lim_first.get("skipped"):
+                            return lim_first
+                        if lim_first.get("success"):
+                            oid = lim_first.get("order_id")
+                            logger.warning(
+                                "🚨 LIVE LIMIT ENTRY (bid+0.6×spread): %s %s | buy_order_id=%s | method=limit_first",
+                                stock_name,
+                                option_contract,
+                                oid,
+                            )
+                            return {
+                                "success": True,
+                                "order_id": oid,
+                                "method": "limit_bid_ask",
+                                "limit_price": lim_first.get("limit_price"),
+                                "limit_response": lim_first,
+                            }
+                        logger.warning(
+                            "Limit-first failed for %s (%s): %s; trying MARKET",
+                            stock_name,
+                            option_contract,
+                            lim_first.get("error"),
+                        )
+                    else:
+                        logger.info(
+                            "Limit-first skipped for %s: spread_pct=%.4f%% > %.1f%%",
+                            stock_name,
+                            sp,
+                            entry_spread_max_pct,
+                        )
 
     market_tag = f"entry_mkt|{stock_name}"[:200]
     market_res = place_live_upstox_order(

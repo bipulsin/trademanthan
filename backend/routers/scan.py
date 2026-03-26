@@ -124,15 +124,29 @@ class StockAlert(BaseModel):
 class TradingLiveToggle(BaseModel):
     trading_live: str
 
+# OTM selection: nearest 10 OTMs; liquidity score weights volume > OI; spread filter when bid/ask exist
+OPTION_OTM_COUNT = 10
+OPTION_LIQ_VOL_EXP = 1.4
+OPTION_LIQ_OI_EXP = 0.6
+MAX_OTM_SPREAD_PCT = 1.0
+
+
+def _weighted_liquidity_score(strike: Dict[str, Any]) -> float:
+    v = max(float(strike.get("volume") or 0), 1e-6)
+    oi = max(float(strike.get("oi") or 0), 1e-6)
+    return (v ** OPTION_LIQ_VOL_EXP) * (oi ** OPTION_LIQ_OI_EXP)
+
+
 # Helper function to find strike from option chain based on volume and OI
 def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: str, stock_ltp: float) -> Optional[Dict]:
     """
-    Find the best option strike from OTM-1 to OTM-5 based on highest volume/OI
-    
+    Find the best option strike from OTM-1 to OTM-10 using a volume-weighted liquidity score.
+
     Logic:
     1. Get all OTM strikes (CE: strike > LTP, PE: strike < LTP)
-    2. Sort by distance from LTP to identify OTM-1, OTM-2, ..., OTM-5
-    3. Select the strike with HIGHEST volume × OI among OTM-1 to OTM-5
+    2. Sort by distance from LTP to identify OTM-1, OTM-2, ..., OTM-10
+    3. Prefer strikes with bid/ask where spread_pct = (ask-bid)/ask*100 <= 1%; if none qualify, fall back to all 10
+    4. Among eligible strikes, select highest score: volume**1.4 * oi**0.6
     
     Args:
         vwap_service: UpstoxService instance
@@ -141,7 +155,7 @@ def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: st
         stock_ltp: Current stock LTP
         
     Returns:
-        Dict with strike_price, volume, oi, ltp or None
+        Dict with strike_price, volume, oi, ltp, optional bid_price/ask_price/spread_pct, or None
     """
     logger.info(f"🔍 find_strike_from_option_chain called for {stock_name} {option_type} (LTP: {stock_ltp})")
     try:
@@ -285,6 +299,18 @@ def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: st
                 }
                 if opt_instrument_key:
                     strike_entry['instrument_key'] = opt_instrument_key
+                bid_p, ask_p = vwap_service.extract_bid_ask_from_quote_data(option_data)
+                strike_entry['bid_price'] = bid_p
+                strike_entry['ask_price'] = ask_p
+                sp_pct = None
+                if (
+                    bid_p is not None
+                    and ask_p is not None
+                    and ask_p > 0
+                    and bid_p <= ask_p
+                ):
+                    sp_pct = (ask_p - bid_p) / ask_p * 100.0
+                strike_entry['spread_pct'] = sp_pct
                 strikes.append(strike_entry)
                 logger.debug(f"Added strike {strike_price} {option_type}: vol={volume}, oi={oi}, ltp={ltp}")
             else:
@@ -322,30 +348,55 @@ def find_strike_from_option_chain(vwap_service, stock_name: str, option_type: st
                 logger.debug(f"Sample available strikes: {[s['strike_price'] for s in sample_strikes]}")
             return None
         
-        # Sort by distance from LTP (closest first) to get OTM-1 to OTM-5
+        # Sort by distance from LTP (closest first) to get OTM-1 to OTM-N
         otm_strikes.sort(key=lambda x: abs(x['strike_price'] - stock_ltp))
         
-        # Get first 5 OTM strikes (OTM-1 to OTM-5)
-        otm_1_to_5 = otm_strikes[:5]
+        otm_bucket = otm_strikes[:OPTION_OTM_COUNT]
         
-        if not otm_1_to_5:
+        if not otm_bucket:
             logger.info(f"Not enough OTM strikes for {stock_name}")
             return otm_strikes[0] if otm_strikes else None
         
-        logger.info(f"OTM-1 to OTM-5 strikes for {stock_name} {option_type}:")
-        for i, strike in enumerate(otm_1_to_5, 1):
-            liquidity_score = strike['volume'] * strike['oi']
-            logger.info(f"  OTM-{i}: Strike {strike['strike_price']}, Vol: {strike['volume']}, OI: {strike['oi']}, Score: {liquidity_score}")
+        eligible: List[Dict[str, Any]] = []
+        for s in otm_bucket:
+            sp = s.get('spread_pct')
+            if sp is None:
+                continue
+            if sp > MAX_OTM_SPREAD_PCT:
+                logger.info(
+                    f"  OTM skip strike {s['strike_price']}: spread_pct={sp:.4f}% > {MAX_OTM_SPREAD_PCT}% (liquidity filter)"
+                )
+                continue
+            eligible.append(s)
+        if not eligible:
+            logger.warning(
+                f"No OTM in top {OPTION_OTM_COUNT} passed spread<={MAX_OTM_SPREAD_PCT}% (or missing bid/ask); "
+                f"using weighted score on all {len(otm_bucket)} without spread filter"
+            )
+            eligible = list(otm_bucket)
         
-        # Select strike with highest volume * OI among OTM-1 to OTM-5
-        selected = max(otm_1_to_5, key=lambda x: x['volume'] * x['oi'])
+        logger.info(f"OTM-1 to OTM-{len(otm_bucket)} candidates for {stock_name} {option_type}:")
+        for i, strike in enumerate(otm_bucket, 1):
+            wscore = _weighted_liquidity_score(strike)
+            sp = strike.get('spread_pct')
+            sp_s = f"{sp:.4f}%" if sp is not None else "n/a"
+            logger.info(
+                f"  OTM-{i}: Strike {strike['strike_price']}, Vol: {strike['volume']}, OI: {strike['oi']}, "
+                f"spread_pct: {sp_s}, weighted_score: {wscore:.2f}"
+            )
         
-        otm_position = otm_1_to_5.index(selected) + 1
-        liquidity_score = selected['volume'] * selected['oi']
-        logger.info(f"✅ Selected OTM-{otm_position} strike: {selected['strike_price']} (Volume: {selected['volume']}, OI: {selected['oi']}, Score: {liquidity_score})")
+        selected = max(eligible, key=_weighted_liquidity_score)
+        otm_position = otm_bucket.index(selected) + 1
+        wscore = _weighted_liquidity_score(selected)
+        sp_sel = selected.get('spread_pct')
+        sp_log = f"{sp_sel:.4f}%" if sp_sel is not None else "n/a"
+        logger.info(
+            f"✅ Selected OTM-{otm_position} strike: {selected['strike_price']} "
+            f"(Volume: {selected['volume']}, OI: {selected['oi']}, spread_pct: {sp_log}, weighted_score: {wscore:.2f})"
+        )
         if selected.get('instrument_key'):
             logger.info(f"   instrument_key from API: {selected['instrument_key']} (will use for Bearish/PE)")
-        logger.info(f"   Highest liquidity among OTM-1 to OTM-5")
+        logger.info(f"   Highest weighted liquidity among filtered OTM-1..{OPTION_OTM_COUNT}")
         return selected
         
     except Exception as e:
