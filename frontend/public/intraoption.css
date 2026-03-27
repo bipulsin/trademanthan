@@ -160,27 +160,6 @@ body[data-theme="light"].theme-page.intraoption-body .intraoption-day-summary-he
     color: var(--theme-muted);
 }
 
-/* LIVE pill */
-body.theme-page.intraoption-body .live-indicator {
-    display: none;
-    font-weight: 800;
-    color: #fbbf24;
-    font-size: 0.95rem;
-    margin-left: 4px;
-    letter-spacing: 0.5px;
-    text-shadow: 0 0 8px rgba(251, 191, 36, 0.5);
-}
-
-body.theme-page.intraoption-body .live-indicator.active {
-    display: inline-block;
-    animation: intraLiveBlink 1.2s infinite;
-}
-
-@keyframes intraLiveBlink {
-    0%, 48% { opacity: 1; }
-    50%, 100% { opacity: 0.35; }
-}
-
 /* Day summary expanded content */
 body.theme-page.intraoption-body .day-summary-content {
     background: var(--theme-card-alt) !important;

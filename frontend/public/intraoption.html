@@ -60,44 +60,6 @@
             align-items: center;
         }
 
-        .live-indicator {
-            display: none;
-            font-weight: 800;
-            color: #f7c948;
-            font-size: 28px;
-            margin-left: 6px;
-            letter-spacing: 0.5px;
-            text-shadow:
-                0 0 6px rgba(247, 201, 72, 0.9),
-                0 0 14px rgba(255, 215, 0, 0.8),
-                0 0 22px rgba(255, 200, 0, 0.6);
-        }
-
-        .live-indicator.active {
-            display: inline-block;
-            animation: liveBlink 1.2s infinite, liveGlow 2s ease-in-out infinite;
-        }
-
-        @keyframes liveBlink {
-            0%, 48% { opacity: 1; }
-            50%, 100% { opacity: 0.25; }
-        }
-
-        @keyframes liveGlow {
-            0%, 100% {
-                text-shadow:
-                    0 0 6px rgba(247, 201, 72, 0.9),
-                    0 0 14px rgba(255, 215, 0, 0.8),
-                    0 0 22px rgba(255, 200, 0, 0.6);
-            }
-            50% {
-                text-shadow:
-                    0 0 10px rgba(255, 223, 102, 1),
-                    0 0 20px rgba(255, 215, 0, 0.9),
-                    0 0 30px rgba(255, 200, 0, 0.8);
-            }
-        }
-        
         .index-item {
             text-align: center;
             min-width: 120px;
@@ -958,7 +920,6 @@
                 <div class="intraoption-dsum-left">
                     <span id="summaryCaret" class="summary-caret collapsed">▶</span>
                     <h3>📊 Day Summary</h3>
-                    <span id="liveIndicator" class="live-indicator">LIVE</span>
                 </div>
                 <div class="intraoption-dsum-center" onclick="event.stopPropagation();">
                     <div class="intraoption-idx-chip">
@@ -1186,11 +1147,6 @@
                 }
                 const data = await response.json();
                 const isLive = (data.trading_live || 'NO').toUpperCase() === 'YES';
-
-                const liveIndicator = document.getElementById('liveIndicator');
-                if (liveIndicator) {
-                    liveIndicator.classList.toggle('active', isLive);
-                }
 
                 const mobileBadge = document.getElementById('mobileLiveBadge');
                 if (mobileBadge) {
