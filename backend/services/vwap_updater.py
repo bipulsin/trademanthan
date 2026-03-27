@@ -549,6 +549,15 @@ def update_vwap_for_all_open_positions():
                                 logger.error(f"🚨 LIVE RE-ENTRY FAILED for {stock_name}: {api_err}")
                                 continue
 
+                            afp = live_entry_result.get("average_fill_price")
+                            if afp is not None:
+                                try:
+                                    af = float(afp)
+                                    if af > 0:
+                                        current_option_ltp = af
+                                except (TypeError, ValueError):
+                                    pass
+
                             # Enter the trade with CURRENT time and prices
                             no_entry_trade.buy_price = current_option_ltp
                             no_entry_trade.buy_time = now  # Use CURRENT time, not alert time
@@ -567,7 +576,8 @@ def update_vwap_for_all_open_positions():
                             logger.info(f"   Entry Time: {re_entry_time_str} (was 'no_entry' at alert time: {alert_time_str})")
                             logger.info(f"   Buy Price: ₹{current_option_ltp:.2f} (current LTP)")
                             logger.info(f"   Stock LTP: ₹{current_stock_ltp:.2f}, VWAP: ₹{current_stock_vwap:.2f}")
-                            logger.info(f"   VWAP Slope: ✅ >= 45° (Previous: ₹{stock_vwap_prev:.2f if stock_vwap_prev else 0:.2f}, Current: ₹{current_stock_vwap:.2f})")
+                            prev_vw = float(stock_vwap_prev) if stock_vwap_prev is not None else 0.0
+                            logger.info(f"   VWAP Slope: ✅ >= 45° (Previous: ₹{prev_vw:.2f}, Current: ₹{current_stock_vwap:.2f})")
                             logger.info(f"   Candle Size: ✅ Passed")
                             logger.info(f"   Index Trends: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
                             print(f"✅ RE-ENTRY DECISION: {stock_name} ({no_entry_trade.option_contract})")
@@ -575,7 +585,8 @@ def update_vwap_for_all_open_positions():
                             print(f"   📊 Entry Conditions:")
                             print(f"      - Time Check: ✅ Before 3:00 PM ({now.strftime('%H:%M:%S')})")
                             print(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
-                            print(f"      - VWAP Slope: ✅ >= 45° (Previous: ₹{stock_vwap_prev:.2f if stock_vwap_prev else 0:.2f} at {stock_vwap_prev_time.strftime('%H:%M') if stock_vwap_prev_time else 'N/A'}, Current: ₹{current_stock_vwap:.2f})")
+                            prev_vw_p = float(stock_vwap_prev) if stock_vwap_prev is not None else 0.0
+                            print(f"      - VWAP Slope: ✅ >= 45° (Previous: ₹{prev_vw_p:.2f} at {stock_vwap_prev_time.strftime('%H:%M') if stock_vwap_prev_time else 'N/A'}, Current: ₹{current_stock_vwap:.2f})")
                             print(f"      - Candle Size: ✅ Passed (now sufficient)")
                             print(f"      - Option Data: ✅ Valid")
                             print(f"   💰 Trade Details:")
@@ -825,6 +836,15 @@ def update_vwap_for_all_open_positions():
                                 logger.error(f"🚨 LIVE RE-ENTRY FAILED for {stock_name}: {api_err}")
                                 continue
 
+                            afp = live_entry_result.get("average_fill_price")
+                            if afp is not None:
+                                try:
+                                    af = float(afp)
+                                    if af > 0:
+                                        current_option_ltp = af
+                                except (TypeError, ValueError):
+                                    pass
+
                             # Enter the trade with CURRENT time and prices
                             no_entry_trade.buy_price = current_option_ltp
                             no_entry_trade.buy_time = now  # Use CURRENT time, not alert time
@@ -843,7 +863,8 @@ def update_vwap_for_all_open_positions():
                             logger.info(f"   Entry Time: {re_entry_time_str} (was 'no_entry' at alert time: {alert_time_str})")
                             logger.info(f"   Buy Price: ₹{current_option_ltp:.2f} (current LTP)")
                             logger.info(f"   Stock LTP: ₹{current_stock_ltp:.2f}, VWAP: ₹{current_stock_vwap:.2f}")
-                            logger.info(f"   VWAP Slope: ✅ >= 45° (Previous: ₹{stock_vwap_prev:.2f if stock_vwap_prev else 0:.2f}, Current: ₹{current_stock_vwap:.2f})")
+                            prev_vw = float(stock_vwap_prev) if stock_vwap_prev is not None else 0.0
+                            logger.info(f"   VWAP Slope: ✅ >= 45° (Previous: ₹{prev_vw:.2f}, Current: ₹{current_stock_vwap:.2f})")
                             logger.info(f"   Candle Size: ✅ Passed")
                             logger.info(f"   Index Trends: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
                             print(f"✅ RE-ENTRY DECISION: {stock_name} ({no_entry_trade.option_contract})")
@@ -851,7 +872,8 @@ def update_vwap_for_all_open_positions():
                             print(f"   📊 Entry Conditions:")
                             print(f"      - Time Check: ✅ Before 3:00 PM ({now.strftime('%H:%M:%S')})")
                             print(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
-                            print(f"      - VWAP Slope: ✅ >= 45° (Previous: ₹{stock_vwap_prev:.2f if stock_vwap_prev else 0:.2f} at {stock_vwap_prev_time.strftime('%H:%M') if stock_vwap_prev_time else 'N/A'}, Current: ₹{current_stock_vwap:.2f})")
+                            prev_vw_p = float(stock_vwap_prev) if stock_vwap_prev is not None else 0.0
+                            print(f"      - VWAP Slope: ✅ >= 45° (Previous: ₹{prev_vw_p:.2f} at {stock_vwap_prev_time.strftime('%H:%M') if stock_vwap_prev_time else 'N/A'}, Current: ₹{current_stock_vwap:.2f})")
                             print(f"      - Candle Size: ✅ Passed (now sufficient)")
                             print(f"      - Option Data: ✅ Valid")
                             print(f"   💰 Trade Details:")
@@ -1629,7 +1651,9 @@ def update_vwap_for_all_open_positions():
                         logger.critical(f"   Sell Price: ₹{position.sell_price:.2f}")
                         logger.critical(f"   Option LTP (fetched): ₹{new_option_ltp:.2f}")
                         logger.critical(f"   Sell Time: {now.strftime('%H:%M:%S')}")
-                        logger.critical(f"   Stock LTP: ₹{new_stock_ltp:.2f if new_stock_ltp else 0:.2f}, VWAP: ₹{new_vwap:.2f if new_vwap else 0:.2f}")
+                        _ns = float(new_stock_ltp) if new_stock_ltp is not None else 0.0
+                        _nv = float(new_vwap) if new_vwap is not None else 0.0
+                        logger.critical(f"   Stock LTP: ₹{_ns:.2f}, VWAP: ₹{_nv:.2f}")
                         logger.critical(f"   PnL: ₹{position.pnl:.2f}")
                 
                 # SIMPLIFIED: Always update updated_at and count as updated
@@ -3628,6 +3652,15 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                                 trade.exit_reason = api_err[:50]
                                 logger.error(f"🚨 LIVE ENTRY FAILED for {stock_name}: {api_err}")
                                 continue
+
+                            afp = live_entry_result.get("average_fill_price")
+                            if afp is not None:
+                                try:
+                                    af = float(afp)
+                                    if af > 0:
+                                        current_option_ltp = af
+                                except (TypeError, ValueError):
+                                    pass
 
                             # Enter the trade with CURRENT time and prices
                             trade.buy_price = current_option_ltp

@@ -2014,6 +2014,28 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         buy_order_id = live_entry_result.get("order_id")
                         if buy_order_id:
                             logger.warning(f"🧾 LIVE BUY ORDER ID for {stock_name}: {buy_order_id}")
+                        afp = live_entry_result.get("average_fill_price")
+                        if afp is not None:
+                            try:
+                                af = float(afp)
+                                if af > 0:
+                                    buy_price = af
+                                    current_option_ltp = af
+                                    if stock and isinstance(stock, dict):
+                                        stock["option_ltp"] = af
+                                    if option_candles and option_candles.get("current_day_candle"):
+                                        cdo = option_candles.get("current_day_candle", {}).get("open")
+                                        if cdo and float(cdo) > 0:
+                                            stop_loss_price = float(cdo) * 0.95
+                                        else:
+                                            stop_loss_price = buy_price * 0.95
+                                    else:
+                                        stop_loss_price = buy_price * 0.95
+                                    logger.info(
+                                        f"✅ Entry buy_price from broker fill avg: ₹{buy_price:.2f} (SL ₹{stop_loss_price:.2f})"
+                                    )
+                            except (TypeError, ValueError):
+                                pass
 
                     if status == 'bought':
                         entry_time_str = buy_time.strftime('%Y-%m-%d %H:%M:%S IST')
