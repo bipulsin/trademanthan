@@ -89,6 +89,7 @@ class UpstoxService:
     # Index instrument keys
     NIFTY50_KEY = "NSE_INDEX|Nifty 50"
     BANKNIFTY_KEY = "NSE_INDEX|Nifty Bank"
+    INDIA_VIX_KEY = "NSE_INDEX|India VIX"
     
     def __init__(self, api_key: str, api_secret: str, access_token: str = None):
         self.api_key = api_key

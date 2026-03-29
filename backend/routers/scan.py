@@ -71,6 +71,7 @@ except ImportError:
     except ImportError:
         health_monitor = None  # Graceful degradation if not available
 from backend.services.upstox_service import upstox_service as vwap_service
+from backend.services.market_sentiment_dials import build_dial_rows, utc_iso
 from backend.services import live_trading
 from backend.database import get_db
 from backend.models.trading import IntradayStockOption, MasterStock, HistoricalMarketData
@@ -5614,6 +5615,31 @@ async def get_index_prices(db: Session = Depends(get_db)):
                 "status": "error",
                 "message": f"Failed to fetch index prices: {str(e)}"
             }
+        )
+
+
+@router.get("/market-sentiment-dials")
+async def market_sentiment_dials():
+    """
+    NIFTY 50, BANKNIFTY, INDIA VIX — intraday % change from session open.
+    Uses Upstox quotes when available, else Yahoo Finance.
+    """
+    try:
+        indices = build_dial_rows(vwap_service)
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "updated_at": utc_iso(),
+                "scale_pct": {"min": -10, "max": 10},
+                "indices": indices,
+            },
+        )
+    except Exception as e:
+        logger.exception("market_sentiment_dials: %s", e)
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "message": str(e), "indices": []},
         )
 
 

@@ -1347,3 +1347,127 @@ body[data-theme="dark"] .market-sentiment-label {
 body[data-theme="dark"] .market-sentiment-value {
     color: #f1f5f9;
 }
+
+.market-sentiment-dials {
+    width: 100%;
+}
+
+.sentiment-dials-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.sentiment-dials-updated {
+    font-size: 0.78rem;
+    color: #64748b;
+}
+
+body[data-theme="dark"] .sentiment-dials-updated {
+    color: #94a3b8;
+}
+
+.market-sentiment-dials-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem 1rem;
+    align-items: start;
+}
+
+@media (max-width: 900px) {
+    .market-sentiment-dials-grid {
+        grid-template-columns: 1fr;
+        max-width: 280px;
+        margin: 0 auto;
+    }
+}
+
+.sentiment-dial {
+    text-align: center;
+    padding: 0.5rem 0.35rem 0.75rem;
+    border-radius: 12px;
+    background: rgba(248, 250, 252, 0.9);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+body[data-theme="dark"] .sentiment-dial {
+    background: rgba(30, 41, 59, 0.55);
+    border-color: rgba(148, 163, 184, 0.2);
+}
+
+.sentiment-dial-head {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.2rem;
+    margin-bottom: 0.25rem;
+}
+
+.sentiment-dial-name {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #475569;
+}
+
+body[data-theme="dark"] .sentiment-dial-name {
+    color: #cbd5e1;
+}
+
+.sentiment-dial-src {
+    font-size: 0.62rem;
+    color: #94a3b8;
+    text-transform: lowercase;
+}
+
+.sentiment-dial-svg {
+    width: 100%;
+    max-width: 220px;
+    height: auto;
+    display: block;
+    margin: 0 auto;
+}
+
+.sentiment-dial-footer {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.1rem;
+    margin-top: 0.15rem;
+}
+
+.sentiment-dial-pct {
+    font-size: 1.05rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    color: #0f172a;
+}
+
+.sentiment-dial--positive .sentiment-dial-pct {
+    color: #15803d;
+}
+
+.sentiment-dial--negative .sentiment-dial-pct {
+    color: #b91c1c;
+}
+
+body[data-theme="dark"] .sentiment-dial-pct {
+    color: #f1f5f9;
+}
+
+body[data-theme="dark"] .sentiment-dial--positive .sentiment-dial-pct {
+    color: #4ade80;
+}
+
+body[data-theme="dark"] .sentiment-dial--negative .sentiment-dial-pct {
+    color: #f87171;
+}
+
+.sentiment-dial-meta {
+    font-size: 0.65rem;
+    color: #94a3b8;
+    text-transform: lowercase;
+}
