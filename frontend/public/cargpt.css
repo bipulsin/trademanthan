@@ -480,6 +480,121 @@ body[data-theme="light"] .cargpt-help-icon-btn:hover {
     font-weight: 700;
 }
 
+/* Mobile: stack rows — no horizontal scroll */
+@media (max-width: 768px) {
+    .cargpt-table-wrap {
+        overflow-x: visible;
+        border: none;
+        background: transparent;
+    }
+
+    .cargpt-table {
+        font-size: 0.85rem;
+    }
+
+    .cargpt-table thead {
+        display: none;
+    }
+
+    .cargpt-table tbody {
+        display: block;
+    }
+
+    .cargpt-table tbody tr {
+        display: block;
+        border: 1px solid var(--cargpt-border);
+        border-radius: 10px;
+        margin-bottom: 12px;
+        overflow: hidden;
+        background: rgba(15, 23, 42, 0.45);
+    }
+
+    .cargpt-table tbody tr:hover td {
+        background: transparent;
+    }
+
+    .cargpt-table tbody td {
+        display: block;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--cargpt-border);
+        word-break: break-word;
+        overflow-wrap: anywhere;
+    }
+
+    .cargpt-table tbody td:last-child {
+        border-bottom: none;
+    }
+
+    .cargpt-table tbody td::before {
+        display: block;
+        font-size: 0.68rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--cargpt-muted);
+        margin-bottom: 6px;
+    }
+
+    .cargpt-table tbody td:nth-child(1)::before {
+        content: "Symbol";
+    }
+
+    .cargpt-table tbody td:nth-child(2)::before {
+        content: "52 Week High Date";
+    }
+
+    .cargpt-table tbody td:nth-child(3)::before {
+        content: "Current Price";
+    }
+
+    .cargpt-table tbody td:nth-child(4)::before {
+        content: "Last 10 Day Cumulative Avg";
+    }
+
+    .cargpt-table tbody td:nth-child(5)::before {
+        content: "Signal";
+    }
+
+    .cargpt-table .cargpt-signal-buy,
+    .cargpt-table .cargpt-signal-avoid {
+        min-width: 0;
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
+        text-align: center;
+    }
+
+    .cargpt-card {
+        padding: 16px;
+    }
+
+    /* DMA detail popup: fit without horizontal scroll */
+    .cargpt-dma-popup {
+        width: min(calc(100vw - 24px), 100%);
+        max-width: 100%;
+    }
+
+    .cargpt-dma-popup-table {
+        width: 100%;
+        table-layout: fixed;
+    }
+
+    .cargpt-dma-popup-table td {
+        white-space: normal;
+        word-break: break-word;
+        padding: 6px 8px 6px 0;
+    }
+
+    .cargpt-dma-popup-table td:first-child {
+        white-space: normal;
+    }
+
+    .cargpt-dma-popup-table td:nth-child(2),
+    .cargpt-dma-popup-table td:nth-child(3) {
+        min-width: 0;
+    }
+}
+
 /* Loading / empty states */
 .cargpt-loading,
 .cargpt-empty {
