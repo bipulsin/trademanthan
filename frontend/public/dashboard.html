@@ -10,7 +10,7 @@
     <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
     <script src="auth-check.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="stylesheet" href="dashboard.css?v=1.3">
+    <link rel="stylesheet" href="dashboard.css?v=1.5">
     <link rel="stylesheet" href="left-menu.css?v=3.13">
     <link rel="stylesheet" href="theme.css?v=1.3">
 </head>
@@ -45,6 +45,32 @@
                                 </button>
                             </div>
                             <div class="market-sentiment-dials-grid" id="marketSentimentDialsGrid" role="list"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Top sector gainers & losers (Nifty sector indices) -->
+                <div class="dashboard-card sector-movers-card full-width">
+                    <div class="card-header compact">
+                        <h3><i class="fas fa-layer-group"></i> Top Gainers &amp; Losers</h3>
+                        <div class="sector-movers-toolbar">
+                            <span class="sector-movers-updated" id="sectorMoversUpdated">—</span>
+                            <button type="button" class="btn-icon" id="sectorMoversRefresh" title="Refresh sectors" aria-label="Refresh sector movers">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-content">
+                        <p class="sector-movers-hint">Nifty sector indices — intraday % change from session open (Yahoo). Top 3 vs bottom 3 by %.</p>
+                        <div class="sector-movers-grid" id="sectorMoversGrid">
+                            <div class="sector-movers-col sector-movers-col--gain">
+                                <h4 class="sector-movers-col-title"><i class="fas fa-arrow-trend-up"></i> Gainers</h4>
+                                <ul class="sector-movers-list" id="sectorMoversGainers" aria-label="Top gaining sectors"></ul>
+                            </div>
+                            <div class="sector-movers-col sector-movers-col--lose">
+                                <h4 class="sector-movers-col-title"><i class="fas fa-arrow-trend-down"></i> Losers</h4>
+                                <ul class="sector-movers-list" id="sectorMoversLosers" aria-label="Top losing sectors"></ul>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -255,6 +281,7 @@
     <script src="left-menu.js?v=3.14"></script>
     <script src="dashboard.js?v=1.2"></script>
     <script src="market-sentiment-dials.js?v=1.3"></script>
+    <script src="dashboard-sector-movers.js?v=1.0"></script>
     <script src="crypto-prices.js?v=1.4"></script>
     <script src="version.js?v=1.0"></script>
     <script src="cache-manager.js?v=1.1"></script>

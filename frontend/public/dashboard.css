@@ -1503,3 +1503,137 @@ body[data-theme="dark"] .sentiment-dial--vix-high .sentiment-dial-pct {
     color: #94a3b8;
     text-transform: lowercase;
 }
+
+/* Top Gainers & Losers — Nifty sectors */
+.sector-movers-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.sector-movers-updated {
+    font-size: 0.78rem;
+    color: #64748b;
+}
+
+body[data-theme="dark"] .sector-movers-updated {
+    color: #94a3b8;
+}
+
+.sector-movers-hint {
+    font-size: 0.82rem;
+    color: #64748b;
+    margin: 0 0 0.85rem;
+    line-height: 1.45;
+}
+
+body[data-theme="dark"] .sector-movers-hint {
+    color: #94a3b8;
+}
+
+.sector-movers-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem 1.25rem;
+}
+
+@media (max-width: 640px) {
+    .sector-movers-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.sector-movers-col-title {
+    margin: 0 0 0.5rem;
+    font-size: 0.82rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.sector-movers-col--gain .sector-movers-col-title {
+    color: #15803d;
+}
+
+.sector-movers-col--lose .sector-movers-col-title {
+    color: #b91c1c;
+}
+
+body[data-theme="dark"] .sector-movers-col--gain .sector-movers-col-title {
+    color: #4ade80;
+}
+
+body[data-theme="dark"] .sector-movers-col--lose .sector-movers-col-title {
+    color: #f87171;
+}
+
+.sector-movers-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border-radius: 10px;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    overflow: hidden;
+    background: rgba(248, 250, 252, 0.65);
+}
+
+body[data-theme="dark"] .sector-movers-list {
+    background: rgba(30, 41, 59, 0.45);
+    border-color: rgba(148, 163, 184, 0.2);
+}
+
+.sector-movers-list li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.55rem 0.75rem;
+    font-size: 0.86rem;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.sector-movers-list li:last-child {
+    border-bottom: none;
+}
+
+.sector-movers-name {
+    font-weight: 600;
+    color: #0f172a;
+    min-width: 0;
+}
+
+body[data-theme="dark"] .sector-movers-name {
+    color: #f1f5f9;
+}
+
+.sector-movers-pct {
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.sector-movers-pct--gain {
+    color: #15803d;
+}
+
+.sector-movers-pct--lose {
+    color: #b91c1c;
+}
+
+body[data-theme="dark"] .sector-movers-pct--gain {
+    color: #4ade80;
+}
+
+body[data-theme="dark"] .sector-movers-pct--lose {
+    color: #f87171;
+}
+
+.sector-movers-empty {
+    padding: 0.75rem;
+    font-size: 0.82rem;
+    color: #94a3b8;
+    text-align: center;
+}
