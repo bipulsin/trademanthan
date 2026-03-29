@@ -27,16 +27,25 @@
         return Math.PI - (Math.PI * (p + 10)) / 20;
     }
 
-    function pctNeedleRotationDeg(pct) {
-        if (pct == null || Number.isNaN(Number(pct))) return 0;
-        const p = Math.max(-10, Math.min(10, Number(pct)));
-        return (p / 10) * 90;
+    /** VIX 0–35 → same φ mapping (0 → π, 35 → 0) */
+    function phiFromVix(v) {
+        const x = Math.max(0, Math.min(35, Number(v)));
+        return Math.PI * (1 - x / 35);
     }
 
-    function vixNeedleRotationDeg(v) {
-        if (v == null || Number.isNaN(Number(v))) return 0;
-        const x = Math.max(0, Math.min(35, Number(v)));
-        return (x / 35) * 180 - 90;
+    /**
+     * SVG rotation (deg, + = clockwise) so the default pointer (triangle pointing up)
+     * aims along the radius toward the arc at angle phi (center CX,CY; arc on upper semicircle).
+     */
+    function needleRotationDegFromPhi(phi) {
+        const vx = Math.cos(phi);
+        const vy = -Math.sin(phi);
+        const targetRad = Math.atan2(vy, vx);
+        const upRad = Math.atan2(-1, 0);
+        let delta = targetRad - upRad;
+        while (delta > Math.PI) delta -= 2 * Math.PI;
+        while (delta < -Math.PI) delta += 2 * Math.PI;
+        return (delta * 180) / Math.PI;
     }
 
     function formatPct(pct) {
@@ -63,7 +72,7 @@
     function dialSvgPct(pct, gid) {
         const has = pct != null && !Number.isNaN(Number(pct));
         const p = has ? Number(pct) : 0;
-        const rot = has ? pctNeedleRotationDeg(pct) : 0;
+        const rot = has ? needleRotationDegFromPhi(phiFromPct(pct)) : 0;
         const phiL = Math.PI;
         const phiM1 = phiFromPct(-3);
         const phiM2 = phiFromPct(3);
@@ -112,7 +121,7 @@
 
     function dialSvgVix(vixVal, gid) {
         const v = vixVal == null || Number.isNaN(Number(vixVal)) ? null : Number(vixVal);
-        const rot = v == null ? 0 : vixNeedleRotationDeg(vixVal);
+        const rot = v == null ? 0 : needleRotationDegFromPhi(phiFromVix(v));
         const phiL = Math.PI;
         const phiR = 0;
         const needleTint =
