@@ -67,12 +67,8 @@
                     <div class="intraday-value">${summary.total_days}</div>
                 </div>
                 <div class="intraday-summary-card">
-                    <h3>Alerts</h3>
-                    <div class="intraday-value">${summary.total_alerts}</div>
-                </div>
-                <div class="intraday-summary-card">
-                    <h3>Trades</h3>
-                    <div class="intraday-value">${summary.total_trades}</div>
+                    <h3>Alerts / Trades</h3>
+                    <div class="intraday-value intraday-value-combined">${summary.total_alerts} <span class="intraday-value-sep">/</span> ${summary.total_trades}</div>
                 </div>
                 <div class="intraday-summary-card intraday-mobile-hide">
                     <h3>Cumulative Win Rate</h3>
@@ -91,15 +87,15 @@
                     <thead>
                         <tr>
                             <th>Date</th>
-                            <th>Market<br/>Trend</th>
+                            <th class="intraday-col-hide-mobile">Market<br/>Trend</th>
                             <th>Total Alerts</th>
-                            <th>Total Trades</th>
-                            <th>Bullish<br/>W/L</th>
-                            <th>Bearish<br/>W/L</th>
+                            <th class="intraday-col-hide-mobile">Total Trades</th>
+                            <th class="intraday-col-hide-mobile">Bullish<br/>W/L</th>
+                            <th class="intraday-col-hide-mobile">Bearish<br/>W/L</th>
                             <th>Win Rate</th>
                             <th>Total P&L</th>
-                            <th>Best Trade</th>
-                            <th>Worst Trade</th>
+                            <th class="intraday-col-hide-mobile">Best Trade</th>
+                            <th class="intraday-col-hide-mobile">Worst Trade</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -107,28 +103,31 @@
                             .map(
                                 (day, index) => `
                             <tr class="intraday-data-row" onclick="window.intradayToggleTradeDetails('${day.date}', ${index})">
-                                <td class="intraday-date-cell">
+                                <td class="intraday-date-cell" data-intraday-label="Date">
                                     <i class="fas fa-chevron-right" id="intraday-expand-icon-${index}" style="font-size: 10px; margin-right: 8px; transition: transform 0.3s;"></i>
-                                    <strong>${formatDate(day.date)}</strong>
+                                    <strong><span class="intraday-date-full">${formatDate(day.date)}</span><span class="intraday-date-short">${formatDateShort(day.date)}</span></strong>
                                 </td>
-                                <td style="text-align: center; font-size: 24px;">
+                                <td class="intraday-col-hide-mobile" style="text-align: center; font-size: 24px;">
                                     ${getMarketTrendIcon(day.market_trend)}
                                 </td>
-                                <td>${day.total_alerts}</td>
-                                <td>${day.total_trades}</td>
-                                <td>
+                                <td data-intraday-label="Alerts / Trades">
+                                    <span class="intraday-desktop-inline">${day.total_alerts}</span>
+                                    <span class="intraday-mobile-inline">${day.total_alerts} / ${day.total_trades}</span>
+                                </td>
+                                <td class="intraday-col-hide-mobile">${day.total_trades}</td>
+                                <td class="intraday-col-hide-mobile">
                                     <span class="intraday-badge intraday-badge-success">${day.bullish_wins}</span> / 
                                     <span class="intraday-badge intraday-badge-danger">${day.bullish_losses}</span>
                                 </td>
-                                <td>
+                                <td class="intraday-col-hide-mobile">
                                     <span class="intraday-badge intraday-badge-success">${day.bearish_wins}</span> / 
                                     <span class="intraday-badge intraday-badge-danger">${day.bearish_losses}</span>
                                 </td>
-                                <td><strong>${day.win_rate.toFixed(1)}%</strong></td>
-                                <td class="${day.total_pnl >= 0 ? "intraday-positive" : "intraday-negative"}">
+                                <td data-intraday-label="Win rate"><strong>${day.win_rate.toFixed(1)}%</strong></td>
+                                <td class="${day.total_pnl >= 0 ? "intraday-positive" : "intraday-negative"}" data-intraday-label="Total P&amp;L">
                                     <strong>₹${day.total_pnl.toLocaleString("en-IN")}</strong>
                                 </td>
-                                <td>
+                                <td class="intraday-col-hide-mobile">
                                     ${
                                         day.total_closed === 0
                                             ? '<div class="intraday-muted-italic">Not losing is winning</div>'
@@ -138,7 +137,7 @@
                                               : "-"
                                     }
                                 </td>
-                                <td>
+                                <td class="intraday-col-hide-mobile">
                                     ${
                                         day.total_closed === 0
                                             ? ""
@@ -173,6 +172,19 @@
         const date = new Date(dateStr);
         const options = { year: "numeric", month: "short", day: "numeric", weekday: "short" };
         return date.toLocaleDateString("en-IN", options);
+    }
+
+    /** Mobile-friendly e.g. 27-Mar (parse YYYY-MM-DD as local calendar date). */
+    function formatDateShort(dateStr) {
+        if (!dateStr || typeof dateStr !== "string") return "";
+        const parts = dateStr.split("-");
+        if (parts.length !== 3) return dateStr;
+        const y = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10) - 1;
+        const d = parseInt(parts[2], 10);
+        const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        if (m < 0 || m > 11 || !d) return dateStr;
+        return `${d}-${months[m]}`;
     }
 
     function getMarketTrendIcon(trend) {
@@ -224,18 +236,18 @@
                                 ${result.trades
                                     .map(
                                         (trade) => `
-                                    <tr>
-                                        <td><strong>${trade.stock_name}</strong></td>
-                                        <td class="intraday-contract">${trade.option_contract || "-"}</td>
-                                        <td>${trade.qty || 0}</td>
-                                        <td>₹${trade.buy_price.toFixed(2)}</td>
-                                        <td>${trade.buy_time || "-"}</td>
-                                        <td>${trade.sell_price > 0 ? trade.sell_price.toFixed(2) : "-"}</td>
-                                        <td>${trade.sell_time || "-"}</td>
-                                        <td class="${trade.pnl >= 0 ? "intraday-positive" : "intraday-negative"}">
+                                    <tr class="intraday-trade-detail-row">
+                                        <td data-intraday-detail-label="Stock"><strong>${trade.stock_name}</strong></td>
+                                        <td class="intraday-contract" data-intraday-detail-label="Option">${trade.option_contract || "-"}</td>
+                                        <td data-intraday-detail-label="Qty">${trade.qty || 0}</td>
+                                        <td data-intraday-detail-label="Buy">₹${trade.buy_price.toFixed(2)}</td>
+                                        <td data-intraday-detail-label="Buy time">${trade.buy_time || "-"}</td>
+                                        <td data-intraday-detail-label="Sell">${trade.sell_price > 0 ? trade.sell_price.toFixed(2) : "-"}</td>
+                                        <td data-intraday-detail-label="Sell time">${trade.sell_time || "-"}</td>
+                                        <td class="${trade.pnl >= 0 ? "intraday-positive" : "intraday-negative"}" data-intraday-detail-label="P&amp;L">
                                             <strong>₹${trade.pnl.toLocaleString("en-IN")}</strong>
                                         </td>
-                                        <td>
+                                        <td data-intraday-detail-label="Status">
                                             <span class="intraday-badge ${getStatusBadgeClass(trade.status)}">
                                                 ${formatStatus(trade.status, trade.exit_reason, trade.no_entry_reason)}
                                             </span>

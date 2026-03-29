@@ -122,6 +122,25 @@
     color: var(--theme-text, #f1f5f9);
 }
 
+.intraday-value-combined {
+    font-size: 1.35rem;
+    line-height: 1.25;
+}
+
+.intraday-value-sep {
+    opacity: 0.55;
+    font-weight: 600;
+    margin: 0 0.1em;
+}
+
+.intraday-date-short {
+    display: none;
+}
+
+.intraday-mobile-inline {
+    display: none;
+}
+
 .intraday-table-wrap {
     overflow-x: auto;
     border-radius: 12px;
@@ -346,7 +365,7 @@
     }
 
     .intraday-summary-cards {
-        grid-template-columns: repeat(3, 1fr);
+        grid-template-columns: repeat(2, 1fr);
         gap: 0.5rem;
     }
 
@@ -367,6 +386,132 @@
     }
 
     .intraday-table-wrap {
-        margin: 0 -0.25rem;
+        margin: 0;
+        overflow-x: visible;
+        border: none;
+        background: transparent;
+    }
+
+    .intraday-table-wrap table {
+        display: block;
+        width: 100%;
+    }
+
+    .intraday-table-wrap thead {
+        display: none;
+    }
+
+    .intraday-table-wrap tbody {
+        display: block;
+    }
+
+    .intraday-data-row {
+        display: block;
+        margin-bottom: 0.85rem;
+        padding: 0.65rem 0.75rem;
+        border: 1px solid var(--theme-border, #e2e8f0);
+        border-radius: 12px;
+        background: var(--theme-card, #fff);
+        box-sizing: border-box;
+    }
+
+    .intraday-data-row > td {
+        display: block;
+        border: none !important;
+        padding: 0.4rem 0 !important;
+    }
+
+    .intraday-data-row > td.intraday-col-hide-mobile {
+        display: none !important;
+    }
+
+    .intraday-data-row > td[data-intraday-label]::before {
+        content: attr(data-intraday-label);
+        display: block;
+        font-size: 0.62rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--theme-muted, #64748b);
+        margin-bottom: 0.2rem;
+    }
+
+    .intraday-date-short {
+        display: inline;
+    }
+
+    .intraday-date-full {
+        display: none;
+    }
+
+    .intraday-desktop-inline {
+        display: none;
+    }
+
+    .intraday-mobile-inline {
+        display: inline;
+    }
+
+    .intraday-expandable-row.expanded {
+        display: block !important;
+        margin-bottom: 0.85rem;
+    }
+
+    .intraday-expandable-row.expanded > td {
+        display: block !important;
+        width: 100% !important;
+        padding: 0 !important;
+        border-radius: 0 0 12px 12px;
+    }
+
+    .intraday-trade-details {
+        padding: 0.75rem !important;
+    }
+
+    .intraday-trade-details-table {
+        display: block;
+        width: 100%;
+        border: none;
+        background: transparent;
+    }
+
+    .intraday-trade-details-table thead {
+        display: none;
+    }
+
+    .intraday-trade-details-table tbody {
+        display: block;
+    }
+
+    .intraday-trade-detail-row {
+        display: block;
+        margin-bottom: 0.75rem;
+        padding: 0.6rem 0.65rem;
+        border: 1px solid var(--theme-border, #e2e8f0);
+        border-radius: 10px;
+        background: var(--theme-card, #fff);
+    }
+
+    .intraday-trade-detail-row > td {
+        display: block;
+        border: none !important;
+        padding: 0.3rem 0 !important;
+    }
+
+    .intraday-trade-detail-row > td[data-intraday-detail-label]::before {
+        content: attr(data-intraday-detail-label);
+        display: inline-block;
+        min-width: 5.5rem;
+        margin-right: 0.5rem;
+        font-size: 0.65rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        color: var(--theme-muted, #64748b);
+        vertical-align: top;
+    }
+
+    .intraday-value-combined {
+        font-size: 1.05rem;
     }
 }
