@@ -772,14 +772,18 @@ body[data-theme="light"] .tm-telegram-modal__textarea {
     right: 0;
     bottom: 0;
     z-index: 1000;
-    height: 64px;
-    padding: 6px 10px 8px;
-    align-items: center;
+    height: 48px;
+    padding: 2px 10px 5px;
+    align-items: flex-end;
     justify-content: space-between;
-    gap: 8px;
+    gap: 6px;
     background: linear-gradient(180deg, #1e40af 0%, #1e3a8a 100%);
-    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.35);
+    box-shadow:
+        0 -4px 14px rgba(0, 0, 0, 0.32),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
     box-sizing: border-box;
+    overflow: visible;
+    border-radius: 16px 16px 0 0;
 }
 
 .tm-footer-index {
@@ -811,23 +815,29 @@ body[data-theme="light"] .tm-telegram-modal__textarea {
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-end;
     position: relative;
-    min-width: 56px;
+    min-width: 52px;
+    /* Float the white circle above the blue bar for a 3D “button” look */
+    transform: translateY(-14px);
+    z-index: 3;
 }
 
 .tm-footer-nav-btn {
-    width: 48px;
-    height: 48px;
+    width: 46px;
+    height: 46px;
     border-radius: 50%;
     border: none;
-    background: #ffffff;
+    background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 100%);
     color: #1e3a8a;
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+    box-shadow:
+        0 8px 22px rgba(0, 0, 0, 0.38),
+        0 3px 8px rgba(0, 0, 0, 0.22),
+        inset 0 2px 0 rgba(255, 255, 255, 0.95);
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 1.25rem;
+    font-size: 1.2rem;
     cursor: pointer;
     transition: transform 0.2s, box-shadow 0.2s;
 }
@@ -844,27 +854,28 @@ body[data-theme="light"] .tm-telegram-modal__textarea {
 .tm-mobile-footer .footer-index-row {
     display: flex;
     align-items: center;
-    gap: 4px;
-    margin-bottom: 2px;
+    gap: 3px;
+    margin-bottom: 0;
 }
 
 .tm-mobile-footer .footer-index-name {
-    font-size: 12px;
+    font-size: 10px;
     font-weight: 700;
     color: #ffffff;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.03em;
 }
 
 .tm-mobile-footer .footer-index-price {
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
     color: #fbbf24;
     font-variant-numeric: tabular-nums;
+    line-height: 1.15;
 }
 
 .tm-mobile-footer .footer-index-arrow {
-    font-size: 22px;
+    font-size: 17px;
     font-weight: 900;
     color: #ffffff;
     line-height: 1;
@@ -920,7 +931,8 @@ body[data-theme="light"] .tm-telegram-modal__textarea {
     }
 
     body.left-menu-footer-mode {
-        padding-bottom: 70px;
+        /* Shorter bar + nav button floats up — reserve space for bar + protrusion */
+        padding-bottom: 76px;
     }
 
     body.left-menu-footer-mode .mobile-menu-overlay {
