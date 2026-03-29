@@ -86,14 +86,14 @@
                 <table>
                     <thead>
                         <tr>
-                            <th>Date</th>
+                            <th class="intraday-th-date">Date</th>
                             <th class="intraday-col-hide-mobile">Market<br/>Trend</th>
-                            <th>Total Alerts</th>
+                            <th class="intraday-col-hide-mobile">Total Alerts</th>
                             <th class="intraday-col-hide-mobile">Total Trades</th>
                             <th class="intraday-col-hide-mobile">Bullish<br/>W/L</th>
                             <th class="intraday-col-hide-mobile">Bearish<br/>W/L</th>
-                            <th>Win Rate</th>
-                            <th>Total P&L</th>
+                            <th class="intraday-th-winrate">Win Rate</th>
+                            <th class="intraday-th-pnl">P&L</th>
                             <th class="intraday-col-hide-mobile">Best Trade</th>
                             <th class="intraday-col-hide-mobile">Worst Trade</th>
                         </tr>
@@ -103,17 +103,14 @@
                             .map(
                                 (day, index) => `
                             <tr class="intraday-data-row" onclick="window.intradayToggleTradeDetails('${day.date}', ${index})">
-                                <td class="intraday-date-cell" data-intraday-label="Date">
+                                <td class="intraday-date-cell">
                                     <i class="fas fa-chevron-right" id="intraday-expand-icon-${index}" style="font-size: 10px; margin-right: 8px; transition: transform 0.3s;"></i>
                                     <strong><span class="intraday-date-full">${formatDate(day.date)}</span><span class="intraday-date-short">${formatDateShort(day.date)}</span></strong>
                                 </td>
                                 <td class="intraday-col-hide-mobile" style="text-align: center; font-size: 24px;">
                                     ${getMarketTrendIcon(day.market_trend)}
                                 </td>
-                                <td data-intraday-label="Alerts / Trades">
-                                    <span class="intraday-desktop-inline">${day.total_alerts}</span>
-                                    <span class="intraday-mobile-inline">${day.total_alerts} / ${day.total_trades}</span>
-                                </td>
+                                <td class="intraday-col-hide-mobile">${day.total_alerts}</td>
                                 <td class="intraday-col-hide-mobile">${day.total_trades}</td>
                                 <td class="intraday-col-hide-mobile">
                                     <span class="intraday-badge intraday-badge-success">${day.bullish_wins}</span> / 
@@ -123,8 +120,8 @@
                                     <span class="intraday-badge intraday-badge-success">${day.bearish_wins}</span> / 
                                     <span class="intraday-badge intraday-badge-danger">${day.bearish_losses}</span>
                                 </td>
-                                <td data-intraday-label="Win rate"><strong>${day.win_rate.toFixed(1)}%</strong></td>
-                                <td class="${day.total_pnl >= 0 ? "intraday-positive" : "intraday-negative"}" data-intraday-label="Total P&amp;L">
+                                <td class="intraday-cell-winrate"><strong>${day.win_rate.toFixed(1)}%</strong></td>
+                                <td class="${day.total_pnl >= 0 ? "intraday-positive" : "intraday-negative"} intraday-cell-pnl">
                                     <strong>₹${day.total_pnl.toLocaleString("en-IN")}</strong>
                                 </td>
                                 <td class="intraday-col-hide-mobile">
@@ -187,6 +184,12 @@
         return `${d}-${months[m]}`;
     }
 
+    function expandedDayMetaHtml(rowIndex) {
+        const day = reportData[rowIndex];
+        if (!day) return "";
+        return `<div class="intraday-expanded-day-meta"><div class="intraday-expanded-day-meta-inner"><span class="intraday-expanded-day-meta-label">Alerts / Trades</span><span class="intraday-expanded-day-meta-value">${day.total_alerts} / ${day.total_trades}</span></div></div>`;
+    }
+
     function getMarketTrendIcon(trend) {
         if (trend === "bullish") {
             return '<span class="intraday-trend-up" title="Bullish: Both NIFTY50 & BANKNIFTY trending up">↑</span>';
@@ -211,6 +214,10 @@
         detailsRow.classList.add("expanded");
         expandIcon.style.transform = "rotate(90deg)";
         expandedRows[rowIndex] = true;
+
+        document.getElementById(`intraday-trade-details-${rowIndex}`).innerHTML =
+            expandedDayMetaHtml(rowIndex) +
+            `<div class="intraday-details-loading"><i class="fas fa-spinner fa-spin"></i> Loading trade details...</div>`;
 
         try {
             const response = await fetch(`${DAILY_TRADES_API}/${date}`, { cache: "no-store" });
@@ -259,9 +266,11 @@
                             </tbody>
                         </table>
                     `;
-                document.getElementById(`intraday-trade-details-${rowIndex}`).innerHTML = detailsHTML;
+                document.getElementById(`intraday-trade-details-${rowIndex}`).innerHTML = expandedDayMetaHtml(rowIndex) + detailsHTML;
             } else {
-                document.getElementById(`intraday-trade-details-${rowIndex}`).innerHTML = `
+                document.getElementById(`intraday-trade-details-${rowIndex}`).innerHTML =
+                    expandedDayMetaHtml(rowIndex) +
+                    `
                         <div class="intraday-details-empty">
                             <i class="fas fa-info-circle"></i> No executed trades for this day
                         </div>
@@ -269,7 +278,9 @@
             }
         } catch (error) {
             console.error("Error loading trade details:", error);
-            document.getElementById(`intraday-trade-details-${rowIndex}`).innerHTML = `
+            document.getElementById(`intraday-trade-details-${rowIndex}`).innerHTML =
+                expandedDayMetaHtml(rowIndex) +
+                `
                     <div class="intraday-details-error">
                         <i class="fas fa-exclamation-triangle"></i> Error loading trade details
                     </div>

@@ -6,12 +6,59 @@
     --intraday-table-head: linear-gradient(135deg, var(--theme-accent-hover, #2563eb) 0%, var(--theme-accent, #3b82f6) 100%);
 }
 
-.intraday-filters {
-    padding: 1.25rem 1.5rem;
-    background: var(--theme-card-alt, rgba(248, 250, 252, 0.9));
+.intraday-filters-wrap {
+    margin-bottom: 1rem;
     border: 1px solid var(--theme-border, rgba(148, 163, 184, 0.35));
     border-radius: 12px;
-    margin-bottom: 1rem;
+    background: var(--theme-card-alt, rgba(248, 250, 252, 0.9));
+    overflow: hidden;
+}
+
+.intraday-filters-summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 0.75rem 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    font-weight: 600;
+    font-size: 0.92rem;
+    color: var(--theme-text, #1e293b);
+    user-select: none;
+}
+
+.intraday-filters-summary::-webkit-details-marker {
+    display: none;
+}
+
+.intraday-filters-summary::marker {
+    content: "";
+}
+
+.intraday-filters-chevron {
+    transition: transform 0.2s ease;
+    color: var(--theme-muted, #64748b);
+    font-size: 0.85rem;
+}
+
+.intraday-filters-wrap[open] .intraday-filters-chevron {
+    transform: rotate(180deg);
+}
+
+.intraday-filters-summary-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.intraday-filters {
+    padding: 1.25rem 1.5rem;
+    background: transparent;
+    border: none;
+    border-top: 1px solid var(--theme-border, rgba(148, 163, 184, 0.35));
+    border-radius: 0;
+    margin-bottom: 0;
 }
 
 .intraday-filter-row {
@@ -134,10 +181,6 @@
 }
 
 .intraday-date-short {
-    display: none;
-}
-
-.intraday-mobile-inline {
     display: none;
 }
 
@@ -344,6 +387,40 @@
     font-size: 0.85rem;
 }
 
+.intraday-expanded-day-meta {
+    padding: 0 0 0.65rem;
+    margin-bottom: 0.65rem;
+    border-bottom: 1px solid var(--theme-border, #e2e8f0);
+}
+
+.intraday-expanded-day-meta-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    font-size: 0.88rem;
+}
+
+.intraday-expanded-day-meta-label {
+    font-weight: 600;
+    color: var(--theme-muted, #64748b);
+}
+
+.intraday-expanded-day-meta-value {
+    font-weight: 700;
+    color: var(--theme-text, #1e293b);
+}
+
+.intraday-cell-winrate {
+    text-align: center;
+}
+
+.intraday-cell-pnl {
+    text-align: right;
+    white-space: nowrap;
+}
+
 @media (max-width: 768px) {
     .intraday-filter-row {
         flex-direction: column;
@@ -388,52 +465,77 @@
     .intraday-table-wrap {
         margin: 0;
         overflow-x: visible;
-        border: none;
-        background: transparent;
-    }
-
-    .intraday-table-wrap table {
-        display: block;
-        width: 100%;
-    }
-
-    .intraday-table-wrap thead {
-        display: none;
-    }
-
-    .intraday-table-wrap tbody {
-        display: block;
-    }
-
-    .intraday-data-row {
-        display: block;
-        margin-bottom: 0.85rem;
-        padding: 0.65rem 0.75rem;
         border: 1px solid var(--theme-border, #e2e8f0);
         border-radius: 12px;
         background: var(--theme-card, #fff);
-        box-sizing: border-box;
+    }
+
+    .intraday-table-wrap table {
+        display: table;
+        width: 100%;
+        table-layout: fixed;
+        border-collapse: collapse;
+    }
+
+    .intraday-table-wrap thead {
+        display: table-header-group;
+    }
+
+    .intraday-table-wrap thead th {
+        font-size: 0.65rem;
+        padding: 0.5rem 0.35rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+
+    .intraday-table-wrap thead th.intraday-th-date {
+        width: 34%;
+    }
+
+    .intraday-table-wrap thead th.intraday-th-winrate {
+        width: 22%;
+        text-align: center;
+    }
+
+    .intraday-table-wrap thead th.intraday-th-pnl {
+        width: 44%;
+        text-align: right;
+    }
+
+    .intraday-table-wrap thead th.intraday-col-hide-mobile {
+        display: none !important;
+    }
+
+    .intraday-table-wrap tbody {
+        display: table-row-group;
+    }
+
+    .intraday-data-row {
+        display: table-row;
     }
 
     .intraday-data-row > td {
-        display: block;
-        border: none !important;
-        padding: 0.4rem 0 !important;
+        display: table-cell;
+        vertical-align: middle;
+        padding: 0.5rem 0.35rem !important;
+        border-bottom: 1px solid var(--theme-border, #f1f5f9);
+        font-size: 0.82rem;
     }
 
     .intraday-data-row > td.intraday-col-hide-mobile {
         display: none !important;
     }
 
-    .intraday-data-row > td[data-intraday-label]::before {
-        content: attr(data-intraday-label);
-        display: block;
-        font-size: 0.62rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--theme-muted, #64748b);
-        margin-bottom: 0.2rem;
+    .intraday-data-row > td.intraday-date-cell {
+        width: 34%;
+    }
+
+    .intraday-data-row > td.intraday-cell-winrate {
+        width: 22%;
+    }
+
+    .intraday-data-row > td.intraday-cell-pnl {
+        width: 44%;
     }
 
     .intraday-date-short {
@@ -444,24 +546,15 @@
         display: none;
     }
 
-    .intraday-desktop-inline {
-        display: none;
-    }
-
-    .intraday-mobile-inline {
-        display: inline;
-    }
-
     .intraday-expandable-row.expanded {
-        display: block !important;
-        margin-bottom: 0.85rem;
+        display: table-row !important;
     }
 
     .intraday-expandable-row.expanded > td {
-        display: block !important;
-        width: 100% !important;
+        display: table-cell !important;
+        width: 100%;
         padding: 0 !important;
-        border-radius: 0 0 12px 12px;
+        border-bottom: 1px solid var(--theme-border, #e2e8f0);
     }
 
     .intraday-trade-details {
