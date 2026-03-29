@@ -189,6 +189,42 @@ body[data-theme="light"] .cargpt-help-icon-btn:hover {
     display: block;
 }
 
+/* CAR Analysis only: session, help, configure — below tab strip, above card / DMA row */
+.cargpt-car-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 14px;
+    margin: 0 0 14px;
+    padding: 6px 2px 12px;
+    font-size: 0.78rem;
+    line-height: 1.4;
+    color: var(--cargpt-muted);
+    border-bottom: 1px solid var(--cargpt-border);
+}
+
+.cargpt-car-toolbar .cargpt-session-info {
+    font-size: 0.78rem;
+    margin-right: auto;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.cargpt-car-toolbar .cargpt-help-icon-btn {
+    width: 28px;
+    height: 28px;
+    font-size: 1.05rem;
+    margin-right: 0;
+    flex-shrink: 0;
+}
+
+.cargpt-car-toolbar .cargpt-setup-link {
+    font-size: 0.78rem;
+    padding: 5px 12px;
+    font-weight: 600;
+    gap: 6px;
+}
+
 .cargpt-help-link {
     display: inline-block;
     color: var(--cargpt-accent);

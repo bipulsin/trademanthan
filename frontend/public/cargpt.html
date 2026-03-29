@@ -8,7 +8,7 @@
     <script src="auth-check.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="left-menu.css?v=3.12">
-    <link rel="stylesheet" href="cargpt.css?v=1.8">
+    <link rel="stylesheet" href="cargpt.css?v=1.9">
     <link rel="stylesheet" href="theme.css?v=1.3">
 </head>
 <body class="cargpt-body">
@@ -24,11 +24,6 @@
         <main class="main-content-area cargpt-main">
             <div class="cargpt-page-header">
                 <h1 class="cargpt-page-title">Cumulative Average Reversal</h1>
-                <span class="cargpt-session-info" id="cargptSessionInfo" aria-label="Session">Session: User ID —</span>
-                <button class="cargpt-help-icon-btn" type="button" onclick="openHelpModal()" aria-label="Help to Setup">
-                    ?
-                </button>
-                <a href="carsetup.html" class="cargpt-setup-link" id="configureLink" onclick="openConfigureModal(event)"><i class="fas fa-cog"></i> Configure</a>
             </div>
 
             <div class="cargpt-tabs">
@@ -77,6 +72,13 @@
                     </section>
                 </div>
                 <div class="cargpt-tab-panel" id="panelCarAnalysis" role="tabpanel" aria-labelledby="tabCarAnalysis">
+                    <div class="cargpt-car-toolbar" aria-label="Session and tools">
+                        <span class="cargpt-session-info" id="cargptSessionInfo" aria-label="Session">Session: User ID —</span>
+                        <button class="cargpt-help-icon-btn" type="button" onclick="openHelpModal()" aria-label="Help to Setup">
+                            ?
+                        </button>
+                        <a href="carsetup.html" class="cargpt-setup-link" id="configureLink" onclick="openConfigureModal(event)"><i class="fas fa-cog"></i> Configure</a>
+                    </div>
                     <section class="cargpt-card">
                         <h2>
                             <span><i class="fas fa-chart-bar"></i> CAR Analysis</span>
