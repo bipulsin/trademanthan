@@ -237,6 +237,63 @@ body[data-theme="light"] .cargpt-help-icon-btn:hover {
     color: var(--cargpt-text);
 }
 
+/* NIFTY250 tab disclaimer (desktop: full text; mobile: first ~13 words + tap for rest) */
+.cargpt-disclaimer {
+    color: var(--cargpt-muted);
+    margin-bottom: 16px;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+/* Desktop & tablet: always show full disclaimer (no ellipsis) */
+@media (min-width: 769px) {
+    .cargpt-disclaimer--collapsible .cargpt-disclaimer-ellipsis {
+        display: none !important;
+    }
+    .cargpt-disclaimer--collapsible .cargpt-disclaimer-rest {
+        display: inline !important;
+    }
+}
+
+@media (max-width: 768px) {
+    .cargpt-disclaimer--collapsible {
+        color: #64748b;
+        font-size: 0.58rem;
+        line-height: 1.38;
+        cursor: pointer;
+        margin-bottom: 12px;
+    }
+
+    .cargpt-disclaimer--collapsible:not(.cargpt-disclaimer-expanded) {
+        user-select: none;
+    }
+
+    .cargpt-disclaimer--collapsible:not(.cargpt-disclaimer-expanded) .cargpt-disclaimer-rest {
+        display: none;
+    }
+
+    .cargpt-disclaimer--collapsible:not(.cargpt-disclaimer-expanded) .cargpt-disclaimer-ellipsis {
+        display: inline;
+    }
+
+    .cargpt-disclaimer--collapsible.cargpt-disclaimer-expanded {
+        color: #6b7280;
+        font-size: 0.62rem;
+        line-height: 1.45;
+        overflow: visible;
+        margin-bottom: 14px;
+        user-select: text;
+    }
+
+    .cargpt-disclaimer--collapsible.cargpt-disclaimer-expanded .cargpt-disclaimer-rest {
+        display: inline;
+    }
+
+    .cargpt-disclaimer--collapsible.cargpt-disclaimer-expanded .cargpt-disclaimer-ellipsis {
+        display: none;
+    }
+}
+
 /* Main content */
 .cargpt-main {
     flex: 1;
@@ -609,7 +666,7 @@ body[data-theme="light"] .cargpt-help-icon-btn:hover {
         border-bottom: 1px solid var(--cargpt-border);
     }
 
-    /* Row 3: Last 10 day cumulative avg — full width */
+    /* Row 3: Last 10 day composite avg — full width */
     .cargpt-table tbody td:nth-child(4) {
         grid-column: 1 / -1;
         grid-row: 3;
@@ -639,7 +696,7 @@ body[data-theme="light"] .cargpt-help-icon-btn:hover {
     }
 
     .cargpt-table tbody td:nth-child(4)::before {
-        content: "Last 10 day cum. avg";
+        content: "Last 10 day comp. avg";
     }
 
     .cargpt-table tbody td:nth-child(5)::before {
