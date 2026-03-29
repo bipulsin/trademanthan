@@ -236,7 +236,7 @@ class LeftMenu {
                 <li class="nav-item" data-page="intraoption.html"><i class="fas fa-bolt"></i><span>Intraday Option</span></li>
                 <li class="nav-item" data-page="pivot-breakout.html"><i class="fas fa-bullseye"></i><span>Pivot Breakout</span></li>
                 <li class="nav-item" data-page="arbitrage.html"><i class="fas fa-shuffle"></i><span>Arbitrage Selection</span></li>
-                <li class="nav-item" data-page="cargpt.html"><i class="fas fa-chart-area"></i><span>Cumulative Avg</span></li>
+                <li class="nav-item" data-page="cargpt.html"><i class="fas fa-chart-area"></i><span>Composite Avg</span></li>
                 <li class="nav-item" data-page="broker.html"><i class="fas fa-university"></i><span>Broker Management</span></li>
                 <li class="nav-item" data-page="strategy.html"><i class="fas fa-robot"></i><span>Strategy Management</span></li>
                 <li class="nav-item" data-page="reports.html"><i class="fas fa-chart-bar"></i><span>Reports</span></li>
@@ -641,7 +641,7 @@ class LeftMenu {
             intraoption: 'Intraday Stock Options Algo',
             'pivot-breakout': 'Pivot Breakout',
             arbitrage: 'Arbitrage Selection',
-            cargpt: 'Cumulative Average Reversal',
+            cargpt: 'Composite Average Reversal',
             broker: 'Broker Management',
             strategy: 'Strategy Management',
             reports: 'Trading Reports',
