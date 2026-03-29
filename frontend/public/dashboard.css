@@ -1454,6 +1454,22 @@ body[data-theme="dark"] .sentiment-dial-name {
     color: #b91c1c;
 }
 
+.sentiment-dial--medium .sentiment-dial-pct {
+    color: #c2410c;
+}
+
+.sentiment-dial--vix-low .sentiment-dial-pct {
+    color: #15803d;
+}
+
+.sentiment-dial--vix-mid .sentiment-dial-pct {
+    color: #c2410c;
+}
+
+.sentiment-dial--vix-high .sentiment-dial-pct {
+    color: #b91c1c;
+}
+
 body[data-theme="dark"] .sentiment-dial-pct {
     color: #f1f5f9;
 }
@@ -1463,6 +1479,22 @@ body[data-theme="dark"] .sentiment-dial--positive .sentiment-dial-pct {
 }
 
 body[data-theme="dark"] .sentiment-dial--negative .sentiment-dial-pct {
+    color: #f87171;
+}
+
+body[data-theme="dark"] .sentiment-dial--medium .sentiment-dial-pct {
+    color: #fb923c;
+}
+
+body[data-theme="dark"] .sentiment-dial--vix-low .sentiment-dial-pct {
+    color: #4ade80;
+}
+
+body[data-theme="dark"] .sentiment-dial--vix-mid .sentiment-dial-pct {
+    color: #fb923c;
+}
+
+body[data-theme="dark"] .sentiment-dial--vix-high .sentiment-dial-pct {
     color: #f87171;
 }
 

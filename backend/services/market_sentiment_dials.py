@@ -33,6 +33,71 @@ def _pct_from_open(last: float, open_: float) -> Optional[float]:
     return None
 
 
+def _vix_level_from_upstox(upstox_service, instrument_key: str) -> Optional[Dict[str, Any]]:
+    """India VIX spot (LTP) for 0–35 dial; open/pct optional."""
+    try:
+        q = upstox_service.get_market_quote_by_key(instrument_key)
+        if not q:
+            return None
+        last = float(q.get("last_price") or 0)
+        if last <= 0:
+            return None
+        ohlc = q.get("ohlc") or {}
+        day_open = float(q.get("open") or ohlc.get("open") or 0)
+        pct = _pct_from_open(last, day_open) if day_open > 0 else None
+        return {
+            "last": last,
+            "open": day_open if day_open > 0 else None,
+            "pct_change": pct,
+            "source": "upstox",
+        }
+    except Exception as e:
+        logger.warning("Upstox VIX quote failed for %s: %s", instrument_key, e)
+        return None
+
+
+def _yahoo_chart_last_only(yahoo_symbol: str) -> Optional[Dict[str, Any]]:
+    """Spot price from Yahoo chart meta (for VIX when % vs open is unavailable)."""
+    from urllib.parse import quote
+
+    try:
+        enc = quote(yahoo_symbol, safe="")
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{enc}"
+        r = requests.get(
+            url,
+            params={"interval": "1d", "range": "5d", "includePrePost": "false"},
+            headers=_YAHOO_HEADERS,
+            timeout=14,
+        )
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        results = (data.get("chart") or {}).get("result") or []
+        if not results:
+            return None
+        meta = results[0].get("meta") or {}
+        price = meta.get("regularMarketPrice")
+        if price is None:
+            price = meta.get("previousClose")
+        if price is None:
+            return None
+        price = float(price)
+        if price <= 0:
+            return None
+        open_f = meta.get("regularMarketOpen")
+        open_f = float(open_f) if open_f is not None else 0.0
+        pct = _pct_from_open(price, open_f) if open_f > 0 else None
+        return {
+            "last": price,
+            "open": open_f if open_f > 0 else None,
+            "pct_change": pct,
+            "source": "yahoo",
+        }
+    except Exception as e:
+        logger.debug("Yahoo chart last-only %s failed: %s", yahoo_symbol, e)
+        return None
+
+
 def _quote_from_upstox(upstox_service, instrument_key: str) -> Optional[Dict[str, Any]]:
     try:
         q = upstox_service.get_market_quote_by_key(instrument_key)
@@ -116,54 +181,77 @@ def _fetch_yahoo_batch() -> Dict[str, Dict[str, Any]]:
     return out
 
 
+def _row_payload(
+    id_key: str,
+    label: str,
+    data: Optional[Dict[str, Any]],
+    unavailable: bool = False,
+) -> Dict[str, Any]:
+    if unavailable or not data:
+        base = {
+            "id": id_key,
+            "label": label,
+            "pct_change": None,
+            "last": None,
+            "open": None,
+            "source": "unavailable",
+        }
+        if id_key == "indiavix":
+            base["dial_mode"] = "vix"
+            base["vix_value"] = None
+            base["vix_scale"] = {"min": 0, "max": 35}
+        else:
+            base["dial_mode"] = "pct"
+        return base
+    if id_key == "indiavix":
+        v = float(data["last"])
+        return {
+            "id": id_key,
+            "label": label,
+            "dial_mode": "vix",
+            "pct_change": data.get("pct_change"),
+            "last": v,
+            "open": data.get("open"),
+            "vix_value": v,
+            "vix_scale": {"min": 0, "max": 35},
+            "source": data["source"],
+        }
+    return {
+        "id": id_key,
+        "label": label,
+        "dial_mode": "pct",
+        "pct_change": data["pct_change"],
+        "last": data["last"],
+        "open": data["open"],
+        "source": data["source"],
+    }
+
+
 def build_dial_rows(upstox_service) -> List[Dict[str, Any]]:
     """
-    Returns three rows: NIFTY 50, BANKNIFTY, INDIA VIX with intraday % from session open.
+    Returns three rows: NIFTY 50, BANKNIFTY (intraday % vs open), INDIA VIX (spot level for 0–35 dial).
     """
-    specs = [
-        ("nifty50", "NIFTY 50", upstox_service.NIFTY50_KEY),
-        ("banknifty", "BANKNIFTY", upstox_service.BANKNIFTY_KEY),
-        ("indiavix", "INDIA VIX", getattr(upstox_service, "INDIA_VIX_KEY", "NSE_INDEX|India VIX")),
-    ]
+    nifty_key = upstox_service.NIFTY50_KEY
+    bank_key = upstox_service.BANKNIFTY_KEY
+    vix_key = getattr(upstox_service, "INDIA_VIX_KEY", "NSE_INDEX|India VIX")
     yahoo_map = _fetch_yahoo_batch()
     rows: List[Dict[str, Any]] = []
-    for id_key, label, ust_key in specs:
-        u = _quote_from_upstox(upstox_service, ust_key)
-        if u is not None:
-            rows.append(
-                {
-                    "id": id_key,
-                    "label": label,
-                    "pct_change": u["pct_change"],
-                    "last": u["last"],
-                    "open": u["open"],
-                    "source": u["source"],
-                }
-            )
-            continue
-        y = yahoo_map.get(id_key)
-        if y is not None:
-            rows.append(
-                {
-                    "id": id_key,
-                    "label": label,
-                    "pct_change": y["pct_change"],
-                    "last": y["last"],
-                    "open": y["open"],
-                    "source": y["source"],
-                }
-            )
-        else:
-            rows.append(
-                {
-                    "id": id_key,
-                    "label": label,
-                    "pct_change": None,
-                    "last": None,
-                    "open": None,
-                    "source": "unavailable",
-                }
-            )
+
+    u = _quote_from_upstox(upstox_service, nifty_key)
+    if u is None:
+        u = yahoo_map.get("nifty50")
+    rows.append(_row_payload("nifty50", "NIFTY 50", u))
+
+    u = _quote_from_upstox(upstox_service, bank_key)
+    if u is None:
+        u = yahoo_map.get("banknifty")
+    rows.append(_row_payload("banknifty", "BANKNIFTY", u))
+
+    u = _vix_level_from_upstox(upstox_service, vix_key)
+    if u is None:
+        u = yahoo_map.get("indiavix") or _yahoo_chart_last_only(YAHOO_SYMBOLS["indiavix"])
+    rows.append(_row_payload("indiavix", "INDIA VIX", u))
+
     return rows
 
 
