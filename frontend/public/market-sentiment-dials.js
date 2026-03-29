@@ -62,10 +62,13 @@
 
     function pointerGroup(rotationDeg, gid, needleFill) {
         const f = needleFill || "#0f172a";
+        /* Double-pointed needle (kite): sharp tip toward the arc, smaller tip toward the hub */
+        const needlePath =
+            "M 0 -56 L 5.5 -6 L 0 9 L -5.5 -6 Z";
         return `
   <g transform="translate(${CX},${CY}) rotate(${rotationDeg})" filter="url(#ptrShadow_${gid})">
-    <polygon points="0,-4 -11,-54 11,-54" fill="${f}" stroke="#ffffff" stroke-width="1.2" stroke-linejoin="round"/>
-    <circle cx="0" cy="0" r="5.5" fill="#1e293b" stroke="#94a3b8" stroke-width="1"/>
+    <path d="${needlePath}" fill="${f}" stroke="#ffffff" stroke-width="1.15" stroke-linejoin="round"/>
+    <circle cx="0" cy="0" r="6" fill="#1e293b" stroke="#94a3b8" stroke-width="1"/>
   </g>`;
     }
 
