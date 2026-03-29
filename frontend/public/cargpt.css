@@ -480,7 +480,7 @@ body[data-theme="light"] .cargpt-help-icon-btn:hover {
     font-weight: 700;
 }
 
-/* Mobile: 2-col grid per card — Symbol|Signal, Date|Price, Cum Avg full width; no horizontal scroll */
+/* Mobile: Symbol|Signal default; tap row expands 52-wk+LTP + cum avg; no horizontal scroll */
 @media (max-width: 768px) {
     .cargpt-table-wrap {
         overflow-x: visible;
@@ -509,6 +509,8 @@ body[data-theme="light"] .cargpt-help-icon-btn:hover {
         margin-bottom: 12px;
         overflow: hidden;
         background: rgba(15, 23, 42, 0.45);
+        cursor: pointer;
+        -webkit-tap-highlight-color: rgba(59, 130, 246, 0.15);
     }
 
     .cargpt-table tbody tr:hover td {
@@ -521,6 +523,25 @@ body[data-theme="light"] .cargpt-help-icon-btn:hover {
         word-break: break-word;
         overflow-wrap: anywhere;
         min-width: 0;
+    }
+
+    /* Collapsed: only Symbol + Signal */
+    .cargpt-table tbody tr.cargpt-mobile-collapsed td:nth-child(2),
+    .cargpt-table tbody tr.cargpt-mobile-collapsed td:nth-child(3),
+    .cargpt-table tbody tr.cargpt-mobile-collapsed td:nth-child(4) {
+        display: none !important;
+    }
+
+    .cargpt-table tbody tr.cargpt-mobile-collapsed td:nth-child(1) {
+        border-bottom: none;
+    }
+
+    .cargpt-table tbody tr.cargpt-mobile-collapsed td:nth-child(5) {
+        border-bottom: none;
+    }
+
+    .cargpt-table tbody tr .cargpt-symbol-link {
+        cursor: pointer;
     }
 
     /* Row 1: Symbol | Signal */
@@ -538,7 +559,7 @@ body[data-theme="light"] .cargpt-help-icon-btn:hover {
         text-align: center;
     }
 
-    /* Row 2: 52W high date | Current price */
+    /* Row 2: 52-wk high | LTP */
     .cargpt-table tbody td:nth-child(2) {
         grid-column: 1;
         grid-row: 2;
@@ -574,15 +595,15 @@ body[data-theme="light"] .cargpt-help-icon-btn:hover {
     }
 
     .cargpt-table tbody td:nth-child(2)::before {
-        content: "52 Week High Date";
+        content: "52-wk high";
     }
 
     .cargpt-table tbody td:nth-child(3)::before {
-        content: "Current Price";
+        content: "LTP";
     }
 
     .cargpt-table tbody td:nth-child(4)::before {
-        content: "Last 10 Day Cumulative Avg";
+        content: "Last 10 day cum. avg";
     }
 
     .cargpt-table tbody td:nth-child(5)::before {

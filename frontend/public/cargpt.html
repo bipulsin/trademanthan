@@ -8,7 +8,7 @@
     <script src="auth-check.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="left-menu.css?v=3.12">
-    <link rel="stylesheet" href="cargpt.css?v=1.7">
+    <link rel="stylesheet" href="cargpt.css?v=1.8">
     <link rel="stylesheet" href="theme.css?v=1.3">
 </head>
 <body class="cargpt-body">
@@ -63,8 +63,8 @@
                                         <thead>
                                             <tr>
                                                 <th>Symbol</th>
-                                                <th>52 Week High Date</th>
-                                                <th>Current Price</th>
+                                                <th>52-wk high</th>
+                                                <th>LTP</th>
                                                 <th>Last 10 Day Cumulative Avg</th>
                                                 <th>Signal</th>
                                             </tr>
@@ -104,8 +104,8 @@
                                         <thead>
                                             <tr>
                                                 <th>Symbol</th>
-                                                <th>52 Week High Date</th>
-                                                <th>Current Price</th>
+                                                <th>52-wk high</th>
+                                                <th>LTP</th>
                                                 <th>Last 10 Day Cumulative Avg</th>
                                                 <th>Signal</th>
                                             </tr>
@@ -201,7 +201,7 @@
             </div>
             <div class="cargpt-dma-popup-body">
                 <table class="cargpt-dma-popup-table">
-                    <tr><td>Current Price</td><td id="cargptDmaCurrentPrice">—</td><td id="cargptDmaCurrentPriceCheck">—</td></tr>
+                    <tr><td>LTP</td><td id="cargptDmaCurrentPrice">—</td><td id="cargptDmaCurrentPriceCheck">—</td></tr>
                     <tr><td>50-DMA</td><td id="cargptDma50">—</td><td id="cargptDma50Check">—</td></tr>
                     <tr><td>100-DMA</td><td id="cargptDma100">—</td><td id="cargptDma100Check">—</td></tr>
                     <tr><td>200-DMA</td><td id="cargptDma200">—</td><td id="cargptDma200Check">—</td></tr>
@@ -490,7 +490,7 @@
                 const signalClass = displaySignal.includes('BUY') ? 'cargpt-signal-buy' : 'cargpt-signal-avoid';
                 const err = row.error ? '<br><small style="color: var(--cargpt-avoid);">' + (row.error || '') + '</small>' : '';
                 html += `
-                    <tr>
+                    <tr class="cargpt-mobile-collapsed" aria-expanded="false" title="Tap to show details">
                         <td><span class="cargpt-symbol-link" data-symbol="${sym(row)}" role="button" tabindex="0">${sym(row)}</span></td>
                         <td>${row.week_52_high_date || '-'}${err}</td>
                         <td>${row.current_price != null ? '₹' + row.current_price : '-'}</td>
@@ -566,6 +566,7 @@
             const link = e.target.closest('.cargpt-symbol-link');
             if (!link) return;
             e.preventDefault();
+            e.stopPropagation();
             const symbol = link.getAttribute('data-symbol') || '';
             const tbody = link.closest('tbody');
             const tableBodyId = tbody ? tbody.id : '';
@@ -577,11 +578,26 @@
             const link = e.target.closest('.cargpt-symbol-link');
             if (link && (e.key === 'Enter' || e.key === ' ')) {
                 e.preventDefault();
+                e.stopPropagation();
                 const symbol = link.getAttribute('data-symbol') || '';
                 const tbody = link.closest('tbody');
                 const row = getRowDataForSymbol(symbol, tbody ? tbody.id : '');
                 showDmaPopup(row);
             }
+        });
+
+        /** Mobile: collapsed rows show Symbol+Signal only; tap row to expand/collapse detail cells */
+        document.addEventListener('click', function(e) {
+            try {
+                if (!window.matchMedia('(max-width: 768px)').matches) return;
+                if (e.target.closest('.cargpt-symbol-link')) return;
+                const tr = e.target.closest('.cargpt-table tbody tr');
+                if (!tr) return;
+                tr.classList.toggle('cargpt-mobile-collapsed');
+                const collapsed = tr.classList.contains('cargpt-mobile-collapsed');
+                tr.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+                tr.setAttribute('title', collapsed ? 'Tap to show details' : 'Tap to hide details');
+            } catch (err) { /* ignore */ }
         });
         document.getElementById('cargptDmaPopupClose').addEventListener('click', closeDmaPopup);
         document.getElementById('cargptDmaPopupOverlay').addEventListener('click', function(e) {
