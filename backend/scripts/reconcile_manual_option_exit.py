@@ -37,6 +37,18 @@ DEFAULT_TARGETS: List[Tuple[str, float, str]] = [
 ]
 
 
+def _row_matches_contract(row, stock_name: str, strike: float, opt_type: str) -> bool:
+    """Match by option_strike when set; else by option_contract text (strike is often 0 in DB)."""
+    if (row.option_type or "").upper() != opt_type.upper():
+        return False
+    if row.option_strike is not None and float(row.option_strike) > 1.0:
+        return abs(float(row.option_strike) - strike) < 0.02
+    oc = (row.option_contract or "").replace(" ", "")
+    # e.g. "INDHOTEL550PE28APR26" or "INDHOTEL 550 PE 28 APR 26"
+    strike_s = str(int(strike)) if strike == int(strike) else str(strike).rstrip("0").rstrip(".")
+    return strike_s in oc or str(int(strike)) in oc
+
+
 def _parse_sell_map(items: List[str]) -> Dict[str, float]:
     out: Dict[str, float] = {}
     for item in items:
@@ -69,6 +81,11 @@ def main() -> None:
         "--also-sold-vwap",
         action="store_true",
         help="Update rows already status=sold with stock_vwap_cross (fix bad prior exit rows)",
+    )
+    parser.add_argument(
+        "--use-sell-column",
+        action="store_true",
+        help="Use existing sell_price on the row (mark-to-market LTP) when --sell not given; less accurate than broker fill",
     )
     args = parser.parse_args()
 
@@ -112,12 +129,7 @@ def main() -> None:
                 IntradayStockOption.trade_date >= day,
                 IntradayStockOption.trade_date < day_end,
             )
-            # Strike match (float)
-            rows = [
-                r
-                for r in q.all()
-                if r.option_strike is not None and abs(float(r.option_strike) - strike) < 0.02
-            ]
+            rows = [r for r in q.all() if _row_matches_contract(r, stock_name, strike, opt_type)]
             if not rows:
                 print(f"[{stock_name} {strike} {opt_type}] No row for {day.date()}")
                 continue
@@ -138,6 +150,9 @@ def main() -> None:
             sell_price: Optional[float] = None
             if stock_name in sell_map:
                 sell_price = sell_map[stock_name]
+            elif args.use_sell_column and row.sell_price and float(row.sell_price) > 0:
+                sell_price = float(row.sell_price)
+                print(f"[{stock_name}] Using row sell_price column: ₹{sell_price:.2f}")
             elif args.fetch_ltp and row.instrument_key and upstox:
                 qd = upstox.get_market_quote_by_key(row.instrument_key)
                 if qd and qd.get("last_price"):
