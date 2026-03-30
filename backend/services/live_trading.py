@@ -10,6 +10,10 @@ from backend.services.upstox_service import upstox_service
 
 logger = logging.getLogger(__name__)
 
+# Upstox `product` on v2/order/place: D = Delivery (CNC equity / NRML-style carry for F&O), I = Intraday (MIS).
+# All live MARKET/LIMIT option orders must use Delivery (D), not Intraday (I).
+UPSTOX_ORDER_PRODUCT = "D"
+
 # After broker accepts a BUY, poll until filled or cancel and fall back (LIMIT can stay open).
 ENTRY_FILL_WAIT_SEC = 90.0
 ENTRY_FILL_POLL_SEC = 1.5
@@ -99,7 +103,7 @@ def place_live_upstox_limit_buy_at_ltp(
     option_contract: str,
     buy_price: float,
     tag: Optional[str] = None,
-    product: str = "I",
+    product: str = UPSTOX_ORDER_PRODUCT,
 ) -> Dict[str, Any]:
     """
     LIMIT BUY at the smallest tick >= LTP (aggressive) for scrips that reject MARKET orders.
@@ -159,7 +163,7 @@ def place_live_upstox_limit_buy_at_price(
     option_contract: str,
     limit_price: float,
     tag: Optional[str] = None,
-    product: str = "I",
+    product: str = UPSTOX_ORDER_PRODUCT,
 ) -> Dict[str, Any]:
     """
     LIMIT BUY at an explicit price (rounded to instrument tick).
@@ -220,7 +224,7 @@ def place_live_upstox_order(
     stock_name: str,
     option_contract: str,
     tag: Optional[str] = None,
-    product: str = "I",
+    product: str = UPSTOX_ORDER_PRODUCT,
 ) -> Dict[str, Any]:
     if not is_trading_live_enabled():
         return {"success": False, "skipped": True, "error": "Live trading disabled"}
@@ -551,7 +555,7 @@ def place_live_upstox_entry_market_first(
                             option_contract=option_contract,
                             limit_price=raw_limit,
                             tag=lim_tag,
-                            product="I",
+                            product=UPSTOX_ORDER_PRODUCT,
                         )
                         if lim_first.get("skipped"):
                             return lim_first
@@ -615,7 +619,7 @@ def place_live_upstox_entry_market_first(
         stock_name=stock_name,
         option_contract=option_contract,
         tag=market_tag,
-        product="I",
+        product=UPSTOX_ORDER_PRODUCT,
     )
     m_err = market_res.get("error") or "Market BUY failed"
     market_accepted_no_fill = False
@@ -659,7 +663,7 @@ def place_live_upstox_entry_market_first(
             option_contract=option_contract,
             buy_price=buy_price,
             tag=limit_tag,
-            product="I",
+            product=UPSTOX_ORDER_PRODUCT,
         )
         if limit_res.get("skipped"):
             return limit_res
@@ -696,7 +700,7 @@ def place_live_upstox_entry_market_first(
             option_contract=option_contract,
             buy_price=buy_price,
             tag=limit_tag,
-            product="I",
+            product=UPSTOX_ORDER_PRODUCT,
         )
         if limit_res.get("skipped"):
             return limit_res
@@ -814,7 +818,7 @@ def place_live_upstox_gtt_entry(
         entry_price=buy_price,
         stop_loss=stop_loss,
         target_price=target_price,
-        product="D"
+        product=UPSTOX_ORDER_PRODUCT,
     )
 
     if result.get("success"):
@@ -867,7 +871,7 @@ def place_live_upstox_exit(
             stock_name=stock_name,
             option_contract=option_contract,
             tag=tag or f"exit_gtt_legacy|ref:{oid}"[:256],
-            product="D",
+            product=UPSTOX_ORDER_PRODUCT,
         )
         if sell_result.get("success"):
             return {
@@ -890,7 +894,7 @@ def place_live_upstox_exit(
             "sell": sell_result,
         }
 
-    # Primary path: market SELL (same product as market BUY entry)
+    # Primary path: market SELL (Delivery — must match BUY product at broker)
     exit_tag = tag or f"exit|ref_buy:{oid}"
     if len(exit_tag) > 250:
         exit_tag = exit_tag[:250]
@@ -901,7 +905,7 @@ def place_live_upstox_exit(
         stock_name=stock_name,
         option_contract=option_contract,
         tag=exit_tag,
-        product="I",
+        product=UPSTOX_ORDER_PRODUCT,
     )
     if sell_result.get("success"):
         logger.warning(
