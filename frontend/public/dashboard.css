@@ -1355,9 +1355,46 @@ body[data-theme="dark"] .market-sentiment-value {
 .sentiment-dials-toolbar {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
+    justify-content: space-between;
     gap: 0.5rem;
     margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.sentiment-basis-toggle {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid rgba(148, 163, 184, 0.4);
+    border-radius: 999px;
+    background: rgba(241, 245, 249, 0.75);
+    padding: 2px;
+    gap: 2px;
+}
+
+.sentiment-basis-btn {
+    border: none;
+    background: transparent;
+    color: #475569;
+    font-size: 0.72rem;
+    font-weight: 600;
+    border-radius: 999px;
+    padding: 0.32rem 0.6rem;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.sentiment-basis-btn.active {
+    background: #2563eb;
+    color: #ffffff;
+}
+
+body[data-theme="dark"] .sentiment-basis-toggle {
+    border-color: rgba(148, 163, 184, 0.28);
+    background: rgba(15, 23, 42, 0.62);
+}
+
+body[data-theme="dark"] .sentiment-basis-btn {
+    color: #cbd5e1;
 }
 
 .sentiment-dials-updated {
@@ -1381,6 +1418,10 @@ body[data-theme="dark"] .sentiment-dials-updated {
 }
 
 @media (max-width: 900px) {
+    .sentiment-dials-toolbar {
+        justify-content: center;
+    }
+
     .market-sentiment-dials-grid {
         display: flex;
         overflow-x: auto;

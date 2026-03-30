@@ -33,6 +33,12 @@ def _pct_from_open(last: float, open_: float) -> Optional[float]:
     return None
 
 
+def _pct_from_ref(last: float, ref_price: float) -> Optional[float]:
+    if ref_price and ref_price > 0 and last is not None and last > 0:
+        return round((float(last) - float(ref_price)) / float(ref_price) * 100.0, 4)
+    return None
+
+
 def _vix_level_from_upstox(upstox_service, instrument_key: str) -> Optional[Dict[str, Any]]:
     """India VIX spot (LTP) for 0–35 dial; open/pct optional."""
     try:
@@ -98,24 +104,34 @@ def _yahoo_chart_last_only(yahoo_symbol: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def _quote_from_upstox(upstox_service, instrument_key: str) -> Optional[Dict[str, Any]]:
+def _quote_from_upstox(upstox_service, instrument_key: str, basis: str = "today") -> Optional[Dict[str, Any]]:
     try:
         q = upstox_service.get_market_quote_by_key(instrument_key)
         if not q:
             return None
         last = float(q.get("last_price") or 0)
         ohlc = q.get("ohlc") or {}
-        day_open = float(q.get("open") or ohlc.get("open") or 0)
-        if day_open <= 0:
-            return None
         if last <= 0:
             return None
-        pct = _pct_from_open(last, day_open)
+
+        basis_norm = str(basis or "today").strip().lower()
+        if basis_norm == "yesterday":
+            ref = float(q.get("close_price") or ohlc.get("close") or 0)
+            ref_label = "previous_close"
+        else:
+            ref = float(q.get("open") or ohlc.get("open") or 0)
+            ref_label = "today_open"
+
+        if ref <= 0:
+            return None
+        pct = _pct_from_ref(last, ref)
         if pct is None:
             return None
         return {
             "last": last,
-            "open": day_open,
+            "open": ref,
+            "reference_price": ref,
+            "reference_label": ref_label,
             "pct_change": pct,
             "source": "upstox",
         }
@@ -124,8 +140,8 @@ def _quote_from_upstox(upstox_service, instrument_key: str) -> Optional[Dict[str
         return None
 
 
-def _yahoo_chart_pct(yahoo_symbol: str) -> Optional[Dict[str, Any]]:
-    """Intraday % from session open via Yahoo Finance chart API (v8)."""
+def _yahoo_chart_pct(yahoo_symbol: str, basis: str = "today") -> Optional[Dict[str, Any]]:
+    """% from today's open or previous close via Yahoo Finance chart API (v8)."""
     from urllib.parse import quote
 
     try:
@@ -151,18 +167,27 @@ def _yahoo_chart_pct(yahoo_symbol: str) -> Optional[Dict[str, Any]]:
         if price is None:
             return None
         price = float(price)
-        open_f = meta.get("regularMarketOpen")
-        if open_f is None or float(open_f) <= 0:
-            open_f = meta.get("chartPreviousClose") or meta.get("previousClose")
-        open_f = float(open_f) if open_f is not None else 0.0
-        if open_f <= 0:
+        basis_norm = str(basis or "today").strip().lower()
+        if basis_norm == "yesterday":
+            ref_f = meta.get("previousClose") or meta.get("chartPreviousClose")
+            ref_label = "previous_close"
+        else:
+            ref_f = meta.get("regularMarketOpen")
+            if ref_f is None or float(ref_f) <= 0:
+                ref_f = meta.get("chartPreviousClose") or meta.get("previousClose")
+            ref_label = "today_open"
+
+        ref_f = float(ref_f) if ref_f is not None else 0.0
+        if ref_f <= 0:
             return None
-        pct = _pct_from_open(price, open_f)
+        pct = _pct_from_ref(price, ref_f)
         if pct is None:
             return None
         return {
             "last": price,
-            "open": open_f,
+            "open": ref_f,
+            "reference_price": ref_f,
+            "reference_label": ref_label,
             "pct_change": pct,
             "source": "yahoo",
         }
@@ -171,11 +196,13 @@ def _yahoo_chart_pct(yahoo_symbol: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def _fetch_yahoo_batch() -> Dict[str, Dict[str, Any]]:
+def _fetch_yahoo_batch(basis: str = "today") -> Dict[str, Dict[str, Any]]:
     """Map id (nifty50, banknifty, indiavix) -> {last, open, pct_change, source}."""
     out: Dict[str, Dict[str, Any]] = {}
     for id_key, ysym in YAHOO_SYMBOLS.items():
-        row = _yahoo_chart_pct(ysym)
+        # Basis switch applies only to NIFTY/BANKNIFTY; VIX stays as current behavior.
+        row_basis = "today" if id_key == "indiavix" else basis
+        row = _yahoo_chart_pct(ysym, basis=row_basis)
         if row:
             out[id_key] = row
     return out
@@ -223,29 +250,38 @@ def _row_payload(
         "pct_change": data["pct_change"],
         "last": data["last"],
         "open": data["open"],
+        "reference_price": data.get("reference_price", data.get("open")),
+        "reference_label": data.get("reference_label", "today_open"),
         "source": data["source"],
     }
 
 
-def build_dial_rows(upstox_service) -> List[Dict[str, Any]]:
+def build_dial_rows(upstox_service, basis: str = "today") -> List[Dict[str, Any]]:
     """
     Returns three rows: NIFTY 50, BANKNIFTY (intraday % vs open), INDIA VIX (spot level for 0–35 dial).
     """
     nifty_key = upstox_service.NIFTY50_KEY
     bank_key = upstox_service.BANKNIFTY_KEY
     vix_key = getattr(upstox_service, "INDIA_VIX_KEY", "NSE_INDEX|India VIX")
-    yahoo_map = _fetch_yahoo_batch()
+    basis_norm = str(basis or "today").strip().lower()
+    if basis_norm not in ("today", "yesterday"):
+        basis_norm = "today"
+    yahoo_map = _fetch_yahoo_batch(basis=basis_norm)
     rows: List[Dict[str, Any]] = []
 
-    u = _quote_from_upstox(upstox_service, nifty_key)
+    u = _quote_from_upstox(upstox_service, nifty_key, basis=basis_norm)
     if u is None:
         u = yahoo_map.get("nifty50")
-    rows.append(_row_payload("nifty50", "NIFTY 50", u))
+    r = _row_payload("nifty50", "NIFTY 50", u)
+    r["basis"] = basis_norm
+    rows.append(r)
 
-    u = _quote_from_upstox(upstox_service, bank_key)
+    u = _quote_from_upstox(upstox_service, bank_key, basis=basis_norm)
     if u is None:
         u = yahoo_map.get("banknifty")
-    rows.append(_row_payload("banknifty", "BANKNIFTY", u))
+    r = _row_payload("banknifty", "BANKNIFTY", u)
+    r["basis"] = basis_norm
+    rows.append(r)
 
     u = _vix_level_from_upstox(upstox_service, vix_key)
     if u is None:

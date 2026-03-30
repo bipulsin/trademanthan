@@ -5659,18 +5659,25 @@ async def get_index_prices(db: Session = Depends(get_db)):
 
 
 @router.get("/market-sentiment-dials")
-async def market_sentiment_dials():
+async def market_sentiment_dials(basis: str = Query("today")):
     """
-    NIFTY 50, BANKNIFTY, INDIA VIX — intraday % change from session open.
+    NIFTY 50, BANKNIFTY, INDIA VIX dials.
+    basis=today => % from today's open (NIFTY/BANKNIFTY)
+    basis=yesterday => % from previous close (NIFTY/BANKNIFTY)
+    INDIA VIX remains spot dial (basis not applied).
     Uses Upstox quotes when available, else Yahoo Finance.
     """
     try:
-        indices = build_dial_rows(vwap_service)
+        basis_norm = str(basis or "today").strip().lower()
+        if basis_norm not in ("today", "yesterday"):
+            basis_norm = "today"
+        indices = build_dial_rows(vwap_service, basis=basis_norm)
         return JSONResponse(
             status_code=200,
             content={
                 "success": True,
                 "updated_at": utc_iso(),
+                "basis": basis_norm,
                 "scale_pct": {"min": -10, "max": 10},
                 "indices": indices,
             },

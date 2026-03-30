@@ -6,6 +6,7 @@
     const API = "/scan/market-sentiment-dials";
     const POLL_MS = 5 * 60 * 1000;
     let timer = null;
+    let currentBasis = "today";
 
     const CX = 100;
     const CY = 96;
@@ -174,11 +175,12 @@
 </svg>`;
     }
 
-    function render(indices, updatedAt) {
+    function render(indices, updatedAt, basis) {
         const grid = document.getElementById("marketSentimentDialsGrid");
         const elTime = document.getElementById("sentimentDialsUpdated");
         if (!grid) return;
         const isDark = document.body?.dataset?.theme === "dark";
+        const basisNorm = basis === "yesterday" ? "yesterday" : "today";
 
         if (elTime && updatedAt) {
             try {
@@ -217,7 +219,7 @@
                     const pct = row.pct_change;
                     chartHtml = dialSvgPct(pct, gid, isDark);
                     footerMain = formatPct(pct);
-                    footerMeta = "vs session open";
+                    footerMeta = basisNorm === "yesterday" ? "vs previous close" : "vs session open";
                     if (pct == null) cls = "neutral";
                     else if (Number(pct) < -3) cls = "negative";
                     else if (Number(pct) > 3) cls = "positive";
@@ -244,19 +246,30 @@
         if (!grid) return;
         grid.setAttribute("aria-busy", "true");
         try {
-            const res = await fetch(API, { cache: "no-store", credentials: "same-origin" });
+            const url = `${API}?basis=${encodeURIComponent(currentBasis)}`;
+            const res = await fetch(url, { cache: "no-store", credentials: "same-origin" });
             const data = await res.json();
             if (data.success && Array.isArray(data.indices)) {
-                render(data.indices, data.updated_at);
+                render(data.indices, data.updated_at, data.basis || currentBasis);
             } else {
-                render([], null);
+                render([], null, currentBasis);
             }
         } catch (e) {
             console.warn("market-sentiment-dials:", e);
-            render([], null);
+            render([], null, currentBasis);
         } finally {
             grid.removeAttribute("aria-busy");
         }
+    }
+
+    function applyBasisUI() {
+        const holder = document.getElementById("sentimentBasisToggle");
+        if (!holder) return;
+        holder.querySelectorAll(".sentiment-basis-btn").forEach((btn) => {
+            const on = btn.getAttribute("data-basis") === currentBasis;
+            btn.classList.toggle("active", on);
+            btn.setAttribute("aria-checked", on ? "true" : "false");
+        });
     }
 
     function startPolling() {
@@ -277,6 +290,21 @@
                 btn.setAttribute("disabled", "disabled");
                 fetchDials().finally(() => btn.removeAttribute("disabled"));
             });
+        }
+
+        const basisToggle = document.getElementById("sentimentBasisToggle");
+        if (basisToggle) {
+            basisToggle.addEventListener("click", (e) => {
+                const btnBasis = e.target.closest(".sentiment-basis-btn");
+                if (!btnBasis) return;
+                const nextBasis = btnBasis.getAttribute("data-basis");
+                if (nextBasis !== "today" && nextBasis !== "yesterday") return;
+                if (nextBasis === currentBasis) return;
+                currentBasis = nextBasis;
+                applyBasisUI();
+                fetchDials();
+            });
+            applyBasisUI();
         }
 
         document.addEventListener("visibilitychange", () => {

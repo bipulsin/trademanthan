@@ -10,7 +10,7 @@
     <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
     <script src="auth-check.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="stylesheet" href="dashboard.css?v=1.8">
+    <link rel="stylesheet" href="dashboard.css?v=1.9">
     <link rel="stylesheet" href="left-menu.css?v=3.13">
     <link rel="stylesheet" href="theme.css?v=1.3">
 </head>
@@ -39,6 +39,10 @@
                     <div class="card-content">
                         <div class="market-sentiment-dials" id="marketSentimentDials">
                             <div class="sentiment-dials-toolbar">
+                                <div class="sentiment-basis-toggle" id="sentimentBasisToggle" role="radiogroup" aria-label="Market sentiment basis">
+                                    <button type="button" class="sentiment-basis-btn" data-basis="yesterday" role="radio" aria-checked="false">Basis Yesterday</button>
+                                    <button type="button" class="sentiment-basis-btn active" data-basis="today" role="radio" aria-checked="true">Today</button>
+                                </div>
                                 <span class="sentiment-dials-updated" id="sentimentDialsUpdated">—</span>
                                 <button type="button" class="btn-icon" id="sentimentDialsRefresh" title="Refresh indices" aria-label="Refresh market sentiment">
                                     <i class="fas fa-sync-alt"></i>
@@ -285,7 +289,7 @@
 
     <script src="left-menu.js?v=3.14"></script>
     <script src="dashboard.js?v=1.2"></script>
-    <script src="market-sentiment-dials.js?v=1.5"></script>
+    <script src="market-sentiment-dials.js?v=1.6"></script>
     <script src="dashboard-sector-movers.js?v=1.2"></script>
     <script src="crypto-prices.js?v=1.4"></script>
     <script src="version.js?v=1.0"></script>
