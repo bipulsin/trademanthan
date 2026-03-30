@@ -2882,6 +2882,10 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                     logger.debug(f"⏭️ Cycle {cycle_number} - Skipping VWAP slope calculation for {stock_name} - already exited with reason: {trade.exit_reason}")
                     processed_count += 1
                     continue
+                if getattr(trade, "status", None) == "sold":
+                    logger.debug(f"⏭️ Cycle {cycle_number} - Skipping {stock_name} - status=sold (defense in depth)")
+                    processed_count += 1
+                    continue
                 
                 # #region agent log
                 # Log each record being processed and its status
@@ -3565,7 +3569,10 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                 # ====================================================================
                 # After recalculating candle size and determining option contract,
                 # check if all entry conditions are met
-                if trade.status == 'no_entry' or trade.status == 'alert_received':
+                # Never re-enter already exited positions (defense in depth)
+                if trade.status == 'sold' or trade.exit_reason is not None:
+                    pass  # Do not run live entry below
+                elif trade.status == 'no_entry' or trade.status == 'alert_received':
                     # Check index trends
                     index_trends = vwap_service.check_index_trends()
                     nifty_trend = index_trends.get("nifty_trend", "unknown")

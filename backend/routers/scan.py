@@ -3222,6 +3222,17 @@ async def process_all_today_stocks(db: Session = Depends(get_db)):
             try:
                 stock_name = trade.stock_name
                 instrument_key = trade.instrument_key
+
+                # Never re-open exits: /process-all-today-stocks must not overwrite sold/closed rows
+                if getattr(trade, "status", None) == "sold":
+                    logger.info(f"⏭️ Skipping {stock_name} - already exited (status=sold)")
+                    continue
+                if getattr(trade, "status", None) == "cancelled":
+                    logger.info(f"⏭️ Skipping {stock_name} - cancelled")
+                    continue
+                if getattr(trade, "exit_reason", None) is not None:
+                    logger.info(f"⏭️ Skipping {stock_name} - has exit_reason={trade.exit_reason!r}")
+                    continue
                 
                 # Skip if already has buy_price and status is 'bought'
                 if trade.buy_price and trade.status == 'bought':
