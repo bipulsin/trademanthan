@@ -789,6 +789,8 @@ function renderAlertGroup(alert, type) {
                             statusDisplay = '<span style="background: #f59e0b; color: black; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">⏰ EXITED-TM</span>';
                         } else if (stock.exit_reason === 'stock_vwap_cross' || stock.exit_reason === 'Exit-VWAP Cross') {
                             statusDisplay = '<span style="background: #8b5cf6; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">📉 EXITED-VW</span>';
+                        } else if (stock.exit_reason === 'manual') {
+                            statusDisplay = '<span style="background: #64748b; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">✋ EXIT-MANUAL</span>';
                         } else if (stock.exit_reason) {
                             statusDisplay = '<span style="background: #6b7280; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">✖ EXITED</span>';
                         } else {
@@ -952,6 +954,8 @@ function renderAlertGroup(alert, type) {
                         statusDisplay = '<span style="background: #f59e0b; color: black; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXT-TM</span>';
                     } else if (stock.exit_reason === 'stock_vwap_cross' || stock.exit_reason === 'Exit-VWAP Cross') {
                         statusDisplay = '<span style="background: #8b5cf6; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXD-VW</span>';
+                    } else if (stock.exit_reason === 'manual') {
+                        statusDisplay = '<span style="background: #64748b; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EX-MN</span>';
                     } else if (stock.exit_reason) {
                         statusDisplay = '<span style="background: #6b7280; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXD</span>';
                     }
