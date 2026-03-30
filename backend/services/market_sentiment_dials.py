@@ -214,8 +214,6 @@ def _yahoo_chart_pct(yahoo_symbol: str, basis: str = "today") -> Optional[Dict[s
             ref_label = "previous_close"
         else:
             ref_f = meta.get("regularMarketOpen")
-            if ref_f is None or float(ref_f) <= 0:
-                ref_f = meta.get("chartPreviousClose") or meta.get("previousClose")
             ref_label = "today_open"
 
         ref_f = float(ref_f) if ref_f is not None else 0.0
