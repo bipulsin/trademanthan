@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import requests
+import pytz
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +117,9 @@ def _quote_from_upstox(upstox_service, instrument_key: str, basis: str = "today"
 
         basis_norm = str(basis or "today").strip().lower()
         if basis_norm == "yesterday":
-            ref = float(q.get("close_price") or ohlc.get("close") or 0)
+            # For "Basis Yesterday", do NOT use market-quote close directly because it may
+            # represent today's close/last post-market on some feeds.
+            ref = float(_previous_trading_close_from_upstox(upstox_service, instrument_key) or 0)
             ref_label = "previous_close"
         else:
             ref = float(q.get("open") or ohlc.get("open") or 0)
@@ -137,6 +140,44 @@ def _quote_from_upstox(upstox_service, instrument_key: str, basis: str = "today"
         }
     except Exception as e:
         logger.warning("Upstox quote failed for %s: %s", instrument_key, e)
+        return None
+
+
+def _previous_trading_close_from_upstox(upstox_service, instrument_key: str) -> Optional[float]:
+    """
+    Previous trading-day close from daily candles.
+    Prefers the most recent candle strictly before today IST.
+    """
+    try:
+        candles = upstox_service.get_historical_candles_by_instrument_key(
+            instrument_key, interval="days/1", days_back=10
+        )
+        if not candles:
+            return None
+
+        ist_today = datetime.now(pytz.timezone("Asia/Kolkata")).date()
+        dated: List[tuple[Any, float]] = []
+        for c in candles:
+            ts = str(c.get("timestamp") or "")
+            cl = float(c.get("close") or 0)
+            if len(ts) < 10 or cl <= 0:
+                continue
+            d = ts[:10]
+            dated.append((d, cl))
+
+        if not dated:
+            return None
+
+        # Prefer candle date < today (true previous trading day close)
+        prev = [cl for d, cl in dated if d < ist_today.isoformat()]
+        if prev:
+            return float(prev[-1])
+
+        # Fallback: second latest close when all candles are "today/unknown"
+        if len(dated) >= 2:
+            return float(dated[-2][1])
+        return None
+    except Exception:
         return None
 
 
@@ -269,16 +310,19 @@ def build_dial_rows(upstox_service, basis: str = "today") -> List[Dict[str, Any]
     yahoo_map = _fetch_yahoo_batch(basis=basis_norm)
     rows: List[Dict[str, Any]] = []
 
-    u = _quote_from_upstox(upstox_service, nifty_key, basis=basis_norm)
-    if u is None:
-        u = yahoo_map.get("nifty50")
+    if basis_norm == "yesterday":
+        # For yesterday-basis, prefer Yahoo previousClose semantics first.
+        u = yahoo_map.get("nifty50") or _quote_from_upstox(upstox_service, nifty_key, basis=basis_norm)
+    else:
+        u = _quote_from_upstox(upstox_service, nifty_key, basis=basis_norm) or yahoo_map.get("nifty50")
     r = _row_payload("nifty50", "NIFTY 50", u)
     r["basis"] = basis_norm
     rows.append(r)
 
-    u = _quote_from_upstox(upstox_service, bank_key, basis=basis_norm)
-    if u is None:
-        u = yahoo_map.get("banknifty")
+    if basis_norm == "yesterday":
+        u = yahoo_map.get("banknifty") or _quote_from_upstox(upstox_service, bank_key, basis=basis_norm)
+    else:
+        u = _quote_from_upstox(upstox_service, bank_key, basis=basis_norm) or yahoo_map.get("banknifty")
     r = _row_payload("banknifty", "BANKNIFTY", u)
     r["basis"] = basis_norm
     rows.append(r)
