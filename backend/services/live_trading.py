@@ -530,7 +530,8 @@ def apply_broker_buy_fill_to_intraday_trade(db, trade) -> bool:
     row: Optional[Dict[str, Any]] = None
     oid = (getattr(trade, "buy_order_id", None) or "").strip()
 
-    if oid:
+    # GTT parent ids are not valid for v2/order/details — use order book below
+    if oid and not oid.upper().startswith("GTT"):
         det = upstox_service.get_order_details(oid)
         cand = _row_from_order_details_api(det)
         if cand and _order_row_is_complete_buy(cand) and _broker_buy_row_average_price(cand):
