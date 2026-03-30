@@ -356,7 +356,7 @@ def update_vwap_for_all_open_positions():
         
         # Import VWAP service
         try:
-            from services.upstox_service import upstox_service
+            from backend.services.upstox_service import upstox_service
             vwap_service = upstox_service
             logger.debug(f"✅ VWAP service imported successfully")
         except ImportError as import_err:
@@ -2527,7 +2527,7 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
         except ImportError:
             try:
                 # Fallback for different import paths
-                from services.upstox_service import upstox_service
+                from backend.services.upstox_service import upstox_service
                 vwap_service = upstox_service
             except ImportError:
                 logger.error("Could not import upstox_service")
@@ -3997,7 +3997,7 @@ def update_10_15_alert_stocks_at_10_30():
         
         # Import VWAP service
         try:
-            from services.upstox_service import upstox_service
+            from backend.services.upstox_service import upstox_service
             vwap_service = upstox_service
         except ImportError:
             logger.error("Could not import upstox_service")
@@ -4171,9 +4171,10 @@ def close_all_open_trades():
     Close all open trades at 3:25 PM (before market close)
     Sets exit_reason = 'time_based', status = 'sold', sell_time = now
     """
-    from database import SessionLocal
-    from models.trading import IntradayStockOption
-    from services.upstox_service import upstox_service as vwap_service
+    # Must use backend.* so this runs under `uvicorn backend.main:app` (project root on sys.path).
+    from backend.database import SessionLocal
+    from backend.models.trading import IntradayStockOption
+    from backend.services.upstox_service import upstox_service as vwap_service
     import pytz
     
     logger.info("🔔 3:25 PM - Closing all open trades (End of Day)")
@@ -4602,7 +4603,7 @@ def update_end_of_day_vwap():
         
         # Import VWAP service
         try:
-            from services.upstox_service import upstox_service
+            from backend.services.upstox_service import upstox_service
             vwap_service = upstox_service
         except ImportError:
             logger.error("Could not import upstox_service")
