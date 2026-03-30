@@ -502,6 +502,158 @@ def sync_trade_buy_fill_from_broker(db, trade) -> bool:
     return updated
 
 
+def apply_broker_buy_fill_to_intraday_trade(db, trade) -> bool:
+    """
+    Find today's completed BUY on Upstox for this row's instrument_key (or buy_order_id),
+    then set status=bought, buy_price (average fill), buy_time, buy_order_id, option_ltp,
+    qty when missing on the row, stop_loss default 5% below buy, pnl=0, clear no_entry_reason.
+
+    Use when the broker filled the order but the app row is still no_entry / alert_received
+    or needs alignment with the actual fill. Skips when status is already sold.
+    Does not require trading_live YES — only a valid API token.
+    """
+    from sqlalchemy.orm.attributes import flag_modified
+    import pytz
+
+    _ = db
+
+    if not upstox_service or not getattr(upstox_service, "access_token", None):
+        return False
+    if getattr(trade, "status", None) == "sold":
+        return False
+    ikey = (getattr(trade, "instrument_key", None) or "").strip()
+    if not ikey:
+        return False
+
+    qty_target = int(getattr(trade, "qty", None) or 0)
+
+    row: Optional[Dict[str, Any]] = None
+    oid = (getattr(trade, "buy_order_id", None) or "").strip()
+
+    if oid:
+        det = upstox_service.get_order_details(oid)
+        cand = _row_from_order_details_api(det)
+        if cand and _order_row_is_complete_buy(cand) and _broker_buy_row_average_price(cand):
+            fq = int(float(cand.get("filled_quantity") or 0))
+            if qty_target <= 0 or fq >= qty_target * 0.99:
+                row = cand
+
+    ob = upstox_service.get_order_book_today()
+    orders_list: List[Dict[str, Any]] = [
+        o for o in (ob.get("orders") or []) if isinstance(o, dict)
+    ]
+
+    if row is None and oid and orders_list:
+        for o in orders_list:
+            if str(o.get("order_id", "")) != str(oid):
+                continue
+            if _order_row_is_complete_buy(o) and _broker_buy_row_average_price(o):
+                fq = int(float(o.get("filled_quantity") or 0))
+                if qty_target <= 0 or fq >= qty_target * 0.99:
+                    row = o
+                    break
+
+    if row is None and orders_list:
+        ist = pytz.timezone("Asia/Kolkata")
+        buy_time = getattr(trade, "buy_time", None)
+        if buy_time:
+            if buy_time.tzinfo is None:
+                buy_time = ist.localize(buy_time)
+            else:
+                buy_time = buy_time.astimezone(ist)
+        buy_naive = buy_time.replace(tzinfo=None) if buy_time else None
+
+        def _ob_ts(o: Dict[str, Any]) -> datetime:
+            s = o.get("order_timestamp") or o.get("exchange_timestamp") or ""
+            try:
+                return datetime.strptime(str(s)[:19], "%Y-%m-%d %H:%M:%S")
+            except (TypeError, ValueError):
+                return datetime.min
+
+        candidates: List[Dict[str, Any]] = []
+        for o in orders_list:
+            if (o.get("instrument_token") or "") != ikey:
+                continue
+            if (o.get("transaction_type") or "").upper() != "BUY":
+                continue
+            if not _order_row_is_complete_buy(o):
+                continue
+            ap = _broker_buy_row_average_price(o)
+            if not ap:
+                continue
+            fq = int(float(o.get("filled_quantity") or 0))
+            if qty_target > 0 and fq < qty_target * 0.99:
+                continue
+            candidates.append(o)
+
+        if candidates:
+            candidates.sort(key=_ob_ts, reverse=True)
+            if buy_naive:
+                narrowed = [
+                    c
+                    for c in candidates
+                    if _ob_ts(c) >= buy_naive - timedelta(minutes=15)
+                ]
+                if narrowed:
+                    candidates = narrowed
+            row = candidates[0]
+
+    if row is None:
+        return False
+
+    new_avg = _broker_buy_row_average_price(row)
+    if not new_avg or new_avg <= 0:
+        return False
+
+    fill_oid = str(row.get("order_id") or row.get("order_ref_id") or "").strip()
+    fq = int(float(row.get("filled_quantity") or 0))
+    if fq <= 0:
+        return False
+
+    if qty_target <= 0:
+        trade.qty = fq
+        flag_modified(trade, "qty")
+
+    ts = row.get("order_timestamp") or row.get("exchange_timestamp") or ""
+    ist = pytz.timezone("Asia/Kolkata")
+    try:
+        buy_dt = datetime.strptime(str(ts)[:19], "%Y-%m-%d %H:%M:%S")
+        buy_dt = ist.localize(buy_dt)
+    except (TypeError, ValueError):
+        buy_dt = datetime.now(ist)
+
+    trade.status = "bought"
+    trade.buy_price = round(new_avg, 2)
+    trade.option_ltp = trade.buy_price
+    if fill_oid:
+        trade.buy_order_id = fill_oid
+    trade.buy_time = buy_dt
+    trade.pnl = 0.0
+    trade.no_entry_reason = None
+    trade.exit_reason = None
+    if not getattr(trade, "stop_loss", None) or float(trade.stop_loss or 0) <= 0:
+        trade.stop_loss = round(float(trade.buy_price) * 0.95, 2)
+        flag_modified(trade, "stop_loss")
+
+    flag_modified(trade, "status")
+    flag_modified(trade, "buy_price")
+    flag_modified(trade, "option_ltp")
+    flag_modified(trade, "buy_order_id")
+    flag_modified(trade, "buy_time")
+    flag_modified(trade, "pnl")
+    flag_modified(trade, "no_entry_reason")
+    flag_modified(trade, "exit_reason")
+
+    logger.info(
+        "📌 apply_broker_buy_fill: %s marked bought @ ₹%.2f qty=%s order_id=%s",
+        getattr(trade, "stock_name", "?"),
+        new_avg,
+        trade.qty,
+        fill_oid or "none",
+    )
+    return True
+
+
 def _order_row_is_complete_sell(row: Dict[str, Any]) -> bool:
     if (row.get("transaction_type") or "").upper() != "SELL":
         return False
