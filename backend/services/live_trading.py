@@ -502,6 +502,141 @@ def sync_trade_buy_fill_from_broker(db, trade) -> bool:
     return updated
 
 
+def _order_row_is_complete_sell(row: Dict[str, Any]) -> bool:
+    if (row.get("transaction_type") or "").upper() != "SELL":
+        return False
+    st = (row.get("status") or "").lower().strip()
+    if "cancel" in st or "reject" in st:
+        return False
+    if st in ("complete", "filled"):
+        return True
+    return "complete" in st
+
+
+def sync_manual_exit_sell_price_from_broker(db, trade) -> bool:
+    """
+    For exit_reason='manual', refresh sell_price and pnl from Upstox SELL fill average.
+    Uses sell_order_id via get_order_details when set; else matches today's order book
+    (same instrument_key, SELL, filled qty).
+    Does not require trading_live YES — only a valid API token.
+    """
+    from sqlalchemy.orm.attributes import flag_modified
+    import pytz
+
+    _ = db
+
+    if not upstox_service or not getattr(upstox_service, "access_token", None):
+        return False
+    if getattr(trade, "exit_reason", None) != "manual":
+        return False
+    if getattr(trade, "status", None) != "sold":
+        return False
+    qty = int(getattr(trade, "qty", None) or 0)
+    if qty <= 0:
+        return False
+    ikey = (getattr(trade, "instrument_key", None) or "").strip()
+    if not ikey:
+        return False
+
+    new_sell: Optional[float] = None
+    sell_oid = (getattr(trade, "sell_order_id", None) or "").strip()
+
+    if sell_oid:
+        det = upstox_service.get_order_details(sell_oid)
+        cand = _row_from_order_details_api(det)
+        if cand and _order_row_is_complete_sell(cand):
+            fq = int(float(cand.get("filled_quantity") or 0))
+            if fq >= qty * 0.99:
+                new_sell = _broker_buy_row_average_price(cand)
+
+    ob = upstox_service.get_order_book_today()
+    orders_list: List[Dict[str, Any]] = [
+        o for o in (ob.get("orders") or []) if isinstance(o, dict)
+    ]
+
+    if new_sell is None and sell_oid and orders_list:
+        for o in orders_list:
+            if str(o.get("order_id", "")) != str(sell_oid):
+                continue
+            if _order_row_is_complete_sell(o):
+                ap = _broker_buy_row_average_price(o)
+                fq = int(float(o.get("filled_quantity") or 0))
+                if ap and ap > 0 and fq >= qty * 0.99:
+                    new_sell = ap
+                    break
+
+    if new_sell is None and orders_list:
+        ist = pytz.timezone("Asia/Kolkata")
+        sell_time = getattr(trade, "sell_time", None)
+        if sell_time:
+            if sell_time.tzinfo is None:
+                sell_time = ist.localize(sell_time)
+            else:
+                sell_time = sell_time.astimezone(ist)
+        sell_naive = sell_time.replace(tzinfo=None) if sell_time else None
+
+        def _ob_ts(o: Dict[str, Any]) -> datetime:
+            s = o.get("order_timestamp") or o.get("exchange_timestamp") or ""
+            try:
+                return datetime.strptime(str(s)[:19], "%Y-%m-%d %H:%M:%S")
+            except (TypeError, ValueError):
+                return datetime.min
+
+        candidates: List[Dict[str, Any]] = []
+        for o in orders_list:
+            if (o.get("instrument_token") or "") != ikey:
+                continue
+            if (o.get("transaction_type") or "").upper() != "SELL":
+                continue
+            if not _order_row_is_complete_sell(o):
+                continue
+            ap = _broker_buy_row_average_price(o)
+            if not ap:
+                continue
+            fq = int(float(o.get("filled_quantity") or 0))
+            if fq < qty * 0.99:
+                continue
+            candidates.append(o)
+
+        if candidates:
+            if sell_naive:
+                narrowed = [
+                    c
+                    for c in candidates
+                    if _ob_ts(c) >= sell_naive - timedelta(minutes=180)
+                ]
+                if narrowed:
+                    candidates = narrowed
+            candidates.sort(key=_ob_ts, reverse=True)
+            best = candidates[0]
+            new_sell = _broker_buy_row_average_price(best)
+
+    if new_sell is None or new_sell <= 0:
+        return False
+
+    old = float(trade.sell_price or 0)
+    if abs(old - new_sell) < 0.005:
+        return False
+
+    trade.sell_price = round(new_sell, 2)
+    trade.option_ltp = trade.sell_price
+    if trade.buy_price and trade.qty:
+        trade.pnl = round(
+            (float(trade.sell_price) - float(trade.buy_price)) * int(trade.qty),
+            2,
+        )
+        flag_modified(trade, "pnl")
+    flag_modified(trade, "sell_price")
+    flag_modified(trade, "option_ltp")
+    logger.info(
+        "📌 Manual exit sell sync: %s sell_price ₹%.2f → ₹%.2f (broker)",
+        getattr(trade, "stock_name", "?"),
+        old,
+        new_sell,
+    )
+    return True
+
+
 def place_live_upstox_entry_market_first(
     instrument_key: str,
     qty: int,

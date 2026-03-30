@@ -367,6 +367,35 @@ def update_vwap_for_all_open_positions():
             import traceback
             logger.error(traceback.format_exc())
             return
+
+        # Manual exits (reconcile script / app): refresh sell_price & PnL from broker SELL average
+        try:
+            manual_exits = db.query(IntradayStockOption).filter(
+                and_(
+                    IntradayStockOption.trade_date >= today,
+                    IntradayStockOption.trade_date < today + timedelta(days=1),
+                    IntradayStockOption.exit_reason == "manual",
+                    IntradayStockOption.status == "sold",
+                )
+            ).all()
+            n_manual_sync = 0
+            for mrow in manual_exits:
+                try:
+                    if live_trading.sync_manual_exit_sell_price_from_broker(db, mrow):
+                        n_manual_sync += 1
+                except Exception as sync_err:
+                    logger.warning(
+                        "Manual exit sell sync failed for %s: %s",
+                        getattr(mrow, "stock_name", "?"),
+                        sync_err,
+                    )
+            if n_manual_sync:
+                logger.info(
+                    "✅ Manual exit sell_price sync from broker: %s row(s) updated (hourly VWAP job)",
+                    n_manual_sync,
+                )
+        except Exception as manual_block_err:
+            logger.warning("Manual exit sell sync block failed: %s", manual_block_err)
         
         # ═══════════════════════════════════════════════════════════════
         # RE-EVALUATE "no_entry" TRADES: Check if conditions are now met
