@@ -267,8 +267,8 @@ def _previous_trading_close_from_upstox_index(instrument_key: str) -> Optional[f
 
 def _sector_pct_from_upstox(label: str) -> Optional[Dict[str, Any]]:
     """
-    Compute sector index % change vs previous close using Upstox:
-    pct = (last - prev_close) / prev_close * 100
+    Compute sector index % using strict close-to-close:
+    pct = (latest_trading_close - previous_trading_close) / previous_trading_close * 100
     """
     try:
         if not upstox_service or not getattr(upstox_service, "access_token", None):
@@ -276,18 +276,30 @@ def _sector_pct_from_upstox(label: str) -> Optional[Dict[str, Any]]:
         ikey = UPSTOX_SECTOR_INDEX_KEYS.get(str(label or "").strip())
         if not ikey:
             return None
-        q = upstox_service.get_market_quote_by_key(ikey)
-        if not q:
+
+        # Strictly use daily candle closes (latest and previous trading day).
+        candles = upstox_service.get_historical_candles_by_instrument_key(
+            ikey, interval="days/1", days_back=15
+        ) or []
+        parsed: List[tuple[Any, float]] = []
+        for c in candles:
+            ts = str(c.get("timestamp") or "")
+            cl = float(c.get("close") or 0)
+            if len(ts) < 10 or cl <= 0:
+                continue
+            d = datetime.strptime(ts[:10], "%Y-%m-%d").date()
+            parsed.append((d, cl))
+        if len(parsed) < 2:
             return None
-        last = float(q.get("last_price") or 0)
-        if last <= 0:
+        parsed.sort(key=lambda x: x[0])
+        latest_close = float(parsed[-1][1])
+        prev_close = float(parsed[-2][1])
+        if latest_close <= 0 or prev_close <= 0:
             return None
-        prev_close = _previous_trading_close_from_upstox_index(ikey)
-        if not prev_close or prev_close <= 0:
-            return None
-        pct = round((last - prev_close) / prev_close * 100.0, 4)
+
+        pct = round((latest_close - prev_close) / prev_close * 100.0, 4)
         return {
-            "last": last,
+            "last": latest_close,
             "open": prev_close,
             "pct_change": pct,
             "source": "upstox",
