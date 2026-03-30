@@ -96,29 +96,55 @@ class GoogleOAuthCodeRequest(BaseModel):
     code: str
     redirect_uri: Optional[str] = None
 
-# Google OAuth configuration (uses settings for default)
-GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID") or settings.GOOGLE_CLIENT_ID
-GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+# Google OAuth endpoints
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
+
+
+def _get_google_oauth_credentials() -> tuple[str, str]:
+    """
+    Resolve Google OAuth credentials on each request.
+    - Client ID can come from env or settings fallback.
+    - Client secret must come from env (or non-placeholder settings) for code-exchange flow.
+    """
+    client_id = (os.getenv("GOOGLE_CLIENT_ID") or settings.GOOGLE_CLIENT_ID or "").strip()
+    client_secret = (os.getenv("GOOGLE_CLIENT_SECRET") or settings.GOOGLE_CLIENT_SECRET or "").strip()
+    # Ignore placeholder defaults
+    if client_secret.lower().startswith("your_google_client_secret"):
+        client_secret = ""
+    return client_id, client_secret
 
 @router.get("/config")
 async def get_oauth_config():
     """Return public OAuth config for frontend (client_id, redirect_uri, domain)"""
+    google_client_id, _ = _get_google_oauth_credentials()
     return {
-        "google_client_id": GOOGLE_CLIENT_ID or "",
+        "google_client_id": google_client_id or "",
         "redirect_uri": settings.GOOGLE_REDIRECT_URI,
         "domain": settings.DOMAIN,
     }
 
-# Only validate Google OAuth credentials when actually needed (not during import)
-def validate_google_oauth():
-    """Validate Google OAuth credentials - call this before using OAuth endpoints"""
-    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+
+def validate_google_id_token_login() -> str:
+    """Validate Google client id for JWT credential verification flow (/auth/google)."""
+    google_client_id, _ = _get_google_oauth_credentials()
+    if not google_client_id:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Google OAuth is not configured. GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set in environment variables"
+            detail="Google OAuth is not configured. GOOGLE_CLIENT_ID must be set in environment variables",
         )
+    return google_client_id
+
+
+def validate_google_code_exchange_login() -> tuple[str, str]:
+    """Validate Google client id+secret for authorization-code flow (/auth/google-code)."""
+    google_client_id, google_client_secret = _get_google_oauth_credentials()
+    if not google_client_id or not google_client_secret:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Google OAuth code flow is not configured. GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set in environment variables",
+        )
+    return google_client_id, google_client_secret
 
 def resolve_google_redirect_uri(requested_redirect_uri: Optional[str]) -> str:
     """Allow redirect URIs only from trusted hosted login pages."""
@@ -152,7 +178,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
 @router.post("/google")
 async def google_oauth(request: GoogleOAuthRequest, db: Session = Depends(get_db)):
     """Handle Google OAuth login/signup using JWT credential"""
-    validate_google_oauth()  # Validate credentials before use
+    google_client_id = validate_google_id_token_login()
     try:
         # Verify the JWT credential with Google
         verify_url = f"https://oauth2.googleapis.com/tokeninfo?id_token={request.credential}"
@@ -164,7 +190,7 @@ async def google_oauth(request: GoogleOAuthRequest, db: Session = Depends(get_db
         userinfo = response.json()
         
         # Verify the audience matches our client ID
-        if userinfo.get('aud') != GOOGLE_CLIENT_ID:
+        if userinfo.get('aud') != google_client_id:
             raise HTTPException(status_code=400, detail="Invalid client ID")
         
         # Check if user exists
@@ -218,7 +244,7 @@ async def google_oauth(request: GoogleOAuthRequest, db: Session = Depends(get_db
 @router.post("/google-verify")
 async def google_oauth_verify(user_data: dict, db: Session = Depends(get_db)):
     """Handle Google OAuth verification from frontend"""
-    validate_google_oauth()  # Validate credentials before use
+    validate_google_id_token_login()
     try:
         google_id = user_data.get('google_id')
         email = user_data.get('email')
@@ -316,14 +342,14 @@ async def google_oauth_verify(user_data: dict, db: Session = Depends(get_db)):
 @router.post("/google-code")
 async def google_oauth_code(request: GoogleOAuthCodeRequest, db: Session = Depends(get_db)):
     """Handle Google OAuth code exchange for mobile browsers"""
-    validate_google_oauth()  # Validate credentials before use
+    google_client_id, google_client_secret = validate_google_code_exchange_login()
     try:
         redirect_uri = resolve_google_redirect_uri(request.redirect_uri)
 
         # Exchange authorization code for access token
         token_response = requests.post(GOOGLE_TOKEN_URL, data={
-            'client_id': GOOGLE_CLIENT_ID,
-            'client_secret': GOOGLE_CLIENT_SECRET,
+            'client_id': google_client_id,
+            'client_secret': google_client_secret,
             'code': request.code,
             'grant_type': 'authorization_code',
             'redirect_uri': redirect_uri
