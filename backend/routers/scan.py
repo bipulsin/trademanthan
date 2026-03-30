@@ -5093,9 +5093,7 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                         buy_order_id=record.buy_order_id,
                                         tag=f"scan_st1_exit_stop_loss:{record.buy_order_id or 'no_buy_id'}"
                                     )
-                                    if not live_exit_result.get("skipped") and not live_exit_result.get("success"):
-                                        logger.error(f"🚨 LIVE EXIT FAILED (stop_loss) for {record.stock_name} - keeping trade OPEN")
-                                    else:
+                                    if live_exit_result.get("success"):
                                         record.sell_price = new_option_ltp
                                         record.sell_time = now
                                         record.exit_reason = 'stop_loss'
@@ -5105,6 +5103,10 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                             record.pnl = (new_option_ltp - record.buy_price) * record.qty
                                         logger.info(f"✅ APPLIED: STOP LOSS EXIT for {record.stock_name}: PnL=₹{record.pnl}")
                                         exit_applied = True
+                                    elif live_exit_result.get("skipped"):
+                                        logger.warning(f"⚠️ LIVE EXIT skipped (stop_loss) for {record.stock_name} — keeping trade OPEN")
+                                    else:
+                                        logger.error(f"🚨 LIVE EXIT FAILED (stop_loss) for {record.stock_name} - keeping trade OPEN")
                                 
                                 elif exit_conditions['vwap_cross']:
                                     live_exit_result = live_trading.place_live_upstox_exit(
@@ -5115,9 +5117,7 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                         buy_order_id=record.buy_order_id,
                                         tag=f"scan_st1_exit_vwap:{record.buy_order_id or 'no_buy_id'}"
                                     )
-                                    if not live_exit_result.get("skipped") and not live_exit_result.get("success"):
-                                        logger.error(f"🚨 LIVE EXIT FAILED (vwap_cross) for {record.stock_name} - keeping trade OPEN")
-                                    else:
+                                    if live_exit_result.get("success"):
                                         record.sell_price = new_option_ltp
                                         record.sell_time = now
                                         record.exit_reason = 'stock_vwap_cross'
@@ -5127,6 +5127,10 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                             record.pnl = (new_option_ltp - record.buy_price) * record.qty
                                         logger.info(f"✅ APPLIED: VWAP CROSS EXIT for {record.stock_name}: PnL=₹{record.pnl}")
                                         exit_applied = True
+                                    elif live_exit_result.get("skipped"):
+                                        logger.warning(f"⚠️ LIVE EXIT skipped (vwap_cross) for {record.stock_name} — keeping trade OPEN")
+                                    else:
+                                        logger.error(f"🚨 LIVE EXIT FAILED (vwap_cross) for {record.stock_name} - keeping trade OPEN")
                                 
                                 elif exit_conditions['profit_target']:
                                     live_exit_result = live_trading.place_live_upstox_exit(
@@ -5137,9 +5141,7 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                         buy_order_id=record.buy_order_id,
                                         tag=f"scan_st1_exit_target:{record.buy_order_id or 'no_buy_id'}"
                                     )
-                                    if not live_exit_result.get("skipped") and not live_exit_result.get("success"):
-                                        logger.error(f"🚨 LIVE EXIT FAILED (profit_target) for {record.stock_name} - keeping trade OPEN")
-                                    else:
+                                    if live_exit_result.get("success"):
                                         record.sell_price = new_option_ltp
                                         record.sell_time = now
                                         record.exit_reason = 'profit_target'
@@ -5149,6 +5151,10 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                             record.pnl = (new_option_ltp - record.buy_price) * record.qty
                                         logger.info(f"✅ APPLIED: PROFIT TARGET EXIT for {record.stock_name}: PnL=₹{record.pnl}")
                                         exit_applied = True
+                                    elif live_exit_result.get("skipped"):
+                                        logger.warning(f"⚠️ LIVE EXIT skipped (profit_target) for {record.stock_name} — keeping trade OPEN")
+                                    else:
+                                        logger.error(f"🚨 LIVE EXIT FAILED (profit_target) for {record.stock_name} - keeping trade OPEN")
                                 
                                 elif exit_conditions['time_based']:
                                     live_exit_result = live_trading.place_live_upstox_exit(
@@ -5159,9 +5165,7 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                         buy_order_id=record.buy_order_id,
                                         tag=f"scan_st1_exit_time:{record.buy_order_id or 'no_buy_id'}"
                                     )
-                                    if not live_exit_result.get("skipped") and not live_exit_result.get("success"):
-                                        logger.error(f"🚨 LIVE EXIT FAILED (time_based) for {record.stock_name} - keeping trade OPEN")
-                                    else:
+                                    if live_exit_result.get("success"):
                                         record.sell_price = new_option_ltp
                                         record.sell_time = now
                                         record.exit_reason = 'time_based'
@@ -5171,6 +5175,10 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                             record.pnl = (new_option_ltp - record.buy_price) * record.qty
                                         logger.info(f"✅ APPLIED: TIME EXIT for {record.stock_name}: PnL=₹{record.pnl}")
                                         exit_applied = True
+                                    elif live_exit_result.get("skipped"):
+                                        logger.warning(f"⚠️ LIVE EXIT skipped (time_based) for {record.stock_name} — keeping trade OPEN")
+                                    else:
+                                        logger.error(f"🚨 LIVE EXIT FAILED (time_based) for {record.stock_name} - keeping trade OPEN")
                                 
                                 # If no exit was applied, just update current price and PnL (trade still OPEN)
                                 if not exit_applied:

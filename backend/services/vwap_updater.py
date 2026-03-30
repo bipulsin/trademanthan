@@ -46,8 +46,16 @@ def _try_live_exit(position, reason: str, option_contract: str):
         buy_order_id=buy_order_id,
         tag=f"vwap_exit_{reason}:{buy_order_id}"
     )
+    # Never treat "skipped" as success — DB must not show EXIT-* unless broker SELL succeeded
+    # (skipped = live off or exit not attempted; success = market sell placed).
     if result.get("skipped"):
-        return True, None
+        logger.warning(
+            "⚠️ LIVE exit skipped for %s (%s) — not marking sold (reason=%s)",
+            getattr(position, "stock_name", "?"),
+            reason,
+            result.get("error") or "skipped",
+        )
+        return False, None
     if result.get("success"):
         return True, result.get("order_id")
     return False, None
