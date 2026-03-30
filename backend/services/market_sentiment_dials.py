@@ -203,7 +203,8 @@ def _yahoo_chart_pct(yahoo_symbol: str, basis: str = "today") -> Optional[Dict[s
         results = (data.get("chart") or {}).get("result") or []
         if not results:
             return None
-        meta = results[0].get("meta") or {}
+        result0 = results[0] or {}
+        meta = result0.get("meta") or {}
         price = meta.get("regularMarketPrice")
         if price is None:
             price = meta.get("previousClose")
@@ -216,6 +217,21 @@ def _yahoo_chart_pct(yahoo_symbol: str, basis: str = "today") -> Optional[Dict[s
             ref_label = "previous_close"
         else:
             ref_f = meta.get("regularMarketOpen")
+            # NSE index symbols often return regularMarketOpen=None after market hours.
+            # Fall back to latest available daily candle open (today's open).
+            if ref_f is None or float(ref_f) <= 0:
+                indicators = (result0.get("indicators") or {})
+                quotes = (indicators.get("quote") or [])
+                q0 = quotes[0] if quotes and isinstance(quotes[0], dict) else {}
+                opens = q0.get("open") or []
+                if isinstance(opens, list):
+                    for v in reversed(opens):
+                        try:
+                            if v is not None and float(v) > 0:
+                                ref_f = float(v)
+                                break
+                        except (TypeError, ValueError):
+                            continue
             ref_label = "today_open"
 
         ref_f = float(ref_f) if ref_f is not None else 0.0
