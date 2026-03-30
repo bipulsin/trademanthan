@@ -1376,11 +1376,60 @@ body[data-theme="dark"] .sentiment-dials-updated {
     align-items: start;
 }
 
+.sentiment-dials-scroll-hint {
+    display: none;
+}
+
 @media (max-width: 900px) {
     .market-sentiment-dials-grid {
-        grid-template-columns: 1fr;
-        max-width: 280px;
-        margin: 0 auto;
+        display: flex;
+        overflow-x: auto;
+        overflow-y: hidden;
+        gap: 0.6rem;
+        scroll-snap-type: x mandatory;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: thin;
+        padding: 0 0.1rem 0.1rem;
+    }
+
+    .market-sentiment-dials-grid::-webkit-scrollbar {
+        height: 5px;
+    }
+
+    .market-sentiment-dials-grid::-webkit-scrollbar-thumb {
+        background: rgba(148, 163, 184, 0.45);
+        border-radius: 999px;
+    }
+
+    .market-sentiment-dials-grid .sentiment-dial {
+        flex: 0 0 100%;
+        width: 100%;
+        max-width: 100%;
+        scroll-snap-align: center;
+    }
+
+    .sentiment-dials-scroll-hint {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 0.45rem;
+        margin-top: 0.4rem;
+        font-size: 0.76rem;
+        color: #64748b;
+    }
+
+    .sentiment-dials-scroll-hint-arrow {
+        color: #2563eb;
+        font-weight: 700;
+        font-size: 0.9rem;
+    }
+
+    body[data-theme="dark"] .sentiment-dials-scroll-hint {
+        color: #94a3b8;
+    }
+
+    body[data-theme="dark"] .sentiment-dials-scroll-hint-arrow {
+        color: #93c5fd;
     }
 }
 
