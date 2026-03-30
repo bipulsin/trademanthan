@@ -5,7 +5,6 @@ Used by dashboard Top Gainers & Losers (sectors).
 from __future__ import annotations
 
 import logging
-import json
 from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -212,39 +211,24 @@ def _norm(s: str) -> str:
     return "".join(ch for ch in str(s or "").upper() if ch.isalnum())
 
 
-@lru_cache(maxsize=1)
-def _load_upstox_sector_index_keys() -> Dict[str, str]:
-    """
-    Build normalized-name -> instrument_key mapping for NSE index instruments.
-    """
-    keys: Dict[str, str] = {}
-    try:
-        p: Path = get_instruments_file_path()
-        if not p.exists():
-            return keys
-        with open(p, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if not isinstance(data, list):
-            return keys
-        for inst in data:
-            if not isinstance(inst, dict):
-                continue
-            if str(inst.get("segment") or "").upper() != "NSE_INDEX":
-                continue
-            ikey = str(inst.get("instrument_key") or "").strip()
-            if not ikey:
-                continue
-            for raw in (
-                inst.get("name"),
-                inst.get("trading_symbol"),
-                inst.get("underlying_symbol"),
-            ):
-                n = _norm(str(raw or ""))
-                if n:
-                    keys.setdefault(n, ikey)
-    except Exception as e:
-        logger.debug("Could not load Upstox sector index keys: %s", e)
-    return keys
+# Static sector label -> Upstox index key map (avoid heavy runtime instruments-file scan).
+# Any unmapped sector automatically falls back to Yahoo in _fetch_one_sector.
+UPSTOX_SECTOR_INDEX_KEYS: Dict[str, str] = {
+    "Nifty Bank": "NSE_INDEX|Nifty Bank",
+    "Nifty IT": "NSE_INDEX|Nifty IT",
+    "Nifty Auto": "NSE_INDEX|Nifty Auto",
+    "Nifty Pharma": "NSE_INDEX|Nifty Pharma",
+    "Nifty FMCG": "NSE_INDEX|Nifty FMCG",
+    "Nifty Metal": "NSE_INDEX|Nifty Metal",
+    "Nifty Realty": "NSE_INDEX|Nifty Realty",
+    "Nifty Energy": "NSE_INDEX|Nifty Energy",
+    "Nifty Infra": "NSE_INDEX|Nifty Infra",
+    "Nifty PSU Bank": "NSE_INDEX|Nifty PSU Bank",
+    "Nifty Media": "NSE_INDEX|Nifty Media",
+    "Nifty Healthcare": "NSE_INDEX|NIFTY HEALTHCARE",
+    "Nifty Oil & Gas": "NSE_INDEX|NIFTY OIL AND GAS",
+    "Nifty Financial Services": "NSE_INDEX|Nifty Fin Service",
+}
 
 
 def _previous_trading_close_from_upstox_index(instrument_key: str) -> Optional[float]:
@@ -289,8 +273,7 @@ def _sector_pct_from_upstox(label: str) -> Optional[Dict[str, Any]]:
     try:
         if not upstox_service or not getattr(upstox_service, "access_token", None):
             return None
-        kmap = _load_upstox_sector_index_keys()
-        ikey = kmap.get(_norm(label))
+        ikey = UPSTOX_SECTOR_INDEX_KEYS.get(str(label or "").strip())
         if not ikey:
             return None
         q = upstox_service.get_market_quote_by_key(ikey)
