@@ -5,6 +5,7 @@ Consolidates all scan algorithm schedulers into a single controller:
 - Health Monitor (every 30 min from 8:39 AM to 4:09 PM)
 - VWAP Updater (hourly updates + cycles + EOD close)
 - Index Price Scheduler (every 5 min during market hours)
+- Entry slip monitor (every 15 min during market hours): cancel unfilled entry orders after 2 checks
 
 Note: Master Stock download from Dhan has been removed.
 
@@ -77,7 +78,8 @@ job_loggers = [
     logging.getLogger('backend.services.vwap_updater'),
     logging.getLogger('backend.services.health_monitor'),
     logging.getLogger('backend.services.index_price_scheduler'),
-    logging.getLogger('backend.routers.scan')  # Add scan router logger for webhook processing, option contracts, trades
+    logging.getLogger('backend.routers.scan'),  # Add scan router logger for webhook processing, option contracts, trades
+    logging.getLogger('backend.services.entry_slip_monitor'),
 ]
 
 for job_logger in job_loggers:
@@ -492,6 +494,26 @@ class ScanST1AlgoScheduler:
                 coalesce=True
             )
             logger.info("✅ Scheduled: Index Price at Market Open/Close (9:15 AM, 3:30 PM)")
+
+            def run_entry_slip_monitor_job():
+                logger.info("🔧 Triggering Entry Slip Monitor job (every 15 minutes)...")
+                try:
+                    result = run_entry_slip_monitor()
+                    logger.info("✅ Entry Slip Monitor job completed: %s", result)
+                except Exception as e:
+                    logger.error(f"❌ Entry Slip Monitor job failed: {e}", exc_info=True)
+
+            self.scheduler.add_job(
+                run_entry_slip_monitor_job,
+                trigger=IntervalTrigger(minutes=15),
+                id='scan_st1_entry_slip_monitor',
+                name='Entry Slip Monitor (Every 15 minutes)',
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=300,
+                coalesce=True,
+            )
+            logger.info("✅ Scheduled: Entry Slip Monitor (Every 15 minutes)")
 
             # 6. CAR NIFTY200 Updater - Every 3 hours (Yahoo first, Upstox fallback)
             def run_car_nifty200_update():

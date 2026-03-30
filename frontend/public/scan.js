@@ -85,6 +85,7 @@ function updateDaySummary(bullishData, bearishData) {
         let bullishTrades = 0;
         let bearishTrades = 0;
         let slExits = 0;
+        let slipExits = 0;
         let timeExits = 0;
         let targetExits = 0;
         let vwapExits = 0;
@@ -121,7 +122,9 @@ function updateDaySummary(bullishData, bearishData) {
                         // Count exits for any trade that has an exit_reason (even if it wasn't "entered" properly)
                         // This ensures we capture all exits including time_based exits at 3:25 PM
                         if (stock.exit_reason) {
-                            if (stock.exit_reason === 'stop_loss' || stock.exit_reason === 'Exit-SL') {
+                            if (stock.exit_reason === 'Exit-Slip') {
+                                slipExits++;
+                            } else if (stock.exit_reason === 'stop_loss' || stock.exit_reason === 'Exit-SL') {
                                 slExits++;
                             } else if (stock.exit_reason === 'time_based') {
                                 timeExits++;
@@ -166,7 +169,9 @@ function updateDaySummary(bullishData, bearishData) {
                         // This ensures we capture all exits including time_based exits at 3:25 PM
                         // Legacy vwap_updater values: Exit-SL, Exit-Target, Exit-VWAP Cross
                         if (stock.exit_reason) {
-                            if (stock.exit_reason === 'stop_loss' || stock.exit_reason === 'Exit-SL') {
+                            if (stock.exit_reason === 'Exit-Slip') {
+                                slipExits++;
+                            } else if (stock.exit_reason === 'stop_loss' || stock.exit_reason === 'Exit-SL') {
                                 slExits++;
                             } else if (stock.exit_reason === 'time_based') {
                                 timeExits++;
@@ -196,6 +201,7 @@ function updateDaySummary(bullishData, bearishData) {
         document.getElementById('summaryTargetExits').textContent = targetExits;
         document.getElementById('summaryVWAPExits').textContent = vwapExits;
         document.getElementById('summarySLExits').textContent = slExits;
+        document.getElementById('summarySlipExits').textContent = slipExits;
         document.getElementById('summaryTimeExits').textContent = timeExits;
         
         // Update quick stats (shown when collapsed)
@@ -771,8 +777,11 @@ function renderAlertGroup(alert, type) {
                         }
                         // Check if trade was already closed (has exit_reason from backend)
                         // Canonical: stop_loss, profit_target, time_based, stock_vwap_cross
+                        // Entry slip (unfilled order cancelled at broker after ~30m)
+                        else if (stock.exit_reason === 'Exit-Slip') {
+                            statusDisplay = '<span style="background: #ea580c; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">📉 EXIT-SLIP</span>';
                         // Legacy (vwap_updater): Exit-SL, Exit-Target, Exit-VWAP Cross
-                        else if (stock.exit_reason === 'stop_loss' || stock.exit_reason === 'Exit-SL') {
+                        } else if (stock.exit_reason === 'stop_loss' || stock.exit_reason === 'Exit-SL') {
                             statusDisplay = '<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">🛑 EXITED-SL</span>';
                         } else if (stock.exit_reason === 'profit_target' || stock.exit_reason === 'Exit-Target') {
                             statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">🎯 EXITED-TG</span>';
@@ -933,7 +942,9 @@ function renderAlertGroup(alert, type) {
                     const marketCloseMinutes = 15 * 60 + 30; // 3:30 PM IST (market close)
                     
                     // 1. EXIT REASON (backend) - check first so exited trades always show correct badge
-                    if (stock.exit_reason === 'stop_loss' || stock.exit_reason === 'Exit-SL') {
+                    if (stock.exit_reason === 'Exit-Slip') {
+                        statusDisplay = '<span style="background: #ea580c; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EX-SLIP</span>';
+                    } else if (stock.exit_reason === 'stop_loss' || stock.exit_reason === 'Exit-SL') {
                         statusDisplay = '<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXD-SL</span>';
                     } else if (stock.exit_reason === 'profit_target' || stock.exit_reason === 'Exit-Target') {
                         statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXD-TG</span>';

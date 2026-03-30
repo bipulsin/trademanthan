@@ -694,6 +694,39 @@ class UpstoxService:
             logger.error(f"❌ Exception cancelling order: {str(e)}")
             return {"success": False, "error": str(e)}
 
+    def get_short_term_positions(self) -> Dict[str, Any]:
+        """
+        Current short-term portfolio positions (F&O, intraday, etc.).
+        See: GET /v2/portfolio/short-term-positions
+        """
+        if not self.access_token:
+            return {"success": False, "error": "Missing access token", "positions": []}
+        url = "https://api.upstox.com/v2/portfolio/short-term-positions"
+        try:
+            response = self.make_api_request(
+                url=url,
+                method="GET",
+                timeout=15,
+                max_retries=2,
+            )
+            if response and response.get("status") == "success":
+                raw = response.get("data")
+                positions: List[Any] = []
+                if isinstance(raw, list):
+                    positions = raw
+                elif isinstance(raw, dict) and isinstance(raw.get("positions"), list):
+                    positions = raw["positions"]
+                return {"success": True, "positions": positions, "data": response}
+            return {
+                "success": False,
+                "error": response.get("message") if isinstance(response, dict) else "Positions failed",
+                "positions": [],
+                "data": response,
+            }
+        except Exception as e:
+            logger.error(f"❌ Exception fetching short-term positions: {str(e)}")
+            return {"success": False, "error": str(e), "positions": []}
+
     def cancel_gtt_order(self, gtt_order_id: str) -> Dict[str, Any]:
         """
         Cancel a GTT order by id (Upstox v3). IDs typically start with GTT-.

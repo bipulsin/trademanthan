@@ -108,7 +108,7 @@ async def lifespan(app: FastAPI):
             try:
                 start_scan_st1_algo()
                 logger.info("✅ Scan ST1 Algo Scheduler: STARTED")
-                logger.info("   - Consolidates: Instruments, Health Monitor, VWAP Updater, Index Price")
+                logger.info("   - Consolidates: Instruments, Health Monitor, VWAP Updater, Index Price, Entry slip monitor")
                 logger.info("   - Master Stock download from Dhan removed")
                 logger.info("   - All logs go to: logs/scan_st1_algo.log")
             except ImportError as import_err:

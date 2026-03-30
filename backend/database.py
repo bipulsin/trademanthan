@@ -258,5 +258,13 @@ def _run_startup_schema_migrations(db_engine):
                     print(f"car_nifty200 one-time seed: {seed_count} rows from arbitrage_master")
                 except Exception:
                     pass
+
+            if "intraday_stock_options" in table_names:
+                iso_columns = {col["name"] for col in inspector.get_columns("intraday_stock_options")}
+                if "entry_slip_checks" not in iso_columns:
+                    conn.execute(
+                        text("ALTER TABLE intraday_stock_options ADD COLUMN entry_slip_checks INTEGER DEFAULT 0")
+                    )
+                    print("Applied migration: added intraday_stock_options.entry_slip_checks")
     except Exception as migration_error:
         print(f"Warning: startup schema migration failed: {migration_error}")

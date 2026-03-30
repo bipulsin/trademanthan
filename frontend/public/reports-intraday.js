@@ -297,6 +297,9 @@
 
     function formatStatus(status, exitReason, noEntryReason) {
         const s = status ? String(status) : "";
+        if (exitReason === "Exit-Slip") {
+            return "EXIT-SLIP";
+        }
         if ((s === "sold" || s.includes("exit")) && exitReason) {
             const exitReasonMap = {
                 time_based: "EXITED-TM",
@@ -307,6 +310,7 @@
                 "Exit-VWAP Cross": "EXITED-VW",
                 "Exit-Target": "EXITED-TG",
                 "Exit-SL": "EXITED-SL",
+                "Exit-Slip": "EXIT-SLIP",
             };
             return exitReasonMap[exitReason] || "EXITED";
         }

@@ -83,10 +83,12 @@ class IntradayStockOption(Base):
     sell_time = Column(DateTime, nullable=True)
     sell_price = Column(Float, nullable=True)
     sell_order_id = Column(String(100), nullable=True)  # Upstox order_id for sell
-    exit_reason = Column(String(50), nullable=True)  # 'profit_target', 'stop_loss', 'time_based', 'stock_vwap_cross', 'manual'
+    exit_reason = Column(String(50), nullable=True)  # 'profit_target', 'stop_loss', 'time_based', 'stock_vwap_cross', 'manual', 'Exit-Slip'
     pnl = Column(Float, nullable=True)
     status = Column(String(50), default='alert_received')  # alert_received, bought, sold, cancelled
     no_entry_reason = Column(String(255), nullable=True)  # Short description of why trade was not entered (e.g., "Index alignment", "VWAP slope", "Candle size", "Time >= 3PM", "Missing option data")
+    # Entry slip monitor (15m scheduler): consecutive ticks without broker position while order pending
+    entry_slip_checks = Column(Integer, nullable=True, default=0)
     
     # Metadata
     trade_date = Column(DateTime, nullable=False, index=True)  # Trading date (not created date)
