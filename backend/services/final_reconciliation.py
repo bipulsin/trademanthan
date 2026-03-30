@@ -27,13 +27,18 @@ _EXIT_TM_CUTOFF = dt_time(15, 15)
 _EXIT_REASON_FINAL_RECON = "final_reconciliation"
 
 
-def run_final_reconciliation(force: bool = False) -> Dict[str, Any]:
+def run_final_reconciliation(
+    force: bool = False,
+    as_of_date: Optional[date_type] = None,
+) -> Dict[str, Any]:
     """
     For today's trades (status != no_entry):
     - bought: try broker exit (SELL fill) → sold + sell_price + sell_order_id + pnl
     - bought/sold: refresh buy/sell/PnL from broker
     Then set exit_reason to 'Exit-TM' when exit_reason was 'time_based' and sell_time >= 15:15 IST.
     Skips Sat/Sun unless force=True (manual /scan/run-final-reconciliation?force=true).
+
+    as_of_date: optional IST calendar day for trade_date filter (manual backfill); default is today IST.
 
     Returns a summary dict (for logging and /scan/run-final-reconciliation).
     """
