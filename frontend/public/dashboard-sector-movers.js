@@ -72,6 +72,9 @@
         const stocks = (data && data.stocks) || [];
         const mode = (data && data.mode) || "gainers";
         const heading = mode === "losers" ? "Bottom 3 losers" : "Top 3 gainers";
+        const subheading = data && data.fo_only
+            ? "F&O stocks only"
+            : "No F&O stocks found in this sector";
         if (!data || !data.success) {
             panel.innerHTML =
                 `<p class="sector-movers-panel-msg">${escapeHtml(data && data.message ? data.message : "Could not load stocks.")}</p>`;
@@ -83,17 +86,22 @@
         }
         panel.innerHTML =
             `<p class="sector-movers-panel-title">${heading}</p>` +
+            `<p class="sector-movers-panel-subtitle">${subheading}</p>` +
             `<ul class="sector-movers-stocks">` +
             stocks
                 .map((s) => {
                     const sym = escapeHtml(s.symbol || "");
+                    const hasFo = s.is_fo !== false;
+                    const foBadge = hasFo
+                        ? ""
+                        : `<span class="sector-movers-stock-fo-badge" title="Not available in F&O" aria-label="Not available in F&O">F</span>`;
                     const pctCls =
                         s.pct_change != null && Number(s.pct_change) >= 0
                             ? "sector-movers-stock-pct--up"
                             : "sector-movers-stock-pct--down";
                     return (
                         `<li>` +
-                        `<span class="sector-movers-stock-sym">${sym}</span>` +
+                        `<span class="sector-movers-stock-sym">${foBadge}${sym}</span>` +
                         `<span class="sector-movers-stock-ltp">₹${fmtLtp(s.ltp)}</span>` +
                         `<span class="sector-movers-stock-pct ${pctCls}">${fmtPct(s.pct_change)}</span>` +
                         `</li>`

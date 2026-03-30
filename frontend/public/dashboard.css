@@ -1726,6 +1726,12 @@ body[data-theme="dark"] .sector-movers-panel {
     color: #334155;
 }
 
+.sector-movers-panel-subtitle {
+    margin: 0 0 0.45rem 0;
+    font-size: 0.7rem;
+    color: #64748b;
+}
+
 body[data-theme="dark"] .sector-movers-panel-placeholder,
 body[data-theme="dark"] .sector-movers-panel-msg {
     color: #94a3b8;
@@ -1733,6 +1739,10 @@ body[data-theme="dark"] .sector-movers-panel-msg {
 
 body[data-theme="dark"] .sector-movers-panel-title {
     color: #cbd5e1;
+}
+
+body[data-theme="dark"] .sector-movers-panel-subtitle {
+    color: #94a3b8;
 }
 
 .sector-movers-stocks {
@@ -1755,10 +1765,38 @@ body[data-theme="dark"] .sector-movers-panel-title {
     font-weight: 700;
     color: #334155;
     min-width: 4.5rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
 }
 
 body[data-theme="dark"] .sector-movers-stock-sym {
     color: #e2e8f0;
+}
+
+.sector-movers-stock-fo-badge {
+    position: relative;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 1px solid #ef4444;
+    color: #ef4444;
+    font-size: 0.58rem;
+    line-height: 14px;
+    text-align: center;
+    font-weight: 700;
+    flex: 0 0 auto;
+}
+
+.sector-movers-stock-fo-badge::after {
+    content: "";
+    position: absolute;
+    left: 2px;
+    right: 2px;
+    top: 7px;
+    border-top: 1.5px solid #ef4444;
+    transform: rotate(-35deg);
+    transform-origin: center;
 }
 
 .sector-movers-stock-ltp {

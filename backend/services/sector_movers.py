@@ -5,11 +5,14 @@ Used by dashboard Top Gainers & Losers (sectors).
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from backend.services.market_sentiment_dials import _yahoo_chart_pct
+from backend.config import get_instruments_file_path
 
 logger = logging.getLogger(__name__)
 
@@ -262,6 +265,48 @@ def _fetch_one_equity_row(yahoo_sym: str) -> Optional[Dict[str, Any]]:
     }
 
 
+@lru_cache(maxsize=1)
+def _load_fo_underlyings() -> frozenset[str]:
+    """
+    Load equity underlyings available in NSE F&O from instruments file.
+    Uses option/future contracts to infer whether underlying stock is F&O tradable.
+    """
+    fo_names: set[str] = set()
+    try:
+        instruments_file: Path = get_instruments_file_path()
+        if not instruments_file.exists():
+            return frozenset()
+        import json
+
+        with open(instruments_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, list):
+            return frozenset()
+
+        for inst in data:
+            if not isinstance(inst, dict):
+                continue
+            seg = str(inst.get("segment") or "").upper()
+            it = str(inst.get("instrument_type") or "").upper()
+            if "NSE_FO" not in seg and "NFO" not in seg:
+                continue
+            if it not in ("CE", "PE", "FUT"):
+                continue
+            u = (inst.get("underlying_symbol") or inst.get("name") or "").strip().upper()
+            if u:
+                fo_names.add(u)
+    except Exception as e:
+        logger.debug("Could not load F&O underlyings: %s", e)
+    return frozenset(fo_names)
+
+
+def _is_fo_stock(symbol: str) -> bool:
+    base = (symbol or "").strip().upper()
+    if not base:
+        return False
+    return base in _load_fo_underlyings()
+
+
 def build_sector_stock_detail(sector_label: str, mode: str) -> Dict[str, Any]:
     """
     Stocks in ``SECTOR_STOCK_UNIVERSE`` for a sector label: top 3 by intraday % vs open
@@ -305,16 +350,22 @@ def build_sector_stock_detail(sector_label: str, mode: str) -> Dict[str, Any]:
             "stocks": [],
         }
 
-    rows.sort(key=lambda x: x["pct_change"], reverse=True)
+    for r in rows:
+        r["is_fo"] = _is_fo_stock(str(r.get("symbol") or ""))
+
+    fo_rows = [r for r in rows if r.get("is_fo")]
+    src_rows = fo_rows if fo_rows else rows
+    src_rows.sort(key=lambda x: x["pct_change"], reverse=True)
     if m == "gainers":
-        pick = rows[:3]
+        pick = src_rows[:3]
     else:
-        pick = sorted(rows, key=lambda x: x["pct_change"])[:3]
+        pick = sorted(src_rows, key=lambda x: x["pct_change"])[:3]
 
     return {
         "success": True,
         "updated_at": ts,
         "sector": label,
         "mode": m,
+        "fo_only": bool(fo_rows),
         "stocks": pick,
     }
