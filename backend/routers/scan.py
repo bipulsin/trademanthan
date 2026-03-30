@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Request, HTTPException, Depends, Query, BackgroundTasks
 from fastapi.responses import JSONResponse, RedirectResponse, PlainTextResponse
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -3539,6 +3539,26 @@ async def set_trading_live(toggle: TradingLiveToggle):
     return {
         "trading_live": updated_value
     }
+
+
+@router.post("/run-final-reconciliation")
+async def run_final_reconciliation_manual(
+    force: bool = Query(False),
+    as_of_date: Optional[date] = Query(
+        None,
+        description="IST calendar day for trade_date filter (backfill). Default: today IST.",
+    ),
+):
+    """
+    Run the same final reconciliation job as the 3:45 / 4:00 PM scheduler:
+    bought→sold from Upstox SELL fills, then broker buy/sell refresh, then Exit-TM tagging.
+    Returns JSON summary including bought_to_sold_rows.
+    Use force=true on weekends when you need a manual run (scheduled jobs still skip Sat/Sun).
+    """
+    from backend.services.final_reconciliation import run_final_reconciliation
+
+    summary = run_final_reconciliation(force=force, as_of_date=as_of_date)
+    return JSONResponse(content=summary)
 
 
 @router.post("/deploy-backend")

@@ -1,10 +1,14 @@
 """
 Final reconciliation (3:45 PM & 4:00 PM IST): align intraday_trade rows with Upstox fills
 and tag late time-based exits as Exit-TM.
+
+Also: for status=bought, detect completed SELL on Upstox for the same instrument/qty (today's
+order book) and close the row (bought→sold) with broker sell_price and sell_order_id.
 """
 
 import logging
-from datetime import datetime, timedelta, time as dt_time
+from datetime import date as date_type, datetime, timedelta, time as dt_time
+from typing import Any, Dict, List, Optional
 
 import pytz
 from sqlalchemy import and_
@@ -19,22 +23,45 @@ logger = logging.getLogger(__name__)
 # Time-based exits at/after 3:25 PM get exit_reason 'time_based'; after 3:15 PM we store 'Exit-TM'
 _EXIT_TM_CUTOFF = dt_time(15, 15)
 
+# When closing bought→sold from broker with no prior exit_reason
+_EXIT_REASON_FINAL_RECON = "final_reconciliation"
 
-def run_final_reconciliation() -> None:
+
+def run_final_reconciliation(force: bool = False) -> Dict[str, Any]:
     """
-    For today's trades (status != no_entry): refresh buy/sell/PnL from broker.
+    For today's trades (status != no_entry):
+    - bought: try broker exit (SELL fill) → sold + sell_price + sell_order_id + pnl
+    - bought/sold: refresh buy/sell/PnL from broker
     Then set exit_reason to 'Exit-TM' when exit_reason was 'time_based' and sell_time >= 15:15 IST.
-    Skips Sat/Sun.
+    Skips Sat/Sun unless force=True (manual /scan/run-final-reconciliation?force=true).
+
+    Returns a summary dict (for logging and /scan/run-final-reconciliation).
     """
+    result: Dict[str, Any] = {
+        "success": False,
+        "weekend_skipped": False,
+        "bought_to_sold": 0,
+        "bought_to_sold_rows": [],
+        "broker_refresh": 0,
+        "exit_tm": 0,
+    }
+
     ist = pytz.timezone("Asia/Kolkata")
     now = datetime.now(ist)
-    if now.weekday() >= 5:
+    if not force and now.weekday() >= 5:
         logger.info("📋 Final reconciliation: skipped (weekend)")
-        return
+        result["weekend_skipped"] = True
+        result["success"] = True
+        return result
 
     db = SessionLocal()
     try:
-        today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        if as_of_date is not None:
+            today = ist.localize(
+                datetime.combine(as_of_date, dt_time(0, 0, 0))
+            ).replace(hour=0, minute=0, second=0, microsecond=0)
+        else:
+            today = now.replace(hour=0, minute=0, second=0, microsecond=0)
         tomorrow = today + timedelta(days=1)
 
         rows = (
@@ -51,10 +78,43 @@ def run_final_reconciliation() -> None:
 
         if not rows:
             logger.info("📋 Final reconciliation: no rows for today")
-            return
+            result["success"] = True
+            return result
 
+        n_bought_to_sold = 0
+        bought_to_sold_rows: List[Dict[str, Any]] = []
         n_refresh = 0
         n_exit_tm = 0
+
+        for trade in rows:
+            try:
+                if getattr(trade, "status", None) == "bought":
+                    if live_trading.reconcile_intraday_exit_from_broker(
+                        db,
+                        trade,
+                        default_exit_reason=_EXIT_REASON_FINAL_RECON,
+                    ):
+                        n_bought_to_sold += 1
+                        st_sell = getattr(trade, "sell_time", None)
+                        bought_to_sold_rows.append(
+                            {
+                                "id": trade.id,
+                                "stock_name": getattr(trade, "stock_name", None),
+                                "status": getattr(trade, "status", None),
+                                "sell_order_id": getattr(trade, "sell_order_id", None),
+                                "sell_price": getattr(trade, "sell_price", None),
+                                "sell_time": st_sell.isoformat() if st_sell is not None else None,
+                                "buy_price": getattr(trade, "buy_price", None),
+                                "pnl": getattr(trade, "pnl", None),
+                                "exit_reason": getattr(trade, "exit_reason", None),
+                            }
+                        )
+            except Exception as ex:
+                logger.warning(
+                    "Final recon bought→sold failed for %s: %s",
+                    getattr(trade, "stock_name", "?"),
+                    ex,
+                )
 
         for trade in rows:
             try:
@@ -100,13 +160,26 @@ def run_final_reconciliation() -> None:
                 )
 
         db.commit()
+        result["success"] = True
+        result["trade_date"] = today.date().isoformat()
+        result["bought_to_sold"] = n_bought_to_sold
+        result["bought_to_sold_rows"] = bought_to_sold_rows
+        result["broker_refresh"] = n_refresh
+        result["exit_tm"] = n_exit_tm
         logger.info(
-            "📋 Final reconciliation done: %s row(s) broker fields updated, %s → Exit-TM",
+            "📋 Final reconciliation done (trade_date %s IST): bought→sold=%s %s, broker_refresh=%s, Exit-TM=%s",
+            today.date().isoformat(),
+            n_bought_to_sold,
+            bought_to_sold_rows,
             n_refresh,
             n_exit_tm,
         )
+        return result
     except Exception as e:
         logger.error("Final reconciliation failed: %s", e, exc_info=True)
         db.rollback()
+        result["success"] = False
+        result["error"] = str(e)
+        return result
     finally:
         db.close()

@@ -72,6 +72,13 @@ def is_trading_live_enabled() -> bool:
     return trading_live == "YES"
 
 
+def _instrument_key_match(stored: Optional[str], api_instrument_token: Any) -> bool:
+    """Match DB instrument_key to Upstox order instrument_token (pipe vs slash in storage)."""
+    a = (stored or "").strip().replace("/", "|")
+    b = str(api_instrument_token or "").strip().replace("/", "|")
+    return bool(a) and a == b
+
+
 def _market_orders_disallowed_by_upstox(order_result: Dict[str, Any]) -> bool:
     """True when Upstox rejects MARKET because the scrip disallows market orders (e.g. UDAPI100500)."""
     parts: list[str] = []
@@ -425,7 +432,7 @@ def sync_trade_buy_fill_from_broker(db, trade) -> bool:
 
         candidates: List[Dict[str, Any]] = []
         for o in orders_list:
-            if (o.get("instrument_token") or "") != trade.instrument_key:
+            if not _instrument_key_match(getattr(trade, "instrument_key", None), o.get("instrument_token")):
                 continue
             if (o.get("transaction_type") or "").upper() != "BUY":
                 continue
@@ -600,7 +607,7 @@ def _final_recon_sync_buy_avg_from_broker(trade, qty: int) -> bool:
 
         candidates: List[Dict[str, Any]] = []
         for o in orders_list:
-            if (o.get("instrument_token") or "") != trade.instrument_key:
+            if not _instrument_key_match(ikey, o.get("instrument_token")):
                 continue
             if (o.get("transaction_type") or "").upper() != "BUY":
                 continue
@@ -717,7 +724,7 @@ def _final_recon_sync_sell_avg_from_broker(trade, qty: int) -> bool:
 
         candidates: List[Dict[str, Any]] = []
         for o in orders_list:
-            if (o.get("instrument_token") or "") != ikey:
+            if not _instrument_key_match(ikey, o.get("instrument_token")):
                 continue
             if (o.get("transaction_type") or "").upper() != "SELL":
                 continue
@@ -841,7 +848,7 @@ def apply_broker_buy_fill_to_intraday_trade(db, trade) -> bool:
 
         candidates: List[Dict[str, Any]] = []
         for o in orders_list:
-            if (o.get("instrument_token") or "") != ikey:
+            if not _instrument_key_match(ikey, o.get("instrument_token")):
                 continue
             if (o.get("transaction_type") or "").upper() != "BUY":
                 continue
@@ -1005,7 +1012,7 @@ def sync_manual_exit_sell_price_from_broker(db, trade) -> bool:
 
         candidates: List[Dict[str, Any]] = []
         for o in orders_list:
-            if (o.get("instrument_token") or "") != ikey:
+            if not _instrument_key_match(ikey, o.get("instrument_token")):
                 continue
             if (o.get("transaction_type") or "").upper() != "SELL":
                 continue
@@ -1098,7 +1105,11 @@ def reconcile_intraday_exit_from_broker(
     if sell_oid and not sell_oid.upper().startswith("GTT"):
         det = upstox_service.get_order_details(sell_oid)
         cand = _row_from_order_details_api(det)
-        if cand and _order_row_is_complete_sell(cand):
+        if (
+            cand
+            and _order_row_is_complete_sell(cand)
+            and _instrument_key_match(ikey, cand.get("instrument_token"))
+        ):
             fq = int(float(cand.get("filled_quantity") or 0))
             if fq >= qty * 0.99:
                 ap = _broker_buy_row_average_price(cand)
@@ -1114,6 +1125,8 @@ def reconcile_intraday_exit_from_broker(
     if new_sell is None and sell_oid and orders_list:
         for o in orders_list:
             if str(o.get("order_id", "")) != str(sell_oid):
+                continue
+            if not _instrument_key_match(ikey, o.get("instrument_token")):
                 continue
             if _order_row_is_complete_sell(o):
                 ap = _broker_buy_row_average_price(o)
@@ -1142,7 +1155,7 @@ def reconcile_intraday_exit_from_broker(
 
         candidates: List[Dict[str, Any]] = []
         for o in orders_list:
-            if (o.get("instrument_token") or "") != ikey:
+            if not _instrument_key_match(ikey, o.get("instrument_token")):
                 continue
             if (o.get("transaction_type") or "").upper() != "SELL":
                 continue
@@ -1157,6 +1170,21 @@ def reconcile_intraday_exit_from_broker(
             candidates.append(o)
 
         if candidates:
+            if st == "bought":
+                buy_time_bt = getattr(trade, "buy_time", None)
+                if buy_time_bt:
+                    if buy_time_bt.tzinfo is None:
+                        buy_time_bt = ist.localize(buy_time_bt)
+                    else:
+                        buy_time_bt = buy_time_bt.astimezone(ist)
+                    buy_naive_bt = buy_time_bt.replace(tzinfo=None)
+                    after_buy = [
+                        c
+                        for c in candidates
+                        if _ob_ts(c) >= buy_naive_bt - timedelta(minutes=2)
+                    ]
+                    if after_buy:
+                        candidates = after_buy
             if sell_naive:
                 narrowed = [
                     c
