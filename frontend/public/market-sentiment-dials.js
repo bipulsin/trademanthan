@@ -6,7 +6,7 @@
     const API = "/scan/market-sentiment-dials";
     const POLL_MS = 5 * 60 * 1000;
     let timer = null;
-    let currentBasis = "today";
+    let currentBasis = "yesterday";
 
     const CX = 100;
     const CY = 96;
