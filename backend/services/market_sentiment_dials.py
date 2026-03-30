@@ -309,8 +309,9 @@ def build_dial_rows(upstox_service, basis: str = "today") -> List[Dict[str, Any]
     rows: List[Dict[str, Any]] = []
 
     if basis_norm == "yesterday":
-        # For yesterday-basis, prefer Yahoo previousClose semantics first.
-        u = yahoo_map.get("nifty50") or _quote_from_upstox(upstox_service, nifty_key, basis=basis_norm)
+        # For yesterday-basis, prefer Upstox daily candles (previous trading day close).
+        # Yahoo previousClose can occasionally be stale/shifted for NSE index symbols.
+        u = _quote_from_upstox(upstox_service, nifty_key, basis=basis_norm) or yahoo_map.get("nifty50")
     else:
         u = _quote_from_upstox(upstox_service, nifty_key, basis=basis_norm) or yahoo_map.get("nifty50")
     r = _row_payload("nifty50", "NIFTY 50", u)
@@ -318,7 +319,7 @@ def build_dial_rows(upstox_service, basis: str = "today") -> List[Dict[str, Any]
     rows.append(r)
 
     if basis_norm == "yesterday":
-        u = yahoo_map.get("banknifty") or _quote_from_upstox(upstox_service, bank_key, basis=basis_norm)
+        u = _quote_from_upstox(upstox_service, bank_key, basis=basis_norm) or yahoo_map.get("banknifty")
     else:
         u = _quote_from_upstox(upstox_service, bank_key, basis=basis_norm) or yahoo_map.get("banknifty")
     r = _row_payload("banknifty", "BANKNIFTY", u)
