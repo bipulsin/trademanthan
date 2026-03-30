@@ -130,47 +130,60 @@ document.head.appendChild(style);
 
 // Mobile Chrome OAuth fallback function
 function initiateGoogleAuth() {
-    console.log('🔄 Initiating Google Auth via fallback method');
-    const redirectUri = `${window.location.origin}/login.html`;
-    
-    // Try to trigger the Google OAuth popup manually
-    if (typeof google !== 'undefined' && google.accounts) {
+    console.log('🔄 Initiating Google Auth via mobile fallback token flow');
+
+    // Prefer token flow for mobile fallback (does not require backend client_secret/code exchange)
+    if (typeof google !== 'undefined' && google.accounts && google.accounts.oauth2) {
         try {
-            google.accounts.oauth2.initCodeClient({
+            const tokenClient = google.accounts.oauth2.initTokenClient({
                 client_id: "428560418671-t59riis4gqkhavnevt9ve6km54ltsba7.apps.googleusercontent.com",
-                scope: 'email profile',
-                ux_mode: 'popup',
-                redirect_uri: redirectUri,
-                callback: handleGoogleAuthResponse
-            }).requestCode();
+                scope: 'openid email profile',
+                callback: handleGoogleTokenResponse
+            });
+            tokenClient.requestAccessToken({ prompt: 'consent' });
         } catch (error) {
-            console.error('Google OAuth error:', error);
-            alert('Google OAuth failed. Please try the demo login or refresh the page.');
+            console.error('Google OAuth token flow error:', error);
+            alert('Google OAuth failed. Please try again.');
         }
     } else {
         console.error('Google OAuth not loaded');
-        alert('Google OAuth not available. Please try the demo login.');
+        alert('Google OAuth not available. Please refresh the page and try again.');
     }
 }
 
-// Handle Google OAuth response from popup method
-function handleGoogleAuthResponse(response) {
-    console.log('Google OAuth popup response:', response);
-    const redirectUri = `${window.location.origin}/login.html`;
-    
-    if (response.code) {
-        // Exchange code for credential
-        fetch('/api/auth/google-code', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                code: response.code,
-                redirect_uri: redirectUri
-            })
+// Handle Google OAuth response from token flow fallback
+function handleGoogleTokenResponse(response) {
+    console.log('Google OAuth token response:', response);
+    if (!response || !response.access_token) {
+        alert('Google OAuth failed. No access token received.');
+        return;
+    }
+
+    fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: {
+            'Authorization': `Bearer ${response.access_token}`
+        }
+    })
+        .then(res => res.json())
+        .then(userinfo => {
+            if (!userinfo || !userinfo.sub || !userinfo.email || !userinfo.name) {
+                throw new Error('Incomplete user profile from Google');
+            }
+
+            return fetch('/api/auth/google-verify', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    google_id: userinfo.sub,
+                    email: userinfo.email,
+                    name: userinfo.name,
+                    picture: userinfo.picture || null
+                })
+            });
         })
-        .then(response => response.json())
+        .then(res => res.json())
         .then(data => {
             if (data.access_token) {
                 localStorage.setItem('trademanthan_token', data.access_token);
@@ -186,10 +199,6 @@ function handleGoogleAuthResponse(response) {
             console.error('Error:', error);
             alert('Login failed: ' + error.message);
         });
-    } else {
-        console.error('No authorization code received');
-        alert('Google OAuth failed. Please try again.');
-    }
 }
 
 // Initialize login popup
