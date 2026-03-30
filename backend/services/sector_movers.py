@@ -5,6 +5,7 @@ Used by dashboard Top Gainers & Losers (sectors).
 from __future__ import annotations
 
 import logging
+import json
 from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -13,6 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from backend.services.market_sentiment_dials import _yahoo_chart_pct
 from backend.config import get_instruments_file_path
+from backend.services.upstox_service import upstox_service
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +193,9 @@ NIFTY_SECTOR_INDICES: List[Tuple[str, str]] = [
 
 
 def _fetch_one_sector(label: str, yahoo_symbol: str) -> Optional[Dict[str, Any]]:
-    row = _yahoo_chart_pct(yahoo_symbol, basis="yesterday")
+    row = _sector_pct_from_upstox(label)
+    if not row:
+        row = _yahoo_chart_pct(yahoo_symbol, basis="yesterday")
     if not row or row.get("pct_change") is None:
         return None
     return {
@@ -202,6 +206,112 @@ def _fetch_one_sector(label: str, yahoo_symbol: str) -> Optional[Dict[str, Any]]
         "open": float(row["open"]) if row.get("open") is not None else None,
         "source": row.get("source", "yahoo"),
     }
+
+
+def _norm(s: str) -> str:
+    return "".join(ch for ch in str(s or "").upper() if ch.isalnum())
+
+
+@lru_cache(maxsize=1)
+def _load_upstox_sector_index_keys() -> Dict[str, str]:
+    """
+    Build normalized-name -> instrument_key mapping for NSE index instruments.
+    """
+    keys: Dict[str, str] = {}
+    try:
+        p: Path = get_instruments_file_path()
+        if not p.exists():
+            return keys
+        with open(p, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, list):
+            return keys
+        for inst in data:
+            if not isinstance(inst, dict):
+                continue
+            if str(inst.get("segment") or "").upper() != "NSE_INDEX":
+                continue
+            ikey = str(inst.get("instrument_key") or "").strip()
+            if not ikey:
+                continue
+            for raw in (
+                inst.get("name"),
+                inst.get("trading_symbol"),
+                inst.get("underlying_symbol"),
+            ):
+                n = _norm(str(raw or ""))
+                if n:
+                    keys.setdefault(n, ikey)
+    except Exception as e:
+        logger.debug("Could not load Upstox sector index keys: %s", e)
+    return keys
+
+
+def _previous_trading_close_from_upstox_index(instrument_key: str) -> Optional[float]:
+    try:
+        if not upstox_service:
+            return None
+        candles = upstox_service.get_historical_candles_by_instrument_key(
+            instrument_key, interval="days/1", days_back=10
+        ) or []
+        if not candles:
+            return None
+        import pytz
+
+        ist_today = datetime.now(pytz.timezone("Asia/Kolkata")).date()
+        parsed: List[tuple[Any, float]] = []
+        for c in candles:
+            ts = str(c.get("timestamp") or "")
+            cl = float(c.get("close") or 0)
+            if len(ts) < 10 or cl <= 0:
+                continue
+            d = datetime.strptime(ts[:10], "%Y-%m-%d").date()
+            parsed.append((d, cl))
+        if not parsed:
+            return None
+        prev = [(d, cl) for d, cl in parsed if d < ist_today]
+        if prev:
+            prev.sort(key=lambda x: x[0])
+            return float(prev[-1][1])
+        if len(parsed) >= 2:
+            parsed.sort(key=lambda x: x[0])
+            return float(parsed[-2][1])
+        return None
+    except Exception:
+        return None
+
+
+def _sector_pct_from_upstox(label: str) -> Optional[Dict[str, Any]]:
+    """
+    Compute sector index % change vs previous close using Upstox:
+    pct = (last - prev_close) / prev_close * 100
+    """
+    try:
+        if not upstox_service or not getattr(upstox_service, "access_token", None):
+            return None
+        kmap = _load_upstox_sector_index_keys()
+        ikey = kmap.get(_norm(label))
+        if not ikey:
+            return None
+        q = upstox_service.get_market_quote_by_key(ikey)
+        if not q:
+            return None
+        last = float(q.get("last_price") or 0)
+        if last <= 0:
+            return None
+        prev_close = _previous_trading_close_from_upstox_index(ikey)
+        if not prev_close or prev_close <= 0:
+            return None
+        pct = round((last - prev_close) / prev_close * 100.0, 4)
+        return {
+            "last": last,
+            "open": prev_close,
+            "pct_change": pct,
+            "source": "upstox",
+        }
+    except Exception as e:
+        logger.debug("Upstox sector fetch failed for %s: %s", label, e)
+        return None
 
 
 def build_sector_movers(top_n: int = 3) -> Dict[str, Any]:
