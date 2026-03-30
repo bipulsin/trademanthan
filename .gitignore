@@ -52,6 +52,9 @@ dist/
 *.xlsx
 data/
 
+# Local DB exports (keep exports/ via .gitkeep)
+exports/*.txt
+
 # PEM files (SSH keys)
 *.pem
 

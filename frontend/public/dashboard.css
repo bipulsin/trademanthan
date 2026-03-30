@@ -1637,3 +1637,146 @@ body[data-theme="dark"] .sector-movers-pct--lose {
     color: #94a3b8;
     text-align: center;
 }
+
+/* Expandable sector → top/bottom 3 stocks */
+.sector-movers-item {
+    flex-direction: column !important;
+    align-items: stretch !important;
+}
+
+.sector-movers-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+}
+
+.sector-movers-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
+    flex: 1;
+    padding: 0;
+    margin: 0;
+    border: none;
+    background: transparent;
+    font: inherit;
+    font-weight: 600;
+    color: #0f172a;
+    text-align: left;
+    cursor: pointer;
+    border-radius: 6px;
+}
+
+.sector-movers-toggle:hover {
+    color: #2563eb;
+}
+
+.sector-movers-toggle:focus-visible {
+    outline: 2px solid #3b82f6;
+    outline-offset: 2px;
+}
+
+body[data-theme="dark"] .sector-movers-toggle {
+    color: #f1f5f9;
+}
+
+body[data-theme="dark"] .sector-movers-toggle:hover {
+    color: #93c5fd;
+}
+
+.sector-movers-chevron {
+    display: inline-block;
+    transition: transform 0.15s ease;
+    font-size: 0.65rem;
+    opacity: 0.75;
+}
+
+.sector-movers-toggle--open .sector-movers-chevron {
+    transform: rotate(90deg);
+}
+
+.sector-movers-panel {
+    width: 100%;
+    padding: 0.4rem 0.5rem 0.55rem 1.4rem;
+    border-top: 1px dashed rgba(148, 163, 184, 0.35);
+    background: rgba(241, 245, 249, 0.5);
+}
+
+body[data-theme="dark"] .sector-movers-panel {
+    background: rgba(15, 23, 42, 0.35);
+    border-top-color: rgba(148, 163, 184, 0.2);
+}
+
+.sector-movers-panel-placeholder,
+.sector-movers-panel-msg {
+    margin: 0;
+    font-size: 0.78rem;
+    color: #64748b;
+}
+
+body[data-theme="dark"] .sector-movers-panel-placeholder,
+body[data-theme="dark"] .sector-movers-panel-msg {
+    color: #94a3b8;
+}
+
+.sector-movers-stocks {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.sector-movers-stocks li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.25rem 0;
+    font-size: 0.78rem;
+    border-bottom: none;
+}
+
+.sector-movers-stock-sym {
+    font-weight: 700;
+    color: #334155;
+    min-width: 4.5rem;
+}
+
+body[data-theme="dark"] .sector-movers-stock-sym {
+    color: #e2e8f0;
+}
+
+.sector-movers-stock-ltp {
+    font-variant-numeric: tabular-nums;
+    color: #475569;
+    flex: 1;
+    text-align: center;
+}
+
+body[data-theme="dark"] .sector-movers-stock-ltp {
+    color: #cbd5e1;
+}
+
+.sector-movers-stock-pct {
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.sector-movers-stock-pct--up {
+    color: #15803d;
+}
+
+.sector-movers-stock-pct--down {
+    color: #b91c1c;
+}
+
+body[data-theme="dark"] .sector-movers-stock-pct--up {
+    color: #4ade80;
+}
+
+body[data-theme="dark"] .sector-movers-stock-pct--down {
+    color: #f87171;
+}

@@ -72,7 +72,7 @@ except ImportError:
         health_monitor = None  # Graceful degradation if not available
 from backend.services.upstox_service import upstox_service as vwap_service
 from backend.services.market_sentiment_dials import build_dial_rows, utc_iso
-from backend.services.sector_movers import build_sector_movers
+from backend.services.sector_movers import build_sector_movers, build_sector_stock_detail
 from backend.services import live_trading
 from backend.database import get_db
 from backend.models.trading import IntradayStockOption, MasterStock, HistoricalMarketData
@@ -5681,6 +5681,27 @@ async def dashboard_sector_movers():
                 "message": str(e),
                 "gainers": [],
                 "losers": [],
+            },
+        )
+
+
+@router.get("/dashboard-sector-movers-detail")
+async def dashboard_sector_movers_detail(sector: str, mode: str = "gainers"):
+    """
+    For a sector label (same string as in Top Gainers / Losers), return 3 NSE equities
+    with highest intraday % (mode=gainers) or lowest % (mode=losers) from a fixed universe.
+    """
+    try:
+        data = build_sector_stock_detail(sector, mode)
+        return JSONResponse(status_code=200, content=data)
+    except Exception as e:
+        logger.exception("dashboard_sector_movers_detail: %s", e)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "message": str(e),
+                "stocks": [],
             },
         )
 
