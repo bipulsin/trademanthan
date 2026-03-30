@@ -162,19 +162,21 @@ def _previous_trading_close_from_upstox(upstox_service, instrument_key: str) -> 
             cl = float(c.get("close") or 0)
             if len(ts) < 10 or cl <= 0:
                 continue
-            d = ts[:10]
+            d = datetime.strptime(ts[:10], "%Y-%m-%d").date()
             dated.append((d, cl))
 
         if not dated:
             return None
 
-        # Prefer candle date < today (true previous trading day close)
-        prev = [cl for d, cl in dated if d < ist_today.isoformat()]
+        # Prefer latest candle date < today (true previous trading day close)
+        prev = [(d, cl) for d, cl in dated if d < ist_today]
         if prev:
-            return float(prev[-1])
+            prev.sort(key=lambda x: x[0])
+            return float(prev[-1][1])
 
         # Fallback: second latest close when all candles are "today/unknown"
         if len(dated) >= 2:
+            dated.sort(key=lambda x: x[0])
             return float(dated[-2][1])
         return None
     except Exception:
