@@ -172,7 +172,7 @@ SECTOR_STOCK_UNIVERSE: Dict[str, List[str]] = {
 }
 
 NIFTY_SECTOR_INDICES: List[Tuple[str, str]] = [
-    ("Nifty Bank", "^NSEBANK"),
+    # Excluded intentionally: Nifty Bank (covered by PSU/Private bank lenses)
     ("Nifty IT", "^CNXIT"),
     ("Nifty Auto", "^CNXAUTO"),
     ("Nifty Pharma", "^CNXPHARMA"),
