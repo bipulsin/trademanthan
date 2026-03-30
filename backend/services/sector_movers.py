@@ -1,5 +1,5 @@
 """
-Nifty sector index movers: intraday % change from session open (Yahoo Finance v8 chart).
+Nifty sector index movers: % change vs previous trading-day close (Yahoo Finance v8 chart).
 Used by dashboard Top Gainers & Losers (sectors).
 """
 from __future__ import annotations
@@ -17,7 +17,7 @@ from backend.config import get_instruments_file_path
 logger = logging.getLogger(__name__)
 
 # Major Nifty sector / strategic indices on Yahoo Finance (display name, symbol)
-# Representative NSE equities per sector (Yahoo symbols) for drill-down: top/bottom 3 by intraday % vs open.
+# Representative NSE equities per sector (Yahoo symbols) for drill-down: top/bottom 3 by % vs previous close.
 # Lists are indicative constituents / liquid names; not exhaustive index replication.
 SECTOR_STOCK_UNIVERSE: Dict[str, List[str]] = {
     "Nifty Bank": [
@@ -191,7 +191,7 @@ NIFTY_SECTOR_INDICES: List[Tuple[str, str]] = [
 
 
 def _fetch_one_sector(label: str, yahoo_symbol: str) -> Optional[Dict[str, Any]]:
-    row = _yahoo_chart_pct(yahoo_symbol)
+    row = _yahoo_chart_pct(yahoo_symbol, basis="yesterday")
     if not row or row.get("pct_change") is None:
         return None
     return {
@@ -206,7 +206,7 @@ def _fetch_one_sector(label: str, yahoo_symbol: str) -> Optional[Dict[str, Any]]
 
 def build_sector_movers(top_n: int = 3) -> Dict[str, Any]:
     """
-    Top ``top_n`` gaining and losing Nifty sector indices by intraday % from open.
+    Top ``top_n`` gaining and losing Nifty sector indices by % vs previous close.
     """
     rows: List[Dict[str, Any]] = []
     max_workers = min(16, max(4, len(NIFTY_SECTOR_INDICES)))
@@ -254,7 +254,7 @@ def _yahoo_display_symbol(yahoo_sym: str) -> str:
 
 
 def _fetch_one_equity_row(yahoo_sym: str) -> Optional[Dict[str, Any]]:
-    row = _yahoo_chart_pct(yahoo_sym)
+    row = _yahoo_chart_pct(yahoo_sym, basis="yesterday")
     if not row or row.get("pct_change") is None:
         return None
     return {
@@ -309,7 +309,7 @@ def _is_fo_stock(symbol: str) -> bool:
 
 def build_sector_stock_detail(sector_label: str, mode: str) -> Dict[str, Any]:
     """
-    Stocks in ``SECTOR_STOCK_UNIVERSE`` for a sector label: top 3 by intraday % vs open
+    Stocks in ``SECTOR_STOCK_UNIVERSE`` for a sector label: top 3 by % vs previous close
     (mode=gainers) or bottom 3 (mode=losers).
     """
     label = (sector_label or "").strip()
