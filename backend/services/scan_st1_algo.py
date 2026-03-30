@@ -6,6 +6,7 @@ Consolidates all scan algorithm schedulers into a single controller:
 - VWAP Updater (hourly updates + cycles + EOD close)
 - Index Price Scheduler (every 5 min during market hours)
 - Entry slip monitor (every 15 min during market hours): cancel unfilled entry orders after 2 checks
+- Final reconciliation (3:45 PM & 4:00 PM): broker buy/sell/PnL sync; time_based → Exit-TM after 3:15 PM exits
 
 Note: Master Stock download from Dhan has been removed.
 
@@ -61,6 +62,7 @@ from backend.services.vwap_updater import (
     close_all_open_trades,
     calculate_vwap_slope_for_cycle
 )
+from backend.services.final_reconciliation import run_final_reconciliation
 
 # Import health monitor instance and methods
 from backend.services.health_monitor import health_monitor
@@ -80,6 +82,7 @@ job_loggers = [
     logging.getLogger('backend.services.index_price_scheduler'),
     logging.getLogger('backend.routers.scan'),  # Add scan router logger for webhook processing, option contracts, trades
     logging.getLogger('backend.services.entry_slip_monitor'),
+    logging.getLogger('backend.services.final_reconciliation'),
 ]
 
 for job_logger in job_loggers:
@@ -298,6 +301,37 @@ class ScanST1AlgoScheduler:
                 coalesce=True
             )
             logger.info("✅ Scheduled: EOD Close All Trades (3:25 PM)")
+
+            # Final reconciliation: broker fill alignment + Exit-TM tagging
+            def run_final_reconciliation_job():
+                logger.info("🔧 Triggering Final Reconciliation...")
+                try:
+                    run_final_reconciliation()
+                    logger.info("✅ Final Reconciliation completed")
+                except Exception as e:
+                    logger.error(f"❌ Final Reconciliation failed: {e}", exc_info=True)
+
+            self.scheduler.add_job(
+                run_final_reconciliation_job,
+                trigger=CronTrigger(hour=15, minute=45, timezone='Asia/Kolkata'),
+                id='scan_st1_final_reconciliation_1545',
+                name='Final Reconciliation (3:45 PM)',
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=300,
+                coalesce=True,
+            )
+            self.scheduler.add_job(
+                run_final_reconciliation_job,
+                trigger=CronTrigger(hour=16, minute=0, timezone='Asia/Kolkata'),
+                id='scan_st1_final_reconciliation_1600',
+                name='Final Reconciliation (4:00 PM)',
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=300,
+                coalesce=True,
+            )
+            logger.info("✅ Scheduled: Final Reconciliation (3:45 PM & 4:00 PM)")
             
             # VWAP Slope Cycles
             def run_cycle_1():

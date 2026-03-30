@@ -502,6 +502,274 @@ def sync_trade_buy_fill_from_broker(db, trade) -> bool:
     return updated
 
 
+def final_reconciliation_refresh_trade_from_broker(db, trade) -> bool:
+    """
+    End-of-day broker alignment (3:45 / 4:00 PM jobs): refresh buy_price and sell_price from
+    today's Upstox order book / order details, then PnL. Does not require trading_live YES.
+
+    Skips status no_entry. Works for bought and sold rows with instrument_key and qty.
+    """
+    from sqlalchemy.orm.attributes import flag_modified
+
+    _ = db
+    if not upstox_service or not getattr(upstox_service, "access_token", None):
+        return False
+    st = getattr(trade, "status", None)
+    if st == "no_entry":
+        return False
+    ikey = (getattr(trade, "instrument_key", None) or "").strip()
+    if not ikey:
+        return False
+    qty = int(getattr(trade, "qty", None) or 0)
+    if qty <= 0:
+        return False
+
+    changed = False
+    if st in ("bought", "sold") and getattr(trade, "buy_price", None) and float(trade.buy_price) > 0:
+        if _final_recon_sync_buy_avg_from_broker(trade, qty):
+            changed = True
+    if st == "sold":
+        if _final_recon_sync_sell_avg_from_broker(trade, qty):
+            changed = True
+
+    if trade.buy_price and trade.sell_price is not None and trade.qty:
+        try:
+            trade.pnl = round(
+                (float(trade.sell_price) - float(trade.buy_price)) * int(trade.qty),
+                2,
+            )
+            flag_modified(trade, "pnl")
+        except (TypeError, ValueError):
+            pass
+
+    return changed
+
+
+def _final_recon_sync_buy_avg_from_broker(trade, qty: int) -> bool:
+    """Like sync_trade_buy_fill_from_broker but no trading_live gate; status bought or sold."""
+    from sqlalchemy.orm.attributes import flag_modified
+    import pytz
+
+    if getattr(trade, "status", None) not in ("bought", "sold"):
+        return False
+
+    oid = (getattr(trade, "buy_order_id", None) or "").strip()
+    row: Optional[Dict[str, Any]] = None
+
+    ob = upstox_service.get_order_book_today()
+    orders_list: List[Dict[str, Any]] = [
+        o for o in (ob.get("orders") or []) if isinstance(o, dict)
+    ]
+
+    if oid and not oid.upper().startswith("GTT"):
+        det = upstox_service.get_order_details(oid)
+        cand = _row_from_order_details_api(det)
+        if cand and _order_row_is_complete_buy(cand) and _broker_buy_row_average_price(cand):
+            fq = int(float(cand.get("filled_quantity") or 0))
+            pq = int(float(cand.get("quantity") or 0))
+            if fq >= qty * 0.99 or (fq == 0 and pq >= qty * 0.99):
+                row = cand
+        if row is None and orders_list:
+            for o in orders_list:
+                if str(o.get("order_id", "")) != str(oid):
+                    continue
+                if not (_order_row_is_complete_buy(o) and _broker_buy_row_average_price(o)):
+                    continue
+                fq = int(float(o.get("filled_quantity") or 0))
+                if fq < qty * 0.99:
+                    continue
+                row = o
+                break
+
+    if row is None and orders_list:
+        ist = pytz.timezone("Asia/Kolkata")
+        buy_time = getattr(trade, "buy_time", None)
+        if buy_time:
+            if buy_time.tzinfo is None:
+                buy_time = ist.localize(buy_time)
+            else:
+                buy_time = buy_time.astimezone(ist)
+        buy_naive = buy_time.replace(tzinfo=None) if buy_time else None
+
+        def _ob_ts(o: Dict[str, Any]) -> datetime:
+            s = o.get("order_timestamp") or o.get("exchange_timestamp") or ""
+            try:
+                return datetime.strptime(str(s)[:19], "%Y-%m-%d %H:%M:%S")
+            except (TypeError, ValueError):
+                return datetime.min
+
+        candidates: List[Dict[str, Any]] = []
+        for o in orders_list:
+            if (o.get("instrument_token") or "") != trade.instrument_key:
+                continue
+            if (o.get("transaction_type") or "").upper() != "BUY":
+                continue
+            if not _order_row_is_complete_buy(o):
+                continue
+            ap = _broker_buy_row_average_price(o)
+            if not ap:
+                continue
+            fq = int(float(o.get("filled_quantity") or 0))
+            if fq < qty * 0.99:
+                continue
+            candidates.append(o)
+
+        if candidates:
+            candidates.sort(key=_ob_ts, reverse=True)
+            if buy_naive:
+                after_alert = [c for c in candidates if _ob_ts(c) >= buy_naive - timedelta(minutes=15)]
+                if after_alert:
+                    candidates = after_alert
+            row = candidates[0]
+
+    if row is None:
+        return False
+
+    new_avg = _broker_buy_row_average_price(row)
+    if not new_avg or new_avg <= 0:
+        return False
+
+    fill_oid = str(row.get("order_id") or row.get("order_ref_id") or "").strip()
+    oid_stored = (getattr(trade, "buy_order_id", None) or "").strip()
+    old = float(trade.buy_price or 0)
+    updated = False
+
+    if not oid_stored and fill_oid:
+        trade.buy_order_id = fill_oid
+        flag_modified(trade, "buy_order_id")
+        updated = True
+
+    if abs(old - new_avg) >= 0.005:
+        trade.buy_price = round(new_avg, 2)
+        if getattr(trade, "status", None) == "bought":
+            trade.option_ltp = trade.buy_price
+        if trade.stop_loss and float(trade.stop_loss) >= float(trade.buy_price) * 0.999:
+            trade.stop_loss = round(float(trade.buy_price) * 0.95, 2)
+            flag_modified(trade, "stop_loss")
+        flag_modified(trade, "buy_price")
+        if getattr(trade, "status", None) == "bought":
+            flag_modified(trade, "option_ltp")
+        logger.info(
+            "📌 Final recon BUY: %s buy_price ₹%.2f → ₹%.2f",
+            getattr(trade, "stock_name", "?"),
+            old,
+            new_avg,
+        )
+        updated = True
+
+    return updated
+
+
+def _final_recon_sync_sell_avg_from_broker(trade, qty: int) -> bool:
+    """Like sync_manual_exit sell sync but any sold row; GTT-safe order details."""
+    from sqlalchemy.orm.attributes import flag_modified
+    import pytz
+
+    if getattr(trade, "status", None) != "sold":
+        return False
+    ikey = (getattr(trade, "instrument_key", None) or "").strip()
+    if not ikey:
+        return False
+
+    new_sell: Optional[float] = None
+    sell_oid = (getattr(trade, "sell_order_id", None) or "").strip()
+
+    if sell_oid and not sell_oid.upper().startswith("GTT"):
+        det = upstox_service.get_order_details(sell_oid)
+        cand = _row_from_order_details_api(det)
+        if cand and _order_row_is_complete_sell(cand):
+            fq = int(float(cand.get("filled_quantity") or 0))
+            if fq >= qty * 0.99:
+                new_sell = _broker_buy_row_average_price(cand)
+
+    ob = upstox_service.get_order_book_today()
+    orders_list: List[Dict[str, Any]] = [
+        o for o in (ob.get("orders") or []) if isinstance(o, dict)
+    ]
+
+    if new_sell is None and sell_oid and orders_list:
+        for o in orders_list:
+            if str(o.get("order_id", "")) != str(sell_oid):
+                continue
+            if _order_row_is_complete_sell(o):
+                ap = _broker_buy_row_average_price(o)
+                fq = int(float(o.get("filled_quantity") or 0))
+                if ap and ap > 0 and fq >= qty * 0.99:
+                    new_sell = ap
+                    break
+
+    if new_sell is None and orders_list:
+        ist = pytz.timezone("Asia/Kolkata")
+        sell_time = getattr(trade, "sell_time", None)
+        if sell_time:
+            if sell_time.tzinfo is None:
+                sell_time = ist.localize(sell_time)
+            else:
+                sell_time = sell_time.astimezone(ist)
+        sell_naive = sell_time.replace(tzinfo=None) if sell_time else None
+
+        def _ob_ts(o: Dict[str, Any]) -> datetime:
+            s = o.get("order_timestamp") or o.get("exchange_timestamp") or ""
+            try:
+                return datetime.strptime(str(s)[:19], "%Y-%m-%d %H:%M:%S")
+            except (TypeError, ValueError):
+                return datetime.min
+
+        candidates: List[Dict[str, Any]] = []
+        for o in orders_list:
+            if (o.get("instrument_token") or "") != ikey:
+                continue
+            if (o.get("transaction_type") or "").upper() != "SELL":
+                continue
+            if not _order_row_is_complete_sell(o):
+                continue
+            ap = _broker_buy_row_average_price(o)
+            if not ap:
+                continue
+            fq = int(float(o.get("filled_quantity") or 0))
+            if fq < qty * 0.99:
+                continue
+            candidates.append(o)
+
+        if candidates:
+            if sell_naive:
+                narrowed = [
+                    c
+                    for c in candidates
+                    if _ob_ts(c) >= sell_naive - timedelta(minutes=180)
+                ]
+                if narrowed:
+                    candidates = narrowed
+            candidates.sort(key=_ob_ts, reverse=True)
+            best = candidates[0]
+            new_sell = _broker_buy_row_average_price(best)
+
+    if new_sell is None or new_sell <= 0:
+        return False
+
+    old = float(trade.sell_price or 0)
+    if abs(old - new_sell) < 0.005:
+        return False
+
+    trade.sell_price = round(new_sell, 2)
+    trade.option_ltp = trade.sell_price
+    if trade.buy_price and trade.qty:
+        trade.pnl = round(
+            (float(trade.sell_price) - float(trade.buy_price)) * int(trade.qty),
+            2,
+        )
+        flag_modified(trade, "pnl")
+    flag_modified(trade, "sell_price")
+    flag_modified(trade, "option_ltp")
+    logger.info(
+        "📌 Final recon SELL: %s sell_price ₹%.2f → ₹%.2f (broker)",
+        getattr(trade, "stock_name", "?"),
+        old,
+        new_sell,
+    )
+    return True
+
+
 def apply_broker_buy_fill_to_intraday_trade(db, trade) -> bool:
     """
     Find today's completed BUY on Upstox for this row's instrument_key (or buy_order_id),

@@ -126,7 +126,7 @@ function updateDaySummary(bullishData, bearishData) {
                                 slipExits++;
                             } else if (stock.exit_reason === 'stop_loss' || stock.exit_reason === 'Exit-SL') {
                                 slExits++;
-                            } else if (stock.exit_reason === 'time_based') {
+                            } else if (stock.exit_reason === 'time_based' || stock.exit_reason === 'Exit-TM') {
                                 timeExits++;
                             } else if (stock.exit_reason === 'profit_target' || stock.exit_reason === 'Exit-Target') {
                                 targetExits++;
@@ -173,7 +173,7 @@ function updateDaySummary(bullishData, bearishData) {
                                 slipExits++;
                             } else if (stock.exit_reason === 'stop_loss' || stock.exit_reason === 'Exit-SL') {
                                 slExits++;
-                            } else if (stock.exit_reason === 'time_based') {
+                            } else if (stock.exit_reason === 'time_based' || stock.exit_reason === 'Exit-TM') {
                                 timeExits++;
                             } else if (stock.exit_reason === 'profit_target' || stock.exit_reason === 'Exit-Target') {
                                 targetExits++;
@@ -785,7 +785,7 @@ function renderAlertGroup(alert, type) {
                             statusDisplay = '<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">🛑 EXITED-SL</span>';
                         } else if (stock.exit_reason === 'profit_target' || stock.exit_reason === 'Exit-Target') {
                             statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">🎯 EXITED-TG</span>';
-                        } else if (stock.exit_reason === 'time_based') {
+                        } else if (stock.exit_reason === 'time_based' || stock.exit_reason === 'Exit-TM') {
                             statusDisplay = '<span style="background: #f59e0b; color: black; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">⏰ EXITED-TM</span>';
                         } else if (stock.exit_reason === 'stock_vwap_cross' || stock.exit_reason === 'Exit-VWAP Cross') {
                             statusDisplay = '<span style="background: #8b5cf6; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">📉 EXITED-VW</span>';
@@ -950,7 +950,7 @@ function renderAlertGroup(alert, type) {
                         statusDisplay = '<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXD-SL</span>';
                     } else if (stock.exit_reason === 'profit_target' || stock.exit_reason === 'Exit-Target') {
                         statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXD-TG</span>';
-                    } else if (stock.exit_reason === 'time_based') {
+                    } else if (stock.exit_reason === 'time_based' || stock.exit_reason === 'Exit-TM') {
                         statusDisplay = '<span style="background: #f59e0b; color: black; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXT-TM</span>';
                     } else if (stock.exit_reason === 'stock_vwap_cross' || stock.exit_reason === 'Exit-VWAP Cross') {
                         statusDisplay = '<span style="background: #8b5cf6; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXD-VW</span>';
