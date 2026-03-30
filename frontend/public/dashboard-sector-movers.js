@@ -48,10 +48,11 @@
                 const sector = row.sector || "";
                 const sectorAttr = encodeURIComponent(sector);
                 const sectorLabel = escapeHtml(sector);
+                const modeLabel = listMode === "losers" ? "bottom 3 losers" : "top 3 gainers";
                 return (
                     `<li class="sector-movers-item">` +
                     `<div class="sector-movers-row">` +
-                    `<button type="button" class="sector-movers-toggle" data-s="${sectorAttr}" data-mode="${listMode}" aria-expanded="false" title="Show top stocks in this sector">` +
+                    `<button type="button" class="sector-movers-toggle" data-sector="${sectorAttr}" data-mode="${listMode}" aria-expanded="false" title="Show ${modeLabel} for this sector">` +
                     `<span class="sector-movers-chevron" aria-hidden="true">▸</span>` +
                     `<span class="sector-movers-name">${sectorLabel}</span>` +
                     `</button>` +
@@ -69,6 +70,8 @@
     function renderDetailPanel(panel, data) {
         if (!panel) return;
         const stocks = (data && data.stocks) || [];
+        const mode = (data && data.mode) || "gainers";
+        const heading = mode === "losers" ? "Bottom 3 losers" : "Top 3 gainers";
         if (!data || !data.success) {
             panel.innerHTML =
                 `<p class="sector-movers-panel-msg">${escapeHtml(data && data.message ? data.message : "Could not load stocks.")}</p>`;
@@ -79,6 +82,7 @@
             return;
         }
         panel.innerHTML =
+            `<p class="sector-movers-panel-title">${heading}</p>` +
             `<ul class="sector-movers-stocks">` +
             stocks
                 .map((s) => {
@@ -123,9 +127,10 @@
     function onGridClick(e) {
         const btn = e.target.closest(".sector-movers-toggle");
         if (!btn) return;
-        const sector = btn.getAttribute("data-sector");
+        const rawSector = btn.getAttribute("data-sector");
         const mode = btn.getAttribute("data-mode") || "gainers";
-        if (!sector) return;
+        if (!rawSector) return;
+        const sector = decodeURIComponent(rawSector);
 
         const item = btn.closest(".sector-movers-item");
         const panel = item && item.querySelector(".sector-movers-panel");
@@ -146,7 +151,7 @@
         if (panel.querySelector(".sector-movers-stocks")) {
             return;
         }
-        panel.innerHTML = `<p class="sector-movers-panel-placeholder">Loading…</p>`;
+        panel.innerHTML = `<p class="sector-movers-panel-placeholder">Loading ${mode === "losers" ? "bottom 3 losers" : "top 3 gainers"}…</p>`;
         loadDetail(sector, mode, panel);
     }
 

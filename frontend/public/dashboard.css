@@ -1717,9 +1717,22 @@ body[data-theme="dark"] .sector-movers-panel {
     color: #64748b;
 }
 
+.sector-movers-panel-title {
+    margin: 0 0 0.35rem 0;
+    font-size: 0.74rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: #334155;
+}
+
 body[data-theme="dark"] .sector-movers-panel-placeholder,
 body[data-theme="dark"] .sector-movers-panel-msg {
     color: #94a3b8;
+}
+
+body[data-theme="dark"] .sector-movers-panel-title {
+    color: #cbd5e1;
 }
 
 .sector-movers-stocks {

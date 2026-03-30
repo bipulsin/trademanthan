@@ -90,7 +90,7 @@
         const pMed = arcPath(phiM1, phiM2);
         const pBull = arcPath(phiM2, phiR);
         const pInner = arcFillPath(phiL, phiR);
-        const innerOpacity = isDark ? "0.95" : "0.55";
+        const innerOpacity = isDark ? "0.88" : "0.6";
         const needleTint = !has
             ? "#64748b"
             : p < -3
@@ -113,7 +113,7 @@
     </linearGradient>
     <linearGradient id="innerGlow_${gid}" x1="50%" y1="0%" x2="50%" y2="100%">
       <stop offset="0%" stop-color="#93c5fd" stop-opacity="${innerOpacity}"/>
-      <stop offset="100%" stop-color="#ffffff" stop-opacity="${innerOpacity}"/>
+      <stop offset="100%" stop-color="#020617" stop-opacity="${innerOpacity}"/>
     </linearGradient>
   </defs>
   <path d="${pInner}" fill="url(#innerGlow_${gid})"/>
@@ -141,7 +141,7 @@
         const phiL = Math.PI;
         const phiR = 0;
         const pInner = arcFillPath(phiL, phiR);
-        const innerOpacity = isDark ? "0.95" : "0.55";
+        const innerOpacity = isDark ? "0.88" : "0.6";
         const needleTint =
             v == null ? "#64748b" : v < 12 ? "#15803d" : v < 22 ? "#d97706" : "#b91c1c";
 
@@ -158,7 +158,7 @@
     </linearGradient>
     <linearGradient id="innerGlow_${gid}" x1="50%" y1="0%" x2="50%" y2="100%">
       <stop offset="0%" stop-color="#93c5fd" stop-opacity="${innerOpacity}"/>
-      <stop offset="100%" stop-color="#ffffff" stop-opacity="${innerOpacity}"/>
+      <stop offset="100%" stop-color="#020617" stop-opacity="${innerOpacity}"/>
     </linearGradient>
   </defs>
   <path d="${pInner}" fill="url(#innerGlow_${gid})"/>
