@@ -21,6 +21,12 @@
         return `M ${p1.x.toFixed(2)} ${p1.y.toFixed(2)} A ${R} ${R} 0 0 1 ${p2.x.toFixed(2)} ${p2.y.toFixed(2)}`;
     }
 
+    function arcFillPath(phi1, phi2) {
+        const p1 = pt(phi1);
+        const p2 = pt(phi2);
+        return `M ${p1.x.toFixed(2)} ${p1.y.toFixed(2)} A ${R} ${R} 0 0 1 ${p2.x.toFixed(2)} ${p2.y.toFixed(2)} L ${p1.x.toFixed(2)} ${p1.y.toFixed(2)} Z`;
+    }
+
     /** pct in [-10,10] → angle along upper semicircle (π = left, 0 = right) */
     function phiFromPct(pct) {
         const p = Math.max(-10, Math.min(10, Number(pct)));
@@ -72,7 +78,7 @@
   </g>`;
     }
 
-    function dialSvgPct(pct, gid) {
+    function dialSvgPct(pct, gid, isDark) {
         const has = pct != null && !Number.isNaN(Number(pct));
         const p = has ? Number(pct) : 0;
         const rot = has ? needleRotationDegFromPhi(phiFromPct(pct)) : 0;
@@ -83,6 +89,8 @@
         const pBear = arcPath(phiL, phiM1);
         const pMed = arcPath(phiM1, phiM2);
         const pBull = arcPath(phiM2, phiR);
+        const pInner = arcFillPath(phiL, phiR);
+        const innerOpacity = isDark ? "0.95" : "0.55";
         const needleTint = !has
             ? "#64748b"
             : p < -3
@@ -103,7 +111,12 @@
       <stop offset="65%" stop-color="#fde68a"/>
       <stop offset="100%" stop-color="#bbf7d0"/>
     </linearGradient>
+    <linearGradient id="innerGlow_${gid}" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#93c5fd" stop-opacity="${innerOpacity}"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="${innerOpacity}"/>
+    </linearGradient>
   </defs>
+  <path d="${pInner}" fill="url(#innerGlow_${gid})"/>
   <path d="${pBear}" fill="none" stroke="#dc2626" stroke-width="14" stroke-linecap="round" opacity="0.95"/>
   <path d="${pMed}" fill="none" stroke="#f59e0b" stroke-width="14" stroke-linecap="round" opacity="0.95"/>
   <path d="${pBull}" fill="none" stroke="#16a34a" stroke-width="14" stroke-linecap="round" opacity="0.95"/>
@@ -122,11 +135,13 @@
 </svg>`;
     }
 
-    function dialSvgVix(vixVal, gid) {
+    function dialSvgVix(vixVal, gid, isDark) {
         const v = vixVal == null || Number.isNaN(Number(vixVal)) ? null : Number(vixVal);
         const rot = v == null ? 0 : needleRotationDegFromPhi(phiFromVix(v));
         const phiL = Math.PI;
         const phiR = 0;
+        const pInner = arcFillPath(phiL, phiR);
+        const innerOpacity = isDark ? "0.95" : "0.55";
         const needleTint =
             v == null ? "#64748b" : v < 12 ? "#15803d" : v < 22 ? "#d97706" : "#b91c1c";
 
@@ -141,7 +156,12 @@
       <stop offset="45%" stop-color="#fbbf24"/>
       <stop offset="100%" stop-color="#ef4444"/>
     </linearGradient>
+    <linearGradient id="innerGlow_${gid}" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#93c5fd" stop-opacity="${innerOpacity}"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="${innerOpacity}"/>
+    </linearGradient>
   </defs>
+  <path d="${pInner}" fill="url(#innerGlow_${gid})"/>
   <path d="${arcPath(phiL, phiR)}" fill="none" stroke="url(#vixArc_${gid})" stroke-width="14" stroke-linecap="round"/>
   <path d="${arcPath(phiL, phiR)}" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
   <path d="${arcPath(phiL, phiR)}" fill="none" stroke="rgba(15,23,42,0.25)" stroke-width="1"/>
@@ -158,6 +178,7 @@
         const grid = document.getElementById("marketSentimentDialsGrid");
         const elTime = document.getElementById("sentimentDialsUpdated");
         if (!grid) return;
+        const isDark = document.body?.dataset?.theme === "dark";
 
         if (elTime && updatedAt) {
             try {
@@ -181,7 +202,7 @@
 
                 if (mode === "vix") {
                     const vv = row.vix_value != null ? row.vix_value : row.last;
-                    chartHtml = dialSvgVix(vv, gid);
+                    chartHtml = dialSvgVix(vv, gid, isDark);
                     footerMain = formatVix(vv);
                     footerMeta = "VIX spot (0–35 scale)";
                     cls =
@@ -194,7 +215,7 @@
                                 : "vix-high";
                 } else {
                     const pct = row.pct_change;
-                    chartHtml = dialSvgPct(pct, gid);
+                    chartHtml = dialSvgPct(pct, gid, isDark);
                     footerMain = formatPct(pct);
                     footerMeta = "vs session open";
                     if (pct == null) cls = "neutral";
