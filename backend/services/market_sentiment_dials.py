@@ -117,9 +117,40 @@ def _quote_from_upstox(upstox_service, instrument_key: str, basis: str = "today"
 
         basis_norm = str(basis or "today").strip().lower()
         if basis_norm == "yesterday":
-            # For "Basis Yesterday", do NOT use market-quote close directly because it may
-            # represent today's close/last post-market on some feeds.
-            ref = float(_previous_trading_close_from_upstox(upstox_service, instrument_key) or 0)
+            # Basis Yesterday = (latest trading-day close - previous trading-day close) / previous close
+            latest_close = float(q.get("close_price") or q.get("last_price") or 0)
+            prev_close = None
+            try:
+                candles = upstox_service.get_historical_candles_by_instrument_key(
+                    instrument_key, interval="days/1", days_back=15
+                ) or []
+                parsed: List[tuple[Any, float]] = []
+                for c in candles:
+                    ts = str(c.get("timestamp") or "")
+                    cl = float(c.get("close") or 0)
+                    if len(ts) < 10 or cl <= 0:
+                        continue
+                    d = datetime.strptime(ts[:10], "%Y-%m-%d").date()
+                    parsed.append((d, cl))
+                if parsed:
+                    parsed.sort(key=lambda x: x[0])
+                    newest_candle_close = float(parsed[-1][1])
+                    if latest_close <= 0:
+                        latest_close = newest_candle_close
+                    # If quote close is newer than candle feed, previous close is the latest candle close.
+                    # If quote close equals latest candle close, previous close is the candle before it.
+                    if abs(latest_close - newest_candle_close) > 0.01:
+                        prev_close = newest_candle_close
+                    elif len(parsed) >= 2:
+                        prev_close = float(parsed[-2][1])
+            except Exception:
+                prev_close = None
+
+            if prev_close is None:
+                prev_close = _previous_trading_close_from_upstox(upstox_service, instrument_key)
+
+            last = float(latest_close or 0)
+            ref = float(prev_close or 0)
             ref_label = "previous_close"
         else:
             ref = float(q.get("open") or ohlc.get("open") or 0)
@@ -183,6 +214,30 @@ def _previous_trading_close_from_upstox(upstox_service, instrument_key: str) -> 
         return None
 
 
+def _latest_two_trading_closes_from_upstox(upstox_service, instrument_key: str) -> tuple[Optional[float], Optional[float]]:
+    """
+    Return (latest_close, previous_close) from daily candles.
+    """
+    try:
+        candles = upstox_service.get_historical_candles_by_instrument_key(
+            instrument_key, interval="days/1", days_back=15
+        ) or []
+        parsed: List[tuple[Any, float]] = []
+        for c in candles:
+            ts = str(c.get("timestamp") or "")
+            cl = float(c.get("close") or 0)
+            if len(ts) < 10 or cl <= 0:
+                continue
+            d = datetime.strptime(ts[:10], "%Y-%m-%d").date()
+            parsed.append((d, cl))
+        if len(parsed) < 2:
+            return None, None
+        parsed.sort(key=lambda x: x[0])
+        return float(parsed[-1][1]), float(parsed[-2][1])
+    except Exception:
+        return None, None
+
+
 def _yahoo_chart_pct(yahoo_symbol: str, basis: str = "today") -> Optional[Dict[str, Any]]:
     """% from today's open or previous close via Yahoo Finance chart API (v8)."""
     from urllib.parse import quote
@@ -213,7 +268,24 @@ def _yahoo_chart_pct(yahoo_symbol: str, basis: str = "today") -> Optional[Dict[s
         price = float(price)
         basis_norm = str(basis or "today").strip().lower()
         if basis_norm == "yesterday":
-            ref_f = meta.get("previousClose") or meta.get("chartPreviousClose")
+            # Basis Yesterday = latest close vs previous close (from daily close series).
+            indicators = (result0.get("indicators") or {})
+            quotes = (indicators.get("quote") or [])
+            q0 = quotes[0] if quotes and isinstance(quotes[0], dict) else {}
+            closes = q0.get("close") or []
+            close_vals: List[float] = []
+            if isinstance(closes, list):
+                for v in closes:
+                    try:
+                        if v is not None and float(v) > 0:
+                            close_vals.append(float(v))
+                    except (TypeError, ValueError):
+                        continue
+            if len(close_vals) >= 2:
+                price = close_vals[-1]
+                ref_f = close_vals[-2]
+            else:
+                ref_f = meta.get("previousClose") or meta.get("chartPreviousClose")
             ref_label = "previous_close"
         else:
             ref_f = meta.get("regularMarketOpen")
