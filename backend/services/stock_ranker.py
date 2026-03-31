@@ -191,7 +191,7 @@ class StockRanker:
     Ranks stocks based on multiple factors to prioritize high-probability trades
     """
     
-    def __init__(self, max_stocks: int = 15):
+    def __init__(self, max_stocks: int = 6):
         """
         Initialize the ranker
         
@@ -515,12 +515,12 @@ class StockRanker:
 
 
 # Global ranker instance
-stock_ranker = StockRanker(max_stocks=15)
+stock_ranker = StockRanker(max_stocks=6)
 
 
 def rank_and_select_stocks(
     stocks: List[Dict],
-    max_stocks: int = 15,
+    max_stocks: int = 6,
     alert_type: str = None,
     export_meta: Optional[Dict[str, Any]] = None,
 ) -> Tuple[List[Dict], Dict]:

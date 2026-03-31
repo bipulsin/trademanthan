@@ -1549,7 +1549,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         # ====================================================================
         # STOCK RANKING & SELECTION (If too many stocks)
         # ====================================================================
-        MAX_STOCKS_PER_ALERT = 15  # Maximum stocks to enter per alert
+        MAX_STOCKS_PER_ALERT = 6  # Maximum stocks to enter per alert
         
         if len(enriched_stocks) > MAX_STOCKS_PER_ALERT:
             logger.info(f"\n📊 TOO MANY STOCKS ({len(enriched_stocks)}) - Applying ranking to select best {MAX_STOCKS_PER_ALERT}")
