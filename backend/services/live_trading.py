@@ -1282,11 +1282,10 @@ def place_live_upstox_entry_market_first(
     risk_reward: float = 2.5,
 ) -> Dict[str, Any]:
     """
-    Primary: LIMIT BUY at bid_price + (ask_price - bid_price) * 0.6 when bid/ask exist and
-    spread_pct = (ask-bid)/ask*100 <= 1%. Polls until the order is actually filled; if it stays open,
-    cancels and falls through.
-    Then MARKET BUY (poll for fill); if Upstox disallows market: LIMIT BUY at LTP (tick ceiling, poll).
-    Else if those fail: GTT backup when buy_price/stop_loss are valid (no immediate fill — caller may
+    Primary: always attempt DELIVERY LIMIT BUY first at intended buy_price.
+    Poll until filled; if it stays open, cancel and fall through.
+    Then MARKET BUY (poll for fill); if Upstox disallows market, try DELIVERY LIMIT BUY at LTP.
+    If those fail: GTT backup when buy_price/stop_loss are valid (no immediate fill — caller may
     still see LTP until GTT child fills).
     On success with an exchange fill, returns average_fill_price / filled_quantity.
     """
@@ -1299,87 +1298,62 @@ def place_live_upstox_entry_market_first(
     if not qty or qty <= 0:
         return {"success": False, "error": "Invalid quantity"}
 
-    entry_spread_max_pct = 1.0
-    quote = upstox_service.get_market_quote_by_key(instrument_key)
-    if quote:
-        bid = quote.get("bid_price")
-        ask = quote.get("ask_price")
-        sp = quote.get("spread_pct")
-        if bid is not None and ask is not None:
-            try:
-                bid_f = float(bid)
-                ask_f = float(ask)
-            except (TypeError, ValueError):
-                bid_f = ask_f = 0.0
-            else:
-                if bid_f > 0 and ask_f > 0 and bid_f <= ask_f:
-                    if sp is None:
-                        sp = (ask_f - bid_f) / ask_f * 100.0
-                    if sp <= entry_spread_max_pct:
-                        raw_limit = bid_f + (ask_f - bid_f) * 0.6
-                        lim_tag = f"entry_lmt_spread|{stock_name}"[:200]
-                        lim_first = place_live_upstox_limit_buy_at_price(
-                            instrument_key=instrument_key,
-                            qty=qty,
-                            stock_name=stock_name,
-                            option_contract=option_contract,
-                            limit_price=raw_limit,
-                            tag=lim_tag,
-                            product=UPSTOX_ORDER_PRODUCT,
-                        )
-                        if lim_first.get("skipped"):
-                            return lim_first
-                        if lim_first.get("success"):
-                            oid = lim_first.get("order_id")
-                            logger.warning(
-                                "🚨 LIVE LIMIT ENTRY (bid+0.6×spread): %s %s | buy_order_id=%s | method=limit_first (awaiting fill)",
-                                stock_name,
-                                option_contract,
-                                oid,
-                            )
-                            wf = wait_for_buy_order_fill(
-                                str(oid), qty, timeout_sec=ENTRY_FILL_WAIT_SEC
-                            )
-                            if wf.get("filled"):
-                                logger.warning(
-                                    "✅ BUY FILLED %s %s | order_id=%s | avg=₹%s qty=%s",
-                                    stock_name,
-                                    option_contract,
-                                    oid,
-                                    wf.get("average_price"),
-                                    wf.get("filled_quantity"),
-                                )
-                                return {
-                                    "success": True,
-                                    "order_id": oid,
-                                    "method": "limit_bid_ask",
-                                    "average_fill_price": wf.get("average_price"),
-                                    "filled_quantity": wf.get("filled_quantity"),
-                                    "limit_price": lim_first.get("limit_price"),
-                                    "limit_response": lim_first,
-                                }
-                            cancel_open_buy_if_pending(str(oid))
-                            logger.warning(
-                                "Limit-first not filled for %s (%s) within %ss (%s); trying MARKET",
-                                stock_name,
-                                option_contract,
-                                int(ENTRY_FILL_WAIT_SEC),
-                                wf.get("error") or "no_fill",
-                            )
-                        else:
-                            logger.warning(
-                                "Limit-first failed for %s (%s): %s; trying MARKET",
-                                stock_name,
-                                option_contract,
-                                lim_first.get("error"),
-                            )
-                    else:
-                        logger.info(
-                            "Limit-first skipped for %s: spread_pct=%.4f%% > %.1f%%",
-                            stock_name,
-                            sp,
-                            entry_spread_max_pct,
-                        )
+    # Step 1 (always): Delivery LIMIT BUY first, using intended buy_price.
+    # If not filled within wait window, cancel and fall through to MARKET.
+    lim_tag = f"entry_lmt_primary|{stock_name}"[:200]
+    lim_first = place_live_upstox_limit_buy_at_price(
+        instrument_key=instrument_key,
+        qty=qty,
+        stock_name=stock_name,
+        option_contract=option_contract,
+        limit_price=buy_price,
+        tag=lim_tag,
+        product=UPSTOX_ORDER_PRODUCT,
+    )
+    if lim_first.get("skipped"):
+        return lim_first
+    if lim_first.get("success"):
+        oid = lim_first.get("order_id")
+        logger.warning(
+            "🚨 LIVE LIMIT ENTRY (primary): %s %s | buy_order_id=%s | method=limit_first (awaiting fill)",
+            stock_name,
+            option_contract,
+            oid,
+        )
+        wf = wait_for_buy_order_fill(str(oid), qty, timeout_sec=ENTRY_FILL_WAIT_SEC)
+        if wf.get("filled"):
+            logger.warning(
+                "✅ BUY FILLED %s %s | order_id=%s | avg=₹%s qty=%s",
+                stock_name,
+                option_contract,
+                oid,
+                wf.get("average_price"),
+                wf.get("filled_quantity"),
+            )
+            return {
+                "success": True,
+                "order_id": oid,
+                "method": "limit_primary",
+                "average_fill_price": wf.get("average_price"),
+                "filled_quantity": wf.get("filled_quantity"),
+                "limit_price": lim_first.get("limit_price"),
+                "limit_response": lim_first,
+            }
+        cancel_open_buy_if_pending(str(oid))
+        logger.warning(
+            "Primary limit not filled for %s (%s) within %ss (%s); trying MARKET",
+            stock_name,
+            option_contract,
+            int(ENTRY_FILL_WAIT_SEC),
+            wf.get("error") or "no_fill",
+        )
+    else:
+        logger.warning(
+            "Primary limit failed for %s (%s): %s; trying MARKET",
+            stock_name,
+            option_contract,
+            lim_first.get("error"),
+        )
 
     market_tag = f"entry_mkt|{stock_name}"[:200]
     market_res = place_live_upstox_order(
