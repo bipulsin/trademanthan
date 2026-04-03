@@ -1,4 +1,7 @@
 (() => {
+    let userActivityExpanded = false;
+    let userActivityLoadedOnce = false;
+
     const API_BASE_URL =
         window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
             ? 'http://localhost:8000'
@@ -54,12 +57,15 @@
 
     async function loadUserActivity() {
         const tbody = document.getElementById('userActivityBody');
+        const cards = document.getElementById('userActivityCards');
         if (!tbody) return;
         tbody.innerHTML = `<tr><td colspan="5" style="padding:12px;">Loading user activity...</td></tr>`;
+        if (cards) cards.innerHTML = `<div style="padding: 4px 2px;">Loading user activity...</div>`;
 
         const token = getToken();
         if (!token) {
             tbody.innerHTML = `<tr><td colspan="5" style="padding:12px;color:#dc2626;">Session expired. Please login again.</td></tr>`;
+            if (cards) cards.innerHTML = `<div style="padding: 4px 2px; color:#dc2626;">Session expired. Please login again.</div>`;
             return;
         }
 
@@ -79,6 +85,7 @@
             const users = Array.isArray(data.users) ? data.users : [];
             if (!users.length) {
                 tbody.innerHTML = `<tr><td colspan="5" style="padding:12px;">No users found.</td></tr>`;
+                if (cards) cards.innerHTML = `<div style="padding: 4px 2px;">No users found.</div>`;
                 return;
             }
             tbody.innerHTML = users
@@ -109,9 +116,34 @@
                     </tr>`;
                 })
                 .join('');
+
+            if (cards) {
+                cards.innerHTML = users.map((u) => {
+                    const safeName = (u.name || '-').replace(/"/g, '&quot;');
+                    const safeEmail = (u.email || '-').replace(/"/g, '&quot;');
+                    const safePage = (u.last_page_visited || '-').replace(/"/g, '&quot;');
+                    return `<div class="user-card ${u.is_blocked ? 'blocked' : ''}">
+                        <div class="user-card-title">${safeName}</div>
+                        <div class="user-card-email">${safeEmail}</div>
+                        <div class="user-card-row"><strong>Last Login:</strong> ${formatDateTime(u.last_login_at)}</div>
+                        <div class="user-card-row"><strong>Last Login IP:</strong> ${u.last_login_ip || '-'}</div>
+                        <div class="user-card-row"><strong>Last Page:</strong> ${safePage}</div>
+                        <div class="user-card-row"><strong>Page Time:</strong> ${formatDateTime(u.last_page_visited_at)}</div>
+                        <div class="user-card-actions">
+                            ${actionBtn('fa-ban', 'Block / Unblock User', 'flag-block', !!u.is_blocked, `window.toggleUserFlag(${u.id}, 'is_blocked', ${!u.is_blocked})`)}
+                            ${stateBadge('Blocked', !!u.is_blocked)}
+                            ${actionBtn('fa-crown', 'Paid User On/Off', 'flag-paid', !!u.is_paid_user, `window.toggleUserFlag(${u.id}, 'is_paid_user', ${!u.is_paid_user})`)}
+                            ${stateBadge('Paid', !!u.is_paid_user)}
+                            ${actionBtn('fa-user-shield', 'Admin User On/Off', 'flag-admin', !!u.is_admin, `window.toggleUserFlag(${u.id}, 'is_admin', ${!u.is_admin})`)}
+                            ${stateBadge('Admin', !!u.is_admin)}
+                        </div>
+                    </div>`;
+                }).join('');
+            }
         } catch (e) {
             console.error('User activity load failed:', e);
             tbody.innerHTML = `<tr><td colspan="5" style="padding:12px;color:#dc2626;">Failed to load user activity.</td></tr>`;
+            if (cards) cards.innerHTML = `<div style="padding: 4px 2px; color:#dc2626;">Failed to load user activity.</div>`;
         }
     }
 
@@ -138,8 +170,35 @@
 
     window.toggleUserFlag = toggleUserFlag;
 
+    function setUserActivityExpanded(expanded) {
+        userActivityExpanded = expanded;
+        const content = document.getElementById('userActivityContent');
+        const icon = document.getElementById('userActivityCollapseIcon');
+        if (content) content.classList.toggle('expanded', expanded);
+        if (icon) {
+            icon.classList.toggle('fa-chevron-right', !expanded);
+            icon.classList.toggle('fa-chevron-down', expanded);
+        }
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
-        loadUserActivity();
-        setInterval(loadUserActivity, 60000);
+        setUserActivityExpanded(false);
+        const toggle = document.getElementById('userActivityToggle');
+        if (toggle) {
+            toggle.addEventListener('click', async () => {
+                const next = !userActivityExpanded;
+                setUserActivityExpanded(next);
+                if (next && !userActivityLoadedOnce) {
+                    userActivityLoadedOnce = true;
+                    await loadUserActivity();
+                }
+            });
+        }
+
+        setInterval(() => {
+            if (userActivityExpanded) {
+                loadUserActivity();
+            }
+        }, 60000);
     });
 })();
