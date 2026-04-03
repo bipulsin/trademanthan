@@ -35,6 +35,10 @@ function handleEmailLogin(event) {
         return;
     }
     
+    // Email/password flow is not enabled in production for secured session
+    alert('Email/password login is currently disabled. Please use Google login.');
+    return;
+
     // Show loading state
     const submitBtn = event.target.querySelector('button[type="submit"]');
     const originalText = submitBtn.textContent;
@@ -91,6 +95,10 @@ function initializeFeatureCards() {
 
 // Google OAuth client ID
 const GOOGLE_CLIENT_ID = '428560418671-t59riis4gqkhavnevt9ve6km54ltsba7.apps.googleusercontent.com';
+const API_BASE_URL =
+    window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+        ? 'http://localhost:8000'
+        : 'https://trademanthan.in';
 
 // Detect mobile/touch device (Google button in popup often fails on mobile - popup blocking, touch issues)
 function isMobileView() {
@@ -202,40 +210,46 @@ async function handleCredentialResponse(response) {
             
             // For now, we'll use a simplified approach since the backend expects a different flow
             // In production, you'd want to implement the full OAuth flow with the backend
-            const apiResponse = await fetch('/auth/google-verify', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    google_id: userData.sub,
-                    email: userData.email,
-                    name: userData.name,
-                    picture: userData.picture,
-                    credential: response.credential
-                })
-            });
+            async function doAuthRequest(path) {
+                return fetch(`${API_BASE_URL}${path}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        google_id: userData.sub,
+                        email: userData.email,
+                        name: userData.name,
+                        picture: userData.picture,
+                        credential: response.credential
+                    })
+                });
+            }
+
+            let apiResponse = await doAuthRequest('/api/auth/google-verify');
+            if (!apiResponse.ok) {
+                apiResponse = await doAuthRequest('/auth/google-verify');
+            }
             
             if (apiResponse.ok) {
                 const authResult = await apiResponse.json();
                 console.log("Backend authentication successful:", authResult);
                 
-                // Store the backend token and user data
-                localStorage.setItem('trademanthan_user', JSON.stringify(authResult.user));
+                // Require a proper JWT token for authenticated session
+                if (!authResult || !authResult.access_token || !String(authResult.access_token).includes('.')) {
+                    throw new Error('Backend did not return a valid session token');
+                }
+                localStorage.setItem('trademanthan_user', JSON.stringify(authResult.user || {}));
                 localStorage.setItem('trademanthan_token', authResult.access_token);
                 
                 console.log("User authenticated and data stored");
             } else {
-                console.warn("Backend API call failed, falling back to localStorage only");
-                // Fallback: store user data in localStorage (for development)
-                localStorage.setItem('trademanthan_user', JSON.stringify(userData));
-                localStorage.setItem('trademanthan_token', 'google_token_' + Date.now());
+                throw new Error(`Authentication failed (${apiResponse.status})`);
             }
         } catch (apiError) {
-            console.warn("Backend API call failed, falling back to localStorage only:", apiError);
-            // Fallback: store user data in localStorage (for development)
-            localStorage.setItem('trademanthan_user', JSON.stringify(userData));
-            localStorage.setItem('trademanthan_token', 'google_token_' + Date.now());
+            console.error("Backend API authentication failed:", apiError);
+            alert("Login failed: unable to create a secure session. Please try again.");
+            return;
         }
         
         // Close the login popup

@@ -7,10 +7,35 @@
     <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
     <script src="auth-check.js"></script>
     <script>
-        (function () {
+        (async function () {
             try {
-                var u = JSON.parse(localStorage.getItem('trademanthan_user') || '{}');
-                if (u.isAdmin !== 'Yes') {
+                const API_BASE_URL =
+                    window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+                        ? 'http://localhost:8000'
+                        : 'https://trademanthan.in';
+                const token = localStorage.getItem('trademanthan_token') || '';
+                if (!token || !token.includes('.')) {
+                    window.location.replace('index.html');
+                    return;
+                }
+                let meRes = await fetch(`${API_BASE_URL}/api/auth/me`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                    cache: 'no-store'
+                });
+                if (!meRes.ok) {
+                    meRes = await fetch(`${API_BASE_URL}/auth/me`, {
+                        headers: { Authorization: `Bearer ${token}` },
+                        cache: 'no-store'
+                    });
+                }
+                if (!meRes.ok) {
+                    window.location.replace('index.html');
+                    return;
+                }
+                const me = await meRes.json();
+                const merged = Object.assign({}, JSON.parse(localStorage.getItem('trademanthan_user') || '{}'), me || {});
+                localStorage.setItem('trademanthan_user', JSON.stringify(merged));
+                if ((String(merged.isAdmin || '').trim()) !== 'Yes') {
                     window.location.replace('dashboard.html');
                 }
             } catch (e) {
@@ -92,7 +117,7 @@
         </main>
     </div>
 
-    <script src="left-menu.js?v=3.14"></script>
+    <script src="left-menu.js?v=3.15"></script>
     <script src="admintwc.js?v=1.0.1"></script>
     <script src="version.js?v=1.0"></script>
     <script src="cache-manager.js?v=1.1"></script>

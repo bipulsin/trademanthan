@@ -8,7 +8,8 @@
             const token = localStorage.getItem('trademanthan_token');
             const userData = localStorage.getItem('trademanthan_user');
             if (!token || !userData) return false;
-            if (!token.startsWith('google_token_') && !token.startsWith('email_token_') && !token.includes('.')) {
+            // Strict session: must be backend JWT
+            if (!token.includes('.')) {
                 localStorage.removeItem('trademanthan_token');
                 localStorage.removeItem('trademanthan_user');
                 return false;
