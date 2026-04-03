@@ -556,6 +556,25 @@ body[data-theme="light"] .cargpt-help-icon-btn:hover {
     background: rgba(59, 130, 246, 0.05);
 }
 
+.cargpt-table tr.cargpt-group-header td {
+    background: rgba(59, 130, 246, 0.14);
+    color: var(--cargpt-text);
+    font-weight: 700;
+    padding: 8px 10px;
+}
+
+.cargpt-table tr.cargpt-group-empty td {
+    padding: 10px;
+    color: #fbbf24;
+    background: rgba(245, 158, 11, 0.12);
+    font-weight: 700;
+}
+
+.cargpt-table tr.cargpt-group-header:hover td,
+.cargpt-table tr.cargpt-group-empty:hover td {
+    background: inherit;
+}
+
 .cargpt-signal-buy {
     color: var(--cargpt-buy);
     font-weight: 700;
@@ -604,6 +623,30 @@ body[data-theme="light"] .cargpt-help-icon-btn:hover {
         background: rgba(15, 23, 42, 0.45);
         cursor: pointer;
         -webkit-tap-highlight-color: rgba(59, 130, 246, 0.15);
+    }
+
+    .cargpt-table tbody tr.cargpt-group-header,
+    .cargpt-table tbody tr.cargpt-group-empty {
+        display: table-row;
+        border: none;
+        border-radius: 0;
+        margin: 0;
+        background: transparent;
+        cursor: default;
+    }
+
+    .cargpt-table tbody tr.cargpt-group-header td,
+    .cargpt-table tbody tr.cargpt-group-empty td {
+        display: table-cell;
+        border-right: none;
+        border-bottom: 1px solid var(--cargpt-border);
+        padding: 10px 12px;
+    }
+
+    .cargpt-table tbody tr.cargpt-group-header td::before,
+    .cargpt-table tbody tr.cargpt-group-empty td::before {
+        display: none !important;
+        content: none !important;
     }
 
     .cargpt-table tbody tr:hover td {
