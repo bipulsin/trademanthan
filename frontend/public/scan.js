@@ -623,7 +623,8 @@ function displayBullishData(data) {
                 </div>
             </div>
             <div id="bullishContent" class="section-content ${collapsedClass}">
-                ${data.alerts.map(alert => renderAlertGroup(alert, 'bullish')).join('')}
+                ${renderGroupTableHeader()}
+                ${data.alerts.map(alert => renderAlertGroup(alert, 'bullish', true)).join('')}
             </div>
         </div>
     `;
@@ -706,7 +707,8 @@ function displayBearishData(data) {
                 </div>
             </div>
             <div id="bearishContent" class="section-content ${collapsedClass}">
-                ${data.alerts.map(alert => renderAlertGroup(alert, 'bearish')).join('')}
+                ${renderGroupTableHeader()}
+                ${data.alerts.map(alert => renderAlertGroup(alert, 'bearish', true)).join('')}
             </div>
         </div>
     `;
@@ -714,8 +716,30 @@ function displayBearishData(data) {
     container.innerHTML = html;
 }
 
+function renderGroupTableHeader() {
+    return `
+        <table class="stocks-table grouped-header-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Stock Name</th>
+                    <th>Stock LTP / VWAP</th>
+                    <th>Slope/Size</th>
+                    <th>Option Contract (OTM-1)</th>
+                    <th>Qty</th>
+                    <th>Buy Price</th>
+                    <th>Stop Loss</th>
+                    <th>Sell Price</th>
+                    <th>PnL</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+        </table>
+    `;
+}
+
 // Render a single alert group
-function renderAlertGroup(alert, type) {
+function renderAlertGroup(alert, type, omitTableHeader = false) {
     if (!alert.stocks || alert.stocks.length === 0) {
         return '';
     }
@@ -735,6 +759,7 @@ function renderAlertGroup(alert, type) {
             </div>
             
             <table class="stocks-table">
+                ${omitTableHeader ? '' : `
                 <thead>
                     <tr>
                         <th>#</th>
@@ -750,6 +775,7 @@ function renderAlertGroup(alert, type) {
                         <th>Status</th>
                     </tr>
                 </thead>
+                `}
                 <tbody>
                     ${sortedStocks.map(function(stock, index) {
                         const stock_ltp = stock.last_traded_price || stock.trigger_price || 0;
