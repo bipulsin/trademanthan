@@ -29,9 +29,9 @@
     function actionBtn(iconClass, title, activeClass, active, onClickJs) {
         const color = active ? '#2563eb' : '#6b7280';
         const iconHtml = iconClass === 'paid-coin'
-            ? '<span class="paid-coin-icon" aria-hidden="true">₹</span>'
+            ? `<span class="paid-coin-icon ${active ? 'active' : ''}" aria-hidden="true">₹</span>`
             : `<i class="fas ${iconClass}" aria-hidden="true"></i>`;
-        return `<button class="admin-flag-btn ${activeClass}" title="${title}" onclick="${onClickJs}" style="border:none;background:transparent;cursor:pointer;padding:6px;color:${color};font-size:16px;">
+        return `<button class="admin-flag-btn ${activeClass}" title="${title}" data-tooltip="${title}" aria-label="${title}" onclick="${onClickJs}" style="border:none;background:transparent;cursor:pointer;padding:6px;color:${color};font-size:16px;">
             ${iconHtml}
         </button>`;
     }
