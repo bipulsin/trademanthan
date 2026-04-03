@@ -28,15 +28,12 @@
 
     function actionBtn(iconClass, title, activeClass, active, onClickJs) {
         const color = active ? '#2563eb' : '#6b7280';
+        const iconHtml = iconClass === 'paid-coin'
+            ? '<span class="paid-coin-icon" aria-hidden="true">₹</span>'
+            : `<i class="fas ${iconClass}" aria-hidden="true"></i>`;
         return `<button class="admin-flag-btn ${activeClass}" title="${title}" onclick="${onClickJs}" style="border:none;background:transparent;cursor:pointer;padding:6px;color:${color};font-size:16px;">
-            <i class="fas ${iconClass}"></i>
+            ${iconHtml}
         </button>`;
-    }
-
-    function stateBadge(label, active) {
-        const bg = active ? '#dcfce7' : '#f1f5f9';
-        const fg = active ? '#166534' : '#64748b';
-        return `<span style="display:inline-block;margin-left:4px;padding:2px 6px;border-radius:10px;font-size:11px;font-weight:600;background:${bg};color:${fg};">${label}</span>`;
     }
 
     async function apiFetch(paths, options) {
@@ -106,12 +103,9 @@
                             <div style="font-size:12px;color:#64748b;">${formatDateTime(u.last_page_visited_at)}</div>
                         </td>
                         <td style="padding:10px;white-space:nowrap;">
-                            ${actionBtn('fa-ban', 'Block / Unblock User', 'flag-block', !!u.is_blocked, `window.toggleUserFlag(${u.id}, 'is_blocked', ${!u.is_blocked})`)}
-                            ${stateBadge('Blocked', !!u.is_blocked)}
-                            ${actionBtn('fa-crown', 'Paid User On/Off', 'flag-paid', !!u.is_paid_user, `window.toggleUserFlag(${u.id}, 'is_paid_user', ${!u.is_paid_user})`)}
-                            ${stateBadge('Paid', !!u.is_paid_user)}
-                            ${actionBtn('fa-user-shield', 'Admin User On/Off', 'flag-admin', !!u.is_admin, `window.toggleUserFlag(${u.id}, 'is_admin', ${!u.is_admin})`)}
-                            ${stateBadge('Admin', !!u.is_admin)}
+                            ${actionBtn('fa-ban', `${u.is_blocked ? 'Unblock User' : 'Block User'}`, 'flag-block', !!u.is_blocked, `window.toggleUserFlag(${u.id}, 'is_blocked', ${!u.is_blocked})`)}
+                            ${actionBtn('paid-coin', `${u.is_paid_user ? 'Remove Paid User' : 'Mark as Paid User'}`, 'flag-paid', !!u.is_paid_user, `window.toggleUserFlag(${u.id}, 'is_paid_user', ${!u.is_paid_user})`)}
+                            ${actionBtn('fa-user-shield', `${u.is_admin ? 'Remove Admin Access' : 'Grant Admin Access'}`, 'flag-admin', !!u.is_admin, `window.toggleUserFlag(${u.id}, 'is_admin', ${!u.is_admin})`)}
                         </td>
                     </tr>`;
                 })
@@ -130,12 +124,9 @@
                         <div class="user-card-row"><strong>Last Page:</strong> ${safePage}</div>
                         <div class="user-card-row"><strong>Page Time:</strong> ${formatDateTime(u.last_page_visited_at)}</div>
                         <div class="user-card-actions">
-                            ${actionBtn('fa-ban', 'Block / Unblock User', 'flag-block', !!u.is_blocked, `window.toggleUserFlag(${u.id}, 'is_blocked', ${!u.is_blocked})`)}
-                            ${stateBadge('Blocked', !!u.is_blocked)}
-                            ${actionBtn('fa-crown', 'Paid User On/Off', 'flag-paid', !!u.is_paid_user, `window.toggleUserFlag(${u.id}, 'is_paid_user', ${!u.is_paid_user})`)}
-                            ${stateBadge('Paid', !!u.is_paid_user)}
-                            ${actionBtn('fa-user-shield', 'Admin User On/Off', 'flag-admin', !!u.is_admin, `window.toggleUserFlag(${u.id}, 'is_admin', ${!u.is_admin})`)}
-                            ${stateBadge('Admin', !!u.is_admin)}
+                            ${actionBtn('fa-ban', `${u.is_blocked ? 'Unblock User' : 'Block User'}`, 'flag-block', !!u.is_blocked, `window.toggleUserFlag(${u.id}, 'is_blocked', ${!u.is_blocked})`)}
+                            ${actionBtn('paid-coin', `${u.is_paid_user ? 'Remove Paid User' : 'Mark as Paid User'}`, 'flag-paid', !!u.is_paid_user, `window.toggleUserFlag(${u.id}, 'is_paid_user', ${!u.is_paid_user})`)}
+                            ${actionBtn('fa-user-shield', `${u.is_admin ? 'Remove Admin Access' : 'Grant Admin Access'}`, 'flag-admin', !!u.is_admin, `window.toggleUserFlag(${u.id}, 'is_admin', ${!u.is_admin})`)}
                         </div>
                     </div>`;
                 }).join('');
@@ -176,8 +167,8 @@
         const icon = document.getElementById('userActivityCollapseIcon');
         if (content) content.classList.toggle('expanded', expanded);
         if (icon) {
-            icon.classList.toggle('fa-chevron-right', !expanded);
-            icon.classList.toggle('fa-chevron-down', expanded);
+            icon.classList.toggle('fa-chevron-down', !expanded);
+            icon.classList.toggle('fa-chevron-up', expanded);
         }
     }
 
