@@ -497,20 +497,21 @@
             };
         }
 
-        function renderCarResults(tbody, data, emptyMsg, dmaFilter) {
+        function renderCarResults(tbody, data, emptyMsg, dmaFilter, opts) {
             if (!data || !Array.isArray(data) || data.length === 0) {
                 return emptyMsg || 'No records.';
             }
             const f = dmaFilter || { dma50: true, dma100: true, dma200: true };
+            const options = opts || {};
             let html = '';
             const sym = (row) => (row.symbol || '-').replace(/[&<>"']/g, function(c) {
                 return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] || c;
             });
-            for (const row of data) {
+            function rowHtml(row) {
                 const displaySignal = getDisplaySignal(row, f.dma50, f.dma100, f.dma200);
                 const signalClass = displaySignal.includes('BUY') ? 'cargpt-signal-buy' : 'cargpt-signal-avoid';
                 const err = row.error ? '<br><small style="color: var(--cargpt-avoid);">' + (row.error || '') + '</small>' : '';
-                html += `
+                return `
                     <tr class="cargpt-mobile-collapsed" aria-expanded="false" title="Tap to show details">
                         <td><span class="cargpt-symbol-link" data-symbol="${sym(row)}" role="button" tabindex="0">${sym(row)}</span></td>
                         <td>${row.week_52_high_date || '-'}${err}</td>
@@ -518,6 +519,37 @@
                         <td style="font-size: 0.85rem;">${formatCumulativeAvg(row.last_10_cumulative_avg)}</td>
                         <td class="${signalClass}">${displaySignal || '-'}</td>
                     </tr>`;
+            }
+
+            if (options.groupBySignal) {
+                const rowsWithSignal = data.map((row) => ({ row, displaySignal: getDisplaySignal(row, f.dma50, f.dma100, f.dma200) }));
+                const byName = (a, b) => (a.row.symbol || '').localeCompare((b.row.symbol || ''), 'en', { sensitivity: 'base' });
+                const buyAvg = rowsWithSignal.filter((r) => /buy/i.test(r.displaySignal || '')).sort(byName);
+                const avoidHold = rowsWithSignal.filter((r) => !/buy/i.test(r.displaySignal || '')).sort(byName);
+
+                html += `
+                    <tr class="cargpt-group-header">
+                        <td colspan="5" style="background:#ecfdf5;color:#065f46;font-weight:700;padding:8px 10px;">Buy / Average</td>
+                    </tr>
+                `;
+                if (buyAvg.length === 0) {
+                    html += `
+                        <tr class="cargpt-group-empty">
+                            <td colspan="5" style="padding:10px;color:#92400e;background:#fffbeb;font-weight:600;">Oho! Nothing to Buy / Average Now! Market is really down</td>
+                        </tr>
+                    `;
+                } else {
+                    for (const r of buyAvg) html += rowHtml(r.row);
+                }
+
+                html += `
+                    <tr class="cargpt-group-header">
+                        <td colspan="5" style="background:#f8fafc;color:#334155;font-weight:700;padding:8px 10px;">Avoid / Hold</td>
+                    </tr>
+                `;
+                for (const r of avoidHold) html += rowHtml(r.row);
+            } else {
+                for (const row of data) html += rowHtml(row);
             }
             tbody.innerHTML = html;
         }
@@ -613,7 +645,7 @@
                 if (!window.matchMedia('(max-width: 768px)').matches) return;
                 if (e.target.closest('.cargpt-symbol-link')) return;
                 const tr = e.target.closest('.cargpt-table tbody tr');
-                if (!tr) return;
+                if (!tr || tr.classList.contains('cargpt-group-header') || tr.classList.contains('cargpt-group-empty')) return;
                 tr.classList.toggle('cargpt-mobile-collapsed');
                 const collapsed = tr.classList.contains('cargpt-mobile-collapsed');
                 tr.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
@@ -662,7 +694,7 @@
                 }
                 window._nifty250Data = data;
                 wrap.style.display = 'block';
-                renderCarResults(tbody, data, null, getDmaFilter('nifty250'));
+                renderCarResults(tbody, data, null, getDmaFilter('nifty250'), { groupBySignal: true });
             } catch (e) {
                 loading.style.display = 'none';
                 overlay.classList.remove('visible');
@@ -732,7 +764,7 @@
             const wrap = document.getElementById('nifty250TableWrap');
             const tbody = document.getElementById('nifty250TableBody');
             if (data && wrap && wrap.style.display !== 'none' && tbody) {
-                renderCarResults(tbody, data, null, getDmaFilter('nifty250'));
+                renderCarResults(tbody, data, null, getDmaFilter('nifty250'), { groupBySignal: true });
             }
         }
         function reRenderCarAnalysis() {
