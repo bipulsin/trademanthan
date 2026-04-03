@@ -60,6 +60,7 @@ class LeftMenu {
                 this.applyAdminNavVisibility();
                 await this.refreshUserProfileFromApi();
                 this.applyAdminNavVisibility();
+                this.trackCurrentPageVisit();
                 this.injectMobileFooter();
                 this.injectPanelSheetHandle();
                 this.setupCollapseToggle();
@@ -693,7 +694,11 @@ class LeftMenu {
         document.querySelectorAll('.nav-item[data-page]').forEach(item => {
             item.addEventListener('click', () => {
                 const page = item.dataset.page;
-                if (page) window.location.replace(page);
+                if (page) {
+                    this.trackPageVisit(page, document.title).finally(() => {
+                        window.location.replace(page);
+                    });
+                }
             });
         });
         document.querySelectorAll('.nav-item[data-action="logout"]').forEach(item => {
@@ -728,6 +733,49 @@ class LeftMenu {
         localStorage.removeItem('trademanthan_user');
         localStorage.removeItem('trademanthan_token');
         window.location.href = 'index.html';
+    }
+
+    trackCurrentPageVisit() {
+        const current = window.location.pathname.split('/').pop() || 'dashboard.html';
+        this.trackPageVisit(current, document.title);
+    }
+
+    async trackPageVisit(page, title) {
+        try {
+            const token = localStorage.getItem('trademanthan_token');
+            if (!token || !token.includes('.')) return;
+            const normalized = String(page || '').slice(0, 255);
+            if (!normalized) return;
+
+            const throttleKey = `tm_last_page_track_${normalized}`;
+            const lastTs = Number(localStorage.getItem(throttleKey) || '0');
+            const nowTs = Date.now();
+            if (nowTs - lastTs < 120000) return; // prevent noisy duplicate writes
+
+            const payload = { page: normalized, title: (title || '').slice(0, 255) };
+            const tryPaths = ['/api/auth/activity/page-view', '/auth/activity/page-view'];
+            for (const path of tryPaths) {
+                try {
+                    const res = await fetch(path, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            Authorization: `Bearer ${token}`,
+                        },
+                        body: JSON.stringify(payload),
+                        keepalive: true,
+                    });
+                    if (res.ok) {
+                        localStorage.setItem(throttleKey, String(nowTs));
+                        break;
+                    }
+                } catch (e) {
+                    // Ignore and try fallback path
+                }
+            }
+        } catch (e) {
+            // Silent; tracking must not break UX
+        }
     }
 }
 

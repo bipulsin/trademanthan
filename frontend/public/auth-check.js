@@ -24,5 +24,28 @@
     }
     if (!isAuthenticated()) {
         window.location.replace('index.html');
+        return;
     }
+
+    // Best-effort page activity tracking for protected pages
+    (function trackPageVisit() {
+        try {
+            const token = localStorage.getItem('trademanthan_token');
+            if (!token || !token.includes('.')) return;
+            const page = window.location.pathname.split('/').pop() || 'unknown';
+            const payload = { page: String(page).slice(0, 255), title: String(document.title || '').slice(0, 255) };
+            const opts = {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify(payload),
+                keepalive: true
+            };
+            fetch('/api/auth/activity/page-view', opts).catch(() => fetch('/auth/activity/page-view', opts).catch(() => {}));
+        } catch (e) {
+            // ignore
+        }
+    })();
 })();

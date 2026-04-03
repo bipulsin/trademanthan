@@ -63,11 +63,37 @@
                         </div>
                     </div>
                 </div>
+
+                <div class="settings-section">
+                    <div class="section-header">
+                        <h2><i class="fas fa-users"></i> User Activity</h2>
+                        <p>Unique users with last login/activity details and quick access controls.</p>
+                    </div>
+                    <div class="setting-card">
+                        <div style="overflow-x: auto;">
+                            <table id="userActivityTable" class="settings-table" style="width: 100%; border-collapse: collapse;">
+                                <thead>
+                                    <tr>
+                                        <th style="text-align: left; padding: 10px;">User</th>
+                                        <th style="text-align: left; padding: 10px;">Last Login</th>
+                                        <th style="text-align: left; padding: 10px;">Last Login IP</th>
+                                        <th style="text-align: left; padding: 10px;">Last Page Visited</th>
+                                        <th style="text-align: left; padding: 10px;">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="userActivityBody">
+                                    <tr><td colspan="5" style="padding: 12px;">Loading user activity...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
             </div>
         </main>
     </div>
 
     <script src="left-menu.js?v=3.14"></script>
+    <script src="admintwc.js?v=1.0.0"></script>
     <script src="version.js?v=1.0"></script>
     <script src="cache-manager.js?v=1.1"></script>
 </body>

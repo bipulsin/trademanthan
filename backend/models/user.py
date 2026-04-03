@@ -18,6 +18,14 @@ class User(Base):
     is_admin = Column("isAdmin", String(10), nullable=True)
     # Optional comma-separated or JSON-ish page allowlist (up to 255 chars)
     page_permitted = Column(String(255), nullable=True)
+    # User governance + activity tracking fields
+    is_blocked = Column(Boolean, default=False, nullable=False)
+    is_paid_user = Column(Boolean, default=False, nullable=False)
+    last_login_at = Column(DateTime, nullable=True)
+    last_login_ip = Column(String(64), nullable=True)
+    last_page_visited = Column(String(255), nullable=True)
+    last_page_visited_at = Column(DateTime, nullable=True)
+    last_activity_ip = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     

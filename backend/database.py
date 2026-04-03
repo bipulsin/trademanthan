@@ -266,5 +266,31 @@ def _run_startup_schema_migrations(db_engine):
                         text("ALTER TABLE intraday_stock_options ADD COLUMN entry_slip_checks INTEGER DEFAULT 0")
                     )
                     print("Applied migration: added intraday_stock_options.entry_slip_checks")
+
+            if "users" in table_names:
+                user_columns = {col["name"] for col in inspector.get_columns("users")}
+                if "is_blocked" not in user_columns:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN is_blocked BOOLEAN DEFAULT FALSE"))
+                    print("Applied migration: added users.is_blocked")
+                if "is_paid_user" not in user_columns:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN is_paid_user BOOLEAN DEFAULT FALSE"))
+                    print("Applied migration: added users.is_paid_user")
+                if "last_login_at" not in user_columns:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN last_login_at TIMESTAMP"))
+                    print("Applied migration: added users.last_login_at")
+                if "last_login_ip" not in user_columns:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN last_login_ip VARCHAR(64)"))
+                    print("Applied migration: added users.last_login_ip")
+                if "last_page_visited" not in user_columns:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN last_page_visited VARCHAR(255)"))
+                    print("Applied migration: added users.last_page_visited")
+                if "last_page_visited_at" not in user_columns:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN last_page_visited_at TIMESTAMP"))
+                    print("Applied migration: added users.last_page_visited_at")
+                if "last_activity_ip" not in user_columns:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN last_activity_ip VARCHAR(64)"))
+                    print("Applied migration: added users.last_activity_ip")
+                conn.execute(text("UPDATE users SET is_blocked = FALSE WHERE is_blocked IS NULL"))
+                conn.execute(text("UPDATE users SET is_paid_user = FALSE WHERE is_paid_user IS NULL"))
     except Exception as migration_error:
         print(f"Warning: startup schema migration failed: {migration_error}")
