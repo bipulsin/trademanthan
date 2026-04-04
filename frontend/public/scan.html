@@ -1327,9 +1327,9 @@
                                 e.preventDefault();
                                 e.stopPropagation();
                                 console.log('🚀 Upstox OAuth button clicked!');
-                                const baseUrl = window.location.hostname === 'localhost' 
-                                    ? 'http://localhost:8000' 
-                                    : 'https://trademanthan.in';
+                                const baseUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+                                    ? 'http://localhost:8000'
+                                    : window.location.origin;
                                 const url = baseUrl + '/scan/upstox/login';
                                 console.log('Redirecting to:', url);
                                 window.location.href = url;
@@ -1361,7 +1361,7 @@
         </div>
     </div>
     
-    <script src="scan.js?v=20260330153000"></script>
+    <script src="scan.js?v=20260405120000"></script>
     <script>
         // Dropdown menu toggle function
         function toggleMenu() {
@@ -1395,9 +1395,9 @@
         // Define the function globally to ensure it's always available
         window.initiateUpstoxOAuth = function() {
             console.log('Initiating Upstox OAuth login...');
-            const API_BASE_URL = window.location.hostname === 'localhost' 
-                ? 'http://localhost:8000' 
-                : 'https://trademanthan.in';
+            const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+                ? 'http://localhost:8000'
+                : window.location.origin;
             const oauthUrl = API_BASE_URL + '/scan/upstox/login';
             
             // Show loading on button if event is available
@@ -1424,9 +1424,9 @@
     <script>
         async function loadTradingLiveStatus() {
             try {
-                const apiBase = window.location.hostname === 'localhost'
+                const apiBase = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
                     ? 'http://localhost:8000'
-                    : 'https://trademanthan.in';
+                    : window.location.origin;
                 const response = await fetch(`${apiBase}/scan/trading-live`);
                 if (!response.ok) {
                     return;

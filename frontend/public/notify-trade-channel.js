@@ -4,15 +4,10 @@
  */
 (function () {
     window.getTrademanthanApiBase = function () {
-        if (window.location.hostname === "localhost") {
+        if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
             return "http://localhost:8000";
         }
-        // tradewithcto.com proxies /auth to FastAPI; trademanthan.in may return 405 for POST /auth (nginx).
-        const h = window.location.hostname || "";
-        if (h === "tradewithcto.com" || h === "www.tradewithcto.com") {
-            return window.location.origin;
-        }
-        return "https://trademanthan.in";
+        return window.location.origin;
     };
 
     function parseNotifyError(data, res) {

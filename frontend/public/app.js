@@ -95,10 +95,12 @@ function initializeFeatureCards() {
 
 // Google OAuth client ID
 const GOOGLE_CLIENT_ID = '428560418671-t59riis4gqkhavnevt9ve6km54ltsba7.apps.googleusercontent.com';
+// Same origin as the page so https://tradewithcto.com calls /api on this host (nginx → FastAPI).
+// Hardcoding trademanthan.in breaks Google login from tradewithcto.com (cross-origin / nginx quirks).
 const API_BASE_URL =
     window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
         ? 'http://localhost:8000'
-        : 'https://trademanthan.in';
+        : window.location.origin;
 
 // Detect mobile/touch device (Google button in popup often fails on mobile - popup blocking, touch issues)
 function isMobileView() {

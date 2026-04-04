@@ -1028,8 +1028,8 @@
         </div>
     </div>
     
-    <script src="scan.js?v=20260330153000"></script>
-    <script src="notify-trade-channel.js?v=2"></script>
+    <script src="scan.js?v=20260405120000"></script>
+    <script src="notify-trade-channel.js?v=3"></script>
     <script>
     (function () {
         var KEY = 'intraoption_engine_modal_shown_v1';
@@ -1138,9 +1138,9 @@
     <script>
         async function loadTradingLiveStatus() {
             try {
-                const apiBase = window.location.hostname === 'localhost'
+                const apiBase = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
                     ? 'http://localhost:8000'
-                    : 'https://trademanthan.in';
+                    : window.location.origin;
                 const response = await fetch(`${apiBase}/scan/trading-live`);
                 if (!response.ok) {
                     return;
@@ -1564,7 +1564,7 @@
 
         </main>
     </div>
-    <script src="left-menu.js?v=3.14"></script>
+    <script src="left-menu.js?v=3.16"></script>
 </body>
 </html>
 

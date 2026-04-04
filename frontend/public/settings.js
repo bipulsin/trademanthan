@@ -503,7 +503,11 @@ async function updateUpstoxToken() {
     button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Updating...';
     
     try {
-        const response = await fetch('https://trademanthan.in/scan/update-upstox-token', {
+        const apiBase =
+            window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+                ? 'http://localhost:8000'
+                : window.location.origin;
+        const response = await fetch(`${apiBase}/scan/update-upstox-token`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -540,7 +544,11 @@ async function initiateUpstoxOAuthSettings() {
         console.log('Initiating Upstox OAuth login...');
         
         // Get the OAuth login URL from backend
-        const response = await fetch('https://trademanthan.in/scan/upstox/login');
+        const apiBase =
+            window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+                ? 'http://localhost:8000'
+                : window.location.origin;
+        const response = await fetch(`${apiBase}/scan/upstox/login`);
         const result = await response.json();
         
         if (result.status === 'success' && result.auth_url) {

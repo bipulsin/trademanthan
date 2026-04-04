@@ -25,12 +25,13 @@ class StrategyManager {
         this._isReady = false;
         this.productsCache = {}; // Cache for products by platform
         
-        // Base URL configuration - Use production domain
-        this.baseURL = 'https://trademanthan.in';
-        
-        // Additional safety checks
+        this.baseURL =
+            window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+                ? 'http://localhost:8000'
+                : window.location.origin;
+
         if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-            console.log('🌐 Running on production domain, using production API');
+            console.log('🌐 Running on production domain, using same-origin API');
         }
         
         console.log('🌐 Base URL set to:', this.baseURL);

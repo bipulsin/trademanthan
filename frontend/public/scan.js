@@ -1,9 +1,10 @@
 // Scan Page JavaScript
 console.log('Scan.js loaded successfully');
 
-const API_BASE_URL = window.location.hostname === 'localhost' 
-    ? 'http://localhost:8000' 
-    : 'https://trademanthan.in';
+const API_BASE_URL =
+    window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+        ? 'http://localhost:8000'
+        : window.location.origin;
 
 /** Set on intraoption.html — hide Upstox token banner/popup and OAuth refresh UX */
 const SCAN_SKIP_TOKEN_UI = typeof window !== 'undefined' && window.__INTRAOPTION_PAGE === true;
@@ -1619,7 +1620,7 @@ async function updateTokenFromPopup() {
     button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Updating...';
     
     try {
-        const response = await fetch('https://trademanthan.in/scan/update-upstox-token', {
+        const response = await fetch(`${API_BASE_URL}/scan/update-upstox-token`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
