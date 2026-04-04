@@ -1361,6 +1361,63 @@ body[data-theme="dark"] .market-sentiment-value {
     flex-wrap: wrap;
 }
 
+.market-sentiment-card .card-header.compact {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+}
+
+.market-sentiment-card .card-header.compact h3 {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.market-trivia-ticker {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 260px;
+    overflow: hidden;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    background: rgba(37, 99, 235, 0.08);
+    padding: 0.28rem 0;
+}
+
+.market-trivia-track {
+    display: inline-flex;
+    align-items: center;
+    gap: 2.8rem;
+    min-width: 100%;
+    white-space: nowrap;
+    will-change: transform;
+    animation: dashboardTriviaTicker 44s linear infinite;
+}
+
+.market-trivia-track span {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #1e3a8a;
+    letter-spacing: 0.01em;
+}
+
+.market-trivia-ticker:hover .market-trivia-track {
+    animation-play-state: paused;
+}
+
+@keyframes dashboardTriviaTicker {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+}
+
+body[data-theme="dark"] .market-trivia-ticker {
+    border-color: rgba(148, 163, 184, 0.24);
+    background: rgba(30, 64, 175, 0.18);
+}
+
+body[data-theme="dark"] .market-trivia-track span {
+    color: #dbeafe;
+}
+
 .sentiment-basis-toggle {
     display: inline-flex;
     align-items: center;
@@ -1418,6 +1475,20 @@ body[data-theme="dark"] .sentiment-dials-updated {
 }
 
 @media (max-width: 900px) {
+    .market-sentiment-card .card-header.compact {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .market-sentiment-card .card-header.compact h3 {
+        white-space: normal;
+    }
+
+    .market-trivia-ticker {
+        min-width: 0;
+        width: 100%;
+    }
+
     .sentiment-dials-toolbar {
         justify-content: center;
     }
