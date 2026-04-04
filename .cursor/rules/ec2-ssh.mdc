@@ -9,7 +9,7 @@ Use these defaults when running remote commands, deployment checks, or `ssh`/`sc
 
 | Setting | Value |
 |--------|--------|
-| **Host** | `3.109.48.23` |
+| **Host** | `3.6.199.247` |
 | **User** | `ubuntu` |
 | **Private key** | **`${workspaceFolder}/TradeM.pem`** (same as `/Users/bipulsahay/TradeManthan/TradeM.pem` on this machine) |
 
@@ -17,16 +17,16 @@ Use these defaults when running remote commands, deployment checks, or `ssh`/`sc
 
 ```bash
 # Interactive shell
-ssh -i "${workspaceFolder}/TradeM.pem" ubuntu@3.109.48.23
+ssh -i "${workspaceFolder}/TradeM.pem" ubuntu@3.6.199.247
 
 # One-off remote command (wrap remote in quotes; use timeout for long-running tails)
-ssh -i "${workspaceFolder}/TradeM.pem" -o ConnectTimeout=20 ubuntu@3.109.48.23 'hostname && uptime'
+ssh -i "${workspaceFolder}/TradeM.pem" -o ConnectTimeout=20 ubuntu@3.6.199.247 'hostname && uptime'
 ```
 
 Or from repo root:
 
 ```bash
-ssh -i ./TradeM.pem ubuntu@3.109.48.23
+ssh -i ./TradeM.pem ubuntu@3.6.199.247
 ./scripts/ec2-ssh.sh 'tail -50 /tmp/deploy_backend.log'
 ```
 

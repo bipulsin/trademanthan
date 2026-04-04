@@ -5,7 +5,7 @@
 set -e
 
 EC2_KEY="/Users/bipulsahay/TradeManthan/TradeM.pem"
-EC2_HOST="3.109.48.23"
+EC2_HOST="3.6.199.247"
 EC2_USER="ubuntu"
 PROJECT_DIR="/home/ubuntu/trademanthan"
 TIMEOUT=15

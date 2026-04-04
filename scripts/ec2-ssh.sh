@@ -7,7 +7,7 @@
 
 set -e
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-export EC2_HOST="${EC2_HOST:-3.109.48.23}"
+export EC2_HOST="${EC2_HOST:-3.6.199.247}"
 export EC2_USER="${EC2_USER:-ubuntu}"
 export EC2_KEY="${EC2_KEY:-$ROOT/TradeM.pem}"
 

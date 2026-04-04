@@ -18,7 +18,7 @@ if echo "$RESPONSE" | grep -q '"success":true'; then
     echo "Deployment is running in the background."
     echo "Check status with: curl -s $API_URL/../deployment-status | python3 -m json.tool"
     echo ""
-    echo "Or check logs on server: ssh -i TradeM.pem ubuntu@3.109.48.23 'tail -f /tmp/deploy_backend.log'"
+    echo "Or check logs on server: ssh -i TradeM.pem ubuntu@3.6.199.247 'tail -f /tmp/deploy_backend.log'"
 else
     echo "❌ Failed to initiate deployment"
     echo "Response: $RESPONSE"

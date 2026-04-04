@@ -3,11 +3,11 @@
 ## EC2 SSH (persistent)
 
 - **Key file:** `TradeM.pem` in the **workspace root** (same folder as this repo). Path: `./TradeM.pem` — **never commit** (`*.pem` is gitignored).
-- **Connection:** `ubuntu@3.109.48.23`
+- **Connection:** `ubuntu@3.6.199.247`
 - **Full detail for agents:** `.cursor/rules/ec2-ssh.mdc` (always applied).
 - **Helper script:** `./scripts/ec2-ssh.sh` or `./scripts/ec2-ssh.sh 'command'`
 
-Example: `ssh -i ./TradeM.pem ubuntu@3.109.48.23` (use `timeout` / `ConnectTimeout` per guidelines below).
+Example: `ssh -i ./TradeM.pem ubuntu@3.6.199.247` (use `timeout` / `ConnectTimeout` per guidelines below).
 
 ## Command Execution Guidelines
 
