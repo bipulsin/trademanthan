@@ -63,6 +63,14 @@ if pgrep -f "uvicorn.*main:app" > /dev/null || pgrep -f "uvicorn.*backend.main:a
     sleep 1
 fi
 
+# Orphan listeners (e.g. manual python3/uvicorn) may not match pkill patterns but still hold :8000,
+# causing systemd to fail with "address already in use" in a restart loop.
+if command -v fuser >/dev/null 2>&1; then
+    log_message "Ensuring port 8000 is free..."
+    sudo fuser -k 8000/tcp >>"$LOG_FILE" 2>&1 || true
+    sleep 1
+fi
+
 # Prefer systemd restart if service exists (ensures clean reload of new code)
 if systemctl list-unit-files 2>/dev/null | grep -q "trademanthan-backend.service"; then
     log_message "Restarting via systemd..."
