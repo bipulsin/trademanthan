@@ -4,6 +4,9 @@
 #   EC2_HOST    - EC2 IP or hostname (e.g. 3.6.199.247)
 #   EC2_USER   - SSH user (e.g. ubuntu)
 #   EC2_SSH_KEY - Contents of your .pem file (private key)
+#
+# Update host after migration (CLI, requires gh auth: gh auth login):
+#   gh secret set EC2_HOST --body "3.6.199.247"
 
 name: Deploy to EC2
 

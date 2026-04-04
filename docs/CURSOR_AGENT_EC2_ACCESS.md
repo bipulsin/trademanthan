@@ -84,3 +84,10 @@ Repeat for each CIDR you want to allow (up to 60 rules total for that group).
 | **Allow Cursor IPs**| Agent can SSH and run any command         | 60-rule limit; many IPs; need to maintain |
 
 Recommendation: use **Option 1** (public backend + `GET /scan/logs?lines=...&grep=...`) so the Cursor agent can inspect scan logs directly. Use Option 2 only if you need the agent to run arbitrary commands on the server.
+
+---
+
+## EC2 public IP change and HTTPS (GitHub Actions)
+
+- **GitHub Actions deploy:** Set repository secret `EC2_HOST` to the current public IP (e.g. `3.6.199.247`). In the repo: **Settings → Secrets and variables → Actions**, or with the GitHub CLI: `gh secret set EC2_HOST --body "3.6.199.247"` (after `gh auth login`).
+- **SSL certificates:** Certs from Let's Encrypt (used in `scripts/nginx-tradentical.conf` under `/etc/letsencrypt/live/tradentical.com/`) are tied to **domain names**, not to the EC2 IP. You do **not** need a new certificate merely because the instance IP changed. Point DNS (A records) for your domains at the new IP, then on the new server either run `scripts/setup_ssl_tradentical.sh` / certbot again, or migrate `/etc/letsencrypt` from the old host with care. Browsing by **IP** over HTTPS may still show a certificate warning; use `https://your-domain.com` for a valid chain.

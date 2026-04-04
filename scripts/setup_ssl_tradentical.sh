@@ -2,6 +2,13 @@
 # Setup SSL for tradentical.com + tradewithcto.com on EC2
 # Run this script ON THE EC2 SERVER: bash setup_ssl_tradentical.sh
 # Prerequisite: tradentical.com, www.tradentical.com, tradewithcto.com and www.tradewithcto.com must point to this server's IP (A/CNAME records)
+#
+# TLS / new EC2 IP: Let's Encrypt certificates are issued for DOMAIN NAMES (SANs), not for the
+# public IP. Changing the Elastic IP / instance does NOT by itself require reissuing a cert if DNS
+# still resolves the same hostnames to the new server. After updating A records to the new IP,
+# either: (1) run this script on the new instance so certbot obtains certs fresh, or (2) migrate
+# /etc/letsencrypt carefully from the old host (same paths, renew hooks). Accessing the site by
+# raw IP over HTTPS may show a name mismatch warning; use the domain URLs for a valid chain.
 
 set -e
 
