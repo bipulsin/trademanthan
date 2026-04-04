@@ -56,6 +56,14 @@ After editing nginx config:
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
+### Apex `tradewithcto.com` vs `www.tradewithcto.com`
+
+If **`https://www.tradewithcto.com` works** but **`https://tradewithcto.com` does not**:
+
+1. **Google Cloud Console** — Under **Authorized JavaScript origins** and **Authorized redirect URIs**, you must list **both** `https://tradewithcto.com` and `https://www.tradewithcto.com` (see Step 3–4). Google Sign-In checks the **exact** origin in the browser address bar.
+2. **Canonical URL** — The repo’s `scripts/nginx-tradentical.conf` includes **301 redirects** from `tradewithcto.com` → `https://www.tradewithcto.com` so all traffic uses the same hostname as the working case.
+3. **DNS** — Ensure the apex `@` **A** record points to the same server as `www` (often `www` is a **CNAME** to the apex or both have **A** records to the same IP).
+
 ## Step 6: Environment Variables (EC2/Production)
 
 Ensure your `.env` or environment has:
