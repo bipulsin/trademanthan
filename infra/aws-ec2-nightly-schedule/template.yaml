@@ -1,0 +1,83 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Stop EC2 at 23:30 IST and start at 08:00 IST daily (EventBridge + Lambda).
+  Deploy with: sam build && sam deploy --guided
+  Stack must be in the SAME AWS region as the EC2 instance.
+
+Parameters:
+  InstanceId:
+    Type: String
+    Description: EC2 instance ID (e.g. i-0abc123def4567890)
+
+Globals:
+  Function:
+    Timeout: 60
+
+Resources:
+  SchedulerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub trademanthan-ec2-scheduler-${InstanceId}
+      Runtime: python3.12
+      Handler: handler.handler
+      CodeUri: lambda/
+      Environment:
+        Variables:
+          INSTANCE_ID: !Ref InstanceId
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ec2:StartInstances
+                - ec2:StopInstances
+                - ec2:DescribeInstances
+              Resource: "*"
+
+  StopRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: trademanthan-ec2-stop-2330-ist
+      Description: Stop EC2 at 23:30 IST (18:00 UTC) every day
+      ScheduleExpression: cron(0 18 * * ? *)
+      State: ENABLED
+      Targets:
+        - Id: StopInstance
+          Arn: !GetAtt SchedulerFunction.Arn
+          Input: '{"action":"stop"}'
+
+  StartRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: trademanthan-ec2-start-0800-ist
+      Description: Start EC2 at 08:00 IST (02:30 UTC) every day
+      ScheduleExpression: cron(30 2 * * ? *)
+      State: ENABLED
+      Targets:
+        - Id: StartInstance
+          Arn: !GetAtt SchedulerFunction.Arn
+          Input: '{"action":"start"}'
+
+  PermissionStop:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref SchedulerFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt StopRule.Arn
+
+  PermissionStart:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref SchedulerFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt StartRule.Arn
+
+Outputs:
+  LambdaArn:
+    Value: !GetAtt SchedulerFunction.Arn
+  StopRuleArn:
+    Value: !GetAtt StopRule.Arn
+  StartRuleArn:
+    Value: !GetAtt StartRule.Arn
