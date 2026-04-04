@@ -13,10 +13,109 @@ Schedules in UTC (EventBridge):
 
 ## Prerequisites
 
+- Your **EC2 instance ID** (e.g. `i-0abc123def4567890`) from **EC2 → Instances**.
+- Work in the **same AWS region** as the instance (e.g. **Mumbai `ap-south-1`** — check the region selector in the top bar).
+
+---
+
+## Option A: AWS Management Console (no CLI)
+
+### 1) IAM role for Lambda
+
+1. Open **IAM → Roles → Create role**.
+2. **Trusted entity:** AWS service → **Lambda** → Next.
+3. **Add permissions:** choose **Create policy** (opens a new tab).
+   - **JSON** tab, paste:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ec2:StartInstances",
+        "ec2:StopInstances",
+        "ec2:DescribeInstances"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+   - Name the policy (e.g. `trademanthan-ec2-schedule-policy`) → **Create policy**.
+4. Back on the role wizard, refresh the policy list, attach **trademanthan-ec2-schedule-policy** → Next.
+5. Role name: e.g. `trademanthan-ec2-scheduler-role` → **Create role**.
+
+### 2) Lambda function
+
+1. Open **Lambda → Create function**.
+2. **Author from scratch**, name e.g. `trademanthan-ec2-scheduler`, runtime **Python 3.12** (or latest supported).
+3. **Change default execution role** → **Use existing role** → select `trademanthan-ec2-scheduler-role` → **Create function**.
+4. **Configuration → Environment variables → Edit** → add:
+   - Key `INSTANCE_ID` → value your instance ID (e.g. `i-0abc123def4567890`) → **Save**.
+5. **Code** tab: replace the default file with the snippet below, then **Deploy**.
+6. **Configuration → Runtime settings → Edit** → **Handler** must match your file and function. For the snippet below, use **`lambda_function.lambda_handler`** (default).
+
+```python
+import json
+import os
+import boto3
+
+def lambda_handler(event, context):
+    instance_id = os.environ.get("INSTANCE_ID", "").strip()
+    if not instance_id:
+        return {"statusCode": 500, "body": json.dumps({"error": "INSTANCE_ID not set"})}
+    action = str(event.get("action", "stop")).lower().strip() if isinstance(event, dict) else "stop"
+    ec2 = boto3.client("ec2", region_name=os.environ.get("AWS_REGION"))
+    if action == "stop":
+        ec2.stop_instances(InstanceIds=[instance_id])
+        msg = {"action": "stop", "instanceId": instance_id}
+    elif action == "start":
+        ec2.start_instances(InstanceIds=[instance_id])
+        msg = {"action": "start", "instanceId": instance_id}
+    else:
+        return {"statusCode": 400, "body": json.dumps({"error": f"Unknown action: {action}"})}
+    return {"statusCode": 200, "body": json.dumps(msg)}
+```
+
+### 3) EventBridge rule — stop at 23:30 IST (18:00 UTC)
+
+1. Open **Amazon EventBridge → Rules → Create rule**.
+2. Name: e.g. `trademanthan-ec2-stop-2330-ist`.
+3. **Rule type:** **Schedule**.
+4. **Schedule pattern:** **A schedule that runs at a regular rate** is wrong — pick **Cron expression** (or “Schedule with a pattern” depending on UI).
+5. **Cron expression:** `cron(0 18 * * ? *)`  
+   Ensure the schedule uses **UTC** (EventBridge default). This is **23:30 IST**.
+6. **Select targets** → **AWS service** → **Lambda function** → choose `trademanthan-ec2-scheduler`.
+7. **Additional settings** → **Configure target input** → **Constant (JSON text)** → `{"action":"stop"}`.
+8. Acknowledge resource policy if prompted so EventBridge may invoke the function → **Create**.
+
+### 4) EventBridge rule — start at 08:00 IST (02:30 UTC)
+
+Repeat step 3 with:
+
+- Name: e.g. `trademanthan-ec2-start-0800-ist`.
+- **Cron expression:** `cron(30 2 * * ? *)` (08:00 IST).
+- Same Lambda target, constant JSON: `{"action":"start"}`.
+
+### 5) Test (optional)
+
+**Lambda → Test** with event JSON `{"action":"stop"}` (only if you are ready for the instance to stop). Prefer testing the **start** rule during a maintenance window.
+
+### Disable later
+
+**EventBridge → Rules** → select each rule → **Disable**.
+
+---
+
+## Option B: Deploy with SAM (CLI)
+
+### Prerequisites (SAM)
+
 - AWS CLI configured (`aws configure`) with permission to create Lambda, IAM, EventBridge, and EC2 start/stop on your instance.
-- **AWS SAM CLI** (`sam`) for the simplest deploy: [Install SAM](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html).
-- Your **EC2 instance ID** (e.g. `i-0abc123def4567890`) from EC2 console.
-- Deploy the stack in the **same AWS region** as the instance (e.g. `ap-south-1`).
+- **AWS SAM CLI** (`sam`): [Install SAM](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html).
 
 ## Deploy
 
