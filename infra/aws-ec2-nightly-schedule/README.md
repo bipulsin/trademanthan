@@ -1,12 +1,12 @@
 # EC2 nightly stop / morning start (cost saving)
 
-Stops the TradeManthan EC2 instance every day at **23:30 IST** and starts it at **08:00 IST** using **Amazon EventBridge** (cron in UTC) and **AWS Lambda** (boto3 `StopInstances` / `StartInstances`).
+Stops the TradeManthan EC2 instance every day at **23:00 IST** and starts it at **08:00 IST** using **Amazon EventBridge** (cron in UTC) and **AWS Lambda** (boto3 `StopInstances` / `StartInstances`).
 
 Schedules in UTC (EventBridge):
 
 | Local (IST) | UTC | Cron |
 |-------------|-----|------|
-| Stop 23:30 | 18:00 | `cron(0 18 * * ? *)` |
+| Stop 23:00 | 17:30 | `cron(30 17 * * ? *)` |
 | Start 08:00 | 02:30 | `cron(30 2 * * ? *)` |
 
 > **IST = UTC+5:30.** If you need another timezone, change the two `ScheduleExpression` values in `template.yaml` and redeploy.
@@ -80,14 +80,14 @@ def lambda_handler(event, context):
     return {"statusCode": 200, "body": json.dumps(msg)}
 ```
 
-### 3) EventBridge rule — stop at 23:30 IST (18:00 UTC)
+### 3) EventBridge rule — stop at 23:00 IST (17:30 UTC)
 
 1. Open **Amazon EventBridge → Rules → Create rule**.
-2. Name: e.g. `trademanthan-ec2-stop-2330-ist`.
+2. Name: e.g. `trademanthan-ec2-stop-2300-ist`.
 3. **Rule type:** **Schedule**.
 4. **Schedule pattern:** **A schedule that runs at a regular rate** is wrong — pick **Cron expression** (or “Schedule with a pattern” depending on UI).
-5. **Cron expression:** `cron(0 18 * * ? *)`  
-   Ensure the schedule uses **UTC** (EventBridge default). This is **23:30 IST**.
+5. **Cron expression:** `cron(30 17 * * ? *)`  
+   Ensure the schedule uses **UTC** (EventBridge default). This is **23:00 IST**.
 6. **Select targets** → **AWS service** → **Lambda function** → choose `trademanthan-ec2-scheduler`.
 7. **Additional settings** → **Configure target input** → **Constant (JSON text)** → `{"action":"stop"}`.
 8. Acknowledge resource policy if prompted so EventBridge may invoke the function → **Create**.
@@ -135,15 +135,15 @@ When prompted:
 ## Verify
 
 - **Lambda:** Console → Lambda → function `trademanthan-ec2-scheduler-<InstanceId>`
-- **Rules:** Console → EventBridge → Rules → `trademanthan-ec2-stop-2330-ist` and `trademanthan-ec2-start-0800-ist`
+- **Rules:** Console → EventBridge → Rules → `trademanthan-ec2-stop-2300-ist` and `trademanthan-ec2-start-0800-ist`
 - **CloudWatch Logs:** Log group `/aws/lambda/trademanthan-ec2-scheduler-...` after the first run
 
 ## Important notes
 
 1. **Elastic IP:** If you rely on a **fixed public IP**, associate an **Elastic IP** with the instance. After stop/start, a *non-EIP* public IP can change — update DNS and GitHub `EC2_HOST` if needed.
 2. **GitHub Actions deploy:** If your workflow SSHs to an IP, use the Elastic IP or a DNS name that tracks the instance.
-3. **Downtime:** The app is unavailable while the instance is stopped (roughly 23:30–08:00 IST).
-4. **Disable schedule:** EventBridge → Rules → disable `trademanthan-ec2-stop-2330-ist` / `trademanthan-ec2-start-0800-ist`, or delete the CloudFormation stack.
+3. **Downtime:** The app is unavailable while the instance is stopped (roughly 23:00–08:00 IST).
+4. **Disable schedule:** EventBridge → Rules → disable `trademanthan-ec2-stop-2300-ist` / `trademanthan-ec2-start-0800-ist`, or delete the CloudFormation stack.
 
 ## Remove
 

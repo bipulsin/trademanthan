@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  Stop EC2 at 23:30 IST and start at 08:00 IST daily (EventBridge + Lambda).
+  Stop EC2 at 23:00 IST and start at 08:00 IST daily (EventBridge + Lambda).
   Deploy with: sam build && sam deploy --guided
   Stack must be in the SAME AWS region as the EC2 instance.
 
@@ -37,9 +37,9 @@ Resources:
   StopRule:
     Type: AWS::Events::Rule
     Properties:
-      Name: trademanthan-ec2-stop-2330-ist
-      Description: Stop EC2 at 23:30 IST (18:00 UTC) every day
-      ScheduleExpression: cron(0 18 * * ? *)
+      Name: trademanthan-ec2-stop-2300-ist
+      Description: Stop EC2 at 23:00 IST (17:30 UTC) every day
+      ScheduleExpression: cron(30 17 * * ? *)
       State: ENABLED
       Targets:
         - Id: StopInstance
