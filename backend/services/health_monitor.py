@@ -47,12 +47,10 @@ class HealthMonitor:
     def start(self):
         """Start the health monitor scheduler"""
         if not self.is_running:
-            # Health check every 30 minutes starting from 8:39 AM until 4:09 PM
-            # Schedule: 8:39, 9:09, 9:39, 10:09, 10:39, 11:09, 11:39, 12:09, 12:39, 13:09, 13:39, 14:09, 14:39, 15:09, 15:39, 16:09
-            # Pattern: Start at 8:39, then every 30 minutes until 16:09 (4:09 PM)
+            # Health check every 30 minutes from 8:30 AM until 4:00 PM IST (kept in sync with scan_st1_algo)
             health_check_times = [
-                (8, 39), (9, 9), (9, 39), (10, 9), (10, 39), (11, 9), (11, 39), (12, 9),
-                (12, 39), (13, 9), (13, 39), (14, 9), (14, 39), (15, 9), (15, 39), (16, 9)
+                (8, 30), (9, 0), (9, 30), (10, 0), (10, 30), (11, 0), (11, 30), (12, 0),
+                (12, 30), (13, 0), (13, 30), (14, 0), (14, 30), (15, 0), (15, 30), (16, 0),
             ]
             
             for hour, minute in health_check_times:
@@ -82,7 +80,7 @@ class HealthMonitor:
             try:
                 self.scheduler.start()
                 self.is_running = True
-                logger.info("✅ Health Monitor started - Checking every 30 min from 8:39 AM to 4:09 PM")
+                logger.info("✅ Health Monitor started - Checking every 30 min from 8:30 AM to 4:00 PM IST")
                 print(f"✅ Health Monitor scheduler started - Jobs: {len(self.scheduler.get_jobs())}", flush=True)
             except Exception as e:
                 logger.error(f"❌ Failed to start Health Monitor scheduler: {e}", exc_info=True)

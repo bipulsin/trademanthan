@@ -1,12 +1,16 @@
 """
 Scan ST1 Algo Scheduler Controller
 Consolidates all scan algorithm schedulers into a single controller:
+- Morning Telegram ping (8:10 AM IST): TradeWithCTO channel — healthy vs not started
 - Instruments Downloader (daily at 9:05 AM)
-- Health Monitor (every 30 min from 8:39 AM to 4:09 PM)
+- Health Monitor (every 30 min from 8:30 AM to 4:00 PM IST)
 - VWAP Updater (hourly updates + cycles + EOD close)
 - Index Price Scheduler (every 5 min during market hours)
 - Entry slip monitor (every 15 min during market hours): cancel unfilled entry orders after 2 checks
 - Final reconciliation (3:45 PM & 4:00 PM): broker buy/sell/PnL sync; time_based → Exit-TM after 3:15 PM exits
+
+Interval-driven jobs only run real work between 08:30 and 21:00 IST (see scheduler_window).
+Exception: 8:10 AM Telegram ping (before 8:30).
 
 Note: Master Stock download from Dhan has been removed.
 
@@ -15,6 +19,7 @@ All logs go to logs/scan_st1_algo.log
 
 import logging
 import os
+import requests
 from pathlib import Path
 from datetime import datetime
 import pytz
@@ -72,6 +77,25 @@ from backend.services.index_price_scheduler import index_price_scheduler
 
 # CAR NIFTY200 updater (Yahoo + Upstox fallback)
 from backend.services.car_nifty200_updater import run_car_nifty200_update_job
+from backend.services.entry_slip_monitor import run_entry_slip_monitor
+from backend.services.scheduler_window import is_allowed_scheduler_window_ist
+from backend.services.telegram_trade_channel import send_trade_with_cto_channel_message
+
+
+def run_morning_trade_channel_health_ping() -> None:
+    """8:10 AM IST: Telegram @TradeWithCTO — healthy API vs system not up."""
+    url = os.getenv("BACKEND_HEALTH_URL", "http://127.0.0.1:8000/scan/health")
+    ok = False
+    try:
+        r = requests.get(url, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            ok = data.get("status") == "healthy"
+    except Exception as e:
+        logger.warning("Morning trade channel health ping failed: %s", e)
+        ok = False
+    text = "TradeWithCTO Running good" if ok else "System not started!"
+    send_trade_with_cto_channel_message(text)
 
 # Configure job function loggers to write ONLY to scan_st1_algo.log
 # This ensures all scan algorithm logs (webhooks, option contracts, trades, exits) go to scan_st1_algo.log
@@ -187,6 +211,19 @@ class ScanST1AlgoScheduler:
             except Exception as e:
                 logger.error(f"❌ Startup instruments check failed: {e}", exc_info=True)
             
+            # 0b. Morning Telegram to @TradeWithCTO — 8:10 AM IST (exception to 08:30–21:00 work window)
+            self.scheduler.add_job(
+                run_morning_trade_channel_health_ping,
+                trigger=CronTrigger(hour=8, minute=10, timezone="Asia/Kolkata"),
+                id="scan_st1_morning_trade_channel_ping",
+                name="Morning TradeWithCTO Telegram Health (8:10 AM)",
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=300,
+                coalesce=True,
+            )
+            logger.info("✅ Scheduled: Morning TradeWithCTO Telegram Health (8:10 AM)")
+            
             # 1. Instruments Downloader - Daily at 9:05 AM
             def run_instruments_download():
                 logger.info("🔧 Triggering Instruments Download job...")
@@ -207,10 +244,10 @@ class ScanST1AlgoScheduler:
             )
             logger.info("✅ Scheduled: Instruments Download (9:05 AM)")
             
-            # 3. Health Monitor - Every 30 minutes from 8:39 AM to 4:09 PM
+            # 3. Health Monitor — every 30 min from 8:30 AM to 4:00 PM IST (within 08:30–21:00 window)
             health_check_times = [
-                (8, 39), (9, 9), (9, 39), (10, 9), (10, 39), (11, 9), (11, 39), (12, 9),
-                (12, 39), (13, 9), (13, 39), (14, 9), (14, 39), (15, 9), (15, 39), (16, 9)
+                (8, 30), (9, 0), (9, 30), (10, 0), (10, 30), (11, 0), (11, 30), (12, 0),
+                (12, 30), (13, 0), (13, 30), (14, 0), (14, 30), (15, 0), (15, 30), (16, 0),
             ]
             
             for hour, minute in health_check_times:
@@ -442,9 +479,15 @@ class ScanST1AlgoScheduler:
             
             # 5. Index Price Scheduler - Every 5 minutes during market hours
             def run_index_price_check():
-                # Check if market is open before logging and running
                 ist = pytz.timezone('Asia/Kolkata')
                 now = datetime.now(ist)
+                if not is_allowed_scheduler_window_ist(now):
+                    logger.debug(
+                        "Outside 08:30–21:00 IST — skip Index Price Check tick (%s)",
+                        now.strftime("%H:%M"),
+                    )
+                    return
+                # Check if market is open before logging and running
                 
                 # Market hours: 9:15 AM to 3:30 PM IST
                 if now.weekday() >= 5:  # Weekend
@@ -530,6 +573,9 @@ class ScanST1AlgoScheduler:
             logger.info("✅ Scheduled: Index Price at Market Open/Close (9:15 AM, 3:30 PM)")
 
             def run_entry_slip_monitor_job():
+                if not is_allowed_scheduler_window_ist():
+                    logger.debug("Outside 08:30–21:00 IST — skip Entry Slip Monitor tick")
+                    return
                 logger.info("🔧 Triggering Entry Slip Monitor job (every 15 minutes)...")
                 try:
                     result = run_entry_slip_monitor()
@@ -551,6 +597,9 @@ class ScanST1AlgoScheduler:
 
             # 6. CAR NIFTY200 Updater - Every 3 hours (Yahoo first, Upstox fallback)
             def run_car_nifty200_update():
+                if not is_allowed_scheduler_window_ist():
+                    logger.debug("Outside 08:30–21:00 IST — skip CAR NIFTY200 Update tick")
+                    return
                 logger.info("🔧 Triggering CAR NIFTY200 Update job...")
                 try:
                     run_car_nifty200_update_job()
