@@ -82,8 +82,7 @@ Also attach **`AWSLambdaBasicExecutionRole`** (AWS managed) so Lambda can write 
 3. **Change default execution role** → **Use existing role** → select `trademanthan-ec2-scheduler-role` → **Create function**.
 4. **Configuration → Environment variables → Edit** → add:
    - Key `INSTANCE_ID` → value **`i-031d2c8bb2447d767`** (this project) → **Save**.
-5. **Code** tab: replace the default file with the snippet below, then **Deploy**.
-6. **Configuration → Runtime settings → Edit** → **Handler** must match your file and function. For the snippet below, use **`lambda_function.lambda_handler`** (default).
+5. **Code** tab: open `lambda_function.py`, replace its contents with the snippet below, then **Deploy**.
 
 ```python
 import json
@@ -106,6 +105,9 @@ def lambda_handler(event, context):
         return {"statusCode": 400, "body": json.dumps({"error": f"Unknown action: {action}"})}
     return {"statusCode": 200, "body": json.dumps(msg)}
 ```
+
+6. **Handler (where to find it):** AWS moved this — it is **not** under **Configuration** in the current console. Stay on (or return to) the **Code** tab and scroll the page: look for **Runtime settings** or **Runtime and handler** → **Edit** → set **Handler** to **`lambda_function.lambda_handler`** (matches `lambda_function.py` + `def lambda_handler` above). **Save**.
+7. Click **Deploy** again if prompted.
 
 ### 3) EventBridge rule — stop at 23:00 IST (17:30 UTC)
 
