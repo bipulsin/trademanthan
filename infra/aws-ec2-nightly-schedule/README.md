@@ -129,9 +129,41 @@ Repeat step 3 with:
 - **Cron expression:** `cron(30 2 * * ? *)` (08:00 IST).
 - Same Lambda target, constant JSON: `{"action":"start"}`.
 
-### 5) Test (optional)
+### 5) How to verify & test
 
-**Lambda → Test** with event JSON `{"action":"stop"}` (only if you are ready for the instance to stop). Prefer testing the **start** rule during a maintenance window.
+**A. Confirm EventBridge is wired to Lambda**
+
+1. **EventBridge → Rules** → open each rule (`trademanthan-ec2-stop-2300-ist`, `trademanthan-ec2-start-0800-ist`).
+2. Check **State** = **Enabled** and **Targets** = your Lambda with the correct constant JSON (`{"action":"stop"}` / `{"action":"start"}`).
+3. Open the **Monitoring** tab (or **Metrics**) on the rule — after the scheduled time passes, **Invocations** should increase (may take until the next run).
+
+**B. Test the Lambda directly (manual invoke)**
+
+1. **Lambda** → your function → **Test** tab.
+2. Create an event (e.g. name `test-start`) with body:
+
+   ```json
+   {"action": "start"}
+   ```
+
+3. Click **Test**. You should see **Succeeded** and a JSON response with `"action":"start"`. Check **EC2 → Instances** — the instance should move to **running** (if it was stopped).
+
+4. To test **stop**, use `{"action": "stop"}` — **this really stops the instance** (site/API down until you start it again). Only do this when you can afford downtime, or test from a **maintenance window**.
+
+5. **Monitor → View CloudWatch logs** (or **Logs** tab) — open the latest log stream. You should see `START`, `END`, and `REPORT` lines with no errors.
+
+**C. Confirm scheduled runs (without waiting until 23:00)**
+
+- After the first **real** scheduled time, check **CloudWatch → Log groups** → `/aws/lambda/<your-function-name>` — new streams should appear at stop/start times.
+- **EventBridge rule → Monitoring** — **Invocations** and **FailedInvocations** (should be 0 failures if IAM and target are correct).
+
+**D. Quick health checklist**
+
+| Check | Where |
+|--------|--------|
+| Lambda can call EC2 | Manual **Test** with `start`/`stop` succeeds; no `AccessDenied` in logs |
+| EventBridge can invoke Lambda | Rule **Monitoring** shows invocations after schedule; Lambda logs show invocations at that time |
+| Instance ID is correct | Lambda **Configuration → Environment variables** → `INSTANCE_ID` = `i-031d2c8bb2447d767` |
 
 ### Disable later
 
@@ -166,6 +198,8 @@ When prompted:
 - **Lambda:** Console → Lambda → function `trademanthan-ec2-scheduler-<InstanceId>`
 - **Rules:** Console → EventBridge → Rules → `trademanthan-ec2-stop-2300-ist` and `trademanthan-ec2-start-0800-ist`
 - **CloudWatch Logs:** Log group `/aws/lambda/trademanthan-ec2-scheduler-...` after the first run
+
+See **Option A → §5 How to verify & test** above for manual Lambda tests, EventBridge metrics, and log checks.
 
 ## Important notes
 
