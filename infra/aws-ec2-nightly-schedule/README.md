@@ -11,9 +11,24 @@ Schedules in UTC (EventBridge):
 
 > **IST = UTC+5:30.** If you need another timezone, change the two `ScheduleExpression` values in `template.yaml` and redeploy.
 
+### Quick reference (TradeManthan production)
+
+| | |
+|--|--|
+| **Instance ID** | `i-031d2c8bb2447d767` |
+| **Region** | Same as the instance (e.g. **ap-south-1** Mumbai) |
+
+After `sam build`, deploy or update the stack with:
+
+```bash
+sam deploy --parameter-overrides InstanceId=i-031d2c8bb2447d767
+```
+
+(Use your AWS profile/region as needed, e.g. `--region ap-south-1`.)
+
 ## Prerequisites
 
-- Your **EC2 instance ID** (e.g. `i-0abc123def4567890`) from **EC2 → Instances**.
+- Your **EC2 instance ID** (this project: **`i-031d2c8bb2447d767`**) from **EC2 → Instances**.
 - Work in the **same AWS region** as the instance (e.g. **Mumbai `ap-south-1`** — check the region selector in the top bar).
 
 ---
@@ -54,7 +69,7 @@ Schedules in UTC (EventBridge):
 2. **Author from scratch**, name e.g. `trademanthan-ec2-scheduler`, runtime **Python 3.12** (or latest supported).
 3. **Change default execution role** → **Use existing role** → select `trademanthan-ec2-scheduler-role` → **Create function**.
 4. **Configuration → Environment variables → Edit** → add:
-   - Key `INSTANCE_ID` → value your instance ID (e.g. `i-0abc123def4567890`) → **Save**.
+   - Key `INSTANCE_ID` → value **`i-031d2c8bb2447d767`** (this project) → **Save**.
 5. **Code** tab: replace the default file with the snippet below, then **Deploy**.
 6. **Configuration → Runtime settings → Edit** → **Handler** must match your file and function. For the snippet below, use **`lambda_function.lambda_handler`** (default).
 
