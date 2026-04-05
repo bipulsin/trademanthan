@@ -37,10 +37,12 @@ sam deploy --parameter-overrides InstanceId=i-031d2c8bb2447d767
 
 ### 1) IAM role for Lambda
 
-1. Open **IAM → Roles → Create role**.
-2. **Trusted entity:** AWS service → **Lambda** → Next.
-3. **Add permissions:** choose **Create policy** (opens a new tab).
-   - **JSON** tab, paste:
+The **Create role → Add permissions** screen only lists **existing** policies; it does **not** show a **Create policy** button. Do one of the following.
+
+#### 1a) Create the policy first (recommended)
+
+1. In a **separate tab**, open **IAM** (left menu) → **Policies** → **Create policy**.
+2. Open the **JSON** tab, replace the contents with:
 
 ```json
 {
@@ -59,9 +61,19 @@ sam deploy --parameter-overrides InstanceId=i-031d2c8bb2447d767
 }
 ```
 
-   - Name the policy (e.g. `trademanthan-ec2-schedule-policy`) → **Create policy**.
-4. Back on the role wizard, refresh the policy list, attach **trademanthan-ec2-schedule-policy** → Next.
-5. Role name: e.g. `trademanthan-ec2-scheduler-role` → **Create role**.
+3. Click **Next**, set the policy name (e.g. `trademanthan-ec2-schedule-policy`) → **Create policy**.
+4. Go back to **IAM → Roles → Create role** (or your existing wizard tab).
+5. **Trusted entity:** AWS service → **Lambda** → **Next**.
+6. **Add permissions:** in the search box, type `trademanthan-ec2-schedule-policy` (or your name) → tick the policy → **Next**.
+7. Role name: e.g. `trademanthan-ec2-scheduler-role` → **Create role**.
+
+Also attach **`AWSLambdaBasicExecutionRole`** (AWS managed) so Lambda can write to CloudWatch Logs: on step 6, search for `AWSLambdaBasicExecutionRole` and select it **in addition to** your custom policy.
+
+#### 1b) Or: create the role, then add an inline policy
+
+1. **IAM → Roles → Create role** → **Lambda** → **Next**.
+2. On **Add permissions**, search and select **`AWSLambdaBasicExecutionRole`** only → **Next** → name the role → **Create role**.
+3. Open the new role → **Permissions** tab → **Add permissions** → **Create inline policy** → **JSON** → paste the same JSON as above → **Review policy** → name it (e.g. `Ec2StartStop`) → **Create policy**.
 
 ### 2) Lambda function
 
