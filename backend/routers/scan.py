@@ -13,6 +13,7 @@ import requests
 import secrets
 import logging
 import asyncio
+import threading
 from pathlib import Path
 
 # Configure logger to write to scan_st1_algo.log instead of trademanthan.log
@@ -106,6 +107,42 @@ def _is_deploy_running() -> tuple[bool, Optional[int]]:
 # Structure: { "date": "YYYY-MM-DD", "alerts": [list of alerts with timestamps] }
 bullish_data = {"date": None, "alerts": []}
 bearish_data = {"date": None, "alerts": []}
+
+# Serialize Chartink webhook processing so in-memory bullish_data/bearish_data stay consistent.
+# Processing runs in a thread pool (see _run_webhook_worker) so the main event loop can still
+# read other concurrent bullish/bearish POST bodies immediately.
+_webhook_process_lock = threading.Lock()
+
+
+def _run_webhook_worker(webhook_data: dict, forced_type: Optional[str]) -> None:
+    """
+    Run process_webhook_data in this thread with a fresh asyncio loop.
+    Keeps Uvicorn's loop free for concurrent webhook connections (Chartink often fires
+    bullish + bearish at the same wall time).
+    """
+    import asyncio as _asyncio
+
+    from backend.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        with _webhook_process_lock:
+            _asyncio.run(process_webhook_data(webhook_data, db, forced_type))
+        if health_monitor:
+            health_monitor.record_webhook_success()
+        logger.info("✅ Webhook worker completed (forced_type=%s)", forced_type)
+    except Exception as e:
+        logger.error(
+            "❌ CRITICAL: Webhook worker failed (forced_type=%s): %s",
+            forced_type,
+            e,
+            exc_info=True,
+        )
+        if health_monitor:
+            health_monitor.record_webhook_failure()
+    finally:
+        db.close()
+
 
 class ChartinkWebhookData(BaseModel):
     """Model for Chartink webhook data"""
@@ -3899,7 +3936,7 @@ async def health_check(db: Session = Depends(get_db)):
         )
 
 @router.post("/chartink-webhook-bullish")
-async def receive_bullish_webhook(request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+async def receive_bullish_webhook(request: Request):
     """
     Dedicated endpoint for Bullish alerts from Chartink.com
     All alerts received here will be treated as BULLISH with CALL options.
@@ -3915,9 +3952,9 @@ async def receive_bullish_webhook(request: Request, background_tasks: Background
     }
     """
     try:
-        # Read raw body bytes first (faster than JSON parsing)
-        # This prevents Chartink from timing out during body reading
-        body_bytes = await asyncio.wait_for(request.body(), timeout=1.0)
+        # Read raw body bytes first; generous timeout so a concurrent webhook on the same host
+        # does not starve this read (processing runs in thread pool, not on this loop).
+        body_bytes = await asyncio.wait_for(request.body(), timeout=30.0)
         
         if not body_bytes:
             return JSONResponse(
@@ -3925,7 +3962,7 @@ async def receive_bullish_webhook(request: Request, background_tasks: Background
                 status_code=400
             )
         
-        # Parse JSON in background to return response immediately
+        # Parse JSON before response (fast); heavy work runs in executor thread.
         try:
             data = json.loads(body_bytes.decode('utf-8'))
         except json.JSONDecodeError as e:
@@ -3937,37 +3974,10 @@ async def receive_bullish_webhook(request: Request, background_tasks: Background
         
         # Enhanced logging: Log full payload for debugging
         stocks_count = len(data.get('stocks', '').split(',')) if isinstance(data.get('stocks'), str) else len(data.get('stocks', []))
-        logger.info(f"📥 Received bullish webhook with {stocks_count} stocks - processing in background")
+        logger.info(f"📥 Received bullish webhook with {stocks_count} stocks — queued for thread-pool processing")
         
-        # Create a new database session for background task
-        from backend.database import SessionLocal
-        
-        # Store data for background processing
         webhook_data = data.copy()
-        
-        # Define background task function
-        async def process_webhook_background():
-            background_db = SessionLocal()
-            try:
-                logger.info(f"🔄 Starting background processing for bullish webhook with {stocks_count} stocks")
-                result = await process_webhook_data(webhook_data, background_db, 'bullish')
-                # Track webhook success
-                if health_monitor:
-                    health_monitor.record_webhook_success()
-                logger.info(f"✅ Background processing completed for bullish webhook")
-            except Exception as e:
-                logger.error(f"❌ CRITICAL: Failed to process bullish webhook in background: {str(e)}")
-                logger.error(f"   Stock names in webhook: {webhook_data.get('stocks', 'N/A')}")
-                import traceback
-                logger.error(f"   Traceback: {traceback.format_exc()}")
-                # Track webhook failure
-                if health_monitor:
-                    health_monitor.record_webhook_failure()
-            finally:
-                background_db.close()
-        
-        # Add background task
-        background_tasks.add_task(process_webhook_background)
+        asyncio.get_running_loop().run_in_executor(None, _run_webhook_worker, webhook_data, "bullish")
         
         # Return immediate acknowledgment to prevent Chartink timeout
         return JSONResponse(content={
@@ -4002,7 +4012,7 @@ async def receive_bullish_webhook(request: Request, background_tasks: Background
         )
 
 @router.post("/chartink-webhook-bearish")
-async def receive_bearish_webhook(request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+async def receive_bearish_webhook(request: Request):
     """
     Dedicated endpoint for Bearish alerts from Chartink.com
     All alerts received here will be treated as BEARISH with PUT options.
@@ -4018,9 +4028,7 @@ async def receive_bearish_webhook(request: Request, background_tasks: Background
     }
     """
     try:
-        # Read raw body bytes first (faster than JSON parsing)
-        # This prevents Chartink from timing out during body reading
-        body_bytes = await asyncio.wait_for(request.body(), timeout=1.0)
+        body_bytes = await asyncio.wait_for(request.body(), timeout=30.0)
         
         if not body_bytes:
             return JSONResponse(
@@ -4028,7 +4036,6 @@ async def receive_bearish_webhook(request: Request, background_tasks: Background
                 status_code=400
             )
         
-        # Parse JSON in background to return response immediately
         try:
             data = json.loads(body_bytes.decode('utf-8'))
         except json.JSONDecodeError as e:
@@ -4038,41 +4045,12 @@ async def receive_bearish_webhook(request: Request, background_tasks: Background
                 status_code=400
             )
         
-        # Enhanced logging: Log full payload for debugging
         stocks_count = len(data.get('stocks', '').split(',')) if isinstance(data.get('stocks'), str) else len(data.get('stocks', []))
-        logger.info(f"📥 Received bearish webhook with {stocks_count} stocks - processing in background")
+        logger.info(f"📥 Received bearish webhook with {stocks_count} stocks — queued for thread-pool processing")
         
-        # Create a new database session for background task
-        from backend.database import SessionLocal
-        
-        # Store data for background processing
         webhook_data = data.copy()
+        asyncio.get_running_loop().run_in_executor(None, _run_webhook_worker, webhook_data, "bearish")
         
-        # Define background task function
-        async def process_webhook_background():
-            background_db = SessionLocal()
-            try:
-                logger.info(f"🔄 Starting background processing for bearish webhook with {stocks_count} stocks")
-                result = await process_webhook_data(webhook_data, background_db, 'bearish')
-                # Track webhook success
-                if health_monitor:
-                    health_monitor.record_webhook_success()
-                logger.info(f"✅ Background processing completed for bearish webhook")
-            except Exception as e:
-                logger.error(f"❌ CRITICAL: Failed to process bearish webhook in background: {str(e)}")
-                logger.error(f"   Stock names in webhook: {webhook_data.get('stocks', 'N/A')}")
-                import traceback
-                logger.error(f"   Traceback: {traceback.format_exc()}")
-                # Track webhook failure
-                if health_monitor:
-                    health_monitor.record_webhook_failure()
-            finally:
-                background_db.close()
-        
-        # Add background task
-        background_tasks.add_task(process_webhook_background)
-        
-        # Return immediate acknowledgment to prevent Chartink timeout
         return JSONResponse(content={
             "status": "success",
             "message": "Bearish webhook received and queued for processing",
