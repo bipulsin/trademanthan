@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Request, HTTPException, Depends, Query, BackgroundTasks
 from fastapi.responses import JSONResponse, RedirectResponse, PlainTextResponse
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, time as dt_time
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -162,6 +162,14 @@ class StockAlert(BaseModel):
 
 class TradingLiveToggle(BaseModel):
     trading_live: str
+
+
+class FixIntradaySellPriceBody(BaseModel):
+    stock_name: str
+    sell_price: float
+    as_of_date: Optional[date] = None
+    option_contains: Optional[str] = None
+
 
 # OTM selection: nearest 10 OTMs; liquidity score weights volume > OI; spread filter when bid/ask exist
 OPTION_OTM_COUNT = 10
@@ -3596,6 +3604,97 @@ async def run_final_reconciliation_manual(
 
     summary = run_final_reconciliation(force=force, as_of_date=as_of_date)
     return JSONResponse(content=summary)
+
+
+@router.post("/fix-intraday-sell-price")
+async def fix_intraday_sell_price(
+    body: FixIntradaySellPriceBody,
+    db: Session = Depends(get_db),
+):
+    """
+    Manual alignment: set sell_price and recompute PnL for an intraday row for an IST calendar
+    day (default: today). Optional option_contains disambiguates (e.g. \"35000\").
+    """
+    import pytz
+    from sqlalchemy.orm.attributes import flag_modified
+
+    ist = pytz.timezone("Asia/Kolkata")
+    if body.as_of_date is not None:
+        today = ist.localize(
+            datetime.combine(body.as_of_date, dt_time(0, 0, 0))
+        ).replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        today = datetime.now(ist).replace(hour=0, minute=0, second=0, microsecond=0)
+    tomorrow = today + timedelta(days=1)
+
+    rows = (
+        db.query(IntradayStockOption)
+        .filter(
+            and_(
+                IntradayStockOption.stock_name == body.stock_name.strip(),
+                IntradayStockOption.trade_date >= today,
+                IntradayStockOption.trade_date < tomorrow,
+            )
+        )
+        .order_by(IntradayStockOption.id.desc())
+        .all()
+    )
+    if body.option_contains:
+        needle = body.option_contains.strip().upper()
+        rows = [r for r in rows if needle in (r.option_contract or "").upper()]
+    if not rows:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "success": False,
+                "message": "No matching intraday row for that trade date and stock.",
+            },
+        )
+
+    def _pick_row(rlist: List[IntradayStockOption]) -> IntradayStockOption:
+        if len(rlist) == 1:
+            return rlist[0]
+        ce350 = [
+            r
+            for r in rlist
+            if "35000" in (r.option_contract or "").replace(" ", "")
+            and "CE" in (r.option_contract or "").upper()
+        ]
+        if len(ce350) == 1:
+            return ce350[0]
+        if len(ce350) > 1:
+            return max(ce350, key=lambda r: r.id)
+        return max(rlist, key=lambda r: r.id)
+
+    trade = _pick_row(rows)
+    sp = round(float(body.sell_price), 2)
+    trade.sell_price = sp
+    trade.option_ltp = sp
+    bp = float(trade.buy_price or 0)
+    qty = int(trade.qty or 0)
+    if bp > 0 and qty > 0:
+        trade.pnl = round((sp - bp) * qty, 2)
+        flag_modified(trade, "pnl")
+    if trade.status in ("bought", "alert_received", "no_entry"):
+        trade.status = "sold"
+        flag_modified(trade, "status")
+    flag_modified(trade, "sell_price")
+    flag_modified(trade, "option_ltp")
+    db.commit()
+    return JSONResponse(
+        content={
+            "success": True,
+            "id": trade.id,
+            "stock_name": trade.stock_name,
+            "option_contract": trade.option_contract,
+            "buy_price": trade.buy_price,
+            "qty": trade.qty,
+            "sell_price": trade.sell_price,
+            "pnl": trade.pnl,
+            "status": trade.status,
+            "trade_date": today.date().isoformat(),
+        }
+    )
 
 
 @router.post("/deploy-backend")
