@@ -72,11 +72,42 @@ def is_trading_live_enabled() -> bool:
     return trading_live == "YES"
 
 
+def _normalize_instrument_key_for_match(s: Optional[str]) -> str:
+    """Normalize Upstox keys: pipe/slash/colon variants (see upstox_service market-quote matching)."""
+    if not s:
+        return ""
+    t = str(s).strip().replace("/", "|").replace(":", "|")
+    return t.upper()
+
+
+def _instrument_key_suffix_token(norm: str) -> str:
+    """Segment after last | or : — matches NSE_FO|84833 to bare 84833 from API."""
+    if not norm:
+        return ""
+    for sep in ("|", ":"):
+        if sep in norm:
+            return norm.split(sep)[-1].strip()
+    return norm.strip()
+
+
 def _instrument_key_match(stored: Optional[str], api_instrument_token: Any) -> bool:
-    """Match DB instrument_key to Upstox order instrument_token (pipe vs slash in storage)."""
-    a = (stored or "").strip().replace("/", "|")
-    b = str(api_instrument_token or "").strip().replace("/", "|")
-    return bool(a) and a == b
+    """Match DB instrument_key to Upstox order instrument_token (pipe/slash/colon/suffix)."""
+    a = _normalize_instrument_key_for_match(stored)
+    b = _normalize_instrument_key_for_match(api_instrument_token)
+    if a and b and a == b:
+        return True
+    sa = _instrument_key_suffix_token(a)
+    sb = _instrument_key_suffix_token(b)
+    if sa and sb and sa == sb:
+        return True
+    return False
+
+
+def _order_row_instrument_token(row: Optional[Dict[str, Any]]) -> str:
+    """Upstox v2 order rows may expose instrument_token or instrument_key."""
+    if not row or not isinstance(row, dict):
+        return ""
+    return str(row.get("instrument_token") or row.get("instrument_key") or "").strip()
 
 
 def _market_orders_disallowed_by_upstox(order_result: Dict[str, Any]) -> bool:
@@ -432,7 +463,9 @@ def sync_trade_buy_fill_from_broker(db, trade) -> bool:
 
         candidates: List[Dict[str, Any]] = []
         for o in orders_list:
-            if not _instrument_key_match(getattr(trade, "instrument_key", None), o.get("instrument_token")):
+            if not _instrument_key_match(
+                getattr(trade, "instrument_key", None), _order_row_instrument_token(o)
+            ):
                 continue
             if (o.get("transaction_type") or "").upper() != "BUY":
                 continue
@@ -560,6 +593,8 @@ def _final_recon_sync_buy_avg_from_broker(trade, qty: int) -> bool:
     if getattr(trade, "status", None) not in ("bought", "sold"):
         return False
 
+    ikey = (getattr(trade, "instrument_key", None) or "").strip()
+
     oid = (getattr(trade, "buy_order_id", None) or "").strip()
     row: Optional[Dict[str, Any]] = None
 
@@ -588,7 +623,7 @@ def _final_recon_sync_buy_avg_from_broker(trade, qty: int) -> bool:
                 row = o
                 break
 
-    if row is None and orders_list:
+    if row is None and orders_list and ikey:
         ist = pytz.timezone("Asia/Kolkata")
         buy_time = getattr(trade, "buy_time", None)
         if buy_time:
@@ -607,7 +642,7 @@ def _final_recon_sync_buy_avg_from_broker(trade, qty: int) -> bool:
 
         candidates: List[Dict[str, Any]] = []
         for o in orders_list:
-            if not _instrument_key_match(ikey, o.get("instrument_token")):
+            if not _instrument_key_match(ikey, _order_row_instrument_token(o)):
                 continue
             if (o.get("transaction_type") or "").upper() != "BUY":
                 continue
@@ -724,7 +759,7 @@ def _final_recon_sync_sell_avg_from_broker(trade, qty: int) -> bool:
 
         candidates: List[Dict[str, Any]] = []
         for o in orders_list:
-            if not _instrument_key_match(ikey, o.get("instrument_token")):
+            if not _instrument_key_match(ikey, _order_row_instrument_token(o)):
                 continue
             if (o.get("transaction_type") or "").upper() != "SELL":
                 continue
@@ -848,7 +883,7 @@ def apply_broker_buy_fill_to_intraday_trade(db, trade) -> bool:
 
         candidates: List[Dict[str, Any]] = []
         for o in orders_list:
-            if not _instrument_key_match(ikey, o.get("instrument_token")):
+            if not _instrument_key_match(ikey, _order_row_instrument_token(o)):
                 continue
             if (o.get("transaction_type") or "").upper() != "BUY":
                 continue
@@ -1012,7 +1047,7 @@ def sync_manual_exit_sell_price_from_broker(db, trade) -> bool:
 
         candidates: List[Dict[str, Any]] = []
         for o in orders_list:
-            if not _instrument_key_match(ikey, o.get("instrument_token")):
+            if not _instrument_key_match(ikey, _order_row_instrument_token(o)):
                 continue
             if (o.get("transaction_type") or "").upper() != "SELL":
                 continue
@@ -1108,7 +1143,7 @@ def reconcile_intraday_exit_from_broker(
         if (
             cand
             and _order_row_is_complete_sell(cand)
-            and _instrument_key_match(ikey, cand.get("instrument_token"))
+            and _instrument_key_match(ikey, _order_row_instrument_token(cand))
         ):
             fq = int(float(cand.get("filled_quantity") or 0))
             if fq >= qty * 0.99:
@@ -1126,7 +1161,7 @@ def reconcile_intraday_exit_from_broker(
         for o in orders_list:
             if str(o.get("order_id", "")) != str(sell_oid):
                 continue
-            if not _instrument_key_match(ikey, o.get("instrument_token")):
+            if not _instrument_key_match(ikey, _order_row_instrument_token(o)):
                 continue
             if _order_row_is_complete_sell(o):
                 ap = _broker_buy_row_average_price(o)
@@ -1155,7 +1190,7 @@ def reconcile_intraday_exit_from_broker(
 
         candidates: List[Dict[str, Any]] = []
         for o in orders_list:
-            if not _instrument_key_match(ikey, o.get("instrument_token")):
+            if not _instrument_key_match(ikey, _order_row_instrument_token(o)):
                 continue
             if (o.get("transaction_type") or "").upper() != "SELL":
                 continue
