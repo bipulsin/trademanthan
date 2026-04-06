@@ -3675,7 +3675,7 @@ async def fix_intraday_sell_price(
     if bp > 0 and qty > 0:
         trade.pnl = round((sp - bp) * qty, 2)
         flag_modified(trade, "pnl")
-    if trade.status in ("bought", "alert_received", "no_entry"):
+    if trade.status in ("bought", "alert_received", "no_entry", "cancelled"):
         trade.status = "sold"
         flag_modified(trade, "status")
     flag_modified(trade, "sell_price")
