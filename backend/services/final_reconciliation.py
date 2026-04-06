@@ -32,9 +32,10 @@ def run_final_reconciliation(
     as_of_date: Optional[date_type] = None,
 ) -> Dict[str, Any]:
     """
-    For today's trades (status != no_entry):
+    For today's trades (including no_entry when instrument_key/qty allow broker match):
+    - no_entry: try Upstox BUY fill → bought (apply_broker_buy_fill_to_intraday_trade)
     - bought: try broker exit (SELL fill) → sold + sell_price + sell_order_id + pnl
-    - bought/sold: refresh buy/sell/PnL from broker
+    - bought/sold: refresh buy/sell/PnL from broker (sold with sell_price 0 still matches SELL leg)
     Then set exit_reason to 'Exit-TM' when exit_reason was 'time_based' and sell_time >= 15:15 IST.
     Skips Sat/Sun unless force=True (manual /scan/run-final-reconciliation?force=true).
 
@@ -75,7 +76,6 @@ def run_final_reconciliation(
                 and_(
                     IntradayStockOption.trade_date >= today,
                     IntradayStockOption.trade_date < tomorrow,
-                    IntradayStockOption.status != "no_entry",
                 )
             )
             .all()
@@ -90,6 +90,17 @@ def run_final_reconciliation(
         bought_to_sold_rows: List[Dict[str, Any]] = []
         n_refresh = 0
         n_exit_tm = 0
+
+        for trade in rows:
+            try:
+                if getattr(trade, "status", None) == "no_entry":
+                    live_trading.apply_broker_buy_fill_to_intraday_trade(db, trade)
+            except Exception as ex:
+                logger.warning(
+                    "Final recon no_entry→broker BUY sync failed for %s: %s",
+                    getattr(trade, "stock_name", "?"),
+                    ex,
+                )
 
         for trade in rows:
             try:

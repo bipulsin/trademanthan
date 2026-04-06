@@ -547,7 +547,8 @@ def final_reconciliation_refresh_trade_from_broker(db, trade) -> bool:
     End-of-day broker alignment (3:45 / 4:00 PM jobs): refresh buy_price and sell_price from
     today's Upstox order book / order details, then PnL. Does not require trading_live YES.
 
-    Skips status no_entry. Works for bought and sold rows with instrument_key and qty.
+    For no_entry: tries apply_broker_buy_fill_to_intraday_trade first (same-day BUY on Upstox),
+    then continues as bought/sold. exit_reason (e.g. Exit-Slip) does not block refresh.
     """
     from sqlalchemy.orm.attributes import flag_modified
 
@@ -555,6 +556,9 @@ def final_reconciliation_refresh_trade_from_broker(db, trade) -> bool:
     if not upstox_service or not getattr(upstox_service, "access_token", None):
         return False
     st = getattr(trade, "status", None)
+    if st == "no_entry":
+        apply_broker_buy_fill_to_intraday_trade(db, trade)
+        st = getattr(trade, "status", None)
     if st == "no_entry":
         return False
     ikey = (getattr(trade, "instrument_key", None) or "").strip()
@@ -774,7 +778,9 @@ def _final_recon_sync_sell_avg_from_broker(trade, qty: int) -> bool:
             candidates.append(o)
 
         if candidates:
-            if sell_naive:
+            # Wrong sell_time + sell_price=0 would narrow away the real fill; skip narrow then.
+            sell_missing = float(trade.sell_price or 0) < 0.005
+            if sell_naive and not sell_missing:
                 narrowed = [
                     c
                     for c in candidates
@@ -1220,7 +1226,8 @@ def reconcile_intraday_exit_from_broker(
                     ]
                     if after_buy:
                         candidates = after_buy
-            if sell_naive:
+            sell_missing = float(trade.sell_price or 0) < 0.005
+            if sell_naive and not sell_missing:
                 narrowed = [
                     c
                     for c in candidates
