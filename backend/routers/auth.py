@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 import requests
 from jose import jwt
-from typing import Optional
+from typing import Any, Dict, Optional
 import os
 from pydantic import BaseModel, Field
 from urllib.parse import urlparse
@@ -308,8 +308,12 @@ async def google_oauth(
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/google-verify")
-async def google_oauth_verify(user_data: dict, req: Request, db: Session = Depends(get_db)):
-    """Handle Google OAuth verification from frontend"""
+async def google_oauth_verify(
+    req: Request,
+    db: Session = Depends(get_db),
+    user_data: Dict[str, Any] = Body(...),
+):
+    """Handle Google OAuth verification from frontend (JSON body must bind correctly)."""
     validate_google_id_token_login()
     try:
         google_id = user_data.get('google_id')

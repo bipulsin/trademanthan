@@ -228,8 +228,9 @@ except Exception as e:
     logger.warning(f"⚠️ Could not create database tables: {e}")
     logger.warning("Database will be initialized when first accessed")
 
-# Include routers
+# Include routers (auth mounted twice so both /auth/... and /api/auth/... work behind any nginx proxy)
 app.include_router(auth.router)
+app.include_router(auth.router, prefix="/api")
 app.include_router(dashboard.router)
 app.include_router(strategy.router)
 app.include_router(broker.router)

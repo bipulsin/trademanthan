@@ -232,25 +232,39 @@ async function handleCredentialResponse(response) {
             if (!apiResponse.ok) {
                 apiResponse = await doAuthRequest('/auth/google-verify');
             }
-            
-            if (apiResponse.ok) {
-                const authResult = await apiResponse.json();
-                console.log("Backend authentication successful:", authResult);
-                
-                // Require a proper JWT token for authenticated session
-                if (!authResult || !authResult.access_token || !String(authResult.access_token).includes('.')) {
-                    throw new Error('Backend did not return a valid session token');
+
+            if (!apiResponse.ok) {
+                let errMsg = 'HTTP ' + apiResponse.status;
+                try {
+                    const errJson = await apiResponse.json();
+                    errMsg = (errJson && (errJson.detail || errJson.message)) || errMsg;
+                } catch (_) {
+                    try {
+                        const txt = await apiResponse.text();
+                        if (txt) errMsg = String(txt).slice(0, 240);
+                    } catch (_) { /* ignore */ }
                 }
-                localStorage.setItem('trademanthan_user', JSON.stringify(authResult.user || {}));
-                localStorage.setItem('trademanthan_token', authResult.access_token);
-                
-                console.log("User authenticated and data stored");
-            } else {
-                throw new Error(`Authentication failed (${apiResponse.status})`);
+                throw new Error(errMsg);
             }
+
+            const authResult = await apiResponse.json().catch(() => ({}));
+            console.log("Backend authentication successful:", authResult);
+
+            const token = authResult && authResult.access_token;
+            if (!token || !String(token).includes('.')) {
+                throw new Error(
+                    (authResult && authResult.detail) ||
+                        'Backend did not return a valid session token. Check server logs and GOOGLE_CLIENT_ID / database.'
+                );
+            }
+            localStorage.setItem('trademanthan_user', JSON.stringify(authResult.user || {}));
+            localStorage.setItem('trademanthan_token', token);
+
+            console.log("User authenticated and data stored");
         } catch (apiError) {
             console.error("Backend API authentication failed:", apiError);
-            alert("Login failed: unable to create a secure session. Please try again.");
+            const msg = (apiError && apiError.message) ? apiError.message : String(apiError);
+            alert('Login failed: ' + msg);
             return;
         }
         
