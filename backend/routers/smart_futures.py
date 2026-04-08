@@ -20,7 +20,9 @@ from backend.services.smart_futures.order_manager import audit, place_entry, pla
 from backend.services.smart_futures.signal_engine import should_exit_position
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/smart-futures", tags=["smart-futures"])
+# No prefix here — mounted twice in main.py: /api/smart-futures/* (canonical) and /smart-futures/*
+# so nginx configs that strip /api/ (proxy_pass .../) still reach these routes.
+router = APIRouter(tags=["smart-futures"])
 IST = pytz.timezone("Asia/Kolkata")
 
 # Dashboard: show top 3 and last 3 among candidates with score >= this value (inclusive).

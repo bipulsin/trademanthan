@@ -242,7 +242,8 @@ app.include_router(algo.router)
 app.include_router(scan.router)
 app.include_router(cargpt.router)
 app.include_router(arbitrage.router)
-app.include_router(smart_futures.router)
+app.include_router(smart_futures.router, prefix="/api/smart-futures")
+app.include_router(smart_futures.router, prefix="/smart-futures")
 
 # Create/migrate tables in a daemon thread so import + uvicorn bind is not blocked by long DB locks
 # (idle-in-transaction + migrations used to delay port 8000 for minutes → nginx 502).
