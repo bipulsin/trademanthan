@@ -302,13 +302,30 @@ def _run_startup_schema_migrations(db_engine):
                         live_enabled BOOLEAN NOT NULL DEFAULT FALSE,
                         position_size SMALLINT NOT NULL DEFAULT 1,
                         partial_exit_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                        brick_atr_period INTEGER NOT NULL DEFAULT 10,
+                        brick_atr_override NUMERIC(18, 8),
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         CONSTRAINT chk_sf_pos_size CHECK (position_size >= 1 AND position_size <= 3),
+                        CONSTRAINT chk_sf_brick_atr_period CHECK (brick_atr_period >= 2 AND brick_atr_period <= 99),
                         CONSTRAINT chk_sf_config_singleton CHECK (id = 1)
                     )
                     """
                 )
             )
+            if "smart_futures_config" in table_names:
+                _sfc_cols = {c["name"] for c in inspect(db_engine).get_columns("smart_futures_config")}
+                if "brick_atr_period" not in _sfc_cols:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE smart_futures_config ADD COLUMN brick_atr_period INTEGER DEFAULT 10"
+                        )
+                    )
+                    conn.execute(text("UPDATE smart_futures_config SET brick_atr_period = 10 WHERE brick_atr_period IS NULL"))
+                    print("Applied migration: added smart_futures_config.brick_atr_period")
+                _sfc_cols = {c["name"] for c in inspect(db_engine).get_columns("smart_futures_config")}
+                if "brick_atr_override" not in _sfc_cols:
+                    conn.execute(text("ALTER TABLE smart_futures_config ADD COLUMN brick_atr_override NUMERIC(18, 8)"))
+                    print("Applied migration: added smart_futures_config.brick_atr_override")
             conn.execute(
                 text(
                     """

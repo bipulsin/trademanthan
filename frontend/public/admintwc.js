@@ -183,6 +183,10 @@
             if (live) live.value = data.live_enabled ? 'YES' : 'NO';
             if (pos) pos.value = String(data.position_size || 1);
             if (part) part.checked = !!data.partial_exit_enabled;
+            const ap = document.getElementById('sfAdminAtrPeriod');
+            const ao = document.getElementById('sfAdminAtrOverride');
+            if (ap) ap.value = String(data.brick_atr_period != null ? data.brick_atr_period : 10);
+            if (ao) ao.value = data.brick_atr_override != null && data.brick_atr_override !== '' ? String(data.brick_atr_override) : '';
             if (msg) msg.textContent = '';
         } catch (e) {
             console.error(e);
@@ -197,11 +201,20 @@
         const liveEl = document.getElementById('sfAdminLive');
         const posEl = document.getElementById('sfAdminPos');
         const partEl = document.getElementById('sfAdminPartial');
+        const apEl = document.getElementById('sfAdminAtrPeriod');
+        const aoEl = document.getElementById('sfAdminAtrOverride');
+        const rawOv = aoEl && aoEl.value != null ? String(aoEl.value).trim() : '';
         const body = {
             live_enabled: liveEl && liveEl.value === 'YES',
             position_size: posEl ? parseInt(posEl.value, 10) : 1,
             partial_exit_enabled: partEl ? !!partEl.checked : false,
+            brick_atr_period: apEl ? parseInt(apEl.value, 10) || 10 : 10,
+            brick_atr_override: rawOv === '' ? null : parseFloat(rawOv),
         };
+        if (body.brick_atr_override != null && !Number.isFinite(body.brick_atr_override)) {
+            if (msg) msg.textContent = 'Invalid ATR override number';
+            return;
+        }
         try {
             const res = await fetch(`${API_BASE_URL}/api/smart-futures/config`, {
                 method: 'PUT',

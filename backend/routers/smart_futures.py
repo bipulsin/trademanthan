@@ -42,6 +42,8 @@ class SmartFuturesConfigUpdate(BaseModel):
     live_enabled: Optional[bool] = None
     position_size: Optional[int] = Field(None, ge=1, le=3)
     partial_exit_enabled: Optional[bool] = None
+    brick_atr_period: Optional[int] = Field(None, ge=2, le=99)
+    brick_atr_override: Optional[float] = None
 
 
 class OrderBody(BaseModel):
@@ -62,11 +64,8 @@ def get_sf_config_public(user: User = Depends(_require_user)):
 
 @router.put("/config")
 def put_sf_config(body: SmartFuturesConfigUpdate, admin: User = Depends(_require_admin)):
-    return repository.set_config(
-        live_enabled=body.live_enabled,
-        position_size=body.position_size,
-        partial_exit_enabled=body.partial_exit_enabled,
-    )
+    patch = body.model_dump(exclude_unset=True)
+    return repository.merge_config(patch)
 
 
 @router.get("/dashboard")

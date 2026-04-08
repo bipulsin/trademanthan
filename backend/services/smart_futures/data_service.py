@@ -47,19 +47,38 @@ def get_1m_candles(instrument_key: str, days_back: int = 3) -> Optional[List[Dic
     )
 
 
-def brick_size_from_1h(instrument_key: str) -> Optional[float]:
-    """ATR(14) on 1-hour candles as Renko brick size (spec: ATR 1H period 14)."""
-    candles = get_1h_candles(instrument_key, days_back=45)
-    if not candles or len(candles) < 20:
+def brick_size_from_1h(instrument_key: str, period: int = 10) -> Optional[float]:
+    """ATR(period) on 1-hour candles as Renko brick size (default ATR(10) on 1h)."""
+    period = max(2, min(int(period), 99))
+    need = period + 5
+    candles = get_1h_candles(instrument_key, days_back=max(45, need // 24 + 14))
+    if not candles or len(candles) < need:
         return None
     candles.sort(key=lambda c: c.get("timestamp") or "")
     highs = [float(c["high"]) for c in candles]
     lows = [float(c["low"]) for c in candles]
     closes = [float(c["close"]) for c in candles]
-    atr_val = atr_wilder(highs, lows, closes, period=14)
+    atr_val = atr_wilder(highs, lows, closes, period=period)
     if atr_val is None or atr_val <= 0:
         return None
     return round(atr_val, 6)
+
+
+def resolve_main_brick_size(instrument_key: str, config: Dict[str, Any]) -> Optional[float]:
+    """
+    If admin set brick_atr_override > 0, use it as fixed brick size.
+    Else compute ATR( brick_atr_period ) on 1-hour candles.
+    """
+    override = config.get("brick_atr_override")
+    if override is not None:
+        try:
+            v = float(override)
+            if v > 0:
+                return round(v, 6)
+        except (TypeError, ValueError):
+            pass
+    period = int(config.get("brick_atr_period") or 10)
+    return brick_size_from_1h(instrument_key, period=period)
 
 
 def closes_from_candles(candles: Sequence[Dict[str, Any]]) -> List[float]:

@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import pytz
 
-from backend.services.smart_futures import data_service
+from backend.services.smart_futures import data_service, repository
 from backend.services.smart_futures.indicators import atr_wilder
 from backend.services.smart_futures.renko_engine import (
     RenkoBrick,
@@ -65,11 +65,14 @@ def scan_symbol(
     symbol: str,
     instrument_key: str,
     now_ist: datetime,
+    config: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Full scan for one future symbol. Returns candidate dict or None if hard fail.
+    Brick size: admin override, else ATR(brick_atr_period) on 1h (default period 10).
     """
-    brick_main = data_service.brick_size_from_1h(instrument_key)
+    cfg = config if config is not None else repository.get_config()
+    brick_main = data_service.resolve_main_brick_size(instrument_key, cfg)
     if brick_main is None or brick_main <= 0:
         logger.debug("smart_futures: no brick size %s", symbol)
         return None

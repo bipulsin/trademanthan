@@ -37,12 +37,13 @@ def run_smart_futures_scan_job() -> Dict[str, Any]:
     rows = repository.fetch_future_symbols()
     max_n = data_service._max_symbols()
     rows = rows[:max_n]
+    cfg = repository.get_config()
     out: List[Dict[str, Any]] = []
     for i, row in enumerate(rows):
         sym = row["symbol"]
         ik = row["instrument_key"]
         try:
-            r = scan_symbol(sym, ik, now)
+            r = scan_symbol(sym, ik, now, cfg)
             if r is None:
                 continue
             r.pop("meta", None)

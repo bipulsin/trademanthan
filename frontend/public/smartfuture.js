@@ -163,6 +163,15 @@
             if (liveEl) liveEl.textContent = live ? 'Yes' : 'No';
             const psEl = el('sfPosSize');
             if (psEl) psEl.textContent = String(cfg.position_size ?? 1);
+            const atrEl = el('sfAtrMeta');
+            if (atrEl) {
+                const p = cfg.brick_atr_period != null ? cfg.brick_atr_period : 10;
+                const o = cfg.brick_atr_override;
+                atrEl.textContent =
+                    o != null && o !== '' && Number(o) > 0
+                        ? `Fixed brick: ${Number(o).toFixed(4)}`
+                        : `ATR(${p}) on 1h — auto`;
+            }
             const cand = data.candidates || [];
             renderCandidates(cand, live);
             renderPositions(data.positions || [], live);

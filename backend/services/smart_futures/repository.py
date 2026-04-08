@@ -11,44 +11,93 @@ from backend.database import engine
 
 logger = logging.getLogger(__name__)
 
+_SKIP = object()
+
 
 def get_config() -> Dict[str, Any]:
-    with engine.connect() as conn:
-        row = conn.execute(
-            text(
-                """
-                SELECT live_enabled, position_size, partial_exit_enabled, updated_at
-                FROM smart_futures_config WHERE id = 1
-                """
-            )
-        ).fetchone()
+    row = None
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT live_enabled, position_size, partial_exit_enabled,
+                           brick_atr_period, brick_atr_override, updated_at
+                    FROM smart_futures_config WHERE id = 1
+                    """
+                )
+            ).fetchone()
+    except Exception:
+        try:
+            with engine.connect() as conn:
+                row = conn.execute(
+                    text(
+                        """
+                        SELECT live_enabled, position_size, partial_exit_enabled, updated_at
+                        FROM smart_futures_config WHERE id = 1
+                        """
+                    )
+                ).fetchone()
+        except Exception:
+            row = None
+    if row and len(row) == 4:
+        return {
+            "live_enabled": bool(row[0]),
+            "position_size": int(row[1] or 1),
+            "partial_exit_enabled": bool(row[2]),
+            "brick_atr_period": 10,
+            "brick_atr_override": None,
+            "updated_at": row[3].isoformat() if row[3] else None,
+        }
     if not row:
         return {
             "live_enabled": False,
             "position_size": 1,
             "partial_exit_enabled": False,
+            "brick_atr_period": 10,
+            "brick_atr_override": None,
             "updated_at": None,
         }
+    ov = row[4]
     return {
         "live_enabled": bool(row[0]),
         "position_size": int(row[1] or 1),
         "partial_exit_enabled": bool(row[2]),
-        "updated_at": row[3].isoformat() if row[3] else None,
+        "brick_atr_period": int(row[3] or 10),
+        "brick_atr_override": float(ov) if ov is not None else None,
+        "updated_at": row[5].isoformat() if row[5] else None,
     }
 
 
-def set_config(
-    *,
-    live_enabled: Optional[bool] = None,
-    position_size: Optional[int] = None,
-    partial_exit_enabled: Optional[bool] = None,
-) -> Dict[str, Any]:
+def merge_config(patch: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge partial update into smart_futures_config (id=1)."""
+    if not patch:
+        return get_config()
     cur = get_config()
-    le = cur["live_enabled"] if live_enabled is None else bool(live_enabled)
-    ps = cur["position_size"] if position_size is None else int(position_size)
-    pe = cur["partial_exit_enabled"] if partial_exit_enabled is None else bool(partial_exit_enabled)
-    if ps not in (1, 2, 3):
-        ps = 1
+    if "live_enabled" in patch:
+        cur["live_enabled"] = bool(patch["live_enabled"])
+    if "position_size" in patch:
+        ps = int(patch["position_size"] or 1)
+        cur["position_size"] = ps if ps in (1, 2, 3) else 1
+    if "partial_exit_enabled" in patch:
+        cur["partial_exit_enabled"] = bool(patch["partial_exit_enabled"])
+    if "brick_atr_period" in patch:
+        p = int(patch["brick_atr_period"] or 10)
+        cur["brick_atr_period"] = max(2, min(99, p))
+    if "brick_atr_override" in patch:
+        v = patch["brick_atr_override"]
+        if v is None or (isinstance(v, str) and str(v).strip() == ""):
+            cur["brick_atr_override"] = None
+        else:
+            fv = float(v)
+            cur["brick_atr_override"] = fv if fv > 0 else None
+
+    le = cur["live_enabled"]
+    ps = cur["position_size"]
+    pe = cur["partial_exit_enabled"]
+    bap = int(cur["brick_atr_period"] or 10)
+    bao = cur["brick_atr_override"]
+
     with engine.begin() as conn:
         n = conn.execute(text("SELECT COUNT(*) FROM smart_futures_config WHERE id = 1")).scalar()
         if n:
@@ -57,24 +106,59 @@ def set_config(
                     """
                     UPDATE smart_futures_config
                     SET live_enabled = :le, position_size = :ps, partial_exit_enabled = :pe,
+                        brick_atr_period = :bap, brick_atr_override = :bao,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = 1
                     """
                 ),
-                {"le": le, "ps": ps, "pe": pe},
+                {"le": le, "ps": ps, "pe": pe, "bap": bap, "bao": bao},
             )
         else:
             conn.execute(
                 text(
                     """
-                    INSERT INTO smart_futures_config (id, live_enabled, position_size, partial_exit_enabled, updated_at)
-                    VALUES (1, :le, :ps, :pe, CURRENT_TIMESTAMP)
+                    INSERT INTO smart_futures_config (
+                        id, live_enabled, position_size, partial_exit_enabled,
+                        brick_atr_period, brick_atr_override, updated_at
+                    )
+                    VALUES (1, :le, :ps, :pe, :bap, :bao, CURRENT_TIMESTAMP)
                     """
                 ),
-                {"le": le, "ps": ps, "pe": pe},
+                {"le": le, "ps": ps, "pe": pe, "bap": bap, "bao": bao},
             )
-    logger.info("smart_futures_config updated live=%s position_size=%s partial_exit=%s", le, ps, pe)
+    logger.info(
+        "smart_futures_config updated live=%s position_size=%s brick_atr_period=%s override=%s",
+        le,
+        ps,
+        bap,
+        bao,
+    )
     return get_config()
+
+
+def set_config(
+    *,
+    live_enabled: Optional[bool] = None,
+    position_size: Optional[int] = None,
+    partial_exit_enabled: Optional[bool] = None,
+    brick_atr_period: Optional[int] = None,
+    brick_atr_override: Any = _SKIP,
+) -> Dict[str, Any]:
+    """Backward-compatible setter; unspecified fields keep current values."""
+    patch: Dict[str, Any] = {}
+    if live_enabled is not None:
+        patch["live_enabled"] = live_enabled
+    if position_size is not None:
+        patch["position_size"] = position_size
+    if partial_exit_enabled is not None:
+        patch["partial_exit_enabled"] = partial_exit_enabled
+    if brick_atr_period is not None:
+        patch["brick_atr_period"] = brick_atr_period
+    if brick_atr_override is not _SKIP:
+        patch["brick_atr_override"] = brick_atr_override
+    if not patch:
+        return get_config()
+    return merge_config(patch)
 
 
 def fetch_future_symbols() -> List[Dict[str, str]]:

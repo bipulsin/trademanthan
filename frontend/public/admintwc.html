@@ -227,6 +227,18 @@
                             <div class="user-card-row" style="margin-top:8px;">
                                 <label><input type="checkbox" id="sfAdminPartial" /> Partial exit (future use)</label>
                             </div>
+                            <div class="user-card-row" style="margin-top:12px;"><strong>Renko brick — ATR period (1h candles)</strong></div>
+                            <p style="font-size:13px;color:#64748b;margin:4px 0 8px;">Default 10 = ATR(10). Used only when override below is empty.</p>
+                            <div style="margin:10px 0;">
+                                <input type="number" id="sfAdminAtrPeriod" min="2" max="99" step="1" value="10"
+                                    style="padding:8px;border-radius:8px;max-width:120px;border:1px solid #cbd5e1;" />
+                            </div>
+                            <div class="user-card-row"><strong>Fixed brick / ATR value (override)</strong></div>
+                            <p style="font-size:13px;color:#64748b;margin:4px 0 8px;">Optional. When set, this exact value is used as Renko brick size for all symbols (skips live ATR calculation).</p>
+                            <div style="margin:10px 0;">
+                                <input type="number" id="sfAdminAtrOverride" min="0" step="any" placeholder="Auto (ATR from 1h)"
+                                    style="padding:8px;border-radius:8px;max-width:200px;border:1px solid #cbd5e1;" />
+                            </div>
                             <div style="margin-top:12px;">
                                 <button type="button" id="sfAdminSave" class="settings-save-btn" style="padding:10px 18px;border-radius:8px;border:none;background:#2563eb;color:#fff;font-weight:600;cursor:pointer;">Save</button>
                                 <span id="sfAdminMsg" style="margin-left:10px;font-size:13px;color:#64748b;"></span>
@@ -273,7 +285,7 @@
     </div>
 
     <script src="left-menu.js?v=3.15"></script>
-    <script src="admintwc.js?v=1.1.4"></script>
+    <script src="admintwc.js?v=1.1.5"></script>
     <script src="version.js?v=1.0"></script>
     <script src="cache-manager.js?v=1.1"></script>
 </body>
