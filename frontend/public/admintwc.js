@@ -161,6 +161,81 @@
 
     window.toggleUserFlag = toggleUserFlag;
 
+    let smartFuturesExpanded = false;
+    let smartFuturesLoadedOnce = false;
+
+    async function loadSmartFuturesConfig() {
+        const msg = document.getElementById('sfAdminMsg');
+        const token = getToken();
+        if (!token) {
+            if (msg) msg.textContent = 'Not logged in';
+            return;
+        }
+        try {
+            const res = await apiFetch(['/api/smart-futures/config', '/smart-futures/config'], {
+                headers: { Authorization: `Bearer ${token}` },
+                cache: 'no-store',
+            });
+            const data = await res.json();
+            const live = document.getElementById('sfAdminLive');
+            const pos = document.getElementById('sfAdminPos');
+            const part = document.getElementById('sfAdminPartial');
+            if (live) live.value = data.live_enabled ? 'YES' : 'NO';
+            if (pos) pos.value = String(data.position_size || 1);
+            if (part) part.checked = !!data.partial_exit_enabled;
+            if (msg) msg.textContent = '';
+        } catch (e) {
+            console.error(e);
+            if (msg) msg.textContent = 'Failed to load config';
+        }
+    }
+
+    async function saveSmartFuturesConfig() {
+        const msg = document.getElementById('sfAdminMsg');
+        const token = getToken();
+        if (!token) return;
+        const liveEl = document.getElementById('sfAdminLive');
+        const posEl = document.getElementById('sfAdminPos');
+        const partEl = document.getElementById('sfAdminPartial');
+        const body = {
+            live_enabled: liveEl && liveEl.value === 'YES',
+            position_size: posEl ? parseInt(posEl.value, 10) : 1,
+            partial_exit_enabled: partEl ? !!partEl.checked : false,
+        };
+        try {
+            const res = await fetch(`${API_BASE_URL}/api/smart-futures/config`, {
+                method: 'PUT',
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(body),
+            });
+            if (!res.ok) {
+                const t = await res.text();
+                throw new Error(t || res.status);
+            }
+            if (msg) msg.textContent = 'Saved.';
+            setTimeout(() => {
+                if (msg) msg.textContent = '';
+            }, 3000);
+        } catch (e) {
+            console.error(e);
+            if (msg) msg.textContent = 'Save failed';
+        }
+    }
+
+    function setSmartFuturesExpanded(expanded) {
+        smartFuturesExpanded = expanded;
+        const content = document.getElementById('smartFuturesContent');
+        const icon = document.getElementById('smartFuturesCollapseIcon');
+        if (content) content.classList.toggle('expanded', expanded);
+        if (icon) {
+            icon.classList.toggle('fa-chevron-down', !expanded);
+            icon.classList.toggle('fa-chevron-up', expanded);
+        }
+    }
+
     function setUserActivityExpanded(expanded) {
         userActivityExpanded = expanded;
         const content = document.getElementById('userActivityContent');
@@ -173,6 +248,21 @@
     }
 
     document.addEventListener('DOMContentLoaded', () => {
+        setSmartFuturesExpanded(false);
+        const sfToggle = document.getElementById('smartFuturesToggle');
+        if (sfToggle) {
+            sfToggle.addEventListener('click', async () => {
+                const next = !smartFuturesExpanded;
+                setSmartFuturesExpanded(next);
+                if (next && !smartFuturesLoadedOnce) {
+                    smartFuturesLoadedOnce = true;
+                    await loadSmartFuturesConfig();
+                }
+            });
+        }
+        const sfSave = document.getElementById('sfAdminSave');
+        if (sfSave) sfSave.addEventListener('click', () => saveSmartFuturesConfig());
+
         setUserActivityExpanded(false);
         const toggle = document.getElementById('userActivityToggle');
         if (toggle) {

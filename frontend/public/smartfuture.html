@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <title>Smart Futures - Tradentical</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
+    <script src="auth-check.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="left-menu.css?v=3.13">
+    <link rel="stylesheet" href="theme.css?v=1.3">
+    <link rel="stylesheet" href="settings.css">
+    <style>
+        .sf-wrap { max-width: 1100px; margin: 0 auto; }
+        .sf-card {
+            background: var(--theme-card, rgba(255,255,255,0.95));
+            border: 1px solid var(--theme-border, #e2e8f0);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+        .sf-meta { font-size: 0.9rem; color: var(--theme-muted, #64748b); margin-bottom: 8px; }
+        .sf-table-wrap { overflow-x: auto; }
+        table.sf-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        table.sf-table th, table.sf-table td { border-bottom: 1px solid var(--theme-border, #e2e8f0); text-align: left; }
+        table.sf-table th { color: var(--theme-muted, #64748b); font-weight: 600; padding: 8px; }
+        .sf-btn-order, .sf-btn-exit {
+            padding: 6px 12px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+        .sf-btn-order { background: #2563eb; color: #fff; }
+        .sf-btn-order:disabled, .sf-btn-exit:disabled { opacity: 0.45; cursor: not-allowed; }
+        .sf-btn-exit { background: #dc2626; color: #fff; }
+    </style>
+</head>
+<body class="theme-page">
+    <div class="mobile-title-bar">
+        <button class="mobile-menu-toggle" id="mobileMenuToggle" type="button" aria-label="Menu"><i class="fas fa-bars"></i></button>
+        <div class="mobile-title-content">
+            <img src="tradewithcto-logo.png" alt="TradeWithCTO" class="mobile-logo">
+            <h1 class="mobile-title">Smart Futures</h1>
+        </div>
+    </div>
+    <div class="app-container app-with-left-menu">
+        <div id="left-menu-container"></div>
+        <main class="right-panel main-content-area">
+            <div class="settings-header">
+                <div class="settings-title-section">
+                    <h1 class="settings-title"><i class="fas fa-bolt"></i> Smart Futures</h1>
+                    <p class="settings-subtitle">NSE F&O Renko selection — top candidates (auto-refresh 60s). Orders only when Live = Yes (Admin).</p>
+                </div>
+            </div>
+            <div class="settings-content sf-wrap">
+                <div class="sf-meta">
+                    Live: <strong id="sfLiveFlag">—</strong> · Position size (lots): <strong id="sfPosSize">—</strong>
+                    · Updated: <span id="sfUpdated">—</span> · <span id="sfStatus"></span>
+                </div>
+                <div class="sf-card">
+                    <h2 style="margin-top:0;font-size:1.1rem;">Top candidates</h2>
+                    <p class="sf-meta">Highest score symbols passing filters (max 3 shown; full list available via API).</p>
+                    <div class="sf-table-wrap">
+                        <table class="sf-table">
+                            <thead>
+                                <tr>
+                                    <th>Symbol</th>
+                                    <th>Score</th>
+                                    <th>LTP</th>
+                                    <th>Renko</th>
+                                    <th>Direction</th>
+                                    <th>Order</th>
+                                    <th>Exit</th>
+                                </tr>
+                            </thead>
+                            <tbody id="sfCandBody">
+                                <tr><td colspan="7" style="padding:12px;">Loading…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="sf-card">
+                    <h2 style="margin-top:0;font-size:1.1rem;">Open positions</h2>
+                    <div class="sf-table-wrap">
+                        <table class="sf-table">
+                            <thead>
+                                <tr>
+                                    <th>Symbol</th>
+                                    <th>Direction</th>
+                                    <th>Lots</th>
+                                    <th>Exit ready</th>
+                                    <th>Exit</th>
+                                </tr>
+                            </thead>
+                            <tbody id="sfPosBody">
+                                <tr><td colspan="5" style="padding:12px;">—</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script src="left-menu.js?v=3.15"></script>
+    <script src="smartfuture.js?v=1"></script>
+</body>
+</html>

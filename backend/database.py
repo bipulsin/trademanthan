@@ -292,5 +292,109 @@ def _run_startup_schema_migrations(db_engine):
                     print("Applied migration: added users.last_activity_ip")
                 conn.execute(text("UPDATE users SET is_blocked = FALSE WHERE is_blocked IS NULL"))
                 conn.execute(text("UPDATE users SET is_paid_user = FALSE WHERE is_paid_user IS NULL"))
+
+            # Smart Futures (NSE F&O Renko intraday engine)
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS smart_futures_config (
+                        id INTEGER PRIMARY KEY DEFAULT 1,
+                        live_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                        position_size SMALLINT NOT NULL DEFAULT 1,
+                        partial_exit_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        CONSTRAINT chk_sf_pos_size CHECK (position_size >= 1 AND position_size <= 3),
+                        CONSTRAINT chk_sf_config_singleton CHECK (id = 1)
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO smart_futures_config (id, live_enabled, position_size, partial_exit_enabled)
+                    SELECT 1, FALSE, 1, FALSE
+                    WHERE NOT EXISTS (SELECT 1 FROM smart_futures_config WHERE id = 1)
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS smart_futures_candidate (
+                        id BIGSERIAL PRIMARY KEY,
+                        session_date DATE NOT NULL,
+                        symbol TEXT NOT NULL,
+                        instrument_key TEXT NOT NULL,
+                        score SMALLINT NOT NULL DEFAULT 0,
+                        direction TEXT NOT NULL DEFAULT 'NONE',
+                        last_brick_color TEXT,
+                        entry_signal BOOLEAN NOT NULL DEFAULT FALSE,
+                        exit_ready BOOLEAN NOT NULL DEFAULT FALSE,
+                        main_brick_size NUMERIC(18, 8),
+                        ltp NUMERIC(18, 4),
+                        prefilter_pass BOOLEAN NOT NULL DEFAULT FALSE,
+                        structure_pass BOOLEAN NOT NULL DEFAULT FALSE,
+                        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        CONSTRAINT uq_sfc_session_symbol UNIQUE (session_date, symbol)
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_sfc_session_score
+                    ON smart_futures_candidate (session_date, score DESC)
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS smart_futures_position (
+                        id BIGSERIAL PRIMARY KEY,
+                        session_date DATE NOT NULL,
+                        user_id INTEGER,
+                        symbol TEXT NOT NULL,
+                        instrument_key TEXT NOT NULL,
+                        direction TEXT NOT NULL,
+                        lots_open INTEGER NOT NULL DEFAULT 1,
+                        lots_total INTEGER NOT NULL DEFAULT 1,
+                        entry_price NUMERIC(18, 4),
+                        main_brick_size NUMERIC(18, 8),
+                        half_brick_size NUMERIC(18, 8),
+                        entry_order_id TEXT,
+                        status TEXT NOT NULL DEFAULT 'OPEN',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        closed_at TIMESTAMP,
+                        CONSTRAINT chk_sf_pos_lots CHECK (lots_open >= 0 AND lots_total >= 1)
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_sfp_open
+                    ON smart_futures_position (session_date, status)
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS smart_futures_order_audit (
+                        id BIGSERIAL PRIMARY KEY,
+                        user_id INTEGER,
+                        position_id BIGINT,
+                        side TEXT NOT NULL,
+                        order_id TEXT,
+                        quantity INTEGER,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+            )
     except Exception as migration_error:
         print(f"Warning: startup schema migration failed: {migration_error}")
