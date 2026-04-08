@@ -5,6 +5,7 @@ from sqlalchemy.orm import sessionmaker
 from contextlib import asynccontextmanager
 import os
 import logging
+import threading
 
 import backend.env_bootstrap  # noqa: F401 — load `<project_root>/.env` before other backend imports
 
@@ -220,14 +221,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Create database tables
-try:
-    create_tables()
-    logger.info("✅ Database tables created successfully")
-except Exception as e:
-    logger.warning(f"⚠️ Could not create database tables: {e}")
-    logger.warning("Database will be initialized when first accessed")
-
 # Include routers (auth mounted twice so both /auth/... and /api/auth/... work behind any nginx proxy)
 app.include_router(auth.router)
 app.include_router(auth.router, prefix="/api")
@@ -240,6 +233,20 @@ app.include_router(scan.router)
 app.include_router(cargpt.router)
 app.include_router(arbitrage.router)
 app.include_router(smart_futures.router)
+
+# Create/migrate tables in a daemon thread so import + uvicorn bind is not blocked by long DB locks
+# (idle-in-transaction + migrations used to delay port 8000 for minutes → nginx 502).
+def _create_tables_background() -> None:
+    try:
+        create_tables()
+        logger.info("✅ Database tables created successfully (background)")
+    except Exception as e:
+        logger.warning(f"⚠️ Could not create database tables: {e}")
+        logger.warning("Database will be initialized when first accessed")
+
+
+threading.Thread(target=_create_tables_background, daemon=True, name="create_tables").start()
+
 
 def get_database_info():
     """Get database connection information"""
