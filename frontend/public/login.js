@@ -15,6 +15,31 @@ function trademanthanApiBase() {
     return window.location.origin;
 }
 
+/** Avoid JSON.parse on HTML error pages (502/504 return <!DOCTYPE...>). */
+function readAuthResponseJson(res) {
+    const ct = (res.headers.get('content-type') || '').toLowerCase();
+    if (!res.ok) {
+        return res.text().then(function (text) {
+            var msg = 'HTTP ' + res.status;
+            if (res.status === 502 || res.status === 503 || res.status === 504) {
+                msg +=
+                    ' — the login API is temporarily unavailable (server restarting or overloaded). Try again in one minute, or sign in at https://trademanthan.in/login.html';
+            } else if (text && text.length > 0 && text.trim().charAt(0) !== '<') {
+                msg += ': ' + text.trim().slice(0, 200);
+            }
+            throw new Error(msg);
+        });
+    }
+    if (ct.indexOf('application/json') === -1) {
+        return res.text().then(function (text) {
+            throw new Error(
+                'Login server returned non-JSON. If this continues, the API may be down. Try https://trademanthan.in/login.html'
+            );
+        });
+    }
+    return res.json();
+}
+
 // Google OAuth callback function
 function handleCredentialResponse(response) {
     console.log("Google OAuth response received");
@@ -37,18 +62,33 @@ function handleCredentialResponse(response) {
         googleButton.style.pointerEvents = 'none';
     }
     
-    // Send to backend for verification
-    fetch(trademanthanApiBase() + '/api/auth/google', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ credential: credential })
-    })
-    .then(response => {
-        console.log('Backend response status:', response.status);
-        return response.json();
-    })
+    // Send to backend for verification (/api/auth first, then /auth — same FastAPI mounts)
+    const base = trademanthanApiBase();
+    const tryUrls = [base + '/api/auth/google', base + '/auth/google'];
+    const tryPost = function (idx) {
+        if (idx >= tryUrls.length) {
+            return Promise.reject(new Error('Login API unreachable'));
+        }
+        return fetch(tryUrls[idx], {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ credential: credential }),
+        }).then(function (response) {
+            console.log('Backend response status:', response.status, tryUrls[idx]);
+            var retry =
+                !response.ok &&
+                (response.status === 502 || response.status === 503 || response.status === 504) &&
+                idx + 1 < tryUrls.length;
+            if (retry) {
+                return tryPost(idx + 1);
+            }
+            return readAuthResponseJson(response);
+        });
+    };
+
+    tryPost(0)
     .then(data => {
         console.log('Backend response data:', data);
         if (data.access_token) {
@@ -187,7 +227,8 @@ function handleGoogleTokenResponse(response) {
                 throw new Error('Incomplete user profile from Google');
             }
 
-            return fetch(trademanthanApiBase() + '/api/auth/google-verify', {
+            const base = trademanthanApiBase();
+            return fetch(base + '/api/auth/google-verify', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -198,9 +239,30 @@ function handleGoogleTokenResponse(response) {
                     name: userinfo.name,
                     picture: userinfo.picture || null
                 })
+            }).then(function (res) {
+                if (
+                    !res.ok &&
+                    (res.status === 502 || res.status === 503 || res.status === 504)
+                ) {
+                    return fetch(base + '/auth/google-verify', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            google_id: userinfo.sub,
+                            email: userinfo.email,
+                            name: userinfo.name,
+                            picture: userinfo.picture || null
+                        })
+                    });
+                }
+                return res;
             });
         })
-        .then(res => res.json())
+        .then(function (res) {
+            return readAuthResponseJson(res);
+        })
         .then(data => {
             if (data.access_token) {
                 localStorage.setItem('trademanthan_token', data.access_token);

@@ -113,6 +113,34 @@ const API_BASE_URL = (function () {
     return window.location.origin;
 })();
 
+/** Do not JSON-parse HTML error pages (nginx 502 returns <!DOCTYPE...>). */
+async function parseLoginApiJson(res) {
+    const ct = (res.headers.get('content-type') || '').toLowerCase();
+    if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        let msg = 'HTTP ' + res.status;
+        if (res.status === 502 || res.status === 503 || res.status === 504) {
+            msg +=
+                ' — login API temporarily unavailable (server busy or restarting). Try https://trademanthan.in/login.html or retry in a minute.';
+        } else if (text && text.trim().charAt(0) !== '<') {
+            try {
+                const j = JSON.parse(text);
+                msg = (j.detail || j.message || msg);
+            } catch (e) {
+                msg += ': ' + text.trim().slice(0, 200);
+            }
+        }
+        throw new Error(msg);
+    }
+    if (!ct.includes('application/json')) {
+        await res.text();
+        throw new Error(
+            'Server returned non-JSON. Try https://trademanthan.in/login.html if this persists.'
+        );
+    }
+    return res.json();
+}
+
 // Detect mobile/touch device (Google button in popup often fails on mobile - popup blocking, touch issues)
 function isMobileView() {
     return window.matchMedia('(max-width: 768px)').matches ||
@@ -240,25 +268,11 @@ async function handleCredentialResponse(response) {
             }
 
             let apiResponse = await doAuthRequest('/api/auth/google-verify');
-            if (!apiResponse.ok) {
+            if (!apiResponse.ok && [502, 503, 504].includes(apiResponse.status)) {
                 apiResponse = await doAuthRequest('/auth/google-verify');
             }
 
-            if (!apiResponse.ok) {
-                let errMsg = 'HTTP ' + apiResponse.status;
-                try {
-                    const errJson = await apiResponse.json();
-                    errMsg = (errJson && (errJson.detail || errJson.message)) || errMsg;
-                } catch (_) {
-                    try {
-                        const txt = await apiResponse.text();
-                        if (txt) errMsg = String(txt).slice(0, 240);
-                    } catch (_) { /* ignore */ }
-                }
-                throw new Error(errMsg);
-            }
-
-            const authResult = await apiResponse.json().catch(() => ({}));
+            const authResult = await parseLoginApiJson(apiResponse);
             console.log("Backend authentication successful:", authResult);
 
             const token = authResult && authResult.access_token;
