@@ -1,3 +1,20 @@
+/** Same backend as app.js — mirror domains must not use relative /api (nginx 502). */
+function trademanthanApiBase() {
+    const h = window.location.hostname;
+    if (h === 'localhost' || h === '127.0.0.1') return 'http://localhost:8000';
+    if (
+        h === 'www.tradewithcto.com' ||
+        h === 'tradewithcto.com' ||
+        h.endsWith('.tradewithcto.com') ||
+        h === 'www.tradentical.com' ||
+        h === 'tradentical.com' ||
+        h.endsWith('.tradentical.com')
+    ) {
+        return 'https://trademanthan.in';
+    }
+    return window.location.origin;
+}
+
 // Google OAuth callback function
 function handleCredentialResponse(response) {
     console.log("Google OAuth response received");
@@ -21,7 +38,7 @@ function handleCredentialResponse(response) {
     }
     
     // Send to backend for verification
-    fetch('/api/auth/google', {
+    fetch(trademanthanApiBase() + '/api/auth/google', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -170,7 +187,7 @@ function handleGoogleTokenResponse(response) {
                 throw new Error('Incomplete user profile from Google');
             }
 
-            return fetch('/api/auth/google-verify', {
+            return fetch(trademanthanApiBase() + '/api/auth/google-verify', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

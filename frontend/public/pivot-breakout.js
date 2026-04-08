@@ -44,11 +44,21 @@
     const bullishSummary = document.getElementById("bullishSummary");
     const bearishSummary = document.getElementById("bearishSummary");
     const refreshBtn = document.getElementById("refreshBtn");
-    const API_BASE =
-        typeof window !== "undefined" &&
-        (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
-            ? ""
-            : window.location.origin;
+    const API_BASE = (function () {
+        const h = window.location.hostname;
+        if (h === "localhost" || h === "127.0.0.1") return "";
+        if (
+            h === "www.tradewithcto.com" ||
+            h === "tradewithcto.com" ||
+            h.endsWith(".tradewithcto.com") ||
+            h === "www.tradentical.com" ||
+            h === "tradentical.com" ||
+            h.endsWith(".tradentical.com")
+        ) {
+            return "https://trademanthan.in";
+        }
+        return window.location.origin;
+    })();
     const API = API_BASE + "/scan/arbitrage/pivot-breakout";
     const STREAM_API = API_BASE + "/scan/arbitrage/pivot-breakout-stream";
 

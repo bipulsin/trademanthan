@@ -1,10 +1,21 @@
 // Scan Page JavaScript
 console.log('Scan.js loaded successfully');
 
-const API_BASE_URL =
-    window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-        ? 'http://localhost:8000'
-        : window.location.origin;
+const API_BASE_URL = (function () {
+    const h = window.location.hostname;
+    if (h === 'localhost' || h === '127.0.0.1') return 'http://localhost:8000';
+    if (
+        h === 'www.tradewithcto.com' ||
+        h === 'tradewithcto.com' ||
+        h.endsWith('.tradewithcto.com') ||
+        h === 'www.tradentical.com' ||
+        h === 'tradentical.com' ||
+        h.endsWith('.tradentical.com')
+    ) {
+        return 'https://trademanthan.in';
+    }
+    return window.location.origin;
+})();
 
 /** Set on intraoption.html — hide Upstox token banner/popup and OAuth refresh UX */
 const SCAN_SKIP_TOKEN_UI = typeof window !== 'undefined' && window.__INTRAOPTION_PAGE === true;

@@ -3,6 +3,21 @@
  * Include this script at the top of protected pages (before any content).
  */
 (function() {
+    function trademanthanApiBase() {
+        const h = window.location.hostname;
+        if (h === 'localhost' || h === '127.0.0.1') return 'http://localhost:8000';
+        if (
+            h === 'www.tradewithcto.com' ||
+            h === 'tradewithcto.com' ||
+            h.endsWith('.tradewithcto.com') ||
+            h === 'www.tradentical.com' ||
+            h === 'tradentical.com' ||
+            h.endsWith('.tradentical.com')
+        ) {
+            return 'https://trademanthan.in';
+        }
+        return window.location.origin;
+    }
     function isAuthenticated() {
         try {
             const token = localStorage.getItem('trademanthan_token');
@@ -44,7 +59,10 @@
                 body: JSON.stringify(payload),
                 keepalive: true
             };
-            fetch('/api/auth/activity/page-view', opts).catch(() => fetch('/auth/activity/page-view', opts).catch(() => {}));
+            const b = trademanthanApiBase();
+            fetch(b + '/api/auth/activity/page-view', opts).catch(() =>
+                fetch(b + '/auth/activity/page-view', opts).catch(() => {})
+            );
         } catch (e) {
             // ignore
         }

@@ -95,12 +95,23 @@ function initializeFeatureCards() {
 
 // Google OAuth client ID
 const GOOGLE_CLIENT_ID = '428560418671-t59riis4gqkhavnevt9ve6km54ltsba7.apps.googleusercontent.com';
-// Same origin as the page so https://tradewithcto.com calls /api on this host (nginx → FastAPI).
-// Hardcoding trademanthan.in breaks Google login from tradewithcto.com (cross-origin / nginx quirks).
-const API_BASE_URL =
-    window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-        ? 'http://localhost:8000'
-        : window.location.origin;
+// API host: TradeWithCTO / Tradentical mirrors often serve static only; /api on those hosts can return nginx 502.
+// CORS on https://trademanthan.in allows those origins; JWT works against the same backend.
+const API_BASE_URL = (function () {
+    const h = window.location.hostname;
+    if (h === 'localhost' || h === '127.0.0.1') return 'http://localhost:8000';
+    if (
+        h === 'www.tradewithcto.com' ||
+        h === 'tradewithcto.com' ||
+        h.endsWith('.tradewithcto.com') ||
+        h === 'www.tradentical.com' ||
+        h === 'tradentical.com' ||
+        h.endsWith('.tradentical.com')
+    ) {
+        return 'https://trademanthan.in';
+    }
+    return window.location.origin;
+})();
 
 // Detect mobile/touch device (Google button in popup often fails on mobile - popup blocking, touch issues)
 function isMobileView() {
