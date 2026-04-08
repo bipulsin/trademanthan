@@ -52,14 +52,12 @@
             <div class="settings-header">
                 <div class="settings-title-section">
                     <h1 class="settings-title"><i class="fas fa-bolt"></i> Smart Futures</h1>
-                    <p class="settings-subtitle">NSE F&O Renko selection — score &#8805; 4 (auto-refresh 60s). Orders only when Live = Yes (Admin).</p>
+                    <p class="settings-subtitle">NSE F&O Renko — top 3 by score (&#8805; 4) from DB first; live prices refresh after. Auto-refresh 60s.</p>
                 </div>
             </div>
             <div class="settings-content sf-wrap">
                 <div class="sf-meta">
-                    Live: <strong id="sfLiveFlag">—</strong> · Position size (lots): <strong id="sfPosSize">—</strong>
-                    · Brick: <span id="sfAtrMeta">—</span>
-                    · Updated: <span id="sfUpdated">—</span> · <span id="sfStatus"></span>
+                    Updated: <span id="sfUpdated">—</span> · <span id="sfStatus"></span>
                 </div>
                 <div class="sf-card">
                     <h2 style="margin-top:0;font-size:1.1rem;">Top by score (&#8805; 4)</h2>
@@ -106,6 +104,6 @@
         </main>
     </div>
     <script src="left-menu.js?v=3.15"></script>
-    <script src="smartfuture.js?v=8"></script>
+    <script src="smartfuture.js?v=9"></script>
 </body>
 </html>

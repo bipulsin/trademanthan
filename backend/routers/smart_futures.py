@@ -75,16 +75,35 @@ def put_sf_config(body: SmartFuturesConfigUpdate, admin: User = Depends(_require
 
 @router.get("/dashboard/top")
 def get_dashboard_top(user: User = Depends(_require_user)):
-    """Fast payload: config + top 3 by score (UI loads this first)."""
+    """DB only: top 3 by score (no config). UI loads this first, then config/positions, then live quotes."""
     d0 = _session_date()
     ms = SMART_FUTURES_MIN_SCORE
-    cfg, candidates = repository.load_dashboard_top(d0, ms)
+    candidates = repository.load_top_candidates_only(d0, ms)
     return {
-        "config": cfg,
         "session_date": str(d0),
         "min_score": ms,
         "candidates": candidates,
     }
+
+
+@router.get("/dashboard/live-quotes")
+def get_dashboard_live_quotes(user: User = Depends(_require_user)):
+    """Broker LTP for current top-3 instrument keys (call after /dashboard/top has painted DB rows)."""
+    d0 = _session_date()
+    ms = SMART_FUTURES_MIN_SCORE
+    cands = repository.load_top_candidates_only(d0, ms)
+    keys = [str(c.get("instrument_key") or "").strip() for c in cands]
+    keys = [k for k in keys if k]
+    if not keys:
+        return {"ltps": {}}
+    try:
+        from backend.services.upstox_service import upstox_service
+
+        ltps = upstox_service.get_market_quotes_batch_by_keys(keys)
+    except Exception as e:
+        logger.warning("Smart Futures live-quotes: %s", e)
+        return {"ltps": {}}
+    return {"ltps": ltps or {}}
 
 
 @router.get("/dashboard/positions")

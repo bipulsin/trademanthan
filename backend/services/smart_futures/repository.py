@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import bindparam, text
 
@@ -352,10 +352,9 @@ def list_open_positions(session_d: date) -> List[Dict[str, Any]]:
     return out
 
 
-def load_dashboard_top(session_d: date, min_score: int) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
-    """Single connection: config + top 3 candidates (score >= min_score, ORDER BY score DESC LIMIT 3)."""
+def load_top_candidates_only(session_d: date, min_score: int) -> List[Dict[str, Any]]:
+    """DB only: top 3 rows with score >= min_score, ORDER BY score DESC (no config query)."""
     with engine.connect() as conn:
-        cfg_row = _fetch_config_row(conn)
         top_rows = conn.execute(
             text(
                 """
@@ -369,7 +368,7 @@ def load_dashboard_top(session_d: date, min_score: int) -> Tuple[Dict[str, Any],
             ),
             {"d": session_d, "min_sc": min_score},
         ).fetchall()
-    return _parse_config_row(cfg_row), [_candidate_row_to_dict(r) for r in top_rows]
+    return [_candidate_row_to_dict(r) for r in top_rows]
 
 
 def load_open_positions_with_exit(session_d: date) -> List[Dict[str, Any]]:

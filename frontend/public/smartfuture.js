@@ -1,5 +1,5 @@
 /**
- * Smart Futures — loads /dashboard/top first (top 3 by score), then /dashboard/positions.
+ * Smart Futures: (1) DB top-3 only, (2) config + positions (DB), (3) broker LTP patch.
  */
 (function () {
     const API_BASE_URL =
@@ -10,6 +10,9 @@
     const FETCH_TIMEOUT_MS = 30000;
 
     const REFRESH_MS = 60000;
+
+    /** Set from /api/smart-futures/config after top table is painted (not shown in UI). */
+    let uiLiveEnabled = false;
 
     function getToken() {
         return localStorage.getItem('trademanthan_token') || '';
@@ -66,9 +69,8 @@
     }
 
     function showCandidateTableError(message) {
-        const msg = escapeHtml(message);
         const top = el('sfCandBody');
-        if (top) top.innerHTML = `<tr><td colspan="7" style="padding:12px;">${msg}</td></tr>`;
+        if (top) top.innerHTML = `<tr><td colspan="7" style="padding:12px;">${escapeHtml(message)}</td></tr>`;
     }
 
     function showPositionsError(message) {
@@ -78,25 +80,40 @@
         }
     }
 
-    function applyConfigMeta(cfg) {
-        const live = !!cfg.live_enabled;
-        const liveEl = el('sfLiveFlag');
-        if (liveEl) liveEl.textContent = live ? 'Yes' : 'No';
-        const psEl = el('sfPosSize');
-        if (psEl) psEl.textContent = String(cfg.position_size ?? 1);
-        const atrEl = el('sfAtrMeta');
-        if (atrEl) {
-            const p = cfg.brick_atr_period != null ? cfg.brick_atr_period : 10;
-            const o = cfg.brick_atr_override;
-            atrEl.textContent =
-                o != null && o !== '' && Number(o) > 0
-                    ? `Fixed brick: ${Number(o).toFixed(4)}`
-                    : `ATR(${p}) on 1h — auto`;
-        }
-        return live;
+    function normIk(s) {
+        return String(s || '')
+            .replace(/\s/g, '')
+            .replace(/:/g, '|')
+            .toUpperCase();
     }
 
-    function renderCandidates(tbodyId, rows, live, emptyMsg) {
+    function patchLtpCells(ltps) {
+        if (!ltps || typeof ltps !== 'object') return;
+        const map = {};
+        Object.keys(ltps).forEach((k) => {
+            map[normIk(k)] = ltps[k];
+        });
+        document.querySelectorAll('td.sf-ltp').forEach((td) => {
+            const ik = td.getAttribute('data-ik');
+            if (!ik) return;
+            let v = ltps[ik];
+            if (v == null || Number.isNaN(Number(v))) {
+                v = map[normIk(ik)];
+            }
+            if (v != null && !Number.isNaN(Number(v))) {
+                td.textContent = Number(v).toFixed(2);
+            }
+        });
+    }
+
+    function applyLiveToOrderButtons(live) {
+        document.querySelectorAll('.sf-btn-order').forEach((btn) => {
+            const entry = btn.getAttribute('data-entry') === '1';
+            btn.disabled = !live || !entry;
+        });
+    }
+
+    function renderCandidates(tbodyId, rows, emptyMsg) {
         const tbody = el(tbodyId);
         if (!tbody) return;
         if (!rows || !rows.length) {
@@ -109,18 +126,20 @@
         }
         tbody.innerHTML = rows
             .map((r) => {
-                const orderDisabled = !live || !r.entry_signal;
+                const orderDisabled = !uiLiveEnabled || !r.entry_signal;
                 const dir = r.direction || '—';
                 const brick = r.last_brick_color || '—';
                 const sym = (r.symbol || '').replace(/</g, '&lt;');
+                const ik = (r.instrument_key || '').replace(/"/g, '');
+                const ltpDisp = r.ltp != null ? Number(r.ltp).toFixed(2) : '—';
                 return `<tr>
                     <td style="padding:8px;font-weight:600;">${sym}</td>
                     <td style="padding:8px;">${r.score ?? 0}</td>
-                    <td style="padding:8px;">${r.ltp != null ? Number(r.ltp).toFixed(2) : '—'}</td>
+                    <td class="sf-ltp" data-ik="${escapeHtml(ik)}" style="padding:8px;">${ltpDisp}</td>
                     <td style="padding:8px;">${brick}</td>
                     <td style="padding:8px;">${dir}</td>
                     <td style="padding:8px;">
-                        <button type="button" class="sf-btn-order" data-ik="${(r.instrument_key || '').replace(/"/g, '')}" data-dir="${dir}" data-sym="${sym}"
+                        <button type="button" class="sf-btn-order" data-ik="${ik.replace(/"/g, '')}" data-dir="${dir}" data-sym="${sym}" data-entry="${r.entry_signal ? '1' : '0'}"
                           ${orderDisabled ? 'disabled' : ''}>Order</button>
                     </td>
                     <td style="padding:8px;">—</td>
@@ -130,7 +149,7 @@
 
         tbody.querySelectorAll('.sf-btn-order').forEach((btn) => {
             btn.addEventListener('click', async () => {
-                if (!live) {
+                if (!uiLiveEnabled) {
                     alert('Live trading is off. Ask admin to enable Live in Admin → Smart Futures.');
                     return;
                 }
@@ -182,7 +201,7 @@
 
         tbody.querySelectorAll('.sf-btn-exit').forEach((btn) => {
             btn.addEventListener('click', async () => {
-                if (!live) {
+                if (!uiLiveEnabled) {
                     alert('Live trading is off.');
                     return;
                 }
@@ -211,6 +230,7 @@
 
     async function loadDashboard() {
         setStatus('Loading…');
+        uiLiveEnabled = false;
         const posBody = el('sfPosBody');
         if (posBody) {
             posBody.innerHTML = '<tr><td colspan="5" style="padding:12px;">Loading…</td></tr>';
@@ -240,37 +260,63 @@
                 return;
             }
 
-            const cfg = dataTop.config || {};
-            const live = applyConfigMeta(cfg);
             renderCandidates(
                 'sfCandBody',
                 dataTop.candidates || [],
-                live,
                 'No top candidates with score &#8805; 4 for this session yet.'
             );
+            applyLiveToOrderButtons(false);
+
             const up = el('sfUpdated');
             if (up) up.textContent = new Date().toLocaleString('en-IN');
-            setStatus('Loading positions…');
+            setStatus('');
 
-            const resPos = await apiGet('/api/smart-futures/dashboard/positions');
-            const rawPos = await resPos.text();
-            let dataPos;
+            const [rCfg, rPos] = await Promise.all([
+                apiGet('/api/smart-futures/config'),
+                apiGet('/api/smart-futures/dashboard/positions'),
+            ]);
+            const rawCfg = await rCfg.text();
+            const rawPos = await rPos.text();
+            let cfg = {};
+            let dataPos = {};
+            try {
+                cfg = rawCfg ? JSON.parse(rawCfg) : {};
+            } catch (e) {
+                cfg = {};
+            }
             try {
                 dataPos = rawPos ? JSON.parse(rawPos) : {};
-            } catch (parseErr) {
-                showPositionsError('Invalid positions response (not JSON).');
-                setStatus('');
-                return;
-            }
-            if (!resPos.ok) {
-                showPositionsError(
-                    'Failed to load positions (HTTP ' + resPos.status + '). ' + httpErrDetail(dataPos, rawPos)
-                );
-                setStatus('');
-                return;
+            } catch (e) {
+                dataPos = {};
             }
 
-            renderPositions(dataPos.positions || [], live);
+            uiLiveEnabled = !!cfg.live_enabled;
+            applyLiveToOrderButtons(uiLiveEnabled);
+
+            if (!rPos.ok) {
+                showPositionsError(
+                    'Failed to load positions (HTTP ' + rPos.status + '). ' + httpErrDetail(dataPos, rawPos)
+                );
+            } else {
+                renderPositions(dataPos.positions || [], uiLiveEnabled);
+            }
+
+            setStatus('Refreshing prices…');
+            try {
+                const rLtp = await apiGet('/api/smart-futures/dashboard/live-quotes');
+                const rawLtp = await rLtp.text();
+                let j = {};
+                try {
+                    j = rawLtp ? JSON.parse(rawLtp) : {};
+                } catch (e) {
+                    j = {};
+                }
+                if (rLtp.ok && j.ltps) {
+                    patchLtpCells(j.ltps);
+                }
+            } catch (e) {
+                /* keep DB LTP */
+            }
             setStatus('');
         } catch (e) {
             console.error(e);
