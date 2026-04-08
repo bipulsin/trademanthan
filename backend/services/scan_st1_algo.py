@@ -19,6 +19,7 @@ All logs go to logs/scan_st1_algo.log
 
 import logging
 import os
+import threading
 import requests
 from pathlib import Path
 from datetime import datetime
@@ -201,15 +202,22 @@ class ScanST1AlgoScheduler:
         logger.info("📝 All scheduler logs will be written to: logs/scan_st1_algo.log")
         
         try:
-            # 0. Ensure instruments file exists on startup (download if missing or stale)
-            logger.info("🔧 Checking instruments file on startup...")
-            try:
-                if ensure_instruments_available():
-                    logger.info("✅ Instruments file ready for scan/option lookups")
-                else:
-                    logger.warning("⚠️ Instruments download failed - scan may show 'Missing option data' for some stocks")
-            except Exception as e:
-                logger.error(f"❌ Startup instruments check failed: {e}", exc_info=True)
+            # 0. Ensure instruments file exists on startup (download if missing or stale).
+            # Run in a daemon thread so FastAPI lifespan / Uvicorn can bind to port 8000 immediately.
+            logger.info("🔧 Checking instruments file on startup (background)...")
+
+            def _ensure_instruments_bg():
+                try:
+                    if ensure_instruments_available():
+                        logger.info("✅ Instruments file ready for scan/option lookups")
+                    else:
+                        logger.warning(
+                            "⚠️ Instruments download failed - scan may show 'Missing option data' for some stocks"
+                        )
+                except Exception as e:
+                    logger.error(f"❌ Startup instruments check failed: {e}", exc_info=True)
+
+            threading.Thread(target=_ensure_instruments_bg, name="instruments_startup", daemon=True).start()
             
             # 0b. Morning Telegram to @TradeWithCTO — 8:10 AM IST (exception to 08:30–21:00 work window)
             self.scheduler.add_job(
@@ -623,13 +631,16 @@ class ScanST1AlgoScheduler:
             self.scheduler.start()
             self.is_running = True
 
-            # Run CAR NIFTY200 update once immediately after startup (e.g. after deploy)
-            try:
-                logger.info("🔧 Running CAR NIFTY200 Update once on startup...")
-                run_car_nifty200_update_job()
-                logger.info("✅ CAR NIFTY200 startup run completed")
-            except Exception as e:
-                logger.error(f"❌ CAR NIFTY200 startup run failed: {e}", exc_info=True)
+            # Run CAR NIFTY200 update once after startup (e.g. after deploy) — background only so HTTP comes up first.
+            def _car_nifty_startup_bg():
+                try:
+                    logger.info("🔧 Running CAR NIFTY200 Update once on startup...")
+                    run_car_nifty200_update_job()
+                    logger.info("✅ CAR NIFTY200 startup run completed")
+                except Exception as e:
+                    logger.error(f"❌ CAR NIFTY200 startup run failed: {e}", exc_info=True)
+
+            threading.Thread(target=_car_nifty_startup_bg, name="car_nifty200_startup", daemon=True).start()
             
             total_jobs = len(self.scheduler.get_jobs())
             logger.info("=" * 60)
