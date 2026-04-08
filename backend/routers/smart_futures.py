@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/smart-futures", tags=["smart-futures"])
 IST = pytz.timezone("Asia/Kolkata")
 
-# Dashboard: show top 3 and last 3 updated among candidates with score > this value (exclusive).
-SMART_FUTURES_MIN_SCORE_EXCLUSIVE = 4
+# Dashboard: show top 3 and last 3 among candidates with score >= this value (inclusive).
+SMART_FUTURES_MIN_SCORE = 4
 
 
 def _session_date():
@@ -75,7 +75,7 @@ def put_sf_config(body: SmartFuturesConfigUpdate, admin: User = Depends(_require
 def get_dashboard(user: User = Depends(_require_user)):
     cfg = repository.get_config()
     d0 = _session_date()
-    ms = SMART_FUTURES_MIN_SCORE_EXCLUSIVE
+    ms = SMART_FUTURES_MIN_SCORE
     top3 = repository.get_top_candidates_min_score(d0, ms, limit=3)
     last3 = repository.get_recent_candidates_min_score(d0, ms, limit=3)
     cands_all = repository.get_top_candidates_min_score(d0, ms, limit=50)
@@ -86,7 +86,7 @@ def get_dashboard(user: User = Depends(_require_user)):
     return {
         "config": cfg,
         "session_date": str(d0),
-        "min_score_exclusive": ms,
+        "min_score": ms,
         "candidates": top3,
         "candidates_recent": last3,
         "candidates_all": cands_all,
@@ -100,9 +100,7 @@ def post_order(body: OrderBody, user: User = Depends(_require_user)):
     if not cfg.get("live_enabled"):
         raise HTTPException(status_code=400, detail="Live trading is disabled (Admin: set Live = Yes)")
     d0 = _session_date()
-    cands = repository.get_top_candidates_min_score(
-        d0, SMART_FUTURES_MIN_SCORE_EXCLUSIVE, limit=50
-    )
+    cands = repository.get_top_candidates_min_score(d0, SMART_FUTURES_MIN_SCORE, limit=50)
     match = next(
         (
             c

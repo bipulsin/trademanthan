@@ -271,8 +271,8 @@ def get_top_candidates(session_d: date, limit: int = 5) -> List[Dict[str, Any]]:
     return [_candidate_row_to_dict(r) for r in rows]
 
 
-def get_top_candidates_min_score(session_d: date, min_score_exclusive: int, limit: int) -> List[Dict[str, Any]]:
-    """Highest-scoring rows for the session with score > min_score_exclusive (e.g. min_score_exclusive=4 → score ≥ 5)."""
+def get_top_candidates_min_score(session_d: date, min_score: int, limit: int) -> List[Dict[str, Any]]:
+    """Highest-scoring rows for the session with score >= min_score (inclusive)."""
     with engine.connect() as conn:
         rows = conn.execute(
             text(
@@ -280,18 +280,18 @@ def get_top_candidates_min_score(session_d: date, min_score_exclusive: int, limi
                 SELECT symbol, instrument_key, score, direction, last_brick_color,
                        entry_signal, exit_ready, main_brick_size, ltp, prefilter_pass, structure_pass, updated_at
                 FROM smart_futures_candidate
-                WHERE session_date = :d AND score > :min_sc
+                WHERE session_date = :d AND score >= :min_sc
                 ORDER BY score DESC, symbol ASC
                 LIMIT :lim
                 """
             ),
-            {"d": session_d, "min_sc": min_score_exclusive, "lim": limit},
+            {"d": session_d, "min_sc": min_score, "lim": limit},
         ).fetchall()
     return [_candidate_row_to_dict(r) for r in rows]
 
 
-def get_recent_candidates_min_score(session_d: date, min_score_exclusive: int, limit: int) -> List[Dict[str, Any]]:
-    """Most recently updated rows for the session with score > min_score_exclusive."""
+def get_recent_candidates_min_score(session_d: date, min_score: int, limit: int) -> List[Dict[str, Any]]:
+    """Most recently updated rows for the session with score >= min_score (inclusive)."""
     with engine.connect() as conn:
         rows = conn.execute(
             text(
@@ -299,12 +299,12 @@ def get_recent_candidates_min_score(session_d: date, min_score_exclusive: int, l
                 SELECT symbol, instrument_key, score, direction, last_brick_color,
                        entry_signal, exit_ready, main_brick_size, ltp, prefilter_pass, structure_pass, updated_at
                 FROM smart_futures_candidate
-                WHERE session_date = :d AND score > :min_sc
+                WHERE session_date = :d AND score >= :min_sc
                 ORDER BY updated_at DESC NULLS LAST, symbol ASC
                 LIMIT :lim
                 """
             ),
-            {"d": session_d, "min_sc": min_score_exclusive, "lim": limit},
+            {"d": session_d, "min_sc": min_score, "lim": limit},
         ).fetchall()
     return [_candidate_row_to_dict(r) for r in rows]
 

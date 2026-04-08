@@ -73,6 +73,24 @@
         if (s) s.textContent = msg;
     }
 
+    function escapeHtml(s) {
+        return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    /** Clears "Loading…" in both candidate tables when the dashboard request fails. */
+    function showCandidateTablesError(message) {
+        const msg = escapeHtml(message);
+        const row = `<tr><td colspan="7" style="padding:12px;">${msg}</td></tr>`;
+        const top = el('sfCandBody');
+        const recent = el('sfCandBodyRecent');
+        if (top) top.innerHTML = row;
+        if (recent) recent.innerHTML = row;
+    }
+
     function renderCandidates(tbodyId, rows, live, emptyMsg) {
         const tbody = el(tbodyId);
         if (!tbody) return;
@@ -80,7 +98,7 @@
             tbody.innerHTML =
                 '<tr><td colspan="7" style="padding:12px;">' +
                 (emptyMsg ||
-                    'No rows with score &gt; 4 for this session yet. Scheduler runs every 5 minutes during market hours.') +
+                    'No rows with score &#8805; 4 for this session yet. Scheduler runs every 5 minutes during market hours.') +
                 '</td></tr>';
             return;
         }
@@ -183,11 +201,36 @@
         setStatus('Loading…');
         try {
             const res = await apiGet('/api/smart-futures/dashboard');
-            if (!res.ok) {
-                setStatus('Failed to load (' + res.status + ')');
+            const raw = await res.text();
+            let data;
+            try {
+                data = raw ? JSON.parse(raw) : {};
+            } catch (parseErr) {
+                const snippet = raw.slice(0, 200).replace(/\s+/g, ' ');
+                showCandidateTablesError(
+                    'Invalid response (not JSON). ' + (snippet ? snippet : 'Empty body.')
+                );
+                setStatus('Bad response (' + res.status + ')');
                 return;
             }
-            const data = await res.json();
+            if (!res.ok) {
+                const detail =
+                    data && typeof data.detail === 'string'
+                        ? data.detail
+                        : data && data.detail && typeof data.detail === 'object'
+                          ? JSON.stringify(data.detail)
+                          : data && typeof data.message === 'string'
+                            ? data.message
+                            : '';
+                const errLine =
+                    'Failed to load dashboard (HTTP ' +
+                    res.status +
+                    '). ' +
+                    (detail ? detail : raw.slice(0, 160).replace(/\s+/g, ' '));
+                showCandidateTablesError(errLine);
+                setStatus('Failed (' + res.status + ')');
+                return;
+            }
             const cfg = data.config || {};
             const live = !!cfg.live_enabled;
             const liveEl = el('sfLiveFlag');
@@ -209,13 +252,13 @@
                 'sfCandBody',
                 cand,
                 live,
-                'No top candidates with score &gt; 4 for this session yet.'
+                'No top candidates with score &#8805; 4 for this session yet.'
             );
             renderCandidates(
                 'sfCandBodyRecent',
                 recent,
                 live,
-                'No recently updated rows with score &gt; 4 (or same as top list).'
+                'No recently updated rows with score &#8805; 4 (or same as top list).'
             );
             renderPositions(data.positions || [], live);
             const up = el('sfUpdated');
@@ -223,8 +266,15 @@
             setStatus('');
         } catch (e) {
             console.error(e);
+            const net =
+                e && e.name === 'AbortError'
+                    ? 'Request timed out — check network or try refreshing.'
+                    : e && e.message
+                      ? 'Network error: ' + e.message
+                      : 'Could not reach the API.';
+            showCandidateTablesError(net);
             if (e && e.name === 'AbortError') {
-                setStatus('Timed out — check network or try refreshing.');
+                setStatus('Timed out');
             } else {
                 setStatus('Error');
             }
