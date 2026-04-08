@@ -7,9 +7,10 @@
             ? 'http://localhost:8000'
             : window.location.origin;
 
-    const FETCH_TIMEOUT_MS = 30000;
+    /** Per-request cap; broker quote batch can be slow on congested networks. */
+    const FETCH_TIMEOUT_MS = 60000;
 
-    const REFRESH_MS = 60000;
+    const REFRESH_MS = 300000;
 
     /** Set from /api/smart-futures/config after top table is painted (not shown in UI). */
     let uiLiveEnabled = false;
@@ -228,7 +229,10 @@
         return raw.slice(0, 160).replace(/\s+/g, ' ');
     }
 
-    async function loadDashboard() {
+    /** Serialize loads so auto-refresh never overlaps a prior run (avoids timeouts / pool contention). */
+    let loadDashboardChain = Promise.resolve();
+
+    async function loadDashboardInternal() {
         setStatus('Loading…');
         uiLiveEnabled = false;
         const posBody = el('sfPosBody');
@@ -336,8 +340,25 @@
         }
     }
 
+    function loadDashboard() {
+        loadDashboardChain = loadDashboardChain
+            .catch(() => {})
+            .then(() => loadDashboardInternal());
+        return loadDashboardChain;
+    }
+
+    async function refreshLoop() {
+        for (;;) {
+            try {
+                await loadDashboard();
+            } catch (e) {
+                console.error(e);
+            }
+            await new Promise((r) => setTimeout(r, REFRESH_MS));
+        }
+    }
+
     window.addEventListener('DOMContentLoaded', () => {
-        loadDashboard();
-        setInterval(loadDashboard, REFRESH_MS);
+        refreshLoop();
     });
 })();
