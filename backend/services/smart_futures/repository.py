@@ -5,7 +5,7 @@ import logging
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 from backend.database import engine
 
@@ -14,32 +14,34 @@ logger = logging.getLogger(__name__)
 _SKIP = object()
 
 
-def get_config() -> Dict[str, Any]:
+def _fetch_config_row(conn) -> Any:
     row = None
     try:
-        with engine.connect() as conn:
+        row = conn.execute(
+            text(
+                """
+                SELECT live_enabled, position_size, partial_exit_enabled,
+                       brick_atr_period, brick_atr_override, updated_at
+                FROM smart_futures_config WHERE id = 1
+                """
+            )
+        ).fetchone()
+    except Exception:
+        try:
             row = conn.execute(
                 text(
                     """
-                    SELECT live_enabled, position_size, partial_exit_enabled,
-                           brick_atr_period, brick_atr_override, updated_at
+                    SELECT live_enabled, position_size, partial_exit_enabled, updated_at
                     FROM smart_futures_config WHERE id = 1
                     """
                 )
             ).fetchone()
-    except Exception:
-        try:
-            with engine.connect() as conn:
-                row = conn.execute(
-                    text(
-                        """
-                        SELECT live_enabled, position_size, partial_exit_enabled, updated_at
-                        FROM smart_futures_config WHERE id = 1
-                        """
-                    )
-                ).fetchone()
         except Exception:
             row = None
+    return row
+
+
+def _parse_config_row(row) -> Dict[str, Any]:
     if row and len(row) == 4:
         return {
             "live_enabled": bool(row[0]),
@@ -67,6 +69,12 @@ def get_config() -> Dict[str, Any]:
         "brick_atr_override": float(ov) if ov is not None else None,
         "updated_at": row[5].isoformat() if row[5] else None,
     }
+
+
+def get_config() -> Dict[str, Any]:
+    with engine.connect() as conn:
+        row = _fetch_config_row(conn)
+    return _parse_config_row(row)
 
 
 def merge_config(patch: Dict[str, Any]) -> Dict[str, Any]:
@@ -344,12 +352,11 @@ def list_open_positions(session_d: date) -> List[Dict[str, Any]]:
     return out
 
 
-def load_dashboard_lists(
-    session_d: date, min_score: int
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, bool]]:
-    """One DB connection for dashboard lists (avoids many sequential connects under pool pressure)."""
+def load_dashboard_top(session_d: date, min_score: int) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    """Single connection: config + top 3 candidates (score >= min_score, ORDER BY score DESC LIMIT 3)."""
     with engine.connect() as conn:
-        top3 = conn.execute(
+        cfg_row = _fetch_config_row(conn)
+        top_rows = conn.execute(
             text(
                 """
                 SELECT symbol, instrument_key, score, direction, last_brick_color,
@@ -362,19 +369,12 @@ def load_dashboard_lists(
             ),
             {"d": session_d, "min_sc": min_score},
         ).fetchall()
-        last3 = conn.execute(
-            text(
-                """
-                SELECT symbol, instrument_key, score, direction, last_brick_color,
-                       entry_signal, exit_ready, main_brick_size, ltp, prefilter_pass, structure_pass, updated_at
-                FROM smart_futures_candidate
-                WHERE session_date = :d AND score >= :min_sc
-                ORDER BY updated_at DESC NULLS LAST, symbol ASC
-                LIMIT 3
-                """
-            ),
-            {"d": session_d, "min_sc": min_score},
-        ).fetchall()
+    return _parse_config_row(cfg_row), [_candidate_row_to_dict(r) for r in top_rows]
+
+
+def load_open_positions_with_exit(session_d: date) -> List[Dict[str, Any]]:
+    """Open positions + exit_ready only for those instrument_keys (not full candidate scan)."""
+    with engine.connect() as conn:
         pos_rows = conn.execute(
             text(
                 """
@@ -387,28 +387,28 @@ def load_dashboard_lists(
             ),
             {"d": session_d},
         ).fetchall()
-        exit_rows = conn.execute(
-            text(
-                """
-                SELECT instrument_key, exit_ready
-                FROM smart_futures_candidate
-                WHERE session_date = :d
-                """
-            ),
-            {"d": session_d},
-        ).fetchall()
+        if not pos_rows:
+            return []
+        keys = [str(r[3]) for r in pos_rows]
+        stmt = text(
+            """
+            SELECT instrument_key, exit_ready
+            FROM smart_futures_candidate
+            WHERE session_date = :d AND instrument_key IN :iks
+            """
+        ).bindparams(bindparam("iks", expanding=True))
+        exit_rows = conn.execute(stmt, {"d": session_d, "iks": keys}).fetchall()
 
     exit_map = {str(r[0]): bool(r[1]) for r in exit_rows}
-    cand_top = [_candidate_row_to_dict(r) for r in top3]
-    cand_recent = [_candidate_row_to_dict(r) for r in last3]
-    positions: List[Dict[str, Any]] = []
+    out: List[Dict[str, Any]] = []
     for r in pos_rows:
-        positions.append(
+        ik = str(r[3])
+        out.append(
             {
                 "id": r[0],
                 "user_id": r[1],
                 "symbol": r[2],
-                "instrument_key": r[3],
+                "instrument_key": ik,
                 "direction": r[4],
                 "lots_open": int(r[5]),
                 "lots_total": int(r[6]),
@@ -417,9 +417,10 @@ def load_dashboard_lists(
                 "half_brick_size": float(r[9]) if r[9] is not None else None,
                 "entry_order_id": r[10],
                 "created_at": r[11].isoformat() if r[11] else None,
+                "exit_ready": bool(exit_map.get(ik, False)),
             }
         )
-    return cand_top, cand_recent, positions, exit_map
+    return out
 
 
 def insert_position(

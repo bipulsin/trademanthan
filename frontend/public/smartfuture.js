@@ -1,16 +1,13 @@
 /**
- * Smart Futures dashboard — polls /api/smart-futures/dashboard every 60s.
+ * Smart Futures — loads /dashboard/top first (top 3 by score), then /dashboard/positions.
  */
 (function () {
-    // Same-origin /api on the site you are on (avoids cross-origin "Failed to fetch" to another domain).
-    // Requires nginx proxy_pass to preserve /api — see scripts/nginx-tradentical.conf.
     const API_BASE_URL =
         window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
             ? 'http://localhost:8000'
             : window.location.origin;
 
-    // Dashboard can wait on DB pool / cold workers; 45s was aborting too often in production.
-    const FETCH_TIMEOUT_MS = 120000;
+    const FETCH_TIMEOUT_MS = 30000;
 
     const REFRESH_MS = 60000;
 
@@ -68,14 +65,35 @@
             .replace(/"/g, '&quot;');
     }
 
-    /** Clears "Loading…" in both candidate tables when the dashboard request fails. */
-    function showCandidateTablesError(message) {
+    function showCandidateTableError(message) {
         const msg = escapeHtml(message);
-        const row = `<tr><td colspan="7" style="padding:12px;">${msg}</td></tr>`;
         const top = el('sfCandBody');
-        const recent = el('sfCandBodyRecent');
-        if (top) top.innerHTML = row;
-        if (recent) recent.innerHTML = row;
+        if (top) top.innerHTML = `<tr><td colspan="7" style="padding:12px;">${msg}</td></tr>`;
+    }
+
+    function showPositionsError(message) {
+        const tbody = el('sfPosBody');
+        if (tbody) {
+            tbody.innerHTML = `<tr><td colspan="5" style="padding:12px;">${escapeHtml(message)}</td></tr>`;
+        }
+    }
+
+    function applyConfigMeta(cfg) {
+        const live = !!cfg.live_enabled;
+        const liveEl = el('sfLiveFlag');
+        if (liveEl) liveEl.textContent = live ? 'Yes' : 'No';
+        const psEl = el('sfPosSize');
+        if (psEl) psEl.textContent = String(cfg.position_size ?? 1);
+        const atrEl = el('sfAtrMeta');
+        if (atrEl) {
+            const p = cfg.brick_atr_period != null ? cfg.brick_atr_period : 10;
+            const o = cfg.brick_atr_override;
+            atrEl.textContent =
+                o != null && o !== '' && Number(o) > 0
+                    ? `Fixed brick: ${Number(o).toFixed(4)}`
+                    : `ATR(${p}) on 1h — auto`;
+        }
+        return live;
     }
 
     function renderCandidates(tbodyId, rows, live, emptyMsg) {
@@ -184,72 +202,75 @@
         });
     }
 
+    function httpErrDetail(data, raw) {
+        if (data && typeof data.detail === 'string') return data.detail;
+        if (data && data.detail && typeof data.detail === 'object') return JSON.stringify(data.detail);
+        if (data && typeof data.message === 'string') return data.message;
+        return raw.slice(0, 160).replace(/\s+/g, ' ');
+    }
+
     async function loadDashboard() {
         setStatus('Loading…');
+        const posBody = el('sfPosBody');
+        if (posBody) {
+            posBody.innerHTML = '<tr><td colspan="5" style="padding:12px;">Loading…</td></tr>';
+        }
+
         try {
-            const res = await apiGet('/api/smart-futures/dashboard');
-            const raw = await res.text();
-            let data;
+            const resTop = await apiGet('/api/smart-futures/dashboard/top');
+            const rawTop = await resTop.text();
+            let dataTop;
             try {
-                data = raw ? JSON.parse(raw) : {};
+                dataTop = rawTop ? JSON.parse(rawTop) : {};
             } catch (parseErr) {
-                const snippet = raw.slice(0, 200).replace(/\s+/g, ' ');
-                showCandidateTablesError(
+                const snippet = rawTop.slice(0, 200).replace(/\s+/g, ' ');
+                showCandidateTableError(
                     'Invalid response (not JSON). ' + (snippet ? snippet : 'Empty body.')
                 );
-                setStatus('Bad response (' + res.status + ')');
+                setStatus('Bad response (' + resTop.status + ')');
+                if (posBody) posBody.innerHTML = '<tr><td colspan="5" style="padding:12px;">—</td></tr>';
                 return;
             }
-            if (!res.ok) {
-                const detail =
-                    data && typeof data.detail === 'string'
-                        ? data.detail
-                        : data && data.detail && typeof data.detail === 'object'
-                          ? JSON.stringify(data.detail)
-                          : data && typeof data.message === 'string'
-                            ? data.message
-                            : '';
+            if (!resTop.ok) {
                 const errLine =
-                    'Failed to load dashboard (HTTP ' +
-                    res.status +
-                    '). ' +
-                    (detail ? detail : raw.slice(0, 160).replace(/\s+/g, ' '));
-                showCandidateTablesError(errLine);
-                setStatus('Failed (' + res.status + ')');
+                    'Failed to load top list (HTTP ' + resTop.status + '). ' + httpErrDetail(dataTop, rawTop);
+                showCandidateTableError(errLine);
+                setStatus('Failed (' + resTop.status + ')');
+                if (posBody) posBody.innerHTML = '<tr><td colspan="5" style="padding:12px;">—</td></tr>';
                 return;
             }
-            const cfg = data.config || {};
-            const live = !!cfg.live_enabled;
-            const liveEl = el('sfLiveFlag');
-            if (liveEl) liveEl.textContent = live ? 'Yes' : 'No';
-            const psEl = el('sfPosSize');
-            if (psEl) psEl.textContent = String(cfg.position_size ?? 1);
-            const atrEl = el('sfAtrMeta');
-            if (atrEl) {
-                const p = cfg.brick_atr_period != null ? cfg.brick_atr_period : 10;
-                const o = cfg.brick_atr_override;
-                atrEl.textContent =
-                    o != null && o !== '' && Number(o) > 0
-                        ? `Fixed brick: ${Number(o).toFixed(4)}`
-                        : `ATR(${p}) on 1h — auto`;
-            }
-            const cand = data.candidates || [];
-            const recent = data.candidates_recent || [];
+
+            const cfg = dataTop.config || {};
+            const live = applyConfigMeta(cfg);
             renderCandidates(
                 'sfCandBody',
-                cand,
+                dataTop.candidates || [],
                 live,
                 'No top candidates with score &#8805; 4 for this session yet.'
             );
-            renderCandidates(
-                'sfCandBodyRecent',
-                recent,
-                live,
-                'No recently updated rows with score &#8805; 4 (or same as top list).'
-            );
-            renderPositions(data.positions || [], live);
             const up = el('sfUpdated');
             if (up) up.textContent = new Date().toLocaleString('en-IN');
+            setStatus('Loading positions…');
+
+            const resPos = await apiGet('/api/smart-futures/dashboard/positions');
+            const rawPos = await resPos.text();
+            let dataPos;
+            try {
+                dataPos = rawPos ? JSON.parse(rawPos) : {};
+            } catch (parseErr) {
+                showPositionsError('Invalid positions response (not JSON).');
+                setStatus('');
+                return;
+            }
+            if (!resPos.ok) {
+                showPositionsError(
+                    'Failed to load positions (HTTP ' + resPos.status + '). ' + httpErrDetail(dataPos, rawPos)
+                );
+                setStatus('');
+                return;
+            }
+
+            renderPositions(dataPos.positions || [], live);
             setStatus('');
         } catch (e) {
             console.error(e);
@@ -259,7 +280,8 @@
                     : e && e.message
                       ? 'Network error: ' + e.message
                       : 'Could not reach the API.';
-            showCandidateTablesError(net);
+            showCandidateTableError(net);
+            showPositionsError(net);
             if (e && e.name === 'AbortError') {
                 setStatus('Timed out');
             } else {

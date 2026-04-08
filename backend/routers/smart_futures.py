@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["smart-futures"])
 IST = pytz.timezone("Asia/Kolkata")
 
-# Dashboard: show top 3 and last 3 among candidates with score >= this value (inclusive).
+# Dashboard: top 3 candidates with score >= this value (inclusive), ORDER BY score DESC.
 SMART_FUTURES_MIN_SCORE = 4
 
 
@@ -73,22 +73,25 @@ def put_sf_config(body: SmartFuturesConfigUpdate, admin: User = Depends(_require
     return repository.merge_config(patch)
 
 
-@router.get("/dashboard")
-def get_dashboard(user: User = Depends(_require_user)):
-    cfg = repository.get_config()
+@router.get("/dashboard/top")
+def get_dashboard_top(user: User = Depends(_require_user)):
+    """Fast payload: config + top 3 by score (UI loads this first)."""
     d0 = _session_date()
     ms = SMART_FUTURES_MIN_SCORE
-    top3, last3, positions, exit_map = repository.load_dashboard_lists(d0, ms)
-    for p in positions:
-        p["exit_ready"] = bool(exit_map.get(p["instrument_key"], False))
+    cfg, candidates = repository.load_dashboard_top(d0, ms)
     return {
         "config": cfg,
         "session_date": str(d0),
         "min_score": ms,
-        "candidates": top3,
-        "candidates_recent": last3,
-        "positions": positions,
+        "candidates": candidates,
     }
+
+
+@router.get("/dashboard/positions")
+def get_dashboard_positions(user: User = Depends(_require_user)):
+    """Open positions + exit_ready (UI loads after /dashboard/top)."""
+    d0 = _session_date()
+    return {"positions": repository.load_open_positions_with_exit(d0)}
 
 
 @router.post("/order")
