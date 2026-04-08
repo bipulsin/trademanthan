@@ -208,6 +208,16 @@ body.theme-page.intraoption-body .no-data p {
     color: var(--theme-muted) !important;
 }
 
+/* Mobile: separator between trade cards within the same scan time group */
+@media (max-width: 768px) {
+    body.theme-page.intraoption-body .stock-card-container .stock-card:not(:last-child) {
+        border-bottom: 1px solid var(--theme-border);
+        border-bottom: 1px solid color-mix(in srgb, var(--theme-muted) 42%, transparent);
+        margin-bottom: 0.65rem !important;
+        padding-bottom: 0.55rem !important;
+    }
+}
+
 /* Embed modals */
 .intraoption-embed-overlay {
     display: none;
