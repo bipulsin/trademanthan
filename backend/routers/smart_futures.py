@@ -78,11 +78,7 @@ def get_dashboard(user: User = Depends(_require_user)):
     cfg = repository.get_config()
     d0 = _session_date()
     ms = SMART_FUTURES_MIN_SCORE
-    top3 = repository.get_top_candidates_min_score(d0, ms, limit=3)
-    last3 = repository.get_recent_candidates_min_score(d0, ms, limit=3)
-    cands_all = repository.get_top_candidates_min_score(d0, ms, limit=50)
-    positions = repository.list_open_positions(d0)
-    exit_map = repository.get_exit_ready_by_instrument(d0)
+    top3, last3, positions, exit_map = repository.load_dashboard_lists(d0, ms)
     for p in positions:
         p["exit_ready"] = bool(exit_map.get(p["instrument_key"], False))
     return {
@@ -91,7 +87,6 @@ def get_dashboard(user: User = Depends(_require_user)):
         "min_score": ms,
         "candidates": top3,
         "candidates_recent": last3,
-        "candidates_all": cands_all,
         "positions": positions,
     }
 

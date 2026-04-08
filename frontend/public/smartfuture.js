@@ -9,7 +9,8 @@
             ? 'http://localhost:8000'
             : window.location.origin;
 
-    const FETCH_TIMEOUT_MS = 45000;
+    // Dashboard can wait on DB pool / cold workers; 45s was aborting too often in production.
+    const FETCH_TIMEOUT_MS = 120000;
 
     const REFRESH_MS = 60000;
 

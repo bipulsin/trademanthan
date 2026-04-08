@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import text
 
@@ -342,6 +342,84 @@ def list_open_positions(session_d: date) -> List[Dict[str, Any]]:
             }
         )
     return out
+
+
+def load_dashboard_lists(
+    session_d: date, min_score: int
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, bool]]:
+    """One DB connection for dashboard lists (avoids many sequential connects under pool pressure)."""
+    with engine.connect() as conn:
+        top3 = conn.execute(
+            text(
+                """
+                SELECT symbol, instrument_key, score, direction, last_brick_color,
+                       entry_signal, exit_ready, main_brick_size, ltp, prefilter_pass, structure_pass, updated_at
+                FROM smart_futures_candidate
+                WHERE session_date = :d AND score >= :min_sc
+                ORDER BY score DESC, symbol ASC
+                LIMIT 3
+                """
+            ),
+            {"d": session_d, "min_sc": min_score},
+        ).fetchall()
+        last3 = conn.execute(
+            text(
+                """
+                SELECT symbol, instrument_key, score, direction, last_brick_color,
+                       entry_signal, exit_ready, main_brick_size, ltp, prefilter_pass, structure_pass, updated_at
+                FROM smart_futures_candidate
+                WHERE session_date = :d AND score >= :min_sc
+                ORDER BY updated_at DESC NULLS LAST, symbol ASC
+                LIMIT 3
+                """
+            ),
+            {"d": session_d, "min_sc": min_score},
+        ).fetchall()
+        pos_rows = conn.execute(
+            text(
+                """
+                SELECT id, user_id, symbol, instrument_key, direction, lots_open, lots_total,
+                       entry_price, main_brick_size, half_brick_size, entry_order_id, created_at
+                FROM smart_futures_position
+                WHERE session_date = :d AND status = 'OPEN' AND lots_open > 0
+                ORDER BY id
+                """
+            ),
+            {"d": session_d},
+        ).fetchall()
+        exit_rows = conn.execute(
+            text(
+                """
+                SELECT instrument_key, exit_ready
+                FROM smart_futures_candidate
+                WHERE session_date = :d
+                """
+            ),
+            {"d": session_d},
+        ).fetchall()
+
+    exit_map = {str(r[0]): bool(r[1]) for r in exit_rows}
+    cand_top = [_candidate_row_to_dict(r) for r in top3]
+    cand_recent = [_candidate_row_to_dict(r) for r in last3]
+    positions: List[Dict[str, Any]] = []
+    for r in pos_rows:
+        positions.append(
+            {
+                "id": r[0],
+                "user_id": r[1],
+                "symbol": r[2],
+                "instrument_key": r[3],
+                "direction": r[4],
+                "lots_open": int(r[5]),
+                "lots_total": int(r[6]),
+                "entry_price": float(r[7]) if r[7] is not None else None,
+                "main_brick_size": float(r[8]) if r[8] is not None else None,
+                "half_brick_size": float(r[9]) if r[9] is not None else None,
+                "entry_order_id": r[10],
+                "created_at": r[11].isoformat() if r[11] else None,
+            }
+        )
+    return cand_top, cand_recent, positions, exit_map
 
 
 def insert_position(
