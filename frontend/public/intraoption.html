@@ -876,6 +876,23 @@
     <link rel="stylesheet" href="intraoption.css?v=12">
 </head>
 <body class="theme-page intraoption-body">
+    <script>
+        (function () {
+            var h = window.location.hostname;
+            var b =
+                h === 'localhost' || h === '127.0.0.1'
+                    ? 'http://localhost:8000'
+                    : h === 'www.tradewithcto.com' ||
+                      h === 'tradewithcto.com' ||
+                      h.endsWith('.tradewithcto.com') ||
+                      h === 'www.tradentical.com' ||
+                      h === 'tradentical.com' ||
+                      h.endsWith('.tradentical.com')
+                      ? 'https://trademanthan.in'
+                      : window.location.origin;
+            window.TRADEMANTHAN_API_BASE = b;
+        })();
+    </script>
     <script>window.__INTRAOPTION_PAGE = true;</script>
 
     <div class="app-container app-with-left-menu">
@@ -1028,7 +1045,7 @@
         </div>
     </div>
     
-    <script src="scan.js?v=20260405120000"></script>
+    <script src="scan.js?v=20260408180000"></script>
     <script src="notify-trade-channel.js?v=3"></script>
     <script>
     (function () {
@@ -1138,9 +1155,7 @@
     <script>
         async function loadTradingLiveStatus() {
             try {
-                const apiBase = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-                    ? 'http://localhost:8000'
-                    : window.location.origin;
+                const apiBase = window.TRADEMANTHAN_API_BASE;
                 const response = await fetch(`${apiBase}/scan/trading-live`);
                 if (!response.ok) {
                     return;
@@ -1487,7 +1502,7 @@
                             requestBody.bearishStocks = stockSymbols;
                         }
                         
-                        const response = await fetch('/scan/manual-entry', {
+                        const response = await fetch(window.TRADEMANTHAN_API_BASE + '/scan/manual-entry', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',

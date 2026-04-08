@@ -1109,6 +1109,24 @@
     </style>
 </head>
 <body>
+    <!-- API host for mirror domains (tradentical / tradewithcto): static host often has no /api → use trademanthan.in -->
+    <script>
+        (function () {
+            var h = window.location.hostname;
+            var b =
+                h === 'localhost' || h === '127.0.0.1'
+                    ? 'http://localhost:8000'
+                    : h === 'www.tradewithcto.com' ||
+                      h === 'tradewithcto.com' ||
+                      h.endsWith('.tradewithcto.com') ||
+                      h === 'www.tradentical.com' ||
+                      h === 'tradentical.com' ||
+                      h.endsWith('.tradentical.com')
+                      ? 'https://trademanthan.in'
+                      : window.location.origin;
+            window.TRADEMANTHAN_API_BASE = b;
+        })();
+    </script>
     <!-- Title Bar -->
     <div class="title-bar">
         <div class="title-bar-content scan-title-bar-content">
@@ -1327,9 +1345,7 @@
                                 e.preventDefault();
                                 e.stopPropagation();
                                 console.log('🚀 Upstox OAuth button clicked!');
-                                const baseUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-                                    ? 'http://localhost:8000'
-                                    : window.location.origin;
+                                const baseUrl = window.TRADEMANTHAN_API_BASE;
                                 const url = baseUrl + '/scan/upstox/login';
                                 console.log('Redirecting to:', url);
                                 window.location.href = url;
@@ -1361,7 +1377,7 @@
         </div>
     </div>
     
-    <script src="scan.js?v=20260405120000"></script>
+    <script src="scan.js?v=20260408180000"></script>
     <script>
         // Dropdown menu toggle function
         function toggleMenu() {
@@ -1395,10 +1411,7 @@
         // Define the function globally to ensure it's always available
         window.initiateUpstoxOAuth = function() {
             console.log('Initiating Upstox OAuth login...');
-            const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-                ? 'http://localhost:8000'
-                : window.location.origin;
-            const oauthUrl = API_BASE_URL + '/scan/upstox/login';
+            const oauthUrl = window.TRADEMANTHAN_API_BASE + '/scan/upstox/login';
             
             // Show loading on button if event is available
             if (event && event.target) {
@@ -1424,9 +1437,7 @@
     <script>
         async function loadTradingLiveStatus() {
             try {
-                const apiBase = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-                    ? 'http://localhost:8000'
-                    : window.location.origin;
+                const apiBase = window.TRADEMANTHAN_API_BASE;
                 const response = await fetch(`${apiBase}/scan/trading-live`);
                 if (!response.ok) {
                     return;
@@ -1952,7 +1963,7 @@
                             requestBody.bearishStocks = stockSymbols;
                         }
                         
-                        const response = await fetch('/scan/manual-entry', {
+                        const response = await fetch(window.TRADEMANTHAN_API_BASE + '/scan/manual-entry', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',

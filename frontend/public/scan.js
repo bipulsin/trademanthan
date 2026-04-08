@@ -2,6 +2,9 @@
 console.log('Scan.js loaded successfully');
 
 const API_BASE_URL = (function () {
+    if (typeof window !== 'undefined' && window.TRADEMANTHAN_API_BASE) {
+        return window.TRADEMANTHAN_API_BASE;
+    }
     const h = window.location.hostname;
     if (h === 'localhost' || h === '127.0.0.1') return 'http://localhost:8000';
     if (
