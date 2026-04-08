@@ -52,7 +52,7 @@
             <div class="settings-header">
                 <div class="settings-title-section">
                     <h1 class="settings-title"><i class="fas fa-bolt"></i> Smart Futures</h1>
-                    <p class="settings-subtitle">NSE F&O Renko selection — top candidates (auto-refresh 60s). Orders only when Live = Yes (Admin).</p>
+                    <p class="settings-subtitle">NSE F&O Renko selection — score &gt; 4 only (auto-refresh 60s). Orders only when Live = Yes (Admin).</p>
                 </div>
             </div>
             <div class="settings-content sf-wrap">
@@ -62,8 +62,8 @@
                     · Updated: <span id="sfUpdated">—</span> · <span id="sfStatus"></span>
                 </div>
                 <div class="sf-card">
-                    <h2 style="margin-top:0;font-size:1.1rem;">Top candidates</h2>
-                    <p class="sf-meta">Highest score symbols passing filters (max 3 shown; full list available via API).</p>
+                    <h2 style="margin-top:0;font-size:1.1rem;">Top by score (&gt; 4)</h2>
+                    <p class="sf-meta">Up to 3 highest scores for today&apos;s session (score must be greater than 4).</p>
                     <div class="sf-table-wrap">
                         <table class="sf-table">
                             <thead>
@@ -78,6 +78,28 @@
                                 </tr>
                             </thead>
                             <tbody id="sfCandBody">
+                                <tr><td colspan="7" style="padding:12px;">Loading…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="sf-card">
+                    <h2 style="margin-top:0;font-size:1.1rem;">Last updated (&gt; 4)</h2>
+                    <p class="sf-meta">Up to 3 rows with score &gt; 4, most recently updated (may overlap with top list).</p>
+                    <div class="sf-table-wrap">
+                        <table class="sf-table">
+                            <thead>
+                                <tr>
+                                    <th>Symbol</th>
+                                    <th>Score</th>
+                                    <th>LTP</th>
+                                    <th>Renko</th>
+                                    <th>Direction</th>
+                                    <th>Order</th>
+                                    <th>Exit</th>
+                                </tr>
+                            </thead>
+                            <tbody id="sfCandBodyRecent">
                                 <tr><td colspan="7" style="padding:12px;">Loading…</td></tr>
                             </tbody>
                         </table>
@@ -106,6 +128,6 @@
         </main>
     </div>
     <script src="left-menu.js?v=3.15"></script>
-    <script src="smartfuture.js?v=3"></script>
+    <script src="smartfuture.js?v=4"></script>
 </body>
 </html>

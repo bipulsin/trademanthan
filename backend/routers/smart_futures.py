@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/smart-futures", tags=["smart-futures"])
 IST = pytz.timezone("Asia/Kolkata")
 
+# Dashboard: show top 3 and last 3 updated among candidates with score > this value (exclusive).
+SMART_FUTURES_MIN_SCORE_EXCLUSIVE = 4
+
 
 def _session_date():
     return datetime.now(IST).date()
@@ -72,23 +75,21 @@ def put_sf_config(body: SmartFuturesConfigUpdate, admin: User = Depends(_require
 def get_dashboard(user: User = Depends(_require_user)):
     cfg = repository.get_config()
     d0 = _session_date()
-    cands = repository.get_top_candidates(d0, limit=10)
-    top3: List[Dict[str, Any]] = cands[:3]
+    ms = SMART_FUTURES_MIN_SCORE_EXCLUSIVE
+    top3 = repository.get_top_candidates_min_score(d0, ms, limit=3)
+    last3 = repository.get_recent_candidates_min_score(d0, ms, limit=3)
+    cands_all = repository.get_top_candidates_min_score(d0, ms, limit=50)
     positions = repository.list_open_positions(d0)
+    exit_map = repository.get_exit_ready_by_instrument(d0)
     for p in positions:
-        try:
-            p["exit_ready"] = should_exit_position(
-                p["instrument_key"],
-                p["direction"],
-                float(p["main_brick_size"] or 0.0),
-            )
-        except Exception:
-            p["exit_ready"] = False
+        p["exit_ready"] = bool(exit_map.get(p["instrument_key"], False))
     return {
         "config": cfg,
         "session_date": str(d0),
+        "min_score_exclusive": ms,
         "candidates": top3,
-        "candidates_all": cands,
+        "candidates_recent": last3,
+        "candidates_all": cands_all,
         "positions": positions,
     }
 
@@ -99,7 +100,9 @@ def post_order(body: OrderBody, user: User = Depends(_require_user)):
     if not cfg.get("live_enabled"):
         raise HTTPException(status_code=400, detail="Live trading is disabled (Admin: set Live = Yes)")
     d0 = _session_date()
-    cands = repository.get_top_candidates(d0, limit=20)
+    cands = repository.get_top_candidates_min_score(
+        d0, SMART_FUTURES_MIN_SCORE_EXCLUSIVE, limit=50
+    )
     match = next(
         (
             c

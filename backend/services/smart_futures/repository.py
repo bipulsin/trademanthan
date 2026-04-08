@@ -236,6 +236,23 @@ def get_exit_ready_by_instrument(session_d: date) -> Dict[str, bool]:
     return {str(r[0]): bool(r[1]) for r in rows}
 
 
+def _candidate_row_to_dict(r) -> Dict[str, Any]:
+    return {
+        "symbol": r[0],
+        "instrument_key": r[1],
+        "score": int(r[2] or 0),
+        "direction": r[3],
+        "last_brick_color": r[4],
+        "entry_signal": bool(r[5]),
+        "exit_ready": bool(r[6]),
+        "main_brick_size": float(r[7]) if r[7] is not None else None,
+        "ltp": float(r[8]) if r[8] is not None else None,
+        "prefilter_pass": bool(r[9]),
+        "structure_pass": bool(r[10]),
+        "updated_at": r[11].isoformat() if r[11] else None,
+    }
+
+
 def get_top_candidates(session_d: date, limit: int = 5) -> List[Dict[str, Any]]:
     with engine.connect() as conn:
         rows = conn.execute(
@@ -251,25 +268,45 @@ def get_top_candidates(session_d: date, limit: int = 5) -> List[Dict[str, Any]]:
             ),
             {"d": session_d, "lim": limit},
         ).fetchall()
-    out: List[Dict[str, Any]] = []
-    for r in rows:
-        out.append(
-            {
-                "symbol": r[0],
-                "instrument_key": r[1],
-                "score": int(r[2] or 0),
-                "direction": r[3],
-                "last_brick_color": r[4],
-                "entry_signal": bool(r[5]),
-                "exit_ready": bool(r[6]),
-                "main_brick_size": float(r[7]) if r[7] is not None else None,
-                "ltp": float(r[8]) if r[8] is not None else None,
-                "prefilter_pass": bool(r[9]),
-                "structure_pass": bool(r[10]),
-                "updated_at": r[11].isoformat() if r[11] else None,
-            }
-        )
-    return out
+    return [_candidate_row_to_dict(r) for r in rows]
+
+
+def get_top_candidates_min_score(session_d: date, min_score_exclusive: int, limit: int) -> List[Dict[str, Any]]:
+    """Highest-scoring rows for the session with score > min_score_exclusive (e.g. min_score_exclusive=4 → score ≥ 5)."""
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                """
+                SELECT symbol, instrument_key, score, direction, last_brick_color,
+                       entry_signal, exit_ready, main_brick_size, ltp, prefilter_pass, structure_pass, updated_at
+                FROM smart_futures_candidate
+                WHERE session_date = :d AND score > :min_sc
+                ORDER BY score DESC, symbol ASC
+                LIMIT :lim
+                """
+            ),
+            {"d": session_d, "min_sc": min_score_exclusive, "lim": limit},
+        ).fetchall()
+    return [_candidate_row_to_dict(r) for r in rows]
+
+
+def get_recent_candidates_min_score(session_d: date, min_score_exclusive: int, limit: int) -> List[Dict[str, Any]]:
+    """Most recently updated rows for the session with score > min_score_exclusive."""
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                """
+                SELECT symbol, instrument_key, score, direction, last_brick_color,
+                       entry_signal, exit_ready, main_brick_size, ltp, prefilter_pass, structure_pass, updated_at
+                FROM smart_futures_candidate
+                WHERE session_date = :d AND score > :min_sc
+                ORDER BY updated_at DESC NULLS LAST, symbol ASC
+                LIMIT :lim
+                """
+            ),
+            {"d": session_d, "min_sc": min_score_exclusive, "lim": limit},
+        ).fetchall()
+    return [_candidate_row_to_dict(r) for r in rows]
 
 
 def list_open_positions(session_d: date) -> List[Dict[str, Any]]:

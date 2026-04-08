@@ -73,12 +73,15 @@
         if (s) s.textContent = msg;
     }
 
-    function renderCandidates(rows, live) {
-        const tbody = el('sfCandBody');
+    function renderCandidates(tbodyId, rows, live, emptyMsg) {
+        const tbody = el(tbodyId);
         if (!tbody) return;
         if (!rows || !rows.length) {
             tbody.innerHTML =
-                '<tr><td colspan="7" style="padding:12px;">No candidates yet. Scheduler runs every 5 minutes during market hours.</td></tr>';
+                '<tr><td colspan="7" style="padding:12px;">' +
+                (emptyMsg ||
+                    'No rows with score &gt; 4 for this session yet. Scheduler runs every 5 minutes during market hours.') +
+                '</td></tr>';
             return;
         }
         tbody.innerHTML = rows
@@ -201,7 +204,19 @@
                         : `ATR(${p}) on 1h — auto`;
             }
             const cand = data.candidates || [];
-            renderCandidates(cand, live);
+            const recent = data.candidates_recent || [];
+            renderCandidates(
+                'sfCandBody',
+                cand,
+                live,
+                'No top candidates with score &gt; 4 for this session yet.'
+            );
+            renderCandidates(
+                'sfCandBodyRecent',
+                recent,
+                live,
+                'No recently updated rows with score &gt; 4 (or same as top list).'
+            );
             renderPositions(data.positions || [], live);
             const up = el('sfUpdated');
             if (up) up.textContent = new Date().toLocaleString('en-IN');
