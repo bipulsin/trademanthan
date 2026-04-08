@@ -12,14 +12,11 @@ from backend.services.smart_futures import data_service
 from backend.services.smart_futures import repository
 from backend.services.smart_futures.order_manager import audit, place_entry, place_exit
 from backend.services.smart_futures.scanner import scan_symbol
+from backend.services.smart_futures.session_calendar import effective_session_date_ist
 from backend.services.smart_futures.signal_engine import should_exit_position
 
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
-
-
-def _session_date_ist() -> datetime.date:
-    return datetime.now(IST).date()
 
 
 def run_smart_futures_scan_job(force: bool = False) -> Dict[str, Any]:
@@ -59,7 +56,7 @@ def run_smart_futures_scan_job(force: bool = False) -> Dict[str, Any]:
 
     out.sort(key=lambda x: (-(x.get("score") or 0), x.get("symbol") or ""))
     out = out[:50]
-    session_d = _session_date_ist()
+    session_d = effective_session_date_ist()
     repository.replace_candidates_session(session_d, out)
     logger.info("smart_futures scan stored %s candidates for %s", len(out), session_d)
     return {"ok": True, "count": len(out), "session_date": str(session_d)}
@@ -68,7 +65,7 @@ def run_smart_futures_scan_job(force: bool = False) -> Dict[str, Any]:
 def run_smart_futures_exit_check_job() -> Dict[str, Any]:
     """Every ~60s: evaluate 1m Renko exit for open positions (square-off only if Live)."""
     cfg = repository.get_config()
-    session_d = _session_date_ist()
+    session_d = effective_session_date_ist()
     positions = repository.list_open_positions(session_d)
     _sync_exit_flags(session_d, positions)
     return {"ok": True, "positions_checked": len(positions), "live": cfg["live_enabled"]}
@@ -106,7 +103,7 @@ def _sync_exit_flags(session_d, positions) -> None:
 def force_exit_all_smart_futures_positions(user_id=None) -> Dict[str, Any]:
     """3:15 PM — close all open Smart Futures positions if Live."""
     cfg = repository.get_config()
-    session_d = _session_date_ist()
+    session_d = effective_session_date_ist()
     positions = repository.list_open_positions(session_d)
     if not cfg.get("live_enabled"):
         logger.info("smart_futures force exit skipped (live off)")

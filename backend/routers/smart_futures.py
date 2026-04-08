@@ -4,10 +4,8 @@ Smart Futures API — Renko-based NSE F&O dashboard and orders.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-import pytz
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -17,20 +15,21 @@ from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
 from backend.services.smart_futures import pipeline, repository
 from backend.services.smart_futures.order_manager import audit, place_entry, place_exit
+from backend.services.smart_futures.session_calendar import effective_session_date_ist
 from backend.services.smart_futures.signal_engine import should_exit_position
 
 logger = logging.getLogger(__name__)
 # No prefix here — mounted twice in main.py: /api/smart-futures/* (canonical) and /smart-futures/*
 # so nginx configs that strip /api/ (proxy_pass .../) still reach these routes.
 router = APIRouter(tags=["smart-futures"])
-IST = pytz.timezone("Asia/Kolkata")
 
 # Dashboard: top 3 candidates with score >= this value (inclusive), ORDER BY score DESC.
 SMART_FUTURES_MIN_SCORE = 4
 
 
 def _session_date():
-    return datetime.now(IST).date()
+    """IST session bucket: before 08:50 → prior calendar day; from 08:50 → today."""
+    return effective_session_date_ist()
 
 
 def _require_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
