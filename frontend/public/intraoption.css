@@ -371,3 +371,61 @@ body.theme-page.intraoption-body .mobile-title {
         font-size: 1rem;
     }
 }
+
+/*
+ * Dark theme only: scan.css hard-codes #2d3748 / #718096 on .stock-card-* and table helpers.
+ * Scoped to intraoption + :not([data-theme="light"]) so light mode keeps scan.css + existing rules.
+ */
+body.theme-page.intraoption-body:not([data-theme="light"]) .stock-card-label {
+    color: var(--theme-muted) !important;
+}
+
+body.theme-page.intraoption-body:not([data-theme="light"]) .stock-card-value {
+    color: var(--theme-text) !important;
+}
+
+body.theme-page.intraoption-body:not([data-theme="light"]) .stock-card-value.green {
+    color: var(--theme-success) !important;
+}
+
+body.theme-page.intraoption-body:not([data-theme="light"]) .stock-card-value.red {
+    color: var(--theme-danger) !important;
+}
+
+body.theme-page.intraoption-body:not([data-theme="light"]) .stock-name {
+    color: var(--theme-text) !important;
+}
+
+body.theme-page.intraoption-body:not([data-theme="light"]) .trigger-price {
+    color: var(--theme-success) !important;
+}
+
+body.theme-page.intraoption-body:not([data-theme="light"]) .stock-vwap {
+    color: var(--theme-muted) !important;
+}
+
+body.theme-page.intraoption-body:not([data-theme="light"]) .vwap-current {
+    color: #93c5fd !important;
+}
+
+body.theme-page.intraoption-body:not([data-theme="light"]) .vwap-previous {
+    color: #c4b5fd !important;
+}
+
+body.theme-page.intraoption-body:not([data-theme="light"]) .stocks-table thead {
+    background: var(--theme-card-alt) !important;
+}
+
+body.theme-page.intraoption-body:not([data-theme="light"]) .stocks-table tbody tr:hover {
+    background: var(--theme-card-alt) !important;
+}
+
+body.theme-page.intraoption-body:not([data-theme="light"]) .alert-meta {
+    color: var(--theme-muted) !important;
+}
+
+body.theme-page.intraoption-body:not([data-theme="light"]) .time-header {
+    background: var(--theme-card-alt) !important;
+    color: var(--theme-text) !important;
+    border-left-color: var(--theme-accent) !important;
+}
