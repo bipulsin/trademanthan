@@ -2,16 +2,6 @@
 function trademanthanApiBase() {
     const h = window.location.hostname;
     if (h === 'localhost' || h === '127.0.0.1') return 'http://localhost:8000';
-    if (
-        h === 'www.tradewithcto.com' ||
-        h === 'tradewithcto.com' ||
-        h.endsWith('.tradewithcto.com') ||
-        h === 'www.tradentical.com' ||
-        h === 'tradentical.com' ||
-        h.endsWith('.tradentical.com')
-    ) {
-        return 'https://trademanthan.in';
-    }
     return window.location.origin;
 }
 
@@ -23,7 +13,7 @@ function readAuthResponseJson(res) {
             var msg = 'HTTP ' + res.status;
             if (res.status === 502 || res.status === 503 || res.status === 504) {
                 msg +=
-                    ' — the login API is temporarily unavailable (server restarting or overloaded). Try again in one minute, or sign in at https://trademanthan.in/login.html';
+                    ' — the login API is temporarily unavailable (server restarting or overloaded). Try again in one minute, or sign in at https://www.tradewithcto.com/login.html';
             } else if (text && text.length > 0 && text.trim().charAt(0) !== '<') {
                 msg += ': ' + text.trim().slice(0, 200);
             }
@@ -33,7 +23,7 @@ function readAuthResponseJson(res) {
     if (ct.indexOf('application/json') === -1) {
         return res.text().then(function (text) {
             throw new Error(
-                'Login server returned non-JSON. If this continues, the API may be down. Try https://trademanthan.in/login.html'
+                'Login server returned non-JSON. If this continues, the API may be down. Try https://www.tradewithcto.com/login.html'
             );
         });
     }

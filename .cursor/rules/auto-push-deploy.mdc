@@ -9,7 +9,7 @@ alwaysApply: true
 
 1. Stage and commit relevant changes with a clear message.
 2. Push to `origin main`.
-3. Trigger backend deployment via `POST https://trademanthan.in/scan/deploy-backend`.
+3. Trigger backend deployment via `POST https://www.tradewithcto.com/scan/deploy-backend`.
 4. Optionally verify via `/scan/deployment-status` and report.
 
 Use the API-based deploy endpoint; the EC2 server pulls from GitHub on deploy. Frontend is served from the same server, so one deploy updates both.

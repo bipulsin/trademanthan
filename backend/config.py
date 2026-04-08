@@ -25,8 +25,8 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "428560418671-t59riis4gqkhavnevt9ve6km54ltsba7.apps.googleusercontent.com")
     GOOGLE_CLIENT_SECRET: str = os.getenv("GOOGLE_CLIENT_SECRET", "your_google_client_secret_here")
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379")
-    DOMAIN: str = os.getenv("DOMAIN", "tradentical.com")
-    GOOGLE_REDIRECT_URI: str = os.getenv("GOOGLE_REDIRECT_URI", "https://tradentical.com/login.html")
+    DOMAIN: str = os.getenv("DOMAIN", "www.tradewithcto.com")
+    GOOGLE_REDIRECT_URI: str = os.getenv("GOOGLE_REDIRECT_URI", "https://www.tradewithcto.com/login.html")
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "production")
     DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "4320"))  # 72 hours default
@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     # Upstox OAuth Configuration
     UPSTOX_API_KEY: str = os.getenv("UPSTOX_API_KEY", "dd1d3bcc-e1a4-4eed-be7c-1833d9301738")
     UPSTOX_API_SECRET: str = os.getenv("UPSTOX_API_SECRET", "8lvpi8fb1f")
-    UPSTOX_REDIRECT_URI: str = os.getenv("UPSTOX_REDIRECT_URI", "https://tradentical.com/scan/upstox/callback")
+    UPSTOX_REDIRECT_URI: str = os.getenv("UPSTOX_REDIRECT_URI", "https://www.tradewithcto.com/scan/upstox/callback")
 
     # CAR GPT Configuration
     CAR_NUMBER_OF_WEEKS: int = int(os.getenv("CAR_NUMBER_OF_WEEKS", "52"))

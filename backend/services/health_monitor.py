@@ -260,7 +260,7 @@ class HealthMonitor:
                     "❌ UPSTOX TOKEN EXPIRED",
                     f"Upstox API token has been failing for {self.api_token_failures} consecutive checks.\n\n" +
                     "ACTION REQUIRED:\n" +
-                    "1. Go to: https://trademanthan.in/scan.html\n" +
+                    "1. Go to: https://www.tradewithcto.com/scan.html\n" +
                     "2. Click 'Login with Upstox'\n" +
                     "3. Complete OAuth authorization\n\n" +
                     f"Time: {check_time.strftime('%Y-%m-%d %H:%M:%S IST')}"
@@ -280,7 +280,7 @@ class HealthMonitor:
         """
         try:
             email_to = os.getenv("ALERT_EMAIL")
-            email_from = os.getenv("SMTP_FROM_EMAIL", "alerts@trademanthan.in")
+            email_from = os.getenv("SMTP_FROM_EMAIL", "support@tradewithcto.com")
             smtp_server = os.getenv("SMTP_SERVER", "localhost")
             smtp_port = int(os.getenv("SMTP_PORT", "25"))
             smtp_user = os.getenv("SMTP_USER", "")
@@ -487,7 +487,7 @@ Generated: {now.strftime('%Y-%m-%d %H:%M:%S IST')}
         email_sent = False
         try:
             email_to = os.getenv("ALERT_EMAIL")
-            email_from = os.getenv("SMTP_FROM_EMAIL", "alerts@trademanthan.in")
+            email_from = os.getenv("SMTP_FROM_EMAIL", "support@tradewithcto.com")
             smtp_server = os.getenv("SMTP_SERVER", "localhost")
             smtp_port = int(os.getenv("SMTP_PORT", "25"))
             smtp_user = os.getenv("SMTP_USER", "")
@@ -507,7 +507,7 @@ TradeManthan System Alert
 
 {'=' * 60}
 System: TradeManthan Scan Service
-Server: https://trademanthan.in
+Server: https://www.tradewithcto.com
 Time: {datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%Y-%m-%d %H:%M:%S IST')}
 
 This is an automated alert. Please check the system immediately.

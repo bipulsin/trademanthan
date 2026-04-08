@@ -34,7 +34,7 @@ jobs:
             python3 backend/migrations/add_carstocklist.py 2>/dev/null || true
             echo "Restarting backend..."
             sudo systemctl restart trademanthan-backend
-            echo "Updating Nginx config for tradentical.com..."
+            echo "Updating Nginx config for tradewithcto.com..."
             if [ -f /home/ubuntu/trademanthan/scripts/nginx-tradentical.conf ]; then
               sudo cp /home/ubuntu/trademanthan/scripts/nginx-tradentical.conf /etc/nginx/sites-available/tradentical
               sudo ln -sf /etc/nginx/sites-available/tradentical /etc/nginx/sites-enabled/

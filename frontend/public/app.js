@@ -6,7 +6,7 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('🔗 Frontend: HTML/CSS/JS with blue-black gradient theme');
     console.log('⚡ Backend: FastAPI with Python');
     console.log('🗄️ Database: PostgreSQL (production)');
-    console.log('🌐 Domain: https://trademanthan.in (production)');
+    console.log('🌐 Domain: https://www.tradewithcto.com (production)');
     
     // Initialize feature card animations
     initializeFeatureCards();
@@ -95,21 +95,10 @@ function initializeFeatureCards() {
 
 // Google OAuth client ID
 const GOOGLE_CLIENT_ID = '428560418671-t59riis4gqkhavnevt9ve6km54ltsba7.apps.googleusercontent.com';
-// API host: TradeWithCTO / Tradentical mirrors often serve static only; /api on those hosts can return nginx 502.
-// CORS on https://trademanthan.in allows those origins; JWT works against the same backend.
+// API: same origin as the page (canonical www.tradewithcto.com).
 const API_BASE_URL = (function () {
     const h = window.location.hostname;
     if (h === 'localhost' || h === '127.0.0.1') return 'http://localhost:8000';
-    if (
-        h === 'www.tradewithcto.com' ||
-        h === 'tradewithcto.com' ||
-        h.endsWith('.tradewithcto.com') ||
-        h === 'www.tradentical.com' ||
-        h === 'tradentical.com' ||
-        h.endsWith('.tradentical.com')
-    ) {
-        return 'https://trademanthan.in';
-    }
     return window.location.origin;
 })();
 
@@ -121,7 +110,7 @@ async function parseLoginApiJson(res) {
         let msg = 'HTTP ' + res.status;
         if (res.status === 502 || res.status === 503 || res.status === 504) {
             msg +=
-                ' — login API temporarily unavailable (server busy or restarting). Try https://trademanthan.in/login.html or retry in a minute.';
+                ' — login API temporarily unavailable (server busy or restarting). Try https://www.tradewithcto.com/login.html or retry in a minute.';
         } else if (text && text.trim().charAt(0) !== '<') {
             try {
                 const j = JSON.parse(text);
@@ -135,7 +124,7 @@ async function parseLoginApiJson(res) {
     if (!ct.includes('application/json')) {
         await res.text();
         throw new Error(
-            'Server returned non-JSON. Try https://trademanthan.in/login.html if this persists.'
+            'Server returned non-JSON. Try https://www.tradewithcto.com/login.html if this persists.'
         );
     }
     return res.json();

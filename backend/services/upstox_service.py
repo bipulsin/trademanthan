@@ -175,9 +175,11 @@ class UpstoxService:
             from backend.config import settings
             redirect_uris = [
                 settings.UPSTOX_REDIRECT_URI,
+                "https://www.tradewithcto.com/scan/upstox/callback",
+                "https://tradewithcto.com/scan/upstox/callback",
                 "https://tradentical.com/scan/upstox/callback",
-                "https://tradentical.com",
                 "https://trademanthan.in/scan/upstox/callback",
+                "https://tradentical.com",
                 "https://trademanthan.in",
                 "http://localhost:3000",
                 "https://localhost:3000",

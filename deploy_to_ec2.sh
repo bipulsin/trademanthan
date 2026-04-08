@@ -124,18 +124,23 @@ if command -v nginx &> /dev/null; then
     if [ ! -f /etc/nginx/sites-available/trademanthan ]; then
         print_warning "Nginx config not found. Creating..."
         cat << 'EOF' | sudo tee /etc/nginx/sites-available/trademanthan > /dev/null
+# HTTP: legacy names → canonical www.tradewithcto.com (HTTPS + full vhosts: scripts/nginx-tradentical.conf)
 server {
     listen 80;
-    server_name trademanthan.in www.trademanthan.in;
+    server_name trademanthan.in www.trademanthan.in tradentical.com www.tradentical.com;
+    return 301 https://www.tradewithcto.com$request_uri;
+}
 
-    # Frontend
+server {
+    listen 80;
+    server_name www.tradewithcto.com;
+
     location / {
         root /home/ubuntu/trademanthan/frontend/public;
         index index.html;
         try_files $uri $uri/ /index.html;
     }
 
-    # Backend API — preserve /api prefix (FastAPI routes are /api/...)
     location /api/ {
         proxy_pass http://localhost:8000/api/;
         proxy_http_version 1.1;
@@ -148,7 +153,6 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # Static files
     location /static/ {
         alias /home/ubuntu/trademanthan/frontend/public/;
     }

@@ -49,7 +49,7 @@ grep pattern file.log
 2. **Push** to GitHub: `git push origin main`
 3. **Deploy** to EC2 (pulls `origin/main` on the server + restarts backend):
    ```bash
-   curl -s --max-time 30 -X POST "https://trademanthan.in/scan/deploy-backend" -H "Content-Type: application/json"
+   curl -s --max-time 30 -X POST "https://www.tradewithcto.com/scan/deploy-backend" -H "Content-Type: application/json"
    ```
    Expect `{"success":true,...}` in the response.
 

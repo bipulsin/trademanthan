@@ -6,7 +6,7 @@
 set -e  # Exit on any error
 
 # Configuration (Edit these values)
-EC2_HOST="3.6.199.247"  # e.g., "13.233.123.45" or "trademanthan.in"
+EC2_HOST="3.6.199.247"  # e.g., "13.233.123.45" or "www.tradewithcto.com"
 EC2_USER="ubuntu"
 EC2_KEY="TradeM.pem"
 APP_DIR="/home/ubuntu/trademanthan"
@@ -110,7 +110,7 @@ if ssh -i "$EC2_KEY" -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" "bash -s"
     sudo systemctl daemon-reload 2>/dev/null || true
     sudo systemctl restart trademanthan-backend
     
-    echo "Updating Nginx config for tradentical.com..."
+    echo "Updating Nginx config for tradewithcto.com..."
     if [ -f /home/ubuntu/trademanthan/scripts/nginx-tradentical.conf ]; then
         sudo cp /home/ubuntu/trademanthan/scripts/nginx-tradentical.conf /etc/nginx/sites-available/tradentical
         sudo ln -sf /etc/nginx/sites-available/tradentical /etc/nginx/sites-enabled/

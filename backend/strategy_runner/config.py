@@ -27,7 +27,7 @@ DATABASE_CONFIG = {
 
 # API Configuration
 API_CONFIG = {
-    'base_url': os.getenv('API_BASE_URL', 'https://trademanthan.in'),
+    'base_url': os.getenv('API_BASE_URL', 'https://www.tradewithcto.com'),
     'timeout': int(os.getenv('API_TIMEOUT', 30)),
     'max_retries': int(os.getenv('API_MAX_RETRIES', 3)),
     'retry_delay': float(os.getenv('API_RETRY_DELAY', 1.0))

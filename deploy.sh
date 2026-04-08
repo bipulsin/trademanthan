@@ -4,7 +4,7 @@
 
 set -e
 
-API_URL="https://trademanthan.in/scan/deploy-backend"
+API_URL="https://www.tradewithcto.com/scan/deploy-backend"
 
 echo "🚀 Initiating backend deployment..."
 echo ""

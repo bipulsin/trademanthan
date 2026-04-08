@@ -149,8 +149,8 @@ def check_missed_alerts():
             print(f"   1. Verify Chartink webhook configuration")
             print(f"   2. Check Chartink logs to see if webhooks were sent")
             print(f"   3. Verify webhook URLs are correct:")
-            print(f"      - Bullish: https://trademanthan.in/scan/chartink-webhook-bullish")
-            print(f"      - Bearish: https://trademanthan.in/scan/chartink-webhook-bearish")
+            print(f"      - Bullish: https://www.tradewithcto.com/scan/chartink-webhook-bullish")
+            print(f"      - Bearish: https://www.tradewithcto.com/scan/chartink-webhook-bearish")
             print(f"   4. Check backend logs: tail -f /tmp/uvicorn.log")
         
     finally:

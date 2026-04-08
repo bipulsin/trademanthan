@@ -30,7 +30,7 @@ The agent can call this from Cursor; if your backend is public, it will work wit
 
 ### Making sure the agent uses the right URL
 
-- If you use a domain (e.g. trademanthan.in), ensure the backend is served on that domain (or a known subdomain) and tell the agent to use that base URL for `/scan/logs`.
+- If you use a domain (e.g. www.tradewithcto.com), ensure the backend is served on that host and tell the agent to use that base URL for `/scan/logs`.
 - If you only expose the app on the EC2 private IP, the agent still cannot reach it; use Option 2 or put the backend behind a public URL.
 
 ---

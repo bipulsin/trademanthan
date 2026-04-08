@@ -882,14 +882,7 @@
             var b =
                 h === 'localhost' || h === '127.0.0.1'
                     ? 'http://localhost:8000'
-                    : h === 'www.tradewithcto.com' ||
-                      h === 'tradewithcto.com' ||
-                      h.endsWith('.tradewithcto.com') ||
-                      h === 'www.tradentical.com' ||
-                      h === 'tradentical.com' ||
-                      h.endsWith('.tradentical.com')
-                      ? 'https://trademanthan.in'
-                      : window.location.origin;
+                    : window.location.origin;
             window.TRADEMANTHAN_API_BASE = b;
         })();
     </script>

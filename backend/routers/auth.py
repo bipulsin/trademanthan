@@ -210,10 +210,12 @@ def validate_google_code_exchange_login() -> tuple[str, str]:
 def resolve_google_redirect_uri(requested_redirect_uri: Optional[str]) -> str:
     """Allow redirect URIs only from trusted hosted login pages."""
     allowed_redirect_uris = {
+        "https://www.tradewithcto.com/login.html",
+        "https://tradewithcto.com/login.html",
+        "https://trademanthan.in/login.html",
+        "https://www.trademanthan.in/login.html",
         "https://tradentical.com/login.html",
         "https://www.tradentical.com/login.html",
-        "https://tradewithcto.com/login.html",
-        "https://www.tradewithcto.com/login.html",
         "http://localhost:8000/login.html",
         "http://localhost:3000/login.html",
         settings.GOOGLE_REDIRECT_URI,

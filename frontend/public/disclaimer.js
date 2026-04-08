@@ -59,7 +59,6 @@
         <h3>Grievances and Support</h3>
         <p>For any grievances, feedback, or suggestions, please contact us at:</p>
         <p>support@tradewithcto.com</p>
-        <p>support@tradentical.com</p>
     `;
 
     function injectStyle() {

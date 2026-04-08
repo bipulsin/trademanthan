@@ -49,7 +49,7 @@ def _send_chartink_ranking_email_sync(csv_path: Path) -> bool:
         return False
 
     email_to = _ranking_email_to()
-    email_from = os.getenv("SMTP_FROM_EMAIL", "alerts@trademanthan.in")
+    email_from = os.getenv("SMTP_FROM_EMAIL", "support@tradewithcto.com")
     smtp_server = os.getenv("SMTP_SERVER", "localhost")
     smtp_port = int(os.getenv("SMTP_PORT", "587"))
     smtp_user = os.getenv("SMTP_USER", "")

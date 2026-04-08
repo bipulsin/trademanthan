@@ -6300,7 +6300,7 @@ async def upstox_oauth_status():
 async def upstox_postback(request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """
     Upstox Postback URL - receives real-time order and GTT updates.
-    Configure in Upstox My Apps: https://tradentical.com/scan/upstox/postback
+    Configure in Upstox My Apps: https://www.tradewithcto.com/scan/upstox/postback
     
     Requirements: Open POST API, no auth, respond with 2XX.
     """

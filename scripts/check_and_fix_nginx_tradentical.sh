@@ -1,12 +1,12 @@
 #!/bin/bash
-# Run this ON the EC2 server to check and fix nginx for tradentical.com
+# Run this ON the EC2 server to check and fix nginx (canonical: www.tradewithcto.com)
 # Usage: ssh -i TradeM.pem ubuntu@3.6.199.247 "bash -s" < scripts/check_and_fix_nginx_tradentical.sh
 # Or: scp this file to EC2 and run: bash check_and_fix_nginx_tradentical.sh
 
 set -e
 cd /home/ubuntu/trademanthan
 
-echo "=== Nginx tradentical.com Configuration Check ==="
+echo "=== Nginx tradewithcto.com Configuration Check ==="
 echo ""
 
 # Check current config

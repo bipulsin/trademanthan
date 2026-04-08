@@ -30,4 +30,4 @@ else
     echo "Restarted via screen"
 fi
 
-echo "=== Done. Verify: curl -s https://tradentical.com/scan/arbitrage/version ==="
+echo "=== Done. Verify: curl -s https://www.tradewithcto.com/scan/arbitrage/version ==="

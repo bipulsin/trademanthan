@@ -2,20 +2,10 @@
  * Tradentical Left Menu - Unified panel for all post-login pages
  * Loads left-menu.html, handles collapse/expand, navigation, auth
  */
-/** Mirror static hosts → real API on trademanthan.in (avoids nginx 502 on /api). */
+/** API base: same origin as www.tradewithcto.com (legacy domains redirect here). */
 function trademanthanApiBase() {
     const h = window.location.hostname;
     if (h === 'localhost' || h === '127.0.0.1') return 'http://localhost:8000';
-    if (
-        h === 'www.tradewithcto.com' ||
-        h === 'tradewithcto.com' ||
-        h.endsWith('.tradewithcto.com') ||
-        h === 'www.tradentical.com' ||
-        h === 'tradentical.com' ||
-        h.endsWith('.tradentical.com')
-    ) {
-        return 'https://trademanthan.in';
-    }
     return window.location.origin;
 }
 

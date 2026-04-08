@@ -215,7 +215,17 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://trademanthan.in", "https://tradentical.com", "https://www.tradentical.com", "https://tradewithcto.com", "https://www.tradewithcto.com", "http://localhost:3000", "http://localhost:8000", "https://65.2.29.219"],
+    allow_origins=[
+        "https://www.tradewithcto.com",
+        "https://tradewithcto.com",
+        "https://trademanthan.in",
+        "https://www.trademanthan.in",
+        "https://tradentical.com",
+        "https://www.tradentical.com",
+        "http://localhost:3000",
+        "http://localhost:8000",
+        "https://65.2.29.219",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
