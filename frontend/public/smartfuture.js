@@ -2,10 +2,24 @@
  * Smart Futures dashboard — polls /api/smart-futures/dashboard every 60s.
  */
 (function () {
-    const API_BASE_URL =
-        window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-            ? 'http://localhost:8000'
-            : window.location.origin;
+    // Mirror domains (tradewithcto / tradentical) often serve static files only; API lives on trademanthan.in.
+    const API_BASE_URL = (() => {
+        const h = window.location.hostname;
+        if (h === 'localhost' || h === '127.0.0.1') return 'http://localhost:8000';
+        if (
+            h === 'www.tradewithcto.com' ||
+            h === 'tradewithcto.com' ||
+            h.endsWith('.tradewithcto.com') ||
+            h === 'www.tradentical.com' ||
+            h === 'tradentical.com' ||
+            h.endsWith('.tradentical.com')
+        ) {
+            return 'https://trademanthan.in';
+        }
+        return window.location.origin;
+    })();
+
+    const FETCH_TIMEOUT_MS = 45000;
 
     const REFRESH_MS = 60000;
 
@@ -16,11 +30,18 @@
     async function apiGet(path) {
         const token = getToken();
         const headers = { Authorization: `Bearer ${token}` };
-        let res = await fetch(`${API_BASE_URL}${path}`, { headers, cache: 'no-store' });
-        if (!res.ok && path.startsWith('/api/')) {
-            res = await fetch(`${API_BASE_URL}${path.replace(/^\/api/, '')}`, { headers, cache: 'no-store' });
+        const ctrl = new AbortController();
+        const tid = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+        const opts = { headers, cache: 'no-store', signal: ctrl.signal };
+        try {
+            let res = await fetch(`${API_BASE_URL}${path}`, opts);
+            if (!res.ok && path.startsWith('/api/')) {
+                res = await fetch(`${API_BASE_URL}${path.replace(/^\/api/, '')}`, opts);
+            }
+            return res;
+        } finally {
+            clearTimeout(tid);
         }
-        return res;
     }
 
     async function apiPost(path, body) {
@@ -29,11 +50,18 @@
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
         };
-        return fetch(`${API_BASE_URL}${path}`, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(body || {}),
-        });
+        const ctrl = new AbortController();
+        const tid = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+        try {
+            return await fetch(`${API_BASE_URL}${path}`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(body || {}),
+                signal: ctrl.signal,
+            });
+        } finally {
+            clearTimeout(tid);
+        }
     }
 
     function el(id) {
@@ -180,7 +208,11 @@
             setStatus('');
         } catch (e) {
             console.error(e);
-            setStatus('Error');
+            if (e && e.name === 'AbortError') {
+                setStatus('Timed out — check network or try refreshing.');
+            } else {
+                setStatus('Error');
+            }
         }
     }
 

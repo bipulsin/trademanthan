@@ -22,17 +22,19 @@ def _session_date_ist() -> datetime.date:
     return datetime.now(IST).date()
 
 
-def run_smart_futures_scan_job() -> Dict[str, Any]:
+def run_smart_futures_scan_job(force: bool = False) -> Dict[str, Any]:
     """
     Periodic job: fetch universe, run scanner, persist top candidates.
     Does not auto-place orders (only when Live + manual or future auto hook).
     """
     now = datetime.now(IST)
     hm = now.hour * 60 + now.minute
-    # Market-ish window: skip heavy work outside 9:15–15:30 IST
-    if hm < 9 * 60 + 15 or hm > 15 * 60 + 30:
+    # Market-ish window: skip heavy work outside 9:15–15:30 IST (unless force=True for admin one-off).
+    if not force and (hm < 9 * 60 + 15 or hm > 15 * 60 + 30):
         logger.info("smart_futures scan skipped (outside window) ist=%s", now.isoformat())
         return {"skipped": True, "reason": "outside_window"}
+    if force:
+        logger.info("smart_futures scan running with force=True (window check bypassed) ist=%s", now.isoformat())
 
     rows = repository.fetch_future_symbols()
     max_n = data_service._max_symbols()

@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import pytz
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -180,8 +180,12 @@ def post_exit(body: ExitBody, user: User = Depends(_require_user)):
 
 
 @router.post("/admin/run-scan")
-def admin_run_scan(_: User = Depends(_require_admin)):
-    return pipeline.run_smart_futures_scan_job()
+def admin_run_scan(
+    force: bool = Query(False, description="Run outside 9:15–15:30 IST (one-off / backfill)"),
+    _: User = Depends(_require_admin),
+):
+    """Run scanner now. Use POST .../admin/run-scan?force=true for a one-off outside market hours."""
+    return pipeline.run_smart_futures_scan_job(force=force)
 
 
 @router.post("/admin/force-exit")

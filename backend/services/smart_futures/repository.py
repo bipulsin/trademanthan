@@ -220,6 +220,22 @@ def replace_candidates_session(session_d: date, rows: List[Dict[str, Any]]) -> N
             )
 
 
+def get_exit_ready_by_instrument(session_d: date) -> Dict[str, bool]:
+    """Map instrument_key -> exit_ready from today's candidate rows (updated by exit-check job)."""
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                """
+                SELECT instrument_key, exit_ready
+                FROM smart_futures_candidate
+                WHERE session_date = :d
+                """
+            ),
+            {"d": session_d},
+        ).fetchall()
+    return {str(r[0]): bool(r[1]) for r in rows}
+
+
 def get_top_candidates(session_d: date, limit: int = 5) -> List[Dict[str, Any]]:
     with engine.connect() as conn:
         rows = conn.execute(
