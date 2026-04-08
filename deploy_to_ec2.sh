@@ -135,9 +135,9 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
-    # Backend API
+    # Backend API — preserve /api prefix (FastAPI routes are /api/...)
     location /api/ {
-        proxy_pass http://localhost:8000/;
+        proxy_pass http://localhost:8000/api/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';

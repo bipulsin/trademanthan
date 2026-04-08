@@ -2,22 +2,12 @@
  * Smart Futures dashboard — polls /api/smart-futures/dashboard every 60s.
  */
 (function () {
-    // Mirror domains (tradewithcto / tradentical) often serve static files only; API lives on trademanthan.in.
-    const API_BASE_URL = (() => {
-        const h = window.location.hostname;
-        if (h === 'localhost' || h === '127.0.0.1') return 'http://localhost:8000';
-        if (
-            h === 'www.tradewithcto.com' ||
-            h === 'tradewithcto.com' ||
-            h.endsWith('.tradewithcto.com') ||
-            h === 'www.tradentical.com' ||
-            h === 'tradentical.com' ||
-            h.endsWith('.tradentical.com')
-        ) {
-            return 'https://trademanthan.in';
-        }
-        return window.location.origin;
-    })();
+    // Same-origin /api on the site you are on (avoids cross-origin "Failed to fetch" to another domain).
+    // Requires nginx proxy_pass to preserve /api — see scripts/nginx-tradentical.conf.
+    const API_BASE_URL =
+        window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+            ? 'http://localhost:8000'
+            : window.location.origin;
 
     const FETCH_TIMEOUT_MS = 45000;
 
@@ -34,11 +24,7 @@
         const tid = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
         const opts = { headers, cache: 'no-store', signal: ctrl.signal };
         try {
-            let res = await fetch(`${API_BASE_URL}${path}`, opts);
-            if (!res.ok && path.startsWith('/api/')) {
-                res = await fetch(`${API_BASE_URL}${path.replace(/^\/api/, '')}`, opts);
-            }
-            return res;
+            return await fetch(`${API_BASE_URL}${path}`, opts);
         } finally {
             clearTimeout(tid);
         }
