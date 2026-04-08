@@ -93,11 +93,22 @@ def run_final_reconciliation(
 
         for trade in rows:
             try:
-                if getattr(trade, "status", None) == "no_entry":
+                if getattr(trade, "status", None) in ("no_entry", "cancelled"):
                     live_trading.apply_broker_buy_fill_to_intraday_trade(db, trade)
             except Exception as ex:
                 logger.warning(
-                    "Final recon no_entry→broker BUY sync failed for %s: %s",
+                    "Final recon no_entry/cancelled→broker BUY sync failed for %s: %s",
+                    getattr(trade, "stock_name", "?"),
+                    ex,
+                )
+
+        for trade in rows:
+            try:
+                if live_trading.final_reconciliation_refresh_trade_from_broker(db, trade):
+                    n_refresh += 1
+            except Exception as ex:
+                logger.warning(
+                    "Final recon broker sync failed for %s: %s",
                     getattr(trade, "stock_name", "?"),
                     ex,
                 )
@@ -132,17 +143,6 @@ def run_final_reconciliation(
                     ex,
                 )
 
-        for trade in rows:
-            try:
-                if live_trading.final_reconciliation_refresh_trade_from_broker(db, trade):
-                    n_refresh += 1
-            except Exception as ex:
-                logger.warning(
-                    "Final recon broker sync failed for %s: %s",
-                    getattr(trade, "stock_name", "?"),
-                    ex,
-                )
-
         cutoff_dt = ist.localize(datetime.combine(today.date(), _EXIT_TM_CUTOFF))
 
         for trade in rows:
@@ -171,6 +171,16 @@ def run_final_reconciliation(
             except Exception as ex:
                 logger.warning(
                     "Final recon Exit-TM step failed for %s: %s",
+                    getattr(trade, "stock_name", "?"),
+                    ex,
+                )
+
+        for trade in rows:
+            try:
+                live_trading.clamp_option_stop_loss_below_buy(trade)
+            except Exception as ex:
+                logger.warning(
+                    "Final recon SL clamp failed for %s: %s",
                     getattr(trade, "stock_name", "?"),
                     ex,
                 )

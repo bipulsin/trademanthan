@@ -103,6 +103,36 @@ def _instrument_key_match(stored: Optional[str], api_instrument_token: Any) -> b
     return False
 
 
+def clamp_option_stop_loss_below_buy(trade) -> bool:
+    """
+    Long option: stop_loss must be strictly below entry. Fixes rows where SL was set from
+    candle open / prev-day low that lies above the actual fill (e.g. buy 6.93 vs SL from open 15).
+    """
+    from sqlalchemy.orm.attributes import flag_modified
+
+    bp = float(getattr(trade, "buy_price", None) or 0)
+    if bp <= 0:
+        return False
+    sl = getattr(trade, "stop_loss", None)
+    if sl is None:
+        return False
+    try:
+        slf = float(sl)
+    except (TypeError, ValueError):
+        return False
+    if slf < bp * 0.999:
+        return False
+    trade.stop_loss = round(bp * 0.95, 2)
+    flag_modified(trade, "stop_loss")
+    logger.info(
+        "📌 SL clamp: %s stop_loss invalid vs buy ₹%.2f → SL ₹%.2f",
+        getattr(trade, "stock_name", "?"),
+        bp,
+        trade.stop_loss,
+    )
+    return True
+
+
 def _order_row_instrument_token(row: Optional[Dict[str, Any]]) -> str:
     """Upstox v2 order rows may expose instrument_token or instrument_key."""
     if not row or not isinstance(row, dict):
@@ -483,7 +513,8 @@ def sync_trade_buy_fill_from_broker(db, trade) -> bool:
             return False
 
         candidates.sort(key=_ob_ts, reverse=True)
-        if buy_naive:
+        buy_missing = float(trade.buy_price or 0) < 0.005
+        if buy_naive and not buy_missing:
             after_alert = [c for c in candidates if _ob_ts(c) >= buy_naive - timedelta(minutes=15)]
             if after_alert:
                 candidates = after_alert
@@ -548,7 +579,8 @@ def final_reconciliation_refresh_trade_from_broker(db, trade) -> bool:
     today's Upstox order book / order details, then PnL. Does not require trading_live YES.
 
     For no_entry: tries apply_broker_buy_fill_to_intraday_trade first (same-day BUY on Upstox),
-    then continues as bought/sold. exit_reason (e.g. Exit-Slip) does not block refresh.
+    then continues as bought/sold. cancelled: same (recover rows that filled on broker but app shows cancelled).
+    exit_reason (e.g. Exit-Slip) does not block refresh.
     """
     from sqlalchemy.orm.attributes import flag_modified
 
@@ -569,9 +601,12 @@ def final_reconciliation_refresh_trade_from_broker(db, trade) -> bool:
         return False
 
     changed = False
-    if st in ("bought", "sold") and getattr(trade, "buy_price", None) and float(trade.buy_price) > 0:
+
+    if st in ("bought", "sold", "cancelled"):
         if _final_recon_sync_buy_avg_from_broker(trade, qty):
             changed = True
+            st = getattr(trade, "status", None)
+
     if st == "sold":
         if _final_recon_sync_sell_avg_from_broker(trade, qty):
             changed = True
@@ -586,15 +621,18 @@ def final_reconciliation_refresh_trade_from_broker(db, trade) -> bool:
         except (TypeError, ValueError):
             pass
 
+    if clamp_option_stop_loss_below_buy(trade):
+        changed = True
+
     return changed
 
 
 def _final_recon_sync_buy_avg_from_broker(trade, qty: int) -> bool:
-    """Like sync_trade_buy_fill_from_broker but no trading_live gate; status bought or sold."""
+    """Like sync_trade_buy_fill_from_broker but no trading_live gate; status bought, sold, or cancelled."""
     from sqlalchemy.orm.attributes import flag_modified
     import pytz
 
-    if getattr(trade, "status", None) not in ("bought", "sold"):
+    if getattr(trade, "status", None) not in ("bought", "sold", "cancelled"):
         return False
 
     ikey = (getattr(trade, "instrument_key", None) or "").strip()
@@ -662,7 +700,8 @@ def _final_recon_sync_buy_avg_from_broker(trade, qty: int) -> bool:
 
         if candidates:
             candidates.sort(key=_ob_ts, reverse=True)
-            if buy_naive:
+            buy_missing = float(trade.buy_price or 0) < 0.005
+            if buy_naive and not buy_missing:
                 after_alert = [c for c in candidates if _ob_ts(c) >= buy_naive - timedelta(minutes=15)]
                 if after_alert:
                     candidates = after_alert
@@ -685,10 +724,16 @@ def _final_recon_sync_buy_avg_from_broker(trade, qty: int) -> bool:
         flag_modified(trade, "buy_order_id")
         updated = True
 
-    if abs(old - new_avg) >= 0.005:
+    price_changed = abs(old - new_avg) >= 0.005 or (old < 0.005 and new_avg > 0.005)
+    if price_changed:
         trade.buy_price = round(new_avg, 2)
-        if getattr(trade, "status", None) == "bought":
+        if getattr(trade, "status", None) in ("bought", "cancelled"):
             trade.option_ltp = trade.buy_price
+        if getattr(trade, "status", None) == "cancelled":
+            trade.status = "bought"
+            trade.no_entry_reason = None
+            flag_modified(trade, "status")
+            flag_modified(trade, "no_entry_reason")
         if trade.stop_loss and float(trade.stop_loss) >= float(trade.buy_price) * 0.999:
             trade.stop_loss = round(float(trade.buy_price) * 0.95, 2)
             flag_modified(trade, "stop_loss")
@@ -905,7 +950,8 @@ def apply_broker_buy_fill_to_intraday_trade(db, trade) -> bool:
 
         if candidates:
             candidates.sort(key=_ob_ts, reverse=True)
-            if buy_naive:
+            buy_missing = float(getattr(trade, "buy_price", None) or 0) < 0.005
+            if buy_naive and not buy_missing:
                 narrowed = [
                     c
                     for c in candidates
@@ -949,6 +995,9 @@ def apply_broker_buy_fill_to_intraday_trade(db, trade) -> bool:
     trade.no_entry_reason = None
     trade.exit_reason = None
     if not getattr(trade, "stop_loss", None) or float(trade.stop_loss or 0) <= 0:
+        trade.stop_loss = round(float(trade.buy_price) * 0.95, 2)
+        flag_modified(trade, "stop_loss")
+    elif float(trade.stop_loss) >= float(trade.buy_price) * 0.999:
         trade.stop_loss = round(float(trade.buy_price) * 0.95, 2)
         flag_modified(trade, "stop_loss")
 

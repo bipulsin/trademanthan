@@ -2084,6 +2084,17 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                             except (TypeError, ValueError):
                                 pass
 
+                    # Long option: SL must stay below actual entry (fill can be far below candle open).
+                    if status == "bought" and buy_price and stop_loss_price is not None:
+                        try:
+                            if float(stop_loss_price) >= float(buy_price) * 0.999:
+                                stop_loss_price = round(float(buy_price) * 0.95, 2)
+                                logger.info(
+                                    f"⚠️ Stop loss capped to 5% below fill: ₹{stop_loss_price:.2f} (buy ₹{buy_price:.2f})"
+                                )
+                        except (TypeError, ValueError):
+                            pass
+
                     if status == 'bought':
                         entry_time_str = buy_time.strftime('%Y-%m-%d %H:%M:%S IST')
                         alert_time_str = triggered_datetime.strftime('%Y-%m-%d %H:%M:%S IST')
@@ -2130,6 +2141,13 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     else:
                         # Fallback: 5% below buy price if candle data not available
                         stop_loss_price = buy_price * 0.95 if buy_price else 0.05
+
+                    if buy_price and stop_loss_price is not None:
+                        try:
+                            if float(stop_loss_price) >= float(buy_price) * 0.999:
+                                stop_loss_price = round(float(buy_price) * 0.95, 2)
+                        except (TypeError, ValueError):
+                            pass
                     
                     status = 'no_entry'  # Trade not entered
                     pnl = None  # No P&L since trade wasn't executed
