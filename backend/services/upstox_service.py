@@ -463,12 +463,14 @@ class UpstoxService:
                 payload["trigger_price"] = float(payload["price"])
 
         try:
+            # Single attempt: retrying POST on timeout can place a duplicate order if the first
+            # request actually reached the broker but the response was lost.
             response = self.make_api_request(
                 url=url,
                 method="POST",
                 data=payload,
                 timeout=10,
-                max_retries=2
+                max_retries=1,
             )
             if response and response.get("status") == "success":
                 order_id = None
@@ -477,6 +479,13 @@ class UpstoxService:
                     if isinstance(data, dict):
                         order_id = data.get("order_id") or data.get("orderId")
                 return {"success": True, "data": response, "order_id": order_id}
+            if not response:
+                return {
+                    "success": False,
+                    "error": "no_response_from_broker",
+                    "ambiguous": True,
+                    "data": None,
+                }
             err_msg = _format_upstox_place_order_error(response) if isinstance(response, dict) else "Order failed"
             return {
                 "success": False,

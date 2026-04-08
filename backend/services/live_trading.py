@@ -1,6 +1,7 @@
 import logging
 import json
 import math
+import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -13,6 +14,23 @@ logger = logging.getLogger(__name__)
 # Upstox `product` on v2/order/place: D = Delivery (CNC equity / NRML-style carry for F&O), I = Intraday (MIS).
 # All live MARKET/LIMIT option orders must use Delivery (D), not Intraday (I).
 UPSTOX_ORDER_PRODUCT = "D"
+
+# Serialize live exits per (instrument_key, buy_order_id) to prevent duplicate MARKET SELLs when
+# multiple schedulers fire (hourly refresh + VWAP cycle) or overlapping HTTP handlers.
+_exit_lock_guard = threading.Lock()
+_exit_locks: Dict[str, threading.Lock] = {}
+
+
+def _live_exit_lock_key(instrument_key: str, buy_order_id: str) -> str:
+    return f"{(instrument_key or '').strip().upper()}|{(buy_order_id or '').strip()}"
+
+
+def _acquire_live_exit_lock(key: str) -> threading.Lock:
+    with _exit_lock_guard:
+        if key not in _exit_locks:
+            _exit_locks[key] = threading.Lock()
+        return _exit_locks[key]
+
 
 # After broker accepts a BUY, poll until filled or cancel and fall back (LIMIT can stay open).
 ENTRY_FILL_WAIT_SEC = 90.0
@@ -1674,7 +1692,8 @@ def place_live_upstox_exit(
     stock_name: str,
     option_contract: str,
     buy_order_id: Optional[str],
-    tag: Optional[str] = None
+    tag: Optional[str] = None,
+    existing_sell_order_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Exit: always use a MARKET SELL at the broker for the open option qty.
@@ -1682,6 +1701,8 @@ def place_live_upstox_exit(
     - Market entry positions: `buy_order_id` is the exchange order id from the BUY; we pass it in the
       order tag for traceability (`exit|ref_buy:<id>`). Exit order id is the new SELL's order_id.
     - Legacy GTT-only rows (`GTT-...`): cancel GTT bundle, then market SELL (product D to match GTT).
+    - If `existing_sell_order_id` is already set on the row, does not place another SELL (idempotent).
+    - Concurrent exits for the same buy/instrument are serialized (in-process lock).
     """
     if not is_trading_live_enabled():
         return {"success": False, "skipped": True, "error": "Live trading disabled"}
@@ -1691,69 +1712,110 @@ def place_live_upstox_exit(
         return {"success": False, "error": "Upstox service unavailable"}
 
     oid = str(buy_order_id).strip()
-    # Legacy GTT entry ids
-    if oid.upper().startswith("GTT"):
-        cancel_result = upstox_service.cancel_gtt_order(oid)
-        if not cancel_result.get("success"):
-            logger.warning(
-                "GTT cancel non-success (order may already be complete): %s — still attempting SELL",
-                cancel_result.get("error"),
+    ex = (existing_sell_order_id or "").strip()
+    if ex:
+        logger.warning(
+            "⏭️ LIVE EXIT skipped — sell_order_id already stored (%s); not placing another SELL | %s %s",
+            ex,
+            stock_name,
+            option_contract,
+        )
+        return {
+            "success": True,
+            "order_id": ex,
+            "skipped_duplicate": True,
+            "ref_buy_order_id": oid,
+            "exit_method": "already_had_sell_order_id",
+        }
+
+    def _finalize_sell_result(sell_result: Dict[str, Any], gtt_cancel: Any = None) -> Dict[str, Any]:
+        if sell_result.get("skipped"):
+            return sell_result
+        amb = bool(sell_result.get("ambiguous"))
+        err = (sell_result.get("error") or "").lower()
+        exit_manually = amb or "no_response" in err
+        out = dict(sell_result)
+        out["exit_manually"] = exit_manually
+        if gtt_cancel is not None:
+            out["gtt_cancel"] = gtt_cancel
+        return out
+
+    lk = _acquire_live_exit_lock(_live_exit_lock_key(instrument_key, oid))
+    with lk:
+        # Legacy GTT entry ids
+        if oid.upper().startswith("GTT"):
+            cancel_result = upstox_service.cancel_gtt_order(oid)
+            if not cancel_result.get("success"):
+                logger.warning(
+                    "GTT cancel non-success (order may already be complete): %s — still attempting SELL",
+                    cancel_result.get("error"),
+                )
+            sell_result = place_live_upstox_order(
+                action="SELL",
+                instrument_key=instrument_key,
+                qty=qty,
+                stock_name=stock_name,
+                option_contract=option_contract,
+                tag=tag or f"exit_gtt_legacy|ref:{oid}"[:256],
+                product=UPSTOX_ORDER_PRODUCT,
             )
+            if sell_result.get("success"):
+                logger.warning(
+                    "🚨 LIVE MARKET EXIT (GTT legacy): %s %s | sell_order_id=%s | ref_buy_order_id=%s",
+                    stock_name,
+                    option_contract,
+                    sell_result.get("order_id"),
+                    oid,
+                )
+                return {
+                    "success": True,
+                    "order_id": sell_result.get("order_id"),
+                    "gtt_cancel": cancel_result,
+                    "exit_method": "market_sell_after_gtt_cancel",
+                    "exit_manually": False,
+                }
+            err = sell_result.get("error") or "Market SELL failed after GTT cancel"
+            logger.error(
+                "❌ GTT legacy exit: SELL failed for %s %s | err=%s",
+                stock_name,
+                option_contract,
+                err,
+            )
+            return _finalize_sell_result(
+                {
+                    "success": False,
+                    "error": err,
+                    "sell": sell_result,
+                },
+                gtt_cancel=cancel_result,
+            )
+
+        # Primary path: market SELL (Delivery — must match BUY product at broker)
+        exit_tag = tag or f"exit|ref_buy:{oid}"
+        if len(exit_tag) > 250:
+            exit_tag = exit_tag[:250]
         sell_result = place_live_upstox_order(
             action="SELL",
             instrument_key=instrument_key,
             qty=qty,
             stock_name=stock_name,
             option_contract=option_contract,
-            tag=tag or f"exit_gtt_legacy|ref:{oid}"[:256],
+            tag=exit_tag,
             product=UPSTOX_ORDER_PRODUCT,
         )
         if sell_result.get("success"):
+            logger.warning(
+                "🚨 LIVE MARKET EXIT: %s %s | sell_order_id=%s | ref_buy_order_id=%s",
+                stock_name,
+                option_contract,
+                sell_result.get("order_id"),
+                oid,
+            )
             return {
                 "success": True,
                 "order_id": sell_result.get("order_id"),
-                "gtt_cancel": cancel_result,
-                "exit_method": "market_sell_after_gtt_cancel",
+                "ref_buy_order_id": oid,
+                "exit_method": "market_sell",
+                "exit_manually": False,
             }
-        err = sell_result.get("error") or "Market SELL failed after GTT cancel"
-        logger.error(
-            "❌ GTT legacy exit: SELL failed for %s %s | err=%s",
-            stock_name,
-            option_contract,
-            err,
-        )
-        return {
-            "success": False,
-            "error": err,
-            "gtt_cancel": cancel_result,
-            "sell": sell_result,
-        }
-
-    # Primary path: market SELL (Delivery — must match BUY product at broker)
-    exit_tag = tag or f"exit|ref_buy:{oid}"
-    if len(exit_tag) > 250:
-        exit_tag = exit_tag[:250]
-    sell_result = place_live_upstox_order(
-        action="SELL",
-        instrument_key=instrument_key,
-        qty=qty,
-        stock_name=stock_name,
-        option_contract=option_contract,
-        tag=exit_tag,
-        product=UPSTOX_ORDER_PRODUCT,
-    )
-    if sell_result.get("success"):
-        logger.warning(
-            "🚨 LIVE MARKET EXIT: %s %s | sell_order_id=%s | ref_buy_order_id=%s",
-            stock_name,
-            option_contract,
-            sell_result.get("order_id"),
-            oid,
-        )
-        return {
-            "success": True,
-            "order_id": sell_result.get("order_id"),
-            "ref_buy_order_id": oid,
-            "exit_method": "market_sell",
-        }
-    return sell_result
+        return _finalize_sell_result(sell_result)

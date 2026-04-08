@@ -33,21 +33,25 @@ def _ensure_ist(dt_value: datetime, ist_tz) -> datetime:
     return dt_value
 
 def _try_live_exit(position, reason: str, option_contract: str):
-    """Attempt live exit; return (ok, order_id). ok is False if broker exit did not succeed (do not mark sold)."""
+    """
+    Attempt live exit; return (ok, order_id, exit_manually).
+    exit_manually=True: broker response missing/ambiguous — caller should set exit_reason to
+    'Exit Manually' and keep status bought (no duplicate SELL retries).
+    """
     buy_order_id = getattr(position, "buy_order_id", None)
     if not buy_order_id:
         logger.warning(f"⚠️ LIVE exit aborted for {position.stock_name} - missing buy_order_id (cannot place SELL)")
-        return False, None
+        return False, None, False
+    existing_sell = getattr(position, "sell_order_id", None)
     result = live_trading.place_live_upstox_exit(
         instrument_key=position.instrument_key,
         qty=position.qty,
         stock_name=position.stock_name,
         option_contract=option_contract or "N/A",
         buy_order_id=buy_order_id,
-        tag=f"vwap_exit_{reason}:{buy_order_id}"
+        tag=f"vwap_exit_{reason}:{buy_order_id}",
+        existing_sell_order_id=existing_sell,
     )
-    # Never treat "skipped" as success — DB must not show EXIT-* unless broker SELL succeeded
-    # (skipped = live off or exit not attempted; success = market sell placed).
     if result.get("skipped"):
         logger.warning(
             "⚠️ LIVE exit skipped for %s (%s) — not marking sold (reason=%s)",
@@ -55,10 +59,18 @@ def _try_live_exit(position, reason: str, option_contract: str):
             reason,
             result.get("error") or "skipped",
         )
-        return False, None
-    if result.get("success"):
-        return True, result.get("order_id")
-    return False, None
+        return False, None, False
+    if result.get("exit_manually"):
+        logger.error(
+            "🚨 LIVE exit uncertain for %s (%s) — mark Exit Manually (err=%s)",
+            getattr(position, "stock_name", "?"),
+            reason,
+            result.get("error"),
+        )
+        return False, None, True
+    if result.get("success") or result.get("skipped_duplicate"):
+        return True, result.get("order_id"), False
+    return False, None, False
 
 
 def historical_data_exists(db: Session, stock_name: str, scan_time: datetime, time_window_minutes: int = 2) -> bool:
@@ -1233,8 +1245,15 @@ def update_vwap_for_all_open_positions():
                                         new_option_ltp = 0.0
                                 
                                 # Exit with VWAP cross
-                                live_ok, live_order_id = _try_live_exit(position, 'stock_vwap_cross', option_contract)
-                                if not live_ok:
+                                live_ok, live_order_id, exit_manual = _try_live_exit(position, 'stock_vwap_cross', option_contract)
+                                if exit_manual:
+                                    from sqlalchemy.orm.attributes import flag_modified
+                                    position.exit_reason = "Exit Manually"
+                                    flag_modified(position, "exit_reason")
+                                    logger.error(
+                                        f"🚨 LIVE EXIT uncertain for {stock_name} — marked Exit Manually (verify broker)"
+                                    )
+                                elif not live_ok:
                                     logger.error(f"🚨 LIVE EXIT FAILED (vwap_cross) for {stock_name} - keeping trade OPEN")
                                 else:
                                     position.exit_reason = 'stock_vwap_cross'
@@ -1635,8 +1654,17 @@ def update_vwap_for_all_open_positions():
                     #   - No more updates will be applied to this trade
                     # ═══════════════════════════════════════════════════════════════
                     if exit_triggered and exit_reason_to_set:
-                        live_ok, live_order_id = _try_live_exit(position, exit_reason_to_set, option_contract)
-                        if not live_ok:
+                        live_ok, live_order_id, exit_manual = _try_live_exit(position, exit_reason_to_set, option_contract)
+                        if exit_manual:
+                            from sqlalchemy.orm.attributes import flag_modified
+                            position.exit_reason = "Exit Manually"
+                            flag_modified(position, "exit_reason")
+                            logger.error(
+                                f"🚨 LIVE EXIT uncertain for {stock_name} — marked Exit Manually (verify broker)"
+                            )
+                            exit_triggered = False
+                            exit_reason_to_set = None
+                        elif not live_ok:
                             logger.error(f"🚨 LIVE EXIT FAILED ({exit_reason_to_set}) for {stock_name} - keeping trade OPEN")
                             exit_triggered = False
                             exit_reason_to_set = None
@@ -3825,8 +3853,16 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                                 # 1. CHECK STOP LOSS
                                 if trade.stop_loss and current_option_ltp_for_pnl <= trade.stop_loss:
                                     exit_triggered = True
-                                    live_ok, live_order_id = _try_live_exit(trade, 'stop_loss', trade.option_contract)
-                                    if not live_ok:
+                                    live_ok, live_order_id, exit_manual = _try_live_exit(trade, 'stop_loss', trade.option_contract)
+                                    if exit_manual:
+                                        from sqlalchemy.orm.attributes import flag_modified
+                                        trade.exit_reason = "Exit Manually"
+                                        flag_modified(trade, "exit_reason")
+                                        logger.error(
+                                            f"🚨 LIVE EXIT uncertain for {stock_name} — marked Exit Manually (verify broker)"
+                                        )
+                                        exit_triggered = False
+                                    elif not live_ok:
                                         logger.error(f"🚨 LIVE EXIT FAILED (stop_loss) for {stock_name} - keeping trade OPEN")
                                         exit_triggered = False
                                     else:
@@ -3856,8 +3892,16 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                                             if (option_type == 'CE' and stock_ltp_exit < stock_vwap_exit) or \
                                                (option_type == 'PE' and stock_ltp_exit > stock_vwap_exit):
                                                 exit_triggered = True
-                                                live_ok, live_order_id = _try_live_exit(trade, 'stock_vwap_cross', trade.option_contract)
-                                                if not live_ok:
+                                                live_ok, live_order_id, exit_manual = _try_live_exit(trade, 'stock_vwap_cross', trade.option_contract)
+                                                if exit_manual:
+                                                    from sqlalchemy.orm.attributes import flag_modified
+                                                    trade.exit_reason = "Exit Manually"
+                                                    flag_modified(trade, "exit_reason")
+                                                    logger.error(
+                                                        f"🚨 LIVE EXIT uncertain for {stock_name} — marked Exit Manually (verify broker)"
+                                                    )
+                                                    exit_triggered = False
+                                                elif not live_ok:
                                                     logger.error(f"🚨 LIVE EXIT FAILED (vwap_cross) for {stock_name} - keeping trade OPEN")
                                                     exit_triggered = False
                                                 else:
@@ -4462,7 +4506,15 @@ def close_all_open_trades():
                 position = fresh_position
                 
                 exit_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
-                live_ok, live_order_id = _try_live_exit(position, 'time_based', option_contract)
+                live_ok, live_order_id, exit_manual = _try_live_exit(position, 'time_based', option_contract)
+                if exit_manual:
+                    from sqlalchemy.orm.attributes import flag_modified
+                    position.exit_reason = "Exit Manually"
+                    flag_modified(position, "exit_reason")
+                    logger.error(
+                        f"🚨 LIVE EXIT uncertain for {stock_name} (time_based) — marked Exit Manually (verify broker)"
+                    )
+                    continue
                 if not live_ok:
                     logger.error(f"🚨 LIVE EXIT FAILED (time_based) for {stock_name} - keeping trade OPEN")
                     continue
