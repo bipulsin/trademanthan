@@ -52,31 +52,34 @@ Executed **sequentially** for each future (Upstox calls per symbol; full pass ca
 - Load **5m** (6 days) and **15m** (10 days) candles; require enough 5m bars.
 - **Previous close**: daily candles, else OHLC fallback.
 
-**Layer 1 — gap / volume / ATR move** (`prefilter_gap_volume_atr` in `data_service.py`)
+**Layer 1 — dual-sided gap / volume / ATR move** (`prefilter_gap_volume_atr` in `data_service.py`)
 
-- Gap: `|open − prev_close| / prev_close ≥ 0.7%`.
-- First ~15m volume vs average of prior sessions’ first ~15m (via 5m proxy).
-- Intraday move vs open: `|last_close − session_open| ≥ 0.5 × ATR(14) on 15m`.
+- Common: first ~15m volume vs average of prior sessions’ first ~15m (5m proxy); must exceed prior avg when history exists.
+- **ATR(10) on 15m** for move thresholds (needs enough 15m bars).
 
-**Enforcement window** (`scanner.py`): Layer 1 **drops** the symbol (`return None`) only when **09:20–13:30 IST**. Outside that window, Layer 1 is **not** used to exclude names; Renko still runs and `prefilter_pass` is stored as `True` for display when outside the window.
+**Bullish branch:** gap **up** ≥ **0.7%** (signed `(open−prev)/prev × 100`); session extension **(last close − open) ≥ 0.5 × ATR(10, 15m)**.
 
-**Layer 2 — Renko**
+**Bearish branch:** gap **down** ≤ **−0.7%**; **|last close − open| ≤ 0.5 × ATR(10, 15m)**.
+
+Pass if **either** branch matches. If Layer 1 fails, **`scan_symbol` returns `None`** (no Renko for that symbol).
+
+**Layer 2 — Renko (only after Layer 1)**
 
 - Build **traditional Renko** from 5m closes and `main_brick_size`.
 - **Structure**: `renko_structure_filter_long` / `_short`; resolve **LONG / SHORT / NONE** and `structure_pass`.
+- **Alignment:** **bull** Layer 1 requires Renko **LONG**; **bear** Layer 1 requires Renko **SHORT**. Mismatch → **`return None`**.
 - **Score 0–6** (`compute_score`): last bricks alignment (+2), low alternation (+2), **momentum** (+1), **volume spike** (+1), capped at 6.
-- **Momentum flag**: 5m move vs **ATR(14) on 15m** (threshold in scanner).
-- **Vol spike**: first-15m volume vs `vol_prev_avg` from meta.
+- **Momentum flag**: |close[−1]−close[−5]| vs **ATR(10) on 15m** in scanner.
 
-**Layer 3 — entry signal (UI / order eligibility)**
+**Layer 3 — entry signal (only Layer 2–qualified names)**
 
-- Only **09:45–11:30 IST**.
+- Window **09:30–13:45 IST**.
 - Requires `structure_pass`, direction LONG/SHORT, **`score ≥ 4`**, plus **pullback** (`entry_pullback_long` / `_short` on bricks).
 - Sets `entry_signal` true/false.
 
 ### 3.4 Persist
 
-1. Keep rows where **`score ≥ 3` OR `structure_pass`**.
+1. Keep rows where **`structure_pass`** is true (Layer 2 only; Layer 1 already required to reach here).
 2. Sort by score desc, take **top 50**.
 3. **`replace_candidates_session(session_date, rows)`** — replaces all rows for that `session_date` in **`smart_futures_candidate`**.
 
@@ -139,10 +142,10 @@ flowchart TD
     W -->|no| Skip[Skip scan]
     W -->|yes| U[Universe: arbitrage_master futures]
     U --> Sym[For each symbol: scan_symbol]
-    Sym --> L1{Layer 1 enforced? 09:20-13:30}
+    Sym --> L1{Layer 1 bull or bear?}
     L1 -->|fail| Drop[Return None]
-    L1 -->|pass or outside window| R[Renko + structure + score]
-    R --> P[Filter score>=3 or structure_pass; top 50]
+    L1 -->|pass| R[Renko + L1/L2 align + score]
+    R --> P[Filter structure_pass; top 50]
     P --> DB[(smart_futures_candidate)]
 
     S60 --> OP[Open positions]

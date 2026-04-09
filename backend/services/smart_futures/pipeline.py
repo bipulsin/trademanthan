@@ -37,8 +37,7 @@ def run_smart_futures_scan_job(force: bool = False) -> Dict[str, Any]:
     max_n = data_service._max_symbols()
     rows = rows[:max_n]
     cfg = repository.get_config()
-    # Layer-1 (gap / first-15m vol vs avg / intraday vs ATR) only enforced 09:20–13:30 IST in scanner;
-    # outside that window Renko + score still run without that filter (see scanner.prefilter_window).
+    # Layer 1 (bull/bear prefilter) must pass before Renko; Layer 2 = structure + score; persist only structure_pass.
     logger.info(
         "smart_futures scan begin symbols=%s (cap %s) ist=%s — sequential Upstox calls per symbol, may take many minutes",
         len(rows),
@@ -57,7 +56,8 @@ def run_smart_futures_scan_job(force: bool = False) -> Dict[str, Any]:
                 continue
             r.pop("meta", None)
             r.pop("prefilter_reason", None)
-            if r.get("score", 0) >= 3 or r.get("structure_pass"):
+            r.pop("layer1_side", None)
+            if r.get("structure_pass"):
                 out.append(r)
         except Exception as e:
             logger.warning("smart_futures scan error %s: %s", sym, e)

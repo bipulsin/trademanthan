@@ -93,10 +93,15 @@ def prefilter_gap_volume_atr(
     prev_close: float,
 ) -> Tuple[bool, str, Dict[str, Any]]:
     """
-    Layer 1:
-    - Gap: abs(open-prev)/prev >= 0.7%
-    - First 15m volume vs prior day first 15m (proxy using 5m candles)
-    - Move >= 0.5 * ATR(14,15m)
+    Layer 1 (dual-sided, ATR(10) on 15m for move rules):
+
+    **Bullish:** gap up ≥ 0.7% (open vs prev close), first-15m volume vs prior avg,
+    session move (last close − open) ≥ 0.5 × ATR(10, 15m).
+
+    **Bearish:** gap down ≤ −0.7%, same volume rule,
+    |last close − open| ≤ 0.5 × ATR(10, 15m).
+
+    Pass if either branch matches.
     """
     meta: Dict[str, Any] = {}
     if not candles_5m or len(candles_5m) < 10:
@@ -120,11 +125,9 @@ def prefilter_gap_volume_atr(
     if len(today_c) < 3:
         today_c = c5[-40:]  # fallback: recent tail
     o0 = float(today_c[0]["open"])
-    c0 = float(today_c[0]["close"])
-    gap_pct = abs(o0 - prev_close) / prev_close * 100.0 if prev_close > 0 else 0.0
-    meta["gap_pct"] = round(gap_pct, 4)
-    if gap_pct < 0.7:
-        return False, "gap_filter", meta
+    gap_pct_signed = (o0 - prev_close) / prev_close * 100.0 if prev_close > 0 else 0.0
+    meta["gap_pct_signed"] = round(gap_pct_signed, 4)
+    meta["gap_pct"] = round(abs(gap_pct_signed), 4)
 
     vol_first15 = sum(float(x.get("volume") or 0) for x in today_c[:3])
     prior_5m = [x for x in c5 if _day(x.get("timestamp") or "") and _day(x.get("timestamp") or "") < today]
@@ -153,22 +156,47 @@ def prefilter_gap_volume_atr(
     if vol_prev_avg and vol_prev_avg > 0 and vol_first15 <= vol_prev_avg:
         return False, "volume_spike", meta
 
-    if not candles_15m or len(candles_15m) < 16:
+    # ATR(10) on 15m — need at least 11 bars
+    if not candles_15m or len(candles_15m) < 12:
         return False, "no_15m_atr", meta
     c15 = sorted(candles_15m, key=lambda c: c.get("timestamp") or "")
     highs = [float(x["high"]) for x in c15]
     lows = [float(x["low"]) for x in c15]
     closes = [float(x["close"]) for x in c15]
-    atr15 = atr_wilder(highs, lows, closes, period=14)
-    if atr15 is None or atr15 <= 0:
-        return False, "atr15", meta
-    move = abs(float(c5[-1]["close"]) - o0)
-    meta["move"] = move
-    meta["atr15"] = atr15
-    if move < 0.5 * atr15:
-        return False, "intraday_move", meta
+    atr10 = atr_wilder(highs, lows, closes, period=10)
+    if atr10 is None or atr10 <= 0:
+        return False, "atr10_15m", meta
 
-    return True, "ok", meta
+    last_px = float(c5[-1]["close"])
+    move_signed = last_px - o0
+    move_abs = abs(move_signed)
+    meta["move_signed"] = round(move_signed, 6)
+    meta["move"] = round(move_abs, 6)
+    meta["atr10_15m"] = atr10
+
+    # Bullish: gap up ≥ 0.7%, extension ≥ 0.5×ATR(10)
+    bull_ok = (
+        gap_pct_signed >= 0.7
+        and move_signed >= 0.5 * atr10
+    )
+    # Bearish: gap down ≤ −0.7%, range from open ≤ 0.5×ATR(10)
+    bear_ok = (
+        gap_pct_signed <= -0.7
+        and move_abs <= 0.5 * atr10
+    )
+
+    if bull_ok:
+        meta["layer1_side"] = "bull"
+        return True, "ok_bull", meta
+    if bear_ok:
+        meta["layer1_side"] = "bear"
+        return True, "ok_bear", meta
+
+    if gap_pct_signed > -0.7 and gap_pct_signed < 0.7:
+        return False, "gap_filter", meta
+    if gap_pct_signed >= 0.7:
+        return False, "intraday_move_bull", meta
+    return False, "intraday_move_bear", meta
 
 
 def quote_prev_close_and_open(instrument_key: str) -> Tuple[Optional[float], Optional[float]]:

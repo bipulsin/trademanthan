@@ -91,18 +91,14 @@ def scan_symbol(
 
     meta: Dict[str, Any] = {}
     hm = now_ist.hour * 60 + now_ist.minute
-    # Layer 1 (gap ≥0.7%, first-15m volume vs prior avg, move ≥0.5×ATR15) only applied in this window.
-    # Outside it we still build Renko and score, but do not drop symbols for failing Layer 1 — so many
-    # more names pass through than during 09:20–13:30 IST (prefilter_pass stored as True for display).
-    prefilter_window = (9 * 60 + 20) <= hm <= (13 * 60 + 30)
+    # Layer 1 must pass before Renko (bull or bear branch in prefilter_gap_volume_atr).
     pre_ok, pre_reason, meta = data_service.prefilter_gap_volume_atr(
         instrument_key, c5, c15 or [], prev_close
     )
-    if prefilter_window and not pre_ok:
+    if not pre_ok:
         logger.debug("smart_futures prefilter skip %s: %s", symbol, pre_reason)
         return None
-    if not prefilter_window:
-        pre_ok = True
+    layer1_side = str(meta.get("layer1_side") or "").strip().lower()
 
     closes = data_service.closes_from_candles(c5)
     bricks = build_traditional_renko(closes, brick_main)
@@ -112,14 +108,14 @@ def scan_symbol(
 
     # Momentum: current range vs ATR 15m
     momentum_ok = False
-    if c15 and len(c15) >= 16:
+    if c15 and len(c15) >= 12:
         c15s = sorted(c15, key=lambda x: x.get("timestamp") or "")
         highs = [float(x["high"]) for x in c15s]
         lows = [float(x["low"]) for x in c15s]
         closes15 = [float(x["close"]) for x in c15s]
-        atr15 = atr_wilder(highs, lows, closes15, period=14)
-        if atr15 and atr15 > 0 and closes:
-            momentum_ok = abs(closes[-1] - closes[-5]) >= 0.3 * atr15
+        atr10_15 = atr_wilder(highs, lows, closes15, period=10)
+        if atr10_15 and atr10_15 > 0 and closes:
+            momentum_ok = abs(closes[-1] - closes[-5]) >= 0.3 * atr10_15
 
     long_struct, _ = renko_structure_filter_long(bricks)
     short_struct, _ = renko_structure_filter_short(bricks)
@@ -146,10 +142,22 @@ def scan_symbol(
     if direction in ("LONG", "SHORT"):
         score = compute_score(direction, bricks, vol_spike, momentum_ok)
 
-    # Entry signal (layer 3) only 9:45–11:30
+    # Layer 2: Renko direction must match Layer 1 side (bull → LONG, bear → SHORT).
+    if structure_pass and direction in ("LONG", "SHORT") and layer1_side in ("bull", "bear"):
+        if layer1_side == "bull" and direction != "LONG":
+            return None
+        if layer1_side == "bear" and direction != "SHORT":
+            return None
+
+    # Entry signal (layer 3): 9:30–13:45 IST, score ≥ 4, pullback — only if Layer 2 gave a trade direction.
     entry_signal = False
-    entry_win = (9 * 60 + 45) <= hm <= (11 * 60 + 30)
-    if entry_win and structure_pass and direction in ("LONG", "SHORT") and score >= 4:
+    entry_win = (9 * 60 + 30) <= hm <= (13 * 60 + 45)
+    if (
+        entry_win
+        and structure_pass
+        and direction in ("LONG", "SHORT")
+        and score >= 4
+    ):
         if direction == "LONG":
             ok_e, _ = entry_pullback_long(bricks)
             entry_signal = ok_e
@@ -167,8 +175,9 @@ def scan_symbol(
         "exit_ready": False,
         "main_brick_size": brick_main,
         "ltp": ltp,
-        "prefilter_pass": pre_ok if prefilter_window else True,
+        "prefilter_pass": pre_ok,
         "structure_pass": structure_pass,
         "prefilter_reason": pre_reason,
+        "layer1_side": layer1_side or None,
         "meta": meta,
     }
