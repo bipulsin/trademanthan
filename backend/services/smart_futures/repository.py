@@ -81,32 +81,34 @@ def merge_config(patch: Dict[str, Any]) -> Dict[str, Any]:
     """Merge partial update into smart_futures_config (id=1)."""
     if not patch:
         return get_config()
-    cur = get_config()
-    if "live_enabled" in patch:
-        cur["live_enabled"] = bool(patch["live_enabled"])
-    if "position_size" in patch:
-        ps = int(patch["position_size"] or 1)
-        cur["position_size"] = ps if ps in (1, 2, 3) else 1
-    if "partial_exit_enabled" in patch:
-        cur["partial_exit_enabled"] = bool(patch["partial_exit_enabled"])
-    if "brick_atr_period" in patch:
-        p = int(patch["brick_atr_period"] or 10)
-        cur["brick_atr_period"] = max(2, min(99, p))
-    if "brick_atr_override" in patch:
-        v = patch["brick_atr_override"]
-        if v is None or (isinstance(v, str) and str(v).strip() == ""):
-            cur["brick_atr_override"] = None
-        else:
-            fv = float(v)
-            cur["brick_atr_override"] = fv if fv > 0 else None
-
-    le = cur["live_enabled"]
-    ps = cur["position_size"]
-    pe = cur["partial_exit_enabled"]
-    bap = int(cur["brick_atr_period"] or 10)
-    bao = cur["brick_atr_override"]
 
     with engine.begin() as conn:
+        row = _fetch_config_row(conn)
+        cur = _parse_config_row(row)
+        if "live_enabled" in patch:
+            cur["live_enabled"] = bool(patch["live_enabled"])
+        if "position_size" in patch:
+            ps = int(patch["position_size"] or 1)
+            cur["position_size"] = ps if ps in (1, 2, 3) else 1
+        if "partial_exit_enabled" in patch:
+            cur["partial_exit_enabled"] = bool(patch["partial_exit_enabled"])
+        if "brick_atr_period" in patch:
+            p = int(patch["brick_atr_period"] or 10)
+            cur["brick_atr_period"] = max(2, min(99, p))
+        if "brick_atr_override" in patch:
+            v = patch["brick_atr_override"]
+            if v is None or (isinstance(v, str) and str(v).strip() == ""):
+                cur["brick_atr_override"] = None
+            else:
+                fv = float(v)
+                cur["brick_atr_override"] = fv if fv > 0 else None
+
+        le = cur["live_enabled"]
+        ps = cur["position_size"]
+        pe = cur["partial_exit_enabled"]
+        bap = int(cur["brick_atr_period"] or 10)
+        bao = cur["brick_atr_override"]
+
         n = conn.execute(text("SELECT COUNT(*) FROM smart_futures_config WHERE id = 1")).scalar()
         if n:
             conn.execute(
@@ -134,6 +136,8 @@ def merge_config(patch: Dict[str, Any]) -> Dict[str, Any]:
                 ),
                 {"le": le, "ps": ps, "pe": pe, "bap": bap, "bao": bao},
             )
+        row_out = _fetch_config_row(conn)
+
     logger.info(
         "smart_futures_config updated live=%s position_size=%s brick_atr_period=%s override=%s",
         le,
@@ -141,7 +145,7 @@ def merge_config(patch: Dict[str, Any]) -> Dict[str, Any]:
         bap,
         bao,
     )
-    return get_config()
+    return _parse_config_row(row_out)
 
 
 def set_config(

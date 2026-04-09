@@ -82,10 +82,19 @@ def run_smart_futures_exit_check_job() -> Dict[str, Any]:
 
 
 def _sync_exit_flags(session_d, positions) -> None:
-    """Update exit_ready on smart_futures_candidate rows (best-effort)."""
+    """Update exit_ready on smart_futures_candidate rows (best-effort).
+
+    Exit evaluation calls Upstox (slow). DB writes use a single transaction so we
+    do not checkout one pooled connection per open position every scheduler tick.
+    """
     from sqlalchemy import text
+
     from backend.database import engine
 
+    if not positions:
+        return
+
+    updates: List[tuple[str, bool]] = []
     for pos in positions:
         ik = pos["instrument_key"]
         mb = float(pos["main_brick_size"] or 0.0)
@@ -94,20 +103,21 @@ def _sync_exit_flags(session_d, positions) -> None:
             flag = should_exit_position(ik, dr, mb)
         except Exception:
             flag = False
-        try:
-            with engine.begin() as conn:
-                conn.execute(
-                    text(
-                        """
-                        UPDATE smart_futures_candidate
-                        SET exit_ready = :ex, updated_at = CURRENT_TIMESTAMP
-                        WHERE session_date = :d AND instrument_key = :ik
-                        """
-                    ),
-                    {"ex": flag, "d": session_d, "ik": ik},
-                )
-        except Exception as e:
-            logger.debug("sync exit flag: %s", e)
+        updates.append((ik, flag))
+
+    try:
+        with engine.begin() as conn:
+            upd = text(
+                """
+                UPDATE smart_futures_candidate
+                SET exit_ready = :ex, updated_at = CURRENT_TIMESTAMP
+                WHERE session_date = :d AND instrument_key = :ik
+                """
+            )
+            for ik, flag in updates:
+                conn.execute(upd, {"ex": flag, "d": session_d, "ik": ik})
+    except Exception as e:
+        logger.debug("sync exit flags batch: %s", e)
 
 
 def force_exit_all_smart_futures_positions(user_id=None) -> Dict[str, Any]:
