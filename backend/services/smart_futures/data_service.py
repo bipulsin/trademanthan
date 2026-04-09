@@ -153,8 +153,8 @@ def prefilter_gap_volume_atr(
             vol_prev_avg = sum(vols) / len(vols)
     meta["vol_first15"] = vol_first15
     meta["vol_prev_avg"] = vol_prev_avg
-    if vol_prev_avg and vol_prev_avg > 0 and vol_first15 <= vol_prev_avg:
-        return False, "volume_spike", meta
+    if not vol_prev_avg or vol_prev_avg <= 0:
+        return False, "volume_baseline_unavailable", meta
 
     # ATR(10) on 15m — need at least 11 bars
     if not candles_15m or len(candles_15m) < 12:
@@ -174,15 +174,23 @@ def prefilter_gap_volume_atr(
     meta["move"] = round(move_abs, 6)
     meta["atr10_15m"] = atr10
 
-    # Bullish: gap up ≥ 0.7%, extension ≥ 0.5×ATR(10)
+    # Volume branch condition:
+    # - Bullish selection: first-15m volume must be ABOVE prior-5-session first-15m average.
+    # - Bearish selection: first-15m volume must be BELOW prior-5-session first-15m average.
+    bull_vol_ok = vol_first15 > vol_prev_avg
+    bear_vol_ok = vol_first15 < vol_prev_avg
+
+    # Bullish: gap up ≥ 0.7%, extension ≥ 0.5×ATR(10), volume above prior avg.
     bull_ok = (
         gap_pct_signed >= 0.7
         and move_signed >= 0.5 * atr10
+        and bull_vol_ok
     )
-    # Bearish: gap down ≤ −0.7%, range from open ≤ 0.5×ATR(10)
+    # Bearish: gap down ≤ −0.7%, range from open ≤ 0.5×ATR(10), volume below prior avg.
     bear_ok = (
         gap_pct_signed <= -0.7
         and move_abs <= 0.5 * atr10
+        and bear_vol_ok
     )
 
     if bull_ok:
@@ -194,6 +202,10 @@ def prefilter_gap_volume_atr(
 
     if gap_pct_signed > -0.7 and gap_pct_signed < 0.7:
         return False, "gap_filter", meta
+    if gap_pct_signed >= 0.7 and not bull_vol_ok:
+        return False, "volume_bull_condition", meta
+    if gap_pct_signed <= -0.7 and not bear_vol_ok:
+        return False, "volume_bear_condition", meta
     if gap_pct_signed >= 0.7:
         return False, "intraday_move_bull", meta
     return False, "intraday_move_bear", meta
