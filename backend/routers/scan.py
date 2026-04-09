@@ -10,6 +10,7 @@ import json
 import os
 import sys
 import requests
+from urllib.parse import urlencode
 import secrets
 import logging
 import asyncio
@@ -6020,13 +6021,17 @@ async def upstox_oauth_login():
         state = secrets.token_urlsafe(32)
         oauth_states[state] = {"timestamp": datetime.utcnow()}
         
-        # Construct the authorization URL
+        # Construct the authorization URL (encode redirect_uri — must match Upstox app settings exactly)
         auth_url = (
-            f"https://api.upstox.com/v2/login/authorization/dialog"
-            f"?response_type=code"
-            f"&client_id={settings.UPSTOX_API_KEY}"
-            f"&redirect_uri={settings.UPSTOX_REDIRECT_URI}"
-            f"&state={state}"
+            "https://api.upstox.com/v2/login/authorization/dialog?"
+            + urlencode(
+                {
+                    "response_type": "code",
+                    "client_id": settings.UPSTOX_API_KEY,
+                    "redirect_uri": settings.UPSTOX_REDIRECT_URI,
+                    "state": state,
+                }
+            )
         )
         
         # Redirect user to Upstox authorization page

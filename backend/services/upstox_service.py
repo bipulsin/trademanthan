@@ -165,68 +165,27 @@ class UpstoxService:
         
     def refresh_access_token(self) -> Optional[str]:
         """
-        Refresh the Upstox access token using API key and secret
-        
-        Returns:
-            New access token if successful, None otherwise
+        Best-effort recovery after 401: reload access token from disk if OAuth completed elsewhere.
+
+        Upstox does **not** support exchanging api_key/secret for a new token without a browser step.
+        The Get Token API requires ``grant_type=authorization_code`` and a **one-time ``code``**
+        from the authorize redirect. Sending ``code=<api_key>`` (the previous bug) triggers
+        error **UDAPI100068** (invalid client_id / redirect_uri / code).
+
+        To obtain a new token, open ``GET /scan/upstox/login`` on this app; ``redirect_uri`` in
+        settings must match the Redirect URL registered in the Upstox developer console exactly.
         """
-        try:
-            # Try different redirect URIs that might be configured
-            from backend.config import settings
-            redirect_uris = [
-                settings.UPSTOX_REDIRECT_URI,
-                "https://www.tradewithcto.com/scan/upstox/callback",
-                "https://tradewithcto.com/scan/upstox/callback",
-                "https://tradentical.com/scan/upstox/callback",
-                "https://trademanthan.in/scan/upstox/callback",
-                "https://tradentical.com",
-                "https://trademanthan.in",
-                "http://localhost:3000",
-                "https://localhost:3000",
-            ]
-            
-            for redirect_uri in redirect_uris:
-                try:
-                    # Upstox login endpoint
-                    url = "https://api.upstox.com/v2/login/authorization/token"
-                    
-                    headers = {
-                        "Accept": "application/json",
-                        "Content-Type": "application/x-www-form-urlencoded"
-                    }
-                    
-                    data = {
-                        "code": self.api_key,  # Using API key as code
-                        "client_id": self.api_key,
-                        "client_secret": self.api_secret,
-                        "redirect_uri": redirect_uri,
-                        "grant_type": "authorization_code"
-                    }
-                    
-                    logger.info(f"Trying token refresh with redirect_uri: {redirect_uri}")
-                    response = requests.post(url, headers=headers, data=data, timeout=10)
-                    
-                    if response.status_code == 200:
-                        result = response.json()
-                        if result.get('status') == 'success':
-                            new_token = result.get('access_token')
-                            if new_token:
-                                logger.info(f"Successfully refreshed Upstox access token with redirect_uri: {redirect_uri}")
-                                # Update the instance token
-                                self.access_token = new_token
-                                return new_token
-                        else:
-                            logger.warning(f"Token refresh failed with {redirect_uri}: {result}")
-                    else:
-                        logger.warning(f"Token refresh API error with {redirect_uri}: {response.status_code} - {response.text}")
-                        
-                except Exception as e:
-                    logger.warning(f"Error with redirect_uri {redirect_uri}: {str(e)}")
-                    continue
-                    
-        except Exception as e:
-            logger.error(f"Error refreshing access token: {str(e)}")
-            
+        logger.info(
+            "Upstox: no server-side token mint without auth code; checking token file for "
+            "a token saved after browser login."
+        )
+        if self.reload_token_from_storage() and self.access_token:
+            logger.info("Upstox: using access token reloaded from token storage.")
+            return self.access_token
+        logger.warning(
+            "Upstox: still unauthenticated or token expired. Complete OAuth via /scan/upstox/login "
+            "and ensure UPSTOX_REDIRECT_URI matches the Upstox app redirect URL (scheme, host, path)."
+        )
         return None
 
     def get_headers(self) -> Dict[str, str]:
