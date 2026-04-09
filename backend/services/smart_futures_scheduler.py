@@ -49,7 +49,15 @@ def start_smart_futures_scheduler() -> None:
     if _scheduler and _scheduler.running:
         return
     tz = pytz.timezone("Asia/Kolkata")
-    _scheduler = BackgroundScheduler(timezone=tz)
+    # One scan at a time: each run can take many minutes (sequential Upstox per symbol).
+    _scheduler = BackgroundScheduler(
+        timezone=tz,
+        job_defaults={
+            "coalesce": True,
+            "max_instances": 1,
+            "misfire_grace_time": 300,
+        },
+    )
     # Every 5 minutes — data + Renko + candidates
     _scheduler.add_job(_job_scan, IntervalTrigger(minutes=5), id="sf_scan", replace_existing=True)
     # Every 60s — sync exit flags / lightweight checks

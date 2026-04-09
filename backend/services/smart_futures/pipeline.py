@@ -37,10 +37,20 @@ def run_smart_futures_scan_job(force: bool = False) -> Dict[str, Any]:
     max_n = data_service._max_symbols()
     rows = rows[:max_n]
     cfg = repository.get_config()
+    # Layer-1 (gap / first-15m vol vs avg / intraday vs ATR) only enforced 09:20–10:30 IST in scanner;
+    # outside that window Renko + score still run without that filter (see scanner.prefilter_window).
+    logger.info(
+        "smart_futures scan begin symbols=%s (cap %s) ist=%s — sequential Upstox calls per symbol, may take many minutes",
+        len(rows),
+        max_n,
+        now.isoformat(),
+    )
     out: List[Dict[str, Any]] = []
     for i, row in enumerate(rows):
         sym = row["symbol"]
         ik = row["instrument_key"]
+        if i % 10 == 0:
+            logger.info("smart_futures scan progress %s/%s %s", i + 1, len(rows), sym)
         try:
             r = scan_symbol(sym, ik, now, cfg)
             if r is None:
