@@ -37,7 +37,7 @@ def run_smart_futures_scan_job(force: bool = False) -> Dict[str, Any]:
     max_n = data_service._max_symbols()
     rows = rows[:max_n]
     cfg = repository.get_config()
-    # Layer-1 (gap / first-15m vol vs avg / intraday vs ATR) only enforced 09:20–10:30 IST in scanner;
+    # Layer-1 (gap / first-15m vol vs avg / intraday vs ATR) only enforced 09:20–13:30 IST in scanner;
     # outside that window Renko + score still run without that filter (see scanner.prefilter_window).
     logger.info(
         "smart_futures scan begin symbols=%s (cap %s) ist=%s — sequential Upstox calls per symbol, may take many minutes",

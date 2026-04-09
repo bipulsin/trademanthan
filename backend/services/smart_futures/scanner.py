@@ -93,8 +93,8 @@ def scan_symbol(
     hm = now_ist.hour * 60 + now_ist.minute
     # Layer 1 (gap ≥0.7%, first-15m volume vs prior avg, move ≥0.5×ATR15) only applied in this window.
     # Outside it we still build Renko and score, but do not drop symbols for failing Layer 1 — so many
-    # more names pass through than during 09:20–10:30 IST (prefilter_pass stored as True for display).
-    prefilter_window = (9 * 60 + 20) <= hm <= (10 * 60 + 30)
+    # more names pass through than during 09:20–13:30 IST (prefilter_pass stored as True for display).
+    prefilter_window = (9 * 60 + 20) <= hm <= (13 * 60 + 30)
     pre_ok, pre_reason, meta = data_service.prefilter_gap_volume_atr(
         instrument_key, c5, c15 or [], prev_close
     )
