@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     # Upstox OAuth Configuration (redirect URI must match Upstox "My Apps" redirect URL exactly)
     UPSTOX_API_KEY: str = os.getenv("UPSTOX_API_KEY", "dd1d3bcc-e1a4-4eed-be7c-1833d9301738")
     UPSTOX_API_SECRET: str = os.getenv("UPSTOX_API_SECRET", "8lvpi8fb1f")
-    UPSTOX_REDIRECT_URI: str = os.getenv("UPSTOX_REDIRECT_URI", "https://www.tradewithcto.com/scan/upstox/callback")
+    UPSTOX_REDIRECT_URI: str = os.getenv("UPSTOX_REDIRECT_URI", "https://tradewithcto.com/scan/upstox/callback")
 
     # CAR GPT Configuration
     CAR_NUMBER_OF_WEEKS: int = int(os.getenv("CAR_NUMBER_OF_WEEKS", "52"))
