@@ -85,12 +85,8 @@ screen -wipe 2>/dev/null || true
 /bin/sleep 1 || true
 
 if [ "$USE_SYSTEMD" = true ]; then
-    log_message "Production path: free port 8000 (orphans) then systemctl restart (no broad pkill)."
-    if command -v fuser >/dev/null 2>&1; then
-        sudo -n fuser -k 8000/tcp >>"$LOG_FILE" 2>&1 || log_message "fuser: nothing on 8000 or skipped (non-fatal)"
-        /bin/sleep 1 || true
-    fi
-    log_message "systemctl restart trademanthan-backend"
+    # systemctl restart stops the old MainPID and starts a new one — no pkill/fuser (those risk killing the wrong PID tree).
+    log_message "Restarting trademanthan-backend via systemctl..."
     sudo systemctl restart trademanthan-backend 2>>"$LOG_FILE" || true
     /bin/sleep 3 || true
 else
