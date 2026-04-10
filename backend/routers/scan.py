@@ -4534,6 +4534,26 @@ async def get_latest_webhook_data(background_tasks: BackgroundTasks, db: Session
     except Exception:
         pass
 
+    # Align today's DB rows with Upstox positions + order book so scan.html matches the broker
+    try:
+        from backend.services.live_trading import reconcile_scan_algo_today_with_broker
+
+        rec = reconcile_scan_algo_today_with_broker(db, force=False)
+        if rec.get("success") and not rec.get("skipped"):
+            logger.info(
+                "Broker↔scan reconcile: updated=%s orphans=%s qty_sync=%s err=%s",
+                rec.get("updated_rows"),
+                rec.get("inserted_orphans"),
+                rec.get("qty_synced"),
+                len(rec.get("errors") or []),
+            )
+        try:
+            db.expire_all()
+        except Exception:
+            pass
+    except Exception as rec_err:
+        logger.warning("Broker reconcile skipped: %s", rec_err)
+
     try:
         ist = pytz.timezone('Asia/Kolkata')
         now = datetime.now(ist)
@@ -5023,6 +5043,29 @@ async def get_latest_webhook_data(background_tasks: BackgroundTasks, db: Session
                 "message": f"Failed to fetch data: {str(e)}"
             }
         )
+
+
+@router.post("/reconcile-broker")
+async def post_reconcile_scan_with_broker(db: Session = Depends(get_db)):
+    """
+    Force one full alignment of today's intraday_stock_options with Upstox positions + order book.
+    Use when scan.html should immediately reflect broker state (ignores the GET /latest throttle).
+    """
+    try:
+        from backend.services.live_trading import reconcile_scan_algo_today_with_broker
+
+        rec = reconcile_scan_algo_today_with_broker(db, force=True)
+        return JSONResponse(
+            status_code=200 if rec.get("success") else 503,
+            content={"status": "success" if rec.get("success") else "error", "data": rec},
+        )
+    except Exception as e:
+        logger.error(f"reconcile-broker: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": str(e)},
+        )
+
 
 @router.post("/refresh-hourly")
 async def refresh_hourly_prices(db: Session = Depends(get_db)):

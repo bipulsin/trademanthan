@@ -20,6 +20,9 @@ UPSTOX_ORDER_PRODUCT = "D"
 _exit_lock_guard = threading.Lock()
 _exit_locks: Dict[str, threading.Lock] = {}
 
+# Throttle broker reconcile for scan.html (GET /scan/latest)
+_reconcile_scan_last_mono: float = 0.0
+
 
 def _live_exit_lock_key(instrument_key: str, buy_order_id: str) -> str:
     return f"{(instrument_key or '').strip().upper()}|{(buy_order_id or '').strip()}"
@@ -879,6 +882,49 @@ def _final_recon_sync_sell_avg_from_broker(trade, qty: int) -> bool:
         new_sell,
     )
     return True
+
+
+def _broker_net_long_qty_for_positions(
+    positions: List[Dict[str, Any]], instrument_key: str
+) -> int:
+    """Sum quantity for a short-term position row matching instrument_token (Upstox)."""
+    total = 0
+    ik = (instrument_key or "").strip()
+    for row in positions:
+        if not isinstance(row, dict):
+            continue
+        tok = (row.get("instrument_token") or row.get("instrument_key") or "").strip()
+        if tok != ik:
+            continue
+        try:
+            total += int(float(row.get("quantity") or 0))
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
+def _load_instrument_dict_by_key(instrument_key: str) -> Optional[Dict[str, Any]]:
+    """Return one instruments.json row for this Upstox instrument_key (NSE_FO|…)."""
+    try:
+        import json
+        from backend.config import get_instruments_file_path
+
+        p = get_instruments_file_path()
+        if not p.exists():
+            return None
+        with open(p, "r") as f:
+            data = json.load(f)
+        if not isinstance(data, list):
+            return None
+        want = (instrument_key or "").strip()
+        for inst in data:
+            if not isinstance(inst, dict):
+                continue
+            if (inst.get("instrument_key") or "").strip() == want:
+                return inst
+    except Exception:
+        return None
+    return None
 
 
 def apply_broker_buy_fill_to_intraday_trade(db, trade) -> bool:
@@ -1833,3 +1879,228 @@ def place_live_upstox_exit(
                 "exit_manually": False,
             }
         return _finalize_sell_result(sell_result)
+
+
+def reconcile_scan_algo_today_with_broker(db, force: bool = False) -> Dict[str, Any]:
+    """
+    Align today's `intraday_stock_options` with Upstox short-term positions + order book.
+
+    - Promotes no_entry / alert_received / cancelled when a same-day BUY exists (apply_broker_buy_fill).
+    - Refreshes buy avg / ids for bought rows (final_reconciliation_refresh_trade_from_broker).
+    - Syncs qty to broker net long when the row is open bought.
+    - Inserts a minimal row for a long F&O position at Upstox with no matching DB row (orphan fill).
+
+    Does not require trading_live. Commits on success when changes were made.
+    """
+    import pytz
+    from sqlalchemy import and_
+    from sqlalchemy.orm.attributes import flag_modified
+
+    from backend.models.trading import IntradayStockOption
+
+    out: Dict[str, Any] = {
+        "success": True,
+        "updated_rows": 0,
+        "inserted_orphans": 0,
+        "qty_synced": 0,
+        "errors": [],
+    }
+
+    if not upstox_service or not getattr(upstox_service, "access_token", None):
+        out["success"] = False
+        out["skipped"] = True
+        out["error"] = "no_upstox_token"
+        return out
+
+    import time as _time
+
+    global _reconcile_scan_last_mono
+    if not force and (_time.monotonic() - float(_reconcile_scan_last_mono)) < 25.0:
+        out["skipped"] = True
+        out["reason"] = "throttled"
+        return out
+
+    ist = pytz.timezone("Asia/Kolkata")
+    now = datetime.now(ist)
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    tomorrow = today + timedelta(days=1)
+
+    pos_res = upstox_service.get_short_term_positions()
+    if not pos_res.get("success"):
+        out["success"] = False
+        out["error"] = pos_res.get("error") or "positions_failed"
+        return out
+    positions = [p for p in (pos_res.get("positions") or []) if isinstance(p, dict)]
+
+    rows = (
+        db.query(IntradayStockOption)
+        .filter(
+            and_(
+                IntradayStockOption.trade_date >= today,
+                IntradayStockOption.trade_date < tomorrow,
+            )
+        )
+        .all()
+    )
+
+    touched = False
+
+    for trade in rows:
+        if getattr(trade, "status", None) == "sold":
+            continue
+        try:
+            st = getattr(trade, "status", None)
+            if st in ("no_entry", "alert_received", "cancelled"):
+                if apply_broker_buy_fill_to_intraday_trade(db, trade):
+                    touched = True
+                    out["updated_rows"] += 1
+            st2 = getattr(trade, "status", None)
+            if st2 in ("bought", "cancelled") and getattr(trade, "exit_reason", None) is None:
+                if final_reconciliation_refresh_trade_from_broker(db, trade):
+                    touched = True
+                    out["updated_rows"] += 1
+
+            if (
+                getattr(trade, "status", None) == "bought"
+                and getattr(trade, "exit_reason", None) is None
+            ):
+                ikey = (getattr(trade, "instrument_key", None) or "").strip()
+                if ikey and positions:
+                    net = _broker_net_long_qty_for_positions(positions, ikey)
+                    cq = int(getattr(trade, "qty", None) or 0)
+                    if net > 0 and cq != net:
+                        trade.qty = net
+                        flag_modified(trade, "qty")
+                        touched = True
+                        out["qty_synced"] += 1
+        except Exception as ex:
+            out["errors"].append(str(ex)[:220])
+            logger.warning("reconcile row id=%s: %s", getattr(trade, "id", "?"), ex)
+
+    try:
+        db.flush()
+    except Exception:
+        pass
+    rows = (
+        db.query(IntradayStockOption)
+        .filter(
+            and_(
+                IntradayStockOption.trade_date >= today,
+                IntradayStockOption.trade_date < tomorrow,
+            )
+        )
+        .all()
+    )
+
+    # Orphan long F&O positions: broker has qty, DB has no row for this instrument_key
+    def _row_exists_for_ikey(ikey: str) -> bool:
+        for tr in rows:
+            ik = (getattr(tr, "instrument_key", None) or "").strip()
+            if ik and _instrument_key_match(ik, ikey):
+                return True
+        return False
+
+    for pos in positions:
+        ikey = (pos.get("instrument_token") or pos.get("instrument_key") or "").strip()
+        if not ikey:
+            continue
+        u = ikey.upper()
+        if "NSE_FO" not in u and "BSE_FO" not in u:
+            continue
+        try:
+            qty_b = int(float(pos.get("quantity") or 0))
+        except (TypeError, ValueError):
+            continue
+        if qty_b <= 0:
+            continue
+        if _row_exists_for_ikey(ikey):
+            continue
+
+        try:
+            inst = _load_instrument_dict_by_key(ikey)
+            tsym = (
+                (inst or {}).get("trading_symbol")
+                or (inst or {}).get("tradingsymbol")
+                or pos.get("trading_symbol")
+                or ""
+            )
+            tsym_u = str(tsym).strip().upper()
+            underlying = (
+                (inst or {}).get("underlying_symbol")
+                or (inst or {}).get("underlying")
+                or ""
+            )
+            if not (underlying or "").strip():
+                underlying = tsym_u.split("-")[0] if tsym_u else "UNKNOWN"
+            opt_type = "PE" if tsym_u.endswith("PE") else "CE"
+            strike = (inst or {}).get("strike_price") or (inst or {}).get("strike") or 0.0
+            try:
+                strike_f = float(strike) if strike else 0.0
+            except (TypeError, ValueError):
+                strike_f = 0.0
+
+            avg = 0.0
+            for k in ("average_price", "avg_price", "average", "day_buy_average_price"):
+                v = pos.get(k)
+                if v is not None:
+                    try:
+                        avg = float(v)
+                        if avg > 0:
+                            break
+                    except (TypeError, ValueError):
+                        pass
+            if avg <= 0:
+                q = upstox_service.get_market_quote_by_key(ikey)
+                if q and float(q.get("last_price") or 0) > 0:
+                    avg = float(q.get("last_price"))
+
+            rec = IntradayStockOption(
+                alert_time=now,
+                alert_type="Bullish" if opt_type == "CE" else "Bearish",
+                scan_name="Broker reconciliation",
+                stock_name=str(underlying)[:100],
+                stock_ltp=0.0,
+                stock_vwap=0.0,
+                option_contract=(tsym or ikey)[:255],
+                option_type=opt_type,
+                option_strike=strike_f,
+                option_ltp=round(avg, 2) if avg > 0 else None,
+                qty=qty_b,
+                trade_date=today,
+                status="bought",
+                buy_price=round(avg, 2) if avg > 0 else None,
+                buy_time=now,
+                buy_order_id=None,
+                instrument_key=ikey,
+                stop_loss=round(avg * 0.95, 2) if avg > 0 else None,
+                sell_price=None,
+                pnl=0.0,
+                no_entry_reason=None,
+                exit_reason=None,
+            )
+            db.add(rec)
+            rows.append(rec)
+            touched = True
+            out["inserted_orphans"] += 1
+            logger.warning(
+                "📌 Reconcile: inserted orphan broker position %s qty=%s @ ₹%.2f",
+                ikey,
+                qty_b,
+                avg,
+            )
+        except Exception as ex:
+            out["errors"].append(f"orphan {ikey}: {str(ex)[:180]}")
+            logger.warning("reconcile orphan %s: %s", ikey, ex)
+
+    if touched:
+        try:
+            db.commit()
+        except Exception as ex:
+            db.rollback()
+            out["success"] = False
+            out["error"] = str(ex)
+            return out
+
+    # Successful run (positions API ok): throttle future calls
+    _reconcile_scan_last_mono = _time.monotonic()
+    return out
