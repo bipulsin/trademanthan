@@ -51,6 +51,11 @@ log_message "Deployed commit: $(git rev-parse --short HEAD 2>/dev/null || echo '
 
 # Kill existing backend process (match both patterns to catch all instances)
 log_message "Stopping existing backend..."
+# Manual `screen -S trademanthan` + uvicorn holds :8000 and causes systemd restart loops (errno 98).
+log_message "Closing trademanthan screen session if present..."
+screen -S trademanthan -X quit 2>/dev/null || true
+screen -wipe 2>/dev/null || true
+sleep 1
 pkill -f "uvicorn.*main:app" || true
 pkill -f "uvicorn.*backend.main:app" || true
 sleep 2
