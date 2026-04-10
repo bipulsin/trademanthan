@@ -13,12 +13,9 @@ log_message() {
     local ts
     ts="$(/bin/date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo 'unknown-time')"
     local line="[$ts] $1"
-    if command -v tee >/dev/null 2>&1; then
-        echo "$line" | tee -a "$LOG_FILE"
-    else
-        echo "$line" >> "$LOG_FILE"
-        echo "$line"
-    fi
+    # Append only (no tee/pipe). Pipes can get SIGPIPE if the parent closes stdout mid-deploy
+    # (e.g. after uvicorn is killed), which aborts the script when set -e is on.
+    echo "$line" >> "$LOG_FILE"
 }
 
 # Production (systemd) listens on 8000. Manual fallback uses dev port only (see dev_backend_env.sh).
@@ -80,11 +77,14 @@ if pgrep -f "uvicorn.*main:app" > /dev/null || pgrep -f "uvicorn.*backend.main:a
     sleep 1
 fi
 
+log_message "Checkpoint: uvicorn stopped; proceeding to port cleanup / service restart..."
+
 # Orphan listeners (e.g. manual python3/uvicorn) may not match pkill patterns but still hold :8000,
 # causing systemd to fail with "address already in use" in a restart loop.
 if command -v fuser >/dev/null 2>&1; then
     log_message "Ensuring port 8000 is free..."
-    sudo fuser -k 8000/tcp >>"$LOG_FILE" 2>&1 || true
+    # -n: non-interactive sudo (fail fast if password would be required)
+    sudo -n fuser -k 8000/tcp >>"$LOG_FILE" 2>&1 || log_message "fuser cleanup skipped or failed (non-fatal)"
     sleep 1
 fi
 

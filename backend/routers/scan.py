@@ -3739,10 +3739,12 @@ async def deploy_backend():
     try:
         DEPLOY_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
         requested_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        DEPLOY_LOG_FILE.write_text(
-            f"[{requested_at}] Deployment requested via /scan/deploy-backend\n",
-            encoding="utf-8",
-        )
+        # Append — never truncate mid-flight (a second deploy could otherwise wipe logs while bash still runs).
+        with DEPLOY_LOG_FILE.open("a", encoding="utf-8") as _df:
+            _df.write("\n")
+            _df.write(
+                f"[{requested_at}] ========== Deployment requested via /scan/deploy-backend ==========\n"
+            )
     except Exception as e:
         logger.error(f"Failed to initialize deployment log: {e}")
         return JSONResponse(
