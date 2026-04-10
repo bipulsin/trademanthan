@@ -4,7 +4,7 @@ Consolidates all scan algorithm schedulers into a single controller:
 - Morning Telegram ping (8:10 AM IST): TradeWithCTO channel — healthy vs not started
 - Instruments Downloader (daily at 9:05 AM)
 - Health Monitor (every 30 min from 8:30 AM to 4:00 PM IST)
-- VWAP Updater (hourly updates + cycles + EOD close)
+- VWAP Updater (every 5 min during 9:15–15:35 IST session + cycles + EOD close)
 - Index Price Scheduler (every 5 min during market hours)
 - Entry slip monitor (every 15 min during market hours): cancel unfilled entry orders after 2 checks
 - Final reconciliation (3:45 PM & 4:00 PM): broker buy/sell/PnL sync; time_based → Exit-TM after 3:15 PM exits
@@ -22,7 +22,7 @@ import os
 import threading
 import requests
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, time as dt_time
 import pytz
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -173,6 +173,27 @@ def _attach_scan_st1_mirror_loggers() -> None:
 _attach_scan_st1_mirror_loggers()
 
 
+def run_scan_st1_vwap_update_gated() -> None:
+    """
+    APScheduler fires every 5 minutes in the 09:00–15:55 IST hour range; we only run real work
+    on weekdays between 09:15 and 15:35 so open-position VWAP / SL / VWAP-exit checks stay aligned
+    with scan.html signals (previously hourly-only, so UI showed EXIT VWAP long before broker exit).
+    """
+    ist = pytz.timezone("Asia/Kolkata")
+    now = datetime.now(ist)
+    if now.weekday() >= 5:
+        return
+    t = now.time()
+    if t < dt_time(9, 15) or t > dt_time(15, 35):
+        return
+    logger.info("🔧 Triggering VWAP Update job (5-min cadence, IST session gate)...")
+    try:
+        update_vwap_for_all_open_positions()
+        logger.info("✅ VWAP Update job (5-min) completed")
+    except Exception as e:
+        logger.error("❌ VWAP Update job (5-min) failed: %s", e, exc_info=True)
+
+
 class ScanST1AlgoScheduler:
     """Unified scheduler controller for all scan algorithm jobs"""
     
@@ -302,29 +323,22 @@ class ScanST1AlgoScheduler:
             )
             logger.info("✅ Scheduled: Daily Health Report (4:00 PM)")
             
-            # 4. VWAP Updater - Hourly updates (9:15 AM - 3:15 PM)
-            for hour in range(9, 16):  # 9 AM to 3 PM
-                def create_vwap_update_wrapper(h):
-                    def run_vwap_update():
-                        logger.info(f"🔧 Triggering VWAP Update job at {h:02d}:15...")
-                        try:
-                            update_vwap_for_all_open_positions()
-                            logger.info(f"✅ VWAP Update job at {h:02d}:15 completed")
-                        except Exception as e:
-                            logger.error(f"❌ VWAP Update job at {h:02d}:15 failed: {e}", exc_info=True)
-                    return run_vwap_update
-                
-                self.scheduler.add_job(
-                    create_vwap_update_wrapper(hour),
-                    trigger=CronTrigger(hour=hour, minute=15, timezone='Asia/Kolkata'),
-                    id=f'scan_st1_vwap_update_{hour}',
-                    name=f'Update VWAP {hour:02d}:15',
-                    replace_existing=True,
-                    max_instances=1,
-                    misfire_grace_time=300,
-                    coalesce=True
-                )
-            logger.info("✅ Scheduled: VWAP Updates (hourly 9:15 AM - 3:15 PM)")
+            # 4. VWAP Updater — every 5 minutes in 9–15 IST (gated to 9:15–15:35 weekdays) so exits track UI
+            self.scheduler.add_job(
+                run_scan_st1_vwap_update_gated,
+                trigger=CronTrigger(
+                    minute="0,5,10,15,20,25,30,35,40,45,50,55",
+                    hour="9-15",
+                    timezone="Asia/Kolkata",
+                ),
+                id="scan_st1_vwap_update_every5",
+                name="Update VWAP + exits (every 5 min, session gated)",
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=300,
+                coalesce=True,
+            )
+            logger.info("✅ Scheduled: VWAP Updates (every 5 min 9:00–15:55 IST clock, work 9:15–15:35 weekdays)")
             
             # EOD Close at 3:25 PM
             def run_eod_close():

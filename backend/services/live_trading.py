@@ -1706,12 +1706,26 @@ def place_live_upstox_exit(
     """
     if not is_trading_live_enabled():
         return {"success": False, "skipped": True, "error": "Live trading disabled"}
-    if not buy_order_id:
-        return {"success": False, "skipped": False, "error": "Missing buy_order_id"}
     if not upstox_service:
         return {"success": False, "error": "Upstox service unavailable"}
 
-    oid = str(buy_order_id).strip()
+    ik = (instrument_key or "").strip()
+    if not ik:
+        return {"success": False, "skipped": False, "error": "Missing instrument_key"}
+
+    # Market SELL only needs instrument_key + qty; buy_order_id is for tags, GTT legacy, and dedupe locks.
+    # Rows missing buy_order_id (sync gap / manual mark) must still be able to exit at VWAP/SL/TM.
+    raw_buy = (buy_order_id or "").strip()
+    if raw_buy:
+        oid = raw_buy
+    else:
+        tail = ik[-24:] if len(ik) > 24 else ik
+        oid = f"NOBUY|{tail}"
+        logger.warning(
+            "⚠️ LIVE EXIT: missing buy_order_id for %s %s — using synthetic ref for tag/lock; placing MARKET SELL anyway",
+            stock_name,
+            option_contract,
+        )
     ex = (existing_sell_order_id or "").strip()
     if ex:
         logger.warning(

@@ -39,9 +39,6 @@ def _try_live_exit(position, reason: str, option_contract: str):
     'Exit Manually' and keep status bought (no duplicate SELL retries).
     """
     buy_order_id = getattr(position, "buy_order_id", None)
-    if not buy_order_id:
-        logger.warning(f"⚠️ LIVE exit aborted for {position.stock_name} - missing buy_order_id (cannot place SELL)")
-        return False, None, False
     existing_sell = getattr(position, "sell_order_id", None)
     result = live_trading.place_live_upstox_exit(
         instrument_key=position.instrument_key,

@@ -852,7 +852,7 @@ function renderAlertGroup(alert, type, omitTableHeader = false) {
                                 // VWAP cross check (directional)
                                 if ((option_type === 'CE' && stock_ltp < stock_vwap) || 
                                     (option_type === 'PE' && stock_ltp > stock_vwap)) {
-                                    statusDisplay = '<span style="background: #8b5cf6; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">📉 EXIT VWAP</span>';
+                                    statusDisplay = '<span style="background: #8b5cf6; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;" title="VWAP cross signal — broker exit runs on server; refresh shortly">📉 VWAP exit (signal)</span>';
                                 } else if (buy_price > 0 && option_ltp >= (buy_price * 1.5)) {
                                     // Profit target hit
                                     statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">🎯 EXIT TARGET</span>';
@@ -1025,7 +1025,7 @@ function renderAlertGroup(alert, type, omitTableHeader = false) {
                             // VWAP cross check (directional)
                             if ((option_type === 'CE' && stock_ltp < stock_vwap) || 
                                 (option_type === 'PE' && stock_ltp > stock_vwap)) {
-                                statusDisplay = '<span style="background: #8b5cf6; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXIT VWAP</span>';
+                                statusDisplay = '<span style="background: #8b5cf6; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;" title="VWAP cross signal — broker exit runs on server">VWAP exit (signal)</span>';
                             } else if (buy_price > 0 && option_ltp >= (buy_price * 1.5)) {
                                 // Profit target hit
                                 statusDisplay = '<span style="background: #16a34a; color: white; padding: 4px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; white-space: nowrap; display: inline-block;">EXIT TG</span>';
