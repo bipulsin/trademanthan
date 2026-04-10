@@ -21,9 +21,14 @@ log_message() {
     fi
 }
 
-# Function to check if backend is responding
+# Production (systemd) listens on 8000. Manual fallback uses dev port only (see dev_backend_env.sh).
 check_backend_health() {
     timeout 5 curl -s -f "http://localhost:8000/scan/health" > /dev/null 2>&1
+    return $?
+}
+
+check_dev_backend_health() {
+    timeout 5 curl -s -f "http://localhost:${TRADEMANTHAN_DEV_PORT:-9000}/scan/health" > /dev/null 2>&1
     return $?
 }
 
@@ -33,6 +38,11 @@ log_message "Starting backend deployment..."
 cd /home/ubuntu/trademanthan || {
     log_message "ERROR: Could not change to project directory"
     exit 1
+}
+# shellcheck disable=SC1091
+. "/home/ubuntu/trademanthan/backend/scripts/dev_backend_env.sh" 2>/dev/null || {
+    TRADEMANTHAN_DEV_SCREEN=trademanthan-dev
+    TRADEMANTHAN_DEV_PORT=9000
 }
 
 # Fetch and reset to latest (ensures clean deploy, no local drift)
@@ -52,8 +62,10 @@ log_message "Deployed commit: $(git rev-parse --short HEAD 2>/dev/null || echo '
 # Kill existing backend process (match both patterns to catch all instances)
 log_message "Stopping existing backend..."
 # Manual `screen -S trademanthan` + uvicorn holds :8000 and causes systemd restart loops (errno 98).
-log_message "Closing trademanthan screen session if present..."
+log_message "Closing legacy manual screen session (if it held :8000)..."
 screen -S trademanthan -X quit 2>/dev/null || true
+log_message "Closing dev screen session (auxiliary :${TRADEMANTHAN_DEV_PORT:-9000})..."
+screen -S "${TRADEMANTHAN_DEV_SCREEN:-trademanthan-dev}" -X quit 2>/dev/null || true
 screen -wipe 2>/dev/null || true
 sleep 1
 pkill -f "uvicorn.*main:app" || true
@@ -82,16 +94,17 @@ if systemctl list-unit-files 2>/dev/null | grep -q "trademanthan-backend.service
     sudo systemctl restart trademanthan-backend 2>>"$LOG_FILE" || true
     sleep 3
 else
-    # Fallback: screen session
-    log_message "Starting backend in screen session..."
+    # Fallback (no systemd): auxiliary server on DEV port only — never 8000 (reserved for production).
+    log_message "Starting auxiliary backend in screen (${TRADEMANTHAN_DEV_SCREEN:-trademanthan-dev} :${TRADEMANTHAN_DEV_PORT:-9000})..."
     cd /home/ubuntu/trademanthan
     source backend/venv/bin/activate
 
     screen -wipe 2>/dev/null || true
     screen -S trademanthan -X quit 2>/dev/null || true
+    screen -S "${TRADEMANTHAN_DEV_SCREEN:-trademanthan-dev}" -X quit 2>/dev/null || true
     sleep 1
 
-    screen -dmS trademanthan bash -c 'cd /home/ubuntu/trademanthan && source backend/venv/bin/activate && python3 -u -m uvicorn main:app --host 0.0.0.0 --port 8000'
+    screen -dmS "${TRADEMANTHAN_DEV_SCREEN:-trademanthan-dev}" bash -c "cd /home/ubuntu/trademanthan && source backend/venv/bin/activate && python3 -u -m uvicorn backend.main:app --host 0.0.0.0 --port ${TRADEMANTHAN_DEV_PORT:-9000}"
     sleep 3
 fi
 BACKEND_PID=$(pgrep -f "uvicorn.*main:app" | head -1)
@@ -102,9 +115,14 @@ log_message "Backend started with PID: $BACKEND_PID"
 log_message "Waiting for backend to start..."
 for i in {1..20}; do
     sleep 1
-    if check_backend_health; then
+    if systemctl list-unit-files 2>/dev/null | grep -q "trademanthan-backend.service" && check_backend_health; then
         log_message "✅ Backend is healthy and responding"
         # Show last few lines of startup log from trademanthan.log (with timeout)
+        timeout 2 tail -10 /home/ubuntu/trademanthan/logs/trademanthan.log 2>/dev/null || true
+        exit 0
+    fi
+    if ! systemctl list-unit-files 2>/dev/null | grep -q "trademanthan-backend.service" && check_dev_backend_health; then
+        log_message "✅ Auxiliary backend is healthy on port ${TRADEMANTHAN_DEV_PORT:-9000}"
         timeout 2 tail -10 /home/ubuntu/trademanthan/logs/trademanthan.log 2>/dev/null || true
         exit 0
     fi

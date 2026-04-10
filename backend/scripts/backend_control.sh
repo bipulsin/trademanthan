@@ -7,10 +7,16 @@ set -e
 
 ACTION="${1:-status}"
 TIMEOUT_SECONDS=10
-LOG_FILE="/tmp/uvicorn.log"
-PID_FILE="/tmp/uvicorn.pid"
+LOG_FILE="/tmp/uvicorn_dev_9000.log"
+PID_FILE="/tmp/uvicorn_dev_9000.pid"
 PROJECT_DIR="/home/ubuntu/trademanthan"
 BACKEND_DIR="$PROJECT_DIR/backend"
+# shellcheck disable=SC1091
+. "$BACKEND_DIR/scripts/dev_backend_env.sh" 2>/dev/null || {
+    TRADEMANTHAN_DEV_SCREEN=trademanthan-dev
+    TRADEMANTHAN_DEV_PORT=9000
+}
+# Controls auxiliary uvicorn on TRADEMANTHAN_DEV_PORT only — production uses systemd on :8000.
 
 # Function to run command with timeout
 run_with_timeout() {
@@ -33,9 +39,9 @@ run_with_timeout() {
     fi
 }
 
-# Function to check if backend is running
+# Function to check if auxiliary backend is running
 check_backend_running() {
-    if pgrep -f "uvicorn.*main:app" > /dev/null 2>&1; then
+    if pgrep -f "uvicorn.*backend.main:app.*--port ${TRADEMANTHAN_DEV_PORT}" > /dev/null 2>&1; then
         return 0
     fi
     return 1
@@ -47,7 +53,7 @@ check_backend_health() {
     local attempt=1
     
     while [ $attempt -le $max_attempts ]; do
-        if curl -s -f --max-time 3 "http://localhost:8000/scan/health" > /dev/null 2>&1; then
+        if curl -s -f --max-time 3 "http://localhost:${TRADEMANTHAN_DEV_PORT}/scan/health" > /dev/null 2>&1; then
             return 0
         fi
         attempt=$((attempt + 1))
@@ -58,13 +64,14 @@ check_backend_health() {
 
 # Function to stop backend
 stop_backend() {
-    echo "Stopping backend..."
-    pkill -f "uvicorn.*main:app" 2>/dev/null || true
+    echo "Stopping auxiliary backend on :${TRADEMANTHAN_DEV_PORT}..."
+    screen -S "$TRADEMANTHAN_DEV_SCREEN" -X quit 2>/dev/null || true
+    pkill -f "uvicorn.*backend.main:app.*--port ${TRADEMANTHAN_DEV_PORT}" 2>/dev/null || true
     sleep 1
     
     # Force kill if still running
     if check_backend_running; then
-        pkill -9 -f "uvicorn.*main:app" 2>/dev/null || true
+        pkill -9 -f "uvicorn.*backend.main:app.*--port ${TRADEMANTHAN_DEV_PORT}" 2>/dev/null || true
         sleep 1
     fi
     
@@ -95,8 +102,8 @@ start_backend() {
         return 1
     }
     
-    # Start backend in background
-    nohup python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 > "$LOG_FILE" 2>&1 &
+    # Start auxiliary backend in background (not production :8000)
+    nohup python3 -m uvicorn backend.main:app --host 0.0.0.0 --port "${TRADEMANTHAN_DEV_PORT}" > "$LOG_FILE" 2>&1 &
     local pid=$!
     echo "$pid" > "$PID_FILE"
     

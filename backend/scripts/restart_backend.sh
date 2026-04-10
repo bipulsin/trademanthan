@@ -8,29 +8,33 @@ set -e
 ACTION="${1:-restart}"
 PROJECT_DIR="/home/ubuntu/trademanthan"
 BACKEND_DIR="${PROJECT_DIR}/backend"
-LOG_FILE="/tmp/uvicorn.log"
+LOG_FILE="/tmp/uvicorn_dev_9000.log"
 SERVICE_NAME="trademanthan-backend"
+# shellcheck disable=SC1091
+. "${BACKEND_DIR}/scripts/dev_backend_env.sh" 2>/dev/null || {
+    TRADEMANTHAN_DEV_SCREEN=trademanthan-dev
+    TRADEMANTHAN_DEV_PORT=9000
+}
 
 check_backend_running() {
-    # Check if systemd service is running
     if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
         return 0
     fi
-    
-    # Check if process is running (non-systemd)
-    if pgrep -f "uvicorn.*main:app" > /dev/null 2>&1; then
+    if pgrep -f "uvicorn.*backend.main:app.*--port ${TRADEMANTHAN_DEV_PORT}" > /dev/null 2>&1; then
         return 0
     fi
-    
     return 1
 }
 
 check_backend_health() {
     local max_attempts=3
     local attempt=1
-    
+    local url="http://localhost:8000/scan/health"
+    if ! systemctl list-unit-files 2>/dev/null | grep -q "^${SERVICE_NAME}.service"; then
+        url="http://localhost:${TRADEMANTHAN_DEV_PORT}/scan/health"
+    fi
     while [ $attempt -le $max_attempts ]; do
-        if curl -s -f --max-time 3 "http://localhost:8000/scan/health" > /dev/null 2>&1; then
+        if curl -s -f --max-time 3 "$url" > /dev/null 2>&1; then
             return 0
         fi
         attempt=$((attempt + 1))
@@ -58,12 +62,13 @@ check_status() {
     
     echo ""
     
-    # Check process
-    if pgrep -f "uvicorn.*main:app" > /dev/null 2>&1; then
-        local pid=$(pgrep -f "uvicorn.*main:app" | head -1)
-        echo "Process: ✅ RUNNING (PID: $pid)"
+    # Check auxiliary process (non-systemd installs)
+    if pgrep -f "uvicorn.*backend.main:app.*--port ${TRADEMANTHAN_DEV_PORT}" > /dev/null 2>&1; then
+        local pid
+        pid=$(pgrep -f "uvicorn.*backend.main:app.*--port ${TRADEMANTHAN_DEV_PORT}" | head -1)
+        echo "Auxiliary uvicorn (:${TRADEMANTHAN_DEV_PORT}): ✅ RUNNING (PID: $pid)"
     else
-        echo "Process: ❌ NOT RUNNING"
+        echo "Auxiliary uvicorn (:${TRADEMANTHAN_DEV_PORT}): ❌ NOT RUNNING"
     fi
     
     echo ""
@@ -105,22 +110,19 @@ restart_backend() {
         echo "Systemd service not found. Using manual restart..."
         
         # Stop existing processes
-        echo "Stopping existing backend processes..."
-        pkill -f "uvicorn.*main:app" 2>/dev/null || true
-        pkill -f "uvicorn backend.main:app" 2>/dev/null || true
+        echo "Stopping existing auxiliary backend processes..."
+        screen -S "${TRADEMANTHAN_DEV_SCREEN}" -X quit 2>/dev/null || true
+        pkill -f "uvicorn.*backend.main:app.*--port ${TRADEMANTHAN_DEV_PORT}" 2>/dev/null || true
         sleep 2
-        
-        # Force kill if still running
-        if pgrep -f "uvicorn.*main:app" > /dev/null 2>&1; then
-            pkill -9 -f "uvicorn.*main:app" 2>/dev/null || true
+        if pgrep -f "uvicorn.*backend.main:app.*--port ${TRADEMANTHAN_DEV_PORT}" > /dev/null 2>&1; then
+            pkill -9 -f "uvicorn.*backend.main:app.*--port ${TRADEMANTHAN_DEV_PORT}" 2>/dev/null || true
             sleep 1
         fi
         
-        # Start backend
-        echo "Starting backend..."
+        echo "Starting auxiliary backend on :${TRADEMANTHAN_DEV_PORT} (production uses systemd :8000)..."
         cd "$PROJECT_DIR" || exit 1
         source "$BACKEND_DIR/venv/bin/activate" || exit 1
-        nohup python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 > "$LOG_FILE" 2>&1 &
+        nohup python3 -m uvicorn backend.main:app --host 0.0.0.0 --port "${TRADEMANTHAN_DEV_PORT}" > "$LOG_FILE" 2>&1 &
         local pid=$!
         echo "Backend started with PID: $pid"
         sleep 3
