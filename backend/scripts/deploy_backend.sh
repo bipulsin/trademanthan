@@ -87,7 +87,9 @@ screen -wipe 2>/dev/null || true
 if [ "$USE_SYSTEMD" = true ]; then
     # systemctl restart stops the old MainPID and starts a new one — no pkill/fuser (those risk killing the wrong PID tree).
     log_message "Restarting trademanthan-backend via systemctl..."
-    sudo systemctl restart trademanthan-backend 2>>"$LOG_FILE" || true
+    _rc=0
+    timeout 120 sudo systemctl restart trademanthan-backend 2>>"$LOG_FILE" || _rc=$?
+    log_message "systemctl restart finished (exit ${_rc}; 124=timeout)"
     /bin/sleep 3 || true
 else
     log_message "Starting auxiliary backend in screen (${TRADEMANTHAN_DEV_SCREEN:-trademanthan-dev} :${TRADEMANTHAN_DEV_PORT:-9000})..."
