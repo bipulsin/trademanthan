@@ -56,6 +56,9 @@ if [ "${1:-}" != "--post-pull" ]; then
 fi
 
 # ─── Phase 2: stop old backend, restart service (always from current script file on disk) ───
+# During systemd churn, sleep/pkill may be interrupted; do not abort the whole deploy on non-zero.
+set +e
+
 log_message "Starting backend deployment (phase: stop / restart)..."
 
 cd /home/ubuntu/trademanthan || {
@@ -74,16 +77,17 @@ screen -S trademanthan -X quit 2>/dev/null || true
 log_message "Closing dev screen session (auxiliary :${TRADEMANTHAN_DEV_PORT:-9000})..."
 screen -S "${TRADEMANTHAN_DEV_SCREEN:-trademanthan-dev}" -X quit 2>/dev/null || true
 screen -wipe 2>/dev/null || true
-sleep 1
-pkill -f "uvicorn.*main:app" || true
-pkill -f "uvicorn.*backend.main:app" || true
-sleep 2
+/bin/sleep 1 || true
+log_message "Sending SIGTERM to uvicorn (if any)..."
+pkill -f "uvicorn.*main:app" 2>/dev/null || true
+pkill -f "uvicorn.*backend.main:app" 2>/dev/null || true
+/bin/sleep 2 || true
 
 if pgrep -f "uvicorn.*main:app" > /dev/null || pgrep -f "uvicorn.*backend.main:app" > /dev/null; then
     log_message "⚠️ Force killing backend process..."
-    pkill -9 -f "uvicorn.*main:app" || true
-    pkill -9 -f "uvicorn.*backend.main:app" || true
-    sleep 1
+    pkill -9 -f "uvicorn.*main:app" 2>/dev/null || true
+    pkill -9 -f "uvicorn.*backend.main:app" 2>/dev/null || true
+    /bin/sleep 1 || true
 fi
 
 log_message "Checkpoint: uvicorn stopped; proceeding to port cleanup / service restart..."
@@ -91,7 +95,7 @@ log_message "Checkpoint: uvicorn stopped; proceeding to port cleanup / service r
 if command -v fuser >/dev/null 2>&1; then
     log_message "Ensuring port 8000 is free..."
     sudo -n fuser -k 8000/tcp >>"$LOG_FILE" 2>&1 || log_message "fuser cleanup skipped or failed (non-fatal)"
-    sleep 1
+    /bin/sleep 1 || true
 fi
 
 if systemctl list-unit-files 2>/dev/null | grep -q "trademanthan-backend.service"; then
@@ -110,7 +114,7 @@ else
     sleep 1
 
     screen -dmS "${TRADEMANTHAN_DEV_SCREEN:-trademanthan-dev}" bash -c "cd /home/ubuntu/trademanthan && source backend/venv/bin/activate && python3 -u -m uvicorn backend.main:app --host 0.0.0.0 --port ${TRADEMANTHAN_DEV_PORT:-9000}"
-    sleep 3
+    /bin/sleep 3 || true
 fi
 BACKEND_PID=$(pgrep -f "uvicorn.*main:app" | head -1)
 
@@ -118,7 +122,7 @@ log_message "Backend started with PID: $BACKEND_PID"
 
 log_message "Waiting for backend to start..."
 for _i in {1..20}; do
-    sleep 1
+    /bin/sleep 1 || true
     if systemctl list-unit-files 2>/dev/null | grep -q "trademanthan-backend.service" && check_backend_health; then
         log_message "✅ Backend is healthy and responding"
         timeout 2 tail -10 /home/ubuntu/trademanthan/logs/trademanthan.log 2>/dev/null || true
