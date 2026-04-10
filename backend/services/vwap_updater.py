@@ -3683,111 +3683,127 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                         logger.info(f"      - Instrument Key: {'✅' if trade.instrument_key else '❌'} ({trade.instrument_key or 'Missing'})")
                     
                     if all_conditions_met:
-                        # Fetch current option LTP
-                        option_quote = vwap_service.get_market_quote_by_key(trade.instrument_key)
-                        if option_quote and option_quote.get('last_price', 0) > 0:
-                            current_option_ltp = float(option_quote.get('last_price', 0))
+                        # Webhook may have entered the same row moments earlier — avoid a second broker order.
+                        try:
+                            db.refresh(trade)
+                        except Exception:
+                            pass
+                        if trade.status not in ('no_entry', 'alert_received'):
+                            logger.info(
+                                f"⏭️ Cycle {cycle_number} - {stock_name}: Deferred live entry skipped — "
+                                f"status is already '{trade.status}' after refresh"
+                            )
+                        elif trade.buy_order_id:
+                            logger.warning(
+                                f"⏭️ Cycle {cycle_number} - {stock_name}: Deferred live entry skipped — "
+                                f"buy_order_id already set ({trade.buy_order_id})"
+                            )
+                        else:
+                            # Fetch current option LTP
+                            option_quote = vwap_service.get_market_quote_by_key(trade.instrument_key)
+                            if option_quote and option_quote.get('last_price', 0) > 0:
+                                current_option_ltp = float(option_quote.get('last_price', 0))
 
-                            # Calculate stop loss BEFORE placing live order
-                            stop_loss_price = None
-                            try:
-                                option_candles = vwap_service.get_option_candles_current_and_previous(trade.instrument_key)
-                                if option_candles and option_candles.get('current_candle'):
-                                    current_candle_open = option_candles.get('current_candle', {}).get('open', 0)
-                                    if current_candle_open and current_candle_open > 0:
-                                        stop_loss_price = current_candle_open * 0.95
-                                        logger.info(f"   Stop Loss: ₹{stop_loss_price:.2f} (5% below candle open: ₹{current_candle_open:.2f})")
+                                # Calculate stop loss BEFORE placing live order
+                                stop_loss_price = None
+                                try:
+                                    option_candles = vwap_service.get_option_candles_current_and_previous(trade.instrument_key)
+                                    if option_candles and option_candles.get('current_candle'):
+                                        current_candle_open = option_candles.get('current_candle', {}).get('open', 0)
+                                        if current_candle_open and current_candle_open > 0:
+                                            stop_loss_price = current_candle_open * 0.95
+                                            logger.info(f"   Stop Loss: ₹{stop_loss_price:.2f} (5% below candle open: ₹{current_candle_open:.2f})")
+                                        else:
+                                            stop_loss_price = current_option_ltp * 0.95
+                                            logger.warning(f"   Stop Loss: ₹{stop_loss_price:.2f} (5% below buy price, candle open not available)")
                                     else:
                                         stop_loss_price = current_option_ltp * 0.95
-                                        logger.warning(f"   Stop Loss: ₹{stop_loss_price:.2f} (5% below buy price, candle open not available)")
-                                else:
+                                        logger.warning(f"   Stop Loss: ₹{stop_loss_price:.2f} (5% below buy price, candles not available)")
+                                except Exception as sl_error:
                                     stop_loss_price = current_option_ltp * 0.95
-                                    logger.warning(f"   Stop Loss: ₹{stop_loss_price:.2f} (5% below buy price, candles not available)")
-                            except Exception as sl_error:
-                                stop_loss_price = current_option_ltp * 0.95
-                                logger.warning(f"   Stop Loss: ₹{stop_loss_price:.2f} (5% below buy price, error fetching candles: {str(sl_error)})")
+                                    logger.warning(f"   Stop Loss: ₹{stop_loss_price:.2f} (5% below buy price, error fetching candles: {str(sl_error)})")
 
-                            live_entry_result = live_trading.place_live_upstox_entry_market_first(
-                                instrument_key=trade.instrument_key,
-                                qty=trade.qty or 0,
-                                stock_name=stock_name,
-                                option_contract=trade.option_contract or "N/A",
-                                buy_price=current_option_ltp,
-                                stop_loss=stop_loss_price
-                            )
-                            if not live_entry_result.get("skipped") and not live_entry_result.get("success"):
-                                api_err = live_entry_result.get('error') or 'Unknown'
-                                trade.no_entry_reason = ("Live order failed: " + api_err)[:255]
-                                trade.exit_reason = api_err[:50]
-                                logger.error(f"🚨 LIVE ENTRY FAILED for {stock_name}: {api_err}")
-                                continue
+                                live_entry_result = live_trading.place_live_upstox_entry_market_first(
+                                    instrument_key=trade.instrument_key,
+                                    qty=trade.qty or 0,
+                                    stock_name=stock_name,
+                                    option_contract=trade.option_contract or "N/A",
+                                    buy_price=current_option_ltp,
+                                    stop_loss=stop_loss_price
+                                )
+                                if live_entry_result.get("skipped"):
+                                    logger.info(
+                                        f"ℹ️ Cycle {cycle_number} - {stock_name}: Live entry skipped (live trading off) — not marking bought"
+                                    )
+                                elif not live_entry_result.get("success"):
+                                    api_err = live_entry_result.get('error') or 'Unknown'
+                                    trade.no_entry_reason = ("Live order failed: " + api_err)[:255]
+                                    trade.exit_reason = api_err[:50]
+                                    logger.error(f"🚨 LIVE ENTRY FAILED for {stock_name}: {api_err}")
+                                    continue
+                                else:
+                                    afp = live_entry_result.get("average_fill_price")
+                                    if afp is not None:
+                                        try:
+                                            af = float(afp)
+                                            if af > 0:
+                                                current_option_ltp = af
+                                        except (TypeError, ValueError):
+                                            pass
 
-                            afp = live_entry_result.get("average_fill_price")
-                            if afp is not None:
-                                try:
-                                    af = float(afp)
-                                    if af > 0:
-                                        current_option_ltp = af
-                                except (TypeError, ValueError):
-                                    pass
+                                    # Enter the trade with CURRENT time and prices (broker order succeeded)
+                                    trade.buy_price = current_option_ltp
+                                    trade.buy_time = now  # Use CURRENT time, not alert time
+                                    trade.stock_ltp = stock_data.get('ltp', 0) if stock_data else trade.stock_ltp
+                                    trade.stock_vwap = current_vwap
+                                    trade.option_ltp = current_option_ltp
+                                    trade.status = 'bought'
+                                    trade.pnl = 0.0
+                                    if live_entry_result.get("order_id"):
+                                        trade.buy_order_id = live_entry_result.get("order_id")
+                                    trade.stop_loss = stop_loss_price
 
-                            # Enter the trade with CURRENT time and prices
-                            trade.buy_price = current_option_ltp
-                            trade.buy_time = now  # Use CURRENT time, not alert time
-                            trade.stock_ltp = stock_data.get('ltp', 0) if stock_data else trade.stock_ltp
-                            trade.stock_vwap = current_vwap
-                            trade.option_ltp = current_option_ltp
-                            trade.status = 'bought'
-                            trade.pnl = 0.0
-                            if live_entry_result.get("success") and live_entry_result.get("order_id"):
-                                trade.buy_order_id = live_entry_result.get("order_id")
-                            trade.stop_loss = stop_loss_price
-                            
-                            entry_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
-                            alert_time_str = trade.alert_time.strftime('%H:%M:%S') if trade.alert_time else 'N/A'
-                            logger.info(f"✅ Cycle {cycle_number} - TRADE ENTERED: {stock_name} ({trade.option_contract})")
-                            logger.info(f"   Entry Time: {entry_time_str} (was 'no_entry' at alert time: {alert_time_str})")
-                            logger.info(f"   Buy Price: ₹{current_option_ltp:.2f} (current LTP)")
-                            logger.info(f"   VWAP Slope: ✅ >= 45° ({slope_angle:.2f}°)")
-                            if is_10_15_alert:
-                                logger.info(f"   Candle Size: ✅ Calculated (Ratio: {candle_size_ratio:.2f}x) - Not blocking for 10:15 alert" if candle_size_ratio is not None else "   Candle Size: ⚠️ Not calculated yet for 10:15 alert")
+                                    entry_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
+                                    alert_time_str = trade.alert_time.strftime('%H:%M:%S') if trade.alert_time else 'N/A'
+                                    logger.info(f"✅ Cycle {cycle_number} - TRADE ENTERED: {stock_name} ({trade.option_contract})")
+                                    logger.info(f"   Entry Time: {entry_time_str} (was 'no_entry' at alert time: {alert_time_str})")
+                                    logger.info(f"   Buy Price: ₹{current_option_ltp:.2f} (current LTP)")
+                                    logger.info(f"   VWAP Slope: ✅ >= 45° ({slope_angle:.2f}°)")
+                                    if is_10_15_alert:
+                                        logger.info(f"   Candle Size: ✅ Calculated (Ratio: {candle_size_ratio:.2f}x) - Not blocking for 10:15 alert" if candle_size_ratio is not None else "   Candle Size: ⚠️ Not calculated yet for 10:15 alert")
+                                    else:
+                                        logger.info(f"   Candle Size: ✅ Passed (Ratio: {candle_size_ratio:.2f}x)" if candle_size_ratio is not None else "   Candle Size: ❌ (not calculated)")
+                                    logger.info(f"   Index Trends: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
+                                    print(f"✅ Cycle {cycle_number} - TRADE ENTERED: {stock_name} ({trade.option_contract})")
+                                    print(f"   ⏰ Entry Time: {entry_time_str} (was 'no_entry' at alert time: {alert_time_str})")
+                                    print(f"   📊 Entry Conditions:")
+                                    print(f"      - Time Check: ✅ Before 3:00 PM")
+                                    print(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
+                                    print(f"      - VWAP Slope: ✅ >= 45° ({slope_angle:.2f}°)")
+                                    if is_10_15_alert:
+                                        print(f"      - Candle Size: ✅ Calculated (Ratio: {candle_size_ratio:.2f}x) - Not blocking for 10:15 alert" if candle_size_ratio is not None else "      - Candle Size: ⚠️ Not calculated yet for 10:15 alert")
+                                    else:
+                                        print(f"      - Candle Size: ✅ {'Passed' if candle_size_check_passed else 'Skipped'}")
+                                    print(f"      - Option Data: ✅ Valid")
+                                    print(f"   💰 Trade Details:")
+                                    print(f"      - Buy Price: ₹{current_option_ltp:.2f} (current LTP)")
+                                    print(f"      - Quantity: {qty}")
+                                    print(f"      - Stop Loss: ₹{trade.stop_loss:.2f}")
                             else:
-                                logger.info(f"   Candle Size: ✅ Passed (Ratio: {candle_size_ratio:.2f}x)" if candle_size_ratio is not None else "   Candle Size: ❌ (not calculated)")
-                            logger.info(f"   Index Trends: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
-                            print(f"✅ Cycle {cycle_number} - TRADE ENTERED: {stock_name} ({trade.option_contract})")
-                            print(f"   ⏰ Entry Time: {entry_time_str} (was 'no_entry' at alert time: {alert_time_str})")
-                            print(f"   📊 Entry Conditions:")
-                            print(f"      - Time Check: ✅ Before 3:00 PM")
-                            print(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
-                            print(f"      - VWAP Slope: ✅ >= 45° ({slope_angle:.2f}°)")
-                            if is_10_15_alert:
-                                print(f"      - Candle Size: ✅ Calculated (Ratio: {candle_size_ratio:.2f}x) - Not blocking for 10:15 alert" if candle_size_ratio is not None else "      - Candle Size: ⚠️ Not calculated yet for 10:15 alert")
-                            else:
-                                print(f"      - Candle Size: ✅ {'Passed' if candle_size_check_passed else 'Skipped'}")
-                            print(f"      - Option Data: ✅ Valid")
-                            print(f"   💰 Trade Details:")
-                            print(f"      - Buy Price: ₹{current_option_ltp:.2f} (current LTP)")
-                            print(f"      - Quantity: {qty}")
-                            print(f"      - Stop Loss: ₹{trade.stop_loss:.2f}")
-                    else:
-                        # Option LTP fetch failed - log detailed error
-                        logger.error(f"❌ Cycle {cycle_number} - {stock_name}: All conditions met BUT option LTP fetch FAILED - cannot enter")
-                        logger.error(f"   Instrument Key: {trade.instrument_key}")
-                        logger.error(f"   Option Contract: {trade.option_contract}")
-                        if option_quote:
-                            logger.error(f"   Option Quote Response: {option_quote}")
-                            logger.error(f"   Last Price in Response: {option_quote.get('last_price', 'NOT FOUND')}")
-                        else:
-                            logger.error(f"   Option Quote Response: None (API call returned None)")
-                            logger.error(f"   📊 All Other Conditions Were Met:")
-                            logger.error(f"      - Time Before 3PM: ✅ ({now.strftime('%H:%M:%S')})")
-                            logger.error(f"      - Index Trends: ✅ (NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend})")
-                            logger.error(f"      - VWAP Slope: ✅ ({slope_angle:.2f}°)" if slope_angle else f"      - VWAP Slope: ✅")
-                            logger.error(f"      - Candle Size: ✅ (Ratio: {candle_size_ratio:.2f}x)" if candle_size_ratio else f"      - Candle Size: ✅")
-                            logger.error(f"      - Option Contract: ✅ ({trade.option_contract})")
-                            logger.error(f"      - Instrument Key: ✅ ({trade.instrument_key})")
-                            print(f"❌ Cycle {cycle_number} - {stock_name}: Entry BLOCKED - Option LTP fetch failed")
-                            print(f"   All conditions passed but cannot fetch option price to enter trade")
+                                # Option LTP fetch failed - log detailed error
+                                logger.error(f"❌ Cycle {cycle_number} - {stock_name}: All conditions met BUT option LTP fetch FAILED - cannot enter")
+                                logger.error(f"   Instrument Key: {trade.instrument_key}")
+                                logger.error(f"   Option Contract: {trade.option_contract}")
+                                logger.error(f"   Option Quote Response: None (API call returned None)")
+                                logger.error(f"   📊 All Other Conditions Were Met:")
+                                logger.error(f"      - Time Before 3PM: ✅ ({now.strftime('%H:%M:%S')})")
+                                logger.error(f"      - Index Trends: ✅ (NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend})")
+                                logger.error(f"      - VWAP Slope: ✅ ({slope_angle:.2f}°)" if slope_angle else f"      - VWAP Slope: ✅")
+                                logger.error(f"      - Candle Size: ✅ (Ratio: {candle_size_ratio:.2f}x)" if candle_size_ratio else f"      - Candle Size: ✅")
+                                logger.error(f"      - Option Contract: ✅ ({trade.option_contract})")
+                                logger.error(f"      - Instrument Key: ✅ ({trade.instrument_key})")
+                                print(f"❌ Cycle {cycle_number} - {stock_name}: Entry BLOCKED - Option LTP fetch failed")
+                                print(f"   All conditions passed but cannot fetch option price to enter trade")
                 
                 # ═══════════════════════════════════════════════════════════════
                 # UPDATE SELL_PRICE AND PNL FOR BOUGHT TRADES IN THIS CYCLE

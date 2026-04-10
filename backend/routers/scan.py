@@ -835,6 +835,12 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             if triggered_at_raw:
                 # Parse the time from Chartink
                 parsed_time = parser.parse(triggered_at_raw, fuzzy=True)
+                # Normalize to IST. Naive timestamps from Chartink are treated as IST (servers are often UTC;
+                # using local hour/minute without this maps e.g. 07:45 UTC to the 10:15 bucket instead of 1:15 PM IST).
+                if parsed_time.tzinfo is None:
+                    parsed_time = ist.localize(parsed_time.replace(tzinfo=None))
+                else:
+                    parsed_time = parsed_time.astimezone(ist)
                 
                 # Map to correct Chartink schedule times based on the parsed time
                 hour = parsed_time.hour
@@ -2481,6 +2487,21 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 except Exception as hist_error:
                     logger.warning(f"⚠️ Failed to save historical data for {stock_name} at webhook time: {str(hist_error)}")
                     # Don't fail webhook processing if historical save fails
+                
+                # Commit each stock in its own transaction so a later stock error cannot roll back
+                # earlier rows after a live broker order (which would hide trades on scan.html).
+                try:
+                    db.commit()
+                    logger.info(f"   💾 Committed DB row for {stock_name}")
+                except Exception as commit_err:
+                    logger.error(f"❌ Database commit failed for {stock_name}: {commit_err}")
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+                    failed_count += 1
+                    saved_count = max(0, saved_count - 1)
+                    continue
                 
             except Exception as db_error:
                 failed_count += 1
@@ -4725,7 +4746,9 @@ async def get_latest_webhook_data(background_tasks: BackgroundTasks, db: Session
                     "exit_reason": record.exit_reason or None,
                     "pnl": record.pnl or 0.0,
                     "status": record.status,  # Include status to identify no_entry trades
-                    "no_entry_reason": record.no_entry_reason or None  # Reason for no entry if status is no_entry
+                    "no_entry_reason": record.no_entry_reason or None,  # Reason for no entry if status is no_entry
+                    "buy_order_id": record.buy_order_id or None,
+                    "buy_time": record.buy_time.isoformat() if record.buy_time else None,
                 })
             
             bullish_alerts = list(grouped_bullish.values())
@@ -4892,7 +4915,9 @@ async def get_latest_webhook_data(background_tasks: BackgroundTasks, db: Session
                     "exit_reason": record.exit_reason or None,
                     "pnl": record.pnl or 0.0,
                     "status": record.status,  # Include status to identify no_entry trades
-                    "no_entry_reason": record.no_entry_reason or None  # Reason for no entry if status is no_entry
+                    "no_entry_reason": record.no_entry_reason or None,  # Reason for no entry if status is no_entry
+                    "buy_order_id": record.buy_order_id or None,
+                    "buy_time": record.buy_time.isoformat() if record.buy_time else None,
                 })
             
             bearish_alerts = list(grouped_bearish.values())
