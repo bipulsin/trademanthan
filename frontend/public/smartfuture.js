@@ -10,10 +10,11 @@
     /** Per-request cap; broker quote batch can be slow on congested networks. */
     const FETCH_TIMEOUT_MS = 60000;
 
-    const REFRESH_MS = 300000;
-
-    /** Set from /api/smart-futures/config after top table is painted (not shown in UI). */
+    /** Set from /api/smart-futures/config after load (not shown in UI). */
     let uiLiveEnabled = false;
+
+    let topLoadChain = Promise.resolve();
+    let posLoadChain = Promise.resolve();
 
     function getToken() {
         return localStorage.getItem('trademanthan_token') || '';
@@ -74,10 +75,22 @@
         if (top) top.innerHTML = `<tr><td colspan="7" style="padding:12px;">${escapeHtml(message)}</td></tr>`;
     }
 
+    function showCandidateTableLoading() {
+        const top = el('sfCandBody');
+        if (top) top.innerHTML = '<tr><td colspan="7" style="padding:12px;">Loading…</td></tr>';
+    }
+
     function showPositionsError(message) {
         const tbody = el('sfPosBody');
         if (tbody) {
             tbody.innerHTML = `<tr><td colspan="5" style="padding:12px;">${escapeHtml(message)}</td></tr>`;
+        }
+    }
+
+    function showPositionsLoading() {
+        const tbody = el('sfPosBody');
+        if (tbody) {
+            tbody.innerHTML = '<tr><td colspan="5" style="padding:12px;">Loading…</td></tr>';
         }
     }
 
@@ -229,19 +242,22 @@
         return raw.slice(0, 160).replace(/\s+/g, ' ');
     }
 
-    /** Serialize loads so auto-refresh never overlaps a prior run (avoids timeouts / pool contention). */
-    let loadDashboardChain = Promise.resolve();
+    function touchUpdated(spanId) {
+        const up = el(spanId);
+        if (up) up.textContent = new Date().toLocaleString('en-IN');
+    }
 
-    async function loadDashboardInternal() {
-        setStatus('Loading…');
-        uiLiveEnabled = false;
-        const posBody = el('sfPosBody');
-        if (posBody) {
-            posBody.innerHTML = '<tr><td colspan="5" style="padding:12px;">Loading…</td></tr>';
-        }
+    async function loadSectionTop() {
+        const btn = el('sfRefreshTop');
+        if (btn) btn.disabled = true;
+        setStatus('Loading top…');
+        showCandidateTableLoading();
 
         try {
-            const resTop = await apiGet('/api/smart-futures/dashboard/top');
+            const [resTop, rCfg] = await Promise.all([
+                apiGet('/api/smart-futures/dashboard/top'),
+                apiGet('/api/smart-futures/config'),
+            ]);
             const rawTop = await resTop.text();
             let dataTop;
             try {
@@ -251,61 +267,35 @@
                 showCandidateTableError(
                     'Invalid response (not JSON). ' + (snippet ? snippet : 'Empty body.')
                 );
-                setStatus('Bad response (' + resTop.status + ')');
-                if (posBody) posBody.innerHTML = '<tr><td colspan="5" style="padding:12px;">—</td></tr>';
+                setStatus('Bad response (top)');
                 return;
             }
             if (!resTop.ok) {
                 const errLine =
                     'Failed to load top list (HTTP ' + resTop.status + '). ' + httpErrDetail(dataTop, rawTop);
                 showCandidateTableError(errLine);
-                setStatus('Failed (' + resTop.status + ')');
-                if (posBody) posBody.innerHTML = '<tr><td colspan="5" style="padding:12px;">—</td></tr>';
+                setStatus('Failed (top)');
                 return;
             }
+
+            let cfg = {};
+            const rawCfg = await rCfg.text();
+            try {
+                cfg = rawCfg ? JSON.parse(rawCfg) : {};
+            } catch (e) {
+                cfg = {};
+            }
+            uiLiveEnabled = !!cfg.live_enabled;
 
             renderCandidates(
                 'sfCandBody',
                 dataTop.candidates || [],
                 'No top candidates with score &#8805; 4 for this session yet.'
             );
-            applyLiveToOrderButtons(false);
-
-            const up = el('sfUpdated');
-            if (up) up.textContent = new Date().toLocaleString('en-IN');
-            setStatus('');
-
-            const [rCfg, rPos] = await Promise.all([
-                apiGet('/api/smart-futures/config'),
-                apiGet('/api/smart-futures/dashboard/positions'),
-            ]);
-            const rawCfg = await rCfg.text();
-            const rawPos = await rPos.text();
-            let cfg = {};
-            let dataPos = {};
-            try {
-                cfg = rawCfg ? JSON.parse(rawCfg) : {};
-            } catch (e) {
-                cfg = {};
-            }
-            try {
-                dataPos = rawPos ? JSON.parse(rawPos) : {};
-            } catch (e) {
-                dataPos = {};
-            }
-
-            uiLiveEnabled = !!cfg.live_enabled;
             applyLiveToOrderButtons(uiLiveEnabled);
+            touchUpdated('sfUpdatedTop');
 
-            if (!rPos.ok) {
-                showPositionsError(
-                    'Failed to load positions (HTTP ' + rPos.status + '). ' + httpErrDetail(dataPos, rawPos)
-                );
-            } else {
-                renderPositions(dataPos.positions || [], uiLiveEnabled);
-            }
-
-            setStatus('Refreshing prices…');
+            setStatus('Refreshing LTP…');
             try {
                 const rLtp = await apiGet('/api/smart-futures/dashboard/live-quotes');
                 const rawLtp = await rLtp.text();
@@ -326,39 +316,91 @@
             console.error(e);
             const net =
                 e && e.name === 'AbortError'
-                    ? 'Request timed out — check network or try refreshing.'
+                    ? 'Request timed out — check network or try again.'
                     : e && e.message
                       ? 'Network error: ' + e.message
                       : 'Could not reach the API.';
             showCandidateTableError(net);
-            showPositionsError(net);
-            if (e && e.name === 'AbortError') {
-                setStatus('Timed out');
-            } else {
-                setStatus('Error');
+            setStatus(e && e.name === 'AbortError' ? 'Timed out' : 'Error');
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    async function loadSectionPositions() {
+        const btn = el('sfRefreshPositions');
+        if (btn) btn.disabled = true;
+        setStatus('Loading positions…');
+        showPositionsLoading();
+
+        try {
+            const [rCfg, rPos] = await Promise.all([
+                apiGet('/api/smart-futures/config'),
+                apiGet('/api/smart-futures/dashboard/positions'),
+            ]);
+            const rawCfg = await rCfg.text();
+            const rawPos = await rPos.text();
+            let cfg = {};
+            let dataPos = {};
+            try {
+                cfg = rawCfg ? JSON.parse(rawCfg) : {};
+            } catch (e) {
+                cfg = {};
             }
+            try {
+                dataPos = rawPos ? JSON.parse(rawPos) : {};
+            } catch (e) {
+                dataPos = {};
+            }
+
+            uiLiveEnabled = !!cfg.live_enabled;
+
+            if (!rPos.ok) {
+                showPositionsError(
+                    'Failed to load positions (HTTP ' + rPos.status + '). ' + httpErrDetail(dataPos, rawPos)
+                );
+                setStatus('Failed (positions)');
+                return;
+            }
+            renderPositions(dataPos.positions || [], uiLiveEnabled);
+            applyLiveToOrderButtons(uiLiveEnabled);
+            touchUpdated('sfUpdatedPos');
+            setStatus('');
+        } catch (e) {
+            console.error(e);
+            const net =
+                e && e.name === 'AbortError'
+                    ? 'Request timed out — check network or try again.'
+                    : e && e.message
+                      ? 'Network error: ' + e.message
+                      : 'Could not reach the API.';
+            showPositionsError(net);
+            setStatus(e && e.name === 'AbortError' ? 'Timed out' : 'Error');
+        } finally {
+            if (btn) btn.disabled = false;
         }
     }
 
     function loadDashboard() {
-        loadDashboardChain = loadDashboardChain
-            .catch(() => {})
-            .then(() => loadDashboardInternal());
-        return loadDashboardChain;
-    }
-
-    async function refreshLoop() {
-        for (;;) {
-            try {
-                await loadDashboard();
-            } catch (e) {
-                console.error(e);
-            }
-            await new Promise((r) => setTimeout(r, REFRESH_MS));
-        }
+        return Promise.all([
+            (topLoadChain = topLoadChain.catch(() => {}).then(() => loadSectionTop())),
+            (posLoadChain = posLoadChain.catch(() => {}).then(() => loadSectionPositions())),
+        ]);
     }
 
     window.addEventListener('DOMContentLoaded', () => {
-        refreshLoop();
+        const bTop = el('sfRefreshTop');
+        const bPos = el('sfRefreshPositions');
+        if (bTop) {
+            bTop.addEventListener('click', () => {
+                topLoadChain = topLoadChain.catch(() => {}).then(() => loadSectionTop());
+            });
+        }
+        if (bPos) {
+            bPos.addEventListener('click', () => {
+                posLoadChain = posLoadChain.catch(() => {}).then(() => loadSectionPositions());
+            });
+        }
+        loadDashboard();
     });
 })();

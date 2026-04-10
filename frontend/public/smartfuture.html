@@ -36,6 +36,39 @@
         .sf-btn-order { background: #2563eb; color: #fff; }
         .sf-btn-order:disabled, .sf-btn-exit:disabled { opacity: 0.45; cursor: not-allowed; }
         .sf-btn-exit { background: #dc2626; color: #fff; }
+        .sf-card-head {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+        .sf-card-head h2 { margin: 0; font-size: 1.1rem; }
+        .sf-card-actions {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
+        }
+        .sf-btn-refresh {
+            padding: 6px 14px;
+            border-radius: 8px;
+            border: 1px solid var(--theme-border, #cbd5e1);
+            background: var(--theme-card, #f8fafc);
+            color: var(--theme-text, #0f172a);
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+        .sf-btn-refresh:hover:not(:disabled) {
+            background: var(--theme-border, #e2e8f0);
+        }
+        .sf-btn-refresh:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
+        .sf-section-updated { font-size: 0.85rem; color: var(--theme-muted, #64748b); }
     </style>
 </head>
 <body class="theme-page">
@@ -52,15 +85,21 @@
             <div class="settings-header">
                 <div class="settings-title-section">
                     <h1 class="settings-title"><i class="fas fa-bolt"></i> Smart Futures</h1>
-                    <p class="settings-subtitle">NSE F&O Renko — top 3 by score (&#8805; 4). Session date: before 8:50 AM IST shows the prior calendar day; from 8:50 AM IST shows today. Auto-refresh every 5 minutes.</p>
+                    <p class="settings-subtitle">NSE F&amp;O Renko — top 3 by score (&#8805; 4). Session date: before 8:50 AM IST shows the prior calendar day; from 8:50 AM IST shows today. Use Refresh on each section to reload data.</p>
                 </div>
             </div>
             <div class="settings-content sf-wrap">
-                <div class="sf-meta">
-                    Updated: <span id="sfUpdated">—</span> · <span id="sfStatus"></span>
+                <div class="sf-meta" id="sfGlobalMeta">
+                    <span id="sfStatus"></span>
                 </div>
                 <div class="sf-card">
-                    <h2 style="margin-top:0;font-size:1.1rem;">Top by score (&#8805; 4)</h2>
+                    <div class="sf-card-head">
+                        <h2>Top by score (&#8805; 4)</h2>
+                        <div class="sf-card-actions">
+                            <button type="button" class="sf-btn-refresh" id="sfRefreshTop" aria-label="Refresh top candidates">Refresh</button>
+                            <span class="sf-section-updated">Updated: <span id="sfUpdatedTop">—</span></span>
+                        </div>
+                    </div>
                     <p class="sf-meta">Up to 3 highest scores for today&apos;s session (score 4 and above).</p>
                     <div class="sf-table-wrap">
                         <table class="sf-table">
@@ -104,6 +143,6 @@
         </main>
     </div>
     <script src="left-menu.js?v=3.15"></script>
-    <script src="smartfuture.js?v=11"></script>
+    <script src="smartfuture.js?v=12"></script>
 </body>
 </html>
