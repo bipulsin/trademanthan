@@ -50,15 +50,15 @@ except Exception as e:
 " 2>&1 | head -30
 echo ""
 
-# Check if scan_st1_algo can be imported
-echo "6. Testing scan_st1_algo import:"
+# Check if smart_future_algo can be imported
+echo "6. Testing smart_future_algo import:"
 python3 -c "
 import sys
 sys.path.insert(0, '.')
 try:
-    from backend.services.scan_st1_algo import scan_st1_algo_scheduler, start_scan_st1_algo
-    print('   ✅ scan_st1_algo imported successfully')
-    print(f'   Scheduler initialized: {scan_st1_algo_scheduler is not None}')
+    from backend.services.smart_future_algo import smart_future_algo_scheduler, start_smart_future_algo
+    print('   ✅ smart_future_algo imported successfully')
+    print(f'   Scheduler initialized: {smart_future_algo_scheduler is not None}')
 except ImportError as e:
     print(f'   ❌ Import error: {e}')
     import traceback

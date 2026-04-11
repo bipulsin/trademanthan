@@ -39,4 +39,4 @@ ssh -i ./TradeM.pem ubuntu@3.6.199.247
 
 - App: `/home/ubuntu/trademanthan`
 - Deploy log: `/tmp/deploy_backend.log`
-- Scan algo log: `/home/ubuntu/trademanthan/logs/scan_st1_algo.log`
+- Scan algo log: `/home/ubuntu/trademanthan/logs/smart_future_algo.log` (legacy: `scan_st1_algo.log`)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Run fin sentiment job once (off schedule) with INFO logs to scan_st1_algo.log and stdout.
+Run fin sentiment job once (off schedule) with INFO logs to smart_future_algo.log and stdout.
 
 Usage (repo root):
   PYTHONPATH=. python backend/scripts/run_fin_sentiment_once.py
@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-LOG_PATH = ROOT / "logs" / "scan_st1_algo.log"
+LOG_PATH = ROOT / "logs" / "smart_future_algo.log"
 
 
 def _setup_logging() -> None:

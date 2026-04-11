@@ -958,26 +958,23 @@
                 
                 const data = await response.json();
                 
-                // New structure: scan_st1_algo replaces all old schedulers
-                const scanSt1Algo = data.scan_st1_algo || {};
-                const totalJobs = data.total_jobs || scanSt1Algo.jobs_count || 0;
-                const isRunning = data.all_running || scanSt1Algo.running || false;
-                
-                // If scan_st1_algo is running AND has jobs
+                // Unified scheduler: smart_future_algo (legacy API key scan_st1_algo)
+                const sfa = data.smart_future_algo || data.scan_st1_algo || {};
+                const totalJobs = data.total_jobs || sfa.jobs_count || 0;
+                const isRunning = data.all_running || sfa.running || false;
+
                 if (data.success && isRunning && totalJobs > 0) {
-                    // Scheduler is active with jobs
-                    updateSchedulerStatus('active', `Scan ST1 Algo: Active (${totalJobs} jobs)`);
+                    updateSchedulerStatus('active', `Smart Future Algo: Active (${totalJobs} jobs)`);
                     document.getElementById('start-schedulers-btn').style.display = 'none';
                 } else {
-                    // Show status based on what's missing
                     if (!data.success) {
-                        updateSchedulerStatus('inactive', `Scan ST1 Algo: ${data.error || 'Error'}`);
+                        updateSchedulerStatus('inactive', `Smart Future Algo: ${data.error || 'Error'}`);
                     } else if (!isRunning) {
-                        updateSchedulerStatus('inactive', `Scan ST1 Algo: Not Running`);
+                        updateSchedulerStatus('inactive', `Smart Future Algo: Not Running`);
                     } else if (totalJobs === 0) {
-                        updateSchedulerStatus('inactive', `Scan ST1 Algo: No Jobs Found`);
+                        updateSchedulerStatus('inactive', `Smart Future Algo: No Jobs Found`);
                     } else {
-                        updateSchedulerStatus('inactive', `Scan ST1 Algo: ${totalJobs} Jobs`);
+                        updateSchedulerStatus('inactive', `Smart Future Algo: ${totalJobs} Jobs`);
                     }
                     document.getElementById('start-schedulers-btn').style.display = 'inline-block';
                 }
@@ -1180,8 +1177,7 @@
                     displayError('Maximum 10000 lines allowed. Showing 10000 lines.');
                 }
                 
-                // Request scan_st1_algo.log for scan algorithm logs
-                const response = await fetch(`${API_BASE_URL}/scan/logs?lines=${lines}&log_type=scan_st1_algo`);
+                const response = await fetch(`${API_BASE_URL}/scan/logs?lines=${lines}&log_type=smart_future_algo`);
                 
                 // Check if response is OK
                 if (!response.ok) {

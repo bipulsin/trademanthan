@@ -13,7 +13,7 @@ On the server (project root), after each qualifying webhook:
 |--------|------|
 | **JSON** (full detail + `breakdown_raw` per row) | `logs/scan_rankings/scan_ranking_<UTC_ts>_<time_label>_<CE\|PE>.json` |
 | **CSV** (Excel-friendly) | Same basename, `.csv` |
-| **ASCII table** | `logs/scan_st1_algo.log` — search for `FULL STOCK RANKING` |
+| **ASCII table** | `logs/smart_future_algo.log` — search for `FULL STOCK RANKING` |
 
 ## Email (CSV attachment)
 

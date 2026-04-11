@@ -5,7 +5,7 @@ FinBERT on announcement text, combined score persisted with last/current rotatio
 Replaces MarketAux: NSE JSON has no entity sentiment; api_sentiment_avg is left null
 and combined_sentiment_avg follows FinBERT when available.
 
-Logs use prefix [fin_sentiment][Sxx] for stage analysis in scan_st1_algo.log.
+Logs use prefix [fin_sentiment][Sxx] for stage analysis in smart_future_algo.log.
 """
 from __future__ import annotations
 

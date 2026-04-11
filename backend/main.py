@@ -21,15 +21,15 @@ import backend.routers.scan as scan
 import backend.routers.cargpt as cargpt
 import backend.routers.arbitrage as arbitrage
 import backend.routers.smart_futures_stub as smart_futures
-# OLD SCHEDULERS - DISABLED - Migrated to scan_st1_algo
+# OLD SCHEDULERS - DISABLED - Migrated to smart_future_algo
 # from backend.services.master_stock_scheduler import start_scheduler, stop_scheduler
 # from backend.services.instruments_downloader import start_instruments_scheduler, stop_instruments_scheduler
 # from backend.services.health_monitor import start_health_monitor, stop_health_monitor
 # from backend.services.vwap_updater import start_vwap_updater, stop_vwap_updater
 # from backend.services.index_price_scheduler import start_index_price_scheduler, stop_index_price_scheduler
 
-# NEW UNIFIED SCHEDULER - Scan ST1 Algo
-from backend.services.scan_st1_algo import start_scan_st1_algo, stop_scan_st1_algo
+# NEW UNIFIED SCHEDULER - Smart Future Algo
+from backend.services.smart_future_algo import start_smart_future_algo, stop_smart_future_algo
 from backend.services.arbitrage_daily_setup_scheduler import (
     start_arbitrage_daily_setup_scheduler,
     stop_arbitrage_daily_setup_scheduler,
@@ -99,27 +99,27 @@ async def lifespan(app: FastAPI):
         logger.info("🚀 TRADE MANTHAN API STARTUP")
         logger.info("=" * 60)
         
-        # OLD SCHEDULERS - DISABLED - All migrated to scan_st1_algo
+        # OLD SCHEDULERS - DISABLED - All migrated to smart_future_algo
         # These are commented out to prevent them from starting
-        # logger.info("⚠️ Old schedulers are disabled - using scan_st1_algo instead")
-        
-        # Start unified Scan ST1 Algo Scheduler (consolidates all schedulers except Master Stock)
+        # logger.info("⚠️ Old schedulers are disabled - using smart_future_algo instead")
+
+        # Start unified Smart Future Algo Scheduler (consolidates all schedulers except Master Stock)
         try:
-            logger.info("Starting Scan ST1 Algo Scheduler Controller...")
+            logger.info("Starting Smart Future Algo Scheduler Controller...")
             try:
-                start_scan_st1_algo()
-                logger.info("✅ Scan ST1 Algo Scheduler: STARTED")
+                start_smart_future_algo()
+                logger.info("✅ Smart Future Algo Scheduler: STARTED")
                 logger.info("   - Consolidates: Instruments, Health Monitor, VWAP Updater, Index Price, Entry slip monitor")
                 logger.info("   - Master Stock download from Dhan removed")
-                logger.info("   - All logs go to: logs/scan_st1_algo.log")
+                logger.info("   - All logs go to: logs/smart_future_algo.log")
             except ImportError as import_err:
-                logger.error(f"❌ Scan ST1 Algo Scheduler: IMPORT ERROR - {import_err}", exc_info=True)
+                logger.error(f"❌ Smart Future Algo Scheduler: IMPORT ERROR - {import_err}", exc_info=True)
                 logger.warning("⚠️ Continuing without scheduler - some scheduled jobs may not run")
             except Exception as scheduler_err:
-                logger.error(f"❌ Scan ST1 Algo Scheduler: FAILED - {scheduler_err}", exc_info=True)
+                logger.error(f"❌ Smart Future Algo Scheduler: FAILED - {scheduler_err}", exc_info=True)
                 logger.warning("⚠️ Continuing without scheduler - some scheduled jobs may not run")
         except Exception as e:
-            logger.error(f"❌ Scan ST1 Algo Scheduler: CRITICAL ERROR - {e}", exc_info=True)
+            logger.error(f"❌ Smart Future Algo Scheduler: CRITICAL ERROR - {e}", exc_info=True)
             logger.warning("⚠️ Backend will continue running but scheduled jobs may not work")
 
         # Start Arbitrage Daily Setup Scheduler (09:16 IST daily)
@@ -169,12 +169,12 @@ async def lifespan(app: FastAPI):
     logger.info("🛑 Shutting down Trade Manthan API...")
     logger.info("🛑 Shutting down all services...")
     
-    # Stop Scan ST1 Algo Scheduler (replaces all old schedulers)
+    # Stop Smart Future Algo Scheduler (replaces all old schedulers)
     try:
-        stop_scan_st1_algo()
-        logger.info("✅ Scan ST1 Algo Scheduler stopped")
+        stop_smart_future_algo()
+        logger.info("✅ Smart Future Algo Scheduler stopped")
     except Exception as e:
-        logger.error(f"⚠️ Error stopping Scan ST1 Algo Scheduler: {e}", exc_info=True)
+        logger.error(f"⚠️ Error stopping Smart Future Algo Scheduler: {e}", exc_info=True)
 
     try:
         stop_arbitrage_daily_setup_scheduler()

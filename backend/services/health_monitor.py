@@ -47,7 +47,7 @@ class HealthMonitor:
     def start(self):
         """Start the health monitor scheduler"""
         if not self.is_running:
-            # Health check every 30 minutes from 8:30 AM until 4:00 PM IST (kept in sync with scan_st1_algo)
+            # Health check every 30 minutes from 8:30 AM until 4:00 PM IST (kept in sync with smart_future_algo)
             health_check_times = [
                 (8, 30), (9, 0), (9, 30), (10, 0), (10, 30), (11, 0), (11, 30), (12, 0),
                 (12, 30), (13, 0), (13, 30), (14, 0), (14, 30), (15, 0), (15, 30), (16, 0),

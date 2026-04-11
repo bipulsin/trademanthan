@@ -17,13 +17,13 @@ import asyncio
 import threading
 from pathlib import Path
 
-# Configure logger to write to scan_st1_algo.log instead of trademanthan.log
-# This ensures all scan-related logs (webhooks, option contracts, trades) go to scan_st1_algo.log
-# The scan_st1_algo service will also configure this logger, but we set it up here to ensure
-# logs are written correctly even if scan_st1_algo hasn't started yet
+# Configure logger to write to smart_future_algo.log instead of trademanthan.log
+# This ensures all scan-related logs (webhooks, option contracts, trades) go to smart_future_algo.log
+# The smart_future_algo service will also configure this logger, but we set it up here to ensure
+# logs are written correctly even if smart_future_algo hasn't started yet
 log_dir = Path(__file__).parent.parent.parent / 'logs'
 log_dir.mkdir(exist_ok=True)
-log_file = log_dir / 'scan_st1_algo.log'
+log_file = log_dir / 'smart_future_algo.log'
 
 # Create file handler with immediate flushing
 class FlushingFileHandler(logging.FileHandler):
@@ -38,7 +38,7 @@ class FlushingFileHandler(logging.FileHandler):
             except (OSError, AttributeError):
                 pass
 
-# Get the logger for backend.routers.scan (scan_st1_algo.py will also configure this)
+# Get the logger for backend.routers.scan (smart_future_algo.py will also configure this)
 logger = logging.getLogger(__name__)  # This will be 'backend.routers.scan'
 
 # Check if handler already exists to avoid duplicates
@@ -46,7 +46,7 @@ handler_exists = False
 for h in logger.handlers:
     if isinstance(h, logging.FileHandler):
         handler_path = getattr(h, 'baseFilename', None) or (getattr(h, 'stream', {}).name if hasattr(getattr(h, 'stream', None), 'name') else None)
-        if handler_path and 'scan_st1_algo.log' in str(handler_path):
+        if handler_path and 'smart_future_algo.log' in str(handler_path):
             handler_exists = True
             break
 
@@ -59,7 +59,7 @@ if not handler_exists:
     ))
     logger.setLevel(logging.INFO)
     logger.addHandler(file_handler)
-    logger.propagate = False  # Only log to scan_st1_algo.log, not to root logger
+    logger.propagate = False  # Only log to smart_future_algo.log, not to root logger
 
 # Add services to path
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -2737,42 +2737,42 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
 
 @router.post("/manual-start-schedulers")
 async def manual_start_schedulers():
-    """Manually start Scan ST1 Algo Scheduler (replaces all old schedulers)"""
+    """Manually start Smart Future Algo Scheduler (replaces all old schedulers)"""
     try:
-        from backend.services.scan_st1_algo import start_scan_st1_algo, scan_st1_algo_scheduler
+        from backend.services.smart_future_algo import start_smart_future_algo, smart_future_algo_scheduler
         
-        # Check if scan_st1_algo is already running
-        if scan_st1_algo_scheduler and scan_st1_algo_scheduler.is_running and scan_st1_algo_scheduler.scheduler.running:
+        # Check if smart_future_algo is already running
+        if smart_future_algo_scheduler and smart_future_algo_scheduler.is_running and smart_future_algo_scheduler.scheduler.running:
             return {
                 "success": True,
-                "message": "Scan ST1 Algo Scheduler is already running",
-                "jobs_count": len(scan_st1_algo_scheduler.scheduler.get_jobs()),
+                "message": "Smart Future Algo Scheduler is already running",
+                "jobs_count": len(smart_future_algo_scheduler.scheduler.get_jobs()),
                 "timestamp": datetime.now().isoformat()
             }
         
         # Stop first if it exists but is in a bad state
-        if scan_st1_algo_scheduler and scan_st1_algo_scheduler.scheduler:
+        if smart_future_algo_scheduler and smart_future_algo_scheduler.scheduler:
             try:
-                if scan_st1_algo_scheduler.scheduler.running:
-                    scan_st1_algo_scheduler.stop()
+                if smart_future_algo_scheduler.scheduler.running:
+                    smart_future_algo_scheduler.stop()
             except:
                 pass
         
         # Start the unified scheduler
-        start_scan_st1_algo()
-        jobs_count = len(scan_st1_algo_scheduler.scheduler.get_jobs())
+        start_smart_future_algo()
+        jobs_count = len(smart_future_algo_scheduler.scheduler.get_jobs())
         
-        logger.info(f"✅ Scan ST1 Algo Scheduler manually started with {jobs_count} jobs")
+        logger.info(f"✅ Smart Future Algo Scheduler manually started with {jobs_count} jobs")
         
         return {
             "success": True,
-            "message": "Scan ST1 Algo Scheduler started successfully",
+            "message": "Smart Future Algo Scheduler started successfully",
             "jobs_count": jobs_count,
             "timestamp": datetime.now().isoformat()
         }
         
     except Exception as e:
-        logger.error(f"Error starting Scan ST1 Algo Scheduler: {e}")
+        logger.error(f"Error starting Smart Future Algo Scheduler: {e}")
         import traceback
         traceback.print_exc()
         return {
@@ -2847,18 +2847,18 @@ async def manual_health_check(db: Session = Depends(get_db)):
             "timestamp": datetime.now().isoformat()
         }
 
-@router.post("/test-scan-st1-algo-log")
-async def test_scan_st1_algo_log():
-    """Test endpoint to write a log entry to scan_st1_algo.log"""
+@router.post("/test-smart-future-algo-log")
+async def test_smart_future_algo_log():
+    """Test endpoint to write a log entry to smart_future_algo.log"""
     try:
-        from backend.services.scan_st1_algo import logger as scan_st1_logger
+        from backend.services.smart_future_algo import logger as smart_future_logger
         import datetime as dt
         
-        test_message = f"🧪 TEST LOG ENTRY - {dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Scan ST1 Algo Logger Test"
-        scan_st1_logger.info(test_message)
+        test_message = f"🧪 TEST LOG ENTRY - {dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Smart Future Algo Logger Test"
+        smart_future_logger.info(test_message)
         
         # Force flush
-        for handler in scan_st1_logger.handlers:
+        for handler in smart_future_logger.handlers:
             if hasattr(handler, 'flush'):
                 handler.flush()
                 if hasattr(handler, 'stream') and hasattr(handler.stream, 'fileno'):
@@ -2870,7 +2870,7 @@ async def test_scan_st1_algo_log():
         
         return {
             "success": True,
-            "message": "Test log entry written to scan_st1_algo.log",
+            "message": "Test log entry written to smart_future_algo.log",
             "test_message": test_message,
             "timestamp": dt.datetime.now().isoformat()
         }
@@ -3511,25 +3511,25 @@ async def download_instruments_now():
 
 @router.get("/scheduler-status")
 async def get_scheduler_status():
-    """Get status of Scan ST1 Algo Scheduler (replaces all old schedulers)"""
+    """Get status of Smart Future Algo Scheduler (replaces all old schedulers)"""
     try:
         try:
-            from backend.services.scan_st1_algo import scan_st1_algo_scheduler
+            from backend.services.smart_future_algo import smart_future_algo_scheduler
         except ImportError as import_err:
-            logger.error(f"Failed to import scan_st1_algo_scheduler: {import_err}")
+            logger.error(f"Failed to import smart_future_algo_scheduler: {import_err}")
             return {
                 "success": False,
                 "error": f"Import error: {str(import_err)}",
                 "all_running": False,
                 "total_jobs": 0,
-                "scan_st1_algo": {
+                "smart_future_algo": {
                     "running": False,
                     "jobs_count": 0,
                     "next_jobs": []
                 }
             }
         except Exception as init_err:
-            logger.error(f"Error initializing scan_st1_algo_scheduler: {init_err}")
+            logger.error(f"Error initializing smart_future_algo_scheduler: {init_err}")
             import traceback
             logger.error(traceback.format_exc())
             return {
@@ -3537,20 +3537,20 @@ async def get_scheduler_status():
                 "error": f"Initialization error: {str(init_err)}",
                 "all_running": False,
                 "total_jobs": 0,
-                "scan_st1_algo": {
+                "smart_future_algo": {
                     "running": False,
                     "jobs_count": 0,
                     "next_jobs": []
                 }
             }
         
-        if not scan_st1_algo_scheduler:
+        if not smart_future_algo_scheduler:
             return {
                 "success": False,
-                "error": "Scan ST1 Algo Scheduler not initialized",
+                "error": "Smart Future Algo Scheduler not initialized",
                 "all_running": False,
                 "total_jobs": 0,
-                "scan_st1_algo": {
+                "smart_future_algo": {
                     "running": False,
                     "jobs_count": 0,
                     "next_jobs": []
@@ -3562,10 +3562,10 @@ async def get_scheduler_status():
             jobs_count = 0
             next_jobs = []
             
-            if scan_st1_algo_scheduler.scheduler:
-                is_running = scan_st1_algo_scheduler.is_running and scan_st1_algo_scheduler.scheduler.running
+            if smart_future_algo_scheduler.scheduler:
+                is_running = smart_future_algo_scheduler.is_running and smart_future_algo_scheduler.scheduler.running
                 if is_running:
-                    jobs = scan_st1_algo_scheduler.scheduler.get_jobs()
+                    jobs = smart_future_algo_scheduler.scheduler.get_jobs()
                     jobs_count = len(jobs)
                     next_jobs = [
                         {"name": job.name, "next_run": str(job.next_run_time) if job.next_run_time else "Not scheduled"} 
@@ -3583,7 +3583,7 @@ async def get_scheduler_status():
             "success": True,
             "all_running": is_running,
             "total_jobs": jobs_count,
-            "scan_st1_algo": {
+            "smart_future_algo": {
                 "running": is_running,
                 "jobs_count": jobs_count,
                 "next_jobs": next_jobs
@@ -3599,7 +3599,7 @@ async def get_scheduler_status():
             "error": str(e),
             "all_running": False,
             "total_jobs": 0,
-            "scan_st1_algo": {
+            "smart_future_algo": {
                 "running": False,
                 "jobs_count": 0,
                 "next_jobs": []
@@ -5288,7 +5288,7 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                         stock_name=record.stock_name,
                                         option_contract=option_contract,
                                         buy_order_id=record.buy_order_id,
-                                        tag=f"scan_st1_exit_stop_loss:{record.buy_order_id or 'no_buy_id'}",
+                                        tag=f"smart_future_exit_stop_loss:{record.buy_order_id or 'no_buy_id'}",
                                         existing_sell_order_id=record.sell_order_id,
                                     )
                                     if live_exit_result.get("success") or live_exit_result.get("skipped_duplicate"):
@@ -5321,7 +5321,7 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                         stock_name=record.stock_name,
                                         option_contract=option_contract,
                                         buy_order_id=record.buy_order_id,
-                                        tag=f"scan_st1_exit_vwap:{record.buy_order_id or 'no_buy_id'}",
+                                        tag=f"smart_future_exit_vwap:{record.buy_order_id or 'no_buy_id'}",
                                         existing_sell_order_id=record.sell_order_id,
                                     )
                                     if live_exit_result.get("success") or live_exit_result.get("skipped_duplicate"):
@@ -5354,7 +5354,7 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                         stock_name=record.stock_name,
                                         option_contract=option_contract,
                                         buy_order_id=record.buy_order_id,
-                                        tag=f"scan_st1_exit_target:{record.buy_order_id or 'no_buy_id'}",
+                                        tag=f"smart_future_exit_target:{record.buy_order_id or 'no_buy_id'}",
                                         existing_sell_order_id=record.sell_order_id,
                                     )
                                     if live_exit_result.get("success") or live_exit_result.get("skipped_duplicate"):
@@ -5387,7 +5387,7 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                         stock_name=record.stock_name,
                                         option_contract=option_contract,
                                         buy_order_id=record.buy_order_id,
-                                        tag=f"scan_st1_exit_time:{record.buy_order_id or 'no_buy_id'}",
+                                        tag=f"smart_future_exit_time:{record.buy_order_id or 'no_buy_id'}",
                                         existing_sell_order_id=record.sell_order_id,
                                     )
                                     if live_exit_result.get("success") or live_exit_result.get("skipped_duplicate"):
@@ -6007,12 +6007,12 @@ async def update_upstox_token(request: Request):
     Update Upstox access token from frontend (LEGACY - use OAuth instead)
     """
     try:
-        # Also log to scan_st1_algo.log for visibility in scanlog.html
+        # Also log to smart_future_algo.log for visibility in scanlog.html
         try:
-            from backend.services.scan_st1_algo import logger as scan_st1_logger
-            scan_st1_logger.info("🔄 Updating Upstox API token (manual update)...")
+            from backend.services.smart_future_algo import logger as smart_future_logger
+            smart_future_logger.info("🔄 Updating Upstox API token (manual update)...")
         except:
-            pass  # Continue even if scan_st1_logger is not available
+            pass  # Continue even if smart_future_logger is not available
         
         data = await request.json()
         new_token = data.get("access_token", "")
@@ -6039,10 +6039,10 @@ async def update_upstox_token(request: Request):
         with open(service_file, 'w') as f:
             f.write(new_content)
         
-        # Log to scan_st1_algo.log
+        # Log to smart_future_algo.log
         try:
-            from backend.services.scan_st1_algo import logger as scan_st1_logger
-            scan_st1_logger.info("✅ Upstox token updated successfully (manual update)")
+            from backend.services.smart_future_algo import logger as smart_future_logger
+            smart_future_logger.info("✅ Upstox token updated successfully (manual update)")
         except:
             pass
         
@@ -6062,10 +6062,10 @@ async def update_upstox_token(request: Request):
         )
         
     except Exception as e:
-        # Log error to scan_st1_algo.log
+        # Log error to smart_future_algo.log
         try:
-            from backend.services.scan_st1_algo import logger as scan_st1_logger
-            scan_st1_logger.error(f"❌ Failed to update Upstox token: {str(e)}")
+            from backend.services.smart_future_algo import logger as smart_future_logger
+            smart_future_logger.error(f"❌ Failed to update Upstox token: {str(e)}")
         except:
             pass
         logger.error(f"❌ Failed to update Upstox token: {str(e)}")
@@ -6224,12 +6224,12 @@ async def upstox_oauth_callback(code: str = None, state: str = None, error: str 
             except Exception as jwt_error:
                 logger.warning(f"⚠️ Could not decode JWT expiration: {jwt_error}")
         
-        # Also log to scan_st1_algo.log for visibility in scanlog.html
+        # Also log to smart_future_algo.log for visibility in scanlog.html
         try:
-            from backend.services.scan_st1_algo import logger as scan_st1_logger
-            scan_st1_logger.info("🔄 Updating Upstox API token (OAuth callback)...")
+            from backend.services.smart_future_algo import logger as smart_future_logger
+            smart_future_logger.info("🔄 Updating Upstox API token (OAuth callback)...")
         except:
-            pass  # Continue even if scan_st1_logger is not available
+            pass  # Continue even if smart_future_logger is not available
         
         # Save token using token manager (persistent storage)
         try:
@@ -6237,8 +6237,8 @@ async def upstox_oauth_callback(code: str = None, state: str = None, error: str 
             if save_upstox_token(access_token, expires_at):
                 logger.info("✅ Upstox token saved to token manager")
                 try:
-                    from backend.services.scan_st1_algo import logger as scan_st1_logger
-                    scan_st1_logger.info("✅ Upstox token saved to token manager")
+                    from backend.services.smart_future_algo import logger as smart_future_logger
+                    smart_future_logger.info("✅ Upstox token saved to token manager")
                 except:
                     pass
             else:
@@ -6265,8 +6265,8 @@ async def upstox_oauth_callback(code: str = None, state: str = None, error: str 
             
             logger.info("✅ Upstox token updated in service file")
             try:
-                from backend.services.scan_st1_algo import logger as scan_st1_logger
-                scan_st1_logger.info("✅ Upstox token updated in service file")
+                from backend.services.smart_future_algo import logger as smart_future_logger
+                smart_future_logger.info("✅ Upstox token updated in service file")
             except:
                 pass
         except Exception as e:
@@ -6277,8 +6277,8 @@ async def upstox_oauth_callback(code: str = None, state: str = None, error: str 
             vwap_service.access_token = access_token
             logger.info("✅ Upstox token updated in memory")
             try:
-                from backend.services.scan_st1_algo import logger as scan_st1_logger
-                scan_st1_logger.info("✅ Upstox token updated in memory - token refresh complete")
+                from backend.services.smart_future_algo import logger as smart_future_logger
+                smart_future_logger.info("✅ Upstox token updated in memory - token refresh complete")
             except:
                 pass
         if hasattr(vwap_service, 'upstox'):
@@ -7120,17 +7120,17 @@ async def get_daily_trades(
 @router.get("/logs")
 async def get_scan_logs(
     lines: int = Query(100, ge=1, le=10000, description="Number of log lines to retrieve (1-10000)"),
-    log_type: str = Query("scan_st1_algo", description="Log file type: 'scan_st1_algo' (default) or 'trademanthan'"),
+    log_type: str = Query("smart_future_algo", description="Log file type: 'smart_future_algo' (default), legacy 'scan_st1_algo', or 'trademanthan'"),
     grep: Optional[str] = Query(None, description="Optional pattern to filter lines (substring match, case-insensitive). Useful for Cursor agent / API callers.")
 ):
     """
     Get the last N lines from the log file
-    For scanlog.html, reads from scan_st1_algo.log (scan algorithm logs)
+    For scanlog.html, reads from smart_future_algo.log (scan algorithm logs)
     For other uses, can read from trademanthan.log
     
     Args:
         lines: Number of lines to return (default 100, max 10000)
-        log_type: Type of log file - 'scan_st1_algo' (default) or 'trademanthan'
+        log_type: Type of log file - 'smart_future_algo' (default), legacy 'scan_st1_algo', or 'trademanthan'
         grep: If set, only return lines containing this string (case-insensitive). Enables Cursor agent to fetch e.g. OPTION_CHAIN_FAIL without SSH.
     
     Returns:
@@ -7145,24 +7145,24 @@ async def get_scan_logs(
             # Local environment
             log_dir = Path(__file__).parent.parent.parent / 'logs'
         
-        # Use scan_st1_algo.log for scan algorithm logs (default for scanlog.html)
-        if log_type == "scan_st1_algo":
-            log_file = log_dir / 'scan_st1_algo.log'
+        # Use smart_future_algo.log for scan algorithm logs (default for scanlog.html)
+        if log_type in ("smart_future_algo", "scan_st1_algo"):
+            log_file = log_dir / "smart_future_algo.log"
         else:
-            # Fallback to trademanthan.log for other uses
-            log_file = log_dir / 'trademanthan.log'
-        
-        # If scan_st1_algo.log doesn't exist, create it (empty file)
-        if log_type == "scan_st1_algo" and not log_file.exists():
+            # trademanthan.log for other uses
+            log_file = log_dir / "trademanthan.log"
+
+        # If smart_future_algo.log doesn't exist, create it (empty file)
+        if log_type in ("smart_future_algo", "scan_st1_algo") and not log_file.exists():
             try:
                 log_file.parent.mkdir(parents=True, exist_ok=True)
                 log_file.touch()
-                logger.info(f"Created scan_st1_algo.log file at {log_file}")
+                logger.info(f"Created smart_future_algo.log file at {log_file}")
             except Exception as e:
-                logger.error(f"Error creating scan_st1_algo.log: {e}")
-        
+                logger.error(f"Error creating smart_future_algo.log: {e}")
+
         # Alternative: try to find from logging configuration (only for trademanthan.log if main file doesn't exist)
-        if log_type != "scan_st1_algo" and not log_file.exists():
+        if log_type not in ("smart_future_algo", "scan_st1_algo") and not log_file.exists():
             # Try alternative locations (EXCLUDE /tmp/uvicorn.log - that's not the proper log file)
             alternative_paths = [
                 Path('/var/log/trademanthan/trademanthan.log'),

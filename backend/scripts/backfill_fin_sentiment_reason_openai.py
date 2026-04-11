@@ -2,7 +2,7 @@
 """
 One-time (or --force) backfill of stock_fin_sentiment.current_combined_sentiment_reason using OpenAI.
 
-1) Parse latest [fin_sentiment][S09] UPSERT lines from scan_st1_algo.log for sample titles.
+1) Parse latest [fin_sentiment][S09] UPSERT lines from smart_future_algo.log for sample titles.
 2) For each DB row, merge log title with NSE attchmntText excerpt (latest row for symbol, 2-day window).
 3) Call gpt-4o-mini (same as scheduler) with title + excerpt + stored nlp/combined scores.
 
@@ -40,7 +40,7 @@ def main() -> int:
     parser.add_argument(
         "--log-dir",
         default=str(LOG_DIR_DEFAULT),
-        help="Directory containing scan_st1_algo.log and rotated scan_st1_algo.log.*",
+        help="Directory containing smart_future_algo.log and rotated *.log.*",
     )
     parser.add_argument(
         "--force",
@@ -66,7 +66,7 @@ def main() -> int:
     from backend.services.nse_corporate_client import NseCorporateAnnouncementsClient
 
     samples = load_latest_s09_samples_from_log_dir(args.log_dir)
-    log.info("Loaded %s symbols from log samples (scan_st1_algo.log*)", len(samples))
+    log.info("Loaded %s symbols from log samples (smart_future_algo.log*)", len(samples))
 
     nse_client = NseCorporateAnnouncementsClient(lookback_calendar_days=2)
     nse_ok, nse_rows = nse_client.fetch_equity_announcements()

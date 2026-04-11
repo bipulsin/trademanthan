@@ -219,16 +219,16 @@ def _merge_s09_samples_from_lines(lines: List[str]) -> Dict[str, str]:
 
 def load_latest_s09_samples_from_log_dir(log_dir: str) -> Dict[str, str]:
     """
-    Merge S09 UPSERT samples from scan_st1_algo.log and rotated scan_st1_algo.log.* files.
+    Merge S09 UPSERT samples from smart_future_algo.log (and legacy scan_st1_algo.log*) files.
     Files processed oldest → newest so the newest line per symbol wins.
     """
     d = Path(log_dir)
     if not d.is_dir():
         return {}
-    paths = sorted(
-        d.glob("scan_st1_algo.log*"),
-        key=lambda p: p.stat().st_mtime,
-    )
+    paths: List[Path] = []
+    for _pat in ("smart_future_algo.log*", "scan_st1_algo.log*"):
+        paths.extend(d.glob(_pat))
+    paths = sorted(paths, key=lambda p: p.stat().st_mtime)
     out: Dict[str, str] = {}
     for p in paths:
         if not p.is_file():

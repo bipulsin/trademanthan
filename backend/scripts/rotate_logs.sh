@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Log Rotation Script for TradeManthan
-# Rotates scan_st1_algo.log and trademanthan.log daily at midnight
+# Rotates smart_future_algo.log (legacy scan_st1_algo.log) and trademanthan.log daily at midnight
 # - Moves current logs to date-based backup files
 # - Clears main log files for next day
 # - Deletes backup files older than 7 days
@@ -90,8 +90,11 @@ main() {
     echo "🔄 Starting log rotation..."
     echo ""
     
-    # Rotate scan_st1_algo.log
-    rotate_log "$LOG_DIR/scan_st1_algo.log"
+    # Rotate smart_future_algo.log; legacy scan_st1_algo.log if still present
+    rotate_log "$LOG_DIR/smart_future_algo.log"
+    if [[ -f "$LOG_DIR/scan_st1_algo.log" ]]; then
+        rotate_log "$LOG_DIR/scan_st1_algo.log"
+    fi
     
     # Rotate trademanthan.log
     rotate_log "$LOG_DIR/trademanthan.log"
@@ -101,6 +104,7 @@ main() {
     echo ""
     
     # Cleanup old backups
+    cleanup_old_backups "smart_future_algo.log"
     cleanup_old_backups "scan_st1_algo.log"
     cleanup_old_backups "trademanthan.log"
     

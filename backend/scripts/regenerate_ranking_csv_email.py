@@ -2,7 +2,7 @@
 """
 Rebuild ranking CSV + trigger ChartInk ranking email (same as webhook pipeline).
 
-Parses "Parsing stocks: ... value='A,B,C'" lines from scan_st1_algo.log for a given day,
+Parses "Parsing stocks: ... value='A,B,C'" lines from smart_future_algo.log for a given day,
 or loads distinct symbols from intraday_stock_options for --date (real LTP/VWAP when present),
 builds enriched rows for the ranker, writes logs/scan_rankings/*.csv + JSON,
 and sends the CSV to CHARTINK_RANKING_EMAIL / tradentical@gmail.com (async SMTP).
@@ -152,8 +152,8 @@ def main() -> int:
     )
     p.add_argument(
         "--log",
-        default="/home/ubuntu/trademanthan/logs/scan_st1_algo.log",
-        help="scan_st1_algo.log path",
+        default="/home/ubuntu/trademanthan/logs/smart_future_algo.log",
+        help="smart_future_algo.log path",
     )
     p.add_argument("--option-type", default="PE", choices=("CE", "PE"), help="Used for synthetic rows from --symbols or log fallback")
     p.add_argument("--no-email", action="store_true", help="CSV/JSON only")

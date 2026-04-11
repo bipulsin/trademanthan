@@ -1,5 +1,5 @@
 """
-Scan ST1 Algo Scheduler Controller
+Smart Future Algo Scheduler Controller
 Consolidates all scan algorithm schedulers into a single controller:
 - Morning Telegram ping (8:10 AM IST): TradeWithCTO channel — healthy vs not started
 - Instruments Downloader (daily at 9:05 AM)
@@ -16,7 +16,7 @@ Exception: 8:10 AM Telegram ping (before 8:30).
 
 Note: Master Stock download from Dhan has been removed.
 
-All logs go to logs/scan_st1_algo.log
+All logs go to logs/smart_future_algo.log
 """
 
 import logging
@@ -30,12 +30,12 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-# Configure dedicated logger for scan_st1_algo
+# Configure dedicated logger for smart_future_algo
 log_dir = Path(__file__).parent.parent.parent / 'logs'
 log_dir.mkdir(exist_ok=True)
-log_file = log_dir / 'scan_st1_algo.log'
+log_file = log_dir / 'smart_future_algo.log'
 
-# Create file handler for scan_st1_algo.log with immediate flushing
+# Create file handler for smart_future_algo.log with immediate flushing
 class FlushingFileHandler(logging.FileHandler):
     """FileHandler that flushes after each log entry to ensure immediate writes"""
     def emit(self, record):
@@ -56,11 +56,11 @@ file_handler.setFormatter(logging.Formatter(
     datefmt='%Y-%m-%d %H:%M:%S'
 ))
 
-# Create logger for scan_st1_algo (does NOT propagate to root logger)
-logger = logging.getLogger('scan_st1_algo')
+# Create logger for smart_future_algo (does NOT propagate to root logger)
+logger = logging.getLogger('smart_future_algo')
 logger.setLevel(logging.INFO)
 logger.addHandler(file_handler)
-logger.propagate = False  # Only log to scan_st1_algo.log, not to root logger
+logger.propagate = False  # Only log to smart_future_algo.log, not to root logger
 
 # Import all the job functions from existing schedulers
 # Master Stock Scheduler removed - no longer downloading from Dhan
@@ -102,8 +102,8 @@ def run_morning_trade_channel_health_ping() -> None:
     text = "TradeWithCTO Running good" if ok else "System not started!"
     send_trade_with_cto_channel_message(text)
 
-# Configure job function loggers to write ONLY to scan_st1_algo.log
-# This ensures all scan algorithm logs (webhooks, option contracts, trades, exits) go to scan_st1_algo.log
+# Configure job function loggers to write ONLY to smart_future_algo.log
+# This ensures all scan algorithm logs (webhooks, option contracts, trades, exits) go to smart_future_algo.log
 job_loggers = [
     logging.getLogger('backend.services.instruments_downloader'),
     logging.getLogger('backend.services.vwap_updater'),
@@ -119,14 +119,14 @@ job_loggers = [
 ]
 
 for job_logger in job_loggers:
-    # Add scan_st1_algo.log handler to job loggers
+    # Add smart_future_algo.log handler to job loggers
     # Check if handler already exists to avoid duplicates by checking baseFilename attribute
     handler_exists = False
     for h in job_logger.handlers:
         if isinstance(h, logging.FileHandler):
             # Check if this handler points to our log file
             handler_path = getattr(h, 'baseFilename', None) or getattr(h, 'stream', {}).name if hasattr(getattr(h, 'stream', None), 'name') else None
-            if handler_path and 'scan_st1_algo.log' in str(handler_path):
+            if handler_path and 'smart_future_algo.log' in str(handler_path):
                 handler_exists = True
                 break
     
@@ -139,14 +139,14 @@ for job_logger in job_loggers:
             datefmt='%Y-%m-%d %H:%M:%S'
         ))
         job_logger.addHandler(job_file_handler)
-        # Disable propagation to root logger so logs ONLY go to scan_st1_algo.log
+        # Disable propagation to root logger so logs ONLY go to smart_future_algo.log
         # This prevents duplicate logs in trademanthan.log
         job_logger.propagate = False
 
 
-def _attach_scan_st1_mirror_loggers() -> None:
+def _attach_smart_future_mirror_loggers() -> None:
     """
-    Add scan_st1_algo.log handler to selected loggers without disabling propagation,
+    Add smart_future_algo.log handler to selected loggers without disabling propagation,
     so the same messages also reach trademanthan.log via the root logger.
     Used for live entry/exit lines (market, limit fallback, GTT backup).
     """
@@ -161,7 +161,7 @@ def _attach_scan_st1_mirror_loggers() -> None:
                 handler_path = getattr(h, "baseFilename", None) or (
                     getattr(h.stream, "name", None) if getattr(h, "stream", None) else None
                 )
-                if handler_path and "scan_st1_algo.log" in str(handler_path):
+                if handler_path and "smart_future_algo.log" in str(handler_path):
                     handler_exists = True
                     break
         if handler_exists:
@@ -175,13 +175,13 @@ def _attach_scan_st1_mirror_loggers() -> None:
             )
         )
         ml.addHandler(mirror_handler)
-        # propagate stays True: logs go to scan_st1_algo.log AND root/trademanthan.log
+        # propagate stays True: logs go to smart_future_algo.log AND root/trademanthan.log
 
 
-_attach_scan_st1_mirror_loggers()
+_attach_smart_future_mirror_loggers()
 
 
-def run_scan_st1_vwap_update_gated() -> None:
+def run_smart_future_vwap_update_gated() -> None:
     """
     APScheduler fires every 5 minutes in the 09:00–15:55 IST hour range; we only run real work
     on weekdays between 09:15 and 15:35 so open-position VWAP / SL / VWAP-exit checks stay aligned
@@ -202,7 +202,7 @@ def run_scan_st1_vwap_update_gated() -> None:
         logger.error("❌ VWAP Update job (5-min) failed: %s", e, exc_info=True)
 
 
-class ScanST1AlgoScheduler:
+class SmartFutureAlgoScheduler:
     """Unified scheduler controller for all scan algorithm jobs"""
     
     def __init__(self):
@@ -210,11 +210,11 @@ class ScanST1AlgoScheduler:
             self.scheduler = BackgroundScheduler(timezone='Asia/Kolkata')
             self.is_running = False
             logger.info("=" * 60)
-            logger.info("🔧 Scan ST1 Algo Scheduler Controller initialized")
+            logger.info("🔧 Smart Future Algo Scheduler Controller initialized")
             logger.info("=" * 60)
         except Exception as e:
             # Log error but don't raise - allow scheduler to be created but not started
-            print(f"ERROR: Failed to initialize ScanST1AlgoScheduler: {e}", flush=True)
+            print(f"ERROR: Failed to initialize SmartFutureAlgoScheduler: {e}", flush=True)
             import traceback
             traceback.print_exc()
             # Create a dummy scheduler object to prevent AttributeError
@@ -224,11 +224,11 @@ class ScanST1AlgoScheduler:
     def start(self):
         """Start all scheduled jobs - runs as independent scheduler"""
         if self.is_running:
-            logger.warning("⚠️ Scan ST1 Algo Scheduler is already running")
+            logger.warning("⚠️ Smart Future Algo Scheduler is already running")
             return
         
-        logger.info("🚀 Starting Scan ST1 Algo Scheduler Controller (Independent Schedule Job)...")
-        logger.info("📝 All scheduler logs will be written to: logs/scan_st1_algo.log")
+        logger.info("🚀 Starting Smart Future Algo Scheduler Controller (Independent Schedule Job)...")
+        logger.info("📝 All scheduler logs will be written to: logs/smart_future_algo.log")
         
         try:
             # 0. Ensure instruments file exists on startup (download if missing or stale).
@@ -252,7 +252,7 @@ class ScanST1AlgoScheduler:
             self.scheduler.add_job(
                 run_morning_trade_channel_health_ping,
                 trigger=CronTrigger(hour=8, minute=10, timezone="Asia/Kolkata"),
-                id="scan_st1_morning_trade_channel_ping",
+                id="smart_future_morning_trade_channel_ping",
                 name="Morning TradeWithCTO Telegram Health (8:10 AM)",
                 replace_existing=True,
                 max_instances=1,
@@ -273,7 +273,7 @@ class ScanST1AlgoScheduler:
             self.scheduler.add_job(
                 run_instruments_download,
                 trigger=CronTrigger(hour=9, minute=5, timezone='Asia/Kolkata'),
-                id='scan_st1_instruments',
+                id='smart_future_instruments',
                 name='Instruments Download (9:05 AM)',
                 replace_existing=True,
                 max_instances=1,
@@ -301,7 +301,7 @@ class ScanST1AlgoScheduler:
                 self.scheduler.add_job(
                     create_health_check_wrapper(hour, minute),
                     trigger=CronTrigger(hour=hour, minute=minute, timezone='Asia/Kolkata'),
-                    id=f'scan_st1_health_check_{hour}_{minute}',
+                    id=f'smart_future_health_check_{hour}_{minute}',
                     name=f'Health Check {hour:02d}:{minute:02d}',
                     replace_existing=True,
                     max_instances=1,
@@ -322,7 +322,7 @@ class ScanST1AlgoScheduler:
             self.scheduler.add_job(
                 run_daily_health_report,
                 trigger=CronTrigger(hour=16, minute=0, timezone='Asia/Kolkata'),
-                id='scan_st1_daily_health_report',
+                id='smart_future_daily_health_report',
                 name='Daily Health Report (4:00 PM)',
                 replace_existing=True,
                 max_instances=1,
@@ -333,13 +333,13 @@ class ScanST1AlgoScheduler:
             
             # 4. VWAP Updater — every 5 minutes in 9–15 IST (gated to 9:15–15:35 weekdays) so exits track UI
             self.scheduler.add_job(
-                run_scan_st1_vwap_update_gated,
+                run_smart_future_vwap_update_gated,
                 trigger=CronTrigger(
                     minute="0,5,10,15,20,25,30,35,40,45,50,55",
                     hour="9-15",
                     timezone="Asia/Kolkata",
                 ),
-                id="scan_st1_vwap_update_every5",
+                id="smart_future_vwap_update_every5",
                 name="Update VWAP + exits (every 5 min, session gated)",
                 replace_existing=True,
                 max_instances=1,
@@ -360,7 +360,7 @@ class ScanST1AlgoScheduler:
             self.scheduler.add_job(
                 run_eod_close,
                 trigger=CronTrigger(hour=15, minute=25, timezone='Asia/Kolkata'),
-                id='scan_st1_close_all_trades_eod',
+                id='smart_future_close_all_trades_eod',
                 name='Close All Open Trades (3:25 PM)',
                 replace_existing=True,
                 max_instances=1,
@@ -381,7 +381,7 @@ class ScanST1AlgoScheduler:
             self.scheduler.add_job(
                 run_final_reconciliation_job,
                 trigger=CronTrigger(hour=15, minute=45, timezone='Asia/Kolkata'),
-                id='scan_st1_final_reconciliation_1545',
+                id='smart_future_final_reconciliation_1545',
                 name='Final Reconciliation (3:45 PM)',
                 replace_existing=True,
                 max_instances=1,
@@ -391,7 +391,7 @@ class ScanST1AlgoScheduler:
             self.scheduler.add_job(
                 run_final_reconciliation_job,
                 trigger=CronTrigger(hour=16, minute=0, timezone='Asia/Kolkata'),
-                id='scan_st1_final_reconciliation_1600',
+                id='smart_future_final_reconciliation_1600',
                 name='Final Reconciliation (4:00 PM)',
                 replace_existing=True,
                 max_instances=1,
@@ -450,7 +450,7 @@ class ScanST1AlgoScheduler:
             self.scheduler.add_job(
                 run_cycle_1,
                 trigger=CronTrigger(hour=10, minute=30, timezone='Asia/Kolkata'),
-                id='scan_st1_cycle_1_vwap_slope',
+                id='smart_future_cycle_1_vwap_slope',
                 name='Cycle 1: VWAP Slope (10:30 AM)',
                 replace_existing=True,
                 max_instances=1,
@@ -462,7 +462,7 @@ class ScanST1AlgoScheduler:
             self.scheduler.add_job(
                 run_cycle_2,
                 trigger=CronTrigger(hour=11, minute=15, timezone='Asia/Kolkata'),
-                id='scan_st1_cycle_2_vwap_slope',
+                id='smart_future_cycle_2_vwap_slope',
                 name='Cycle 2: VWAP Slope (11:15 AM)',
                 replace_existing=True,
                 max_instances=1,
@@ -474,7 +474,7 @@ class ScanST1AlgoScheduler:
             self.scheduler.add_job(
                 run_cycle_3,
                 trigger=CronTrigger(hour=12, minute=15, timezone='Asia/Kolkata'),
-                id='scan_st1_cycle_3_vwap_slope',
+                id='smart_future_cycle_3_vwap_slope',
                 name='Cycle 3: VWAP Slope (12:15 PM)',
                 replace_existing=True,
                 max_instances=1,
@@ -486,7 +486,7 @@ class ScanST1AlgoScheduler:
             self.scheduler.add_job(
                 run_cycle_4,
                 trigger=CronTrigger(hour=13, minute=15, timezone='Asia/Kolkata'),
-                id='scan_st1_cycle_4_vwap_slope',
+                id='smart_future_cycle_4_vwap_slope',
                 name='Cycle 4: VWAP Slope (13:15 PM)',
                 replace_existing=True,
                 max_instances=1,
@@ -498,7 +498,7 @@ class ScanST1AlgoScheduler:
             self.scheduler.add_job(
                 run_cycle_5,
                 trigger=CronTrigger(hour=14, minute=15, timezone='Asia/Kolkata'),
-                id='scan_st1_cycle_5_vwap_slope',
+                id='smart_future_cycle_5_vwap_slope',
                 name='Cycle 5: VWAP Slope (14:15 PM)',
                 replace_existing=True,
                 max_instances=1,
@@ -553,7 +553,7 @@ class ScanST1AlgoScheduler:
             self.scheduler.add_job(
                 run_index_price_check,
                 trigger=IntervalTrigger(minutes=5),
-                id='scan_st1_index_price_check',
+                id='smart_future_index_price_check',
                 name='Index Price Check (Every 5 minutes)',
                 replace_existing=True,
                 max_instances=1,
@@ -582,7 +582,7 @@ class ScanST1AlgoScheduler:
             self.scheduler.add_job(
                 run_index_price_9_15,
                 trigger=CronTrigger(hour=9, minute=15, timezone='Asia/Kolkata'),
-                id='scan_st1_index_price_9_15',
+                id='smart_future_index_price_9_15',
                 name='Index Price at 9:15 AM (Market Open)',
                 replace_existing=True,
                 max_instances=1,
@@ -593,7 +593,7 @@ class ScanST1AlgoScheduler:
             self.scheduler.add_job(
                 run_index_price_15_30,
                 trigger=CronTrigger(hour=15, minute=30, timezone='Asia/Kolkata'),
-                id='scan_st1_index_price_15_30',
+                id='smart_future_index_price_15_30',
                 name='Index Price at 3:30 PM (Market Close)',
                 replace_existing=True,
                 max_instances=1,
@@ -616,7 +616,7 @@ class ScanST1AlgoScheduler:
             self.scheduler.add_job(
                 run_entry_slip_monitor_job,
                 trigger=IntervalTrigger(minutes=15),
-                id='scan_st1_entry_slip_monitor',
+                id='smart_future_entry_slip_monitor',
                 name='Entry Slip Monitor (Every 15 minutes)',
                 replace_existing=True,
                 max_instances=1,
@@ -662,7 +662,7 @@ class ScanST1AlgoScheduler:
                         minute=minute,
                         timezone="Asia/Kolkata",
                     ),
-                    id=f"scan_st1_fin_sentiment_{hour}_{minute:02d}",
+                    id=f"smart_future_fin_sentiment_{hour}_{minute:02d}",
                     name=f"Fin Sentiment ({hour:02d}:{minute:02d} IST)",
                     replace_existing=True,
                     max_instances=1,
@@ -709,7 +709,7 @@ class ScanST1AlgoScheduler:
                         minute=_mm,
                         timezone="Asia/Kolkata",
                     ),
-                    id=f"scan_st1_smart_futures_picker_{_hh}_{_mm:02d}",
+                    id=f"smart_future_futures_picker_{_hh}_{_mm:02d}",
                     name=f"Smart Futures picker ({_hh:02d}:{_mm:02d} IST)",
                     replace_existing=True,
                     max_instances=1,
@@ -736,7 +736,7 @@ class ScanST1AlgoScheduler:
             self.scheduler.add_job(
                 run_car_nifty200_update,
                 trigger=IntervalTrigger(hours=3),
-                id='scan_st1_car_nifty200_update',
+                id='smart_future_car_nifty200_update',
                 name='CAR NIFTY200 Update (Every 3 hours)',
                 replace_existing=True,
                 max_instances=1,
@@ -762,7 +762,7 @@ class ScanST1AlgoScheduler:
             
             total_jobs = len(self.scheduler.get_jobs())
             logger.info("=" * 60)
-            logger.info(f"✅ Scan ST1 Algo Scheduler Controller STARTED")
+            logger.info(f"✅ Smart Future Algo Scheduler Controller STARTED")
             logger.info(f"   Status: Running as independent scheduled job")
             logger.info(f"   Total Jobs: {total_jobs}")
             logger.info(f"   Log File: {log_file}")
@@ -770,21 +770,21 @@ class ScanST1AlgoScheduler:
             logger.info("=" * 60)
             
         except Exception as e:
-            logger.error(f"❌ Failed to start Scan ST1 Algo Scheduler: {e}", exc_info=True)
+            logger.error(f"❌ Failed to start Smart Future Algo Scheduler: {e}", exc_info=True)
             raise
     
     def stop(self):
         """Stop all scheduled jobs"""
         if not self.is_running:
-            logger.warning("⚠️ Scan ST1 Algo Scheduler is not running")
+            logger.warning("⚠️ Smart Future Algo Scheduler is not running")
             return
         
         try:
             self.scheduler.shutdown()
             self.is_running = False
-            logger.info("✅ Scan ST1 Algo Scheduler Controller STOPPED")
+            logger.info("✅ Smart Future Algo Scheduler Controller STOPPED")
         except Exception as e:
-            logger.error(f"❌ Error stopping Scan ST1 Algo Scheduler: {e}", exc_info=True)
+            logger.error(f"❌ Error stopping Smart Future Algo Scheduler: {e}", exc_info=True)
     
     def get_status(self):
         """Get scheduler status"""
@@ -815,14 +815,14 @@ class ScanST1AlgoScheduler:
 
 
 # Global instance
-scan_st1_algo_scheduler = ScanST1AlgoScheduler()
+smart_future_algo_scheduler = SmartFutureAlgoScheduler()
 
 
-def start_scan_st1_algo():
-    """Start the scan ST1 algo scheduler"""
-    scan_st1_algo_scheduler.start()
+def start_smart_future_algo():
+    """Start the smart future algo scheduler."""
+    smart_future_algo_scheduler.start()
 
 
-def stop_scan_st1_algo():
-    """Stop the scan ST1 algo scheduler"""
-    scan_st1_algo_scheduler.stop()
+def stop_smart_future_algo():
+    """Stop the smart future algo scheduler."""
+    smart_future_algo_scheduler.stop()

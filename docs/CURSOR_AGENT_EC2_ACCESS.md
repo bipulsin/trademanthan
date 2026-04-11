@@ -13,7 +13,7 @@ Your backend already exposes scan logs over HTTP. If the app is reachable from t
 - **URL:** `GET /scan/logs`
 - **Query params:**
   - `lines` – number of lines (1–10000), default 100
-  - `log_type` – `scan_st1_algo` (default) or `trademanthan`
+  - `log_type` – `smart_future_algo` (default), legacy `scan_st1_algo`, or `trademanthan`
   - `grep` – optional substring to filter lines (case-insensitive). Use this so the agent gets only relevant lines.
 
 ### Examples (replace with your base URL)
