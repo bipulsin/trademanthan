@@ -150,7 +150,7 @@ def parse_s09_upsert_log_line(line: str) -> Optional[tuple[str, str]]:
     """Return (symbol, sample_title) from [fin_sentiment][S09] ... UPSERT ... sample=%r line."""
     if "[fin_sentiment][S09]" not in line or "UPSERT" not in line or "sample=" not in line:
         return None
-    ms = re.search(r"\bsymbol=([^\s]+)\s+UPSERT", line)
+    ms = re.search(r"\bsymbol=([^\s]+).*?\bUPSERT\b", line)
     if not ms:
         return None
     mt = re.search(r"\bsample=(.+)$", line)
@@ -161,6 +161,12 @@ def parse_s09_upsert_log_line(line: str) -> Optional[tuple[str, str]]:
     except (SyntaxError, ValueError):
         return None
     return ms.group(1), title
+
+
+def nse_row_to_title_and_detail(r: Dict[str, Any]) -> Dict[str, str]:
+    title_parts = [(r.get("sm_name") or "").strip(), (r.get("desc") or "").strip()]
+    title = " — ".join(p for p in title_parts if p) or "(no title)"
+    return {"title": title, "detail_excerpt": nse_attachment_excerpt(r)}
 
 
 def fetch_latest_nse_announcement_for_symbol(
@@ -177,29 +183,80 @@ def fetch_latest_nse_announcement_for_symbol(
     if not ok:
         return None
     symu = symbol.strip().upper()
-    cand = [r for r in rows if isinstance(r, dict) and (r.get("symbol") or "").strip().upper() == symu]
-    if not cand:
+    idx = index_latest_nse_row_by_symbol([x for x in rows if isinstance(x, dict)])
+    r = idx.get(symu)
+    if not r:
         return None
+    return nse_row_to_title_and_detail(r)
 
-    def sort_key(r: Dict[str, Any]) -> str:
-        return str(r.get("sort_date") or r.get("an_dt") or "")
 
-    cand.sort(key=sort_key, reverse=True)
-    r = cand[0]
-    title_parts = [(r.get("sm_name") or "").strip(), (r.get("desc") or "").strip()]
-    title = " — ".join(p for p in title_parts if p) or "(no title)"
-    return {"title": title, "detail_excerpt": nse_attachment_excerpt(r)}
+def announcement_from_index(
+    symbol: str, index: Dict[str, Dict[str, Any]]
+) -> Optional[Dict[str, str]]:
+    r = index.get(symbol.strip().upper())
+    if not r:
+        return None
+    return nse_row_to_title_and_detail(r)
 
 
 def load_latest_s09_samples_from_log(log_path: str) -> Dict[str, str]:
-    """Last occurrence per symbol wins."""
+    """Last occurrence per symbol wins (single file)."""
     p = Path(log_path)
     if not p.is_file():
         return {}
+    return _merge_s09_samples_from_lines(p.read_text(encoding="utf-8", errors="replace").splitlines())
+
+
+def _merge_s09_samples_from_lines(lines: List[str]) -> Dict[str, str]:
     out: Dict[str, str] = {}
-    for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+    for line in lines:
         parsed = parse_s09_upsert_log_line(line)
         if parsed:
             sym, title = parsed
             out[sym] = title
+    return out
+
+
+def load_latest_s09_samples_from_log_dir(log_dir: str) -> Dict[str, str]:
+    """
+    Merge S09 UPSERT samples from scan_st1_algo.log and rotated scan_st1_algo.log.* files.
+    Files processed oldest → newest so the newest line per symbol wins.
+    """
+    d = Path(log_dir)
+    if not d.is_dir():
+        return {}
+    paths = sorted(
+        d.glob("scan_st1_algo.log*"),
+        key=lambda p: p.stat().st_mtime,
+    )
+    out: Dict[str, str] = {}
+    for p in paths:
+        if not p.is_file():
+            continue
+        try:
+            lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        out.update(_merge_s09_samples_from_lines(lines))
+    return out
+
+
+def index_latest_nse_row_by_symbol(rows: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Pick most recent raw NSE row per symbol from a corporate-announcements payload."""
+    by_sym: Dict[str, List[Dict[str, Any]]] = {}
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        sym = (r.get("symbol") or "").strip().upper()
+        if not sym:
+            continue
+        by_sym.setdefault(sym, []).append(r)
+
+    def sort_key(r: Dict[str, Any]) -> str:
+        return str(r.get("sort_date") or r.get("an_dt") or "")
+
+    out: Dict[str, Dict[str, Any]] = {}
+    for sym, cand in by_sym.items():
+        cand.sort(key=sort_key, reverse=True)
+        out[sym] = cand[0]
     return out

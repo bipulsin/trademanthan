@@ -8,16 +8,18 @@ One-time (or --force) backfill of stock_fin_sentiment.current_combined_sentiment
 
   PYTHONPATH=. python backend/scripts/backfill_fin_sentiment_reason_openai.py
   PYTHONPATH=. python backend/scripts/backfill_fin_sentiment_reason_openai.py --force
+  PYTHONPATH=. python backend/scripts/backfill_fin_sentiment_reason_openai.py --log-dir /home/ubuntu/trademanthan/logs
 """
 from __future__ import annotations
 
 import argparse
 import logging
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-LOG_DEFAULT = ROOT / "logs" / "scan_st1_algo.log"
+LOG_DIR_DEFAULT = ROOT / "logs"
 
 
 def _setup_logging() -> None:
@@ -36,9 +38,9 @@ def main() -> int:
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--log-path",
-        default=str(LOG_DEFAULT),
-        help="Path to scan_st1_algo.log (S09 UPSERT lines)",
+        "--log-dir",
+        default=str(LOG_DIR_DEFAULT),
+        help="Directory containing scan_st1_algo.log and rotated scan_st1_algo.log.*",
     )
     parser.add_argument(
         "--force",
@@ -56,13 +58,20 @@ def main() -> int:
     from backend.database import SessionLocal
     from backend.models.fin_sentiment import StockFinSentiment
     from backend.services.fin_sentiment_reason_openai import (
+        announcement_from_index,
         derive_sentiment_reason_openai,
-        fetch_latest_nse_announcement_for_symbol,
-        load_latest_s09_samples_from_log,
+        index_latest_nse_row_by_symbol,
+        load_latest_s09_samples_from_log_dir,
     )
+    from backend.services.nse_corporate_client import NseCorporateAnnouncementsClient
 
-    samples = load_latest_s09_samples_from_log(args.log_path)
-    log.info("Loaded %s symbols from log samples", len(samples))
+    samples = load_latest_s09_samples_from_log_dir(args.log_dir)
+    log.info("Loaded %s symbols from log samples (scan_st1_algo.log*)", len(samples))
+
+    nse_client = NseCorporateAnnouncementsClient(lookback_calendar_days=2)
+    nse_ok, nse_rows = nse_client.fetch_equity_announcements()
+    nse_index = index_latest_nse_row_by_symbol(nse_rows) if nse_ok else {}
+    log.info("NSE index symbols=%s ok=%s", len(nse_index), nse_ok)
 
     db = SessionLocal()
     try:
@@ -77,7 +86,7 @@ def main() -> int:
                     continue
 
             title_log = samples.get(sym)
-            nse_pkg = fetch_latest_nse_announcement_for_symbol(sym, lookback_calendar_days=2)
+            nse_pkg = announcement_from_index(sym, nse_index)
             title_nse = (nse_pkg or {}).get("title") or ""
             detail = (nse_pkg or {}).get("detail_excerpt") or ""
 
@@ -105,6 +114,7 @@ def main() -> int:
             row.current_combined_sentiment_reason = reason
             updated += 1
             log.info("%s: updated reason len=%s", sym, len(reason))
+            time.sleep(0.6)
 
         db.commit()
         log.info("Done updated=%s skipped=%s", updated, skipped)
