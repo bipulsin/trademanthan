@@ -20,7 +20,7 @@ import backend.routers.algo as algo
 import backend.routers.scan as scan
 import backend.routers.cargpt as cargpt
 import backend.routers.arbitrage as arbitrage
-import backend.routers.smart_futures as smart_futures
+import backend.routers.smart_futures_stub as smart_futures
 # OLD SCHEDULERS - DISABLED - Migrated to scan_st1_algo
 # from backend.services.master_stock_scheduler import start_scheduler, stop_scheduler
 # from backend.services.instruments_downloader import start_instruments_scheduler, stop_instruments_scheduler
@@ -34,11 +34,6 @@ from backend.services.arbitrage_daily_setup_scheduler import (
     start_arbitrage_daily_setup_scheduler,
     stop_arbitrage_daily_setup_scheduler,
 )
-from backend.services.smart_futures_scheduler import (
-    start_smart_futures_scheduler,
-    stop_smart_futures_scheduler,
-)
-
 # Configure logging with file handler - MUST be done before any loggers are created
 log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
 os.makedirs(log_dir, exist_ok=True)
@@ -136,14 +131,6 @@ async def lifespan(app: FastAPI):
             logger.error(f"❌ Arbitrage Daily Setup Scheduler: FAILED - {e}", exc_info=True)
             logger.warning("⚠️ Continuing without arbitrage scheduler")
 
-        try:
-            logger.info("Starting Smart Futures scheduler...")
-            start_smart_futures_scheduler()
-            logger.info("✅ Smart Futures scheduler: STARTED")
-        except Exception as e:
-            logger.error(f"❌ Smart Futures scheduler: FAILED - {e}", exc_info=True)
-            logger.warning("⚠️ Continuing without Smart Futures scheduler")
-        
         logger.info("=" * 60)
         logger.info("✅ STARTUP COMPLETE - All Services Active")
         logger.info("=" * 60)
@@ -195,12 +182,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"⚠️ Error stopping Arbitrage Daily Setup Scheduler: {e}", exc_info=True)
 
-    try:
-        stop_smart_futures_scheduler()
-        logger.info("✅ Smart Futures scheduler stopped")
-    except Exception as e:
-        logger.error(f"⚠️ Error stopping Smart Futures scheduler: {e}", exc_info=True)
-    
     logger.info("✅ Shutdown complete")
 
 app = FastAPI(

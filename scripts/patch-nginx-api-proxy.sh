@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run ON the web server (sudo). Fixes /api/ proxy_pass so FastAPI receives paths under /api/...
-# Without this, nginx sends /api/foo → upstream /foo and routes like /api/smart-futures/* 404.
+# Without this, nginx sends /api/foo → upstream /foo and routes like /api/auth/* 404.
 #
 # Usage:
 #   sudo bash scripts/patch-nginx-api-proxy.sh
