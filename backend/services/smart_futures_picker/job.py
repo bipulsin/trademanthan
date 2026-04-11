@@ -2,10 +2,12 @@
 Smart Futures picker job: arbitrage_master universe → CMS / Final_CMS → smart_futures_daily.
 
 Schedules: 09:30 IST open; then 10:00–15:00 every 30 minutes (weekdays).
+Off-cycle on Sat/Sun: set env SMART_FUTURES_PICKER_FORCE_WEEKEND=1 (manual only).
 """
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -396,7 +398,12 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
     scan_trigger: e.g. '09:30', '10:00' (for logging / row metadata).
     """
     now_ist = datetime.now(IST)
-    if now_ist.weekday() >= 5:
+    _force_weekend = os.environ.get("SMART_FUTURES_PICKER_FORCE_WEEKEND", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    if now_ist.weekday() >= 5 and not _force_weekend:
         return {"skipped": "weekend", "scan_trigger": scan_trigger}
     session_date = now_ist.date()
 
