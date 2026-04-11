@@ -5,12 +5,21 @@ https://www.marketaux.com/documentation
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import requests
 
 logger = logging.getLogger(__name__)
+
+_REDACT_TOKEN_IN_MSG = re.compile(r"api_token=[^&\s]+", re.IGNORECASE)
+
+
+def _safe_marketaux_error_message(exc: BaseException) -> str:
+    """Avoid leaking api_token when requests embeds the full URL in str(exc)."""
+    msg = str(exc)
+    return _REDACT_TOKEN_IN_MSG.sub("api_token=***", msg)
 
 BASE_URL = "https://api.marketaux.com/v1/news/all"
 DEFAULT_TIMEOUT = 22
@@ -62,7 +71,11 @@ class MarketauxClient:
             r.raise_for_status()
             payload = r.json()
         except Exception as e:
-            logger.warning("MarketAux request failed symbols=%s: %s", sym[:80], e)
+            logger.warning(
+                "MarketAux request failed symbols=%s: %s",
+                sym[:80],
+                _safe_marketaux_error_message(e),
+            )
             return []
         if not isinstance(payload, dict):
             return []
