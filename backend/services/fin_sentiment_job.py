@@ -31,9 +31,23 @@ logger = logging.getLogger(__name__)
 
 IST = pytz.timezone("Asia/Kolkata")
 MAX_ITEMS_PER_STOCK = 5
-# NSE from_date/to_date: IST calendar span (0 = today only).
-DEFAULT_NSE_LOOKBACK_CALENDAR_DAYS = 0
 REASON_MAX_LEN = 2000
+
+
+def _ist_nse_ddmm_range_watermark_to_now(watermark_utc: datetime, now_utc: datetime) -> Tuple[str, str]:
+    """NSE API DD-MM-YYYY inclusive: IST calendar dates from last run through this run."""
+    d0 = watermark_utc.astimezone(IST).date()
+    d1 = now_utc.astimezone(IST).date()
+    if d1 < d0:
+        d1 = d0
+    return d0.strftime("%d-%m-%Y"), d1.strftime("%d-%m-%Y")
+
+
+def _ist_nse_single_calendar_today_ddmm(now_utc: datetime) -> Tuple[str, str]:
+    """Same IST calendar day for from_date and to_date (09:17 slot default)."""
+    d = now_utc.astimezone(IST).date()
+    s = d.strftime("%d-%m-%Y")
+    return s, s
 
 
 def _build_current_combined_sentiment_reason(
@@ -168,12 +182,14 @@ def _load_arbitrage_rows(db: Session) -> List[Tuple[str, Optional[str]]]:
 
 def run_fin_sentiment_job(
     *,
-    nse_lookback_calendar_days: int = DEFAULT_NSE_LOOKBACK_CALENDAR_DAYS,
+    use_single_ist_day_nse: bool = False,
 ) -> Dict[str, Any]:
     """
     Entry point for APScheduler. One NSE API pull per run; filters since watermark.
 
-    nse_lookback_calendar_days: 0 = single IST calendar day (today); 1 = today+yesterday, etc.
+    NSE from_date/to_date (IST calendar, inclusive):
+    - Default: from last successful run (watermark) through now — only that span is requested.
+    - use_single_ist_day_nse=True (09:17 IST slot only): today-only window (single IST calendar day).
     """
     summary: Dict[str, Any] = {
         "ok": False,
@@ -191,13 +207,20 @@ def run_fin_sentiment_job(
         "filter_accepted_hits": 0,
         "openai_reason_ok": 0,
         "openai_reason_fallback": 0,
+        "nse_from_date": None,
+        "nse_to_date": None,
+        "nse_window": None,
     }
 
     now_utc = datetime.now(pytz.UTC)
     now_ist = now_utc.astimezone(IST)
     run_tag = now_ist.strftime("%Y-%m-%d %H:%M:%S %Z")
 
-    logger.info("[fin_sentiment][S01] start run_tag=%s nse_lookback_calendar_days=%s", run_tag, nse_lookback_calendar_days)
+    logger.info(
+        "[fin_sentiment][S01] start run_tag=%s use_single_ist_day_nse=%s",
+        run_tag,
+        use_single_ist_day_nse,
+    )
 
     db = SessionLocal()
     try:
@@ -224,10 +247,23 @@ def run_fin_sentiment_job(
             return summary
 
         arb_set = {s for s, _ in arb}
-        client = NseCorporateAnnouncementsClient(lookback_calendar_days=nse_lookback_calendar_days)
-        logger.info("[fin_sentiment][S05] nse client created; fetching corporate-announcements")
+        if use_single_ist_day_nse:
+            nse_from, nse_to = _ist_nse_single_calendar_today_ddmm(now_utc)
+            summary["nse_window"] = "single_ist_day_917"
+        else:
+            nse_from, nse_to = _ist_nse_ddmm_range_watermark_to_now(watermark, now_utc)
+            summary["nse_window"] = "watermark_to_now"
+        summary["nse_from_date"] = nse_from
+        summary["nse_to_date"] = nse_to
+        logger.info(
+            "[fin_sentiment][S05] nse date range from=%s to=%s window=%s",
+            nse_from,
+            nse_to,
+            summary["nse_window"],
+        )
 
-        nse_ok, raw = client.fetch_equity_announcements()
+        client = NseCorporateAnnouncementsClient(lookback_calendar_days=0)
+        nse_ok, raw = client.fetch_equity_announcements(from_date=nse_from, to_date=nse_to)
         if not nse_ok:
             summary["skipped"] = "nse_corporate_announcements_unavailable"
             summary["ok"] = False

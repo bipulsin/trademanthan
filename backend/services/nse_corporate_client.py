@@ -85,10 +85,28 @@ class NseCorporateAnnouncementsClient:
         s.headers["Referer"] = "https://www.nseindia.com/companies-listing/corporate-filings-announcements"
         return ok_any
 
-    def fetch_equity_announcements(self) -> Tuple[bool, List[Dict[str, Any]]]:
+    def _resolve_date_params(
+        self,
+        *,
+        from_date: Optional[str],
+        to_date: Optional[str],
+    ) -> Tuple[str, str, str]:
+        if from_date and to_date:
+            return from_date.strip(), to_date.strip(), "explicit"
+        from_s, to_s = _ist_date_strings(lookback_days=self._lookback)
+        return from_s, to_s, f"lookback_days={self._lookback}"
+
+    def fetch_equity_announcements(
+        self,
+        *,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+    ) -> Tuple[bool, List[Dict[str, Any]]]:
         """
         (ok, rows). ok=False means transport/auth failure — caller should not advance watermark.
         ok=True and empty list means no rows in the requested window.
+
+        Pass from_date and to_date as DD-MM-YYYY (IST calendar) to override lookback_calendar_days.
         """
         with self._lock:
             if self._session is None:
@@ -96,13 +114,13 @@ class NseCorporateAnnouncementsClient:
                 self._primed = False
             s = self._session
 
-            from_s, to_s = _ist_date_strings(lookback_days=self._lookback)
+            from_s, to_s, plan_mode = self._resolve_date_params(from_date=from_date, to_date=to_date)
             params = {"index": "equities", "from_date": from_s, "to_date": to_s}
             logger.info(
-                "[fin_sentiment][nse][request_plan] from_date=%s to_date=%s lookback_calendar_days=%s",
+                "[fin_sentiment][nse][request_plan] from_date=%s to_date=%s mode=%s",
                 from_s,
                 to_s,
-                self._lookback,
+                plan_mode,
             )
 
             def _call() -> requests.Response:

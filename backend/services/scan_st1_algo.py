@@ -8,7 +8,7 @@ Consolidates all scan algorithm schedulers into a single controller:
 - Index Price Scheduler (every 5 min during market hours)
 - Entry slip monitor (every 15 min during market hours): cancel unfilled entry orders after 2 checks
 - Final reconciliation (3:45 PM & 4:00 PM): broker buy/sell/PnL sync; time_based → Exit-TM after 3:15 PM exits
-- Fin sentiment (weekdays 9:17–13:17 IST, 15 min): NSE corporate announcements + FinBERT for arbitrage_master, store in stock_fin_sentiment
+- Fin sentiment (weekdays 9:17–13:17 IST, 15 min): NSE corporate announcements + FinBERT for arbitrage_master, store in stock_fin_sentiment (NSE date window: last-run→now; 09:17 only uses today IST)
 
 Interval-driven jobs only run real work between 08:30 and 21:00 IST (see scheduler_window).
 Exception: 8:10 AM Telegram ping (before 8:30).
@@ -643,7 +643,7 @@ class ScanST1AlgoScheduler:
                         return
                     logger.info("🔧 Fin Sentiment job (%02d:%02d IST)...", h, m)
                     try:
-                        run_fin_sentiment_job()
+                        run_fin_sentiment_job(use_single_ist_day_nse=(h == 9 and m == 17))
                         logger.info("✅ Fin Sentiment job (%02d:%02d) completed", h, m)
                     except Exception as e:
                         logger.error("❌ Fin Sentiment job (%02d:%02d) failed: %s", h, m, e, exc_info=True)
