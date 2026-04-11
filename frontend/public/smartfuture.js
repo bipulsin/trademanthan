@@ -7,8 +7,6 @@
             ? 'http://localhost:8000'
             : window.location.origin;
 
-    const POLL_MS = 120 * 1000;
-
     function authHeaders() {
         const t = localStorage.getItem('trademanthan_token') || '';
         return {
@@ -184,6 +182,5 @@
         const ref = document.getElementById('sfTrendRefresh');
         if (ref) ref.addEventListener('click', function () { loadTrend(false); });
         loadTrend(false);
-        setInterval(function () { loadTrend(true); }, POLL_MS);
     });
 })();

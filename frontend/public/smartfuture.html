@@ -46,11 +46,18 @@
             cursor: pointer;
         }
         .sf-btn-refresh {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            padding: 0;
             border: 1px solid var(--theme-border, #cbd5e1);
             background: var(--theme-card, #f8fafc);
             color: var(--theme-text, #0f172a);
         }
         .sf-btn-refresh:hover:not(:disabled) { background: var(--theme-border, #e2e8f0); }
+        .sf-btn-refresh i { font-size: 1rem; }
         .sf-btn-order {
             border: none;
             background: #2563eb;
@@ -82,7 +89,7 @@
             <div class="settings-header">
                 <div class="settings-title-section">
                     <h1 class="settings-title"><i class="fas fa-bolt"></i> Smart Futures</h1>
-                    <p class="settings-subtitle">Today&apos;s trend picks (CMS) refresh on a short timer after each scheduled scan. Admin parameters stay on the Admin page.</p>
+                    <p class="settings-subtitle">Today&apos;s trend picks (CMS). Use the refresh control in that section to reload data. Admin parameters stay on the Admin page.</p>
                 </div>
             </div>
             <div class="settings-content sf-wrap">
@@ -90,7 +97,7 @@
                     <div class="sf-card-head">
                         <h2><i class="fas fa-chart-line"></i> Today&apos;s Trend</h2>
                         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-                            <button type="button" class="sf-btn-refresh" id="sfTrendRefresh">Refresh</button>
+                            <button type="button" class="sf-btn-refresh" id="sfTrendRefresh" title="Refresh" aria-label="Refresh today&apos;s trend"><i class="fas fa-sync-alt" aria-hidden="true"></i></button>
                             <span class="sf-meta">Session (IST): <span id="sfTrendSession">—</span></span>
                             <span class="sf-meta">Updated: <span id="sfTrendUpdated">—</span></span>
                         </div>
@@ -102,6 +109,6 @@
         </main>
     </div>
     <script src="left-menu.js?v=3.15"></script>
-    <script src="smartfuture.js?v=14"></script>
+    <script src="smartfuture.js?v=15"></script>
 </body>
 </html>
