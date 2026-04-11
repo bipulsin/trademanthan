@@ -4,6 +4,8 @@ FinBERT on announcement text, combined score persisted with last/current rotatio
 
 Replaces MarketAux: NSE JSON has no entity sentiment; api_sentiment_avg is left null
 and combined_sentiment_avg follows FinBERT when available.
+
+Logs use prefix [fin_sentiment][Sxx] for stage analysis in scan_st1_algo.log.
 """
 from __future__ import annotations
 
@@ -25,6 +27,8 @@ logger = logging.getLogger(__name__)
 
 IST = pytz.timezone("Asia/Kolkata")
 MAX_ITEMS_PER_STOCK = 5
+# NSE from_date/to_date: IST calendar span (0 = today only).
+DEFAULT_NSE_LOOKBACK_CALENDAR_DAYS = 0
 
 
 @dataclass
@@ -66,7 +70,8 @@ def _row_title(row: Dict[str, Any]) -> str:
         (row.get("sm_name") or "").strip(),
         (row.get("desc") or "").strip(),
     ]
-    return " — ".join(p for p in parts if p) or "(no title)"
+    joined = " — ".join(p for p in parts if p)
+    return joined if joined else "(no title)"
 
 
 def _finbert_numeric_from_scores(scores: Dict[str, Any]) -> float:
@@ -121,9 +126,14 @@ def _load_arbitrage_rows(db: Session) -> List[Tuple[str, Optional[str]]]:
     return out
 
 
-def run_fin_sentiment_job() -> Dict[str, Any]:
+def run_fin_sentiment_job(
+    *,
+    nse_lookback_calendar_days: int = DEFAULT_NSE_LOOKBACK_CALENDAR_DAYS,
+) -> Dict[str, Any]:
     """
     Entry point for APScheduler. One NSE API pull per run; filters since watermark.
+
+    nse_lookback_calendar_days: 0 = single IST calendar day (today); 1 = today+yesterday, etc.
     """
     summary: Dict[str, Any] = {
         "ok": False,
@@ -132,57 +142,110 @@ def run_fin_sentiment_job() -> Dict[str, Any]:
         "rows_upserted": 0,
         "nse_announcements_total": 0,
         "skipped": None,
+        "filter_raw_rows": 0,
+        "filter_symbol_in_arb": 0,
+        "filter_symbol_not_arb": 0,
+        "filter_no_publish_time": 0,
+        "filter_at_or_before_watermark": 0,
+        "filter_duplicate_seq": 0,
+        "filter_accepted_hits": 0,
     }
 
     now_utc = datetime.now(pytz.UTC)
     now_ist = now_utc.astimezone(IST)
+    run_tag = now_ist.strftime("%Y-%m-%d %H:%M:%S %Z")
+
+    logger.info("[fin_sentiment][S01] start run_tag=%s nse_lookback_calendar_days=%s", run_tag, nse_lookback_calendar_days)
 
     db = SessionLocal()
     try:
         watermark = _get_watermark(db)
+        logger.info("[fin_sentiment][S02] watermark_utc=%s", watermark.isoformat())
+
         arb = _load_arbitrage_rows(db)
         summary["stocks_considered"] = len(arb)
+        logger.info("[fin_sentiment][S03] arbitrage_master rows=%s", len(arb))
+
         if not arb:
             summary["skipped"] = "arbitrage_master empty"
+            logger.info("[fin_sentiment][S04] skip reason=%s advance_watermark=True", summary["skipped"])
             _set_watermark(db, now_utc)
             db.commit()
             summary["ok"] = True
+            logger.info("[fin_sentiment][S99] end ok=%s summary=%s", summary["ok"], summary)
             return summary
 
         arb_set = {s for s, _ in arb}
-        client = NseCorporateAnnouncementsClient(lookback_calendar_days=2)
+        client = NseCorporateAnnouncementsClient(lookback_calendar_days=nse_lookback_calendar_days)
+        logger.info("[fin_sentiment][S05] nse client created; fetching corporate-announcements")
+
         nse_ok, raw = client.fetch_equity_announcements()
         if not nse_ok:
             summary["skipped"] = "nse_corporate_announcements_unavailable"
             summary["ok"] = False
-            logger.warning("Fin sentiment job skipped: %s", summary["skipped"])
+            logger.warning(
+                "[fin_sentiment][S06] FAIL nse_fetch ok=False skipped=%s — watermark NOT advanced",
+                summary["skipped"],
+            )
+            logger.info("[fin_sentiment][S99] end ok=%s summary=%s", summary["ok"], summary)
             return summary
 
         summary["nse_announcements_total"] = len(raw)
+        summary["filter_raw_rows"] = len(raw)
+        logger.info("[fin_sentiment][S06] nse_fetch ok=True raw_rows=%s", len(raw))
 
         bucket: Dict[str, List[CorpHit]] = defaultdict(list)
         seen: Dict[str, set] = defaultdict(set)
 
         for row in raw:
             sym = (row.get("symbol") or "").strip().upper()
-            if not sym or sym not in arb_set:
+            if not sym:
                 continue
+            if sym not in arb_set:
+                summary["filter_symbol_not_arb"] += 1
+                continue
+            summary["filter_symbol_in_arb"] += 1
             pub = _parse_row_time_utc(row)
-            if pub is None or pub <= watermark:
+            if pub is None:
+                summary["filter_no_publish_time"] += 1
+                continue
+            if pub <= watermark:
+                summary["filter_at_or_before_watermark"] += 1
                 continue
             sid = _row_seq_id(row)
             if sid in seen[sym]:
+                summary["filter_duplicate_seq"] += 1
                 continue
             seen[sym].add(sid)
             bucket[sym].append(CorpHit(seq_id=sid, published_utc=pub, title=_row_title(row)))
+            summary["filter_accepted_hits"] += 1
+
+        symbols_with_hits = [s for s, hs in bucket.items() if hs]
+        logger.info(
+            "[fin_sentiment][S07] after_filter symbol_hits_in_arb=%s symbols_with_hits=%s "
+            "not_arb=%s no_time=%s lte_watermark=%s dup=%s accepted=%s",
+            summary["filter_symbol_in_arb"],
+            len(symbols_with_hits),
+            summary["filter_symbol_not_arb"],
+            summary["filter_no_publish_time"],
+            summary["filter_at_or_before_watermark"],
+            summary["filter_duplicate_seq"],
+            summary["filter_accepted_hits"],
+        )
 
         finbert_ok = False
         try:
             from backend.services.finbert_service import is_finbert_available, predict_sentiment
 
             finbert_ok = is_finbert_available()
-        except Exception:
+        except Exception as e:
+            logger.info("[fin_sentiment][S08] finbert import/check failed: %s", e)
             finbert_ok = False
+
+        logger.info("[fin_sentiment][S08] finbert_available=%s", finbert_ok)
+
+        detail_lines = 0
+        max_detail = 25
 
         for sym, ikey in arb:
             hits = bucket.get(sym) or []
@@ -201,7 +264,7 @@ def run_fin_sentiment_job() -> Dict[str, Any]:
                     nums = [_finbert_numeric_from_scores(x.get("scores") or {}) for x in fb]
                     nlp_avg = sum(nums) / len(nums) if nums else None
                 except Exception as e:
-                    logger.warning("FinBERT batch failed for %s: %s", sym, e)
+                    logger.warning("[fin_sentiment][S09] finbert_failed symbol=%s err=%s", sym, e)
                     nlp_avg = None
 
             if api_avg is not None and nlp_avg is not None:
@@ -214,6 +277,12 @@ def run_fin_sentiment_job() -> Dict[str, Any]:
                 combined = None
 
             if combined is None:
+                logger.info(
+                    "[fin_sentiment][S09] symbol=%s hits=%s SKIP no_combined (nlp=%s)",
+                    sym,
+                    len(hits),
+                    nlp_avg,
+                )
                 continue
 
             row = db.get(StockFinSentiment, sym)
@@ -243,22 +312,42 @@ def run_fin_sentiment_job() -> Dict[str, Any]:
                 row.current_run_at = now_ist
 
             summary["rows_upserted"] += 1
+            if detail_lines < max_detail:
+                sample = (titles[0][:120] + "…") if titles and len(titles[0]) > 120 else (titles[0] if titles else "")
+                logger.info(
+                    "[fin_sentiment][S09] symbol=%s UPSERT hits=%s nlp_avg=%.4f combined=%.4f prev_current=%s sample=%r",
+                    sym,
+                    len(hits),
+                    float(nlp_avg) if nlp_avg is not None else float("nan"),
+                    float(combined),
+                    prev_current,
+                    sample,
+                )
+                detail_lines += 1
+
+        if summary["rows_upserted"] > detail_lines:
+            logger.info(
+                "[fin_sentiment][S09] … upsert detail truncated (logged=%s total_upserts=%s)",
+                detail_lines,
+                summary["rows_upserted"],
+            )
 
         _set_watermark(db, now_utc)
         db.commit()
         summary["ok"] = True
         logger.info(
-            "Fin sentiment job OK (NSE corporate): stocks=%s with_news=%s rows=%s nse_rows=%s",
-            summary["stocks_considered"],
+            "[fin_sentiment][S10] commit watermark_utc=%s stocks_with_news=%s rows_upserted=%s",
+            now_utc.isoformat(),
             summary["stocks_with_news"],
             summary["rows_upserted"],
-            summary["nse_announcements_total"],
         )
+        logger.info("[fin_sentiment][S99] end ok=%s summary=%s", summary["ok"], summary)
         return summary
     except Exception as e:
-        logger.error("Fin sentiment job failed: %s", e, exc_info=True)
+        logger.error("[fin_sentiment][ERR] %s", e, exc_info=True)
         db.rollback()
         summary["error"] = str(e)
+        logger.info("[fin_sentiment][S99] end ok=%s summary=%s", summary["ok"], summary)
         return summary
     finally:
         db.close()

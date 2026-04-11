@@ -32,7 +32,7 @@ UA = (
 
 
 def _ist_date_strings(*, lookback_days: int) -> Tuple[str, str]:
-    """NSE expects DD-MM-YYYY; use IST calendar dates."""
+    """NSE expects DD-MM-YYYY; use IST calendar dates. lookback_days=0 → single day (today)."""
     today_ist = datetime.now(IST).date()
     start = today_ist - timedelta(days=max(0, int(lookback_days)))
     return start.strftime("%d-%m-%Y"), today_ist.strftime("%d-%m-%Y")
@@ -41,7 +41,7 @@ def _ist_date_strings(*, lookback_days: int) -> Tuple[str, str]:
 class NseCorporateAnnouncementsClient:
     """Thread-safe session with cookie priming and one retry on 403/401."""
 
-    def __init__(self, *, lookback_calendar_days: int = 2) -> None:
+    def __init__(self, *, lookback_calendar_days: int = 0) -> None:
         self._lookback = lookback_calendar_days
         self._lock = threading.Lock()
         self._session: Optional[requests.Session] = None
@@ -70,10 +70,17 @@ class NseCorporateAnnouncementsClient:
         for url in PRIME_URLS:
             try:
                 r = s.get(url, headers=html_headers, timeout=DEFAULT_TIMEOUT)
-                if 200 <= r.status_code < 400:
+                st = r.status_code
+                if 200 <= st < 400:
                     ok_any = True
+                logger.info(
+                    "[fin_sentiment][nse][prime] url=%s http_status=%s cookies=%s",
+                    url,
+                    st,
+                    len(s.cookies or {}),
+                )
             except Exception as e:
-                logger.debug("NSE prime GET %s failed: %s", url, e)
+                logger.info("[fin_sentiment][nse][prime] url=%s FAILED: %s", url, e)
         s.headers["Accept"] = "application/json, text/plain, */*"
         s.headers["Referer"] = "https://www.nseindia.com/companies-listing/corporate-filings-announcements"
         return ok_any
@@ -91,6 +98,12 @@ class NseCorporateAnnouncementsClient:
 
             from_s, to_s = _ist_date_strings(lookback_days=self._lookback)
             params = {"index": "equities", "from_date": from_s, "to_date": to_s}
+            logger.info(
+                "[fin_sentiment][nse][request_plan] from_date=%s to_date=%s lookback_calendar_days=%s",
+                from_s,
+                to_s,
+                self._lookback,
+            )
 
             def _call() -> requests.Response:
                 if not self._primed:
@@ -100,10 +113,17 @@ class NseCorporateAnnouncementsClient:
 
             for attempt in range(2):
                 try:
+                    logger.info("[fin_sentiment][nse][http] attempt=%s GET corporate-announcements", attempt + 1)
                     r = _call()
+                    logger.info(
+                        "[fin_sentiment][nse][http] attempt=%s http_status=%s bytes=%s",
+                        attempt + 1,
+                        r.status_code,
+                        len(r.content or b""),
+                    )
                     if r.status_code in (401, 403):
                         logger.warning(
-                            "NSE corporate-announcements HTTP %s — re-priming session (attempt %s)",
+                            "[fin_sentiment][nse][http] status=%s re-priming session (attempt %s)",
                             r.status_code,
                             attempt + 1,
                         )
@@ -115,11 +135,22 @@ class NseCorporateAnnouncementsClient:
                     r.raise_for_status()
                     data = r.json()
                     if not isinstance(data, list):
-                        logger.warning("NSE corporate-announcements: expected list, got %s", type(data))
+                        logger.warning(
+                            "[fin_sentiment][nse][parse] expected JSON list, got %s",
+                            type(data),
+                        )
                         return False, []
-                    return True, [x for x in data if isinstance(x, dict)]
+                    rows = [x for x in data if isinstance(x, dict)]
+                    syms = {str(x.get("symbol") or "").strip().upper() for x in rows}
+                    syms.discard("")
+                    logger.info(
+                        "[fin_sentiment][nse][parse] ok dict_rows=%s distinct_symbols=%s",
+                        len(rows),
+                        len(syms),
+                    )
+                    return True, rows
                 except Exception as e:
-                    logger.warning("NSE corporate-announcements request failed: %s", e)
+                    logger.warning("[fin_sentiment][nse][http] request failed attempt=%s: %s", attempt + 1, e)
                     self._primed = False
                     if attempt == 0:
                         self._session = self._build_session()
