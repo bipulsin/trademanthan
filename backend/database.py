@@ -375,6 +375,54 @@ def _run_startup_schema_migrations(db_engine):
                 conn.execute(text("UPDATE users SET is_blocked = FALSE WHERE is_blocked IS NULL"))
                 conn.execute(text("UPDATE users SET is_paid_user = FALSE WHERE is_paid_user IS NULL"))
 
+            # Smart Futures daily picks (CMS picker job → smart_futures_daily)
+            if "smart_futures_daily" not in table_names:
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE smart_futures_daily (
+                                id BIGSERIAL PRIMARY KEY,
+                                session_date DATE NOT NULL,
+                                stock TEXT NOT NULL,
+                                fut_symbol TEXT,
+                                fut_instrument_key TEXT NOT NULL,
+                                side TEXT NOT NULL,
+                                obv_slope DOUBLE PRECISION,
+                                volume_surge DOUBLE PRECISION,
+                                adx_14 DOUBLE PRECISION,
+                                atr_14 DOUBLE PRECISION,
+                                renko_momentum DOUBLE PRECISION,
+                                ha_trend DOUBLE PRECISION,
+                                macd_div DOUBLE PRECISION,
+                                rsi_div DOUBLE PRECISION,
+                                stoch_div DOUBLE PRECISION,
+                                cms DOUBLE PRECISION,
+                                final_cms DOUBLE PRECISION,
+                                sector_score DOUBLE PRECISION,
+                                combined_sentiment DOUBLE PRECISION,
+                                entry_price DOUBLE PRECISION,
+                                sl_price DOUBLE PRECISION,
+                                target_price DOUBLE PRECISION,
+                                hold_type TEXT,
+                                entry_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+                                trend_continuation TEXT,
+                                scan_trigger TEXT,
+                                vix_at_scan DOUBLE PRECISION,
+                                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                                CONSTRAINT uq_sfd_session_fut UNIQUE (session_date, fut_instrument_key)
+                            )
+                            """
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_sfd_session_date ON smart_futures_daily (session_date DESC)"
+                        )
+                    )
+                    print("Applied migration: created smart_futures_daily (PostgreSQL)")
+
             # Legacy Smart Futures DB tables removed (screener rebuild); drop if still present.
             _sf_tables = (
                 "smart_futures_order_audit",

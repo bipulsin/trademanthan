@@ -9,6 +9,7 @@ Consolidates all scan algorithm schedulers into a single controller:
 - Entry slip monitor (every 15 min during market hours): cancel unfilled entry orders after 2 checks
 - Final reconciliation (3:45 PM & 4:00 PM): broker buy/sell/PnL sync; time_based → Exit-TM after 3:15 PM exits
 - Fin sentiment (weekdays 9:17–13:17 IST, 15 min): NSE corporate announcements + FinBERT for arbitrage_master, store in stock_fin_sentiment (NSE date window: last-run→now; 09:17 only uses today IST)
+- Smart Futures CMS picker (weekdays 9:30 then 10:00–15:00 every 30 min IST): arbitrage_master current-month futures → smart_futures_daily
 
 Interval-driven jobs only run real work between 08:30 and 21:00 IST (see scheduler_window).
 Exception: 8:10 AM Telegram ping (before 8:30).
@@ -81,6 +82,7 @@ from backend.services.index_price_scheduler import index_price_scheduler
 from backend.services.car_nifty200_updater import run_car_nifty200_update_job
 from backend.services.entry_slip_monitor import run_entry_slip_monitor
 from backend.services.fin_sentiment_job import run_fin_sentiment_job
+from backend.services.smart_futures_picker.job import run_smart_futures_picker_job
 from backend.services.scheduler_window import is_allowed_scheduler_window_ist
 from backend.services.telegram_trade_channel import send_trade_with_cto_channel_message
 
@@ -111,6 +113,7 @@ job_loggers = [
     logging.getLogger('backend.services.entry_slip_monitor'),
     logging.getLogger('backend.services.final_reconciliation'),
     logging.getLogger('backend.services.fin_sentiment_job'),
+    logging.getLogger('backend.services.smart_futures_picker.job'),
     logging.getLogger('backend.services.fin_sentiment_reason_openai'),
     logging.getLogger('backend.services.nse_corporate_client'),
 ]
@@ -669,6 +672,53 @@ class ScanST1AlgoScheduler:
             logger.info(
                 "✅ Scheduled: Fin Sentiment (%s weekday slots 9:17–13:17 IST, 15 min)",
                 len(fin_sentiment_times),
+            )
+
+            # Smart Futures picker — 9:30 open, then 10:00–15:00 every 30 min (weekdays)
+            _sf_picker_slots = [(9, 30)]
+            for _h in range(10, 15):
+                for _m in (0, 30):
+                    _sf_picker_slots.append((_h, _m))
+            _sf_picker_slots.append((15, 0))
+
+            def _create_sf_picker_wrapper(_hh: int, _mm: int):
+                _label = f"{_hh:02d}:{_mm:02d}"
+
+                def _run_sf_picker():
+                    if not is_allowed_scheduler_window_ist():
+                        logger.debug("Outside 08:30–21:00 IST — skip Smart Futures picker %s", _label)
+                        return
+                    ist = pytz.timezone("Asia/Kolkata")
+                    if datetime.now(ist).weekday() >= 5:
+                        return
+                    logger.info("🔧 Smart Futures picker (%s IST)...", _label)
+                    try:
+                        run_smart_futures_picker_job(scan_trigger=_label)
+                        logger.info("✅ Smart Futures picker (%s) completed", _label)
+                    except Exception as e:
+                        logger.error("❌ Smart Futures picker (%s) failed: %s", _label, e, exc_info=True)
+
+                return _run_sf_picker
+
+            for _hh, _mm in _sf_picker_slots:
+                self.scheduler.add_job(
+                    _create_sf_picker_wrapper(_hh, _mm),
+                    trigger=CronTrigger(
+                        day_of_week="mon-fri",
+                        hour=_hh,
+                        minute=_mm,
+                        timezone="Asia/Kolkata",
+                    ),
+                    id=f"scan_st1_smart_futures_picker_{_hh}_{_mm:02d}",
+                    name=f"Smart Futures picker ({_hh:02d}:{_mm:02d} IST)",
+                    replace_existing=True,
+                    max_instances=1,
+                    misfire_grace_time=300,
+                    coalesce=True,
+                )
+            logger.info(
+                "✅ Scheduled: Smart Futures picker (%s weekday slots 9:30 + 30 min to 15:00 IST)",
+                len(_sf_picker_slots),
             )
 
             # 6. CAR NIFTY200 Updater - Every 3 hours (Yahoo first, Upstox fallback)
