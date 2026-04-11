@@ -51,7 +51,13 @@ def main() -> int:
             temperature=0,
         )
     except Exception as e:
-        print("FAIL: OpenAI API request error:", type(e).__name__, str(e)[:500])
+        err = str(e)[:800]
+        print("FAIL: OpenAI API request error:", type(e).__name__, err)
+        if "insufficient_quota" in err or "429" in err:
+            print(
+                "HINT: Key is accepted but account has no quota / billing issue — "
+                "see https://platform.openai.com/account/billing"
+            )
         return 4
 
     msg = (resp.choices[0].message.content or "").strip()
