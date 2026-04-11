@@ -29,6 +29,41 @@ IST = pytz.timezone("Asia/Kolkata")
 MAX_ITEMS_PER_STOCK = 5
 # NSE from_date/to_date: IST calendar span (0 = today only).
 DEFAULT_NSE_LOOKBACK_CALENDAR_DAYS = 0
+REASON_MAX_LEN = 512
+
+
+def _build_current_combined_sentiment_reason(
+    *,
+    n_hits: int,
+    api_avg: Optional[float],
+    nlp_avg: Optional[float],
+) -> str:
+    """
+    Short text stored on each update: what current_combined_sentiment represents this run.
+    """
+    core = (
+        "Same as combined_sentiment_avg for this run: ~−1 bearish to +1 bullish. "
+    )
+    if api_avg is not None and nlp_avg is not None:
+        src = (
+            f"Average of third-party entity sentiment and FinBERT over {n_hits} "
+            f"announcement(s) since the job watermark."
+        )
+    elif nlp_avg is not None:
+        src = (
+            f"Mean FinBERT score on up to {n_hits} latest NSE equity corporate announcement(s) "
+            f"for this symbol since the job watermark; NSE filings carry no vendor sentiment score."
+        )
+    elif api_avg is not None:
+        src = (
+            f"Mean third-party entity sentiment on {n_hits} item(s); FinBERT was not applied or failed."
+        )
+    else:
+        src = "No scored inputs; row should not normally persist with a combined value."
+    text = (core + src).strip()
+    if len(text) > REASON_MAX_LEN:
+        return text[: REASON_MAX_LEN - 1] + "…"
+    return text
 
 
 @dataclass
@@ -285,6 +320,10 @@ def run_fin_sentiment_job(
                 )
                 continue
 
+            reason = _build_current_combined_sentiment_reason(
+                n_hits=len(hits), api_avg=api_avg, nlp_avg=nlp_avg
+            )
+
             row = db.get(StockFinSentiment, sym)
             prev_current = float(row.current_combined_sentiment) if row and row.current_combined_sentiment is not None else None
 
@@ -297,6 +336,7 @@ def run_fin_sentiment_job(
                     combined_sentiment_avg=combined,
                     last_combined_sentiment=None,
                     current_combined_sentiment=combined,
+                    current_combined_sentiment_reason=reason,
                     news_count=len(hits),
                     current_run_at=now_ist,
                 )
@@ -308,6 +348,7 @@ def run_fin_sentiment_job(
                 row.combined_sentiment_avg = combined
                 row.last_combined_sentiment = prev_current
                 row.current_combined_sentiment = combined
+                row.current_combined_sentiment_reason = reason
                 row.news_count = len(hits)
                 row.current_run_at = now_ist
 

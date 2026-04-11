@@ -271,6 +271,7 @@ def _run_startup_schema_migrations(db_engine):
                         combined_sentiment_avg DOUBLE PRECISION,
                         last_combined_sentiment DOUBLE PRECISION,
                         current_combined_sentiment DOUBLE PRECISION,
+                        current_combined_sentiment_reason TEXT,
                         news_count INTEGER,
                         current_run_at TIMESTAMPTZ,
                         updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
@@ -308,6 +309,18 @@ def _run_startup_schema_migrations(db_engine):
                         """
                     )
                 )
+
+            if "stock_fin_sentiment" in table_names:
+                sfs_cols = {col["name"] for col in inspect(db_engine).get_columns("stock_fin_sentiment")}
+                if "current_combined_sentiment_reason" not in sfs_cols:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE stock_fin_sentiment ADD COLUMN current_combined_sentiment_reason TEXT"
+                        )
+                    )
+                    print(
+                        "Applied migration: added stock_fin_sentiment.current_combined_sentiment_reason"
+                    )
 
             if "intraday_stock_options" in table_names:
                 iso_columns = {col["name"] for col in inspector.get_columns("intraday_stock_options")}
