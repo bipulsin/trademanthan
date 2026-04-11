@@ -42,4 +42,7 @@ class Settings(BaseSettings):
     # MarketAux (financial news + entity sentiment)
     MARKETAUX_API_TOKEN: str = os.getenv("MARKETAUX_API_TOKEN", "")
 
+    # OpenAI (fin sentiment reason text from filings)
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+
 settings = Settings()

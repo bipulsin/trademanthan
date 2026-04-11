@@ -323,6 +323,23 @@ def _run_startup_schema_migrations(db_engine):
                     print(
                         "Applied migration: added stock_fin_sentiment.current_combined_sentiment_reason"
                     )
+                    _insp_sfs = inspect(db_engine)
+                for col in _insp_sfs.get_columns("stock_fin_sentiment"):
+                    if col["name"] != "current_combined_sentiment_reason":
+                        continue
+                    t = col["type"]
+                    if db_engine.dialect.name == "postgresql" and getattr(t, "length", None) is not None:
+                        conn.execute(
+                            text(
+                                "ALTER TABLE stock_fin_sentiment "
+                                "ALTER COLUMN current_combined_sentiment_reason TYPE TEXT "
+                                "USING current_combined_sentiment_reason::text"
+                            )
+                        )
+                        print(
+                            "Applied migration: widened stock_fin_sentiment.current_combined_sentiment_reason to TEXT"
+                        )
+                    break
 
             if "intraday_stock_options" in table_names:
                 iso_columns = {col["name"] for col in inspector.get_columns("intraday_stock_options")}

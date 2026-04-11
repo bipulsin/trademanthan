@@ -111,6 +111,7 @@ job_loggers = [
     logging.getLogger('backend.services.entry_slip_monitor'),
     logging.getLogger('backend.services.final_reconciliation'),
     logging.getLogger('backend.services.fin_sentiment_job'),
+    logging.getLogger('backend.services.fin_sentiment_reason_openai'),
     logging.getLogger('backend.services.nse_corporate_client'),
 ]
 

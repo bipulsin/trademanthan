@@ -1,5 +1,5 @@
 """Financial sentiment snapshots (NSE corporate filings + FinBERT)."""
-from sqlalchemy import Column, String, Float, Integer, DateTime, func
+from sqlalchemy import Column, String, Float, Integer, DateTime, Text, func
 
 from backend.models.base import Base
 
@@ -18,8 +18,8 @@ class StockFinSentiment(Base):
     combined_sentiment_avg = Column(Float, nullable=True)
     last_combined_sentiment = Column(Float, nullable=True)
     current_combined_sentiment = Column(Float, nullable=True)
-    # Brief text: why current_combined_sentiment is set (FinBERT + NSE source); updated each successful run
-    current_combined_sentiment_reason = Column(String(512), nullable=True)
+    # OpenAI-derived bracketed category + rationale (can be long); updated each successful run
+    current_combined_sentiment_reason = Column(Text, nullable=True)
     news_count = Column(Integer, nullable=True)
     current_run_at = Column(DateTime(timezone=True), nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

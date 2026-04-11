@@ -21,6 +21,10 @@ from sqlalchemy.orm import Session
 
 from backend.database import SessionLocal
 from backend.models.fin_sentiment import FinSentimentJobState, StockFinSentiment
+from backend.services.fin_sentiment_reason_openai import (
+    derive_sentiment_reason_openai,
+    nse_attachment_excerpt,
+)
 from backend.services.nse_corporate_client import NseCorporateAnnouncementsClient
 
 logger = logging.getLogger(__name__)
@@ -29,7 +33,7 @@ IST = pytz.timezone("Asia/Kolkata")
 MAX_ITEMS_PER_STOCK = 5
 # NSE from_date/to_date: IST calendar span (0 = today only).
 DEFAULT_NSE_LOOKBACK_CALENDAR_DAYS = 0
-REASON_MAX_LEN = 512
+REASON_MAX_LEN = 2000
 
 
 def _build_current_combined_sentiment_reason(
@@ -71,6 +75,7 @@ class CorpHit:
     seq_id: str
     published_utc: datetime
     title: str
+    detail_excerpt: str
 
 
 def _parse_row_time_utc(row: Dict[str, Any]) -> Optional[datetime]:
@@ -184,6 +189,8 @@ def run_fin_sentiment_job(
         "filter_at_or_before_watermark": 0,
         "filter_duplicate_seq": 0,
         "filter_accepted_hits": 0,
+        "openai_reason_ok": 0,
+        "openai_reason_fallback": 0,
     }
 
     now_utc = datetime.now(pytz.UTC)
@@ -207,7 +214,13 @@ def run_fin_sentiment_job(
             _set_watermark(db, now_utc)
             db.commit()
             summary["ok"] = True
-            logger.info("[fin_sentiment][S99] end ok=%s summary=%s", summary["ok"], summary)
+            logger.info(
+                "[fin_sentiment][S99] end ok=%s openai_ok=%s openai_fallback=%s summary=%s",
+                summary["ok"],
+                summary.get("openai_reason_ok"),
+                summary.get("openai_reason_fallback"),
+                summary,
+            )
             return summary
 
         arb_set = {s for s, _ in arb}
@@ -222,7 +235,13 @@ def run_fin_sentiment_job(
                 "[fin_sentiment][S06] FAIL nse_fetch ok=False skipped=%s — watermark NOT advanced",
                 summary["skipped"],
             )
-            logger.info("[fin_sentiment][S99] end ok=%s summary=%s", summary["ok"], summary)
+            logger.info(
+                "[fin_sentiment][S99] end ok=%s openai_ok=%s openai_fallback=%s summary=%s",
+                summary["ok"],
+                summary.get("openai_reason_ok"),
+                summary.get("openai_reason_fallback"),
+                summary,
+            )
             return summary
 
         summary["nse_announcements_total"] = len(raw)
@@ -252,7 +271,14 @@ def run_fin_sentiment_job(
                 summary["filter_duplicate_seq"] += 1
                 continue
             seen[sym].add(sid)
-            bucket[sym].append(CorpHit(seq_id=sid, published_utc=pub, title=_row_title(row)))
+            bucket[sym].append(
+                CorpHit(
+                    seq_id=sid,
+                    published_utc=pub,
+                    title=_row_title(row),
+                    detail_excerpt=nse_attachment_excerpt(row),
+                )
+            )
             summary["filter_accepted_hits"] += 1
 
         symbols_with_hits = [s for s, hs in bucket.items() if hs]
@@ -320,9 +346,26 @@ def run_fin_sentiment_job(
                 )
                 continue
 
-            reason = _build_current_combined_sentiment_reason(
-                n_hits=len(hits), api_avg=api_avg, nlp_avg=nlp_avg
+            announcements = [
+                {"title": h.title[:512], "detail_excerpt": (h.detail_excerpt or "")[:6000]}
+                for h in hits
+            ]
+            reason_llm = derive_sentiment_reason_openai(
+                symbol=sym,
+                announcements=announcements,
+                nlp_sentiment_avg=nlp_avg,
+                combined_sentiment_avg=combined,
             )
+            if reason_llm:
+                reason = reason_llm
+                summary["openai_reason_ok"] += 1
+                logger.info("[fin_sentiment][S09b] symbol=%s openai_reason=len=%s", sym, len(reason))
+            else:
+                reason = _build_current_combined_sentiment_reason(
+                    n_hits=len(hits), api_avg=api_avg, nlp_avg=nlp_avg
+                )
+                summary["openai_reason_fallback"] += 1
+                logger.info("[fin_sentiment][S09b] symbol=%s openai_reason=fallback", sym)
 
             row = db.get(StockFinSentiment, sym)
             prev_current = float(row.current_combined_sentiment) if row and row.current_combined_sentiment is not None else None
@@ -382,13 +425,25 @@ def run_fin_sentiment_job(
             summary["stocks_with_news"],
             summary["rows_upserted"],
         )
-        logger.info("[fin_sentiment][S99] end ok=%s summary=%s", summary["ok"], summary)
+        logger.info(
+            "[fin_sentiment][S99] end ok=%s openai_ok=%s openai_fallback=%s summary=%s",
+            summary["ok"],
+            summary.get("openai_reason_ok"),
+            summary.get("openai_reason_fallback"),
+            summary,
+        )
         return summary
     except Exception as e:
         logger.error("[fin_sentiment][ERR] %s", e, exc_info=True)
         db.rollback()
         summary["error"] = str(e)
-        logger.info("[fin_sentiment][S99] end ok=%s summary=%s", summary["ok"], summary)
+        logger.info(
+            "[fin_sentiment][S99] end ok=%s openai_ok=%s openai_fallback=%s summary=%s",
+            summary["ok"],
+            summary.get("openai_reason_ok"),
+            summary.get("openai_reason_fallback"),
+            summary,
+        )
         return summary
     finally:
         db.close()
