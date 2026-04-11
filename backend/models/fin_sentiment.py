@@ -1,4 +1,4 @@
-"""Financial news sentiment snapshots (MarketAux + FinBERT)."""
+"""Financial sentiment snapshots (NSE corporate filings + FinBERT)."""
 from sqlalchemy import Column, String, Float, Integer, DateTime, func
 
 from backend.models.base import Base
@@ -24,7 +24,7 @@ class StockFinSentiment(Base):
 
 
 class FinSentimentJobState(Base):
-    """Singleton watermark for MarketAux `published_after` (row id must be 1)."""
+    """Singleton watermark: last successful run time (UTC); announcements after this are picked up."""
 
     __tablename__ = "fin_sentiment_job_state"
 

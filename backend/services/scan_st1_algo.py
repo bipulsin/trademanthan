@@ -8,7 +8,7 @@ Consolidates all scan algorithm schedulers into a single controller:
 - Index Price Scheduler (every 5 min during market hours)
 - Entry slip monitor (every 15 min during market hours): cancel unfilled entry orders after 2 checks
 - Final reconciliation (3:45 PM & 4:00 PM): broker buy/sell/PnL sync; time_based → Exit-TM after 3:15 PM exits
-- Fin sentiment (weekdays 9:14–14:14 IST, 30 min): MarketAux news + entity scores for arbitrage_master stocks, FinBERT on titles, store in stock_fin_sentiment
+- Fin sentiment (weekdays 9:17–13:17 IST, 15 min): NSE corporate announcements + FinBERT for arbitrage_master, store in stock_fin_sentiment
 
 Interval-driven jobs only run real work between 08:30 and 21:00 IST (see scheduler_window).
 Exception: 8:10 AM Telegram ping (before 8:30).
@@ -111,7 +111,7 @@ job_loggers = [
     logging.getLogger('backend.services.entry_slip_monitor'),
     logging.getLogger('backend.services.final_reconciliation'),
     logging.getLogger('backend.services.fin_sentiment_job'),
-    logging.getLogger('backend.services.marketaux_client'),
+    logging.getLogger('backend.services.nse_corporate_client'),
 ]
 
 for job_logger in job_loggers:
@@ -621,12 +621,15 @@ class ScanST1AlgoScheduler:
             )
             logger.info("✅ Scheduled: Entry Slip Monitor (Every 15 minutes)")
 
-            # Fin sentiment: MarketAux + FinBERT for arbitrage_master — weekdays 9:14–14:14 IST, 30-min cadence
+            # Fin sentiment: NSE corporate announcements + FinBERT — weekdays 9:17–13:17 IST, every 15 minutes
             fin_sentiment_times = []
-            for h in range(9, 14):
-                for m in (14, 44):
+            for m in (17, 32, 47):
+                fin_sentiment_times.append((9, m))
+            for h in range(10, 13):
+                for m in (2, 17, 32, 47):
                     fin_sentiment_times.append((h, m))
-            fin_sentiment_times.append((14, 14))
+            for m in (2, 17):
+                fin_sentiment_times.append((13, m))
 
             def create_fin_sentiment_wrapper(h, m):
                 def run_fin_sentiment_scheduled():
@@ -663,7 +666,7 @@ class ScanST1AlgoScheduler:
                     coalesce=True,
                 )
             logger.info(
-                "✅ Scheduled: Fin Sentiment (%s weekday slots 9:14–14:14 IST)",
+                "✅ Scheduled: Fin Sentiment (%s weekday slots 9:17–13:17 IST, 15 min)",
                 len(fin_sentiment_times),
             )
 

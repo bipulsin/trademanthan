@@ -1,11 +1,13 @@
 """
-Scheduled job: MarketAux news + entity sentiment for arbitrage_master stocks,
-FinBERT on titles, combined score persisted with last/current rotation.
+Scheduled job: NSE corporate announcements for arbitrage_master stocks,
+FinBERT on announcement text, combined score persisted with last/current rotation.
+
+Replaces MarketAux: NSE JSON has no entity sentiment; api_sentiment_avg is left null
+and combined_sentiment_avg follows FinBERT when available.
 """
 from __future__ import annotations
 
 import logging
-import time
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -15,67 +17,59 @@ import pytz
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from backend.config import settings
 from backend.database import SessionLocal
 from backend.models.fin_sentiment import FinSentimentJobState, StockFinSentiment
-from backend.services.marketaux_client import MarketauxClient
+from backend.services.nse_corporate_client import NseCorporateAnnouncementsClient
 
 logger = logging.getLogger(__name__)
 
 IST = pytz.timezone("Asia/Kolkata")
-SYMBOL_CHUNK = 12  # keep URLs small; tune if your MarketAux plan allows more
-MAX_NEWS_PER_STOCK = 5
-BATCH_SLEEP_SEC = 0.12
+MAX_ITEMS_PER_STOCK = 5
 
 
 @dataclass
-class ArticleHit:
-    uuid: str
-    published_at: str
+class CorpHit:
+    seq_id: str
+    published_utc: datetime
     title: str
-    entity_sentiment: float
 
 
-def _parse_ts(s: str) -> float:
-    if not s:
-        return 0.0
-    s = str(s).replace("Z", "+00:00")
-    try:
-        from dateutil import parser as date_parser
+def _parse_row_time_utc(row: Dict[str, Any]) -> Optional[datetime]:
+    from dateutil import parser as date_parser
 
-        return date_parser.parse(s).timestamp()
-    except Exception:
-        return 0.0
-
-
-def _entity_sentiment_for_symbol(article: Dict[str, Any], symbol_upper: str) -> Optional[float]:
-    entities = article.get("entities") or article.get("entity") or []
-    if isinstance(entities, dict):
-        entities = [entities]
-    if not isinstance(entities, list):
-        return None
-    best: Optional[float] = None
-    for ent in entities:
-        if not isinstance(ent, dict):
+    for key in ("sort_date", "an_dt", "anDt"):
+        v = row.get(key)
+        if not v:
             continue
-        sym = (ent.get("symbol") or ent.get("ticker") or "").strip().upper()
-        if sym != symbol_upper:
+        try:
+            dt = date_parser.parse(str(v))
+            if dt.tzinfo is None:
+                dt = IST.localize(dt)
+            return dt.astimezone(pytz.UTC)
+        except Exception:
             continue
-        for key in ("sentiment_score", "sentiment", "overall_sentiment_score"):
-            v = ent.get(key)
-            if v is None:
-                continue
-            try:
-                f = float(v)
-                if f == f:  # not NaN
-                    best = f if best is None else (best + f) / 2
-            except (TypeError, ValueError):
-                continue
-    return best
+    return None
+
+
+def _row_seq_id(row: Dict[str, Any]) -> str:
+    for k in ("seq_id", "seqId", "SeqId"):
+        v = row.get(k)
+        if v is not None and str(v).strip():
+            return str(v).strip()
+    sym = (row.get("symbol") or "").strip()
+    dt = (row.get("dt") or row.get("sort_date") or "").strip()
+    return f"{sym}|{dt}"
+
+
+def _row_title(row: Dict[str, Any]) -> str:
+    parts = [
+        (row.get("sm_name") or "").strip(),
+        (row.get("desc") or "").strip(),
+    ]
+    return " — ".join(p for p in parts if p) or "(no title)"
 
 
 def _finbert_numeric_from_scores(scores: Dict[str, Any]) -> float:
-    """Map FinBERT class probs to [-1, 1] similar to MarketAux entity score."""
     def _g(*keys: str) -> float:
         for k in keys:
             for cand in (k, k.lower(), k.upper()):
@@ -94,8 +88,9 @@ def _finbert_numeric_from_scores(scores: Dict[str, Any]) -> float:
 def _get_watermark(db: Session) -> datetime:
     row = db.get(FinSentimentJobState, 1)
     if row and row.watermark:
-        return row.watermark if row.watermark.tzinfo else pytz.UTC.localize(row.watermark)
-    return datetime.now(pytz.UTC) - timedelta(minutes=90)
+        w = row.watermark
+        return w if w.tzinfo else pytz.UTC.localize(w)
+    return datetime.now(pytz.UTC) - timedelta(hours=48)
 
 
 def _set_watermark(db: Session, ts: datetime) -> None:
@@ -128,23 +123,17 @@ def _load_arbitrage_rows(db: Session) -> List[Tuple[str, Optional[str]]]:
 
 def run_fin_sentiment_job() -> Dict[str, Any]:
     """
-    Entry point for APScheduler. Idempotent per watermark; commits once at end.
+    Entry point for APScheduler. One NSE API pull per run; filters since watermark.
     """
     summary: Dict[str, Any] = {
         "ok": False,
         "stocks_considered": 0,
         "stocks_with_news": 0,
         "rows_upserted": 0,
-        "batches": 0,
+        "nse_announcements_total": 0,
         "skipped": None,
     }
-    token = (settings.MARKETAUX_API_TOKEN or "").strip()
-    if not token:
-        summary["skipped"] = "MARKETAUX_API_TOKEN missing"
-        logger.info("Fin sentiment job skipped: %s", summary["skipped"])
-        return summary
 
-    client = MarketauxClient(token)
     now_utc = datetime.now(pytz.UTC)
     now_ist = now_utc.astimezone(IST)
 
@@ -160,35 +149,33 @@ def run_fin_sentiment_job() -> Dict[str, Any]:
             summary["ok"] = True
             return summary
 
-        symbols = [s for s, _ in arb]
+        arb_set = {s for s, _ in arb}
+        client = NseCorporateAnnouncementsClient(lookback_calendar_days=2)
+        nse_ok, raw = client.fetch_equity_announcements()
+        if not nse_ok:
+            summary["skipped"] = "nse_corporate_announcements_unavailable"
+            summary["ok"] = False
+            logger.warning("Fin sentiment job skipped: %s", summary["skipped"])
+            return summary
 
-        # symbol -> list ArticleHit (dedupe uuid across all batches)
-        bucket: Dict[str, List[ArticleHit]] = defaultdict(list)
-        seen_uuid: Dict[str, set] = defaultdict(set)
+        summary["nse_announcements_total"] = len(raw)
 
-        batches = 0
-        for i in range(0, len(symbols), SYMBOL_CHUNK):
-            chunk = symbols[i : i + SYMBOL_CHUNK]
-            articles = client.fetch_news_for_symbols(chunk, watermark, limit=100)
-            batches += 1
-            for art in articles:
-                uid = str(art.get("uuid") or art.get("id") or "").strip()
-                title = (art.get("title") or art.get("snippet") or "").strip() or "(no title)"
-                pub = str(art.get("published_at") or art.get("date") or "")
-                for sym in chunk:
-                    sc = _entity_sentiment_for_symbol(art, sym)
-                    if sc is None:
-                        continue
-                    if uid and uid in seen_uuid[sym]:
-                        continue
-                    if uid:
-                        seen_uuid[sym].add(uid)
-                    bucket[sym].append(ArticleHit(uuid=uid, published_at=pub, title=title, entity_sentiment=float(sc)))
-            time.sleep(BATCH_SLEEP_SEC)
+        bucket: Dict[str, List[CorpHit]] = defaultdict(list)
+        seen: Dict[str, set] = defaultdict(set)
 
-        summary["batches"] = batches
+        for row in raw:
+            sym = (row.get("symbol") or "").strip().upper()
+            if not sym or sym not in arb_set:
+                continue
+            pub = _parse_row_time_utc(row)
+            if pub is None or pub <= watermark:
+                continue
+            sid = _row_seq_id(row)
+            if sid in seen[sym]:
+                continue
+            seen[sym].add(sid)
+            bucket[sym].append(CorpHit(seq_id=sid, published_utc=pub, title=_row_title(row)))
 
-        # Per stock: sort by time desc, keep 5, compute API avg
         finbert_ok = False
         try:
             from backend.services.finbert_service import is_finbert_available, predict_sentiment
@@ -202,10 +189,9 @@ def run_fin_sentiment_job() -> Dict[str, Any]:
             if not hits:
                 continue
             summary["stocks_with_news"] += 1
-            hits.sort(key=lambda h: _parse_ts(h.published_at), reverse=True)
-            hits = hits[:MAX_NEWS_PER_STOCK]
-            api_scores = [h.entity_sentiment for h in hits]
-            api_avg = sum(api_scores) / len(api_scores) if api_scores else None
+            hits.sort(key=lambda h: h.published_utc.timestamp(), reverse=True)
+            hits = hits[:MAX_ITEMS_PER_STOCK]
+            api_avg: Optional[float] = None
 
             titles = [h.title[:512] for h in hits]
             nlp_avg: Optional[float] = None
@@ -262,11 +248,11 @@ def run_fin_sentiment_job() -> Dict[str, Any]:
         db.commit()
         summary["ok"] = True
         logger.info(
-            "Fin sentiment job OK: stocks=%s with_news=%s rows=%s batches=%s",
+            "Fin sentiment job OK (NSE corporate): stocks=%s with_news=%s rows=%s nse_rows=%s",
             summary["stocks_considered"],
             summary["stocks_with_news"],
             summary["rows_upserted"],
-            summary["batches"],
+            summary["nse_announcements_total"],
         )
         return summary
     except Exception as e:
