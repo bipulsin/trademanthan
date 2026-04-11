@@ -409,6 +409,8 @@ def _run_startup_schema_migrations(db_engine):
                                 trend_continuation TEXT,
                                 scan_trigger TEXT,
                                 vix_at_scan DOUBLE PRECISION,
+                                order_status TEXT,
+                                buy_price DOUBLE PRECISION,
                                 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                                 CONSTRAINT uq_sfd_session_fut UNIQUE (session_date, fut_instrument_key)
@@ -422,6 +424,15 @@ def _run_startup_schema_migrations(db_engine):
                         )
                     )
                     print("Applied migration: created smart_futures_daily (PostgreSQL)")
+
+            if "smart_futures_daily" in table_names:
+                _sfd_cols = {c["name"] for c in inspector.get_columns("smart_futures_daily")}
+                if "order_status" not in _sfd_cols:
+                    conn.execute(text("ALTER TABLE smart_futures_daily ADD COLUMN order_status TEXT"))
+                    print("Applied migration: added smart_futures_daily.order_status")
+                if "buy_price" not in _sfd_cols:
+                    conn.execute(text("ALTER TABLE smart_futures_daily ADD COLUMN buy_price DOUBLE PRECISION"))
+                    print("Applied migration: added smart_futures_daily.buy_price")
 
             # Legacy Smart Futures DB tables removed (screener rebuild); drop if still present.
             _sf_tables = (

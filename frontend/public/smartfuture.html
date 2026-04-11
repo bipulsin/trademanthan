@@ -12,19 +12,60 @@
     <link rel="stylesheet" href="theme.css?v=1.3">
     <link rel="stylesheet" href="settings.css">
     <style>
-        .sf-placeholder-card {
-            max-width: 720px;
-            margin: 0 auto;
+        .sf-wrap { max-width: 1100px; margin: 0 auto; }
+        .sf-card {
             background: var(--theme-card, rgba(255,255,255,0.95));
             border: 1px solid var(--theme-border, #e2e8f0);
             border-radius: 12px;
-            padding: 20px 22px;
+            padding: 16px 18px;
+            margin-bottom: 18px;
         }
-        .sf-placeholder-card p {
-            margin: 0;
-            color: var(--theme-muted, #64748b);
-            line-height: 1.55;
+        .sf-card h2 { margin: 0 0 10px; font-size: 1.15rem; }
+        .sf-card-head {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 10px;
         }
+        .sf-meta { font-size: 0.88rem; color: var(--theme-muted, #64748b); }
+        .sf-table-wrap { overflow-x: auto; }
+        table.sf-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+        table.sf-table th, table.sf-table td {
+            border-bottom: 1px solid var(--theme-border, #e2e8f0);
+            text-align: left;
+            padding: 8px 6px;
+        }
+        table.sf-table th { color: var(--theme-muted, #64748b); font-weight: 600; }
+        .sf-btn-refresh, .sf-btn-order {
+            padding: 6px 14px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            cursor: pointer;
+        }
+        .sf-btn-refresh {
+            border: 1px solid var(--theme-border, #cbd5e1);
+            background: var(--theme-card, #f8fafc);
+            color: var(--theme-text, #0f172a);
+        }
+        .sf-btn-refresh:hover:not(:disabled) { background: var(--theme-border, #e2e8f0); }
+        .sf-btn-order {
+            border: none;
+            background: #2563eb;
+            color: #fff;
+        }
+        .sf-btn-order:disabled { opacity: 0.45; cursor: not-allowed; }
+        .sf-group-title {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: var(--theme-text, #0f172a);
+            margin: 16px 0 8px;
+            padding-top: 4px;
+            border-top: 1px dashed var(--theme-border, #e2e8f0);
+        }
+        .sf-group-title:first-child { border-top: none; margin-top: 0; padding-top: 0; }
     </style>
 </head>
 <body class="theme-page">
@@ -41,17 +82,26 @@
             <div class="settings-header">
                 <div class="settings-title-section">
                     <h1 class="settings-title"><i class="fas fa-bolt"></i> Smart Futures</h1>
-                    <p class="settings-subtitle">The screener is being rebuilt. Admin parameters remain available on the Admin page.</p>
+                    <p class="settings-subtitle">Today&apos;s trend picks (CMS) refresh on a short timer after each scheduled scan. Admin parameters stay on the Admin page.</p>
                 </div>
             </div>
-            <div class="settings-content">
-                <div class="sf-placeholder-card">
-                    <p>Check back later for the new NSE F&amp;O workflow. Navigation and layout are unchanged.</p>
+            <div class="settings-content sf-wrap">
+                <div class="sf-card">
+                    <div class="sf-card-head">
+                        <h2><i class="fas fa-chart-line"></i> Today&apos;s Trend</h2>
+                        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                            <button type="button" class="sf-btn-refresh" id="sfTrendRefresh">Refresh</button>
+                            <span class="sf-meta">Session (IST): <span id="sfTrendSession">—</span></span>
+                            <span class="sf-meta">Updated: <span id="sfTrendUpdated">—</span></span>
+                        </div>
+                    </div>
+                    <p class="sf-meta" id="sfTrendMsg"></p>
+                    <div id="sfTrendGroups"></div>
                 </div>
             </div>
         </main>
     </div>
     <script src="left-menu.js?v=3.15"></script>
-    <script src="smartfuture.js?v=13"></script>
+    <script src="smartfuture.js?v=14"></script>
 </body>
 </html>

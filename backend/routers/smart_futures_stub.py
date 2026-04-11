@@ -1,23 +1,29 @@
 """
-Placeholder Smart Futures routes: admin config only (JSON file), no screener / orders.
+Smart Futures routes: admin config (JSON file) + smart_futures_daily list / order.
 
-Mounted at /api/smart-futures and /smart-futures for admintwc.js and future UI.
+Mounted at /api/smart-futures and /smart-futures for admintwc.js and smartfuture.html.
 """
 from __future__ import annotations
 
 import json
 import logging
 import threading
+from collections import OrderedDict
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
+import pytz
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from backend.config import settings
 from backend.database import get_db
 from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
+from backend.services.upstox_service import UpstoxService
 
 logger = logging.getLogger(__name__)
 
@@ -89,3 +95,160 @@ def put_sf_config_stub(body: SmartFuturesConfigUpdate, admin: User = Depends(_re
         _CONFIG_PATH.write_text(json.dumps(cur, indent=2), encoding="utf-8")
     logger.info("smart_futures_stub: config saved by admin id=%s", getattr(admin, "id", None))
     return cur
+
+
+IST = pytz.timezone("Asia/Kolkata")
+
+
+def _prev_trading_day(d: date) -> date:
+    x = d - timedelta(days=1)
+    for _ in range(10):
+        if x.weekday() < 5:
+            return x
+        x -= timedelta(days=1)
+    return d - timedelta(days=1)
+
+
+def effective_session_date_ist_for_trend(now_ist: Optional[datetime] = None) -> date:
+    """
+    Session date for Today's Trend: Fri 9:00 IST → next trading day 08:59 IST still shows Friday's
+    session_date; before 09:00 on a weekday shows previous trading day.
+    Weekend shows last Friday's session_date.
+    """
+    now = now_ist or datetime.now(IST)
+    if now.tzinfo is None:
+        now = IST.localize(now)
+    else:
+        now = now.astimezone(IST)
+    d = now.date()
+    wd = d.weekday()
+    if wd == 5:
+        return d - timedelta(days=1)
+    if wd == 6:
+        return d - timedelta(days=2)
+    if now.time() < time(9, 0):
+        return _prev_trading_day(d)
+    return d
+
+
+def _row_to_dict(r: Any) -> Dict[str, Any]:
+    out = dict(r)
+    sd = out.get("session_date")
+    if sd is not None and hasattr(sd, "isoformat"):
+        out["session_date"] = sd.isoformat()
+    ea = out.get("entry_at")
+    if ea is not None and hasattr(ea, "isoformat"):
+        out["entry_at"] = ea.isoformat()
+    for k in (
+        "final_cms",
+        "sector_score",
+        "combined_sentiment",
+        "entry_price",
+        "sl_price",
+        "target_price",
+        "buy_price",
+    ):
+        v = out.get(k)
+        if v is not None:
+            out[k] = float(v)
+    return out
+
+
+@router.get("/daily")
+def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = Depends(get_db)):
+    """Today's Trend: rows for effective session_date (IST window 9:00 → next session 08:59)."""
+    sd = effective_session_date_ist_for_trend()
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT id, fut_symbol, side, final_cms, sector_score, combined_sentiment,
+                       entry_price, sl_price, target_price, trend_continuation, entry_at,
+                       order_status, buy_price, session_date, scan_trigger
+                FROM smart_futures_daily
+                WHERE session_date = :sd
+                ORDER BY entry_at DESC NULLS LAST, id DESC
+                """
+            ),
+            {"sd": sd},
+        ).mappings().all()
+    except Exception as e:
+        logger.warning("smart_futures /daily query failed: %s", e)
+        return {
+            "session_date": sd.isoformat(),
+            "groups": [],
+            "rows": [],
+            "error": str(e),
+        }
+
+    serialized = [_row_to_dict(r) for r in rows]
+    buckets: OrderedDict[str, List[Dict[str, Any]]] = OrderedDict()
+    for r in serialized:
+        ea = r.get("entry_at") or ""
+        bucket = ea[:16] if isinstance(ea, str) and len(ea) >= 16 else (ea or "—")
+        if bucket not in buckets:
+            buckets[bucket] = []
+        buckets[bucket].append(r)
+    groups = [{"entry_at": k, "rows": v} for k, v in buckets.items()]
+    return {
+        "session_date": sd.isoformat(),
+        "groups": groups,
+        "rows": serialized,
+    }
+
+
+@router.post("/daily/{row_id}/order")
+def post_smart_futures_daily_order(
+    row_id: int,
+    user: User = Depends(_require_user),
+    db: Session = Depends(get_db),
+):
+    """Mark row as bought and store LTP at click time (Upstox quote)."""
+    sd = effective_session_date_ist_for_trend()
+    row = db.execute(
+        text(
+            """
+            SELECT id, fut_instrument_key, session_date, order_status
+            FROM smart_futures_daily
+            WHERE id = :id
+            """
+        ),
+        {"id": row_id},
+    ).mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Row not found")
+    rsd = row.get("session_date")
+    if hasattr(rsd, "isoformat"):
+        rsd = rsd.isoformat()
+    if str(rsd) != sd.isoformat():
+        raise HTTPException(status_code=400, detail="Pick is outside the current session window")
+    if (row.get("order_status") or "").strip().lower() == "bought":
+        raise HTTPException(status_code=400, detail="Already marked as bought")
+
+    ikey = (row.get("fut_instrument_key") or "").strip()
+    if not ikey:
+        raise HTTPException(status_code=400, detail="Missing instrument key")
+
+    try:
+        us = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+        q = us.get_market_quote_by_key(ikey) or {}
+        ltp = float(q.get("last_price") or 0)
+    except Exception as e:
+        logger.error("smart_futures order LTP failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=502, detail=f"LTP fetch failed: {e}") from e
+    if ltp <= 0:
+        raise HTTPException(status_code=502, detail="Could not read last price from broker")
+
+    db.execute(
+        text(
+            """
+            UPDATE smart_futures_daily
+            SET order_status = 'bought', buy_price = :ltp, updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id AND (order_status IS NULL OR LOWER(TRIM(order_status)) <> 'bought')
+            """
+        ),
+        {"id": row_id, "ltp": ltp},
+    )
+    db.commit()
+    logger.info("smart_futures order: user=%s row=%s buy_price=%s", getattr(user, "id", None), row_id, ltp)
+    return {"success": True, "id": row_id, "order_status": "bought", "buy_price": ltp}

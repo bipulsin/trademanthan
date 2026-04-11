@@ -1,1 +1,189 @@
-/* Smart Futures public page — shell only; screener UI removed until rebuild. */
+/**
+ * Smart Futures — Today's Trend from smart_futures_daily (grouped by entry time).
+ */
+(function () {
+    const API_BASE =
+        window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+            ? 'http://localhost:8000'
+            : window.location.origin;
+
+    const POLL_MS = 120 * 1000;
+
+    function authHeaders() {
+        const t = localStorage.getItem('trademanthan_token') || '';
+        return {
+            Authorization: 'Bearer ' + t,
+            'Content-Type': 'application/json',
+        };
+    }
+
+    async function fetchDailyJson() {
+        const paths = ['/api/smart-futures/daily', '/smart-futures/daily'];
+        let lastErr = null;
+        for (const p of paths) {
+            try {
+                const res = await fetch(API_BASE + p, { headers: authHeaders(), cache: 'no-store' });
+                if (res.ok) return await res.json();
+                lastErr = new Error((await res.text()) || res.statusText);
+            } catch (e) {
+                lastErr = e;
+            }
+        }
+        throw lastErr || new Error('Failed to load daily picks');
+    }
+
+    function fmtNum(v, d) {
+        if (v == null || v === '') return '—';
+        const n = Number(v);
+        if (!Number.isFinite(n)) return '—';
+        return n.toFixed(d);
+    }
+
+    function fmtEntryGroupLabel(bucket) {
+        if (!bucket || bucket === '—') return 'Entry time';
+        try {
+            const d = new Date(bucket.length >= 16 ? bucket + ':00' : bucket);
+            if (!Number.isNaN(d.getTime())) {
+                return d.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' });
+            }
+        } catch (e) { /* ignore */ }
+        return bucket;
+    }
+
+    function renderGroups(data) {
+        const host = document.getElementById('sfTrendGroups');
+        const sessionEl = document.getElementById('sfTrendSession');
+        const msg = document.getElementById('sfTrendMsg');
+        if (!host) return;
+
+        if (sessionEl) sessionEl.textContent = data.session_date || '—';
+
+        if (data.error) {
+            msg.textContent = data.error;
+        } else {
+            msg.textContent = '';
+        }
+
+        const groups = data.groups && data.groups.length ? data.groups : [];
+        if (!groups.length) {
+            host.innerHTML =
+                '<div class="sf-table-wrap"><table class="sf-table"><tbody><tr><td colspan="9" style="padding:14px;">No Record</td></tr></tbody></table></div>';
+            return;
+        }
+
+        const thead =
+            '<thead><tr>' +
+            '<th>Symbol</th><th>Side</th><th>Final CMS</th><th>Sector</th><th>Sentiment Score</th>' +
+            '<th>Entry</th><th>SL</th><th>Target</th><th>In Trend</th><th>Order</th>' +
+            '</tr></thead>';
+
+        let html = '';
+        groups.forEach(function (g) {
+            const label = fmtEntryGroupLabel(g.entry_at);
+            html += '<div class="sf-group-title">' + label + '</div>';
+            html += '<div class="sf-table-wrap"><table class="sf-table">' + thead + '<tbody>';
+            (g.rows || []).forEach(function (r) {
+                const bought = String(r.order_status || '').toLowerCase() === 'bought';
+                const btnLabel = bought ? 'Bought' : 'Order';
+                html +=
+                    '<tr data-row-id="' +
+                    r.id +
+                    '">' +
+                    '<td>' +
+                    (r.fut_symbol || '—') +
+                    '</td>' +
+                    '<td>' +
+                    (r.side || '—') +
+                    '</td>' +
+                    '<td>' +
+                    fmtNum(r.final_cms, 2) +
+                    '</td>' +
+                    '<td>' +
+                    fmtNum(r.sector_score, 2) +
+                    '</td>' +
+                    '<td>' +
+                    fmtNum(r.combined_sentiment, 3) +
+                    '</td>' +
+                    '<td>' +
+                    fmtNum(r.entry_price, 2) +
+                    '</td>' +
+                    '<td>' +
+                    fmtNum(r.sl_price, 2) +
+                    '</td>' +
+                    '<td>' +
+                    fmtNum(r.target_price, 2) +
+                    '</td>' +
+                    '<td>' +
+                    (r.trend_continuation === 'Yes' ? 'Yes' : '') +
+                    '</td>' +
+                    '<td><button type="button" class="sf-btn-order" data-order-id="' +
+                    r.id +
+                    '"' +
+                    (bought ? ' disabled' : '') +
+                    '>' +
+                    btnLabel +
+                    '</button></td>' +
+                    '</tr>';
+            });
+            html += '</tbody></table></div>';
+        });
+        host.innerHTML = html;
+
+        host.querySelectorAll('.sf-btn-order[data-order-id]').forEach(function (btn) {
+            btn.addEventListener('click', onOrderClick);
+        });
+    }
+
+    async function onOrderClick(ev) {
+        const btn = ev.currentTarget;
+        const id = btn.getAttribute('data-order-id');
+        if (!id || btn.disabled) return;
+        if (!window.confirm('Mark this row as bought at current LTP?')) return;
+        btn.disabled = true;
+        const paths = ['/api/smart-futures/daily/' + id + '/order', '/smart-futures/daily/' + id + '/order'];
+        let ok = false;
+        let errText = '';
+        for (const p of paths) {
+            try {
+                const res = await fetch(API_BASE + p, { method: 'POST', headers: authHeaders() });
+                if (res.ok) {
+                    ok = true;
+                    break;
+                }
+                errText = (await res.text()) || res.statusText;
+            } catch (e) {
+                errText = String(e.message || e);
+            }
+        }
+        if (!ok) {
+            alert(errText || 'Order failed');
+            btn.disabled = false;
+            return;
+        }
+        btn.textContent = 'Bought';
+        await loadTrend(true);
+    }
+
+    async function loadTrend(silent) {
+        const updated = document.getElementById('sfTrendUpdated');
+        const msg = document.getElementById('sfTrendMsg');
+        try {
+            const data = await fetchDailyJson();
+            renderGroups(data);
+            if (updated) updated.textContent = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+        } catch (e) {
+            if (!silent && msg) msg.textContent = String(e.message || e);
+            const host = document.getElementById('sfTrendGroups');
+            if (host)
+                host.innerHTML =
+                    '<div class="sf-table-wrap"><table class="sf-table"><tbody><tr><td colspan="9" style="padding:14px;">No Record</td></tr></tbody></table></div>';
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        const ref = document.getElementById('sfTrendRefresh');
+        if (ref) ref.addEventListener('click', function () { loadTrend(false); });
+        loadTrend(false);
+        setInterval(function () { loadTrend(true); }, POLL_MS);
+    });
+})();
