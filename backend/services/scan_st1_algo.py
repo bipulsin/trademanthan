@@ -8,6 +8,7 @@ Consolidates all scan algorithm schedulers into a single controller:
 - Index Price Scheduler (every 5 min during market hours)
 - Entry slip monitor (every 15 min during market hours): cancel unfilled entry orders after 2 checks
 - Final reconciliation (3:45 PM & 4:00 PM): broker buy/sell/PnL sync; time_based → Exit-TM after 3:15 PM exits
+- Fin sentiment (weekdays 9:14–14:14 IST, 30 min): MarketAux news + entity scores for arbitrage_master stocks, FinBERT on titles, store in stock_fin_sentiment
 
 Interval-driven jobs only run real work between 08:30 and 21:00 IST (see scheduler_window).
 Exception: 8:10 AM Telegram ping (before 8:30).
@@ -79,6 +80,7 @@ from backend.services.index_price_scheduler import index_price_scheduler
 # CAR NIFTY200 updater (Yahoo + Upstox fallback)
 from backend.services.car_nifty200_updater import run_car_nifty200_update_job
 from backend.services.entry_slip_monitor import run_entry_slip_monitor
+from backend.services.fin_sentiment_job import run_fin_sentiment_job
 from backend.services.scheduler_window import is_allowed_scheduler_window_ist
 from backend.services.telegram_trade_channel import send_trade_with_cto_channel_message
 
@@ -108,6 +110,8 @@ job_loggers = [
     logging.getLogger('backend.routers.scan'),  # Add scan router logger for webhook processing, option contracts, trades
     logging.getLogger('backend.services.entry_slip_monitor'),
     logging.getLogger('backend.services.final_reconciliation'),
+    logging.getLogger('backend.services.fin_sentiment_job'),
+    logging.getLogger('backend.services.marketaux_client'),
 ]
 
 for job_logger in job_loggers:
@@ -616,6 +620,52 @@ class ScanST1AlgoScheduler:
                 coalesce=True,
             )
             logger.info("✅ Scheduled: Entry Slip Monitor (Every 15 minutes)")
+
+            # Fin sentiment: MarketAux + FinBERT for arbitrage_master — weekdays 9:14–14:14 IST, 30-min cadence
+            fin_sentiment_times = []
+            for h in range(9, 14):
+                for m in (14, 44):
+                    fin_sentiment_times.append((h, m))
+            fin_sentiment_times.append((14, 14))
+
+            def create_fin_sentiment_wrapper(h, m):
+                def run_fin_sentiment_scheduled():
+                    if not is_allowed_scheduler_window_ist():
+                        logger.debug("Outside 08:30–21:00 IST — skip Fin Sentiment tick")
+                        return
+                    ist = pytz.timezone("Asia/Kolkata")
+                    now = datetime.now(ist)
+                    if now.weekday() >= 5:
+                        return
+                    logger.info("🔧 Fin Sentiment job (%02d:%02d IST)...", h, m)
+                    try:
+                        run_fin_sentiment_job()
+                        logger.info("✅ Fin Sentiment job (%02d:%02d) completed", h, m)
+                    except Exception as e:
+                        logger.error("❌ Fin Sentiment job (%02d:%02d) failed: %s", h, m, e, exc_info=True)
+
+                return run_fin_sentiment_scheduled
+
+            for hour, minute in fin_sentiment_times:
+                self.scheduler.add_job(
+                    create_fin_sentiment_wrapper(hour, minute),
+                    trigger=CronTrigger(
+                        day_of_week="mon-fri",
+                        hour=hour,
+                        minute=minute,
+                        timezone="Asia/Kolkata",
+                    ),
+                    id=f"scan_st1_fin_sentiment_{hour}_{minute:02d}",
+                    name=f"Fin Sentiment ({hour:02d}:{minute:02d} IST)",
+                    replace_existing=True,
+                    max_instances=1,
+                    misfire_grace_time=300,
+                    coalesce=True,
+                )
+            logger.info(
+                "✅ Scheduled: Fin Sentiment (%s weekday slots 9:14–14:14 IST)",
+                len(fin_sentiment_times),
+            )
 
             # 6. CAR NIFTY200 Updater - Every 3 hours (Yahoo first, Upstox fallback)
             def run_car_nifty200_update():

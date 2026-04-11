@@ -39,4 +39,7 @@ class Settings(BaseSettings):
     # CAR GPT Configuration
     CAR_NUMBER_OF_WEEKS: int = int(os.getenv("CAR_NUMBER_OF_WEEKS", "52"))
 
+    # MarketAux (financial news + entity sentiment)
+    MARKETAUX_API_TOKEN: str = os.getenv("MARKETAUX_API_TOKEN", "")
+
 settings = Settings()

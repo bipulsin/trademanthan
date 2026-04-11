@@ -259,6 +259,56 @@ def _run_startup_schema_migrations(db_engine):
                 except Exception:
                     pass
 
+            # MarketAux + FinBERT sentiment job tables
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS stock_fin_sentiment (
+                        stock VARCHAR(64) PRIMARY KEY,
+                        stock_instrument_key TEXT,
+                        api_sentiment_avg DOUBLE PRECISION,
+                        nlp_sentiment_avg DOUBLE PRECISION,
+                        combined_sentiment_avg DOUBLE PRECISION,
+                        last_combined_sentiment DOUBLE PRECISION,
+                        current_combined_sentiment DOUBLE PRECISION,
+                        news_count INTEGER,
+                        current_run_at TIMESTAMPTZ,
+                        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS fin_sentiment_job_state (
+                        id INTEGER PRIMARY KEY,
+                        watermark TIMESTAMPTZ NOT NULL
+                    )
+                    """
+                )
+            )
+            if db_engine.dialect.name == "postgresql":
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO fin_sentiment_job_state (id, watermark)
+                        SELECT 1, (CURRENT_TIMESTAMP AT TIME ZONE 'UTC' - interval '90 minutes')
+                        WHERE NOT EXISTS (SELECT 1 FROM fin_sentiment_job_state WHERE id = 1)
+                        """
+                    )
+                )
+            else:
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO fin_sentiment_job_state (id, watermark)
+                        SELECT 1, datetime('now', '-90 minutes')
+                        WHERE NOT EXISTS (SELECT 1 FROM fin_sentiment_job_state WHERE id = 1)
+                        """
+                    )
+                )
+
             if "intraday_stock_options" in table_names:
                 iso_columns = {col["name"] for col in inspector.get_columns("intraday_stock_options")}
                 if "entry_slip_checks" not in iso_columns:

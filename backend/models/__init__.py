@@ -4,6 +4,7 @@ from .trading import Broker, IntradayStockOption, MasterStock, UpstoxInstrument,
 from .strategy import Strategy, Trade, Backtest, INDICATOR_PARAMETERS, AVAILABLE_INDICATORS, LOGIC_OPERATORS
 from .products import Product
 from .car import CarStockList
+from .fin_sentiment import StockFinSentiment, FinSentimentJobState
 
 __all__ = [
     "Base",
@@ -21,5 +22,7 @@ __all__ = [
     "AVAILABLE_INDICATORS", 
     "LOGIC_OPERATORS",
     "Product",
-    "CarStockList"
+    "CarStockList",
+    "StockFinSentiment",
+    "FinSentimentJobState",
 ]
