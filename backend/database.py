@@ -310,8 +310,10 @@ def _run_startup_schema_migrations(db_engine):
                     )
                 )
 
-            if "stock_fin_sentiment" in table_names:
-                sfs_cols = {col["name"] for col in inspect(db_engine).get_columns("stock_fin_sentiment")}
+            # Use a fresh inspector: table may have been created above and was not in initial table_names.
+            _insp_sfs = inspect(db_engine)
+            if "stock_fin_sentiment" in _insp_sfs.get_table_names():
+                sfs_cols = {col["name"] for col in _insp_sfs.get_columns("stock_fin_sentiment")}
                 if "current_combined_sentiment_reason" not in sfs_cols:
                     conn.execute(
                         text(
