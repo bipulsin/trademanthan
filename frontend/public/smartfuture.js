@@ -21,8 +21,25 @@
         for (const p of paths) {
             try {
                 const res = await fetch(API_BASE + p, { headers: authHeaders(), cache: 'no-store' });
-                if (res.ok) return await res.json();
-                lastErr = new Error((await res.text()) || res.statusText);
+                const raw = await res.text();
+                const ct = (res.headers.get('content-type') || '').toLowerCase();
+                const looksJson =
+                    ct.includes('application/json') || /^\s*[\[{]/.test(raw.slice(0, 20));
+                if (res.ok) {
+                    if (!looksJson) {
+                        lastErr = new Error(
+                            'Server returned non-JSON (often HTML). Sign in or ask ops to proxy /smart-futures/ to the API.'
+                        );
+                        continue;
+                    }
+                    try {
+                        return JSON.parse(raw);
+                    } catch (parseErr) {
+                        lastErr = new Error('Invalid JSON from ' + p + ': ' + (parseErr.message || parseErr));
+                        continue;
+                    }
+                }
+                lastErr = new Error(raw.slice(0, 200) || res.statusText || String(res.status));
             } catch (e) {
                 lastErr = e;
             }
