@@ -217,6 +217,7 @@ def _norm(s: str) -> str:
 
 # Static sector label -> Upstox index key map (avoid heavy runtime instruments-file scan).
 # Any unmapped sector automatically falls back to Yahoo in _fetch_one_sector.
+# Keys must match Upstox BOD JSON ``instrument_key`` (see complete.json.gz, segment NSE_INDEX).
 UPSTOX_SECTOR_INDEX_KEYS: Dict[str, str] = {
     "Nifty Bank": "NSE_INDEX|Nifty Bank",
     "Nifty IT": "NSE_INDEX|Nifty IT",
@@ -232,7 +233,33 @@ UPSTOX_SECTOR_INDEX_KEYS: Dict[str, str] = {
     "Nifty Healthcare": "NSE_INDEX|NIFTY HEALTHCARE",
     "Nifty Oil & Gas": "NSE_INDEX|NIFTY OIL AND GAS",
     "Nifty Financial Services": "NSE_INDEX|Nifty Fin Service",
+    "Nifty Private Bank": "NSE_INDEX|Nifty Pvt Bank",
+    "Nifty Consumer Durables": "NSE_INDEX|NIFTY CONSR DURBL",
+    "Nifty Logistics": "NSE_INDEX|Nifty Trans Logis",
+    "Nifty Services": "NSE_INDEX|Nifty Serv Sector",
+    # Upstox has no standalone Nifty Telecom index; closest listed sectoral benchmark:
+    "Nifty Telecom": "NSE_INDEX|Nifty MS IT Telcm",
+    "Nifty Chemicals": "NSE_INDEX|Nifty Chemicals",
 }
+
+# ``arbitrage_master`` / CSV historically stored display-style suffixes; Upstox expects
+# instrument_key strings from the instruments file (often abbreviated).
+SECTOR_INDEX_INSTRUMENT_ALIASES: Dict[str, str] = {
+    "NSE_INDEX|Nifty Financial Services": "NSE_INDEX|Nifty Fin Service",
+    "NSE_INDEX|Nifty Private Bank": "NSE_INDEX|Nifty Pvt Bank",
+    "NSE_INDEX|Nifty Consumer Durables": "NSE_INDEX|NIFTY CONSR DURBL",
+    "NSE_INDEX|Nifty Logistics": "NSE_INDEX|Nifty Trans Logis",
+    "NSE_INDEX|Nifty Services": "NSE_INDEX|Nifty Serv Sector",
+    "NSE_INDEX|Nifty Telecom": "NSE_INDEX|Nifty MS IT Telcm",
+}
+
+
+def normalize_sector_instrument_key(raw: Optional[str]) -> Optional[str]:
+    """Map legacy sector_index strings to Upstox ``instrument_key`` when needed."""
+    s = str(raw or "").strip()
+    if not s:
+        return None
+    return SECTOR_INDEX_INSTRUMENT_ALIASES.get(s, s)
 
 # NSE equity symbol (no .NS) -> Nifty sector label (keys of UPSTOX_SECTOR_INDEX_KEYS)
 _EQ_SYMBOL_TO_SECTOR_LABEL: Dict[str, str] = {}

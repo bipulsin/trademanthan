@@ -16,7 +16,8 @@ DEFAULT_CSV_PATH = _REPO_ROOT / "backend" / "fno_sector_mapping.csv"
 
 def load_fno_sector_index_map(csv_path: Optional[Path] = None) -> Dict[str, str]:
     """
-    Returns uppercased NSE symbol → sector_index string (e.g. ``NSE_INDEX|Nifty IT``).
+    Returns uppercased NSE symbol → sector_index string (Upstox ``instrument_key``, e.g.
+    ``NSE_INDEX|Nifty Fin Service``, ``NSE_INDEX|Nifty Pvt Bank``).
     Empty dict if file is missing.
     """
     path = csv_path or DEFAULT_CSV_PATH

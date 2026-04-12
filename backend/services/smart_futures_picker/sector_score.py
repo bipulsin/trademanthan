@@ -9,6 +9,7 @@ from backend.services.sector_movers import (
     SECTOR_STOCK_UNIVERSE,
     UPSTOX_SECTOR_INDEX_KEYS,
     equity_sector_index_instrument_key,
+    normalize_sector_instrument_key,
 )
 from backend.services.upstox_service import upstox_service
 
@@ -113,7 +114,7 @@ def resolve_sector_instrument_key_for_stock(
     Prefer arbitrage_master.sector_index (Upstox instrument key), then static equity map.
     """
     sym = str(stock or "").strip().upper()
-    manual = str(sector_index_from_master or "").strip()
+    manual = normalize_sector_instrument_key(sector_index_from_master)
     if manual:
         return manual
     ek = equity_sector_index_instrument_key(sym)

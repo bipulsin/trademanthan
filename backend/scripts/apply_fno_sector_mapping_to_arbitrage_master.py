@@ -18,6 +18,7 @@ from sqlalchemy import text  # noqa: E402
 
 from backend.database import engine  # noqa: E402
 from backend.services.fno_sector_mapping_csv import load_fno_sector_index_map  # noqa: E402
+from backend.services.sector_movers import normalize_sector_instrument_key  # noqa: E402
 
 
 def main() -> int:
@@ -29,6 +30,9 @@ def main() -> int:
     missing = 0
     with engine.begin() as conn:
         for sym, idx in m.items():
+            canon = normalize_sector_instrument_key(idx)
+            if not canon:
+                continue
             r = conn.execute(
                 text(
                     """
@@ -37,7 +41,7 @@ def main() -> int:
                     WHERE UPPER(TRIM(stock)) = :sym
                     """
                 ),
-                {"sym": sym, "idx": idx},
+                {"sym": sym, "idx": canon},
             ).rowcount
             if r:
                 updated += r
