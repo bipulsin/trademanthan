@@ -26,7 +26,7 @@ from backend.services.smart_futures_exit import (
     m5_bars_for_session,
 )
 from backend.services.smart_futures_session_date import effective_session_date_ist_for_trend
-from backend.services.smart_futures_picker.job import compute_atr5_14_ratio_for_session
+from backend.services.smart_futures_session_utils import compute_atr5_14_ratio_for_session
 from backend.services.upstox_service import UpstoxService
 
 logger = logging.getLogger(__name__)
@@ -101,6 +101,48 @@ def put_sf_config_stub(body: SmartFuturesConfigUpdate, admin: User = Depends(_re
     return cur
 
 
+def _missing_db_column_error(e: BaseException, column: str) -> bool:
+    msg = str(e).lower()
+    if column.lower() not in msg:
+        return False
+    return (
+        "does not exist" in msg
+        or "unknown column" in msg
+        or "no such column" in msg
+        or ("column" in msg and "not" in msg)
+    )
+
+
+_SQL_DAILY_FULL = """
+                SELECT id, fut_symbol, fut_instrument_key, side, final_cms, sector_score, combined_sentiment,
+                       entry_price, sl_price, target_price, trend_continuation, entry_at,
+                       order_status, buy_price, sell_price, session_date, scan_trigger,
+                       cms, atr5_14_ratio
+                FROM smart_futures_daily
+                WHERE session_date = :sd
+                ORDER BY entry_at DESC NULLS LAST, id DESC
+                """
+_SQL_DAILY_NO_SELL_PRICE = """
+                SELECT id, fut_symbol, fut_instrument_key, side, final_cms, sector_score, combined_sentiment,
+                       entry_price, sl_price, target_price, trend_continuation, entry_at,
+                       order_status, buy_price, session_date, scan_trigger,
+                       cms, atr5_14_ratio
+                FROM smart_futures_daily
+                WHERE session_date = :sd
+                ORDER BY entry_at DESC NULLS LAST, id DESC
+                """
+
+
+def _fetch_daily_for_session(db: Session, sd: Any) -> List[Any]:
+    try:
+        return db.execute(text(_SQL_DAILY_FULL), {"sd": sd}).mappings().all()
+    except Exception as e:
+        if _missing_db_column_error(e, "sell_price"):
+            logger.warning("smart_futures /daily: sell_price column missing, using query without it: %s", e)
+            return db.execute(text(_SQL_DAILY_NO_SELL_PRICE), {"sd": sd}).mappings().all()
+        raise
+
+
 def _atr_ratio_needs_backfill(v: Any) -> bool:
     if v is None:
         return True
@@ -142,20 +184,7 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
     """Today's Trend: rows for effective session_date (IST window 9:00 → next session 08:59)."""
     sd = effective_session_date_ist_for_trend()
     try:
-        rows = db.execute(
-            text(
-                """
-                SELECT id, fut_symbol, fut_instrument_key, side, final_cms, sector_score, combined_sentiment,
-                       entry_price, sl_price, target_price, trend_continuation, entry_at,
-                       order_status, buy_price, sell_price, session_date, scan_trigger,
-                       cms, atr5_14_ratio
-                FROM smart_futures_daily
-                WHERE session_date = :sd
-                ORDER BY entry_at DESC NULLS LAST, id DESC
-                """
-            ),
-            {"sd": sd},
-        ).mappings().all()
+        rows = _fetch_daily_for_session(db, sd)
     except Exception as e:
         logger.warning("smart_futures /daily query failed: %s", e)
         return {
@@ -356,16 +385,33 @@ def post_smart_futures_daily_sell(
     if ltp <= 0:
         raise HTTPException(status_code=502, detail="Could not read last price from broker")
 
-    db.execute(
-        text(
-            """
-            UPDATE smart_futures_daily
-            SET order_status = 'sold', sell_price = :ltp, updated_at = CURRENT_TIMESTAMP
-            WHERE id = :id AND LOWER(TRIM(order_status)) = 'bought'
-            """
-        ),
-        {"id": row_id, "ltp": ltp},
-    )
+    try:
+        db.execute(
+            text(
+                """
+                UPDATE smart_futures_daily
+                SET order_status = 'sold', sell_price = :ltp, updated_at = CURRENT_TIMESTAMP
+                WHERE id = :id AND LOWER(TRIM(order_status)) = 'bought'
+                """
+            ),
+            {"id": row_id, "ltp": ltp},
+        )
+    except Exception as e:
+        if _missing_db_column_error(e, "sell_price"):
+            logger.warning("smart_futures sell: sell_price column missing, status-only update: %s", e)
+            db.execute(
+                text(
+                    """
+                    UPDATE smart_futures_daily
+                    SET order_status = 'sold', updated_at = CURRENT_TIMESTAMP
+                    WHERE id = :id AND LOWER(TRIM(order_status)) = 'bought'
+                    """
+                ),
+                {"id": row_id},
+            )
+            ltp = None
+        else:
+            raise
     db.commit()
     logger.info("smart_futures sell: user=%s row=%s sell_price=%s", getattr(user, "id", None), row_id, ltp)
     return {"success": True, "id": row_id, "order_status": "sold", "sell_price": ltp}

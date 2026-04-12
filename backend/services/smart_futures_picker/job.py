@@ -20,6 +20,7 @@ from sqlalchemy import text
 from backend.config import settings
 from backend.database import SessionLocal
 from backend.services.smart_futures_session_date import effective_session_date_ist_for_trend
+from backend.services.smart_futures_session_utils import compute_atr5_14_ratio_for_session
 from backend.services.smart_futures_exit import index_session_long_short_flags
 from backend.services.smart_futures_picker.indicators import (
     adx_14_last_two,
@@ -113,38 +114,6 @@ def _vix_last_close_5m(upstox: UpstoxService) -> Optional[float]:
         return float(s[-1].get("close") or 0) or None
     except Exception as e:
         logger.warning("smart_futures_picker: VIX fetch failed: %s", e)
-        return None
-
-
-def compute_atr5_14_ratio_for_session(
-    upstox: UpstoxService, fut_instrument_key: str, session_date: datetime.date
-) -> Optional[float]:
-    """
-    ATR(5)/ATR(14) on the same session 5m window as the picker. Used to backfill rows
-    that predate atr5_14_ratio persistence (e.g. GET /daily one-off fill).
-    """
-    try:
-        m5_raw = upstox.get_historical_candles_by_instrument_key(
-            fut_instrument_key, interval="minutes/5", days_back=2
-        )
-        m5 = _sort_candles(m5_raw)
-        m5_today = [b for b in m5 if _ist_date_from_ts(str(b.get("timestamp") or "")) == session_date]
-        if len(m5_today) < 20:
-            m5_today = m5[-max(20, len(m5)) :] if len(m5) >= 20 else []
-        if len(m5_today) < 15:
-            return None
-        highs = [float(b["high"]) for b in m5_today]
-        lows = [float(b["low"]) for b in m5_today]
-        closes = [float(b["close"]) for b in m5_today]
-        atr = wilder_atr_14(highs, lows, closes)
-        if atr is None or atr <= 0:
-            return None
-        atr5 = wilder_atr(highs, lows, closes, 5)
-        if atr5 is None or atr5 <= 0:
-            return None
-        return float(atr5) / float(atr)
-    except Exception as e:
-        logger.debug("compute_atr5_14_ratio_for_session %s: %s", fut_instrument_key, e)
         return None
 
 
