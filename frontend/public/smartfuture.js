@@ -61,9 +61,9 @@
         const core = r.cms != null && r.cms !== '' ? Number(r.cms) : NaN;
         const lines = [];
         lines.push(
-            'LONG if Final CMS > 0 at scan time, SHORT if < 0. ' +
-                'Final CMS = core CMS × (1 + 0.5×sector score) × (1 + sentiment). ' +
-                'Core CMS is from this futures contract’s session (5‑minute bars: VWAP vs price, volume surge, Renko/Heikin‑Ashi, divergences) plus recent daily OBV—not the same as a spot equity “uptrend” on another timeframe.'
+            'CMS v2: regime filter (ATR5>ATR14, ADX>20 rising), normalized score, then Final CMS = score × (ATR5/ATR14) × (ADX/25). ' +
+                'Entry needs Final CMS beyond threshold, price vs session VWAP, sector and NIFTY/BANKNIFTY aligned, and sentiment band. ' +
+                'Divergences are not used for entry; they feed exit hints after you mark Bought.'
         );
         const bits = [];
         if (Number.isFinite(core)) bits.push('core CMS ' + core.toFixed(2));
@@ -72,7 +72,7 @@
         if (Number.isFinite(fc)) bits.push('final CMS ' + fc.toFixed(2));
         if (bits.length) lines.push('This row: ' + bits.join(' · ') + '.');
         if (s === 'LONG' || s === 'SHORT') {
-            lines.push('Side shown: ' + s + ' (follows sign of final CMS).');
+            lines.push('Side: ' + s + ' (meets entry rules at scan time).');
         }
         return lines.join(' ');
     }
@@ -98,6 +98,38 @@
             '<i class="fas fa-check" aria-hidden="true"></i>' +
             '<span class="sr-only">Yes</span>' +
             '</span>'
+        );
+    }
+
+    function fmtActionCell(r) {
+        const id = r.id;
+        const sold = String(r.order_status || '').toLowerCase() === 'sold';
+        const bought = String(r.order_status || '').toLowerCase() === 'bought';
+        const exitS = Boolean(r.exit_suggested);
+        const reason = escapeAttr(String(r.exit_reason || ''));
+        let hint = '';
+        if (bought && exitS) {
+            hint =
+                '<span class="sf-exit-hint" title="' +
+                (reason || 'Exit signal (ADX, ATR, VWAP, or divergence)') +
+                '">Exit</span> ';
+        }
+        if (sold) {
+            const sp = r.sell_price != null && r.sell_price !== '' ? ' @' + fmtNum(r.sell_price, 2) : '';
+            return hint + '<span class="sf-sold">Sold' + sp + '</span>';
+        }
+        if (bought) {
+            return (
+                hint +
+                '<button type="button" class="sf-btn-sell" data-sell-id="' +
+                id +
+                '">Sell</button>'
+            );
+        }
+        return (
+            '<button type="button" class="sf-btn-order" data-order-id="' +
+            id +
+            '">Order</button>'
         );
     }
 
@@ -154,7 +186,7 @@
         const thead =
             '<thead><tr>' +
             '<th>Symbol</th><th>Side</th><th>Final CMS</th><th>Sector Score</th><th>Sentiment Score</th>' +
-            '<th>Entry</th><th>SL</th><th>Target</th><th>In Trend</th><th>Order</th>' +
+            '<th>Entry</th><th>SL</th><th>Target</th><th>In Trend</th><th>Action</th>' +
             '</tr></thead>';
 
         let html = '';
@@ -163,8 +195,6 @@
             html += '<div class="sf-group-title">' + label + '</div>';
             html += '<div class="sf-table-wrap"><table class="sf-table">' + thead + '<tbody>';
             (g.rows || []).forEach(function (r) {
-                const bought = String(r.order_status || '').toLowerCase() === 'bought';
-                const btnLabel = bought ? 'Bought' : 'Order';
                 html +=
                     '<tr data-row-id="' +
                     r.id +
@@ -196,26 +226,27 @@
                     '<td>' +
                     fmtTrendCell(r) +
                     '</td>' +
-                    '<td><button type="button" class="sf-btn-order" data-order-id="' +
-                    r.id +
-                    '"' +
-                    (bought ? ' disabled' : '') +
-                    '>' +
-                    btnLabel +
-                    '</button></td>' +
+                    '<td>' +
+                    fmtActionCell(r) +
+                    '</td>' +
                     '</tr>';
             });
             html += '</tbody></table></div>';
         });
         host.innerHTML = html;
 
-        host.querySelectorAll('.sf-btn-order[data-order-id]').forEach(function (btn) {
-            btn.addEventListener('click', onOrderClick);
-        });
+        host.onclick = function (ev) {
+            if (ev.target && ev.target.closest && ev.target.closest('.sf-btn-order')) {
+                onOrderClick(ev);
+            } else if (ev.target && ev.target.closest && ev.target.closest('.sf-btn-sell')) {
+                onSellClick(ev);
+            }
+        };
     }
 
     async function onOrderClick(ev) {
-        const btn = ev.currentTarget;
+        const btn = ev.target && ev.target.closest ? ev.target.closest('.sf-btn-order') : null;
+        if (!btn) return;
         const id = btn.getAttribute('data-order-id');
         if (!id || btn.disabled) return;
         if (!window.confirm('Mark this row as bought at current LTP?')) return;
@@ -240,7 +271,36 @@
             btn.disabled = false;
             return;
         }
-        btn.textContent = 'Bought';
+        await loadTrend(true);
+    }
+
+    async function onSellClick(ev) {
+        const btn = ev.target && ev.target.closest ? ev.target.closest('.sf-btn-sell') : null;
+        if (!btn) return;
+        const id = btn.getAttribute('data-sell-id');
+        if (!id || btn.disabled) return;
+        if (!window.confirm('Mark this position as sold at current LTP?')) return;
+        btn.disabled = true;
+        const paths = ['/api/smart-futures/daily/' + id + '/sell', '/smart-futures/daily/' + id + '/sell'];
+        let ok = false;
+        let errText = '';
+        for (const p of paths) {
+            try {
+                const res = await fetch(API_BASE + p, { method: 'POST', headers: authHeaders() });
+                if (res.ok) {
+                    ok = true;
+                    break;
+                }
+                errText = (await res.text()) || res.statusText;
+            } catch (e) {
+                errText = String(e.message || e);
+            }
+        }
+        if (!ok) {
+            alert(errText || 'Sell failed');
+            btn.disabled = false;
+            return;
+        }
         await loadTrend(true);
     }
 

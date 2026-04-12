@@ -38,7 +38,7 @@
             padding: 8px 6px;
         }
         table.sf-table th { color: var(--theme-muted, #64748b); font-weight: 600; }
-        .sf-btn-refresh, .sf-btn-order {
+        .sf-btn-refresh, .sf-btn-order, .sf-btn-sell {
             padding: 6px 14px;
             border-radius: 8px;
             font-weight: 600;
@@ -64,6 +64,24 @@
             color: #fff;
         }
         .sf-btn-order:disabled { opacity: 0.45; cursor: not-allowed; }
+        .sf-btn-sell {
+            border: none;
+            background: #b45309;
+            color: #fff;
+        }
+        .sf-btn-sell:disabled { opacity: 0.45; cursor: not-allowed; }
+        .sf-exit-hint {
+            display: inline-block;
+            margin-right: 6px;
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            background: #fef3c7;
+            color: #92400e;
+            vertical-align: middle;
+        }
+        .sf-sold { font-weight: 600; color: var(--theme-muted, #64748b); }
         .sf-group-title {
             font-size: 0.95rem;
             font-weight: 700;

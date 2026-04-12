@@ -1,6 +1,6 @@
 """
-Indicators for Smart Futures CMS: OBV slope (spec), Wilder ATR(14), ADX(14), VWAP,
-volume surge, Renko-style momentum, HA trend, simplified oscillator divergences.
+Indicators for Smart Futures CMS v2: OBV slope, Wilder ATR(5/14), ADX(14), VWAP, volume surge,
+Renko-style momentum, HA trend, and oscillator divergences (divergences used for exit signals only).
 """
 from __future__ import annotations
 
@@ -263,6 +263,95 @@ def divergence_bundle(
     return md, rd, sd
 
 
+def adx_14_last_two(highs: Sequence[float], lows: Sequence[float], closes: Sequence[float]) -> Tuple[Optional[float], Optional[float]]:
+    """Latest ADX(14) and previous bar ADX, or (None, None) if unavailable."""
+    try:
+        import pandas as pd
+        import pandas_ta as ta
+
+        if len(closes) < 32:
+            return None, None
+        df = pd.DataFrame({"high": list(highs), "low": list(lows), "close": list(closes)})
+        adx_df = ta.adx(df["high"], df["low"], df["close"], length=14)
+        if adx_df is None or adx_df.empty:
+            return None, None
+        col = "ADX_14" if "ADX_14" in adx_df.columns else next(
+            (c for c in adx_df.columns if str(c).upper().startswith("ADX")), None
+        )
+        if not col:
+            return None, None
+        series = adx_df[col].dropna()
+        if len(series) < 2:
+            return None, None
+        return float(series.iloc[-1]), float(series.iloc[-2])
+    except Exception:
+        return None, None
+
+
+def market_regime_ok(
+    atr5: float,
+    atr14: float,
+    adx: float,
+    adx_prev: Optional[float],
+) -> bool:
+    """Layer 1: trending regime (mandatory for new CMS pipeline)."""
+    if adx_prev is None:
+        return False
+    return atr5 > atr14 and adx > 20.0 and adx > adx_prev
+
+
+def volume_surge_norm_01(volume_surge_ratio_val: float) -> float:
+    """Map session volume surge ratio to [0, 1] (linear past entry floor ~1.5)."""
+    return max(0.0, min(1.0, (float(volume_surge_ratio_val) - 1.5) / 1.5))
+
+
+def vwap_deviation_atr_norm(close: float, vwap: float, atr14: float) -> float:
+    """(close − VWAP) / ATR(14), clipped to [-2, +2]."""
+    if atr14 <= 0:
+        return 0.0
+    return max(-2.0, min(2.0, (float(close) - float(vwap)) / float(atr14)))
+
+
+def breakout_volume_spike(highs: Sequence[float], lows: Sequence[float], closes: Sequence[float], vs: float) -> bool:
+    """Optional +0.1 CMS boost: breakout of recent range with elevated surge."""
+    if len(closes) < 10 or float(vs) < 2.0:
+        return False
+    prior_high = max(highs[-10:-1])
+    prior_low = min(lows[-10:-1])
+    lc = float(closes[-1])
+    return lc > prior_high or lc < prior_low
+
+
+def compute_cms_score_weighted(
+    obv_slope_norm: float,
+    volume_surge_norm: float,
+    vwap_deviation: float,
+    renko_momentum_norm: float,
+    ha_trend_norm: float,
+    breakout_boost: bool,
+) -> float:
+    """
+    Layer 2: weighted normalized CMS (no raw cross-terms, no divergences).
+    """
+    s = (
+        0.25 * float(obv_slope_norm)
+        + 0.20 * float(volume_surge_norm)
+        + 0.20 * float(vwap_deviation)
+        + 0.15 * float(renko_momentum_norm)
+        + 0.20 * float(ha_trend_norm)
+    )
+    if breakout_boost:
+        s += 0.1
+    return float(s)
+
+
+def compute_cms_final_multiplier(cms_score: float, atr5: float, atr14: float, adx: float) -> float:
+    """Layer 2→3: volatility and trend weighting on the combined score."""
+    if atr14 <= 0 or adx <= 0:
+        return 0.0
+    return float(cms_score) * (float(atr5) / float(atr14)) * (float(adx) / 25.0)
+
+
 def compute_cms_core(
     obv_slope: float,
     volume_surge: float,
@@ -273,19 +362,19 @@ def compute_cms_core(
     macd_div: float,
     rsi_div: float,
     stoch_div: float,
+    *,
+    breakout_boost: bool = False,
 ) -> float:
     """
-    CMS = (OBV_slope × volume_surge × ADX_14 × (close-VWAP)/ATR_14)
-          + Renko_momentum + HA_trend + MACD_div + RSI_div + Stoch_div
-    ADX scaled to 0–1 for product term; close_vwap_atr is (close-VWAP)/ATR already.
+    Normalized CMS **score** (Layer 2). ``macd_div`` / ``rsi_div`` / ``stoch_div`` are ignored
+    for entry (reserved for exit / reversal). ``adx_14`` kept for call-site compatibility.
+
+    ``close_vwap_atr`` may be a wider clip from the caller; VWAP term is re-clipped to [-2, 2] internally
+    when used as deviation — callers should pass (close−VWAP)/ATR.
     """
-    adx_n = min(1.0, max(0.0, adx_14 / 50.0))
-    prod = obv_slope * volume_surge * adx_n * close_vwap_atr
-    return (
-        prod
-        + renko_momentum
-        + ha_trend
-        + macd_div
-        + rsi_div
-        + stoch_div
-    )
+    obv_n = max(-1.0, min(1.0, float(obv_slope)))
+    vs_n = volume_surge_norm_01(volume_surge)
+    vd = max(-2.0, min(2.0, float(close_vwap_atr)))
+    rm_n = max(-1.0, min(1.0, float(renko_momentum)))
+    ha_n = max(-1.0, min(1.0, float(ha_trend)))
+    return compute_cms_score_weighted(obv_n, vs_n, vd, rm_n, ha_n, breakout_boost)

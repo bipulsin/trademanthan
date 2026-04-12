@@ -1,8 +1,8 @@
 """
 Smart Futures historical backtest engine.
 
-Mirrors picker scoring math and filters (read-only reuse of indicator helpers + ScoredPick shape)
-without modifying ``smart_futures_picker/job.py`` or sentiment jobs.
+Mirrors picker scoring math and filters (shared indicator helpers + ``ScoredPick`` / thresholds from job).
+Does not modify sentiment jobs.
 """
 from __future__ import annotations
 
@@ -24,19 +24,26 @@ from backend.services.smart_futures_backtest.log_setup import get_backtest_logge
 from backend.services.smart_futures_backtest.retry import call_with_retries
 from backend.services.smart_futures_backtest.sector_asof import sector_score_as_of
 from backend.services.smart_futures_backtest.sentiment import load_sentiment_map_for_session_date
+from backend.services.smart_futures_exit import index_session_long_short_flags
 from backend.services.smart_futures_picker.indicators import (
-    adx_14_value,
+    adx_14_last_two,
+    breakout_volume_spike,
     compute_cms_core,
+    compute_cms_final_multiplier,
     compute_obv_slope_daily,
     divergence_bundle,
     ha_trend_score,
+    market_regime_ok,
     renko_momentum_score,
     session_vwap,
     volume_surge_ratio,
+    vwap_deviation_atr_norm,
     wilder_atr,
     wilder_atr_14,
 )
 from backend.services.smart_futures_picker.job import (
+    CMS_FINAL_ENTRY_THRESHOLD,
+    SECTOR_ALIGN_MIN,
     ScoredPick,
     _ist_date_from_ts,
     _session_elapsed_fraction,
@@ -170,6 +177,9 @@ def score_symbol_backtest(
     cutoff_ist: datetime,
     sentiment_map: Dict[str, float],
     sector_index: Optional[str] = None,
+    *,
+    index_long_ok: bool = False,
+    index_short_ok: bool = False,
 ) -> Optional[ScoredPick]:
     daily_raw = upstox.get_historical_candles_by_instrument_key(
         fut_key, interval="days/1", days_back=120, range_end_date=session_date
@@ -203,14 +213,15 @@ def score_symbol_backtest(
     if atr5 is None or atr5 <= 0:
         return None
     atr5_14_ratio = float(atr5) / float(atr)
-    adx = adx_14_value(highs, lows, closes)
-    if adx is None:
-        adx = 0.0
+    adx_curr, adx_prev = adx_14_last_two(highs, lows, closes)
+    if adx_curr is None:
+        return None
+    if not market_regime_ok(float(atr5), float(atr), float(adx_curr), adx_prev):
+        return None
 
     vwap = session_vwap(highs, lows, closes, vols)
     last_close = closes[-1]
-    cvatr = (last_close - vwap) / atr
-    cvatr = max(-4.0, min(4.0, cvatr))
+    vwap_dev = vwap_deviation_atr_norm(last_close, vwap, float(atr))
 
     frac = _session_elapsed_fraction(session_date, m5_today)
     vs = volume_surge_ratio(vols, avg_daily_vol, frac)
@@ -222,11 +233,13 @@ def score_symbol_backtest(
     ha = ha_trend_score(opens, highs, lows, closes)
     md, rd, sd = divergence_bundle(highs, lows, closes)
 
-    cms = compute_cms_core(obv_slope, vs, adx, cvatr, rm, ha, md, rd, sd)
+    boost = breakout_volume_spike(highs, lows, closes, vs)
+    cms = compute_cms_core(
+        obv_slope, vs, float(adx_curr), vwap_dev, rm, ha, md, rd, sd, breakout_boost=boost
+    )
+    final_cms = compute_cms_final_multiplier(cms, float(atr5), float(atr), float(adx_curr))
 
     sector_score = sector_score_as_of(upstox, stock, sector_index, session_date)
-    if sector_score < -0.6:
-        return None
 
     raw_sent = sentiment_map.get(stock.upper())
     if raw_sent is not None:
@@ -239,11 +252,27 @@ def score_symbol_backtest(
     else:
         comb = 0.0
 
-    final_cms = cms * (1.0 + 0.5 * sector_score) * (1.0 + comb)
-    if abs(final_cms) <= 2.5:
+    th = CMS_FINAL_ENTRY_THRESHOLD
+    long_ok = (
+        final_cms > th
+        and last_close > vwap
+        and sector_score > SECTOR_ALIGN_MIN
+        and index_long_ok
+    )
+    short_ok = (
+        final_cms < -th
+        and last_close < vwap
+        and sector_score < -SECTOR_ALIGN_MIN
+        and index_short_ok
+    )
+    if long_ok and not short_ok:
+        side = "LONG"
+    elif short_ok and not long_ok:
+        side = "SHORT"
+    elif long_ok and short_ok:
+        side = "LONG" if final_cms >= 0 else "SHORT"
+    else:
         return None
-
-    side = "LONG" if final_cms > 0 else "SHORT"
     return ScoredPick(
         stock=stock,
         fut_symbol=fut_sym or "",
@@ -251,7 +280,7 @@ def score_symbol_backtest(
         side=side,
         obv_slope=obv_slope,
         volume_surge=vs,
-        adx_14=float(adx),
+        adx_14=float(adx_curr),
         atr_14=float(atr),
         atr5_14_ratio=atr5_14_ratio,
         renko_momentum=rm,
@@ -291,12 +320,12 @@ def _persist_backtest_rows(
     n = 0
     for pick, entry_price in picks:
         atr = pick.atr_14
-        hold_type = "positional" if abs(pick.final_cms) > 4.0 else "intraday"
+        hold_type = "positional" if abs(pick.final_cms) > 1.2 else "intraday"
         if pick.side == "LONG":
-            sl = entry_price - atr * 1.5
+            sl = entry_price - atr * 1.2
             tgt = entry_price + atr * 3.0
         else:
-            sl = entry_price + atr * 1.5
+            sl = entry_price + atr * 1.2
             tgt = entry_price - atr * 3.0
         db.execute(
             text(
@@ -423,6 +452,10 @@ def run_backtest_cutoff(
     )
     skip_long_vix = vix is not None and vix > 22.0
 
+    idx_long_ok, idx_short_ok = index_session_long_short_flags(
+        upstox, session_date, range_end_date=session_date, days_back=8
+    )
+
     rows = db.execute(
         text(
             """
@@ -480,6 +513,8 @@ def run_backtest_cutoff(
                 cutoff_ist,
                 sentiment_map,
                 str(sector_index).strip() if sector_index else None,
+                index_long_ok=idx_long_ok,
+                index_short_ok=idx_short_ok,
             )
 
         sc, err = call_with_retries(

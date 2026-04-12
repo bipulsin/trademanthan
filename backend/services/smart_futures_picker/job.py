@@ -10,7 +10,7 @@ import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -20,16 +20,21 @@ from sqlalchemy import text
 from backend.config import settings
 from backend.database import SessionLocal
 from backend.services.smart_futures_session_date import effective_session_date_ist_for_trend
+from backend.services.smart_futures_exit import index_session_long_short_flags
 from backend.services.smart_futures_picker.indicators import (
+    adx_14_last_two,
     adx_14_value,
+    breakout_volume_spike,
     compute_cms_core,
+    compute_cms_final_multiplier,
     compute_obv_slope_daily,
     divergence_bundle,
     ha_trend_score,
+    market_regime_ok,
     renko_momentum_score,
     session_vwap,
-    true_range,
     volume_surge_ratio,
+    vwap_deviation_atr_norm,
     wilder_atr,
     wilder_atr_14,
 )
@@ -40,6 +45,9 @@ logger = logging.getLogger(__name__)
 
 IST = pytz.timezone("Asia/Kolkata")
 INDIA_VIX_KEY = "NSE_INDEX|India VIX"
+# CMS v2: ``final_cms`` uses ATR/ADX multipliers — threshold on that scale.
+CMS_FINAL_ENTRY_THRESHOLD = 0.65
+SECTOR_ALIGN_MIN = 0.05  # sector index must agree with side by at least this magnitude
 SESSION_OPEN = (9, 15)
 SESSION_END = (15, 30)
 SESSION_MINUTES = 375.0  # 9:15–15:30
@@ -218,6 +226,9 @@ def _score_symbol(
     session_date: datetime.date,
     sentiment_map: Dict[str, float],
     sector_index: Optional[str] = None,
+    *,
+    index_long_ok: bool = False,
+    index_short_ok: bool = False,
 ) -> Optional[ScoredPick]:
     daily_raw = upstox.get_historical_candles_by_instrument_key(
         fut_key, interval="days/1", days_back=45
@@ -253,14 +264,15 @@ def _score_symbol(
     if atr5 is None or atr5 <= 0:
         return None
     atr5_14_ratio = float(atr5) / float(atr)
-    adx = adx_14_value(highs, lows, closes)
-    if adx is None:
-        adx = 0.0
+    adx_curr, adx_prev = adx_14_last_two(highs, lows, closes)
+    if adx_curr is None:
+        return None
+    if not market_regime_ok(float(atr5), float(atr), float(adx_curr), adx_prev):
+        return None
 
     vwap = session_vwap(highs, lows, closes, vols)
     last_close = closes[-1]
-    cvatr = (last_close - vwap) / atr
-    cvatr = max(-4.0, min(4.0, cvatr))
+    vwap_dev = vwap_deviation_atr_norm(last_close, vwap, float(atr))
 
     frac = _session_elapsed_fraction(session_date, m5_today)
     vs = volume_surge_ratio(vols, avg_daily_vol, frac)
@@ -272,11 +284,13 @@ def _score_symbol(
     ha = ha_trend_score(opens, highs, lows, closes)
     md, rd, sd = divergence_bundle(highs, lows, closes)
 
-    cms = compute_cms_core(obv_slope, vs, adx, cvatr, rm, ha, md, rd, sd)
+    boost = breakout_volume_spike(highs, lows, closes, vs)
+    cms = compute_cms_core(
+        obv_slope, vs, float(adx_curr), vwap_dev, rm, ha, md, rd, sd, breakout_boost=boost
+    )
+    final_cms = compute_cms_final_multiplier(cms, float(atr5), float(atr), float(adx_curr))
 
     sector_score = compute_sector_score_for_stock(stock, sector_instrument_key=sector_index)
-    if sector_score < -0.6:
-        return None
 
     raw_sent = sentiment_map.get(stock.upper())
     if raw_sent is not None:
@@ -289,11 +303,27 @@ def _score_symbol(
     else:
         comb = 0.0
 
-    final_cms = cms * (1.0 + 0.5 * sector_score) * (1.0 + comb)
-    if abs(final_cms) <= 2.5:
+    th = CMS_FINAL_ENTRY_THRESHOLD
+    long_ok = (
+        final_cms > th
+        and last_close > vwap
+        and sector_score > SECTOR_ALIGN_MIN
+        and index_long_ok
+    )
+    short_ok = (
+        final_cms < -th
+        and last_close < vwap
+        and sector_score < -SECTOR_ALIGN_MIN
+        and index_short_ok
+    )
+    if long_ok and not short_ok:
+        side = "LONG"
+    elif short_ok and not long_ok:
+        side = "SHORT"
+    elif long_ok and short_ok:
+        side = "LONG" if final_cms >= 0 else "SHORT"
+    else:
         return None
-
-    side = "LONG" if final_cms > 0 else "SHORT"
     return ScoredPick(
         stock=stock,
         fut_symbol=fut_sym or "",
@@ -301,7 +331,7 @@ def _score_symbol(
         side=side,
         obv_slope=obv_slope,
         volume_surge=vs,
-        adx_14=float(adx),
+        adx_14=float(adx_curr),
         atr_14=float(atr),
         atr5_14_ratio=atr5_14_ratio,
         renko_momentum=rm,
@@ -326,12 +356,12 @@ def _persist_pick(
     now_ist: datetime,
 ) -> None:
     atr = pick.atr_14
-    hold_type = "positional" if abs(pick.final_cms) > 4.0 else "intraday"
+    hold_type = "positional" if abs(pick.final_cms) > 1.2 else "intraday"
     if pick.side == "LONG":
-        sl = entry_price - atr * 1.5
+        sl = entry_price - atr * 1.2
         tgt = entry_price + atr * 3.0
     else:
-        sl = entry_price + atr * 1.5
+        sl = entry_price + atr * 1.2
         tgt = entry_price - atr * 3.0
 
     params = {
@@ -481,6 +511,10 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
     vix = _vix_last_close_5m(upstox)
     skip_long_vix = vix is not None and vix > 22.0
 
+    idx_long_ok, idx_short_ok = index_session_long_short_flags(
+        upstox, session_date, range_end_date=session_date
+    )
+
     longs: List[ScoredPick] = []
     shorts: List[ScoredPick] = []
     for stock, fut_sym, fut_key, sector_index in rows:
@@ -496,6 +530,8 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
                 session_date,
                 sentiment_map,
                 str(sector_index).strip() if sector_index else None,
+                index_long_ok=idx_long_ok,
+                index_short_ok=idx_short_ok,
             )
         except Exception as e:
             logger.debug("smart_futures_picker: skip %s: %s", st, e)

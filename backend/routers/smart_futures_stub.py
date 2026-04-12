@@ -21,6 +21,10 @@ from backend.config import settings
 from backend.database import get_db
 from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
+from backend.services.smart_futures_exit import (
+    exit_evaluation_from_m5_dicts,
+    m5_bars_for_session,
+)
 from backend.services.smart_futures_session_date import effective_session_date_ist_for_trend
 from backend.services.smart_futures_picker.job import compute_atr5_14_ratio_for_session
 from backend.services.upstox_service import UpstoxService
@@ -124,6 +128,7 @@ def _row_to_dict(r: Any) -> Dict[str, Any]:
         "sl_price",
         "target_price",
         "buy_price",
+        "sell_price",
         "atr5_14_ratio",
     ):
         v = out.get(k)
@@ -142,7 +147,7 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
                 """
                 SELECT id, fut_symbol, fut_instrument_key, side, final_cms, sector_score, combined_sentiment,
                        entry_price, sl_price, target_price, trend_continuation, entry_at,
-                       order_status, buy_price, session_date, scan_trigger,
+                       order_status, buy_price, sell_price, session_date, scan_trigger,
                        cms, atr5_14_ratio
                 FROM smart_futures_daily
                 WHERE session_date = :sd
@@ -161,6 +166,9 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
         }
 
     serialized = [_row_to_dict(r) for r in rows]
+    for r in serialized:
+        r.setdefault("exit_suggested", False)
+        r.setdefault("exit_reason", "")
 
     # Backfill atr5_14_ratio when NULL (e.g. rows created before the column existed).
     # Same 5m session logic as the picker; persist so this is typically a one-time fill per row.
@@ -205,6 +213,30 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
                     db.rollback()
                     continue
                 r["atr5_14_ratio"] = float(ratio)
+
+    # Exit hints for open positions (CMS v2 exit rules; divergences not used for entry).
+    try:
+        us_exit = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+    except Exception as e:
+        logger.warning("smart_futures /daily exit enrich: Upstox init failed: %s", e)
+        us_exit = None
+    if us_exit is not None:
+        for r in serialized:
+            if str(r.get("order_status") or "").strip().lower() != "bought":
+                continue
+            ikey = str(r.get("fut_instrument_key") or "").strip()
+            if not ikey:
+                continue
+            try:
+                raw = us_exit.get_historical_candles_by_instrument_key(
+                    ikey, interval="minutes/5", days_back=5, range_end_date=sd
+                )
+                m5t = m5_bars_for_session(raw, sd)
+                ex, reason = exit_evaluation_from_m5_dicts(str(r.get("side") or ""), m5t)
+                r["exit_suggested"] = bool(ex)
+                r["exit_reason"] = reason or ""
+            except Exception as ex:
+                logger.debug("smart_futures exit hint id=%s: %s", r.get("id"), ex)
 
     for r in serialized:
         r.pop("fut_instrument_key", None)
@@ -279,3 +311,61 @@ def post_smart_futures_daily_order(
     db.commit()
     logger.info("smart_futures order: user=%s row=%s buy_price=%s", getattr(user, "id", None), row_id, ltp)
     return {"success": True, "id": row_id, "order_status": "bought", "buy_price": ltp}
+
+
+@router.post("/daily/{row_id}/sell")
+def post_smart_futures_daily_sell(
+    row_id: int,
+    user: User = Depends(_require_user),
+    db: Session = Depends(get_db),
+):
+    """Mark row as sold at current LTP (exit / square-off bookkeeping)."""
+    sd = effective_session_date_ist_for_trend()
+    row = db.execute(
+        text(
+            """
+            SELECT id, fut_instrument_key, session_date, order_status
+            FROM smart_futures_daily
+            WHERE id = :id
+            """
+        ),
+        {"id": row_id},
+    ).mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Row not found")
+    rsd = row.get("session_date")
+    if hasattr(rsd, "isoformat"):
+        rsd = rsd.isoformat()
+    if str(rsd) != sd.isoformat():
+        raise HTTPException(status_code=400, detail="Pick is outside the current session window")
+    ost = str(row.get("order_status") or "").strip().lower()
+    if ost != "bought":
+        raise HTTPException(status_code=400, detail="Sell only after position is marked bought")
+
+    ikey = (row.get("fut_instrument_key") or "").strip()
+    if not ikey:
+        raise HTTPException(status_code=400, detail="Missing instrument key")
+
+    try:
+        us = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+        q = us.get_market_quote_by_key(ikey) or {}
+        ltp = float(q.get("last_price") or 0)
+    except Exception as e:
+        logger.error("smart_futures sell LTP failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=502, detail=f"LTP fetch failed: {e}") from e
+    if ltp <= 0:
+        raise HTTPException(status_code=502, detail="Could not read last price from broker")
+
+    db.execute(
+        text(
+            """
+            UPDATE smart_futures_daily
+            SET order_status = 'sold', sell_price = :ltp, updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id AND LOWER(TRIM(order_status)) = 'bought'
+            """
+        ),
+        {"id": row_id, "ltp": ltp},
+    )
+    db.commit()
+    logger.info("smart_futures sell: user=%s row=%s sell_price=%s", getattr(user, "id", None), row_id, ltp)
+    return {"success": True, "id": row_id, "order_status": "sold", "sell_price": ltp}
