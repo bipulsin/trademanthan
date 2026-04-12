@@ -303,6 +303,7 @@ body[data-theme="light"] .theme-btn.active {
     object-fit: contain;
     flex-shrink: 0;
     border-radius: 4px;
+    background: transparent;
 }
 
 .nav-item span {
