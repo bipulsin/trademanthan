@@ -92,8 +92,11 @@
                 <h2><i class="fas fa-user-shield" aria-hidden="true"></i> Run backtest (admin)</h2>
                 <p class="sf-meta" style="margin:0 0 10px;">
                     POSTs to the API and may take several minutes for wide ranges. IST scan times per day (comma-separated).
-                    Session dates must be <strong>2026-02-01</strong> or later. Futures are always
-                    <code>arbitrage_master.currmth_future_*</code> (current month at run time, e.g. April&nbsp;2026 contract when that is what the table holds).
+                    Session dates must be <strong>2026-02-01</strong> or later.
+                    For <strong>2026-02-01</strong> through <strong>2026-03-31</strong>, the engine uses
+                    <strong>April&nbsp;2026</strong> expiry futures from <code>nse_instruments.json</code> per stock
+                    (not <code>currmth</code>). From <strong>2026-04-01</strong> onward it uses
+                    <code>arbitrage_master.currmth_future_*</code>.
                 </p>
                 <div class="bt-run-grid">
                     <div class="bt-run-field">
@@ -118,6 +121,6 @@
             <div id="btGroups"></div>
         </div>
     </div>
-    <script src="backtestsmart.js?v=3"></script>
+    <script src="backtestsmart.js?v=4"></script>
 </body>
 </html>

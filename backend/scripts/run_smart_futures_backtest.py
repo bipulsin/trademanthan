@@ -7,7 +7,8 @@ Examples:
     --from-date 2026-02-12 --to-date 2026-03-06 --times 09:30,10:30
 
 Does not start the web server; uses DB + Upstox like the live picker (read-only on sentiment tables).
-Session dates must be >= 2026-02-01; futures keys always come from arbitrage_master.currmth_future_*.
+Session dates must be >= 2026-02-01. For 2026-02-01..2026-03-31, April-2026 expiry FUTs are taken from
+nse_instruments.json; from 2026-04-01 onward, currmth_future_* from arbitrage_master.
 """
 from __future__ import annotations
 

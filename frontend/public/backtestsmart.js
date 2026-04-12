@@ -255,7 +255,8 @@
         if (from_date < MIN_BACKTEST || to_date < MIN_BACKTEST) {
             if (statusEl) {
                 statusEl.textContent =
-                    'Backtest dates must be on or after ' + MIN_BACKTEST + ' (uses currmth futures from arbitrage_master).';
+                    'Backtest dates must be on or after ' + MIN_BACKTEST +
+                    ' (Feb–Mar 2026 uses April 2026 futures from instruments; Apr+ uses arbitrage_master currmth).';
             }
             return;
         }

@@ -15,6 +15,11 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.config import settings
+from backend.services.smart_futures_backtest.april_2026_universe import (
+    APRIL_2026_FUT_SESSION_END,
+    load_april_2026_futures_by_underlying,
+    use_fixed_april_2026_futures,
+)
 from backend.services.smart_futures_backtest.log_setup import get_backtest_logger
 from backend.services.smart_futures_backtest.retry import call_with_retries
 from backend.services.smart_futures_backtest.sector_asof import sector_score_as_of
@@ -46,9 +51,19 @@ SESSION_MINUTES = 375.0
 # Earliest calendar session_date allowed for backtests (product rule).
 BACKTEST_MIN_SESSION_DATE = date(2026, 2, 1)
 
-# Futures contracts always come from arbitrage_master.current-month columns at run time
-# (currmth_future_symbol / currmth_future_instrument_key), not from historical front-month keys.
-FUTURES_UNIVERSE_SOURCE = "arbitrage_master_currmth"
+# Session dates 2026-04-01+ use arbitrage_master.currmth_future_* at run time.
+# Session dates 2026-02-01 .. 2026-03-31 use April-2026 expiry FUT from nse_instruments.json (see april_2026_universe).
+FUTURES_UNIVERSE_CURRMTH = "arbitrage_master_currmth"
+FUTURES_UNIVERSE_APRIL2026 = "nse_instruments_april2026_expiry"
+
+
+def _aggregate_futures_universe_label(d0: date, d1: date) -> str:
+    """Human-readable label for a whole date range (slots may differ if range spans Apr 2026)."""
+    if d0 > APRIL_2026_FUT_SESSION_END:
+        return FUTURES_UNIVERSE_CURRMTH
+    if d1 <= APRIL_2026_FUT_SESSION_END:
+        return FUTURES_UNIVERSE_APRIL2026
+    return "mixed_april2026_expiry_then_currmth"
 
 
 def validate_backtest_date_bounds(d0: date, d1: date) -> Optional[str]:
@@ -351,8 +366,12 @@ def run_backtest_cutoff(
     """
     Run one backtest snapshot.
 
-    Universe: ``arbitrage_master.currmth_future_*`` only (current month future as stored at run
-    time — e.g. April 2026 contract when that row is the current month), for every session_date.
+    Futures resolution:
+    - Session dates **2026-02-01 .. 2026-03-31**: April-2026-expiry FUT from ``nse_instruments.json``
+      per underlying (not ``arbitrage_master.currmth``).
+    - Session dates **2026-04-01 onwards**: ``arbitrage_master.currmth_future_*`` at run time.
+
+    Stock list and ``sector_index`` still come from ``arbitrage_master``.
 
     ``cutoff_ist`` must be timezone-aware (Asia/Kolkata recommended).
     """
@@ -364,8 +383,11 @@ def run_backtest_cutoff(
             "error": msg,
             "session_date": str(session_date),
             "scan_time_label": scan_time_label,
-            "futures_universe": FUTURES_UNIVERSE_SOURCE,
+            "futures_universe": FUTURES_UNIVERSE_CURRMTH,
         }
+    futures_universe = (
+        FUTURES_UNIVERSE_APRIL2026 if use_fixed_april_2026_futures(session_date) else FUTURES_UNIVERSE_CURRMTH
+    )
     if cutoff_ist.tzinfo is None:
         cutoff_ist = IST.localize(cutoff_ist)
     else:
@@ -384,7 +406,7 @@ def run_backtest_cutoff(
             "error": uerr or "upstox_init_failed",
             "session_date": str(session_date),
             "scan_time_label": scan_time_label,
-            "futures_universe": FUTURES_UNIVERSE_SOURCE,
+            "futures_universe": futures_universe,
         }
 
     vix, _ = call_with_retries(
@@ -412,17 +434,35 @@ def run_backtest_cutoff(
             "skipped": "no_universe",
             "session_date": str(session_date),
             "scan_time_label": scan_time_label,
-            "futures_universe": FUTURES_UNIVERSE_SOURCE,
+            "futures_universe": futures_universe,
         }
+
+    apr_map: Optional[Dict[str, Tuple[str, str]]] = None
+    if use_fixed_april_2026_futures(session_date):
+        apr_map = load_april_2026_futures_by_underlying()
+        if not apr_map:
+            log.error("backtest: April 2026 futures map empty (instruments file)")
+            return {
+                "error": "No April 2026 equity futures found in nse_instruments.json; refresh instruments.",
+                "session_date": str(session_date),
+                "scan_time_label": scan_time_label,
+                "futures_universe": futures_universe,
+            }
 
     longs: List[ScoredPick] = []
     shorts: List[ScoredPick] = []
 
-    for stock, fut_sym, fut_key, sector_index in rows:
-        if not fut_key:
-            continue
+    for stock, fut_sym_am, fut_key_am, sector_index in rows:
         st = str(stock).strip().upper()
-        fk = str(fut_key).strip()
+        if apr_map is not None:
+            pair = apr_map.get(st)
+            if not pair:
+                continue
+            fut_sym, fk = pair[0], pair[1]
+        else:
+            if not fut_key_am:
+                continue
+            fut_sym, fk = str(fut_sym_am or ""), str(fut_key_am).strip()
 
         def _do_score() -> Optional[ScoredPick]:
             return score_symbol_backtest(
@@ -508,7 +548,7 @@ def run_backtest_cutoff(
         "best_long": best_long.stock if best_long else None,
         "best_short": best_short.stock if best_short else None,
         "skip_long_vix": skip_long_vix,
-        "futures_universe": FUTURES_UNIVERSE_SOURCE,
+        "futures_universe": futures_universe,
     }
 
 
@@ -552,7 +592,7 @@ def run_backtest_date_range(
             "results": [],
             "ok_slots": 0,
             "total_slots": 0,
-            "futures_universe": FUTURES_UNIVERSE_SOURCE,
+            "futures_universe": FUTURES_UNIVERSE_CURRMTH,
         }
     summary: List[Dict[str, Any]] = []
     for d in _iter_trading_days(from_date, to_date):
@@ -578,5 +618,5 @@ def run_backtest_date_range(
         "results": summary,
         "ok_slots": ok_n,
         "total_slots": len(summary),
-        "futures_universe": FUTURES_UNIVERSE_SOURCE,
+        "futures_universe": _aggregate_futures_universe_label(from_date, to_date),
     }
