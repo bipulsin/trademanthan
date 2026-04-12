@@ -446,6 +446,61 @@ def _run_startup_schema_migrations(db_engine):
                     )
                     print("Applied migration: added smart_futures_daily.atr5_14_ratio")
 
+            # Smart Futures backtest results (separate from live smart_futures_daily)
+            if "backtest_smart_future" not in table_names:
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE backtest_smart_future (
+                                id BIGSERIAL PRIMARY KEY,
+                                session_date DATE NOT NULL,
+                                simulated_asof TIMESTAMPTZ NOT NULL,
+                                scan_time_label TEXT NOT NULL,
+                                stock TEXT NOT NULL,
+                                fut_symbol TEXT,
+                                fut_instrument_key TEXT NOT NULL,
+                                side TEXT NOT NULL,
+                                obv_slope DOUBLE PRECISION,
+                                volume_surge DOUBLE PRECISION,
+                                adx_14 DOUBLE PRECISION,
+                                atr_14 DOUBLE PRECISION,
+                                atr5_14_ratio DOUBLE PRECISION,
+                                renko_momentum DOUBLE PRECISION,
+                                ha_trend DOUBLE PRECISION,
+                                macd_div DOUBLE PRECISION,
+                                rsi_div DOUBLE PRECISION,
+                                stoch_div DOUBLE PRECISION,
+                                cms DOUBLE PRECISION,
+                                final_cms DOUBLE PRECISION,
+                                sector_score DOUBLE PRECISION,
+                                combined_sentiment DOUBLE PRECISION,
+                                entry_price DOUBLE PRECISION,
+                                sl_price DOUBLE PRECISION,
+                                target_price DOUBLE PRECISION,
+                                hold_type TEXT,
+                                trend_continuation TEXT,
+                                scan_trigger TEXT,
+                                vix_at_scan DOUBLE PRECISION,
+                                sentiment_source TEXT,
+                                sentiment_run_at_match_count INTEGER,
+                                created_at TIMESTAMPTZ DEFAULT NOW()
+                            )
+                            """
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_btsf_sim ON backtest_smart_future (simulated_asof DESC)"
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_btsf_session ON backtest_smart_future (session_date DESC)"
+                        )
+                    )
+                    print("Applied migration: created backtest_smart_future (PostgreSQL)")
+
             # Legacy Smart Futures DB tables removed (screener rebuild); drop if still present.
             _sf_tables = (
                 "smart_futures_order_audit",

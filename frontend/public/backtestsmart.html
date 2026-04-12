@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <title>Smart Futures Backtest - Tradentical</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
+    <script src="auth-check.js?v=1"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="settings.css">
+    <link rel="stylesheet" href="theme.css?v=1.3">
+    <style>
+        .sf-wrap { max-width: 1200px; margin: 0 auto; padding: 16px; }
+        .sf-card {
+            background: var(--theme-card, rgba(255,255,255,0.95));
+            border: 1px solid var(--theme-border, #e2e8f0);
+            border-radius: 12px;
+            padding: 16px 18px;
+            margin-bottom: 18px;
+        }
+        .sf-card h2 { margin: 0 0 10px; font-size: 1.15rem; }
+        .sf-card-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+        .sf-meta { font-size: 0.88rem; color: var(--theme-muted, #64748b); }
+        .sf-table-wrap { overflow-x: auto; }
+        table.sf-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+        table.sf-table th, table.sf-table td {
+            border-bottom: 1px solid var(--theme-border, #e2e8f0);
+            text-align: left;
+            padding: 8px 6px;
+        }
+        table.sf-table th { color: var(--theme-muted, #64748b); font-weight: 600; }
+        .sf-btn-refresh {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 40px; height: 40px; padding: 0; border-radius: 8px;
+            border: 1px solid var(--theme-border, #cbd5e1);
+            background: var(--theme-card, #f8fafc);
+            color: var(--theme-text, #0f172a);
+            cursor: pointer;
+        }
+        .sf-btn-refresh:hover:not(:disabled) { background: var(--theme-border, #e2e8f0); }
+        .sf-group-title {
+            font-size: 0.95rem; font-weight: 700; color: var(--theme-text, #0f172a);
+            margin: 16px 0 8px; padding-top: 4px;
+            border-top: 1px dashed var(--theme-border, #e2e8f0);
+        }
+        .sf-group-title:first-child { border-top: none; margin-top: 0; padding-top: 0; }
+        .sf-side-pill { display: inline-block; padding: 3px 10px; border-radius: 6px; font-weight: 600; font-size: 0.8rem; }
+        .sf-side-pill.sf-side-long { background: #4ade80; color: #000000; }
+        .sf-side-pill.sf-side-short { background: #ef4444; color: #ffffff; }
+    </style>
+</head>
+<body class="theme-page">
+    <div class="sf-wrap">
+        <div class="sf-card">
+            <div class="sf-card-head">
+                <h1 class="settings-title" style="margin:0;font-size:1.35rem;">Smart Futures — Backtest</h1>
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <button type="button" class="sf-btn-refresh" id="btRefresh" title="Refresh" aria-label="Refresh"><i class="fas fa-sync-alt" aria-hidden="true"></i></button>
+                    <span class="sf-meta">Updated: <span id="btUpdated">—</span></span>
+                </div>
+            </div>
+            <p class="sf-meta" style="margin-top:0;">
+                All rows from <code>backtest_smart_future</code>, grouped by simulated time (IST). This page is not linked from the main navigation.
+            </p>
+            <p class="sf-meta" id="btMsg" style="color:#b45309;"></p>
+            <div id="btGroups"></div>
+        </div>
+    </div>
+    <script src="backtestsmart.js?v=1"></script>
+</body>
+</html>

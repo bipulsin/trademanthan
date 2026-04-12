@@ -21,6 +21,7 @@ import backend.routers.scan as scan
 import backend.routers.cargpt as cargpt
 import backend.routers.arbitrage as arbitrage
 import backend.routers.smart_futures_stub as smart_futures
+import backend.routers.smart_futures_backtest_router as smart_futures_backtest
 # OLD SCHEDULERS - DISABLED - Migrated to smart_future_algo
 # from backend.services.master_stock_scheduler import start_scheduler, stop_scheduler
 # from backend.services.instruments_downloader import start_instruments_scheduler, stop_instruments_scheduler
@@ -225,6 +226,8 @@ app.include_router(cargpt.router)
 app.include_router(arbitrage.router)
 app.include_router(smart_futures.router, prefix="/api/smart-futures")
 app.include_router(smart_futures.router, prefix="/smart-futures")
+app.include_router(smart_futures_backtest.router, prefix="/api/smart-futures-backtest")
+app.include_router(smart_futures_backtest.router, prefix="/smart-futures-backtest")
 
 # Create/migrate tables in a daemon thread so import + uvicorn bind is not blocked by long DB locks
 # (idle-in-transaction + migrations used to delay port 8000 for minutes → nginx 502).
