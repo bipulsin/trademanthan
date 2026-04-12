@@ -183,6 +183,7 @@ def _score_symbol(
     fut_key: str,
     session_date: datetime.date,
     sentiment_map: Dict[str, float],
+    sector_index: Optional[str] = None,
 ) -> Optional[ScoredPick]:
     daily_raw = upstox.get_historical_candles_by_instrument_key(
         fut_key, interval="days/1", days_back=45
@@ -235,7 +236,7 @@ def _score_symbol(
 
     cms = compute_cms_core(obv_slope, vs, adx, cvatr, rm, ha, md, rd, sd)
 
-    sector_score = compute_sector_score_for_stock(stock)
+    sector_score = compute_sector_score_for_stock(stock, sector_instrument_key=sector_index)
     if sector_score < -0.6:
         return None
 
@@ -415,7 +416,7 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
         rows = db.execute(
             text(
                 """
-                SELECT stock, currmth_future_symbol, currmth_future_instrument_key
+                SELECT stock, currmth_future_symbol, currmth_future_instrument_key, sector_index
                 FROM arbitrage_master
                 WHERE currmth_future_instrument_key IS NOT NULL
                   AND TRIM(currmth_future_instrument_key) <> ''
@@ -441,7 +442,7 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
 
     longs: List[ScoredPick] = []
     shorts: List[ScoredPick] = []
-    for stock, fut_sym, fut_key in rows:
+    for stock, fut_sym, fut_key, sector_index in rows:
         if not fut_key:
             continue
         st = str(stock).strip().upper()
@@ -453,6 +454,7 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
                 str(fut_key).strip(),
                 session_date,
                 sentiment_map,
+                str(sector_index).strip() if sector_index else None,
             )
         except Exception as e:
             logger.debug("smart_futures_picker: skip %s: %s", st, e)
