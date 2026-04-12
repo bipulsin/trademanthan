@@ -19,6 +19,7 @@ from sqlalchemy import text
 
 from backend.config import settings
 from backend.database import SessionLocal
+from backend.services.smart_futures_session_date import effective_session_date_ist_for_trend
 from backend.services.smart_futures_picker.indicators import (
     adx_14_value,
     compute_cms_core,
@@ -405,7 +406,8 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
     )
     if now_ist.weekday() >= 5 and not _force_weekend:
         return {"skipped": "weekend", "scan_trigger": scan_trigger}
-    session_date = now_ist.date()
+    # Align with GET /daily filter (weekend / pre-9:00 map to trading session date).
+    session_date = effective_session_date_ist_for_trend(now_ist)
 
     db = SessionLocal()
     try:

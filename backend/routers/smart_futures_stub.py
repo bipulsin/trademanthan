@@ -9,11 +9,9 @@ import json
 import logging
 import threading
 from collections import OrderedDict
-from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import pytz
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -23,6 +21,7 @@ from backend.config import settings
 from backend.database import get_db
 from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
+from backend.services.smart_futures_session_date import effective_session_date_ist_for_trend
 from backend.services.upstox_service import UpstoxService
 
 logger = logging.getLogger(__name__)
@@ -95,40 +94,6 @@ def put_sf_config_stub(body: SmartFuturesConfigUpdate, admin: User = Depends(_re
         _CONFIG_PATH.write_text(json.dumps(cur, indent=2), encoding="utf-8")
     logger.info("smart_futures_stub: config saved by admin id=%s", getattr(admin, "id", None))
     return cur
-
-
-IST = pytz.timezone("Asia/Kolkata")
-
-
-def _prev_trading_day(d: date) -> date:
-    x = d - timedelta(days=1)
-    for _ in range(10):
-        if x.weekday() < 5:
-            return x
-        x -= timedelta(days=1)
-    return d - timedelta(days=1)
-
-
-def effective_session_date_ist_for_trend(now_ist: Optional[datetime] = None) -> date:
-    """
-    Session date for Today's Trend: Fri 9:00 IST → next trading day 08:59 IST still shows Friday's
-    session_date; before 09:00 on a weekday shows previous trading day.
-    Weekend shows last Friday's session_date.
-    """
-    now = now_ist or datetime.now(IST)
-    if now.tzinfo is None:
-        now = IST.localize(now)
-    else:
-        now = now.astimezone(IST)
-    d = now.date()
-    wd = d.weekday()
-    if wd == 5:
-        return d - timedelta(days=1)
-    if wd == 6:
-        return d - timedelta(days=2)
-    if now.time() < time(9, 0):
-        return _prev_trading_day(d)
-    return d
 
 
 def _row_to_dict(r: Any) -> Dict[str, Any]:
