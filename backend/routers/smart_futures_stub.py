@@ -22,6 +22,7 @@ from backend.database import get_db
 from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
 from backend.services.smart_futures_session_date import effective_session_date_ist_for_trend
+from backend.services.smart_futures_picker.job import compute_atr5_14_ratio_for_session
 from backend.services.upstox_service import UpstoxService
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,16 @@ def put_sf_config_stub(body: SmartFuturesConfigUpdate, admin: User = Depends(_re
     return cur
 
 
+def _atr_ratio_needs_backfill(v: Any) -> bool:
+    if v is None:
+        return True
+    try:
+        f = float(v)
+        return not (f == f)  # NaN
+    except (TypeError, ValueError):
+        return True
+
+
 def _row_to_dict(r: Any) -> Dict[str, Any]:
     out = dict(r)
     sd = out.get("session_date")
@@ -129,7 +140,7 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
         rows = db.execute(
             text(
                 """
-                SELECT id, fut_symbol, side, final_cms, sector_score, combined_sentiment,
+                SELECT id, fut_symbol, fut_instrument_key, side, final_cms, sector_score, combined_sentiment,
                        entry_price, sl_price, target_price, trend_continuation, entry_at,
                        order_status, buy_price, session_date, scan_trigger,
                        cms, atr5_14_ratio
@@ -150,6 +161,54 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
         }
 
     serialized = [_row_to_dict(r) for r in rows]
+
+    # Backfill atr5_14_ratio when NULL (e.g. rows created before the column existed).
+    # Same 5m session logic as the picker; persist so this is typically a one-time fill per row.
+    need_upstox = any(
+        _atr_ratio_needs_backfill(r.get("atr5_14_ratio"))
+        and (str(r.get("fut_instrument_key") or "").strip())
+        for r in serialized
+    )
+    if need_upstox:
+        try:
+            upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+        except Exception as e:
+            logger.warning("smart_futures /daily ATR backfill: Upstox init failed: %s", e)
+            upstox = None
+        if upstox is not None:
+            for r in serialized:
+                if not _atr_ratio_needs_backfill(r.get("atr5_14_ratio")):
+                    continue
+                ikey = str(r.get("fut_instrument_key") or "").strip()
+                if not ikey:
+                    continue
+                rid = r.get("id")
+                if rid is None:
+                    continue
+                ratio = compute_atr5_14_ratio_for_session(upstox, ikey, sd)
+                if ratio is None:
+                    continue
+                try:
+                    db.execute(
+                        text(
+                            """
+                            UPDATE smart_futures_daily
+                            SET atr5_14_ratio = :ratio, updated_at = CURRENT_TIMESTAMP
+                            WHERE id = :id AND session_date = :sd
+                            """
+                        ),
+                        {"id": int(rid), "sd": sd, "ratio": float(ratio)},
+                    )
+                    db.commit()
+                except Exception as ex:
+                    logger.warning("smart_futures /daily ATR backfill update id=%s: %s", rid, ex)
+                    db.rollback()
+                    continue
+                r["atr5_14_ratio"] = float(ratio)
+
+    for r in serialized:
+        r.pop("fut_instrument_key", None)
+
     buckets: OrderedDict[str, List[Dict[str, Any]]] = OrderedDict()
     for r in serialized:
         ea = r.get("entry_at") or ""
