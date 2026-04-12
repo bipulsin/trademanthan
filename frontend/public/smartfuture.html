@@ -8,7 +8,7 @@
     <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
     <script src="auth-check.js?v=1"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="stylesheet" href="left-menu.css?v=3.13">
+    <link rel="stylesheet" href="left-menu.css?v=3.17">
     <link rel="stylesheet" href="theme.css?v=1.3">
     <link rel="stylesheet" href="settings.css">
     <style>
@@ -108,6 +108,20 @@
             white-space: nowrap;
             border: 0;
         }
+        .sf-brand-icon {
+            width: 40px;
+            height: 40px;
+            object-fit: contain;
+            flex-shrink: 0;
+            border-radius: 8px;
+        }
+        .mobile-sf-brand-icon {
+            width: 28px;
+            height: 28px;
+            object-fit: contain;
+            flex-shrink: 0;
+            border-radius: 6px;
+        }
     </style>
 </head>
 <body class="theme-page">
@@ -115,6 +129,7 @@
         <button class="mobile-menu-toggle" id="mobileMenuToggle" type="button" aria-label="Menu"><i class="fas fa-bars"></i></button>
         <div class="mobile-title-content">
             <img src="tradewithcto-logo.png" alt="TradeWithCTO" class="mobile-logo">
+            <img src="icons/smart-futures.png?v=1" alt="" class="mobile-sf-brand-icon" width="28" height="28" aria-hidden="true" />
             <h1 class="mobile-title">Smart Futures</h1>
         </div>
     </div>
@@ -123,7 +138,10 @@
         <main class="right-panel main-content-area">
             <div class="settings-header">
                 <div class="settings-title-section">
-                    <h1 class="settings-title"><i class="fas fa-bolt"></i> Smart Futures</h1>
+                    <h1 class="settings-title">
+                        <img src="icons/smart-futures.png?v=1" class="sf-brand-icon" width="40" height="40" alt="" aria-hidden="true" />
+                        Smart Futures
+                    </h1>
                     <p class="settings-subtitle">Today&apos;s trend picks (CMS). Use the refresh control in that section to reload data. Admin parameters stay on the Admin page.</p>
                 </div>
             </div>
@@ -143,7 +161,7 @@
             </div>
         </main>
     </div>
-    <script src="left-menu.js?v=3.15"></script>
+    <script src="left-menu.js?v=3.17"></script>
     <script src="smartfuture.js?v=18"></script>
 </body>
 </html>
