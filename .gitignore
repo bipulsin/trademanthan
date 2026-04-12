@@ -49,6 +49,7 @@ dist/
 
 # Data files
 *.csv
+!backend/fno_sector_mapping.csv
 *.xlsx
 data/
 

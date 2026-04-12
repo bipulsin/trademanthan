@@ -24,6 +24,7 @@ from sqlalchemy import inspect, text
 
 from backend.config import get_instruments_file_path, settings
 from backend.database import engine
+from backend.services.fno_sector_mapping_csv import load_fno_sector_index_map
 from backend.services.sector_movers import equity_sector_index_instrument_key
 from backend.services.upstox_service import UpstoxService
 
@@ -235,10 +236,13 @@ def run_arbitrage_daily_setup() -> Dict:
             ).fetchall()
         ]
 
+        fno_sector_map = load_fno_sector_index_map()
         metadata_updates: List[Dict] = []
         for stock in stocks:
             stock_key = eq_map.get(stock)
             current_fut, next_fut = _pick_current_next_futures(fut_map.get(stock, []))
+            sym_u = str(stock or "").strip().upper()
+            sector_idx = fno_sector_map.get(sym_u) or equity_sector_index_instrument_key(stock)
             metadata_updates.append(
                 {
                     "stock": stock,
@@ -247,7 +251,7 @@ def run_arbitrage_daily_setup() -> Dict:
                     "cm_key": current_fut.get("instrument_key") if current_fut else None,
                     "nm_symbol": next_fut.get("trading_symbol") if next_fut else None,
                     "nm_key": next_fut.get("instrument_key") if next_fut else None,
-                    "sector_index": equity_sector_index_instrument_key(stock),
+                    "sector_index": sector_idx,
                 }
             )
 
