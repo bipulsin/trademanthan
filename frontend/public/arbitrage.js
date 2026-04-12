@@ -38,7 +38,7 @@
 
     function renderRows(rows) {
         if (!rows || rows.length === 0) {
-            bodyEl.innerHTML = '<tr><td colspan="8" class="state-cell">No matching arbitrage records found.</td></tr>';
+            bodyEl.innerHTML = '<tr><td colspan="7" class="state-cell">No matching arbitrage records found.</td></tr>';
             cardsEl.innerHTML = '<div class="arbitrage-card-state">No matching arbitrage records found.</div>';
             return;
         }
@@ -55,7 +55,6 @@
                 <tr>
                     <td class="arbitrage-stock-cell">${star}${r.stock || "-"}</td>
                     <td class="num">${fmt(r.stock_ltp)}</td>
-                    <td class="arbitrage-sector-cell" title="${(r.sector_index || "").replace(/"/g, "&quot;")}">${ellipsize(r.sector_index || "-", 40)}</td>
                     <td>${r.currmth_future_symbol || "-"}</td>
                     <td class="num">${fmt(r.currmth_future_ltp)}</td>
                     <td>${r.nextmth_future_symbol || "-"}</td>
@@ -84,7 +83,6 @@
                     <div class="arbitrage-card-head">
                         <div>
                             <p class="arbitrage-card-title">${star}${r.stock || "-"} [${fmt(r.stock_ltp)}]</p>
-                            <p class="arbitrage-card-meta">${ellipsize(r.sector_index || "—", 48)}</p>
                         </div>
                         <button
                             class="btn-order"

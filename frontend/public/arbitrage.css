@@ -128,21 +128,6 @@ body {
     color: var(--theme-muted, #94a3b8);
 }
 
-.arbitrage-card-meta {
-    margin: 0.25rem 0 0;
-    font-size: 0.82rem;
-    color: var(--theme-muted, #94a3b8);
-    word-break: break-word;
-}
-
-.arbitrage-sector-cell {
-    font-size: 0.82rem;
-    max-width: 240px;
-    white-space: normal !important;
-    word-break: break-word;
-    color: var(--theme-muted, #94a3b8);
-}
-
 .arbitrage-card-state {
     border: 1px dashed var(--theme-border, #334155);
     border-radius: 10px;
