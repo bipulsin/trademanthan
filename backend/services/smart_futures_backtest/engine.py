@@ -43,6 +43,22 @@ IST = pytz.timezone("Asia/Kolkata")
 INDIA_VIX_KEY = "NSE_INDEX|India VIX"
 SESSION_MINUTES = 375.0
 
+# Earliest calendar session_date allowed for backtests (product rule).
+BACKTEST_MIN_SESSION_DATE = date(2026, 2, 1)
+
+# Futures contracts always come from arbitrage_master.current-month columns at run time
+# (currmth_future_symbol / currmth_future_instrument_key), not from historical front-month keys.
+FUTURES_UNIVERSE_SOURCE = "arbitrage_master_currmth"
+
+
+def validate_backtest_date_bounds(d0: date, d1: date) -> Optional[str]:
+    """Return an error message if the inclusive range is not allowed; else None."""
+    if d0 < BACKTEST_MIN_SESSION_DATE:
+        return f"from_date must be on or after {BACKTEST_MIN_SESSION_DATE.isoformat()}"
+    if d1 < BACKTEST_MIN_SESSION_DATE:
+        return f"to_date must be on or after {BACKTEST_MIN_SESSION_DATE.isoformat()}"
+    return None
+
 
 def _parse_bar_end_ist(ts: str) -> Optional[datetime]:
     if not ts or len(ts) < 19:
@@ -333,11 +349,23 @@ def run_backtest_cutoff(
     throttle_sec: float = 0.04,
 ) -> Dict[str, Any]:
     """
-    Run one backtest snapshot: universe from arbitrage_master, sentiment read-only from DB.
+    Run one backtest snapshot.
+
+    Universe: ``arbitrage_master.currmth_future_*`` only (current month future as stored at run
+    time — e.g. April 2026 contract when that row is the current month), for every session_date.
 
     ``cutoff_ist`` must be timezone-aware (Asia/Kolkata recommended).
     """
     log = get_backtest_logger()
+    if session_date < BACKTEST_MIN_SESSION_DATE:
+        msg = f"session_date must be on or after {BACKTEST_MIN_SESSION_DATE.isoformat()}"
+        log.warning("backtest rejected: %s (got %s)", msg, session_date)
+        return {
+            "error": msg,
+            "session_date": str(session_date),
+            "scan_time_label": scan_time_label,
+            "futures_universe": FUTURES_UNIVERSE_SOURCE,
+        }
     if cutoff_ist.tzinfo is None:
         cutoff_ist = IST.localize(cutoff_ist)
     else:
@@ -352,7 +380,12 @@ def run_backtest_cutoff(
     upstox, uerr = call_with_retries(log, "upstox_init", _init_upstox, max_tries=2)
     if upstox is None:
         log.error("run_backtest_cutoff: no Upstox client: %s", uerr)
-        return {"error": uerr or "upstox_init_failed", "session_date": str(session_date), "scan_time_label": scan_time_label}
+        return {
+            "error": uerr or "upstox_init_failed",
+            "session_date": str(session_date),
+            "scan_time_label": scan_time_label,
+            "futures_universe": FUTURES_UNIVERSE_SOURCE,
+        }
 
     vix, _ = call_with_retries(
         log,
@@ -375,7 +408,12 @@ def run_backtest_cutoff(
     ).fetchall()
     if not rows:
         log.warning("backtest: empty arbitrage_master universe")
-        return {"skipped": "no_universe", "session_date": str(session_date), "scan_time_label": scan_time_label}
+        return {
+            "skipped": "no_universe",
+            "session_date": str(session_date),
+            "scan_time_label": scan_time_label,
+            "futures_universe": FUTURES_UNIVERSE_SOURCE,
+        }
 
     longs: List[ScoredPick] = []
     shorts: List[ScoredPick] = []
@@ -470,6 +508,7 @@ def run_backtest_cutoff(
         "best_long": best_long.stock if best_long else None,
         "best_short": best_short.stock if best_short else None,
         "skip_long_vix": skip_long_vix,
+        "futures_universe": FUTURES_UNIVERSE_SOURCE,
     }
 
 
@@ -498,15 +537,30 @@ def run_backtest_date_range(
     *,
     throttle_sec: float = 0.04,
 ) -> Dict[str, Any]:
-    """Run ``run_backtest_cutoff`` for each weekday in range and each scan label (IST wall-clock)."""
+    """
+    Run ``run_backtest_cutoff`` for each weekday in range and each scan label (IST wall-clock).
+
+    Dates must be on or after ``BACKTEST_MIN_SESSION_DATE``. Futures keys always come from
+    ``arbitrage_master.currmth_future_*`` at run time.
+    """
     log = get_backtest_logger()
+    ve = validate_backtest_date_bounds(from_date, to_date)
+    if ve:
+        log.warning("backtest range rejected: %s", ve)
+        return {
+            "error": ve,
+            "results": [],
+            "ok_slots": 0,
+            "total_slots": 0,
+            "futures_universe": FUTURES_UNIVERSE_SOURCE,
+        }
     summary: List[Dict[str, Any]] = []
     for d in _iter_trading_days(from_date, to_date):
         for lbl in scan_time_labels:
             try:
                 co = _combine_ist(d, lbl)
                 r = run_backtest_cutoff(db, d, lbl, co, throttle_sec=throttle_sec)
-                r["ok"] = "error" not in r
+                r["ok"] = not r.get("error") and not r.get("skipped")
                 summary.append(r)
             except Exception as e:
                 log.exception("backtest fatal %s %s: %s", d, lbl, e)
@@ -520,4 +574,9 @@ def run_backtest_date_range(
                 )
     ok_n = sum(1 for x in summary if x.get("ok"))
     log.info("backtest range complete days=%s slots=%s ok_slots=%s", len(_iter_trading_days(from_date, to_date)), len(summary), ok_n)
-    return {"results": summary, "ok_slots": ok_n, "total_slots": len(summary)}
+    return {
+        "results": summary,
+        "ok_slots": ok_n,
+        "total_slots": len(summary),
+        "futures_universe": FUTURES_UNIVERSE_SOURCE,
+    }

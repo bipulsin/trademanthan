@@ -7,6 +7,7 @@ Examples:
     --from-date 2026-02-12 --to-date 2026-03-06 --times 09:30,10:30
 
 Does not start the web server; uses DB + Upstox like the live picker (read-only on sentiment tables).
+Session dates must be >= 2026-02-01; futures keys always come from arbitrage_master.currmth_future_*.
 """
 from __future__ import annotations
 
@@ -27,11 +28,25 @@ def main() -> int:
     import backend.env_bootstrap  # noqa: F401
 
     from backend.database import SessionLocal
-    from backend.services.smart_futures_backtest.engine import run_backtest_date_range
+    from backend.services.smart_futures_backtest.engine import (
+        BACKTEST_MIN_SESSION_DATE,
+        run_backtest_date_range,
+        validate_backtest_date_bounds,
+    )
 
     p = argparse.ArgumentParser(description="Smart Futures backtest runner")
-    p.add_argument("--from-date", dest="from_date", required=True, help="YYYY-MM-DD (inclusive)")
-    p.add_argument("--to-date", dest="to_date", required=True, help="YYYY-MM-DD (inclusive)")
+    p.add_argument(
+        "--from-date",
+        dest="from_date",
+        required=True,
+        help=f"YYYY-MM-DD (inclusive), >= {BACKTEST_MIN_SESSION_DATE.isoformat()}",
+    )
+    p.add_argument(
+        "--to-date",
+        dest="to_date",
+        required=True,
+        help=f"YYYY-MM-DD (inclusive), >= {BACKTEST_MIN_SESSION_DATE.isoformat()}",
+    )
     p.add_argument(
         "--times",
         default="09:30,10:30",
@@ -44,9 +59,17 @@ def main() -> int:
     d1 = date.fromisoformat(args.to_date.strip())
     times = tuple(t.strip() for t in args.times.split(",") if t.strip())
 
+    ve = validate_backtest_date_bounds(d0, d1)
+    if ve:
+        print("ERROR:", ve, file=sys.stderr)
+        return 2
+
     db = SessionLocal()
     try:
         out = run_backtest_date_range(db, d0, d1, times, throttle_sec=args.throttle)
+        if out.get("error"):
+            print("ERROR:", out["error"], file=sys.stderr)
+            return 1
         print("ok_slots", out.get("ok_slots"), "total_slots", out.get("total_slots"))
         for r in out.get("results") or []:
             print(r)

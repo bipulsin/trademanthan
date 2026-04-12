@@ -144,6 +144,8 @@ def post_run_backtest(
             raise HTTPException(status_code=400, detail=f"Invalid time label: {t}")
     try:
         out = run_backtest_date_range(db, d0, d1, times, throttle_sec=0.04)
+        if out.get("error"):
+            raise HTTPException(status_code=400, detail=out["error"])
         return {"success": True, **out}
     except Exception as e:
         logger.exception("backtest /run failed: %s", e)

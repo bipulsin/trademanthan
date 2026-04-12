@@ -3,6 +3,8 @@
  * Open directly: /backtestsmart.html (not linked from the main menu).
  */
 (function () {
+    const MIN_BACKTEST = '2026-02-01';
+
     const API_BASE =
         window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
             ? 'http://localhost:8000'
@@ -248,6 +250,13 @@
         }
         if (from_date > to_date) {
             if (statusEl) statusEl.textContent = 'From date must be on or before to date.';
+            return;
+        }
+        if (from_date < MIN_BACKTEST || to_date < MIN_BACKTEST) {
+            if (statusEl) {
+                statusEl.textContent =
+                    'Backtest dates must be on or after ' + MIN_BACKTEST + ' (uses currmth futures from arbitrage_master).';
+            }
             return;
         }
         if (!times.length) {

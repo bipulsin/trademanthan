@@ -90,15 +90,19 @@
             </p>
             <div id="btAdminRunPanel" class="bt-admin-panel" style="display: none;" aria-hidden="true">
                 <h2><i class="fas fa-user-shield" aria-hidden="true"></i> Run backtest (admin)</h2>
-                <p class="sf-meta" style="margin:0 0 10px;">POSTs to the API and may take several minutes for wide ranges. IST scan times per day (comma-separated).</p>
+                <p class="sf-meta" style="margin:0 0 10px;">
+                    POSTs to the API and may take several minutes for wide ranges. IST scan times per day (comma-separated).
+                    Session dates must be <strong>2026-02-01</strong> or later. Futures are always
+                    <code>arbitrage_master.currmth_future_*</code> (current month at run time, e.g. April&nbsp;2026 contract when that is what the table holds).
+                </p>
                 <div class="bt-run-grid">
                     <div class="bt-run-field">
                         <label for="btRunFrom">From date</label>
-                        <input type="date" id="btRunFrom" autocomplete="off" />
+                        <input type="date" id="btRunFrom" min="2026-02-01" autocomplete="off" />
                     </div>
                     <div class="bt-run-field">
                         <label for="btRunTo">To date</label>
-                        <input type="date" id="btRunTo" autocomplete="off" />
+                        <input type="date" id="btRunTo" min="2026-02-01" autocomplete="off" />
                     </div>
                     <div class="bt-run-field" style="grid-column: span 2; min-width: 200px;">
                         <label for="btRunTimes">Scan times (IST)</label>
@@ -114,6 +118,6 @@
             <div id="btGroups"></div>
         </div>
     </div>
-    <script src="backtestsmart.js?v=2"></script>
+    <script src="backtestsmart.js?v=3"></script>
 </body>
 </html>
