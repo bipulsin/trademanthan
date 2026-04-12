@@ -37,6 +37,14 @@
         return n.toFixed(d);
     }
 
+    /** API stores small decimals; UI shows value × 100 for readability. */
+    function fmtTimes100(v, d) {
+        if (v == null || v === '') return '—';
+        const n = Number(v);
+        if (!Number.isFinite(n)) return '—';
+        return (n * 100).toFixed(d);
+    }
+
     function escapeHtml(s) {
         return String(s)
             .replace(/&/g, '&amp;')
@@ -100,7 +108,7 @@
 
         const thead =
             '<thead><tr>' +
-            '<th>Symbol</th><th>Side</th><th>Final CMS</th><th>Sector Score</th><th>Sentiment Score</th>' +
+            '<th>Symbol</th><th>Side</th><th>Final CMS</th><th>Sector Score (×100)</th><th>Sentiment Score (×100)</th>' +
             '<th>Entry</th><th>SL</th><th>Target</th><th>In Trend</th><th>Order</th>' +
             '</tr></thead>';
 
@@ -126,10 +134,10 @@
                     fmtNum(r.final_cms, 2) +
                     '</td>' +
                     '<td>' +
-                    fmtNum(r.sector_score, 2) +
+                    fmtTimes100(r.sector_score, 2) +
                     '</td>' +
                     '<td>' +
-                    fmtNum(r.combined_sentiment, 3) +
+                    fmtTimes100(r.combined_sentiment, 2) +
                     '</td>' +
                     '<td>' +
                     fmtNum(r.entry_price, 2) +
@@ -141,7 +149,7 @@
                     fmtNum(r.target_price, 2) +
                     '</td>' +
                     '<td>' +
-                    (r.trend_continuation === 'Yes' ? 'Yes' : '') +
+                    fmtTrendCell(r) +
                     '</td>' +
                     '<td><button type="button" class="sf-btn-order" data-order-id="' +
                     r.id +
