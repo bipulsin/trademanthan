@@ -10,6 +10,31 @@ import pytz
 
 logger = logging.getLogger(__name__)
 
+
+def _upstox_v3_max_calendar_span_days(interval: str) -> Optional[int]:
+    """
+    Upstox V3 maximum calendar span for one historical-candle request.
+    https://upstox.com/developer/api-documentation/v3/get-historical-candle-data
+    minutes 1–15: 1 month; minutes >15: 1 quarter; hours: 1 quarter; days/weeks/months: very large.
+    Returns None when no small cap applies.
+    """
+    parts = (interval or "").strip().lower().split("/")
+    if len(parts) != 2:
+        return None
+    unit, sival = parts[0], parts[1]
+    try:
+        ival = int(sival)
+    except ValueError:
+        return None
+    if unit == "minutes":
+        if 1 <= ival <= 15:
+            return 31
+        return 92
+    if unit == "hours":
+        return 92
+    return None
+
+
 # Known NSE equity/derivative holidays (fallback when API omits or returns wrong format).
 # Used so monthly expiry correctly uses previous trading day when last Tuesday is a holiday.
 # Source: NSE holiday circulars. Add new years as they are published.
@@ -1176,7 +1201,17 @@ class UpstoxService:
                 end_d = range_end_date
             else:
                 end_d = datetime.now(ist).date()
-            start_d = end_d - timedelta(days=days_back)
+            eff_days = int(days_back)
+            span_cap = _upstox_v3_max_calendar_span_days(interval)
+            if span_cap is not None and eff_days > span_cap:
+                logger.info(
+                    "Clamping historical candle days_back %s -> %s for interval %s (Upstox V3 limit)",
+                    eff_days,
+                    span_cap,
+                    interval,
+                )
+                eff_days = span_cap
+            start_d = end_d - timedelta(days=eff_days)
             to_date = end_d.strftime("%Y-%m-%d")
             from_date = start_d.strftime("%Y-%m-%d")
             
