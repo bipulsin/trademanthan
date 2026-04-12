@@ -42,6 +42,7 @@ SECTOR_STOCK_UNIVERSE: Dict[str, List[str]] = {
         "LTIM.NS",
         "MPHASIS.NS",
         "COFORGE.NS",
+        "NAUKRI.NS",
     ],
     "Nifty Auto": [
         "MARUTI.NS",
@@ -112,6 +113,7 @@ SECTOR_STOCK_UNIVERSE: Dict[str, List[str]] = {
         "ABB.NS",
         "HAL.NS",
         "BHEL.NS",
+        "POWERINDIA.NS",
     ],
     "Nifty PSU Bank": [
         "SBIN.NS",

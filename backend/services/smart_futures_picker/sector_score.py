@@ -77,9 +77,15 @@ def compute_sector_score_for_stock(stock: str) -> float:
     sym = str(stock or "").strip().upper()
     label = _STOCK_TO_SECTOR.get(sym)
     if not label:
+        logger.debug("sector_score: no sector mapping for symbol=%s (score=0)", sym)
         return 0.0
     d1, d5 = sector_raw_returns(label)
     if d1 is None:
+        logger.debug(
+            "sector_score: no index returns symbol=%s sector=%s (score=0)",
+            sym,
+            label,
+        )
         return 0.0
     if d5 is None:
         d5 = d1
