@@ -37,6 +37,35 @@
         return n.toFixed(d);
     }
 
+    function escapeHtml(s) {
+        return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function fmtSideCell(side) {
+        const s = String(side || '').trim().toUpperCase();
+        if (s === 'LONG') {
+            return '<span class="sf-side-pill sf-side-long">LONG</span>';
+        }
+        if (s === 'SHORT') {
+            return '<span class="sf-side-pill sf-side-short">SHORT</span>';
+        }
+        return side ? escapeHtml(String(side)) : '—';
+    }
+
+    function fmtTrendCell(r) {
+        if (String(r.trend_continuation || '').trim() !== 'Yes') return '';
+        return (
+            '<span class="sf-trend-yes" title="Yes">' +
+            '<i class="fas fa-check" aria-hidden="true"></i>' +
+            '<span class="sr-only">Yes</span>' +
+            '</span>'
+        );
+    }
+
     function fmtEntryGroupLabel(bucket) {
         if (!bucket || bucket === '—') return 'Entry time';
         try {
@@ -65,13 +94,13 @@
         const groups = data.groups && data.groups.length ? data.groups : [];
         if (!groups.length) {
             host.innerHTML =
-                '<div class="sf-table-wrap"><table class="sf-table"><tbody><tr><td colspan="9" style="padding:14px;">No Record</td></tr></tbody></table></div>';
+                '<div class="sf-table-wrap"><table class="sf-table"><tbody><tr><td colspan="10" style="padding:14px;">No Record</td></tr></tbody></table></div>';
             return;
         }
 
         const thead =
             '<thead><tr>' +
-            '<th>Symbol</th><th>Side</th><th>Final CMS</th><th>Sector</th><th>Sentiment Score</th>' +
+            '<th>Symbol</th><th>Side</th><th>Final CMS</th><th>Sector Score</th><th>Sentiment Score</th>' +
             '<th>Entry</th><th>SL</th><th>Target</th><th>In Trend</th><th>Order</th>' +
             '</tr></thead>';
 
@@ -91,7 +120,7 @@
                     (r.fut_symbol || '—') +
                     '</td>' +
                     '<td>' +
-                    (r.side || '—') +
+                    fmtSideCell(r.side) +
                     '</td>' +
                     '<td>' +
                     fmtNum(r.final_cms, 2) +
@@ -174,7 +203,7 @@
             const host = document.getElementById('sfTrendGroups');
             if (host)
                 host.innerHTML =
-                    '<div class="sf-table-wrap"><table class="sf-table"><tbody><tr><td colspan="9" style="padding:14px;">No Record</td></tr></tbody></table></div>';
+                    '<div class="sf-table-wrap"><table class="sf-table"><tbody><tr><td colspan="10" style="padding:14px;">No Record</td></tr></tbody></table></div>';
         }
     }
 
