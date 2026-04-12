@@ -375,6 +375,13 @@ def _run_startup_schema_migrations(db_engine):
                 conn.execute(text("UPDATE users SET is_blocked = FALSE WHERE is_blocked IS NULL"))
                 conn.execute(text("UPDATE users SET is_paid_user = FALSE WHERE is_paid_user IS NULL"))
 
+            # arbitrage_master: Upstox Nifty sector index key per equity (CNX / Nifty family)
+            if "arbitrage_master" in table_names:
+                _am_cols = {c["name"] for c in inspector.get_columns("arbitrage_master")}
+                if "sector_index" not in _am_cols:
+                    conn.execute(text("ALTER TABLE arbitrage_master ADD COLUMN sector_index TEXT"))
+                    print("Applied migration: added arbitrage_master.sector_index")
+
             # Smart Futures daily picks (CMS picker job → smart_futures_daily)
             if "smart_futures_daily" not in table_names:
                 if db_engine.dialect.name == "postgresql":

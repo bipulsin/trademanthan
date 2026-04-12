@@ -200,6 +200,7 @@ async def get_arbitrage_selection():
                         nextmth_future_symbol,
                         nextmth_future_instrement_key,
                         nextmth_future_ltp,
+                        sector_index,
                         EXISTS (
                             SELECT 1
                             FROM arbitrage_order ao

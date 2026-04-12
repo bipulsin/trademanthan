@@ -232,6 +232,27 @@ UPSTOX_SECTOR_INDEX_KEYS: Dict[str, str] = {
     "Nifty Financial Services": "NSE_INDEX|Nifty Fin Service",
 }
 
+# NSE equity symbol (no .NS) -> Nifty sector label (keys of UPSTOX_SECTOR_INDEX_KEYS)
+_EQ_SYMBOL_TO_SECTOR_LABEL: Dict[str, str] = {}
+for _sect_lbl, _yahoo_syms in SECTOR_STOCK_UNIVERSE.items():
+    for _ys in _yahoo_syms:
+        _base = str(_ys or "").replace(".NS", "").strip().upper()
+        if _base:
+            _EQ_SYMBOL_TO_SECTOR_LABEL[_base] = _sect_lbl
+
+
+def equity_sector_index_instrument_key(nse_equity_symbol: str) -> Optional[str]:
+    """
+    Upstox instrument_key for the Nifty sector index (CNX / Nifty family) that best matches
+    this NSE equity symbol, derived from SECTOR_STOCK_UNIVERSE + UPSTOX_SECTOR_INDEX_KEYS.
+    None if the stock is not in the static universe or the sector has no Upstox index key.
+    """
+    sym = str(nse_equity_symbol or "").strip().upper()
+    lbl = _EQ_SYMBOL_TO_SECTOR_LABEL.get(sym)
+    if not lbl:
+        return None
+    return UPSTOX_SECTOR_INDEX_KEYS.get(lbl)
+
 
 def _previous_trading_close_from_upstox_index(instrument_key: str) -> Optional[float]:
     try:

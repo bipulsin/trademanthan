@@ -20,10 +20,11 @@ from typing import Dict, List, Optional, Tuple
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 from backend.config import get_instruments_file_path, settings
 from backend.database import engine
+from backend.services.sector_movers import equity_sector_index_instrument_key
 from backend.services.upstox_service import UpstoxService
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,22 @@ class ArbitrageDailySetupScheduler:
         }
 
 
+def _ensure_arbitrage_sector_index_column() -> None:
+    """Idempotent: add sector_index if missing (covers tables created before migration)."""
+    try:
+        insp = inspect(engine)
+        if "arbitrage_master" not in insp.get_table_names():
+            return
+        cols = {c["name"] for c in insp.get_columns("arbitrage_master")}
+        if "sector_index" in cols:
+            return
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE arbitrage_master ADD COLUMN sector_index TEXT"))
+        logger.info("arbitrage_master: added column sector_index")
+    except Exception as e:
+        logger.warning("arbitrage_master sector_index ensure failed: %s", e)
+
+
 def _ensure_arbitrage_table() -> None:
     create_sql = text(
         """
@@ -108,7 +125,8 @@ def _ensure_arbitrage_table() -> None:
             currmth_future_ltp NUMERIC,
             nextmth_future_symbol TEXT,
             nextmth_future_instrement_key TEXT,
-            nextmth_future_ltp NUMERIC
+            nextmth_future_ltp NUMERIC,
+            sector_index TEXT
         )
         """
     )
@@ -197,6 +215,7 @@ def _get_close_price(upstox: UpstoxService, instrument_key: Optional[str], cache
 
 def run_arbitrage_daily_setup() -> Dict:
     _ensure_arbitrage_table()
+    _ensure_arbitrage_sector_index_column()
 
     instruments = _load_instruments()
     eq_map, fut_map = _build_mappings(instruments)
@@ -228,6 +247,7 @@ def run_arbitrage_daily_setup() -> Dict:
                     "cm_key": current_fut.get("instrument_key") if current_fut else None,
                     "nm_symbol": next_fut.get("trading_symbol") if next_fut else None,
                     "nm_key": next_fut.get("instrument_key") if next_fut else None,
+                    "sector_index": equity_sector_index_instrument_key(stock),
                 }
             )
 
@@ -241,7 +261,8 @@ def run_arbitrage_daily_setup() -> Dict:
                         currmth_future_symbol = :cm_symbol,
                         currmth_future_instrument_key = :cm_key,
                         nextmth_future_symbol = :nm_symbol,
-                        nextmth_future_instrement_key = :nm_key
+                        nextmth_future_instrement_key = :nm_key,
+                        sector_index = :sector_index
                     WHERE stock = :stock
                     """
                 ),
@@ -310,6 +331,9 @@ def run_arbitrage_daily_setup() -> Dict:
         populated_next_ltp = conn.execute(
             text("SELECT COUNT(*) FROM arbitrage_master WHERE nextmth_future_ltp IS NOT NULL")
         ).scalar() or 0
+        populated_sector_index = conn.execute(
+            text("SELECT COUNT(*) FROM arbitrage_master WHERE sector_index IS NOT NULL AND TRIM(sector_index) <> ''")
+        ).scalar() or 0
 
     return {
         "success": True,
@@ -323,6 +347,7 @@ def run_arbitrage_daily_setup() -> Dict:
             "Stock_LTP": int(populated_stock_ltp),
             "CurrMth_Future_LTP": int(populated_curr_ltp),
             "NextMth_Future_LTP": int(populated_next_ltp),
+            "Sector_Index": int(populated_sector_index),
         },
     }
 
