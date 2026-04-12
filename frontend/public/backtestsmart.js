@@ -70,18 +70,12 @@
     }
 
     async function fetchRows() {
-        const paths = ['/api/smart-futures-backtest/rows', '/smart-futures-backtest/rows'];
-        let lastErr = null;
-        for (const p of paths) {
-            try {
-                const res = await fetch(API_BASE + p + '?limit=8000', { headers: authHeaders(), cache: 'no-store' });
-                if (res.ok) return await res.json();
-                lastErr = new Error((await res.text()) || res.statusText);
-            } catch (e) {
-                lastErr = e;
-            }
-        }
-        throw lastErr || new Error('Failed to load backtest rows');
+        // Production nginx only proxies /api/ to uvicorn; /smart-futures-backtest/* hits static root → POST/GET 405.
+        const url = API_BASE + '/api/smart-futures-backtest/rows?limit=8000';
+        const res = await fetch(url, { headers: authHeaders(), cache: 'no-store' });
+        if (res.ok) return await res.json();
+        const t = await res.text();
+        throw new Error(t || res.statusText);
     }
 
     function fmtNum(v, d) {
@@ -271,38 +265,34 @@
             }
         }
         const body = JSON.stringify({ from_date: from_date, to_date: to_date, times: times });
-        const paths = ['/api/smart-futures-backtest/run', '/smart-futures-backtest/run'];
+        const url = API_BASE + '/api/smart-futures-backtest/run';
         btn.disabled = true;
         if (statusEl) statusEl.textContent = 'Running… this may take several minutes. Do not close the tab.';
         let lastErr = null;
         let ok = false;
         let payload = null;
-        for (let p = 0; p < paths.length; p++) {
+        try {
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: authHeaders(),
+                body: body,
+            });
+            const text = await res.text();
             try {
-                const res = await fetch(API_BASE + paths[p], {
-                    method: 'POST',
-                    headers: authHeaders(),
-                    body: body,
-                });
-                const text = await res.text();
-                try {
-                    payload = text ? JSON.parse(text) : {};
-                } catch (e) {
-                    payload = { detail: text || res.statusText };
-                }
-                if (res.status === 403) {
-                    if (statusEl) statusEl.textContent = 'Administrator only (403).';
-                    lastErr = '403';
-                    break;
-                }
-                if (res.ok) {
-                    ok = true;
-                    break;
-                }
-                lastErr = (payload && payload.detail) || text || res.statusText;
+                payload = text ? JSON.parse(text) : {};
             } catch (e) {
-                lastErr = String(e.message || e);
+                payload = { detail: text || res.statusText };
             }
+            if (res.status === 403) {
+                if (statusEl) statusEl.textContent = 'Administrator only (403).';
+                lastErr = '403';
+            } else if (res.ok) {
+                ok = true;
+            } else {
+                lastErr = (payload && payload.detail) || text || res.statusText;
+            }
+        } catch (e) {
+            lastErr = String(e.message || e);
         }
         btn.disabled = false;
         if (ok && payload) {
