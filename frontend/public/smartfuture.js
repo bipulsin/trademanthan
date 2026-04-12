@@ -101,7 +101,7 @@
         );
     }
 
-    /** ATR(5)/ATR(14) on session 5m bars; 🔥 next to symbol when ratio ≥ 1.1. */
+    /** ATR(5)/ATR(14) on session 5m bars; 🔥 left of symbol when ratio ≥ 1.1. */
     function fmtSymbolCell(r) {
         const sym = r && r.fut_symbol != null && r.fut_symbol !== '' ? String(r.fut_symbol) : '—';
         const ratio = r && r.atr5_14_ratio != null && r.atr5_14_ratio !== '' ? Number(r.atr5_14_ratio) : NaN;
@@ -110,14 +110,13 @@
             ? 'ATR(5)/ATR(14) = ' + ratio.toFixed(3) + ' (session 5‑minute bars). Fire when ≥ 1.1.'
             : '';
         const titleAttr = tip ? ' title="' + escapeAttr(tip) + '"' : '';
-        let inner = sym === '—' ? sym : escapeHtml(sym);
-        if (hot) {
-            inner += ' <span class="sf-atr-fire" aria-hidden="true">🔥</span>';
-        }
+        const label = sym === '—' ? sym : escapeHtml(sym);
+        const fire =
+            hot ? '<span class="sf-atr-fire" aria-hidden="true">🔥</span> ' : '';
         if (tip) {
-            inner = '<span class="sf-symbol-wrap"' + titleAttr + '>' + inner + '</span>';
+            return '<span class="sf-symbol-wrap"' + titleAttr + '>' + fire + label + '</span>';
         }
-        return inner;
+        return fire ? fire + label : label;
     }
 
     function fmtEntryGroupLabel(bucket) {
