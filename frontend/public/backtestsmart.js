@@ -16,6 +16,57 @@
         };
     }
 
+    /** Same rule as left-menu.js: DB isAdmin "Yes" → API isAdmin / is_admin. */
+    function isUserAdmin(user) {
+        if (!user || typeof user !== 'object') return false;
+        const raw = user.isAdmin != null ? user.isAdmin : user.is_admin;
+        if (raw == null || raw === '') return false;
+        return String(raw).trim().toLowerCase() === 'yes';
+    }
+
+    async function refreshUserFromMe() {
+        const paths = [API_BASE + '/api/auth/me', API_BASE + '/auth/me'];
+        for (let i = 0; i < paths.length; i++) {
+            try {
+                const res = await fetch(paths[i], { headers: authHeaders(), cache: 'no-store' });
+                if (res.ok) {
+                    const me = await res.json();
+                    try {
+                        const prev = JSON.parse(localStorage.getItem('trademanthan_user') || '{}');
+                        localStorage.setItem('trademanthan_user', JSON.stringify(Object.assign({}, prev, me)));
+                    } catch (e) {
+                        localStorage.setItem('trademanthan_user', JSON.stringify(me));
+                    }
+                    return me;
+                }
+            } catch (e) {
+                /* try next path */
+            }
+        }
+        return null;
+    }
+
+    function readStoredUser() {
+        try {
+            return JSON.parse(localStorage.getItem('trademanthan_user') || '{}');
+        } catch (e) {
+            return {};
+        }
+    }
+
+    function showAdminRunPanelIfEligible() {
+        const panel = document.getElementById('btAdminRunPanel');
+        if (!panel) return;
+        const user = readStoredUser();
+        if (!isUserAdmin(user)) {
+            panel.style.display = 'none';
+            panel.setAttribute('aria-hidden', 'true');
+            return;
+        }
+        panel.style.display = 'block';
+        panel.setAttribute('aria-hidden', 'false');
+    }
+
     async function fetchRows() {
         const paths = ['/api/smart-futures-backtest/rows', '/smart-futures-backtest/rows'];
         let lastErr = null;
@@ -172,9 +223,95 @@
         }
     }
 
-    document.addEventListener('DOMContentLoaded', function () {
+    function parseTimesInput(raw) {
+        return String(raw || '')
+            .split(',')
+            .map(function (s) {
+                return s.trim();
+            })
+            .filter(Boolean);
+    }
+
+    async function postRunBacktest() {
+        const fromEl = document.getElementById('btRunFrom');
+        const toEl = document.getElementById('btRunTo');
+        const timesEl = document.getElementById('btRunTimes');
+        const btn = document.getElementById('btRunBtn');
+        const statusEl = document.getElementById('btRunStatus');
+        if (!fromEl || !toEl || !timesEl || !btn) return;
+        const from_date = (fromEl.value || '').trim();
+        const to_date = (toEl.value || '').trim();
+        const times = parseTimesInput(timesEl.value);
+        if (!from_date || !to_date) {
+            if (statusEl) statusEl.textContent = 'Choose from and to dates.';
+            return;
+        }
+        if (from_date > to_date) {
+            if (statusEl) statusEl.textContent = 'From date must be on or before to date.';
+            return;
+        }
+        if (!times.length) {
+            if (statusEl) statusEl.textContent = 'Enter at least one scan time (IST), e.g. 09:30,10:30.';
+            return;
+        }
+        for (let i = 0; i < times.length; i++) {
+            if (!/^\d{1,2}:\d{2}$/.test(times[i])) {
+                if (statusEl) statusEl.textContent = 'Invalid time format: use HH:MM like 09:30.';
+                return;
+            }
+        }
+        const body = JSON.stringify({ from_date: from_date, to_date: to_date, times: times });
+        const paths = ['/api/smart-futures-backtest/run', '/smart-futures-backtest/run'];
+        btn.disabled = true;
+        if (statusEl) statusEl.textContent = 'Running… this may take several minutes. Do not close the tab.';
+        let lastErr = null;
+        let ok = false;
+        let payload = null;
+        for (let p = 0; p < paths.length; p++) {
+            try {
+                const res = await fetch(API_BASE + paths[p], {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    body: body,
+                });
+                const text = await res.text();
+                try {
+                    payload = text ? JSON.parse(text) : {};
+                } catch (e) {
+                    payload = { detail: text || res.statusText };
+                }
+                if (res.status === 403) {
+                    if (statusEl) statusEl.textContent = 'Administrator only (403).';
+                    lastErr = '403';
+                    break;
+                }
+                if (res.ok) {
+                    ok = true;
+                    break;
+                }
+                lastErr = (payload && payload.detail) || text || res.statusText;
+            } catch (e) {
+                lastErr = String(e.message || e);
+            }
+        }
+        btn.disabled = false;
+        if (ok && payload) {
+            const okSlots = payload.ok_slots != null ? payload.ok_slots : '—';
+            const total = payload.total_slots != null ? payload.total_slots : '—';
+            if (statusEl) statusEl.textContent = 'Done. Slots completed: ' + okSlots + ' / ' + total + '.';
+            await load(true);
+        } else {
+            if (statusEl) statusEl.textContent = lastErr ? String(lastErr) : 'Run failed.';
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', async function () {
         const ref = document.getElementById('btRefresh');
         if (ref) ref.addEventListener('click', function () { load(false); });
+        await refreshUserFromMe();
+        showAdminRunPanelIfEligible();
+        const runBtn = document.getElementById('btRunBtn');
+        if (runBtn) runBtn.addEventListener('click', function () { postRunBacktest(); });
         load(false);
     });
 })();

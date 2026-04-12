@@ -48,6 +48,31 @@
         .sf-side-pill { display: inline-block; padding: 3px 10px; border-radius: 6px; font-weight: 600; font-size: 0.8rem; }
         .sf-side-pill.sf-side-long { background: #4ade80; color: #000000; }
         .sf-side-pill.sf-side-short { background: #ef4444; color: #ffffff; }
+        .bt-admin-panel {
+            margin-top: 14px;
+            padding: 12px 14px;
+            border: 1px solid var(--theme-border, #cbd5e1);
+            border-radius: 10px;
+            background: var(--theme-bg-soft, rgba(248, 250, 252, 0.9));
+        }
+        .bt-admin-panel h2 { font-size: 1rem; margin: 0 0 10px; }
+        .bt-run-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px 14px; align-items: end; }
+        .bt-run-field label { display: block; font-size: 0.78rem; color: var(--theme-muted, #64748b); margin-bottom: 4px; }
+        .bt-run-field input { width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--theme-border, #cbd5e1); font-size: 0.88rem; }
+        .bt-run-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
+        .bt-btn-run {
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: none;
+            font-weight: 600;
+            font-size: 0.88rem;
+            cursor: pointer;
+            background: #0f766e;
+            color: #fff;
+        }
+        .bt-btn-run:hover:not(:disabled) { background: #115e59; }
+        .bt-btn-run:disabled { opacity: 0.55; cursor: not-allowed; }
+        #btRunStatus { font-size: 0.85rem; color: var(--theme-muted, #64748b); margin: 0; flex: 1; min-width: 200px; }
     </style>
 </head>
 <body class="theme-page">
@@ -63,10 +88,32 @@
             <p class="sf-meta" style="margin-top:0;">
                 All rows from <code>backtest_smart_future</code>, grouped by simulated time (IST). This page is not linked from the main navigation.
             </p>
+            <div id="btAdminRunPanel" class="bt-admin-panel" style="display: none;" aria-hidden="true">
+                <h2><i class="fas fa-user-shield" aria-hidden="true"></i> Run backtest (admin)</h2>
+                <p class="sf-meta" style="margin:0 0 10px;">POSTs to the API and may take several minutes for wide ranges. IST scan times per day (comma-separated).</p>
+                <div class="bt-run-grid">
+                    <div class="bt-run-field">
+                        <label for="btRunFrom">From date</label>
+                        <input type="date" id="btRunFrom" autocomplete="off" />
+                    </div>
+                    <div class="bt-run-field">
+                        <label for="btRunTo">To date</label>
+                        <input type="date" id="btRunTo" autocomplete="off" />
+                    </div>
+                    <div class="bt-run-field" style="grid-column: span 2; min-width: 200px;">
+                        <label for="btRunTimes">Scan times (IST)</label>
+                        <input type="text" id="btRunTimes" value="09:30,10:30" placeholder="09:30,10:30" spellcheck="false" />
+                    </div>
+                </div>
+                <div class="bt-run-actions">
+                    <button type="button" class="bt-btn-run" id="btRunBtn">Run backtest</button>
+                    <p id="btRunStatus" role="status"></p>
+                </div>
+            </div>
             <p class="sf-meta" id="btMsg" style="color:#b45309;"></p>
             <div id="btGroups"></div>
         </div>
     </div>
-    <script src="backtestsmart.js?v=1"></script>
+    <script src="backtestsmart.js?v=2"></script>
 </body>
 </html>
