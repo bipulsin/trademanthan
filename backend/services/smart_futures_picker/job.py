@@ -30,6 +30,7 @@ from backend.services.smart_futures_picker.indicators import (
     session_vwap,
     true_range,
     volume_surge_ratio,
+    wilder_atr,
     wilder_atr_14,
 )
 from backend.services.smart_futures_picker.sector_score import compute_sector_score_for_stock
@@ -141,6 +142,7 @@ class ScoredPick:
     volume_surge: float
     adx_14: float
     atr_14: float
+    atr5_14_ratio: float
     renko_momentum: float
     ha_trend: float
     macd_div: float
@@ -215,6 +217,10 @@ def _score_symbol(
     atr = wilder_atr_14(highs, lows, closes)
     if atr is None or atr <= 0:
         return None
+    atr5 = wilder_atr(highs, lows, closes, 5)
+    if atr5 is None or atr5 <= 0:
+        return None
+    atr5_14_ratio = float(atr5) / float(atr)
     adx = adx_14_value(highs, lows, closes)
     if adx is None:
         adx = 0.0
@@ -265,6 +271,7 @@ def _score_symbol(
         volume_surge=vs,
         adx_14=float(adx),
         atr_14=float(atr),
+        atr5_14_ratio=atr5_14_ratio,
         renko_momentum=rm,
         ha_trend=ha,
         macd_div=md,
@@ -305,6 +312,7 @@ def _persist_pick(
         "volume_surge": pick.volume_surge,
         "adx_14": pick.adx_14,
         "atr_14": pick.atr_14,
+        "atr5_14_ratio": pick.atr5_14_ratio,
         "renko_momentum": pick.renko_momentum,
         "ha_trend": pick.ha_trend,
         "macd_div": pick.macd_div,
@@ -346,6 +354,7 @@ def _persist_pick(
                     volume_surge = :volume_surge,
                     adx_14 = :adx_14,
                     atr_14 = :atr_14,
+                    atr5_14_ratio = :atr5_14_ratio,
                     renko_momentum = :renko_momentum,
                     ha_trend = :ha_trend,
                     macd_div = :macd_div,
@@ -375,14 +384,14 @@ def _persist_pick(
                 """
                 INSERT INTO smart_futures_daily (
                     session_date, stock, fut_symbol, fut_instrument_key, side,
-                    obv_slope, volume_surge, adx_14, atr_14,
+                    obv_slope, volume_surge, adx_14, atr_14, atr5_14_ratio,
                     renko_momentum, ha_trend, macd_div, rsi_div, stoch_div,
                     cms, final_cms, sector_score, combined_sentiment,
                     entry_price, sl_price, target_price, hold_type,
                     entry_at, trend_continuation, scan_trigger, vix_at_scan
                 ) VALUES (
                     :session_date, :stock, :fut_symbol, :fut_instrument_key, :side,
-                    :obv_slope, :volume_surge, :adx_14, :atr_14,
+                    :obv_slope, :volume_surge, :adx_14, :atr_14, :atr5_14_ratio,
                     :renko_momentum, :ha_trend, :macd_div, :rsi_div, :stoch_div,
                     :cms, :final_cms, :sector_score, :combined_sentiment,
                     :entry_price, :sl_price, :target_price, :hold_type,

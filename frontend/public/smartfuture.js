@@ -45,13 +45,48 @@
             .replace(/"/g, '&quot;');
     }
 
-    function fmtSideCell(side) {
+    function escapeAttr(s) {
+        return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;');
+    }
+
+    /** Plain-language tooltip for LONG/SHORT (uses row.cms when API sends it). */
+    function sideTooltip(r) {
+        const s = String(r.side || '').trim().toUpperCase();
+        const fc = Number(r.final_cms);
+        const ss = Number(r.sector_score);
+        const cs = Number(r.combined_sentiment);
+        const core = r.cms != null && r.cms !== '' ? Number(r.cms) : NaN;
+        const lines = [];
+        lines.push(
+            'LONG if Final CMS > 0 at scan time, SHORT if < 0. ' +
+                'Final CMS = core CMS × (1 + 0.5×sector score) × (1 + sentiment). ' +
+                'Core CMS is from this futures contract’s session (5‑minute bars: VWAP vs price, volume surge, Renko/Heikin‑Ashi, divergences) plus recent daily OBV—not the same as a spot equity “uptrend” on another timeframe.'
+        );
+        const bits = [];
+        if (Number.isFinite(core)) bits.push('core CMS ' + core.toFixed(2));
+        if (Number.isFinite(ss)) bits.push('sector ' + ss.toFixed(2));
+        if (Number.isFinite(cs)) bits.push('sentiment ' + cs.toFixed(3));
+        if (Number.isFinite(fc)) bits.push('final CMS ' + fc.toFixed(2));
+        if (bits.length) lines.push('This row: ' + bits.join(' · ') + '.');
+        if (s === 'LONG' || s === 'SHORT') {
+            lines.push('Side shown: ' + s + ' (follows sign of final CMS).');
+        }
+        return lines.join(' ');
+    }
+
+    function fmtSideCell(r) {
+        const side = r && r.side != null ? r.side : '';
         const s = String(side || '').trim().toUpperCase();
+        const tip = escapeAttr(sideTooltip(r || {}));
+        const titleAttr = tip ? ' title="' + tip + '"' : '';
         if (s === 'LONG') {
-            return '<span class="sf-side-pill sf-side-long">LONG</span>';
+            return '<span class="sf-side-pill sf-side-long"' + titleAttr + '>LONG</span>';
         }
         if (s === 'SHORT') {
-            return '<span class="sf-side-pill sf-side-short">SHORT</span>';
+            return '<span class="sf-side-pill sf-side-short"' + titleAttr + '>SHORT</span>';
         }
         return side ? escapeHtml(String(side)) : '—';
     }
@@ -64,6 +99,25 @@
             '<span class="sr-only">Yes</span>' +
             '</span>'
         );
+    }
+
+    /** ATR(5)/ATR(14) on session 5m bars; 🔥 next to symbol when ratio ≥ 1.1. */
+    function fmtSymbolCell(r) {
+        const sym = r && r.fut_symbol != null && r.fut_symbol !== '' ? String(r.fut_symbol) : '—';
+        const ratio = r && r.atr5_14_ratio != null && r.atr5_14_ratio !== '' ? Number(r.atr5_14_ratio) : NaN;
+        const hot = Number.isFinite(ratio) && ratio >= 1.1;
+        const tip = Number.isFinite(ratio)
+            ? 'ATR(5)/ATR(14) = ' + ratio.toFixed(3) + ' (session 5‑minute bars). Fire when ≥ 1.1.'
+            : '';
+        const titleAttr = tip ? ' title="' + escapeAttr(tip) + '"' : '';
+        let inner = sym === '—' ? sym : escapeHtml(sym);
+        if (hot) {
+            inner += ' <span class="sf-atr-fire" aria-hidden="true">🔥</span>';
+        }
+        if (tip) {
+            inner = '<span class="sf-symbol-wrap"' + titleAttr + '>' + inner + '</span>';
+        }
+        return inner;
     }
 
     function fmtEntryGroupLabel(bucket) {
@@ -117,10 +171,10 @@
                     r.id +
                     '">' +
                     '<td>' +
-                    (r.fut_symbol || '—') +
+                    fmtSymbolCell(r) +
                     '</td>' +
                     '<td>' +
-                    fmtSideCell(r.side) +
+                    fmtSideCell(r) +
                     '</td>' +
                     '<td>' +
                     fmtNum(r.final_cms, 2) +

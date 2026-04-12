@@ -440,6 +440,11 @@ def _run_startup_schema_migrations(db_engine):
                 if "buy_price" not in _sfd_cols:
                     conn.execute(text("ALTER TABLE smart_futures_daily ADD COLUMN buy_price DOUBLE PRECISION"))
                     print("Applied migration: added smart_futures_daily.buy_price")
+                if "atr5_14_ratio" not in _sfd_cols:
+                    conn.execute(
+                        text("ALTER TABLE smart_futures_daily ADD COLUMN atr5_14_ratio DOUBLE PRECISION")
+                    )
+                    print("Applied migration: added smart_futures_daily.atr5_14_ratio")
 
             # Legacy Smart Futures DB tables removed (screener rebuild); drop if still present.
             _sf_tables = (

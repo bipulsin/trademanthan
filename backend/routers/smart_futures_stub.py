@@ -105,6 +105,7 @@ def _row_to_dict(r: Any) -> Dict[str, Any]:
     if ea is not None and hasattr(ea, "isoformat"):
         out["entry_at"] = ea.isoformat()
     for k in (
+        "cms",
         "final_cms",
         "sector_score",
         "combined_sentiment",
@@ -112,6 +113,7 @@ def _row_to_dict(r: Any) -> Dict[str, Any]:
         "sl_price",
         "target_price",
         "buy_price",
+        "atr5_14_ratio",
     ):
         v = out.get(k)
         if v is not None:
@@ -129,7 +131,8 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
                 """
                 SELECT id, fut_symbol, side, final_cms, sector_score, combined_sentiment,
                        entry_price, sl_price, target_price, trend_continuation, entry_at,
-                       order_status, buy_price, session_date, scan_trigger
+                       order_status, buy_price, session_date, scan_trigger,
+                       cms, atr5_14_ratio
                 FROM smart_futures_daily
                 WHERE session_date = :sd
                 ORDER BY entry_at DESC NULLS LAST, id DESC

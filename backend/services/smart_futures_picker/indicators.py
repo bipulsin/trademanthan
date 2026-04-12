@@ -53,24 +53,36 @@ def true_range(high: float, low: float, prev_close: float) -> float:
     return max(high - low, abs(high - prev_close), abs(low - prev_close))
 
 
+def wilder_atr(
+    highs: Sequence[float], lows: Sequence[float], closes: Sequence[float], period: int
+) -> Optional[float]:
+    """
+    Wilder / RMA ATR at the latest bar. Returns None if insufficient history.
+    """
+    if period < 1:
+        return None
+    n = len(closes)
+    if n < period + 1:
+        return None
+    trs: List[float] = []
+    for i in range(1, n):
+        trs.append(true_range(highs[i], lows[i], closes[i - 1]))
+    if len(trs) < period:
+        return None
+    atr = sum(trs[:period]) / float(period)
+    pm1 = float(period - 1)
+    for j in range(period, len(trs)):
+        atr = (atr * pm1 + trs[j]) / float(period)
+    return float(atr)
+
+
 def wilder_atr_14(
     highs: Sequence[float], lows: Sequence[float], closes: Sequence[float]
 ) -> Optional[float]:
     """
     Standard ATR(14) on last bars; returns ATR at latest bar or None if insufficient.
     """
-    n = len(closes)
-    if n < 15:
-        return None
-    trs: List[float] = []
-    for i in range(1, n):
-        trs.append(true_range(highs[i], lows[i], closes[i - 1]))
-    if len(trs) < 14:
-        return None
-    atr = sum(trs[:14]) / 14.0
-    for j in range(14, len(trs)):
-        atr = (atr * 13.0 + trs[j]) / 14.0
-    return float(atr)
+    return wilder_atr(highs, lows, closes, 14)
 
 
 def session_vwap(highs: Sequence[float], lows: Sequence[float], closes: Sequence[float], volumes: Sequence[float]) -> float:
