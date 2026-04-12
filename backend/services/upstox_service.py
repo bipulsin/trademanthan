@@ -4,7 +4,7 @@ Upstox API Service for fetching market data
 import requests
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Dict, Optional, List, Any, Tuple
 import pytz
 
@@ -1145,7 +1145,14 @@ class UpstoxService:
             logger.error(f"Error getting option VWAP: {str(e)}")
             return None
     
-    def get_historical_candles_by_instrument_key(self, instrument_key: str, interval: str = "hours/1", days_back: int = 2) -> Optional[List[Dict]]:
+    def get_historical_candles_by_instrument_key(
+        self,
+        instrument_key: str,
+        interval: str = "hours/1",
+        days_back: int = 2,
+        *,
+        range_end_date: Optional[date] = None,
+    ) -> Optional[List[Dict]]:
         """
         Fetch historical candle data using instrument key directly
         Uses improved API request with automatic retry and token refresh
@@ -1154,19 +1161,24 @@ class UpstoxService:
             instrument_key: Full instrument key (e.g., "NSE_FO|RELIANCE25NOV1450CE")
             interval: Candle interval
             days_back: Number of days to fetch
+            range_end_date: When set, use this IST calendar date as the API ``to_date``
+                (end of the window) instead of today. Use for historical backtests so
+                minute/daily ranges include the replay session and stay consistent when
+                ``days_back`` is anchored from that date.
             
         Returns:
             List of candle data or None
         """
         try:
-            # Calculate date range
+            # Calculate date range (Upstox path: .../{to_date}/{from_date})
             ist = pytz.timezone('Asia/Kolkata')
-            end_date = datetime.now(ist)
-            start_date = end_date - timedelta(days=days_back)
-            
-            # Format dates for API
-            to_date = end_date.strftime("%Y-%m-%d")
-            from_date = start_date.strftime("%Y-%m-%d")
+            if range_end_date is not None:
+                end_d = range_end_date
+            else:
+                end_d = datetime.now(ist).date()
+            start_d = end_d - timedelta(days=days_back)
+            to_date = end_d.strftime("%Y-%m-%d")
+            from_date = start_d.strftime("%Y-%m-%d")
             
             # Upstox V3 API endpoint
             url = f"{self.base_url}/historical-candle/{instrument_key}/{interval}/{to_date}/{from_date}"

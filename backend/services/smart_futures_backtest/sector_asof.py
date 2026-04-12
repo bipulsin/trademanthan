@@ -44,7 +44,7 @@ def sector_score_as_of(
         return 0.0
     try:
         candles = upstox.get_historical_candles_by_instrument_key(
-            ikey, interval="days/1", days_back=160
+            ikey, interval="days/1", days_back=160, range_end_date=as_of
         )
     except Exception as e:
         logger.debug("sector_asof fetch failed %s: %s", ikey, e)

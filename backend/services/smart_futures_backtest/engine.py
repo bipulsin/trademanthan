@@ -115,7 +115,10 @@ def _m5_session_upto(m5_sorted: List[dict], session_date: date, cutoff_ist: date
 
 def _entry_price_at_cutoff(upstox: UpstoxService, fut_key: str, cutoff_ist: datetime) -> Optional[float]:
     try:
-        c = upstox.get_historical_candles_by_instrument_key(fut_key, interval="minutes/1", days_back=120)
+        end_d = cutoff_ist.astimezone(IST).date()
+        c = upstox.get_historical_candles_by_instrument_key(
+            fut_key, interval="minutes/1", days_back=120, range_end_date=end_d
+        )
         s = _sort_candles(c)
         if not s:
             return None
@@ -136,7 +139,10 @@ def _entry_price_at_cutoff(upstox: UpstoxService, fut_key: str, cutoff_ist: date
 def _vix_at_cutoff(upstox: UpstoxService, session_date: date, cutoff_ist: datetime) -> Optional[float]:
     try:
         c = upstox.get_historical_candles_by_instrument_key(
-            INDIA_VIX_KEY, interval="minutes/5", days_back=120
+            INDIA_VIX_KEY,
+            interval="minutes/5",
+            days_back=120,
+            range_end_date=session_date,
         )
         s = _sort_candles(c)
         last: Optional[float] = None
@@ -166,7 +172,7 @@ def score_symbol_backtest(
     sector_index: Optional[str] = None,
 ) -> Optional[ScoredPick]:
     daily_raw = upstox.get_historical_candles_by_instrument_key(
-        fut_key, interval="days/1", days_back=120
+        fut_key, interval="days/1", days_back=120, range_end_date=session_date
     )
     daily = _daily_last_n_upto(daily_raw, session_date, 10)
     if len(daily) < 10:
@@ -177,7 +183,7 @@ def score_symbol_backtest(
     obv_slope = compute_obv_slope_daily(closes_d, vols_d)
 
     m5_raw = upstox.get_historical_candles_by_instrument_key(
-        fut_key, interval="minutes/5", days_back=120
+        fut_key, interval="minutes/5", days_back=120, range_end_date=session_date
     )
     m5 = _sort_candles(m5_raw)
     m5_today = _m5_session_upto(m5, session_date, cutoff_ist)
