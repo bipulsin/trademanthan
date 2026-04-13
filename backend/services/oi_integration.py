@@ -87,6 +87,8 @@ class NSEOIFetcher:
         rows: list = []
         if isinstance(data.get("stocks"), list):
             rows = data["stocks"]
+        if not rows and isinstance(data.get("data"), list):
+            rows = data["data"]
         fd = data.get("filtered") or {}
         if isinstance(fd, dict) and isinstance(fd.get("data"), list):
             rows = fd["data"]
@@ -130,10 +132,26 @@ class NSEOIFetcher:
             except (TypeError, ValueError):
                 return 0.0
 
-        oi = _i(best.get("openInterest") or best.get("oi") or best.get("open_interest"))
-        chg = _i(best.get("changeinOpenInterest") or best.get("chg_oi") or best.get("change_in_oi"))
+        oi = _i(
+            best.get("openInterest")
+            or best.get("oi")
+            or best.get("open_interest")
+            or best.get("openInterestQty")
+        )
+        chg = _i(
+            best.get("changeinOpenInterest")
+            or best.get("changeInOpenInterest")
+            or best.get("chg_oi")
+            or best.get("change_in_oi")
+            or best.get("netChangeOpenInterest")
+        )
         lp = _f(best.get("lastPrice") or best.get("last_price") or best.get("ltp"))
-        pc = _f(best.get("previousClose") or best.get("prev_close") or best.get("closePrice"))
+        pc = _f(
+            best.get("previousClose")
+            or best.get("prev_close")
+            or best.get("closePrice")
+            or best.get("pClose")
+        )
         prev_oi = max(0, oi - chg)
 
         return {

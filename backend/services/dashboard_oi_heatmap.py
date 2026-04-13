@@ -1,13 +1,13 @@
 """
 Dashboard: OI buildup heatmap for top 10 F&O names (premarket watchlist when available).
 
-Uses NSE derivative quote API (see oi_integration.NSEOIFetcher) with a single shared
-response cache and a refresh lock so concurrent dashboard users do not stampede NSE.
+Uses NSE derivative quote API when reachable; falls back to Upstox current-month future
+quotes (OI + price) when NSE blocks datacenter IPs. Server-side response cache + locks.
 """
 from __future__ import annotations
 
+import fcntl
 import logging
-import os
 import threading
 import time
 from datetime import date, datetime
@@ -33,6 +33,14 @@ _RESPONSE_CACHE_TTL_SEC = 150.0
 _SLEEP_BETWEEN_NSE_CALLS_SEC = 0.06
 _TOP_N = 10
 
+# Serialize premarket job across workers; cooldown avoids hammering Upstox if the job keeps failing.
+_PREMARKET_FLOCK_PATH = "/tmp/tm_heatmap_premarket_job.flock"
+_PREMARKET_ATTEMPT_COOLDOWN_SEC = 45 * 60.0
+_last_premarket_attempt_mono: float = 0.0
+
+_upstox_cached: Any = None
+_upstox_init_failed: bool = False
+
 _response_cache: Optional[Tuple[float, Dict[str, Any]]] = None
 _refresh_lock = threading.Lock()
 
@@ -50,21 +58,6 @@ def _symbols_in_rank_order(rows: List[Dict[str, Any]]) -> List[str]:
     return out[:_TOP_N]
 
 
-def _heatmap_premarket_marker_path(session_date: date) -> str:
-    """Exclusive marker so multiple app workers do not each run the 200-symbol premarket job."""
-    return f"/tmp/tm_heatmap_premarket_{session_date.isoformat()}.lock"
-
-
-def _try_create_exclusive_premarket_marker(session_date: date) -> bool:
-    path = _heatmap_premarket_marker_path(session_date)
-    try:
-        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-        os.close(fd)
-        return True
-    except FileExistsError:
-        return False
-
-
 def _wait_for_premarket_rows(session_date: date, want_min: int, max_wait_sec: float = 150.0) -> List[Dict[str, Any]]:
     """Poll DB while another worker runs the premarket job (can take 1–2+ minutes)."""
     deadline = time.monotonic() + max_wait_sec
@@ -75,6 +68,101 @@ def _wait_for_premarket_rows(session_date: date, want_min: int, max_wait_sec: fl
             return rows
         time.sleep(step)
     return fetch_premarket_watchlist_for_date(session_date)
+
+
+def _upstox_service():
+    """Lazy singleton; NSE OI often fails on server IPs — Upstox is the primary fallback."""
+    global _upstox_cached, _upstox_init_failed
+    if _upstox_init_failed:
+        return None
+    if _upstox_cached is not None:
+        return _upstox_cached
+    try:
+        from backend.config import settings
+        from backend.services.upstox_service import UpstoxService
+
+        _upstox_cached = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+        return _upstox_cached
+    except Exception as e:
+        logger.warning("dashboard_oi_heatmap: Upstox init failed: %s", e)
+        _upstox_init_failed = True
+        return None
+
+
+def _future_key_from_arbitrage(symbol: str) -> Optional[str]:
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return None
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text(
+                """
+                SELECT currmth_future_instrument_key
+                FROM arbitrage_master
+                WHERE UPPER(TRIM(stock)) = :s
+                  AND currmth_future_instrument_key IS NOT NULL
+                  AND TRIM(currmth_future_instrument_key) <> ''
+                LIMIT 1
+                """
+            ),
+            {"s": sym},
+        ).fetchone()
+        if not row or not row[0]:
+            return None
+        return str(row[0]).strip()
+    finally:
+        db.close()
+
+
+def _nse_derivative_usable(raw: Dict[str, Any]) -> bool:
+    oi = int(raw.get("oi") or 0)
+    lp = float(raw.get("last_price") or 0)
+    pc = float(raw.get("prev_close") or 0)
+    return oi > 0 or lp > 1e-6 or pc > 1e-6
+
+
+def _run_premarket_job_under_flock() -> None:
+    with open(_PREMARKET_FLOCK_PATH, "w") as fp:
+        fcntl.flock(fp.fileno(), fcntl.LOCK_EX)
+        try:
+            run_premarket_watchlist_job()
+        finally:
+            fcntl.flock(fp.fileno(), fcntl.LOCK_UN)
+
+
+def _needs_auto_premarket_job(rows: List[Dict[str, Any]]) -> bool:
+    """
+    Run the same ranked scan as the scheduler when we do not yet have a full top 10 for today.
+    - Empty: any IST weekday (pre-market or post-market).
+    - Partial (1..9): only after 15:15 IST (post-market top-up for today).
+    """
+    if len(rows) >= _TOP_N:
+        return False
+    now = datetime.now(IST)
+    if now.weekday() >= 5:
+        return False
+    if len(rows) == 0:
+        return True
+    if 0 < len(rows) < _TOP_N:
+        return now.hour > 15 or (now.hour == 15 and now.minute >= 15)
+    return False
+
+
+def _maybe_run_premarket_for_today() -> None:
+    global _last_premarket_attempt_mono
+    today = _session_today_ist()
+    rows = fetch_premarket_watchlist_for_date(today)
+    if not _needs_auto_premarket_job(rows):
+        return
+    now_m = time.monotonic()
+    if now_m - _last_premarket_attempt_mono < _PREMARKET_ATTEMPT_COOLDOWN_SEC:
+        return
+    _last_premarket_attempt_mono = now_m
+    try:
+        _run_premarket_job_under_flock()
+    except Exception as e:
+        logger.exception("dashboard_oi_heatmap: premarket job under flock failed: %s", e)
 
 
 def _fetch_latest_session_date_min_rows(min_rows: int) -> Optional[date]:
@@ -102,13 +190,10 @@ def _resolve_top10_symbols() -> Tuple[List[str], str]:
     """
     Same ranked universe as the scheduled pre-market job (OBV + gap + range), never alphabetical.
 
-    Order of preference:
-    1) Today's persisted premarket_watchlist (rank 1..10) when present.
-    2) If today has no rows: on IST weekdays, run ``run_premarket_watchlist_job()`` at most once
-       per calendar day (mirrors scheduler), then re-read today.
-    3) If still empty (e.g. weekend, holiday, or job insufficient_data): most recent session in DB
-       with 10 rows, else most recent session with any rows.
-    4) Partial today (1..9 rows): use those in rank order (no padding).
+    1) Today's premarket_watchlist when it has a full top 10.
+    2) Else: may run ``run_premarket_watchlist_job()`` under flock (weekdays): on empty rows anytime,
+       or on partial rows after 15:15 IST (post-market top-up for today). Cooldown between attempts.
+    3) Partial / latest session fallback as before.
     """
     today = _session_today_ist()
     rows_today = fetch_premarket_watchlist_for_date(today)
@@ -116,24 +201,15 @@ def _resolve_top10_symbols() -> Tuple[List[str], str]:
     if len(rows_today) >= _TOP_N:
         return _symbols_in_rank_order(rows_today), "premarket_today"
 
+    _maybe_run_premarket_for_today()
+    rows_today = fetch_premarket_watchlist_for_date(today)
+    if len(rows_today) >= _TOP_N:
+        return _symbols_in_rank_order(rows_today), "premarket_today"
     if len(rows_today) > 0:
         return _symbols_in_rank_order(rows_today), "premarket_today_partial"
 
-    # No rows for today — optional one-shot same computation as scheduler (weekdays only).
-    now_ist = datetime.now(IST)
-    if now_ist.weekday() < 5:
-        exclusive = _try_create_exclusive_premarket_marker(today)
-        if exclusive:
-            try:
-                out = run_premarket_watchlist_job()
-                if isinstance(out, dict) and out.get("skipped"):
-                    logger.info("dashboard_oi_heatmap: premarket job skipped: %s", out.get("skipped"))
-            except Exception as e:
-                logger.exception("dashboard_oi_heatmap: premarket job failed: %s", e)
-            rows_today = fetch_premarket_watchlist_for_date(today)
-        else:
-            rows_today = _wait_for_premarket_rows(today, 1)
-
+    if datetime.now(IST).weekday() < 5:
+        rows_today = _wait_for_premarket_rows(today, 1, max_wait_sec=35.0)
         if len(rows_today) >= _TOP_N:
             return _symbols_in_rank_order(rows_today), "premarket_today"
         if len(rows_today) > 0:
@@ -152,6 +228,56 @@ def _resolve_top10_symbols() -> Tuple[List[str], str]:
     return [], "none"
 
 
+def _heatmap_row_dict(
+    rank: int,
+    symbol: str,
+    lp: float,
+    pc: float,
+    oi: int,
+    chg: int,
+    oi_source: str,
+) -> Dict[str, Any]:
+    prev_oi = max(0, int(oi) - int(chg))
+    dp = float(lp) - float(pc)
+    price_change_pct = (dp / pc * 100.0) if pc > 1e-9 else 0.0
+    oi_change_pct = (float(chg) / float(prev_oi) * 100.0) if prev_oi > 0 else 0.0
+    signal = interpret_oi_signal(float(dp), float(chg))
+    heat01 = max(0.0, min(1.0, abs(oi_change_pct) / 12.0))
+    return {
+        "rank": rank,
+        "symbol": symbol,
+        "last_price": round(float(lp), 2),
+        "prev_close": round(float(pc), 2),
+        "price_change_pct": round(price_change_pct, 3),
+        "oi": int(oi),
+        "change_in_oi": int(chg),
+        "oi_change_pct": round(oi_change_pct, 3),
+        "signal": signal,
+        "heat01": round(heat01, 4),
+        "oi_source": oi_source,
+    }
+
+
+def _try_upstox_heatmap_row(rank: int, symbol: str) -> Optional[Dict[str, Any]]:
+    u = _upstox_service()
+    if not u:
+        return None
+    ik = _future_key_from_arbitrage(symbol)
+    if not ik:
+        return None
+    q = u.get_market_quote_by_key(ik)
+    if not q:
+        return None
+    lp = float(q.get("last_price") or 0)
+    ohlc = q.get("ohlc") if isinstance(q.get("ohlc"), dict) else {}
+    pc = float(q.get("close_price") or ohlc.get("close") or 0)
+    oi = int(q.get("oi") or 0)
+    chg = int(q.get("change_in_oi") or 0)
+    if lp <= 1e-9 and oi <= 0:
+        return None
+    return _heatmap_row_dict(rank, symbol, lp, pc, oi, chg, "upstox")
+
+
 def _build_payload() -> Dict[str, Any]:
     symbols, source_tag = _resolve_top10_symbols()
     if not symbols:
@@ -168,53 +294,44 @@ def _build_payload() -> Dict[str, Any]:
     rows_out: List[Dict[str, Any]] = []
 
     for rank, sym in enumerate(symbols, start=1):
+        raw: Optional[Dict[str, Any]] = None
+        nse_err: Optional[str] = None
         try:
             raw = fetcher.get_oi(sym)
+        except Exception as e:
+            nse_err = str(e)
+            logger.info("dashboard_oi_heatmap: NSE quote-derivative failed for %s: %s", sym, e)
+
+        if raw is not None and _nse_derivative_usable(raw):
             oi = int(raw.get("oi") or 0)
             chg = int(raw.get("change_in_oi") or 0)
             lp = float(raw.get("last_price") or 0.0)
             pc = float(raw.get("prev_close") or 0.0)
-            prev_oi = max(0, int(raw.get("prev_oi") or max(0, oi - chg)))
-
-            dp = lp - pc
-            price_change_pct = (dp / pc * 100.0) if pc > 1e-9 else 0.0
-            oi_change_pct = (chg / float(prev_oi) * 100.0) if prev_oi > 0 else 0.0
-
-            signal = interpret_oi_signal(float(dp), float(chg))
-            # Intensity 0..1 from absolute OI % move (cap at 12% day move for display scaling)
-            heat01 = max(0.0, min(1.0, abs(oi_change_pct) / 12.0))
-
-            rows_out.append(
-                {
-                    "rank": rank,
-                    "symbol": sym,
-                    "last_price": round(lp, 2),
-                    "prev_close": round(pc, 2),
-                    "price_change_pct": round(price_change_pct, 3),
-                    "oi": oi,
-                    "change_in_oi": chg,
-                    "oi_change_pct": round(oi_change_pct, 3),
-                    "signal": signal,
-                    "heat01": round(heat01, 4),
-                }
-            )
-        except Exception as e:
-            logger.warning("dashboard_oi_heatmap: %s failed: %s", sym, e)
-            rows_out.append(
-                {
-                    "rank": rank,
-                    "symbol": sym,
-                    "last_price": None,
-                    "prev_close": None,
-                    "price_change_pct": None,
-                    "oi": None,
-                    "change_in_oi": None,
-                    "oi_change_pct": None,
-                    "signal": "ERROR",
-                    "heat01": 0.0,
-                    "error": str(e)[:120],
-                }
-            )
+            rows_out.append(_heatmap_row_dict(rank, sym, lp, pc, oi, chg, "nse"))
+        else:
+            ux = _try_upstox_heatmap_row(rank, sym)
+            if ux:
+                rows_out.append(ux)
+            else:
+                hint = nse_err or (
+                    "NSE unreachable or empty; no Upstox future quote (check arbitrage_master currmth key)"
+                )
+                rows_out.append(
+                    {
+                        "rank": rank,
+                        "symbol": sym,
+                        "last_price": None,
+                        "prev_close": None,
+                        "price_change_pct": None,
+                        "oi": None,
+                        "change_in_oi": None,
+                        "oi_change_pct": None,
+                        "signal": "ERROR",
+                        "heat01": 0.0,
+                        "error": hint[:160],
+                        "oi_source": "none",
+                    }
+                )
 
         time.sleep(_SLEEP_BETWEEN_NSE_CALLS_SEC)
 

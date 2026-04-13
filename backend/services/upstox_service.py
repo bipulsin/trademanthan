@@ -1953,6 +1953,28 @@ class UpstoxService:
                         out['bid_price'] = bid_px
                         out['ask_price'] = ask_px
                         out['spread_pct'] = (ask_px - bid_px) / ask_px * 100.0
+
+                    # F&O: open interest (dashboard OI heatmap, diagnostics) — equities often omit these
+                    def _qi(*keys: str) -> int:
+                        for k in keys:
+                            v = quote_data.get(k)
+                            if v is not None and v != "":
+                                try:
+                                    return int(float(v))
+                                except (TypeError, ValueError):
+                                    continue
+                        return 0
+
+                    oi_v = _qi("oi", "open_interest", "openInterest")
+                    oi_chg = _qi(
+                        "change_in_oi",
+                        "changeInOi",
+                        "chgoi",
+                        "chg_oi",
+                        "pchangeinOpenInterest",
+                    )
+                    out["oi"] = oi_v
+                    out["change_in_oi"] = oi_chg
                     
                     logger.info(f"✅ Market quote for {instrument_key}: LTP=₹{ltp}, Close=₹{close_price}")
                     
