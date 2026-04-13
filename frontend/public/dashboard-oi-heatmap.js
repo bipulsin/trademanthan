@@ -150,7 +150,7 @@
         }
 
         try {
-            const res = await fetch(API, { cache: "no-store" });
+            const res = await fetch(API + "?_=" + Date.now(), { cache: "no-store" });
             const data = await res.json();
             if (!res.ok || data.success === false) {
                 throw new Error((data && data.message) || data.error || res.statusText || "Failed");

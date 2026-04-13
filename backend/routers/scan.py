@@ -6192,14 +6192,23 @@ class OiHeatmapHistoricalApplyBody(BaseModel):
 
 
 @router.get("/dashboard/oi-heatmap")
-async def dashboard_oi_heatmap_live():
+async def dashboard_oi_heatmap_live(
+    reload_db: bool = Query(
+        False,
+        description="If true, replace in-process cache from oi_heatmap_latest (fixes stale worker/cache).",
+    ),
+):
     """
     Live Top ~200 NSE stock futures (Upstox batch quotes): OI, OI change, signal, volume.
     Refreshed on a 15-minute schedule (9:15–15:15 IST); falls back to last DB snapshot when live is unavailable.
     """
+    no_cache = {
+        "Cache-Control": "no-store, no-cache, must-revalidate, private",
+        "Pragma": "no-cache",
+    }
     try:
-        data = get_live_oi_heatmap_json()
-        return JSONResponse(status_code=200, content=data)
+        data = get_live_oi_heatmap_json(force_reload_from_db=reload_db)
+        return JSONResponse(status_code=200, content=data, headers=no_cache)
     except Exception as e:
         logger.exception("dashboard_oi_heatmap_live: %s", e)
         return JSONResponse(
@@ -6209,6 +6218,7 @@ async def dashboard_oi_heatmap_live():
                 "message": str(e),
                 "rows": [],
             },
+            headers=no_cache,
         )
 
 

@@ -357,6 +357,16 @@ def load_oi_heatmap_snapshot_from_db() -> Tuple[List[Dict[str, Any]], Optional[s
             exp = d.get("expiry")
             if exp is not None and not isinstance(exp, (str, int, float)):
                 d["expiry"] = str(exp)
+            # Normalize for JSON (PostgreSQL may return Decimal)
+            for _k in ("ltp", "chg_pct", "oi_chg_pct", "score"):
+                if _k in d and d[_k] is not None:
+                    d[_k] = float(d[_k])
+            for _k in ("oi", "oi_chg", "volume", "rank"):
+                if _k in d and d[_k] is not None:
+                    try:
+                        d[_k] = int(d[_k])
+                    except (TypeError, ValueError):
+                        pass
             rows_out.append(d)
         return rows_out, updated_iso
     except (ProgrammingError, OperationalError) as e:
@@ -435,8 +445,13 @@ def maybe_trigger_refresh_if_empty() -> None:
     threading.Thread(target=_run, daemon=True, name="oi-heatmap-on-demand-refresh").start()
 
 
-def get_live_oi_heatmap_json() -> Dict[str, Any]:
+def get_live_oi_heatmap_json(force_reload_from_db: bool = False) -> Dict[str, Any]:
     """API payload for GET /scan/dashboard/oi-heatmap."""
+    if force_reload_from_db:
+        db_rows, db_ts = load_oi_heatmap_snapshot_from_db()
+        if db_rows:
+            replace_cache_with_rows(db_rows, db_ts or "", source="snapshot")
+
     with _cache_lock:
         rows = list(_rows_cache)
         ts = _cache_updated_at_iso
