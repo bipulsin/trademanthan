@@ -2053,6 +2053,97 @@ class UpstoxService:
             logger.error(f"❌ Error fetching batch market quotes: {str(e)}")
         return result
 
+    def get_market_quote_snapshots_batch(
+        self, instrument_keys: list[str], max_per_request: int = 100
+    ) -> dict[str, Dict[str, Any]]:
+        """
+        Full v2 market-quote payload per instrument (volume, oi, net_change, etc.).
+        Same /v2/market-quote/quotes endpoint as batch LTP; chunk to respect rate limits.
+
+        Returns:
+            Map instrument_key (requested form) -> dict with last_price, volume, oi, change_in_oi, net_change, ohlc
+        """
+        out: dict[str, Dict[str, Any]] = {}
+        if not instrument_keys:
+            return out
+        keys_batch = instrument_keys[:max_per_request]
+        try:
+            from urllib.parse import quote
+
+            keys_param = ",".join(keys_batch)
+            url = f"https://api.upstox.com/v2/market-quote/quotes?instrument_key={quote(keys_param, safe=',')}"
+            data = self.make_api_request(url, method="GET", timeout=20, max_retries=2)
+            if not data or data.get("status") != "success" or "data" not in data:
+                return out
+            raw = data.get("data") or {}
+            if not isinstance(raw, dict):
+                return out
+
+            def normalize_key(k: str) -> str:
+                return k.replace(" ", "").replace(":", "|").upper()
+
+            def find_quote_data(req_key: str) -> Optional[Dict[str, Any]]:
+                if req_key in raw:
+                    qd = raw[req_key]
+                    return qd if isinstance(qd, dict) else None
+                alt1 = req_key.replace("|", ":")
+                if alt1 in raw:
+                    qd = raw[alt1]
+                    return qd if isinstance(qd, dict) else None
+                alt2 = req_key.replace(":", "|")
+                if alt2 in raw:
+                    qd = raw[alt2]
+                    return qd if isinstance(qd, dict) else None
+                norm_req = normalize_key(req_key)
+                for resp_key, qd in raw.items():
+                    if not isinstance(qd, dict):
+                        continue
+                    if normalize_key(resp_key) == norm_req:
+                        return qd
+                return None
+
+            def _qi(qd: Dict[str, Any], *keys: str) -> int:
+                for k in keys:
+                    v = qd.get(k)
+                    if v is not None and v != "":
+                        try:
+                            return int(float(v))
+                        except (TypeError, ValueError):
+                            continue
+                return 0
+
+            for req_key in keys_batch:
+                qd = find_quote_data(req_key)
+                if not qd:
+                    continue
+                lp = float(qd.get("last_price") or 0)
+                vol = float(qd.get("volume") or 0)
+                oi_v = _qi(qd, "oi", "open_interest", "openInterest")
+                oi_chg = _qi(
+                    qd,
+                    "change_in_oi",
+                    "changeInOi",
+                    "chgoi",
+                    "chg_oi",
+                    "pchangeinOpenInterest",
+                )
+                try:
+                    net_chg = float(qd.get("net_change") or 0)
+                except (TypeError, ValueError):
+                    net_chg = 0.0
+                ohlc = qd.get("ohlc") if isinstance(qd.get("ohlc"), dict) else {}
+                out[req_key] = {
+                    "last_price": lp,
+                    "volume": vol,
+                    "oi": oi_v,
+                    "change_in_oi": oi_chg,
+                    "net_change": net_chg,
+                    "ohlc": ohlc,
+                }
+        except Exception as e:
+            logger.error(f"❌ Error fetching batch quote snapshots: {str(e)}")
+        return out
+
     def get_market_quote(self, symbol: str) -> Optional[Dict]:
         """
         Get real-time market quote (LTP) for a symbol

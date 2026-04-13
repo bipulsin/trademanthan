@@ -80,6 +80,10 @@ OI_FETCH_INTERVAL_SECONDS: int = 60
 # --- Legacy alias for diagnostics logs (prefer TIER2_THRESHOLD for entries) ---
 CMS_FINAL_ENTRY_THRESHOLD: float = TIER2_THRESHOLD
 
+# When True, only symbols in premarket Top N (see PREMKET_TOP_N in config) OR top OI-mover ranks qualify for CMS signals.
+CMS_PRIORITY_FILTER_ENABLED: bool = False
+CMS_PRIORITY_OI_MOVER_MAX_RANK: int = 20
+
 
 def cms_weights_active() -> Dict[str, float]:
     return OI_CMS_WEIGHTS if OI_IN_CMS_ENABLED else CMS_WEIGHTS

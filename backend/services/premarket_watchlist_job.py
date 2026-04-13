@@ -25,8 +25,11 @@ logger = logging.getLogger(__name__)
 
 IST = pytz.timezone("Asia/Kolkata")
 UNIVERSE_LIMIT = 200
-TOP_N = 10
 SLEEP_BETWEEN_SYMBOLS_SEC = 0.04
+
+
+def _top_n() -> int:
+    return max(1, min(50, int(getattr(settings, "PREMKET_TOP_N", 10))))
 
 
 def _sort_candles(candles: Optional[List[dict]]) -> List[dict]:
@@ -214,7 +217,7 @@ def run_premarket_watchlist_job() -> Dict[str, Any]:
         )
 
     scored.sort(key=lambda x: float(x["composite_score"]), reverse=True)
-    top = scored[:TOP_N]
+    top = scored[: _top_n()]
     computed_at = datetime.now(IST)
     for idx, row in enumerate(top, start=1):
         row["rank"] = idx

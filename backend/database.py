@@ -482,6 +482,14 @@ def _run_startup_schema_migrations(db_engine):
                         conn.execute(text(f"ALTER TABLE smart_futures_daily ADD COLUMN {colname} {coltype}"))
                         print(f"Applied migration: added smart_futures_daily.{colname}")
                         _sfd_cols.add(colname)
+                if "premkt_rank" not in _sfd_cols:
+                    conn.execute(text("ALTER TABLE smart_futures_daily ADD COLUMN premkt_rank INTEGER"))
+                    print("Applied migration: added smart_futures_daily.premkt_rank")
+                    _sfd_cols.add("premkt_rank")
+                if "oi_heat_rank" not in _sfd_cols:
+                    conn.execute(text("ALTER TABLE smart_futures_daily ADD COLUMN oi_heat_rank INTEGER"))
+                    print("Applied migration: added smart_futures_daily.oi_heat_rank")
+                    _sfd_cols.add("oi_heat_rank")
 
             # Smart Futures backtest results (separate from live smart_futures_daily)
             if "backtest_smart_future" not in table_names:
@@ -568,6 +576,39 @@ def _run_startup_schema_migrations(db_engine):
                         )
                     )
                     print("Applied migration: created premarket_watchlist (PostgreSQL)")
+
+            # Live OI heatmap snapshot (Upstox batch quotes; refreshed by oi_heatmap job)
+            if "oi_heatmap_latest" not in table_names:
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE oi_heatmap_latest (
+                                id BIGSERIAL PRIMARY KEY,
+                                rank INTEGER NOT NULL,
+                                instrument_key TEXT NOT NULL,
+                                underlying_symbol TEXT,
+                                trading_symbol TEXT,
+                                expiry TEXT,
+                                ltp DOUBLE PRECISION,
+                                chg_pct DOUBLE PRECISION,
+                                oi BIGINT,
+                                oi_chg BIGINT,
+                                oi_chg_pct DOUBLE PRECISION,
+                                oi_signal TEXT,
+                                volume BIGINT,
+                                score DOUBLE PRECISION,
+                                updated_at TIMESTAMPTZ NOT NULL
+                            )
+                            """
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_oi_heatmap_updated ON oi_heatmap_latest (updated_at DESC)"
+                        )
+                    )
+                    print("Applied migration: created oi_heatmap_latest (PostgreSQL)")
 
             # Legacy Smart Futures DB tables removed (screener rebuild); drop if still present.
             _sf_tables = (

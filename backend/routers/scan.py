@@ -80,6 +80,7 @@ from backend.services.premarket_watchlist_job import (
     run_premarket_watchlist_job,
 )
 from backend.services.dashboard_oi_heatmap import get_dashboard_oi_heatmap_response
+from backend.services.oi_heatmap import get_live_oi_heatmap_json
 from backend.services import live_trading
 from backend.database import get_db
 from backend.models.trading import IntradayStockOption, MasterStock, HistoricalMarketData
@@ -6170,6 +6171,27 @@ async def dashboard_oi_heatmap():
         return JSONResponse(status_code=status, content=data)
     except Exception as e:
         logger.exception("dashboard_oi_heatmap: %s", e)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "message": str(e),
+                "rows": [],
+            },
+        )
+
+
+@router.get("/dashboard/oi-heatmap")
+async def dashboard_oi_heatmap_live():
+    """
+    Live Top ~200 NSE stock futures (Upstox batch quotes): OI, OI change, signal, volume.
+    Refreshed by scheduler (OI_REFRESH_INTERVAL); falls back to last cache on API errors.
+    """
+    try:
+        data = get_live_oi_heatmap_json()
+        return JSONResponse(status_code=200, content=data)
+    except Exception as e:
+        logger.exception("dashboard_oi_heatmap_live: %s", e)
         return JSONResponse(
             status_code=500,
             content={

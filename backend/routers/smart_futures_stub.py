@@ -125,6 +125,18 @@ _SQL_DAILY_FULL = """
                        order_status, buy_price, sell_price, sell_time, hold_type, session_date, scan_trigger,
                        cms, atr5_14_ratio,
                        signal_tier, tier_multiplier, calculated_lots, stop_stage, current_stop_price,
+                       oi_signal, oi_gate_passed, time_filter_passed, regime_filter_passed, ema_slope_norm,
+                       premkt_rank, oi_heat_rank
+                FROM smart_futures_daily
+                WHERE session_date = :sd
+                ORDER BY entry_at DESC NULLS LAST, id DESC
+                """
+_SQL_DAILY_NO_RANK = """
+                SELECT id, fut_symbol, fut_instrument_key, side, final_cms, sector_score, combined_sentiment,
+                       entry_price, sl_price, target_price, trend_continuation, entry_at,
+                       order_status, buy_price, sell_price, sell_time, hold_type, session_date, scan_trigger,
+                       cms, atr5_14_ratio,
+                       signal_tier, tier_multiplier, calculated_lots, stop_stage, current_stop_price,
                        oi_signal, oi_gate_passed, time_filter_passed, regime_filter_passed, ema_slope_norm
                 FROM smart_futures_daily
                 WHERE session_date = :sd
@@ -163,6 +175,9 @@ def _fetch_daily_for_session(db: Session, sd: Any) -> List[Any]:
     try:
         return db.execute(text(_SQL_DAILY_FULL), {"sd": sd}).mappings().all()
     except Exception as e:
+        if _missing_db_column_error(e, "premkt_rank") or _missing_db_column_error(e, "oi_heat_rank"):
+            logger.warning("smart_futures /daily: premkt_rank/oi_heat_rank missing, legacy query: %s", e)
+            return db.execute(text(_SQL_DAILY_NO_RANK), {"sd": sd}).mappings().all()
         if _missing_db_column_error(e, "signal_tier") or _missing_db_column_error(e, "ema_slope_norm"):
             logger.warning("smart_futures /daily: extended columns missing, using legacy query: %s", e)
             try:

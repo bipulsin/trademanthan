@@ -45,4 +45,15 @@ class Settings(BaseSettings):
     # OpenAI (fin sentiment reason text from filings)
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 
+    # Live OI heatmap (Upstox-only: instruments JSON + batch market quotes)
+    UPSTOX_OI_ENABLED: bool = os.getenv("UPSTOX_OI_ENABLED", "true").lower() in ("1", "true", "yes")
+    OI_REFRESH_INTERVAL: int = int(os.getenv("OI_REFRESH_INTERVAL", "60"))
+    OI_HEATMAP_TOP_N: int = int(os.getenv("OI_HEATMAP_TOP_N", "200"))
+    OI_BATCH_CHUNK_SIZE: int = int(os.getenv("OI_BATCH_CHUNK_SIZE", "100"))
+
+    # Pre-market watchlist schedule (IST, HH:MM)
+    PREMKET_ENABLED: bool = os.getenv("PREMKET_ENABLED", "true").lower() in ("1", "true", "yes")
+    PREMKET_RUN_TIME: str = os.getenv("PREMKET_RUN_TIME", "09:00")
+    PREMKET_TOP_N: int = int(os.getenv("PREMKET_TOP_N", "10"))
+
 settings = Settings()

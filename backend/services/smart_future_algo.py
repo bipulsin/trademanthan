@@ -10,7 +10,8 @@ Consolidates all scan algorithm schedulers into a single controller:
 - Final reconciliation (3:45 PM & 4:00 PM): broker buy/sell/PnL sync; time_based → Exit-TM after 3:15 PM exits
 - Fin sentiment (weekdays 9:17–13:17 IST, 15 min): NSE corporate announcements + FinBERT for arbitrage_master, store in stock_fin_sentiment (NSE date window: last-run→now; 09:17 only uses today IST)
 - Smart Futures CMS picker (weekdays 9:15, 9:30, then 10:00–15:00 every 30 min IST): arbitrage_master current-month futures → smart_futures_daily
-- Pre-market F&O watchlist (weekdays 9:14 IST): top 200 equities from arbitrage_master by OBV slope + gap + range position → Top 10 in premarket_watchlist table for dashboard
+- Pre-market F&O watchlist (weekdays, configurable PREMKET_RUN_TIME IST): top 200 equities → Top N in premarket_watchlist
+- Live OI heatmap (weekdays, OI_REFRESH_INTERVAL): Upstox batch quotes → oi_heatmap cache + DB
 
 Interval-driven jobs only run real work between 08:30 and 21:00 IST (see scheduler_window).
 Exception: 8:10 AM Telegram ping (before 8:30).
@@ -26,6 +27,7 @@ import threading
 import requests
 from pathlib import Path
 from datetime import datetime, time as dt_time
+from typing import Tuple
 import pytz
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -87,6 +89,18 @@ from backend.services.smart_futures_picker.job import run_smart_futures_picker_j
 from backend.services.premarket_watchlist_job import run_premarket_watchlist_job
 from backend.services.scheduler_window import is_allowed_scheduler_window_ist
 from backend.services.telegram_trade_channel import send_trade_with_cto_channel_message
+from backend.config import settings
+
+
+def _parse_hh_mm(s: str) -> Tuple[int, int]:
+    """IST clock time from ``HH:MM`` (e.g. PREMKET_RUN_TIME)."""
+    try:
+        parts = (s or "09:00").strip().split(":")
+        h = int(parts[0])
+        m = int(parts[1]) if len(parts) > 1 else 0
+        return max(0, min(23, h)), max(0, min(59, m))
+    except Exception:
+        return 9, 0
 
 
 def run_morning_trade_channel_health_ping() -> None:
@@ -117,6 +131,7 @@ job_loggers = [
     logging.getLogger('backend.services.fin_sentiment_job'),
     logging.getLogger('backend.services.smart_futures_picker.job'),
     logging.getLogger('backend.services.premarket_watchlist_job'),
+    logging.getLogger('backend.services.oi_heatmap'),
     logging.getLogger('backend.services.fin_sentiment_reason_openai'),
     logging.getLogger('backend.services.nse_corporate_client'),
 ]
@@ -677,15 +692,19 @@ class SmartFutureAlgoScheduler:
                 len(fin_sentiment_times),
             )
 
-            # Pre-market F&O Top 10 watchlist — 9:14 IST (before 9:15 cash open pickers)
+            # Pre-market F&O Top N watchlist — configurable IST (default 9:00), before cash open pickers
+            pm_h, pm_m = _parse_hh_mm(getattr(settings, "PREMKET_RUN_TIME", "09:00"))
+
             def run_premarket_watchlist_scheduled():
+                if not getattr(settings, "PREMKET_ENABLED", True):
+                    return
                 if not is_allowed_scheduler_window_ist():
                     logger.debug("Outside 08:30–21:00 IST — skip Pre-market watchlist")
                     return
                 ist = pytz.timezone("Asia/Kolkata")
                 if datetime.now(ist).weekday() >= 5:
                     return
-                logger.info("🔧 Pre-market F&O watchlist job (Top 200 → Top 10)...")
+                logger.info("🔧 Pre-market F&O watchlist job (Top 200 → Top %s)...", getattr(settings, "PREMKET_TOP_N", 10))
                 try:
                     out = run_premarket_watchlist_job()
                     logger.info(
@@ -695,17 +714,53 @@ class SmartFutureAlgoScheduler:
                 except Exception as e:
                     logger.error("❌ Pre-market watchlist failed: %s", e, exc_info=True)
 
+            if getattr(settings, "PREMKET_ENABLED", True):
+                self.scheduler.add_job(
+                    run_premarket_watchlist_scheduled,
+                    trigger=CronTrigger(day_of_week="mon-fri", hour=pm_h, minute=pm_m, timezone="Asia/Kolkata"),
+                    id="smart_future_premarket_watchlist",
+                    name="Pre-market F&O watchlist (config IST)",
+                    replace_existing=True,
+                    max_instances=1,
+                    misfire_grace_time=600,
+                    coalesce=True,
+                )
+                logger.info(
+                    "✅ Scheduled: Pre-market F&O watchlist (%02d:%02d IST, Mon–Fri)",
+                    pm_h,
+                    pm_m,
+                )
+            else:
+                logger.info("⏭️ Pre-market watchlist not scheduled (PREMKET_ENABLED=false)")
+
+            # Live OI heatmap (Top ~200 stock FUT) — Upstox batch quotes, interval from config
+            def run_oi_heatmap_tick():
+                if not getattr(settings, "UPSTOX_OI_ENABLED", True):
+                    return
+                if not is_allowed_scheduler_window_ist():
+                    return
+                ist = pytz.timezone("Asia/Kolkata")
+                if datetime.now(ist).weekday() >= 5:
+                    return
+                try:
+                    from backend.services.oi_heatmap import refresh_oi_heatmap_live
+
+                    refresh_oi_heatmap_live()
+                except Exception as e:
+                    logger.error("❌ OI heatmap refresh failed: %s", e, exc_info=True)
+
+            _oi_sec = max(30, int(getattr(settings, "OI_REFRESH_INTERVAL", 60)))
             self.scheduler.add_job(
-                run_premarket_watchlist_scheduled,
-                trigger=CronTrigger(day_of_week="mon-fri", hour=9, minute=14, timezone="Asia/Kolkata"),
-                id="smart_future_premarket_watchlist",
-                name="Pre-market F&O watchlist (9:14 IST)",
+                run_oi_heatmap_tick,
+                trigger=IntervalTrigger(seconds=_oi_sec, timezone="Asia/Kolkata"),
+                id="smart_future_oi_heatmap_live",
+                name="OI heatmap live (Upstox)",
                 replace_existing=True,
                 max_instances=1,
-                misfire_grace_time=600,
+                misfire_grace_time=max(60, _oi_sec),
                 coalesce=True,
             )
-            logger.info("✅ Scheduled: Pre-market F&O watchlist (9:14 IST, Mon–Fri)")
+            logger.info("✅ Scheduled: OI heatmap refresh every %ss (weekdays, scheduler window)", _oi_sec)
 
             # Smart Futures picker — 9:15 (first bar after cash open), 9:30, then 10:00–15:00 every 30 min (weekdays)
             _sf_picker_slots = [(9, 15), (9, 30)]

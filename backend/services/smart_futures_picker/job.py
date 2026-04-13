@@ -50,6 +50,8 @@ from backend.services.smart_futures_config import (
     TIME_FILTER_ENABLED,
     TRADE_WINDOWS,
     cms_weights_active,
+    CMS_PRIORITY_FILTER_ENABLED,
+    CMS_PRIORITY_OI_MOVER_MAX_RANK,
 )
 # Index NIFTY/BANKNIFTY alignment was optional; disabled — see run_smart_futures_picker_job.
 from backend.services.smart_futures_picker.indicators import (
@@ -385,6 +387,8 @@ class ScoredPick:
     oi_signal: str = ""
     oi_gate_passed: Optional[bool] = None
     oi_gate_reason: str = ""
+    premkt_rank: Optional[int] = None
+    oi_heat_rank: Optional[int] = None
     calculated_lots: Optional[int] = None
     stop_loss_price: Optional[float] = None
     tier_sizing_mult: float = 1.0
@@ -631,6 +635,41 @@ def _score_symbol_outcome(
     else:
         sig_tier, tier_mult = _tier_short(final_cms)
 
+    premkt_r: Optional[int] = None
+    oi_heat_r: Optional[int] = None
+    try:
+        from backend.services.oi_heatmap import oi_heat_rank_for_underlying, premkt_rank_for_stock
+
+        premkt_r = premkt_rank_for_stock(stock, session_date)
+        oi_heat_r = oi_heat_rank_for_underlying(stock)
+    except Exception:
+        pass
+
+    if CMS_PRIORITY_FILTER_ENABLED:
+        top_n = int(getattr(settings, "PREMKET_TOP_N", 10))
+        in_premkt = premkt_r is not None and 1 <= premkt_r <= top_n
+        in_oi = oi_heat_r is not None and 1 <= oi_heat_r <= int(CMS_PRIORITY_OI_MOVER_MAX_RANK)
+        if not in_premkt and not in_oi:
+            _log_sf_event(
+                {
+                    "symbol": stock,
+                    "action": "BLOCKED",
+                    "block_reason": "priority_filter: not in premarket top %s or OI movers top %s"
+                    % (top_n, CMS_PRIORITY_OI_MOVER_MAX_RANK),
+                    "premkt_rank": premkt_r,
+                    "oi_heat_rank": oi_heat_r,
+                }
+            )
+            return _fail(
+                "priority_filter",
+                reject_note="Not in premarket watchlist or top OI movers",
+                final_cms=float(final_cms),
+                cms=float(cms),
+                volume_surge=float(vs),
+                sector_score=float(sector_score),
+                combined_sentiment=float(comb),
+            )
+
     oi_val: Optional[int] = None
     oi_chg: Optional[int] = None
     oi_sig = ""
@@ -642,7 +681,16 @@ def _score_symbol_outcome(
                 _oi_fetcher_singleton = NSEOIFetcher()
             except Exception:
                 _oi_fetcher_singleton = None
-        oq = get_cached_oi_quote(stock, _oi_fetcher_singleton)
+        oq = None
+        if getattr(settings, "UPSTOX_OI_ENABLED", True):
+            try:
+                from backend.services.oi_heatmap import try_oiquote_from_heatmap_for_gate
+
+                oq = try_oiquote_from_heatmap_for_gate(stock)
+            except Exception:
+                oq = None
+        if oq is None:
+            oq = get_cached_oi_quote(stock, _oi_fetcher_singleton)
         if oq is None:
             oi_gate_passed = None
             oi_gate_reason = "OI unavailable"
@@ -716,6 +764,8 @@ def _score_symbol_outcome(
         oi_signal=oi_sig,
         oi_gate_passed=oi_gate_passed,
         oi_gate_reason=oi_gate_reason,
+        premkt_rank=premkt_r,
+        oi_heat_rank=oi_heat_r,
     )
     _log_sf_event(
         {
@@ -892,6 +942,8 @@ def _persist_pick(
         "cms_score_raw": float(pick.cms),
         "cms_final": float(pick.final_cms),
         "reentry_apply": bool(reentry_flag),
+        "premkt_rank": pick.premkt_rank,
+        "oi_heat_rank": pick.oi_heat_rank,
     }
 
     ex = db.execute(
@@ -953,6 +1005,8 @@ def _persist_pick(
                     ema_slope_norm = :ema_slope_norm,
                     cms_score_raw = :cms_score_raw,
                     cms_final = :cms_final,
+                    premkt_rank = :premkt_rank,
+                    oi_heat_rank = :oi_heat_rank,
                     reentry_consumed = CASE WHEN :reentry_apply THEN TRUE ELSE reentry_consumed END,
                     order_status = CASE WHEN :reentry_apply THEN NULL ELSE order_status END,
                     buy_price = CASE WHEN :reentry_apply THEN NULL ELSE buy_price END,
@@ -979,7 +1033,8 @@ def _persist_pick(
                     stop_loss_price, stop_stage, current_stop_price,
                     time_filter_passed, regime_filter_passed, regime_filter_reason,
                     oi_value, oi_change, oi_signal, oi_gate_passed, oi_gate_reason,
-                    ema_slope_norm, cms_score_raw, cms_final, reentry_consumed
+                    ema_slope_norm, cms_score_raw, cms_final, reentry_consumed,
+                    premkt_rank, oi_heat_rank
                 ) VALUES (
                     :session_date, :stock, :fut_symbol, :fut_instrument_key, :side,
                     :obv_slope, :volume_surge, :adx_14, :atr_14, :atr5_14_ratio,
@@ -991,7 +1046,8 @@ def _persist_pick(
                     :stop_loss_price, :stop_stage, :current_stop_price,
                     :time_filter_passed, :regime_filter_passed, :regime_filter_reason,
                     :oi_value, :oi_change, :oi_signal, :oi_gate_passed, :oi_gate_reason,
-                    :ema_slope_norm, :cms_score_raw, :cms_final, FALSE
+                    :ema_slope_norm, :cms_score_raw, :cms_final, FALSE,
+                    :premkt_rank, :oi_heat_rank
                 )
                 """
             ),
