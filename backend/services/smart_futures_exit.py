@@ -11,8 +11,15 @@ from typing import Any, List, Optional, Sequence, Tuple
 
 import pytz
 
+from backend.services.smart_futures_config import (
+    ADX_LENGTH,
+    TRAIL_LOCK_ATR_MULT,
+    TRAIL_STAGE1_ATR_MULT,
+    TRAIL_STAGE2_ATR_MULT,
+    TRAILING_STOP_ENABLED,
+)
 from backend.services.smart_futures_picker.indicators import (
-    adx_14_last_two,
+    adx_last_two,
     divergence_bundle,
     session_vwap,
     wilder_atr,
@@ -163,8 +170,55 @@ def exit_evaluation_from_m5_dicts(
     vwap = session_vwap(highs, lows, closes, vols)
     atr14 = wilder_atr_14(highs, lows, closes)
     atr5 = wilder_atr(highs, lows, closes, 5)
-    adx_c, adx_p = adx_14_last_two(highs, lows, closes)
+    adx_c, adx_p = adx_last_two(highs, lows, closes, ADX_LENGTH)
     md, rd, sd = divergence_bundle(highs, lows, closes)
     return should_exit_position(
         side, highs, lows, closes, vwap, adx_c, adx_p, atr5, atr14, md, rd, sd
     )
+
+
+def compute_trailing_stop_levels(
+    side: str,
+    entry_price: float,
+    last_close: float,
+    atr14: float,
+    lot_size: int,
+    *,
+    current_stop_price: Optional[float] = None,
+    stop_stage: Optional[str] = None,
+) -> Tuple[float, str]:
+    """
+    Stage 1: PnL >= TRAIL_STAGE1_ATR_MULT * ATR * lot → stop at entry (breakeven).
+    Stage 2: PnL >= TRAIL_STAGE2_ATR_MULT * ATR * lot → trail 1 ATR from entry (favorable side).
+    Never loosen stop (only move in favor).
+    """
+    if not TRAILING_STOP_ENABLED or atr14 <= 0 or lot_size <= 0 or entry_price <= 0:
+        return (
+            float(current_stop_price or entry_price),
+            str(stop_stage or "INITIAL"),
+        )
+    sd = str(side or "").strip().upper()
+    pnl_r = (last_close - entry_price) * lot_size if sd == "LONG" else (entry_price - last_close) * lot_size
+    s1 = float(TRAIL_STAGE1_ATR_MULT) * float(atr14) * float(lot_size)
+    s2 = float(TRAIL_STAGE2_ATR_MULT) * float(atr14) * float(lot_size)
+    lock = float(TRAIL_LOCK_ATR_MULT) * float(atr14)
+
+    cur = float(current_stop_price) if current_stop_price is not None else (
+        entry_price - 1.2 * atr14 if sd == "LONG" else entry_price + 1.2 * atr14
+    )
+    stage = str(stop_stage or "INITIAL")
+
+    if pnl_r >= s2:
+        if sd == "LONG":
+            new_stop = max(cur, entry_price + lock, entry_price)
+        else:
+            new_stop = min(cur, entry_price - lock, entry_price)
+        return new_stop, "TRAILING"
+    if pnl_r >= s1:
+        new_stop = entry_price
+        if sd == "LONG":
+            new_stop = max(cur, entry_price)
+        else:
+            new_stop = min(cur, entry_price)
+        return new_stop, "BREAKEVEN"
+    return cur, stage

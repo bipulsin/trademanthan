@@ -1,10 +1,13 @@
 """
-Indicators for Smart Futures CMS v2: OBV slope, Wilder ATR(5/14), ADX(14), VWAP, volume surge,
-Renko-style momentum, HA trend, and oscillator divergences (divergences used for exit signals only).
+Indicators for Smart Futures CMS v2: OBV slope, Wilder ATR(5/14), configurable ADX length, VWAP,
+volume surge, Renko momentum, HA trend, EMA spread slope, and oscillator divergences
+(divergences used for exit / alerts only — not in CMS sum).
 """
 from __future__ import annotations
 
-from typing import List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
+
+from backend.services.smart_futures_config import ADX_SLOW_LENGTH, cms_weights_active
 
 # --- OBV slope (exact user spec, linregress slope only) ---
 
@@ -111,23 +114,31 @@ def volume_surge_ratio(
     return cum / max(1e-6, exp)
 
 
-# --- ADX(14) via pandas_ta (Wilder-compatible) ---
+# --- ADX via pandas_ta (Wilder-compatible); length from config ---
 
 
-def adx_14_value(highs: Sequence[float], lows: Sequence[float], closes: Sequence[float]) -> Optional[float]:
+def _adx_column_name(adx_df, length: int) -> Optional[str]:
+    for candidate in (f"ADX_{length}", f"ADX_{int(length)}"):
+        if candidate in adx_df.columns:
+            return candidate
+    return next((c for c in adx_df.columns if str(c).upper().startswith("ADX")), None)
+
+
+def adx_value(
+    highs: Sequence[float], lows: Sequence[float], closes: Sequence[float], length: int
+) -> Optional[float]:
     try:
         import pandas as pd
         import pandas_ta as ta
 
-        if len(closes) < 30:
+        need = max(30, length + 20)
+        if len(closes) < need:
             return None
         df = pd.DataFrame({"high": list(highs), "low": list(lows), "close": list(closes)})
-        adx_df = ta.adx(df["high"], df["low"], df["close"], length=14)
+        adx_df = ta.adx(df["high"], df["low"], df["close"], length=int(length))
         if adx_df is None or adx_df.empty:
             return None
-        col = "ADX_14" if "ADX_14" in adx_df.columns else next(
-            (c for c in adx_df.columns if str(c).upper().startswith("ADX")), None
-        )
+        col = _adx_column_name(adx_df, int(length))
         if not col:
             return None
         v = adx_df[col].iloc[-1]
@@ -139,6 +150,11 @@ def adx_14_value(highs: Sequence[float], lows: Sequence[float], closes: Sequence
         return float(v)
     except Exception:
         return None
+
+
+def adx_14_value(highs: Sequence[float], lows: Sequence[float], closes: Sequence[float]) -> Optional[float]:
+    """Backward-compatible: ADX at slow reference length (default 14)."""
+    return adx_value(highs, lows, closes, ADX_SLOW_LENGTH)
 
 
 # --- Renko momentum (brick = ATR/10 on 5m closes), HA trend, div proxies ---
@@ -263,21 +279,22 @@ def divergence_bundle(
     return md, rd, sd
 
 
-def adx_14_last_two(highs: Sequence[float], lows: Sequence[float], closes: Sequence[float]) -> Tuple[Optional[float], Optional[float]]:
-    """Latest ADX(14) and previous bar ADX, or (None, None) if unavailable."""
+def adx_last_two(
+    highs: Sequence[float], lows: Sequence[float], closes: Sequence[float], length: int
+) -> Tuple[Optional[float], Optional[float]]:
+    """Latest ADX(length) and previous bar ADX, or (None, None) if unavailable."""
     try:
         import pandas as pd
         import pandas_ta as ta
 
-        if len(closes) < 32:
+        need = max(32, int(length) + 20)
+        if len(closes) < need:
             return None, None
         df = pd.DataFrame({"high": list(highs), "low": list(lows), "close": list(closes)})
-        adx_df = ta.adx(df["high"], df["low"], df["close"], length=14)
+        adx_df = ta.adx(df["high"], df["low"], df["close"], length=int(length))
         if adx_df is None or adx_df.empty:
             return None, None
-        col = "ADX_14" if "ADX_14" in adx_df.columns else next(
-            (c for c in adx_df.columns if str(c).upper().startswith("ADX")), None
-        )
+        col = _adx_column_name(adx_df, int(length))
         if not col:
             return None, None
         series = adx_df[col].dropna()
@@ -288,16 +305,23 @@ def adx_14_last_two(highs: Sequence[float], lows: Sequence[float], closes: Seque
         return None, None
 
 
+def adx_14_last_two(highs: Sequence[float], lows: Sequence[float], closes: Sequence[float]) -> Tuple[Optional[float], Optional[float]]:
+    """Backward-compatible: last two ADX values at ADX_SLOW_LENGTH (14)."""
+    return adx_last_two(highs, lows, closes, ADX_SLOW_LENGTH)
+
+
 def market_regime_ok(
     atr5: float,
     atr14: float,
     adx: float,
     adx_prev: Optional[float],
+    *,
+    adx_threshold: float,
 ) -> bool:
     """Layer 1: trending regime (mandatory for new CMS pipeline)."""
     if adx_prev is None:
         return False
-    return atr5 > atr14 and adx > 20.0 and adx > adx_prev
+    return atr5 > atr14 and adx > float(adx_threshold) and adx > adx_prev
 
 
 def volume_surge_norm_01(volume_surge_ratio_val: float) -> float:
@@ -310,6 +334,46 @@ def vwap_deviation_atr_norm(close: float, vwap: float, atr14: float) -> float:
     if atr14 <= 0:
         return 0.0
     return max(-2.0, min(2.0, (float(close) - float(vwap)) / float(atr14)))
+
+
+def ema_spread_series(closes: Sequence[float], fast: int = 5, slow: int = 13) -> List[float]:
+    """EMA(fast) − EMA(slow) at each bar (simple sequential EMA on full series)."""
+    n = len(closes)
+    out = [0.0] * n
+    if n < slow + 2:
+        return out
+
+    def ema_series(series: Sequence[float], span: int) -> List[float]:
+        k = 2.0 / (float(span) + 1.0)
+        acc = [float(series[0])]
+        for i in range(1, len(series)):
+            acc.append(float(series[i]) * k + acc[-1] * (1.0 - k))
+        return acc
+
+    ef = ema_series(closes, fast)
+    es = ema_series(closes, slow)
+    for i in range(n):
+        out[i] = ef[i] - es[i]
+    return out
+
+
+def ema_slope_norm_m5(closes: Sequence[float], norm_window: int = 50) -> float:
+    """
+    EMA_spread = EMA(5) − EMA(13); normalize latest spread to [-1, 1] using rolling min/max
+    over the last ``norm_window`` spreads (same bar count as closes).
+    """
+    if len(closes) < 20:
+        return 0.0
+    spreads = ema_spread_series(closes, 5, 13)
+    w = min(norm_window, len(spreads))
+    seg = spreads[-w:]
+    lo = min(seg)
+    hi = max(seg)
+    cur = seg[-1]
+    if hi - lo <= 1e-12:
+        return 0.0
+    u = 2.0 * (cur - lo) / (hi - lo) - 1.0
+    return max(-1.0, min(1.0, float(u)))
 
 
 def breakout_volume_spike(highs: Sequence[float], lows: Sequence[float], closes: Sequence[float], vs: float) -> bool:
@@ -328,18 +392,27 @@ def compute_cms_score_weighted(
     vwap_deviation: float,
     renko_momentum_norm: float,
     ha_trend_norm: float,
+    ema_slope_norm: float,
     breakout_boost: bool,
+    *,
+    oi_score_norm: float = 0.0,
+    weights: Optional[Dict[str, float]] = None,
 ) -> float:
     """
-    Layer 2: weighted normalized CMS (no raw cross-terms, no divergences).
+    Layer 2: weighted normalized CMS (no divergences). Weights from ``cms_weights_active()`` by default.
     """
+    w = weights if weights is not None else cms_weights_active()
     s = (
-        0.25 * float(obv_slope_norm)
-        + 0.20 * float(volume_surge_norm)
-        + 0.20 * float(vwap_deviation)
-        + 0.15 * float(renko_momentum_norm)
-        + 0.20 * float(ha_trend_norm)
+        float(w.get("obv_slope", 0.0)) * float(obv_slope_norm)
+        + float(w.get("volume_surge", 0.0)) * float(volume_surge_norm)
+        + float(w.get("vwap_dev", 0.0)) * float(vwap_deviation)
+        + float(w.get("renko_mom", 0.0)) * float(renko_momentum_norm)
+        + float(w.get("ha_trend", 0.0)) * float(ha_trend_norm)
+        + float(w.get("ema_slope", 0.0)) * float(ema_slope_norm)
     )
+    oi_w = float(w.get("oi_score", 0.0))
+    if oi_w > 0.0:
+        s += oi_w * float(oi_score_norm)
     if breakout_boost:
         s += 0.1
     return float(s)
@@ -355,19 +428,17 @@ def compute_cms_final_multiplier(cms_score: float, atr5: float, atr14: float, ad
 def compute_cms_core(
     obv_slope: float,
     volume_surge: float,
-    adx_14: float,
     close_vwap_atr: float,
     renko_momentum: float,
     ha_trend: float,
-    macd_div: float,
-    rsi_div: float,
-    stoch_div: float,
+    ema_slope: float,
     *,
     breakout_boost: bool = False,
+    oi_score_norm: float = 0.0,
+    weights: Optional[Dict[str, float]] = None,
 ) -> float:
     """
-    Normalized CMS **score** (Layer 2). ``macd_div`` / ``rsi_div`` / ``stoch_div`` are ignored
-    for entry (reserved for exit / reversal). ``adx_14`` kept for call-site compatibility.
+    Normalized CMS **score** (Layer 2). Divergences are not inputs — use ``divergence_bundle`` only in exit logic.
 
     ``close_vwap_atr`` may be a wider clip from the caller; VWAP term is re-clipped to [-2, 2] internally
     when used as deviation — callers should pass (close−VWAP)/ATR.
@@ -377,4 +448,15 @@ def compute_cms_core(
     vd = max(-2.0, min(2.0, float(close_vwap_atr)))
     rm_n = max(-1.0, min(1.0, float(renko_momentum)))
     ha_n = max(-1.0, min(1.0, float(ha_trend)))
-    return compute_cms_score_weighted(obv_n, vs_n, vd, rm_n, ha_n, breakout_boost)
+    ema_n = max(-1.0, min(1.0, float(ema_slope)))
+    return compute_cms_score_weighted(
+        obv_n,
+        vs_n,
+        vd,
+        rm_n,
+        ha_n,
+        ema_n,
+        breakout_boost,
+        oi_score_norm=oi_score_norm,
+        weights=weights,
+    )

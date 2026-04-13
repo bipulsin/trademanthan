@@ -24,9 +24,12 @@ from backend.database import get_db
 from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
 from backend.services.smart_futures_exit import (
+    compute_trailing_stop_levels,
     exit_evaluation_from_m5_dicts,
     m5_bars_for_session,
 )
+from backend.services.smart_futures_picker.indicators import wilder_atr_14
+from backend.services.smart_futures_picker.position_sizing import get_futures_lot_size_by_instrument_key
 from backend.services.smart_futures_session_date import effective_session_date_ist_for_trend
 from backend.services.smart_futures_session_utils import compute_atr5_14_ratio_for_session
 from backend.services.upstox_service import UpstoxService
@@ -120,7 +123,9 @@ _SQL_DAILY_FULL = """
                 SELECT id, fut_symbol, fut_instrument_key, side, final_cms, sector_score, combined_sentiment,
                        entry_price, sl_price, target_price, trend_continuation, entry_at,
                        order_status, buy_price, sell_price, sell_time, hold_type, session_date, scan_trigger,
-                       cms, atr5_14_ratio
+                       cms, atr5_14_ratio,
+                       signal_tier, tier_multiplier, calculated_lots, stop_stage, current_stop_price,
+                       oi_signal, oi_gate_passed, time_filter_passed, regime_filter_passed, ema_slope_norm
                 FROM smart_futures_daily
                 WHERE session_date = :sd
                 ORDER BY entry_at DESC NULLS LAST, id DESC
@@ -158,6 +163,26 @@ def _fetch_daily_for_session(db: Session, sd: Any) -> List[Any]:
     try:
         return db.execute(text(_SQL_DAILY_FULL), {"sd": sd}).mappings().all()
     except Exception as e:
+        if _missing_db_column_error(e, "signal_tier") or _missing_db_column_error(e, "ema_slope_norm"):
+            logger.warning("smart_futures /daily: extended columns missing, using legacy query: %s", e)
+            try:
+                return db.execute(
+                    text(
+                        """
+                SELECT id, fut_symbol, fut_instrument_key, side, final_cms, sector_score, combined_sentiment,
+                       entry_price, sl_price, target_price, trend_continuation, entry_at,
+                       order_status, buy_price, sell_price, sell_time, hold_type, session_date, scan_trigger,
+                       cms, atr5_14_ratio
+                FROM smart_futures_daily
+                WHERE session_date = :sd
+                ORDER BY entry_at DESC NULLS LAST, id DESC
+                        """
+                    ),
+                    {"sd": sd},
+                ).mappings().all()
+            except Exception as e2:
+                logger.warning("smart_futures /daily: legacy query failed: %s", e2)
+                raise e2
         if _missing_db_column_error(e, "hold_type"):
             logger.warning("smart_futures /daily: hold_type missing, query without it: %s", e)
             return db.execute(text(_SQL_DAILY_NO_HOLD_TYPE), {"sd": sd}).mappings().all()
@@ -208,6 +233,9 @@ def _row_to_dict(r: Any) -> Dict[str, Any]:
         "buy_price",
         "sell_price",
         "atr5_14_ratio",
+        "tier_multiplier",
+        "ema_slope_norm",
+        "current_stop_price",
     ):
         v = out.get(k)
         if v is not None:
@@ -305,6 +333,68 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
                 r["exit_reason"] = reason or ""
             except Exception as ex:
                 logger.debug("smart_futures exit hint id=%s: %s", r.get("id"), ex)
+
+        # Trailing stop (breakeven / trail) for bought rows — persists current_stop_price + stop_stage.
+        for r in serialized:
+            if str(r.get("order_status") or "").strip().lower() != "bought":
+                continue
+            ikey2 = str(r.get("fut_instrument_key") or "").strip()
+            if not ikey2:
+                continue
+            rid2 = r.get("id")
+            try:
+                raw2 = us_exit.get_historical_candles_by_instrument_key(
+                    ikey2, interval="minutes/5", days_back=5, range_end_date=sd
+                )
+                m5b = m5_bars_for_session(raw2, sd)
+                if len(m5b) < 15:
+                    continue
+                highs2 = [float(b["high"]) for b in m5b]
+                lows2 = [float(b["low"]) for b in m5b]
+                closes2 = [float(b["close"]) for b in m5b]
+                atr14 = wilder_atr_14(highs2, lows2, closes2)
+                if atr14 is None or atr14 <= 0:
+                    continue
+                lot = max(1, get_futures_lot_size_by_instrument_key(ikey2))
+                entry_px = float(r.get("buy_price") or r.get("entry_price") or 0)
+                if entry_px <= 0:
+                    continue
+                lc = float(closes2[-1])
+                cur_stop = r.get("current_stop_price")
+                cur_stop_f = float(cur_stop) if cur_stop is not None else None
+                stg = str(r.get("stop_stage") or "") or None
+                ns, nstage = compute_trailing_stop_levels(
+                    str(r.get("side") or ""),
+                    entry_px,
+                    lc,
+                    float(atr14),
+                    int(lot),
+                    current_stop_price=cur_stop_f,
+                    stop_stage=stg,
+                )
+                if nstage != (stg or "INITIAL") or (
+                    cur_stop_f is not None and abs(ns - cur_stop_f) > 1e-6
+                ) or cur_stop_f is None:
+                    db.execute(
+                        text(
+                            """
+                            UPDATE smart_futures_daily
+                            SET current_stop_price = :csp, stop_stage = :stg, updated_at = CURRENT_TIMESTAMP
+                            WHERE id = :id AND session_date = :sd
+                            """
+                        ),
+                        {
+                            "id": int(rid2),
+                            "sd": sd,
+                            "csp": float(ns),
+                            "stg": nstage,
+                        },
+                    )
+                    db.commit()
+                r["current_stop_price"] = float(ns)
+                r["stop_stage"] = nstage
+            except Exception as tex:
+                logger.debug("smart_futures trail id=%s: %s", r.get("id"), tex)
 
     for r in serialized:
         if str(r.get("order_status") or "").strip().lower() != "bought":

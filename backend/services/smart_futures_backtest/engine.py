@@ -25,13 +25,20 @@ from backend.services.smart_futures_backtest.retry import call_with_retries
 from backend.services.smart_futures_backtest.sector_asof import sector_score_as_of
 from backend.services.smart_futures_backtest.sentiment import load_sentiment_map_for_session_date
 from backend.services.smart_futures_exit import index_session_long_short_flags
+from backend.services.smart_futures_config import (
+    ADX_LENGTH,
+    ADX_THRESHOLD,
+    NEUTRAL_BAND,
+    TIER2_THRESHOLD,
+)
 from backend.services.smart_futures_picker.indicators import (
-    adx_14_last_two,
+    adx_last_two,
     breakout_volume_spike,
     compute_cms_core,
     compute_cms_final_multiplier,
     compute_obv_slope_daily,
     divergence_bundle,
+    ema_slope_norm_m5,
     ha_trend_score,
     market_regime_ok,
     renko_momentum_score,
@@ -42,7 +49,6 @@ from backend.services.smart_futures_picker.indicators import (
     wilder_atr_14,
 )
 from backend.services.smart_futures_picker.job import (
-    CMS_FINAL_ENTRY_THRESHOLD,
     SECTOR_ALIGN_MIN,
     ScoredPick,
     _ist_date_from_ts,
@@ -213,10 +219,12 @@ def score_symbol_backtest(
     if atr5 is None or atr5 <= 0:
         return None
     atr5_14_ratio = float(atr5) / float(atr)
-    adx_curr, adx_prev = adx_14_last_two(highs, lows, closes)
+    adx_curr, adx_prev = adx_last_two(highs, lows, closes, ADX_LENGTH)
     if adx_curr is None:
         return None
-    if not market_regime_ok(float(atr5), float(atr), float(adx_curr), adx_prev):
+    if not market_regime_ok(
+        float(atr5), float(atr), float(adx_curr), adx_prev, adx_threshold=ADX_THRESHOLD
+    ):
         return None
 
     vwap = session_vwap(highs, lows, closes, vols)
@@ -232,10 +240,11 @@ def score_symbol_backtest(
     rm = renko_momentum_score(closes, brick)
     ha = ha_trend_score(opens, highs, lows, closes)
     md, rd, sd = divergence_bundle(highs, lows, closes)
+    ema_n = ema_slope_norm_m5(closes)
 
     boost = breakout_volume_spike(highs, lows, closes, vs)
     cms = compute_cms_core(
-        obv_slope, vs, float(adx_curr), vwap_dev, rm, ha, md, rd, sd, breakout_boost=boost
+        obv_slope, vs, vwap_dev, rm, ha, ema_n, breakout_boost=boost
     )
     final_cms = compute_cms_final_multiplier(cms, float(atr5), float(atr), float(adx_curr))
 
@@ -252,15 +261,18 @@ def score_symbol_backtest(
     else:
         comb = 0.0
 
-    th = CMS_FINAL_ENTRY_THRESHOLD
+    if abs(float(final_cms)) < float(NEUTRAL_BAND):
+        return None
+
+    th = float(TIER2_THRESHOLD)
     long_ok = (
-        final_cms > th
+        final_cms >= th
         and last_close > vwap
         and sector_score > SECTOR_ALIGN_MIN
         and index_long_ok
     )
     short_ok = (
-        final_cms < -th
+        final_cms <= -th
         and last_close < vwap
         and sector_score < -SECTOR_ALIGN_MIN
         and index_short_ok

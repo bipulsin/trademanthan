@@ -456,6 +456,33 @@ def _run_startup_schema_migrations(db_engine):
                     )
                     print("Applied migration: added smart_futures_daily.sell_time")
 
+                _sfd_new = [
+                    ("signal_tier", "TEXT"),
+                    ("tier_multiplier", "DOUBLE PRECISION"),
+                    ("sizing_tier_mult", "DOUBLE PRECISION"),
+                    ("calculated_lots", "INTEGER"),
+                    ("stop_loss_price", "DOUBLE PRECISION"),
+                    ("stop_stage", "TEXT"),
+                    ("current_stop_price", "DOUBLE PRECISION"),
+                    ("time_filter_passed", "BOOLEAN"),
+                    ("regime_filter_passed", "BOOLEAN"),
+                    ("regime_filter_reason", "TEXT"),
+                    ("oi_value", "INTEGER"),
+                    ("oi_change", "INTEGER"),
+                    ("oi_signal", "TEXT"),
+                    ("oi_gate_passed", "BOOLEAN"),
+                    ("oi_gate_reason", "TEXT"),
+                    ("ema_slope_norm", "DOUBLE PRECISION"),
+                    ("cms_score_raw", "DOUBLE PRECISION"),
+                    ("cms_final", "DOUBLE PRECISION"),
+                    ("reentry_consumed", "BOOLEAN DEFAULT FALSE"),
+                ]
+                for colname, coltype in _sfd_new:
+                    if colname not in _sfd_cols:
+                        conn.execute(text(f"ALTER TABLE smart_futures_daily ADD COLUMN {colname} {coltype}"))
+                        print(f"Applied migration: added smart_futures_daily.{colname}")
+                        _sfd_cols.add(colname)
+
             # Smart Futures backtest results (separate from live smart_futures_daily)
             if "backtest_smart_future" not in table_names:
                 if db_engine.dialect.name == "postgresql":

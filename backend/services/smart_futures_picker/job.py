@@ -11,8 +11,8 @@ import logging
 import os
 from collections import Counter
 from dataclasses import dataclass
-from datetime import date, datetime
-from typing import Any, Dict, List, Optional
+from datetime import date, datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -23,15 +23,43 @@ from backend.config import settings
 from backend.database import SessionLocal
 from backend.services.smart_futures_session_date import effective_session_date_ist_for_trend
 from backend.services.smart_futures_session_utils import compute_atr5_14_ratio_for_session
+from backend.services.oi_integration import (
+    NSEOIFetcher,
+    get_cached_oi_quote,
+    oi_signal_from_quote,
+    normalized_oi_score_for_side,
+)
+from backend.services.smart_futures_config import (
+    ADX_LENGTH,
+    ADX_THRESHOLD,
+    CAPITAL,
+    CMS_FINAL_ENTRY_THRESHOLD,
+    MAX_OPEN_POSITIONS,
+    NEUTRAL_BAND,
+    OI_BLOCK_ON_CONFLICT,
+    OI_GATE_ENABLED,
+    OI_IN_CMS_ENABLED,
+    REENTRY_COOLDOWN_MINUTES,
+    REENTRY_ENABLED,
+    REENTRY_MAX_PER_SESSION,
+    REENTRY_NEUTRAL_RESET_THRESHOLD,
+    RISK_PCT,
+    SECTOR_ALIGN_MIN,
+    TIER1_THRESHOLD,
+    TIER2_THRESHOLD,
+    TIME_FILTER_ENABLED,
+    TRADE_WINDOWS,
+    cms_weights_active,
+)
 # Index NIFTY/BANKNIFTY alignment was optional; disabled — see run_smart_futures_picker_job.
 from backend.services.smart_futures_picker.indicators import (
-    adx_14_last_two,
-    adx_14_value,
+    adx_last_two,
     breakout_volume_spike,
     compute_cms_core,
     compute_cms_final_multiplier,
     compute_obv_slope_daily,
     divergence_bundle,
+    ema_slope_norm_m5,
     ha_trend_score,
     market_regime_ok,
     renko_momentum_score,
@@ -41,6 +69,10 @@ from backend.services.smart_futures_picker.indicators import (
     wilder_atr,
     wilder_atr_14,
 )
+from backend.services.smart_futures_picker.position_sizing import (
+    calculate_position_size,
+    get_futures_lot_size_by_instrument_key,
+)
 from backend.services.smart_futures_picker.sector_score import compute_sector_score_for_stock
 from backend.services.upstox_service import UpstoxService
 
@@ -48,12 +80,173 @@ logger = logging.getLogger(__name__)
 
 IST = pytz.timezone("Asia/Kolkata")
 INDIA_VIX_KEY = "NSE_INDEX|India VIX"
-# CMS v2: ``final_cms`` uses ATR/ADX multipliers — threshold on that scale.
-CMS_FINAL_ENTRY_THRESHOLD = 0.65
-SECTOR_ALIGN_MIN = 0.05  # sector index must agree with side by at least this magnitude
 SESSION_OPEN = (9, 15)
 SESSION_END = (15, 30)
 SESSION_MINUTES = 375.0  # 9:15–15:30
+
+# Re-entry / CMS trace (per process; reset from DB at job start)
+_reentry_track: Dict[str, Dict[str, Any]] = {}
+_oi_fetcher_singleton: Optional[NSEOIFetcher] = None
+
+
+def _log_sf_event(payload: Dict[str, Any]) -> None:
+    logger.info("smart_futures_signal %s", json.dumps(payload, default=str))
+
+
+def _reentry_rk(session_date: date, stock: str) -> str:
+    return f"{session_date.isoformat()}_{stock.strip().upper()}"
+
+
+def _bootstrap_reentry_track(db, session_date: date) -> None:
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT stock, sell_time, reentry_consumed
+                FROM smart_futures_daily
+                WHERE session_date = :sd
+                """
+            ),
+            {"sd": session_date},
+        ).fetchall()
+    except Exception as e:
+        logger.debug("reentry bootstrap: %s", e)
+        return
+    for stock, sell_time, rcons in rows:
+        if not stock:
+            continue
+        rk = _reentry_rk(session_date, str(stock))
+        st = _reentry_track.setdefault(rk, {})
+        if sell_time is not None and rcons:
+            st["consumed"] = True
+        if sell_time is not None:
+            try:
+                cu = sell_time + timedelta(minutes=int(REENTRY_COOLDOWN_MINUTES))
+                st["cooldown_until"] = cu
+            except Exception:
+                pass
+
+
+def _reentry_update_scan(stock: str, session_date: date, final_cms: Optional[float]) -> None:
+    if final_cms is None or not REENTRY_ENABLED:
+        return
+    rk = _reentry_rk(session_date, stock)
+    st = _reentry_track.setdefault(rk, {})
+    if abs(float(final_cms)) < float(REENTRY_NEUTRAL_RESET_THRESHOLD):
+        st["saw_below"] = True
+
+
+def _reentry_block_reason(
+    db,
+    stock: str,
+    session_date: date,
+    now_ist: datetime,
+    final_cms: float,
+) -> Optional[str]:
+    """If re-entry rules block a new pick for a symbol that already had a closed trade today, return reason."""
+    if not REENTRY_ENABLED:
+        return None
+    try:
+        row = db.execute(
+            text(
+                """
+                SELECT sell_time, reentry_consumed
+                FROM smart_futures_daily
+                WHERE session_date = :sd AND UPPER(TRIM(stock)) = :st
+                LIMIT 1
+                """
+            ),
+            {"sd": session_date, "st": stock.strip().upper()},
+        ).mappings().first()
+    except Exception as e:
+        logger.debug("reentry check: %s", e)
+        return None
+    if not row or row.get("sell_time") is None:
+        return None
+    if bool(row.get("reentry_consumed")):
+        return "BLOCKED: re-entry exhausted"
+    rk = _reentry_rk(session_date, stock)
+    st = _reentry_track.setdefault(rk, {})
+    cu = st.get("cooldown_until")
+    if cu is not None and now_ist < cu:
+        return "BLOCKED: Cooldown active"
+    if not st.get("saw_below"):
+        return "BLOCKED: neutral reset not confirmed"
+    return None
+
+
+def _count_open_smart_futures(db, session_date: date) -> int:
+    try:
+        r = db.execute(
+            text(
+                """
+                SELECT COUNT(*) FROM smart_futures_daily
+                WHERE session_date = :sd
+                  AND LOWER(TRIM(COALESCE(order_status, ''))) = 'bought'
+                  AND sell_time IS NULL
+                """
+            ),
+            {"sd": session_date},
+        ).scalar()
+        return int(r or 0)
+    except Exception:
+        return 0
+
+
+def _bar_end_ist_from_ts(ts: str) -> Optional[datetime]:
+    if not ts or len(ts) < 19:
+        return None
+    try:
+        return datetime.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=IST)
+    except ValueError:
+        return None
+
+
+def time_of_day_filter(ist_dt: datetime) -> Tuple[bool, str]:
+    if not TIME_FILTER_ENABLED:
+        return True, ""
+    t = ist_dt.time()
+    for a, b in TRADE_WINDOWS:
+        if a <= t <= b:
+            return True, ""
+    return False, "BLOCKED: Outside trade window"
+
+
+def _tier_long(final_cms: float) -> Tuple[str, float]:
+    if final_cms > TIER1_THRESHOLD:
+        return "TIER1", 1.0
+    if TIER2_THRESHOLD <= final_cms <= TIER1_THRESHOLD:
+        return "TIER2", 0.5
+    return "NO_SIGNAL", 0.0
+
+
+def _tier_short(final_cms: float) -> Tuple[str, float]:
+    if final_cms < -TIER1_THRESHOLD:
+        return "TIER1", 1.0
+    if -TIER1_THRESHOLD <= final_cms <= -TIER2_THRESHOLD:
+        return "TIER2", 0.5
+    return "NO_SIGNAL", 0.0
+
+
+def _oi_gate_ok(side: str, oi_sig: str) -> Tuple[bool, str]:
+    s = str(side or "").strip().upper()
+    if s == "LONG":
+        if oi_sig == "LONG_BUILDUP":
+            return True, ""
+        if oi_sig == "LONG_UNWINDING":
+            return False, "LONG_UNWINDING blocks LONG"
+        if oi_sig in ("SHORT_COVERING", "NEUTRAL"):
+            return True, "OI caution: " + oi_sig
+        return True, "OI caution: " + oi_sig
+    if s == "SHORT":
+        if oi_sig == "SHORT_BUILDUP":
+            return True, ""
+        if oi_sig == "SHORT_COVERING":
+            return False, "SHORT_COVERING blocks SHORT"
+        if oi_sig in ("LONG_BUILDUP", "NEUTRAL"):
+            return True, "OI caution: " + oi_sig
+        return True, "OI caution: " + oi_sig
+    return False, "invalid side"
 
 
 def _sort_candles(candles: Optional[List[dict]]) -> List[dict]:
@@ -180,6 +373,21 @@ class ScoredPick:
     final_cms: float
     sector_score: float
     combined_sentiment: float
+    signal_tier: str = "NO_SIGNAL"
+    tier_multiplier: float = 1.0
+    ema_slope_norm: float = 0.0
+    time_filter_passed: bool = True
+    time_filter_reason: str = ""
+    regime_filter_passed: bool = True
+    regime_filter_reason: str = ""
+    oi_value: Optional[int] = None
+    oi_change: Optional[int] = None
+    oi_signal: str = ""
+    oi_gate_passed: Optional[bool] = None
+    oi_gate_reason: str = ""
+    calculated_lots: Optional[int] = None
+    stop_loss_price: Optional[float] = None
+    tier_sizing_mult: float = 1.0
 
 
 def _load_sentiment_map(db) -> Dict[str, float]:
@@ -218,6 +426,8 @@ def _score_symbol_outcome(
     index_long_ok: bool = False,
     index_short_ok: bool = False,
 ) -> SymbolScoreOutcome:
+    global _oi_fetcher_singleton
+
     def _fail(code: str, reject_note: Optional[str] = None, **metrics: Any) -> SymbolScoreOutcome:
         return SymbolScoreOutcome(
             stock=stock,
@@ -255,6 +465,23 @@ def _score_symbol_outcome(
     if len(m5_today) < 15:
         return _fail("insufficient_m5", reject_note=f"need=15 have={len(m5_today)}")
 
+    last_ts = str(m5_today[-1].get("timestamp") or "")
+    bar_end = _bar_end_ist_from_ts(last_ts)
+    if bar_end is None:
+        return _fail("bad_bar_ts", reject_note=last_ts[:32])
+    tf_ok, tf_reason = time_of_day_filter(bar_end)
+    if not tf_ok:
+        _log_sf_event(
+            {
+                "timestamp": bar_end.isoformat(),
+                "symbol": stock,
+                "action": "BLOCKED",
+                "block_reason": tf_reason,
+                "time_filter_passed": False,
+            }
+        )
+        return _fail("time_window", reject_note=tf_reason)
+
     highs = [float(b["high"]) for b in m5_today]
     lows = [float(b["low"]) for b in m5_today]
     opens = [float(b["open"]) for b in m5_today]
@@ -268,11 +495,23 @@ def _score_symbol_outcome(
     if atr5 is None or atr5 <= 0:
         return _fail("atr5_invalid")
     atr5_14_ratio = float(atr5) / float(atr)
-    adx_curr, adx_prev = adx_14_last_two(highs, lows, closes)
+    adx_curr, adx_prev = adx_last_two(highs, lows, closes, ADX_LENGTH)
     if adx_curr is None:
         return _fail("adx_missing")
-    if not market_regime_ok(float(atr5), float(atr), float(adx_curr), adx_prev):
-        return _fail("regime_fail", final_cms=None)
+    if not market_regime_ok(
+        float(atr5), float(atr), float(adx_curr), adx_prev, adx_threshold=ADX_THRESHOLD
+    ):
+        _log_sf_event(
+            {
+                "timestamp": bar_end.isoformat(),
+                "symbol": stock,
+                "action": "BLOCKED",
+                "block_reason": "BLOCKED: regime filter failed",
+                "regime_filter_passed": False,
+                "adx": float(adx_curr),
+            }
+        )
+        return _fail("regime_fail", reject_note="BLOCKED: regime filter failed", final_cms=None)
 
     vwap = session_vwap(highs, lows, closes, vols)
     last_close = closes[-1]
@@ -287,12 +526,38 @@ def _score_symbol_outcome(
     rm = renko_momentum_score(closes, brick)
     ha = ha_trend_score(opens, highs, lows, closes)
     md, rd, sd = divergence_bundle(highs, lows, closes)
+    ema_n = ema_slope_norm_m5(closes)
 
     boost = breakout_volume_spike(highs, lows, closes, vs)
+    wts = cms_weights_active()
+    oi_score_norm = 0.0
+    if OI_IN_CMS_ENABLED:
+        if _oi_fetcher_singleton is None:
+            try:
+                _oi_fetcher_singleton = NSEOIFetcher()
+            except Exception:
+                _oi_fetcher_singleton = None
+        oq = get_cached_oi_quote(stock, _oi_fetcher_singleton)
+        if oq is not None:
+            prov_side = "LONG" if last_close >= vwap else "SHORT"
+            oi_score_norm = normalized_oi_score_for_side(oq, prov_side)
+
     cms = compute_cms_core(
-        obv_slope, vs, float(adx_curr), vwap_dev, rm, ha, md, rd, sd, breakout_boost=boost
+        obv_slope,
+        vs,
+        vwap_dev,
+        rm,
+        ha,
+        ema_n,
+        breakout_boost=boost,
+        oi_score_norm=oi_score_norm,
+        weights=wts,
     )
     final_cms = compute_cms_final_multiplier(cms, float(atr5), float(atr), float(adx_curr))
+
+    rk = f"{session_date.isoformat()}_{stock.upper()}"
+    st = _reentry_track.setdefault(rk, {})
+    st["last_final_cms"] = float(final_cms)
 
     sector_score = compute_sector_score_for_stock(stock, sector_instrument_key=sector_index)
 
@@ -314,15 +579,29 @@ def _score_symbol_outcome(
     else:
         comb = 0.0
 
-    th = CMS_FINAL_ENTRY_THRESHOLD
+    if abs(float(final_cms)) < float(NEUTRAL_BAND):
+        return _fail(
+            "neutral_band",
+            final_cms=float(final_cms),
+            cms=float(cms),
+            volume_surge=float(vs),
+            sector_score=float(sector_score),
+            combined_sentiment=float(comb),
+        )
+
+    th = TIER2_THRESHOLD
+    t_long, _ = _tier_long(final_cms)
+    t_short, _ = _tier_short(final_cms)
     gl = {
-        "final_cms_gt_th": bool(final_cms > th),
+        "tier_ok_long": bool(t_long != "NO_SIGNAL"),
+        "final_cms_ge_th": bool(final_cms >= th - 1e-12),
         "close_gt_vwap": bool(last_close > vwap),
         "sector_gt_min": bool(sector_score > SECTOR_ALIGN_MIN),
         "index_long_ok": bool(index_long_ok),
     }
     gs = {
-        "final_cms_lt_neg_th": bool(final_cms < -th),
+        "tier_ok_short": bool(t_short != "NO_SIGNAL"),
+        "final_cms_le_neg_th": bool(final_cms <= -th + 1e-12),
         "close_lt_vwap": bool(last_close < vwap),
         "sector_lt_neg_min": bool(sector_score < -SECTOR_ALIGN_MIN),
         "index_short_ok": bool(index_short_ok),
@@ -346,6 +625,66 @@ def _score_symbol_outcome(
             gate_long=gl,
             gate_short=gs,
         )
+
+    if side == "LONG":
+        sig_tier, tier_mult = _tier_long(final_cms)
+    else:
+        sig_tier, tier_mult = _tier_short(final_cms)
+
+    oi_val: Optional[int] = None
+    oi_chg: Optional[int] = None
+    oi_sig = ""
+    oi_gate_passed: Optional[bool] = True
+    oi_gate_reason = ""
+    if OI_GATE_ENABLED:
+        if _oi_fetcher_singleton is None:
+            try:
+                _oi_fetcher_singleton = NSEOIFetcher()
+            except Exception:
+                _oi_fetcher_singleton = None
+        oq = get_cached_oi_quote(stock, _oi_fetcher_singleton)
+        if oq is None:
+            oi_gate_passed = None
+            oi_gate_reason = "OI unavailable"
+            logger.warning("smart_futures_picker: OI unavailable for %s", stock)
+            if OI_BLOCK_ON_CONFLICT:
+                _log_sf_event(
+                    {
+                        "symbol": stock,
+                        "action": "BLOCKED",
+                        "block_reason": "OI gate: data unavailable",
+                        "oi_gate_passed": None,
+                    }
+                )
+                return _fail("oi_unavailable", reject_note="OI gate: data unavailable")
+        else:
+            import time as time_mod
+
+            if time_mod.time() - oq.fetched_at > 300:
+                logger.warning("smart_futures_picker: OI stale for %s", stock)
+                oi_gate_reason = "OI stale (>5m)"
+                if OI_BLOCK_ON_CONFLICT:
+                    return _fail("oi_stale", reject_note=oi_gate_reason)
+            oi_val = int(oq.oi)
+            oi_chg = int(oq.change_in_oi)
+            oi_sig = oi_signal_from_quote(oq)
+            ok_oi, note_oi = _oi_gate_ok(side, oi_sig)
+            oi_gate_passed = ok_oi
+            oi_gate_reason = note_oi
+            if not ok_oi and OI_BLOCK_ON_CONFLICT:
+                _log_sf_event(
+                    {
+                        "symbol": stock,
+                        "action": "BLOCKED",
+                        "block_reason": note_oi,
+                        "oi_signal": oi_sig,
+                        "oi_gate_passed": False,
+                    }
+                )
+                return _fail("oi_gate", reject_note=note_oi)
+            if ok_oi and note_oi.startswith("OI caution"):
+                logger.warning("smart_futures_picker: %s %s", stock, note_oi)
+
     pick = ScoredPick(
         stock=stock,
         fut_symbol=fut_sym or "",
@@ -365,6 +704,33 @@ def _score_symbol_outcome(
         final_cms=float(final_cms),
         sector_score=float(sector_score),
         combined_sentiment=comb,
+        signal_tier=sig_tier,
+        tier_multiplier=float(tier_mult),
+        ema_slope_norm=float(ema_n),
+        time_filter_passed=True,
+        time_filter_reason="",
+        regime_filter_passed=True,
+        regime_filter_reason="",
+        oi_value=oi_val,
+        oi_change=oi_chg,
+        oi_signal=oi_sig,
+        oi_gate_passed=oi_gate_passed,
+        oi_gate_reason=oi_gate_reason,
+    )
+    _log_sf_event(
+        {
+            "timestamp": bar_end.isoformat(),
+            "symbol": stock,
+            "cms_score_raw": float(cms),
+            "cms_final": float(final_cms),
+            "signal_tier": sig_tier,
+            "time_filter_passed": True,
+            "regime_filter_passed": True,
+            "oi_signal": oi_sig,
+            "oi_gate_passed": oi_gate_passed,
+            "action": "QUALIFIED",
+            "block_reason": "",
+        }
     )
     return SymbolScoreOutcome(
         stock=stock,
@@ -386,7 +752,7 @@ def _persist_pick(
     vix: Optional[float],
     entry_price: float,
     now_ist: datetime,
-) -> None:
+) -> bool:
     atr = pick.atr_14
     hold_type = "positional" if abs(pick.final_cms) > 1.2 else "intraday"
     if pick.side == "LONG":
@@ -395,6 +761,90 @@ def _persist_pick(
     else:
         sl = entry_price + atr * 1.2
         tgt = entry_price - atr * 3.0
+
+    sl_dist = float(atr) * 1.2
+    lot = get_futures_lot_size_by_instrument_key(pick.fut_instrument_key)
+    if lot <= 0:
+        logger.warning(
+            "smart_futures_signal %s",
+            json.dumps(
+                {
+                    "symbol": pick.stock,
+                    "action": "BLOCKED",
+                    "block_reason": "BLOCKED: lot size unknown",
+                },
+                default=str,
+            ),
+        )
+        return False
+    psz = calculate_position_size(
+        capital=CAPITAL,
+        risk_pct=RISK_PCT,
+        stop_loss_distance=sl_dist,
+        lot_size=lot,
+        signal_tier=pick.signal_tier,
+    )
+    pick.tier_sizing_mult = float(psz.tier_sizing_mult)
+    if psz.skipped_reason:
+        logger.warning(
+            "smart_futures_signal %s",
+            json.dumps(
+                {
+                    "symbol": pick.stock,
+                    "action": "BLOCKED",
+                    "block_reason": psz.skipped_reason or "SIZE ZERO — SKIPPED",
+                    "calculated_lots": 0,
+                },
+                default=str,
+            ),
+        )
+        return False
+    pick.calculated_lots = int(psz.final_lots)
+    pick.stop_loss_price = float(sl)
+
+    existing = db.execute(
+        text(
+            """
+            SELECT order_status, sell_time, reentry_consumed
+            FROM smart_futures_daily
+            WHERE session_date = :session_date AND fut_instrument_key = :fut_instrument_key
+            LIMIT 1
+            """
+        ),
+        {"session_date": session_date, "fut_instrument_key": pick.fut_instrument_key},
+    ).mappings().first()
+
+    if existing:
+        ost = str(existing.get("order_status") or "").strip().lower()
+        sold = existing.get("sell_time") is not None
+        if ost == "bought" and not sold:
+            logger.info(
+                "smart_futures_signal %s",
+                json.dumps(
+                    {
+                        "symbol": pick.stock,
+                        "action": "BLOCKED",
+                        "block_reason": "BLOCKED: open position exists for symbol",
+                    },
+                    default=str,
+                ),
+            )
+            return False
+        if sold and bool(existing.get("reentry_consumed")):
+            logger.info(
+                "smart_futures_signal %s",
+                json.dumps(
+                    {
+                        "symbol": pick.stock,
+                        "action": "BLOCKED",
+                        "block_reason": "BLOCKED: re-entry exhausted for session",
+                    },
+                    default=str,
+                ),
+            )
+            return False
+
+    reentry_flag = bool(existing and existing.get("sell_time") is not None)
 
     params = {
         "session_date": session_date,
@@ -423,6 +873,25 @@ def _persist_pick(
         "entry_at": now_ist,
         "scan_trigger": scan_trigger,
         "vix_at_scan": vix,
+        "signal_tier": pick.signal_tier,
+        "tier_multiplier": pick.tier_multiplier,
+        "sizing_tier_mult": pick.tier_sizing_mult,
+        "calculated_lots": pick.calculated_lots,
+        "stop_loss_price": pick.stop_loss_price,
+        "stop_stage": "INITIAL",
+        "current_stop_price": float(sl),
+        "time_filter_passed": pick.time_filter_passed,
+        "regime_filter_passed": pick.regime_filter_passed,
+        "regime_filter_reason": pick.regime_filter_reason or "",
+        "oi_value": pick.oi_value,
+        "oi_change": pick.oi_change,
+        "oi_signal": pick.oi_signal or "",
+        "oi_gate_passed": pick.oi_gate_passed,
+        "oi_gate_reason": pick.oi_gate_reason or "",
+        "ema_slope_norm": pick.ema_slope_norm,
+        "cms_score_raw": float(pick.cms),
+        "cms_final": float(pick.final_cms),
+        "reentry_apply": bool(reentry_flag),
     }
 
     ex = db.execute(
@@ -466,6 +935,29 @@ def _persist_pick(
                     trend_continuation = 'Yes',
                     scan_trigger = :scan_trigger,
                     vix_at_scan = :vix_at_scan,
+                    signal_tier = :signal_tier,
+                    tier_multiplier = :tier_multiplier,
+                    sizing_tier_mult = :sizing_tier_mult,
+                    calculated_lots = :calculated_lots,
+                    stop_loss_price = :stop_loss_price,
+                    stop_stage = :stop_stage,
+                    current_stop_price = :current_stop_price,
+                    time_filter_passed = :time_filter_passed,
+                    regime_filter_passed = :regime_filter_passed,
+                    regime_filter_reason = :regime_filter_reason,
+                    oi_value = :oi_value,
+                    oi_change = :oi_change,
+                    oi_signal = :oi_signal,
+                    oi_gate_passed = :oi_gate_passed,
+                    oi_gate_reason = :oi_gate_reason,
+                    ema_slope_norm = :ema_slope_norm,
+                    cms_score_raw = :cms_score_raw,
+                    cms_final = :cms_final,
+                    reentry_consumed = CASE WHEN :reentry_apply THEN TRUE ELSE reentry_consumed END,
+                    order_status = CASE WHEN :reentry_apply THEN NULL ELSE order_status END,
+                    buy_price = CASE WHEN :reentry_apply THEN NULL ELSE buy_price END,
+                    sell_price = CASE WHEN :reentry_apply THEN NULL ELSE sell_price END,
+                    sell_time = CASE WHEN :reentry_apply THEN NULL ELSE sell_time END,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE session_date = :session_date AND fut_instrument_key = :fut_instrument_key
                 """
@@ -482,20 +974,43 @@ def _persist_pick(
                     renko_momentum, ha_trend, macd_div, rsi_div, stoch_div,
                     cms, final_cms, sector_score, combined_sentiment,
                     entry_price, sl_price, target_price, hold_type,
-                    entry_at, trend_continuation, scan_trigger, vix_at_scan
+                    entry_at, trend_continuation, scan_trigger, vix_at_scan,
+                    signal_tier, tier_multiplier, sizing_tier_mult, calculated_lots,
+                    stop_loss_price, stop_stage, current_stop_price,
+                    time_filter_passed, regime_filter_passed, regime_filter_reason,
+                    oi_value, oi_change, oi_signal, oi_gate_passed, oi_gate_reason,
+                    ema_slope_norm, cms_score_raw, cms_final, reentry_consumed
                 ) VALUES (
                     :session_date, :stock, :fut_symbol, :fut_instrument_key, :side,
                     :obv_slope, :volume_surge, :adx_14, :atr_14, :atr5_14_ratio,
                     :renko_momentum, :ha_trend, :macd_div, :rsi_div, :stoch_div,
                     :cms, :final_cms, :sector_score, :combined_sentiment,
                     :entry_price, :sl_price, :target_price, :hold_type,
-                    :entry_at, NULL, :scan_trigger, :vix_at_scan
+                    :entry_at, NULL, :scan_trigger, :vix_at_scan,
+                    :signal_tier, :tier_multiplier, :sizing_tier_mult, :calculated_lots,
+                    :stop_loss_price, :stop_stage, :current_stop_price,
+                    :time_filter_passed, :regime_filter_passed, :regime_filter_reason,
+                    :oi_value, :oi_change, :oi_signal, :oi_gate_passed, :oi_gate_reason,
+                    :ema_slope_norm, :cms_score_raw, :cms_final, FALSE
                 )
                 """
             ),
             params,
         )
     db.commit()
+    _log_sf_event(
+        {
+            "symbol": pick.stock,
+            "action": "ENTER_" + str(pick.side),
+            "calculated_lots": pick.calculated_lots,
+            "stop_loss_price": pick.stop_loss_price,
+            "stop_stage": "INITIAL",
+            "signal_tier": pick.signal_tier,
+            "cms_final": float(pick.final_cms),
+            "cms_score_raw": float(pick.cms),
+        }
+    )
+    return True
 
 
 def _log_smart_futures_diagnostics(
@@ -538,11 +1053,11 @@ def _log_smart_futures_diagnostics(
     for o in no_entry_outcomes:
         gl, gs = o.gate_long, o.gate_short
         if gl and all(
-            [gl["final_cms_gt_th"], gl["close_gt_vwap"], gl["sector_gt_min"]]
+            [gl["final_cms_ge_th"], gl["close_gt_vwap"], gl["sector_gt_min"]]
         ) and not gl["index_long_ok"]:
             index_only_long += 1
         if gs and all(
-            [gs["final_cms_lt_neg_th"], gs["close_lt_vwap"], gs["sector_lt_neg_min"]]
+            [gs["final_cms_le_neg_th"], gs["close_lt_vwap"], gs["sector_lt_neg_min"]]
         ) and not gs["index_short_ok"]:
             index_only_short += 1
 
@@ -593,6 +1108,8 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
                 SELECT stock
                 FROM smart_futures_daily
                 WHERE session_date = :sd
+                  AND LOWER(TRIM(COALESCE(order_status, ''))) = 'bought'
+                  AND sell_time IS NULL
                 """
             ),
             {"sd": session_date},
@@ -602,6 +1119,7 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
             for r in prior_rows
             if r and r[0] is not None and str(r[0]).strip()
         }
+        _bootstrap_reentry_track(db, session_date)
         rows = db.execute(
             text(
                 """
@@ -662,11 +1180,22 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
             reject_counts["exception"] += 1
             logger.debug("smart_futures_picker: skip %s: %s", st, e)
             continue
+        if oc.final_cms is not None:
+            _reentry_update_scan(st, session_date, float(oc.final_cms))
         if oc.reject_code != "ok":
             reject_counts[oc.reject_code] += 1
             if oc.reject_code == "no_entry_signal":
                 no_entry_outcomes.append(oc)
         if not oc.pick:
+            continue
+        rdb = SessionLocal()
+        try:
+            rr = _reentry_block_reason(rdb, st, session_date, now_ist, float(oc.pick.final_cms))
+        finally:
+            rdb.close()
+        if rr:
+            logger.info("smart_futures_signal %s", json.dumps({"symbol": st, "action": "BLOCKED", "block_reason": rr}, default=str))
+            reject_counts["reentry_block"] += 1
             continue
         if oc.pick.side == "LONG":
             if skip_long_vix:
@@ -721,6 +1250,28 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
     dbw: Optional[Session] = None
     try:
         dbw = SessionLocal()
+        open_n = _count_open_smart_futures(dbw, session_date)
+        if open_n >= int(MAX_OPEN_POSITIONS):
+            logger.warning(
+                "smart_futures_signal %s",
+                json.dumps(
+                    {
+                        "action": "BLOCKED",
+                        "block_reason": "BLOCKED: Max positions reached",
+                        "open_positions": open_n,
+                    },
+                    default=str,
+                ),
+            )
+            return {
+                "scan_trigger": scan_trigger,
+                "picks": 0,
+                "vix": vix,
+                "excluded_already_selected": excluded_already_selected,
+                "blocked": "max_positions",
+                "open_positions": open_n,
+                "reject_histogram": dict(reject_counts),
+            }
         saved = 0
         for pick in (best_long, best_short):
             if not pick:
@@ -732,8 +1283,8 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
             if not entry or entry <= 0:
                 logger.warning("smart_futures_picker: no entry for %s", pick.stock)
                 continue
-            _persist_pick(dbw, pick, session_date, scan_trigger or "", vix, entry, now_ist)
-            saved += 1
+            if _persist_pick(dbw, pick, session_date, scan_trigger or "", vix, entry, now_ist):
+                saved += 1
 
         logger.info(
             "smart_futures_picker [%s]: saved=%s vix=%s excluded_already_selected=%s (long=%s short=%s)",

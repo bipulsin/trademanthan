@@ -136,6 +136,50 @@
         return lines.join(' ');
     }
 
+    function fmtTierBadge(r) {
+        const t = String((r && r.signal_tier) || '').trim().toUpperCase();
+        if (t === 'TIER1') {
+            return '<span class="sf-badge sf-b-t1" title="Tier 1">T1</span>';
+        }
+        if (t === 'TIER2') {
+            return '<span class="sf-badge sf-b-t2" title="Tier 2">T2</span>';
+        }
+        return '—';
+    }
+
+    function fmtOiTag(r) {
+        const m = {
+            LONG_BUILDUP: 'LB',
+            SHORT_BUILDUP: 'SB',
+            LONG_UNWINDING: 'LU',
+            SHORT_COVERING: 'SC',
+            NEUTRAL: 'N',
+        };
+        const s = String((r && r.oi_signal) || '');
+        const short = m[s] || (s ? s.slice(0, 6) : '');
+        return short ? '<span class="sf-oi-tag" title="' + escapeAttr(s) + '">' + escapeHtml(short) + '</span>' : '—';
+    }
+
+    function fmtStopStageChip(r) {
+        const st = String((r && r.stop_stage) || '').toUpperCase();
+        if (st === 'TRAILING') return '<span class="sf-stop-chip sf-stop-trail">Trail</span>';
+        if (st === 'BREAKEVEN') return '<span class="sf-stop-chip sf-stop-be">BE</span>';
+        if (st === 'INITIAL') return '<span class="sf-stop-chip sf-stop-ini">Init</span>';
+        return r && r.stop_stage ? escapeHtml(String(r.stop_stage)) : '—';
+    }
+
+    function fmtFilterDot(r) {
+        const tf = r && r.time_filter_passed;
+        const rf = r && r.regime_filter_passed;
+        if (tf === false || rf === false) {
+            return '<span class="sf-filter-dot sf-filter-bad" title="Filter blocked at scan">●</span>';
+        }
+        if (tf === true && rf === true) {
+            return '<span class="sf-filter-dot sf-filter-ok" title="Time + regime OK">●</span>';
+        }
+        return '—';
+    }
+
     function fmtSideCell(r) {
         const side = r && r.side != null ? r.side : '';
         const s = String(side || '').trim().toUpperCase();
@@ -324,6 +368,15 @@
             (noFuture ? '' : fmtSideCell(r)) +
             '</td>' +
             '<td>' +
+            (noFuture ? '' : fmtTierBadge(r)) +
+            '</td>' +
+            '<td>' +
+            (noFuture ? '' : fmtOiTag(r)) +
+            '</td>' +
+            '<td>' +
+            (noFuture ? '' : fmtFilterDot(r)) +
+            '</td>' +
+            '<td>' +
             (noFuture ? '' : fmtNum(r.final_cms, 2)) +
             '</td>' +
             '<td>' +
@@ -355,6 +408,18 @@
             '</td>' +
             '<td>' +
             fmtSideCell(r) +
+            '</td>' +
+            '<td>' +
+            fmtTierBadge(r) +
+            '</td>' +
+            '<td>' +
+            fmtOiTag(r) +
+            '</td>' +
+            '<td>' +
+            fmtStopStageChip(r) +
+            '</td>' +
+            '<td>' +
+            (r.calculated_lots != null && r.calculated_lots !== '' ? escapeHtml(String(r.calculated_lots)) : '—') +
             '</td>' +
             '<td>' +
             fmtNum(r.final_cms, 2) +
@@ -397,7 +462,7 @@
 
         const thead =
             '<thead><tr>' +
-            '<th>Run Slot</th><th>Symbol</th><th>Side</th><th>Final CMS</th><th>Sector Score</th><th>Sentiment Score</th>' +
+            '<th>Run Slot</th><th>Symbol</th><th>Side</th><th>Tier</th><th>OI</th><th>Filters</th><th>Final CMS</th><th>Sector Score</th><th>Sentiment Score</th>' +
             '<th>Entry</th><th>SL</th><th>Status</th>' +
             '</tr></thead>';
 
@@ -462,13 +527,13 @@
 
         if (!bought.length) {
             host.innerHTML =
-                '<div class="sf-table-wrap"><table class="sf-table"><tbody><tr><td colspan="8" style="padding:14px;">No open positions</td></tr></tbody></table></div>';
+                '<div class="sf-table-wrap"><table class="sf-table"><tbody><tr><td colspan="12" style="padding:14px;">No open positions</td></tr></tbody></table></div>';
             return;
         }
 
         const thead =
             '<thead><tr>' +
-            '<th>Symbol</th><th>Side</th><th>Final CMS</th>' +
+            '<th>Symbol</th><th>Side</th><th>Tier</th><th>OI</th><th>Stop</th><th>Lots</th><th>Final CMS</th>' +
             '<th>Entry</th><th>SL</th><th>Target</th><th>In Trend</th><th>Action</th>' +
             '</tr></thead>';
         let body = '';
