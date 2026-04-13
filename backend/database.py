@@ -448,6 +448,13 @@ def _run_startup_schema_migrations(db_engine):
                 if "sell_price" not in _sfd_cols:
                     conn.execute(text("ALTER TABLE smart_futures_daily ADD COLUMN sell_price DOUBLE PRECISION"))
                     print("Applied migration: added smart_futures_daily.sell_price")
+                if "sell_time" not in _sfd_cols:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE smart_futures_daily ADD COLUMN sell_time TIMESTAMP WITH TIME ZONE"
+                        )
+                    )
+                    print("Applied migration: added smart_futures_daily.sell_time")
 
             # Smart Futures backtest results (separate from live smart_futures_daily)
             if "backtest_smart_future" not in table_names:

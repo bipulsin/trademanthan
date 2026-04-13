@@ -116,6 +116,15 @@ def _missing_db_column_error(e: BaseException, column: str) -> bool:
 _SQL_DAILY_FULL = """
                 SELECT id, fut_symbol, fut_instrument_key, side, final_cms, sector_score, combined_sentiment,
                        entry_price, sl_price, target_price, trend_continuation, entry_at,
+                       order_status, buy_price, sell_price, sell_time, session_date, scan_trigger,
+                       cms, atr5_14_ratio
+                FROM smart_futures_daily
+                WHERE session_date = :sd
+                ORDER BY entry_at DESC NULLS LAST, id DESC
+                """
+_SQL_DAILY_NO_SELL_TIME = """
+                SELECT id, fut_symbol, fut_instrument_key, side, final_cms, sector_score, combined_sentiment,
+                       entry_price, sl_price, target_price, trend_continuation, entry_at,
                        order_status, buy_price, sell_price, session_date, scan_trigger,
                        cms, atr5_14_ratio
                 FROM smart_futures_daily
@@ -137,6 +146,15 @@ def _fetch_daily_for_session(db: Session, sd: Any) -> List[Any]:
     try:
         return db.execute(text(_SQL_DAILY_FULL), {"sd": sd}).mappings().all()
     except Exception as e:
+        if _missing_db_column_error(e, "sell_time"):
+            logger.warning("smart_futures /daily: sell_time missing, query without it: %s", e)
+            try:
+                return db.execute(text(_SQL_DAILY_NO_SELL_TIME), {"sd": sd}).mappings().all()
+            except Exception as e2:
+                if _missing_db_column_error(e2, "sell_price"):
+                    logger.warning("smart_futures /daily: fallback minimal query: %s", e2)
+                    return db.execute(text(_SQL_DAILY_NO_SELL_PRICE), {"sd": sd}).mappings().all()
+                raise
         if _missing_db_column_error(e, "sell_price"):
             logger.warning("smart_futures /daily: sell_price column missing, using query without it: %s", e)
             return db.execute(text(_SQL_DAILY_NO_SELL_PRICE), {"sd": sd}).mappings().all()
@@ -161,6 +179,9 @@ def _row_to_dict(r: Any) -> Dict[str, Any]:
     ea = out.get("entry_at")
     if ea is not None and hasattr(ea, "isoformat"):
         out["entry_at"] = ea.isoformat()
+    st = out.get("sell_time")
+    if st is not None and hasattr(st, "isoformat"):
+        out["sell_time"] = st.isoformat()
     for k in (
         "cms",
         "final_cms",
@@ -385,21 +406,72 @@ def post_smart_futures_daily_sell(
     if ltp <= 0:
         raise HTTPException(status_code=502, detail="Could not read last price from broker")
 
+    sell_time_iso: Optional[str] = None
     try:
-        db.execute(
+        res = db.execute(
             text(
                 """
                 UPDATE smart_futures_daily
-                SET order_status = 'sold', sell_price = :ltp, updated_at = CURRENT_TIMESTAMP
+                SET order_status = 'sold', sell_price = :ltp, sell_time = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE id = :id AND LOWER(TRIM(order_status)) = 'bought'
+                RETURNING sell_price, sell_time
                 """
             ),
             {"id": row_id, "ltp": ltp},
         )
+        upd = res.mappings().first()
+        if not upd:
+            db.rollback()
+            raise HTTPException(status_code=400, detail="Could not sell — position not open or already sold")
+        st = upd.get("sell_time")
+        if st is not None and hasattr(st, "isoformat"):
+            sell_time_iso = st.isoformat()
+    except HTTPException:
+        raise
     except Exception as e:
-        if _missing_db_column_error(e, "sell_price"):
+        if _missing_db_column_error(e, "sell_time"):
+            logger.warning("smart_futures sell: sell_time column missing, update without it: %s", e)
+            try:
+                r2 = db.execute(
+                    text(
+                        """
+                        UPDATE smart_futures_daily
+                        SET order_status = 'sold', sell_price = :ltp, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = :id AND LOWER(TRIM(order_status)) = 'bought'
+                        """
+                    ),
+                    {"id": row_id, "ltp": ltp},
+                )
+                if getattr(r2, "rowcount", 1) == 0:
+                    db.rollback()
+                    raise HTTPException(status_code=400, detail="Could not sell — position not open or already sold")
+            except HTTPException:
+                raise
+            except Exception as e2:
+                if _missing_db_column_error(e2, "sell_price"):
+                    logger.warning("smart_futures sell: sell_price missing, status-only: %s", e2)
+                    r3 = db.execute(
+                        text(
+                            """
+                            UPDATE smart_futures_daily
+                            SET order_status = 'sold', updated_at = CURRENT_TIMESTAMP
+                            WHERE id = :id AND LOWER(TRIM(order_status)) = 'bought'
+                            """
+                        ),
+                        {"id": row_id},
+                    )
+                    if getattr(r3, "rowcount", 1) == 0:
+                        db.rollback()
+                        raise HTTPException(
+                            status_code=400, detail="Could not sell — position not open or already sold"
+                        )
+                    ltp = None
+                else:
+                    raise
+        elif _missing_db_column_error(e, "sell_price"):
             logger.warning("smart_futures sell: sell_price column missing, status-only update: %s", e)
-            db.execute(
+            r4 = db.execute(
                 text(
                     """
                     UPDATE smart_futures_daily
@@ -409,9 +481,24 @@ def post_smart_futures_daily_sell(
                 ),
                 {"id": row_id},
             )
+            if getattr(r4, "rowcount", 1) == 0:
+                db.rollback()
+                raise HTTPException(status_code=400, detail="Could not sell — position not open or already sold")
             ltp = None
         else:
             raise
     db.commit()
-    logger.info("smart_futures sell: user=%s row=%s sell_price=%s", getattr(user, "id", None), row_id, ltp)
-    return {"success": True, "id": row_id, "order_status": "sold", "sell_price": ltp}
+    logger.info(
+        "smart_futures sell: user=%s row=%s sell_price=%s sell_time=%s",
+        getattr(user, "id", None),
+        row_id,
+        ltp,
+        sell_time_iso,
+    )
+    return {
+        "success": True,
+        "id": row_id,
+        "order_status": "sold",
+        "sell_price": ltp,
+        "sell_time": sell_time_iso,
+    }
