@@ -153,7 +153,14 @@
                 throw new Error((data && data.message) || res.statusText || "Failed");
             }
             const rows = data.rows || [];
-            const src = data.symbols_source || "—";
+            let src = data.symbols_source || "—";
+            if (src.startsWith("premarket_session_")) {
+                src = "Saved session " + src.replace("premarket_session_", "");
+            } else if (src === "premarket_today") {
+                src = "Today’s pre-market rank";
+            } else if (src === "premarket_today_partial") {
+                src = "Today’s pre-market rank (partial)";
+            }
             const inner = renderTable(rows);
             host.innerHTML = inner;
             if (msg) {

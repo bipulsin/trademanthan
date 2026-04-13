@@ -121,7 +121,7 @@
                         </div>
                     </div>
                     <div class="card-content">
-                        <p class="oi-heatmap-hint">Top 10 F&amp;O underlyings (same list as pre-market when available; otherwise from arbitrage_master). Near-month futures: price vs OI regime and ΔOI % (refreshed every 3 minutes; server caches ~2.5 minutes to limit NSE load).</p>
+                        <p class="oi-heatmap-hint">Top 10 F&amp;O underlyings use the <strong>same ranked scan</strong> as Pre-Market F&amp;O Watchlist (OBV slope, gap, 20-day range). On weekdays, if today&rsquo;s list is not in the database yet, the server runs that scan once (like the scheduled job) then loads OI. Weekends use the latest saved session. Near-month futures from NSE; refresh every 3 minutes (server cache ~2.5 minutes).</p>
                         <p class="oi-heatmap-msg" id="oiHeatmapMsg">Loading…</p>
                         <div class="oi-heatmap-wrap" id="oiHeatmapHost"></div>
                     </div>
@@ -335,7 +335,7 @@
     <script src="market-sentiment-dials.js?v=1.6"></script>
     <script src="dashboard-sector-movers.js?v=1.3"></script>
     <script src="dashboard-premarket-watchlist.js?v=1.0"></script>
-    <script src="dashboard-oi-heatmap.js?v=1.0"></script>
+    <script src="dashboard-oi-heatmap.js?v=1.1"></script>
     <script src="crypto-prices.js?v=1.4"></script>
     <script src="version.js?v=1.0"></script>
     <script src="cache-manager.js?v=1.1"></script>

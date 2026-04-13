@@ -7,6 +7,7 @@ response cache and a refresh lock so concurrent dashboard users do not stampede 
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from datetime import date, datetime
@@ -14,11 +15,13 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pytz
 from sqlalchemy import text
-from sqlalchemy.orm import Session
 
 from backend.database import SessionLocal
 from backend.services.oi_integration import NSEOIFetcher, interpret_oi_signal
-from backend.services.premarket_watchlist_job import fetch_premarket_watchlist_for_date
+from backend.services.premarket_watchlist_job import (
+    fetch_premarket_watchlist_for_date,
+    run_premarket_watchlist_job,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +41,7 @@ def _session_today_ist() -> date:
     return datetime.now(IST).date()
 
 
-def _symbols_from_premarket(session_date: date) -> List[str]:
-    rows = fetch_premarket_watchlist_for_date(session_date)
+def _symbols_in_rank_order(rows: List[Dict[str, Any]]) -> List[str]:
     out: List[str] = []
     for r in rows:
         s = (r.get("stock") or "").strip().upper()
@@ -48,53 +50,106 @@ def _symbols_from_premarket(session_date: date) -> List[str]:
     return out[:_TOP_N]
 
 
-def _symbols_from_arbitrage(db: Session, exclude: List[str], limit: int) -> List[str]:
-    if limit <= 0:
-        return []
-    exc = {x.strip().upper() for x in exclude if x and str(x).strip()}
-    rows = db.execute(
-        text(
-            """
-            SELECT DISTINCT UPPER(TRIM(stock)) AS s
-            FROM arbitrage_master
-            WHERE stock IS NOT NULL AND TRIM(stock) <> ''
-            ORDER BY s
-            """
-        )
-    ).fetchall()
-    out: List[str] = []
-    for (sym,) in rows:
-        if not sym:
-            continue
-        if sym in exc:
-            continue
-        out.append(sym)
-        if len(out) >= limit:
-            break
-    return out
+def _heatmap_premarket_marker_path(session_date: date) -> str:
+    """Exclusive marker so multiple app workers do not each run the 200-symbol premarket job."""
+    return f"/tmp/tm_heatmap_premarket_{session_date.isoformat()}.lock"
+
+
+def _try_create_exclusive_premarket_marker(session_date: date) -> bool:
+    path = _heatmap_premarket_marker_path(session_date)
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        os.close(fd)
+        return True
+    except FileExistsError:
+        return False
+
+
+def _wait_for_premarket_rows(session_date: date, want_min: int, max_wait_sec: float = 150.0) -> List[Dict[str, Any]]:
+    """Poll DB while another worker runs the premarket job (can take 1–2+ minutes)."""
+    deadline = time.monotonic() + max_wait_sec
+    step = 0.4
+    while time.monotonic() < deadline:
+        rows = fetch_premarket_watchlist_for_date(session_date)
+        if len(rows) >= want_min:
+            return rows
+        time.sleep(step)
+    return fetch_premarket_watchlist_for_date(session_date)
+
+
+def _fetch_latest_session_date_min_rows(min_rows: int) -> Optional[date]:
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text(
+                """
+                SELECT session_date
+                FROM premarket_watchlist
+                GROUP BY session_date
+                HAVING COUNT(*) >= :m
+                ORDER BY session_date DESC
+                LIMIT 1
+                """
+            ),
+            {"m": min_rows},
+        ).fetchone()
+        return row[0] if row else None
+    finally:
+        db.close()
 
 
 def _resolve_top10_symbols() -> Tuple[List[str], str]:
     """
-    Prefer today's premarket_top list; pad with arbitrage_master names alphabetically if needed.
+    Same ranked universe as the scheduled pre-market job (OBV + gap + range), never alphabetical.
+
+    Order of preference:
+    1) Today's persisted premarket_watchlist (rank 1..10) when present.
+    2) If today has no rows: on IST weekdays, run ``run_premarket_watchlist_job()`` at most once
+       per calendar day (mirrors scheduler), then re-read today.
+    3) If still empty (e.g. weekend, holiday, or job insufficient_data): most recent session in DB
+       with 10 rows, else most recent session with any rows.
+    4) Partial today (1..9 rows): use those in rank order (no padding).
     """
-    sd = _session_today_ist()
-    primary = _symbols_from_premarket(sd)
-    if len(primary) >= _TOP_N:
-        return primary[:_TOP_N], "premarket"
+    today = _session_today_ist()
+    rows_today = fetch_premarket_watchlist_for_date(today)
 
-    need = _TOP_N - len(primary)
-    db = SessionLocal()
-    try:
-        extra = _symbols_from_arbitrage(db, primary, need)
-    finally:
-        db.close()
+    if len(rows_today) >= _TOP_N:
+        return _symbols_in_rank_order(rows_today), "premarket_today"
 
-    merged = primary + [s for s in extra if s not in primary]
-    if len(merged) >= _TOP_N:
-        return merged[:_TOP_N], "premarket+arbitrage" if primary else "arbitrage"
+    if len(rows_today) > 0:
+        return _symbols_in_rank_order(rows_today), "premarket_today_partial"
 
-    return merged, "premarket+arbitrage" if primary else "arbitrage"
+    # No rows for today — optional one-shot same computation as scheduler (weekdays only).
+    now_ist = datetime.now(IST)
+    if now_ist.weekday() < 5:
+        exclusive = _try_create_exclusive_premarket_marker(today)
+        if exclusive:
+            try:
+                out = run_premarket_watchlist_job()
+                if isinstance(out, dict) and out.get("skipped"):
+                    logger.info("dashboard_oi_heatmap: premarket job skipped: %s", out.get("skipped"))
+            except Exception as e:
+                logger.exception("dashboard_oi_heatmap: premarket job failed: %s", e)
+            rows_today = fetch_premarket_watchlist_for_date(today)
+        else:
+            rows_today = _wait_for_premarket_rows(today, 1)
+
+        if len(rows_today) >= _TOP_N:
+            return _symbols_in_rank_order(rows_today), "premarket_today"
+        if len(rows_today) > 0:
+            return _symbols_in_rank_order(rows_today), "premarket_today_partial"
+
+    d10 = _fetch_latest_session_date_min_rows(_TOP_N)
+    if d10:
+        rows = fetch_premarket_watchlist_for_date(d10)
+        return _symbols_in_rank_order(rows), f"premarket_session_{d10.isoformat()}"
+
+    d1 = _fetch_latest_session_date_min_rows(1)
+    if d1:
+        rows = fetch_premarket_watchlist_for_date(d1)
+        return _symbols_in_rank_order(rows), f"premarket_session_{d1.isoformat()}"
+
+    return [], "none"
 
 
 def _build_payload() -> Dict[str, Any]:
@@ -106,7 +161,7 @@ def _build_payload() -> Dict[str, Any]:
             "cache_ttl_sec": int(_RESPONSE_CACHE_TTL_SEC),
             "symbols_source": "none",
             "rows": [],
-            "message": "No F&O universe (premarket empty and arbitrage_master empty).",
+            "message": "No premarket watchlist data (run the scheduled job or POST /scan/premarket-watchlist/run).",
         }
 
     fetcher = NSEOIFetcher()
