@@ -242,40 +242,104 @@
         return bucket;
     }
 
+    function pad2(n) {
+        return String(n).padStart(2, '0');
+    }
+
+    function todayIstYmd() {
+        const now = new Date();
+        const parts = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Kolkata',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+        }).formatToParts(now);
+        const y = parts.find(function (p) { return p.type === 'year'; });
+        const m = parts.find(function (p) { return p.type === 'month'; });
+        const d = parts.find(function (p) { return p.type === 'day'; });
+        return (y ? y.value : '') + '-' + (m ? m.value : '') + '-' + (d ? d.value : '');
+    }
+
+    function nowIstMinutes() {
+        const now = new Date();
+        const hh = Number(
+            new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', hour12: false }).format(now)
+        );
+        const mm = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', minute: '2-digit' }).format(now));
+        if (!Number.isFinite(hh) || !Number.isFinite(mm)) return 24 * 60;
+        return hh * 60 + mm;
+    }
+
+    function scheduledSlotsForSession(sessionDate) {
+        const out = ['09:15'];
+        for (let h = 9, m = 30; h < 15 || (h === 15 && m === 0); ) {
+            out.push(pad2(h) + ':' + pad2(m));
+            m += 30;
+            if (m >= 60) {
+                h += 1;
+                m -= 60;
+            }
+        }
+        const isTodaySession = String(sessionDate || '') === todayIstYmd();
+        if (!isTodaySession) return out;
+        const nowMin = nowIstMinutes();
+        return out.filter(function (slot) {
+            const p = slot.split(':');
+            const mins = Number(p[0]) * 60 + Number(p[1]);
+            return mins <= nowMin;
+        });
+    }
+
+    function normalizeRunSlot(v) {
+        const s = String(v || '').trim();
+        const m = s.match(/(\d{1,2}):(\d{2})/);
+        if (!m) return '';
+        return pad2(Number(m[1])) + ':' + pad2(Number(m[2]));
+    }
+
+    function deriveRunSlot(r) {
+        const fromScan = normalizeRunSlot(r && r.scan_trigger);
+        if (fromScan) return fromScan;
+        const ea = String((r && r.entry_at) || '');
+        const m = ea.match(/T(\d{2}):(\d{2})/);
+        if (!m) return '';
+        return m[1] + ':' + m[2];
+    }
+
     function trendTableRowHtml(r) {
+        const noFuture = Boolean(r && r.__no_future_selected);
+        const runSlot = escapeHtml(String((r && r.__run_slot) || deriveRunSlot(r) || ''));
+        const symbolCell = noFuture ? 'No Future selected' : fmtSymbolCell(r);
         return (
             '<tr data-row-id="' +
             r.id +
             '">' +
             '<td>' +
-            fmtSymbolCell(r) +
+            runSlot +
             '</td>' +
             '<td>' +
-            fmtSideCell(r) +
+            symbolCell +
             '</td>' +
             '<td>' +
-            fmtNum(r.final_cms, 2) +
+            (noFuture ? '' : fmtSideCell(r)) +
             '</td>' +
             '<td>' +
-            fmtNum(r.sector_score, 2) +
+            (noFuture ? '' : fmtNum(r.final_cms, 2)) +
             '</td>' +
             '<td>' +
-            fmtNum(r.combined_sentiment, 3) +
+            (noFuture ? '' : fmtNum(r.sector_score, 2)) +
             '</td>' +
             '<td>' +
-            fmtNum(r.entry_price, 2) +
+            (noFuture ? '' : fmtNum(r.combined_sentiment, 3)) +
             '</td>' +
             '<td>' +
-            fmtNum(r.sl_price, 2) +
+            (noFuture ? '' : fmtNum(r.entry_price, 2)) +
             '</td>' +
             '<td>' +
-            fmtNum(r.target_price, 2) +
+            (noFuture ? '' : fmtNum(r.sl_price, 2)) +
             '</td>' +
             '<td>' +
-            fmtTrendCell(r) +
-            '</td>' +
-            '<td>' +
-            fmtTrendActionCell(r) +
+            (noFuture ? '' : fmtTrendActionCell(r)) +
             '</td>' +
             '</tr>'
         );
@@ -294,12 +358,6 @@
             '</td>' +
             '<td>' +
             fmtNum(r.final_cms, 2) +
-            '</td>' +
-            '<td>' +
-            fmtNum(r.sector_score, 2) +
-            '</td>' +
-            '<td>' +
-            fmtNum(r.combined_sentiment, 3) +
             '</td>' +
             '<td>' +
             fmtNum(r.entry_price, 2) +
@@ -335,36 +393,48 @@
         }
 
         const groups = data.groups && data.groups.length ? data.groups : [];
-        if (!groups.length) {
-            const sd = escapeHtml(String(data.session_date || '—'));
-            const hint =
-                'No picks for session ' +
-                sd +
-                '. On market days the scanner runs from 9:15 IST; if markets are closed or no symbol passes CMS filters, this list stays empty.';
-            host.innerHTML =
-                '<div class="sf-table-wrap"><table class="sf-table"><tbody><tr><td colspan="10" style="padding:14px;">No Record</td></tr></tbody></table></div>' +
-                '<p class="sf-meta" style="margin-top:10px;max-width:42rem;">' +
-                hint +
-                '</p>';
-            return;
-        }
+        const flat = flattenRows(data);
 
         const thead =
             '<thead><tr>' +
-            '<th>Symbol</th><th>Side</th><th>Final CMS</th><th>Sector Score</th><th>Sentiment Score</th>' +
-            '<th>Entry</th><th>SL</th><th>Target</th><th>In Trend</th><th>Status</th>' +
+            '<th>Run Slot</th><th>Symbol</th><th>Side</th><th>Final CMS</th><th>Sector Score</th><th>Sentiment Score</th>' +
+            '<th>Entry</th><th>SL</th><th>Status</th>' +
             '</tr></thead>';
 
-        let html = '';
-        groups.forEach(function (g) {
-            const label = fmtEntryGroupLabel(g.entry_at);
-            html += '<div class="sf-group-title">' + label + '</div>';
-            html += '<div class="sf-table-wrap"><table class="sf-table">' + thead + '<tbody>';
-            (g.rows || []).forEach(function (r) {
-                html += trendTableRowHtml(r);
-            });
-            html += '</tbody></table></div>';
+        const slots = scheduledSlotsForSession(data.session_date);
+        const bySlot = {};
+        flat.forEach(function (r) {
+            const slot = deriveRunSlot(r);
+            if (!slot) return;
+            if (!bySlot[slot]) bySlot[slot] = [];
+            bySlot[slot].push(r);
         });
+
+        const rows = [];
+        slots.forEach(function (slot) {
+            const picked = bySlot[slot] || [];
+            if (picked.length) {
+                picked.forEach(function (r) {
+                    const row = Object.assign({}, r, { __run_slot: slot });
+                    rows.push(row);
+                });
+            } else {
+                rows.push({ id: 'slot-' + slot, __run_slot: slot, __no_future_selected: true });
+            }
+        });
+
+        let html = '<div class="sf-table-wrap"><table class="sf-table">' + thead + '<tbody>';
+        rows.forEach(function (r) {
+            html += trendTableRowHtml(r);
+        });
+        html += '</tbody></table></div>';
+        const extra = flat.filter(function (r) {
+            const slot = deriveRunSlot(r);
+            return slot && slots.indexOf(slot) === -1;
+        });
+        if (extra.length) {
+            html += '<p class="sf-meta" style="margin-top:10px;">Additional rows exist outside visible slot window: ' + extra.length + '.</p>';
+        }
         host.innerHTML = html;
 
         host.onclick = function (ev) {
@@ -392,13 +462,13 @@
 
         if (!bought.length) {
             host.innerHTML =
-                '<div class="sf-table-wrap"><table class="sf-table"><tbody><tr><td colspan="10" style="padding:14px;">No open positions</td></tr></tbody></table></div>';
+                '<div class="sf-table-wrap"><table class="sf-table"><tbody><tr><td colspan="8" style="padding:14px;">No open positions</td></tr></tbody></table></div>';
             return;
         }
 
         const thead =
             '<thead><tr>' +
-            '<th>Symbol</th><th>Side</th><th>Final CMS</th><th>Sector Score</th><th>Sentiment Score</th>' +
+            '<th>Symbol</th><th>Side</th><th>Final CMS</th>' +
             '<th>Entry</th><th>SL</th><th>Target</th><th>In Trend</th><th>Action</th>' +
             '</tr></thead>';
         let body = '';
@@ -510,7 +580,7 @@
             const host = document.getElementById('sfTrendGroups');
             if (host) {
                 host.innerHTML =
-                    '<div class="sf-table-wrap"><table class="sf-table"><tbody><tr><td colspan="10" style="padding:14px;">No Record</td></tr></tbody></table></div>';
+                    '<div class="sf-table-wrap"><table class="sf-table"><tbody><tr><td colspan="9" style="padding:14px;">No Record</td></tr></tbody></table></div>';
             }
             const openHost = document.getElementById('sfOpenPositions');
             if (openHost) openHost.innerHTML = '';
