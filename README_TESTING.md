@@ -55,18 +55,25 @@ python test_premkt_scanner.py --date 2026-04-10 --limit 40 --validate
 python test_premkt_scanner.py --sample
 ```
 
-## Scoring model (harness)
+## Scoring model (harness = production)
 
-Components are **min–max normalized across the tested universe**, then combined with:
+The **same** implementation powers:
+
+- `backend/services/premarket_scoring.py`
+- `backend/services/premarket_watchlist_job.py` (dashboard / `premarket_watchlist` table)
+- `test_premkt_scanner.py`
+
+Components are **min–max normalized across the universe**, then combined with:
 
 | Component | Weight |
 |-----------|--------|
 | OBV slope (10-day, same helper as Smart Futures) | 30% |
 | Gap strength `abs(gap%)` (session open vs prev close) | 25% |
-| Range position vs ~52w band from daily history | 25% |
+| Range position vs ~52w band from daily history before session | 25% |
 | Momentum: `ema_slope_norm_m5` on **prior session** 5-minute closes | 20% |
 
-Production `premarket_watchlist_job` still uses its own composite (OBV + gap + 20d range); this harness aligns with the **weighted** spec used in your scanner design doc. Compare results as a **regression signal**, not a byte-for-byte match to the job.
+**Backfill** a session date (e.g. for DB refresh):  
+`PYTHONPATH=. python -c "from datetime import date; from backend.services.premarket_watchlist_job import run_premarket_watchlist_job; print(run_premarket_watchlist_job(session_date=date(2026,4,13)))"`
 
 ## Important caveats
 

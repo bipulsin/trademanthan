@@ -7,7 +7,7 @@ stable import path referenced by ops/docs (`premkt_scanner.run`, `fetch_rows`).
 from __future__ import annotations
 
 from datetime import date
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from backend.services.premarket_watchlist_job import (
     fetch_premarket_watchlist_for_date,
@@ -15,9 +15,9 @@ from backend.services.premarket_watchlist_job import (
 )
 
 
-def run() -> Dict[str, Any]:
-    """Run the pre-market scan (same as the scheduled job)."""
-    return run_premarket_watchlist_job()
+def run(session_date: Optional[date] = None) -> Dict[str, Any]:
+    """Run the pre-market scan (same as the scheduled job). Pass ``session_date`` for backfill."""
+    return run_premarket_watchlist_job(session_date=session_date)
 
 
 def fetch_rows(session_date: date) -> List[Dict[str, Any]]:

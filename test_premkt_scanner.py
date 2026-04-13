@@ -21,7 +21,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 # Repo root on path
 ROOT = Path(__file__).resolve().parent
@@ -32,45 +32,20 @@ import pytz
 from sqlalchemy import text
 
 from backend.database import SessionLocal
-from backend.services.smart_futures_picker.indicators import compute_obv_slope_daily, ema_slope_norm_m5
+from backend.services.premarket_scoring import (
+    composite_weighted,
+    min_max_norm,
+    parse_candle_date_ist,
+    score_premarket_raw,
+    sort_candles,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger("premkt_test")
 
 IST = pytz.timezone("Asia/Kolkata")
 
-# Weighted composite (same as product spec)
-W_OBV = 0.30
-W_GAP = 0.25
-W_RANGE = 0.25
-W_MOM = 0.20
-
-
-def _parse_candle_date(ts: Any) -> Optional[date]:
-    """
-    Calendar date in Asia/Kolkata for an Upstox candle timestamp (often UTC ISO).
-    Using the raw UTC date breaks NSE daily alignment (evening UTC = previous IST date).
-    """
-    if ts is None:
-        return None
-    s = str(ts).strip()
-    try:
-        if "T" in s:
-            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
-            if dt.tzinfo is None:
-                dt = IST.localize(dt)
-            else:
-                dt = dt.astimezone(IST)
-            return dt.date()
-        return date.fromisoformat(s[:10])
-    except ValueError:
-        return None
-
-
-def _sort_candles(candles: Optional[List[dict]]) -> List[dict]:
-    if not candles:
-        return []
-    return sorted(candles, key=lambda c: str(c.get("timestamp") or ""))
+_parse_candle_date = parse_candle_date_ist
 
 
 def prev_trading_day(d: date) -> date:
@@ -148,7 +123,7 @@ def demo_historical_fetch_one(upstox: Any, instrument_key: str, sim_date: date) 
         days_back=14,
         range_end_date=pre,
     )
-    daily = _sort_candles(daily)
+    daily = sort_candles(daily)
     print(f"candles returned: {len(daily)}")
     for c in daily[-5:]:
         print(f"  ts={c.get('timestamp')} O={c.get('open')} H={c.get('high')} L={c.get('low')} C={c.get('close')} V={c.get('volume')}")
@@ -170,17 +145,6 @@ class SymbolRow:
     mom_norm: float = 0.0
     composite_score: float = 0.0
     error: Optional[str] = None
-
-
-def _min_max_norm(values: Sequence[float]) -> List[float]:
-    if not values:
-        return []
-    lo = min(values)
-    hi = max(values)
-    span = hi - lo
-    if span <= 1e-12:
-        return [0.5 for _ in values]
-    return [(v - lo) / span for v in values]
 
 
 class PremktTester:
@@ -236,167 +200,8 @@ class PremktTester:
         return out
 
     def fetch_historical_data(self, stock: str, instrument_key: str) -> Dict[str, Any]:
-        """
-        prev_5_days_ohlcv: last 5 completed daily bars ending prev_trading_day(sim) (for display)
-        OBV uses 10 sessions ending prev_trading_day (matches production compute_obv_slope_daily input)
-        prev_day_close: previous session close vs simulation_date
-        52w_high / 52w_low: from ~270 calendar days of daily bars ending prev_trading_day
-        recent_5min_bars: prior session 5m closes for momentum
-        """
-        ux = self._ux()
-        sim = self.simulation_date
-
-        out: Dict[str, Any] = {"stock": stock.upper(), "instrument_key": instrument_key, "error": None}
-
-        # Anchor to simulation date so we include the session row when present; holidays on
-        # calendar "previous weekday" are handled by taking the last bar with date < sim.
-        daily_raw = ux.get_historical_candles_by_instrument_key(
-            instrument_key, interval="days/1", days_back=320, range_end_date=sim
-        )
-        daily = _sort_candles(daily_raw)
-        if len(daily) < 30:
-            out["error"] = f"insufficient daily history ({len(daily)})"
-            return out
-
-        def _cd(c: dict) -> Optional[date]:
-            return _parse_candle_date(c.get("timestamp"))
-
-        completed_before_sim = [c for c in daily if _cd(c) is not None and _cd(c) < sim]
-        if len(completed_before_sim) < 11:
-            out["error"] = f"need 11+ daily bars before {sim} (got {len(completed_before_sim)})"
-            return out
-
-        pre_eff = _cd(completed_before_sim[-1])
-        prev_close = float(completed_before_sim[-1]["close"])
-        if prev_close <= 0:
-            out["error"] = "bad prev_close"
-            return out
-
-        # OBV slope: last 10 completed sessions before sim
-        tail10 = completed_before_sim[-10:]
-        if len(tail10) < 10:
-            out["error"] = "need 10 daily bars for OBV"
-            return out
-        closes = [float(x["close"]) for x in tail10]
-        vols = [float(x.get("volume") or 0) for x in tail10]
-        obv_slope = compute_obv_slope_daily(closes, vols)
-
-        prev5 = completed_before_sim[-5:]
-        out["prev_5_days_ohlcv"] = [
-            {
-                "date": str(_parse_candle_date(x.get("timestamp"))),
-                "o": float(x["open"]),
-                "h": float(x["high"]),
-                "l": float(x["low"]),
-                "c": float(x["close"]),
-                "v": float(x.get("volume") or 0),
-            }
-            for x in prev5
-        ]
-
-        # 52w range from history strictly before sim (no lookahead)
-        highs = [float(x["high"]) for x in completed_before_sim]
-        lows = [float(x["low"]) for x in completed_before_sim]
-        w52_hi = max(highs)
-        w52_lo = min(lows)
-        if w52_hi - w52_lo <= 1e-9:
-            out["error"] = "degenerate 52w range"
-            return out
-
-        # Simulation session bar (open vs prev close = gap); requires completed day in API
-        daily_to_sim = ux.get_historical_candles_by_instrument_key(
-            instrument_key, interval="days/1", days_back=5, range_end_date=sim
-        )
-        daily_to_sim = _sort_candles(daily_to_sim)
-        sim_bar = None
-        for c in daily_to_sim:
-            if _parse_candle_date(c.get("timestamp")) == sim:
-                sim_bar = c
-                break
-
-        day_open = float(sim_bar.get("open") or 0) if sim_bar else 0.0
-        day_open_source = "daily"
-        if day_open <= 0:
-            # Same calendar day before EOD: Upstox often has no finalized daily yet — use first cash 5m open (≥9:15 IST).
-            m5today = ux.get_historical_candles_by_instrument_key(
-                instrument_key, interval="minutes/5", days_back=2, range_end_date=sim
-            )
-            m5today = _sort_candles(m5today)
-            for c in m5today:
-                ts = str(c.get("timestamp") or "")
-                try:
-                    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                    if dt.tzinfo is None:
-                        dt = IST.localize(dt)
-                    else:
-                        dt = dt.astimezone(IST)
-                except Exception:
-                    continue
-                if dt.date() != sim:
-                    continue
-                if dt.hour < 9 or (dt.hour == 9 and dt.minute < 15):
-                    continue
-                o = float(c.get("open") or 0)
-                if o > 0:
-                    day_open = o
-                    day_open_source = "first_5m_open"
-                    break
-
-        if day_open <= 0:
-            out["error"] = f"no session open for {sim} (no daily or intraday 5m yet)"
-            return out
-        out["day_open_source"] = day_open_source
-
-        gap_pct = (day_open - prev_close) / prev_close * 100.0
-        gap_strength = abs(gap_pct)
-
-        # Range position at open vs ~52w band
-        range_pos = (day_open - w52_lo) / (w52_hi - w52_lo + 1e-12)
-        range_pos = max(0.0, min(1.0, float(range_pos)))
-        out["prev_day_close"] = prev_close
-        out["day_open"] = day_open
-        out["52w_high"] = w52_hi
-        out["52w_low"] = w52_lo
-        out["gap_pct_signed"] = gap_pct
-        out["gap_strength"] = gap_strength
-        out["range_position"] = range_pos
-        out["obv_slope"] = obv_slope
-
-        # Momentum: prior session 5m closes → ema_slope_norm_m5
-        assert pre_eff is not None
-        m5 = ux.get_historical_candles_by_instrument_key(
-            instrument_key, interval="minutes/5", days_back=5, range_end_date=pre_eff
-        )
-        m5 = _sort_candles(m5)
-        closes_m5: List[float] = []
-        for c in m5:
-            ts = str(c.get("timestamp") or "")
-            if not ts:
-                continue
-            try:
-                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                if dt.tzinfo is None:
-                    dt = IST.localize(dt)
-                else:
-                    dt = dt.astimezone(IST)
-            except Exception:
-                continue
-            if dt.date() != pre_eff:
-                continue
-            if dt.hour < 9 or (dt.hour == 9 and dt.minute < 15):
-                continue
-            if dt.hour > 15 or (dt.hour == 15 and dt.minute > 35):
-                continue
-            closes_m5.append(float(c["close"]))
-
-        out["recent_5min_bars"] = len(closes_m5)
-        if len(closes_m5) >= 20:
-            mom = ema_slope_norm_m5(closes_m5)
-        else:
-            mom = 0.0
-        out["momentum"] = float(mom)
-
-        return out
+        """Same implementation as production ``premarket_watchlist`` job (`premarket_scoring`)."""
+        return score_premarket_raw(self._ux(), stock, instrument_key, self.simulation_date)
 
     def compute_premkt_score(self, raw: Dict[str, Any]) -> SymbolRow:
         r = SymbolRow(
@@ -432,22 +237,17 @@ class PremktTester:
         rng_v = [r.range_position for r in raw_rows]
         mom_v = [r.momentum for r in raw_rows]
 
-        obv_n = _min_max_norm(obv_v)
-        gap_n = _min_max_norm(gap_v)
-        rng_n = _min_max_norm(rng_v)
-        mom_n = _min_max_norm(mom_v)
+        obv_n = min_max_norm(obv_v)
+        gap_n = min_max_norm(gap_v)
+        rng_n = min_max_norm(rng_v)
+        mom_n = min_max_norm(mom_v)
 
         for i, r in enumerate(raw_rows):
             r.obv_norm = obv_n[i]
             r.gap_norm = gap_n[i]
             r.range_norm = rng_n[i]
             r.mom_norm = mom_n[i]
-            r.composite_score = (
-                W_OBV * r.obv_norm
-                + W_GAP * r.gap_norm
-                + W_RANGE * r.range_norm
-                + W_MOM * r.mom_norm
-            )
+            r.composite_score = composite_weighted(r.obv_norm, r.gap_norm, r.range_norm, r.mom_norm)
 
         raw_rows.sort(key=lambda x: x.composite_score, reverse=True)
         self._rows = raw_rows
@@ -492,7 +292,7 @@ class PremktTester:
             m5 = ux.get_historical_candles_by_instrument_key(
                 r.instrument_key, interval="minutes/5", days_back=2, range_end_date=sim
             )
-            m5 = _sort_candles(m5)
+            m5 = sort_candles(m5)
             day_op = None
             day_cl = None
             for c in m5:
@@ -556,18 +356,16 @@ def load_sample_rows(path: Path) -> Tuple[Optional[date], List[SymbolRow]]:
         gap_v = [r.gap_strength for r in rows]
         rng_v = [r.range_position for r in rows]
         mom_v = [r.momentum for r in rows]
-        obv_n = _min_max_norm(obv_v)
-        gap_n = _min_max_norm(gap_v)
-        rng_n = _min_max_norm(rng_v)
-        mom_n = _min_max_norm(mom_v)
+        obv_n = min_max_norm(obv_v)
+        gap_n = min_max_norm(gap_v)
+        rng_n = min_max_norm(rng_v)
+        mom_n = min_max_norm(mom_v)
         for i, r in enumerate(rows):
             r.obv_norm = obv_n[i]
             r.gap_norm = gap_n[i]
             r.range_norm = rng_n[i]
             r.mom_norm = mom_n[i]
-            r.composite_score = (
-                W_OBV * r.obv_norm + W_GAP * r.gap_norm + W_RANGE * r.range_norm + W_MOM * r.mom_norm
-            )
+            r.composite_score = composite_weighted(r.obv_norm, r.gap_norm, r.range_norm, r.mom_norm)
         rows.sort(key=lambda x: x.composite_score, reverse=True)
     return sim_d, rows
 

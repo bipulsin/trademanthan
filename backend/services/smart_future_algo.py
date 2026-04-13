@@ -10,7 +10,7 @@ Consolidates all scan algorithm schedulers into a single controller:
 - Final reconciliation (3:45 PM & 4:00 PM): broker buy/sell/PnL sync; time_based → Exit-TM after 3:15 PM exits
 - Fin sentiment (weekdays 9:17–13:17 IST, 15 min): NSE corporate announcements + FinBERT for arbitrage_master, store in stock_fin_sentiment (NSE date window: last-run→now; 09:17 only uses today IST)
 - Smart Futures CMS picker (weekdays 9:15, 9:30, then 10:00–15:00 every 30 min IST): arbitrage_master current-month futures → smart_futures_daily
-- Pre-market F&O watchlist (weekdays, configurable PREMKET_RUN_TIME IST): top 200 equities → Top N in premarket_watchlist
+- Pre-market F&O watchlist (weekdays 9:14 IST default, PREMKET_RUN_TIME): ~203 equities → Top N in premarket_watchlist (same scoring as test_premkt_scanner / premarket_scoring)
 - Live OI heatmap (weekdays, OI_REFRESH_INTERVAL): Upstox batch quotes → oi_heatmap cache + DB
 
 Interval-driven jobs only run real work between 08:30 and 21:00 IST (see scheduler_window).
@@ -692,7 +692,7 @@ class SmartFutureAlgoScheduler:
                 len(fin_sentiment_times),
             )
 
-            # Pre-market F&O Top N watchlist — configurable IST (default 9:00), before cash open pickers
+            # Pre-market F&O Top N watchlist — configurable IST (default 9:14), before cash open pickers
             pm_h, pm_m = _parse_hh_mm(getattr(settings, "PREMKET_RUN_TIME", "09:00"))
 
             def run_premarket_watchlist_scheduled():

@@ -1,5 +1,5 @@
 /**
- * Dashboard: Pre-market F&O Top 10 watchlist (OBV slope + gap strength + 20d range position).
+ * Dashboard: Pre-market F&O Top N (OBV + gap + 52w range + momentum; matches premarket_scoring / test harness).
  */
 (function () {
     const API = "/scan/premarket-watchlist";
@@ -68,6 +68,9 @@
                     "</td>" +
                     "<td>" +
                     fmtNum(r.range_position, 3) +
+                    "</td>" +
+                    "<td>" +
+                    fmtNum(r.momentum, 3) +
                     "</td>" +
                     "<td>" +
                     fmtNum(r.composite_score, 3) +

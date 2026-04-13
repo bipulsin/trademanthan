@@ -562,6 +562,7 @@ def _run_startup_schema_migrations(db_engine):
                                 gap_strength DOUBLE PRECISION,
                                 gap_pct_signed DOUBLE PRECISION,
                                 range_position DOUBLE PRECISION,
+                                momentum DOUBLE PRECISION,
                                 composite_score DOUBLE PRECISION,
                                 ltp DOUBLE PRECISION,
                                 computed_at TIMESTAMPTZ NOT NULL,
@@ -576,6 +577,15 @@ def _run_startup_schema_migrations(db_engine):
                         )
                     )
                     print("Applied migration: created premarket_watchlist (PostgreSQL)")
+
+            _insp_pm = inspect(db_engine)
+            if "premarket_watchlist" in _insp_pm.get_table_names():
+                _pm_cols = {c["name"] for c in _insp_pm.get_columns("premarket_watchlist")}
+                if "momentum" not in _pm_cols:
+                    conn.execute(
+                        text("ALTER TABLE premarket_watchlist ADD COLUMN momentum DOUBLE PRECISION")
+                    )
+                    print("Applied migration: added premarket_watchlist.momentum")
 
             # Live OI heatmap snapshot (Upstox batch quotes; refreshed by oi_heatmap job)
             if "oi_heatmap_latest" not in table_names:

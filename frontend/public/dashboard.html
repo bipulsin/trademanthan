@@ -102,7 +102,7 @@
                         </div>
                     </div>
                     <div class="card-content">
-                        <p class="premarket-watchlist-hint">Top N (default 10) of up to 200 F&amp;O names from arbitrage_master, ranked by composite of 10-day OBV slope, gap strength, and range position. Weekdays at <code>PREMKET_RUN_TIME</code> IST (default 9:00).</p>
+                        <p class="premarket-watchlist-hint">Top N (default 10) of up to 203 F&amp;O names from <code>arbitrage_master</code>, same model as <code>test_premkt_scanner.py</code>: 10-day OBV slope, gap at open, 52w range position, prior-session 5m momentum — weighted 30% / 25% / 25% / 20%. Weekdays at <strong>9:14 AM</strong> IST (<code>PREMKET_RUN_TIME</code>).</p>
                         <div class="premarket-watchlist-wrap" id="premarketWatchlistHost">
                             <p class="premarket-watchlist-msg" id="premarketWatchlistMsg">Loading…</p>
                         </div>
@@ -351,7 +351,7 @@
     <script src="dashboard.js?v=1.2"></script>
     <script src="market-sentiment-dials.js?v=1.6"></script>
     <script src="dashboard-sector-movers.js?v=1.3"></script>
-    <script src="dashboard-premarket-watchlist.js?v=1.0"></script>
+    <script src="dashboard-premarket-watchlist.js?v=1.1"></script>
     <script src="dashboard-oi-heatmap.js?v=2.0"></script>
     <script src="dashboard-priority-signals.js?v=1.0"></script>
     <script src="crypto-prices.js?v=1.4"></script>
