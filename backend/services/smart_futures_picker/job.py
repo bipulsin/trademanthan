@@ -23,7 +23,7 @@ from backend.config import settings
 from backend.database import SessionLocal
 from backend.services.smart_futures_session_date import effective_session_date_ist_for_trend
 from backend.services.smart_futures_session_utils import compute_atr5_14_ratio_for_session
-from backend.services.smart_futures_exit import index_session_long_short_flags
+# Index NIFTY/BANKNIFTY alignment was optional; disabled — see run_smart_futures_picker_job.
 from backend.services.smart_futures_picker.indicators import (
     adx_14_last_two,
     adx_14_value,
@@ -106,7 +106,7 @@ def _session_elapsed_fraction(session_date: date, m5: List[dict]) -> float:
 def _vix_last_close_5m(upstox: UpstoxService) -> Optional[float]:
     try:
         c = upstox.get_historical_candles_by_instrument_key(
-            INDIA_VIX_KEY, interval="minutes/5", days_back=2
+            INDIA_VIX_KEY, interval="minutes/5", days_back=6
         )
         s = _sort_candles(c)
         if not s:
@@ -246,7 +246,7 @@ def _score_symbol_outcome(
     obv_slope = compute_obv_slope_daily(closes_d, vols_d)
 
     m5_raw = upstox.get_historical_candles_by_instrument_key(
-        fut_key, interval="minutes/5", days_back=2
+        fut_key, interval="minutes/5", days_back=6
     )
     m5 = _sort_candles(m5_raw)
     m5_today = [b for b in m5 if _ist_date_from_ts(str(b.get("timestamp") or "")) == session_date]
@@ -614,9 +614,8 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
     vix = _vix_last_close_5m(upstox)
     skip_long_vix = vix is not None and vix > 22.0
 
-    idx_long_ok, idx_short_ok = index_session_long_short_flags(
-        upstox, session_date, range_end_date=session_date
-    )
+    # Index long/short gates disabled: do not fetch NIFTY/BANKNIFTY 5m for alignment.
+    idx_long_ok, idx_short_ok = True, True
 
     reject_counts: Counter[str] = Counter()
     no_entry_outcomes: List[SymbolScoreOutcome] = []

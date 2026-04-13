@@ -47,7 +47,7 @@ def compute_atr5_14_ratio_for_session(
     """
     try:
         m5_raw = upstox.get_historical_candles_by_instrument_key(
-            fut_instrument_key, interval="minutes/5", days_back=2
+            fut_instrument_key, interval="minutes/5", days_back=6
         )
         m5 = _sort_candles(m5_raw)
         m5_today = [b for b in m5 if _ist_date_from_ts(str(b.get("timestamp") or "")) == session_date]
