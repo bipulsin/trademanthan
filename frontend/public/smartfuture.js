@@ -351,9 +351,7 @@
     }
 
     function trendTableRowHtml(r) {
-        const noFuture = Boolean(r && r.__no_future_selected);
         const runSlot = escapeHtml(String((r && r.__run_slot) || deriveRunSlot(r) || ''));
-        const symbolCell = noFuture ? 'No Future selected' : fmtSymbolCell(r);
         return (
             '<tr data-row-id="' +
             r.id +
@@ -362,37 +360,37 @@
             runSlot +
             '</td>' +
             '<td>' +
-            symbolCell +
+            fmtSymbolCell(r) +
             '</td>' +
             '<td>' +
-            (noFuture ? '' : fmtSideCell(r)) +
+            fmtSideCell(r) +
             '</td>' +
             '<td>' +
-            (noFuture ? '' : fmtTierBadge(r)) +
+            fmtTierBadge(r) +
             '</td>' +
             '<td>' +
-            (noFuture ? '' : fmtOiTag(r)) +
+            fmtOiTag(r) +
             '</td>' +
             '<td>' +
-            (noFuture ? '' : fmtFilterDot(r)) +
+            fmtFilterDot(r) +
             '</td>' +
             '<td>' +
-            (noFuture ? '' : fmtNum(r.final_cms, 2)) +
+            fmtNum(r.final_cms, 2) +
             '</td>' +
             '<td>' +
-            (noFuture ? '' : fmtNum(r.sector_score, 2)) +
+            fmtNum(r.sector_score, 2) +
             '</td>' +
             '<td>' +
-            (noFuture ? '' : fmtNum(r.combined_sentiment, 3)) +
+            fmtNum(r.combined_sentiment, 3) +
             '</td>' +
             '<td>' +
-            (noFuture ? '' : fmtNum(r.entry_price, 2)) +
+            fmtNum(r.entry_price, 2) +
             '</td>' +
             '<td>' +
-            (noFuture ? '' : fmtNum(r.sl_price, 2)) +
+            fmtNum(r.sl_price, 2) +
             '</td>' +
             '<td>' +
-            (noFuture ? '' : fmtTrendActionCell(r)) +
+            fmtTrendActionCell(r) +
             '</td>' +
             '</tr>'
         );
@@ -483,8 +481,6 @@
                     const row = Object.assign({}, r, { __run_slot: slot });
                     rows.push(row);
                 });
-            } else {
-                rows.push({ id: 'slot-' + slot, __run_slot: slot, __no_future_selected: true });
             }
         });
 
