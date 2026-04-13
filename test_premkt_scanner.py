@@ -245,36 +245,35 @@ class PremktTester:
         """
         ux = self._ux()
         sim = self.simulation_date
-        pre = prev_trading_day(sim)
 
         out: Dict[str, Any] = {"stock": stock.upper(), "instrument_key": instrument_key, "error": None}
 
-        # Long history for 52w proxy (trading days in window)
+        # Anchor to simulation date so we include the session row when present; holidays on
+        # calendar "previous weekday" are handled by taking the last bar with date < sim.
         daily_raw = ux.get_historical_candles_by_instrument_key(
-            instrument_key, interval="days/1", days_back=320, range_end_date=pre
+            instrument_key, interval="days/1", days_back=320, range_end_date=sim
         )
         daily = _sort_candles(daily_raw)
         if len(daily) < 30:
             out["error"] = f"insufficient daily history ({len(daily)})"
             return out
 
-        by_d = {}
-        for c in daily:
-            dd = _parse_candle_date(c.get("timestamp"))
-            if dd:
-                by_d[dd] = c
+        def _cd(c: dict) -> Optional[date]:
+            return _parse_candle_date(c.get("timestamp"))
 
-        if pre not in by_d:
-            out["error"] = f"no daily bar for prev session {pre}"
+        completed_before_sim = [c for c in daily if _cd(c) is not None and _cd(c) < sim]
+        if len(completed_before_sim) < 11:
+            out["error"] = f"need 11+ daily bars before {sim} (got {len(completed_before_sim)})"
             return out
 
-        prev_close = float(by_d[pre]["close"])
+        pre_eff = _cd(completed_before_sim[-1])
+        prev_close = float(completed_before_sim[-1]["close"])
         if prev_close <= 0:
             out["error"] = "bad prev_close"
             return out
 
-        # OBV slope: last 10 daily bars ending last session in `daily` (range_end_date=pre)
-        tail10 = daily[-10:]
+        # OBV slope: last 10 completed sessions before sim
+        tail10 = completed_before_sim[-10:]
         if len(tail10) < 10:
             out["error"] = "need 10 daily bars for OBV"
             return out
@@ -282,7 +281,7 @@ class PremktTester:
         vols = [float(x.get("volume") or 0) for x in tail10]
         obv_slope = compute_obv_slope_daily(closes, vols)
 
-        prev5 = daily[-5:]
+        prev5 = completed_before_sim[-5:]
         out["prev_5_days_ohlcv"] = [
             {
                 "date": str(_parse_candle_date(x.get("timestamp"))),
@@ -295,9 +294,9 @@ class PremktTester:
             for x in prev5
         ]
 
-        # 52w range from history through `pre` (completed sessions only)
-        highs = [float(x["high"]) for x in daily]
-        lows = [float(x["low"]) for x in daily]
+        # 52w range from history strictly before sim (no lookahead)
+        highs = [float(x["high"]) for x in completed_before_sim]
+        lows = [float(x["low"]) for x in completed_before_sim]
         w52_hi = max(highs)
         w52_lo = min(lows)
         if w52_hi - w52_lo <= 1e-9:
@@ -364,8 +363,9 @@ class PremktTester:
         out["obv_slope"] = obv_slope
 
         # Momentum: prior session 5m closes → ema_slope_norm_m5
+        assert pre_eff is not None
         m5 = ux.get_historical_candles_by_instrument_key(
-            instrument_key, interval="minutes/5", days_back=5, range_end_date=pre
+            instrument_key, interval="minutes/5", days_back=5, range_end_date=pre_eff
         )
         m5 = _sort_candles(m5)
         closes_m5: List[float] = []
@@ -381,7 +381,7 @@ class PremktTester:
                     dt = dt.astimezone(IST)
             except Exception:
                 continue
-            if dt.date() != pre:
+            if dt.date() != pre_eff:
                 continue
             if dt.hour < 9 or (dt.hour == 9 and dt.minute < 15):
                 continue
