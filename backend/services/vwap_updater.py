@@ -70,6 +70,61 @@ def _try_live_exit(position, reason: str, option_contract: str):
     return False, None, False
 
 
+def _skip_exit_if_already_closed_at_broker(
+    db: Session,
+    position,
+    now: datetime,
+    fallback_sell_price: float = 0.0,
+) -> bool:
+    """
+    Guard before any live SELL: if broker already shows exit/flat, do not place another sell.
+    Returns True when caller must skip placing live exit order.
+    """
+    try:
+        if live_trading.reconcile_intraday_exit_from_broker(db, position, default_exit_reason="manual"):
+            logger.info(
+                "✅ Exit guard: %s already exited at broker — skipping live SELL",
+                getattr(position, "stock_name", "?"),
+            )
+            return True
+    except Exception as e:
+        logger.debug("Exit guard reconcile failed for %s: %s", getattr(position, "stock_name", "?"), e)
+
+    ikey = (getattr(position, "instrument_key", None) or "").strip()
+    if not ikey:
+        return False
+
+    try:
+        bro_net = live_trading.get_broker_net_long_qty_for_instrument(ikey)
+    except Exception as e:
+        logger.debug("Exit guard positions check failed for %s: %s", getattr(position, "stock_name", "?"), e)
+        bro_net = None
+
+    if bro_net is None or bro_net > 0:
+        return False
+
+    from sqlalchemy.orm.attributes import flag_modified
+
+    fp = float(fallback_sell_price or position.sell_price or position.buy_price or 0.0)
+    position.status = "sold"
+    position.exit_reason = "manual"
+    position.sell_time = now
+    position.sell_price = fp
+    if position.buy_price and position.qty:
+        position.pnl = round((fp - float(position.buy_price)) * int(position.qty), 2)
+        flag_modified(position, "pnl")
+    flag_modified(position, "status")
+    flag_modified(position, "exit_reason")
+    flag_modified(position, "sell_time")
+    flag_modified(position, "sell_price")
+    logger.warning(
+        "✅ Exit guard: %s broker net long=%s (flat) — marked sold/manual, skipped live SELL",
+        getattr(position, "stock_name", "?"),
+        bro_net,
+    )
+    return True
+
+
 def historical_data_exists(db: Session, stock_name: str, scan_time: datetime, time_window_minutes: int = 2) -> bool:
     """
     Check if historical market data already exists for a stock at a specific time.
@@ -1242,6 +1297,8 @@ def update_vwap_for_all_open_positions():
                                         new_option_ltp = 0.0
                                 
                                 # Exit with VWAP cross
+                                if _skip_exit_if_already_closed_at_broker(db, position, now, new_option_ltp):
+                                    continue
                                 live_ok, live_order_id, exit_manual = _try_live_exit(position, 'stock_vwap_cross', option_contract)
                                 if exit_manual:
                                     from sqlalchemy.orm.attributes import flag_modified
@@ -1651,6 +1708,10 @@ def update_vwap_for_all_open_positions():
                     #   - No more updates will be applied to this trade
                     # ═══════════════════════════════════════════════════════════════
                     if exit_triggered and exit_reason_to_set:
+                        if _skip_exit_if_already_closed_at_broker(db, position, now, new_option_ltp):
+                            exit_triggered = False
+                            exit_reason_to_set = None
+                            continue
                         live_ok, live_order_id, exit_manual = _try_live_exit(position, exit_reason_to_set, option_contract)
                         if exit_manual:
                             from sqlalchemy.orm.attributes import flag_modified
@@ -3866,6 +3927,9 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                                 # 1. CHECK STOP LOSS
                                 if trade.stop_loss and current_option_ltp_for_pnl <= trade.stop_loss:
                                     exit_triggered = True
+                                    if _skip_exit_if_already_closed_at_broker(db, trade, now, current_option_ltp_for_pnl):
+                                        exit_triggered = False
+                                        continue
                                     live_ok, live_order_id, exit_manual = _try_live_exit(trade, 'stop_loss', trade.option_contract)
                                     if exit_manual:
                                         from sqlalchemy.orm.attributes import flag_modified
@@ -3905,6 +3969,9 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                                             if (option_type == 'CE' and stock_ltp_exit < stock_vwap_exit) or \
                                                (option_type == 'PE' and stock_ltp_exit > stock_vwap_exit):
                                                 exit_triggered = True
+                                                if _skip_exit_if_already_closed_at_broker(db, trade, now, current_option_ltp_for_pnl):
+                                                    exit_triggered = False
+                                                    continue
                                                 live_ok, live_order_id, exit_manual = _try_live_exit(trade, 'stock_vwap_cross', trade.option_contract)
                                                 if exit_manual:
                                                     from sqlalchemy.orm.attributes import flag_modified
