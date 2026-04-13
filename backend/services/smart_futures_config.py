@@ -26,6 +26,9 @@ TIER1_THRESHOLD: float = 0.75
 TIER2_THRESHOLD: float = 0.60
 NEUTRAL_BAND: float = 0.60
 
+# Sector index must agree with side by at least this magnitude
+SECTOR_ALIGN_MIN: float = 0.05
+
 # --- CMS weights (must sum to 1.0 when OI_IN_CMS_ENABLED is False) ---
 CMS_WEIGHTS: Dict[str, float] = {
     "obv_slope": 0.25,
