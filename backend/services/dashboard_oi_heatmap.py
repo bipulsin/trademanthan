@@ -258,6 +258,34 @@ def _heatmap_row_dict(
     }
 
 
+def _upstox_oi_change_vs_prior_daily(u: Any, instrument_key: str, current_oi: int) -> int:
+    """
+    Full market quote often omits change_in_oi. Use last two daily candles' OI (7th field) when present:
+    current OI vs previous trading day's OI in the series.
+    """
+    if current_oi <= 0:
+        return 0
+    try:
+        candles = u.get_historical_candles_by_instrument_key(
+            instrument_key, interval="days/1", days_back=12
+        )
+    except Exception as e:
+        logger.debug("dashboard_oi_heatmap: daily OI history %s: %s", instrument_key, e)
+        return 0
+    if not candles or len(candles) < 2:
+        return 0
+    sorted_c = sorted(candles, key=lambda c: str(c.get("timestamp") or ""))
+    prev = sorted_c[-2]
+    p_oi = prev.get("oi")
+    if p_oi is None:
+        return 0
+    try:
+        p_int = int(float(p_oi))
+    except (TypeError, ValueError):
+        return 0
+    return int(current_oi) - p_int
+
+
 def _try_upstox_heatmap_row(rank: int, symbol: str) -> Optional[Dict[str, Any]]:
     u = _upstox_service()
     if not u:
@@ -270,9 +298,22 @@ def _try_upstox_heatmap_row(rank: int, symbol: str) -> Optional[Dict[str, Any]]:
         return None
     lp = float(q.get("last_price") or 0)
     ohlc = q.get("ohlc") if isinstance(q.get("ohlc"), dict) else {}
-    pc = float(q.get("close_price") or ohlc.get("close") or 0)
+    open_ = float(ohlc.get("open") or 0)
+    # Upstox: net_change = last_price − previous day's close (see Full Market Quotes API docs)
+    net_chg = float(q.get("net_change") or 0)
+    if abs(net_chg) > 1e-9:
+        pc = lp - net_chg
+    elif open_ > 1e-9:
+        # Intraday vs session open when net_change not populated
+        pc = open_
+    else:
+        pc = float(q.get("close_price") or ohlc.get("close") or 0)
+
     oi = int(q.get("oi") or 0)
     chg = int(q.get("change_in_oi") or 0)
+    if chg == 0 and oi > 0:
+        chg = _upstox_oi_change_vs_prior_daily(u, ik, oi)
+
     if lp <= 1e-9 and oi <= 0:
         return None
     return _heatmap_row_dict(rank, symbol, lp, pc, oi, chg, "upstox")

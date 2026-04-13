@@ -1230,14 +1230,20 @@ class UpstoxService:
                 structured_candles = []
                 for candle in candles:
                     if len(candle) >= 6:
-                        structured_candles.append({
+                        rec = {
                             'timestamp': candle[0],
                             'open': float(candle[1]),
                             'high': float(candle[2]),
                             'low': float(candle[3]),
                             'close': float(candle[4]),
-                            'volume': float(candle[5])
-                        })
+                            'volume': float(candle[5]),
+                        }
+                        if len(candle) >= 7:
+                            try:
+                                rec["oi"] = float(candle[6])
+                            except (TypeError, ValueError, IndexError):
+                                pass
+                        structured_candles.append(rec)
                 
                 logger.info(f"✅ Fetched {len(structured_candles)} candles for {instrument_key}")
                 return structured_candles
@@ -1975,6 +1981,10 @@ class UpstoxService:
                     )
                     out["oi"] = oi_v
                     out["change_in_oi"] = oi_chg
+                    try:
+                        out["net_change"] = float(quote_data.get("net_change") or 0)
+                    except (TypeError, ValueError):
+                        out["net_change"] = 0.0
                     
                     logger.info(f"✅ Market quote for {instrument_key}: LTP=₹{ltp}, Close=₹{close_price}")
                     
@@ -2362,14 +2372,20 @@ class UpstoxService:
                 for candle in candles:
                     # Upstox format: [timestamp, open, high, low, close, volume, oi]
                     if len(candle) >= 6:
-                        structured_candles.append({
+                        rec = {
                             'timestamp': candle[0],
                             'open': float(candle[1]),
                             'high': float(candle[2]),
                             'low': float(candle[3]),
                             'close': float(candle[4]),
-                            'volume': float(candle[5])
-                        })
+                            'volume': float(candle[5]),
+                        }
+                        if len(candle) >= 7:
+                            try:
+                                rec["oi"] = float(candle[6])
+                            except (TypeError, ValueError, IndexError):
+                                pass
+                        structured_candles.append(rec)
                 
                 logger.info(f"✅ Fetched {len(structured_candles)} candles for {symbol}")
                 return structured_candles
