@@ -9,7 +9,7 @@ Consolidates all scan algorithm schedulers into a single controller:
 - Entry slip monitor (every 15 min during market hours): cancel unfilled entry orders after 2 checks
 - Final reconciliation (3:45 PM & 4:00 PM): broker buy/sell/PnL sync; time_based → Exit-TM after 3:15 PM exits
 - Fin sentiment (weekdays 9:17–13:17 IST, 15 min): NSE corporate announcements + FinBERT for arbitrage_master, store in stock_fin_sentiment (NSE date window: last-run→now; 09:17 only uses today IST)
-- Smart Futures CMS picker (weekdays 9:30 then 10:00–15:00 every 30 min IST): arbitrage_master current-month futures → smart_futures_daily
+- Smart Futures CMS picker (weekdays 9:15, 9:30, then 10:00–15:00 every 30 min IST): arbitrage_master current-month futures → smart_futures_daily
 
 Interval-driven jobs only run real work between 08:30 and 21:00 IST (see scheduler_window).
 Exception: 8:10 AM Telegram ping (before 8:30).
@@ -674,8 +674,8 @@ class SmartFutureAlgoScheduler:
                 len(fin_sentiment_times),
             )
 
-            # Smart Futures picker — 9:30 open, then 10:00–15:00 every 30 min (weekdays)
-            _sf_picker_slots = [(9, 30)]
+            # Smart Futures picker — 9:15 (first bar after cash open), 9:30, then 10:00–15:00 every 30 min (weekdays)
+            _sf_picker_slots = [(9, 15), (9, 30)]
             for _h in range(10, 15):
                 for _m in (0, 30):
                     _sf_picker_slots.append((_h, _m))
@@ -717,7 +717,7 @@ class SmartFutureAlgoScheduler:
                     coalesce=True,
                 )
             logger.info(
-                "✅ Scheduled: Smart Futures picker (%s weekday slots 9:30 + 30 min to 15:00 IST)",
+                "✅ Scheduled: Smart Futures picker (%s weekday slots 9:15/9:30 + 30 min to 15:00 IST)",
                 len(_sf_picker_slots),
             )
 

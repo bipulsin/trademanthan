@@ -181,7 +181,7 @@ def _row_to_dict(r: Any) -> Dict[str, Any]:
 
 @router.get("/daily")
 def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = Depends(get_db)):
-    """Today's Trend: rows for effective session_date (IST window 9:00 → next session 08:59)."""
+    """Today's Trend: rows for effective session_date (IST window 9:15 → next session 09:14)."""
     sd = effective_session_date_ist_for_trend()
     try:
         rows = _fetch_daily_for_session(db, sd)

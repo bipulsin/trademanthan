@@ -1,7 +1,7 @@
 """
 Smart Futures picker job: arbitrage_master universe → CMS / Final_CMS → smart_futures_daily.
 
-Schedules: 09:30 IST open; then 10:00–15:00 every 30 minutes (weekdays).
+Schedules: 09:15 and 09:30 IST; then 10:00–15:00 every 30 minutes (weekdays).
 Off-cycle on Sat/Sun: set env SMART_FUTURES_PICKER_FORCE_WEEKEND=1 (manual only).
 """
 from __future__ import annotations
@@ -447,7 +447,7 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
     )
     if now_ist.weekday() >= 5 and not _force_weekend:
         return {"skipped": "weekend", "scan_trigger": scan_trigger}
-    # Align with GET /daily filter (weekend / pre-9:00 map to trading session date).
+    # Align with GET /daily filter (weekend / pre-9:15 map to trading session date).
     session_date = effective_session_date_ist_for_trend(now_ist)
 
     db = SessionLocal()

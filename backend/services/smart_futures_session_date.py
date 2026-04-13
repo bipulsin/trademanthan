@@ -24,9 +24,10 @@ def _prev_trading_day(d: date) -> date:
 
 def effective_session_date_ist_for_trend(now_ist: Optional[datetime] = None) -> date:
     """
-    Session date for Today's Trend: Fri 9:00 IST → next trading day 08:59 IST still shows Friday's
-    session_date; before 09:00 on a weekday shows previous trading day.
-    Weekend shows last Friday's session_date.
+    Session date for Today's Trend (aligned with cash open 9:15 IST and first picker run).
+
+    Before 9:15 on a weekday → previous trading day. From 9:15 → calendar ``d``.
+    Weekend → last Friday's session_date (Sat/Sun).
     """
     now = now_ist or datetime.now(IST)
     if now.tzinfo is None:
@@ -39,6 +40,6 @@ def effective_session_date_ist_for_trend(now_ist: Optional[datetime] = None) -> 
         return d - timedelta(days=1)
     if wd == 6:
         return d - timedelta(days=2)
-    if now.time() < time(9, 0):
+    if now.time() < time(9, 15):
         return _prev_trading_day(d)
     return d

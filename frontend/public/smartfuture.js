@@ -195,8 +195,16 @@
 
         const groups = data.groups && data.groups.length ? data.groups : [];
         if (!groups.length) {
+            const sd = escapeHtml(String(data.session_date || '—'));
+            const hint =
+                'No picks for session ' +
+                sd +
+                '. On market days the scanner runs from 9:15 IST; if markets are closed or no symbol passes CMS filters, this list stays empty.';
             host.innerHTML =
-                '<div class="sf-table-wrap"><table class="sf-table"><tbody><tr><td colspan="10" style="padding:14px;">No Record</td></tr></tbody></table></div>';
+                '<div class="sf-table-wrap"><table class="sf-table"><tbody><tr><td colspan="10" style="padding:14px;">No Record</td></tr></tbody></table></div>' +
+                '<p class="sf-meta" style="margin-top:10px;max-width:42rem;">' +
+                hint +
+                '</p>';
             return;
         }
 
