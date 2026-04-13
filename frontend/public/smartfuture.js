@@ -15,6 +15,23 @@
         };
     }
 
+    function isTokenExpiredResponse(res, payloadText, payloadJson) {
+        if (res && Number(res.status) === 401) return true;
+        const detail =
+            (payloadJson && (payloadJson.detail || payloadJson.message)) ||
+            payloadText ||
+            '';
+        return /token\s+expired/i.test(String(detail));
+    }
+
+    function redirectToLoginExpired() {
+        try {
+            localStorage.removeItem('trademanthan_token');
+            sessionStorage.setItem('auth_redirect_reason', 'Your session expired. Please sign in again.');
+        } catch (e) { /* ignore */ }
+        window.location.replace('index.html');
+    }
+
     async function fetchDailyJson() {
         const paths = ['/api/smart-futures/daily', '/smart-futures/daily'];
         let lastErr = null;
@@ -38,6 +55,10 @@
                         lastErr = new Error('Invalid JSON from ' + p + ': ' + (parseErr.message || parseErr));
                         continue;
                     }
+                }
+                if (isTokenExpiredResponse(res, raw, null)) {
+                    redirectToLoginExpired();
+                    throw new Error('Session expired');
                 }
                 lastErr = new Error(raw.slice(0, 200) || res.statusText || String(res.status));
             } catch (e) {
@@ -410,7 +431,18 @@
                     ok = true;
                     break;
                 }
-                errText = (await res.text()) || res.statusText;
+                const raw = (await res.text()) || res.statusText;
+                let data = null;
+                try {
+                    data = JSON.parse(raw);
+                } catch (e) {
+                    data = null;
+                }
+                if (isTokenExpiredResponse(res, raw, data)) {
+                    redirectToLoginExpired();
+                    return;
+                }
+                errText = (data && data.detail) || raw || res.statusText;
             } catch (e) {
                 errText = String(e.message || e);
             }
@@ -447,6 +479,10 @@
                 if (res.ok && data && data.success) {
                     ok = true;
                     break;
+                }
+                if (isTokenExpiredResponse(res, raw, data)) {
+                    redirectToLoginExpired();
+                    return;
                 }
                 errText = (data && data.detail) || raw || res.statusText;
             } catch (e) {
