@@ -1994,6 +1994,16 @@ body[data-theme="dark"] .sector-movers-stock-pct--down {
 }
 
 /* Pre-market F&O watchlist */
+.premarket-watchlist-session-date {
+    font-weight: 600;
+    font-size: 0.92em;
+    color: #64748b;
+    margin-left: 0.35em;
+    white-space: nowrap;
+}
+body[data-theme="dark"] .premarket-watchlist-session-date {
+    color: #94a3b8;
+}
 .premarket-watchlist-toolbar {
     display: flex;
     align-items: center;

@@ -44,6 +44,32 @@
         return Number(n).toFixed(d);
     }
 
+    /** YYYY-MM-DD → dd-MMM-yyyy (e.g. 13-Apr-2026) */
+    function formatSessionDateLabel(ymd) {
+        if (!ymd || ymd === "—") return "—";
+        const p = String(ymd).trim().split("-");
+        if (p.length !== 3) return ymd;
+        const y = parseInt(p[0], 10);
+        const m = parseInt(p[1], 10);
+        const d = parseInt(p[2], 10);
+        if (!y || !m || !d || m < 1 || m > 12) return ymd;
+        const months = [
+            "Jan",
+            "Feb",
+            "Mar",
+            "Apr",
+            "May",
+            "Jun",
+            "Jul",
+            "Aug",
+            "Sep",
+            "Oct",
+            "Nov",
+            "Dec",
+        ];
+        return String(d).padStart(2, "0") + "-" + months[m - 1] + "-" + y;
+    }
+
     function fmtTime(iso) {
         if (!iso) return "—";
         try {
@@ -173,8 +199,10 @@
         const host = document.getElementById("premarketWatchlistHost");
         const msg = document.getElementById("premarketWatchlistMsg");
         const updated = document.getElementById("premarketWatchlistUpdated");
+        const sessionHead = document.getElementById("premarketWatchlistSessionDate");
         if (!host) return;
 
+        if (sessionHead) sessionHead.textContent = "—";
         if (msg) {
             msg.textContent = "Loading…";
             msg.style.display = "block";
@@ -187,6 +215,10 @@
             }
             const rows = out.rows || [];
             const sessionDate = out.session_date || "—";
+            if (sessionHead) {
+                sessionHead.textContent =
+                    rows.length > 0 ? formatSessionDateLabel(sessionDate) : "—";
+            }
             const inner = renderTable(rows);
             host.innerHTML = inner;
             if (msg) {
@@ -227,6 +259,7 @@
                 msg.style.display = "none";
             }
             if (updated) updated.textContent = "—";
+            if (sessionHead) sessionHead.textContent = "—";
         }
     }
 
