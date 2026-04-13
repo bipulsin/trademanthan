@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pytz
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from backend.config import settings
 from backend.database import SessionLocal
@@ -43,8 +44,11 @@ _cache_lock = threading.Lock()
 _rows_cache: List[Dict[str, Any]] = []
 _cache_updated_at_mono: float = 0.0
 _cache_updated_at_iso: str = ""
+_cache_source: str = "none"  # "live" (Upstox refresh) | "snapshot" (DB) | "none"
 _last_error: Optional[str] = None
 _underlying_rank: Dict[str, int] = {}
+_api_refresh_lock = threading.Lock()
+_last_api_refresh_attempt_mono: float = 0.0
 
 # Daily universe of instrument_keys (rebuilt when instruments file mtime changes)
 _universe_date: Optional[date] = None
@@ -193,7 +197,7 @@ def refresh_oi_heatmap_live() -> Dict[str, Any]:
     """
     Fetch batch quotes for universe keys, sort by |oi_change|, update memory cache + DB.
     """
-    global _rows_cache, _cache_updated_at_mono, _cache_updated_at_iso, _last_error, _underlying_rank
+    global _rows_cache, _cache_updated_at_mono, _cache_updated_at_iso, _last_error, _underlying_rank, _cache_source
 
     if not getattr(settings, "UPSTOX_OI_ENABLED", True):
         return {"success": False, "skipped": "UPSTOX_OI_ENABLED false"}
@@ -275,6 +279,7 @@ def refresh_oi_heatmap_live() -> Dict[str, Any]:
         _rows_cache = rows
         _cache_updated_at_mono = time.monotonic()
         _cache_updated_at_iso = now_iso
+        _cache_source = "live"
         _last_error = None
 
     _persist_snapshot(rows, now_dt)
@@ -324,18 +329,124 @@ def _persist_snapshot(rows: List[Dict[str, Any]], updated_at: datetime) -> None:
             db.close()
 
 
+def load_oi_heatmap_snapshot_from_db() -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """
+    Last persisted snapshot (PostgreSQL ``oi_heatmap_latest``). Used when process memory is empty
+    (e.g. after restart, or before the first scheduler tick; weekends skip live refresh).
+    """
+    db = None
+    try:
+        db = SessionLocal()
+        r = db.execute(
+            text(
+                """
+                SELECT rank, instrument_key, underlying_symbol, trading_symbol, expiry,
+                       ltp, chg_pct, oi, oi_chg, oi_chg_pct, oi_signal, volume, score, updated_at
+                FROM oi_heatmap_latest
+                ORDER BY rank ASC
+                """
+            )
+        )
+        rows_out: List[Dict[str, Any]] = []
+        updated_iso: Optional[str] = None
+        for row in r.mappings():
+            d = dict(row)
+            uat = d.pop("updated_at", None)
+            if updated_iso is None and uat is not None:
+                updated_iso = uat.isoformat() if hasattr(uat, "isoformat") else str(uat)
+            exp = d.get("expiry")
+            if exp is not None and not isinstance(exp, (str, int, float)):
+                d["expiry"] = str(exp)
+            rows_out.append(d)
+        return rows_out, updated_iso
+    except (ProgrammingError, OperationalError) as e:
+        logger.debug("oi_heatmap: DB snapshot unavailable: %s", e)
+        return [], None
+    except Exception as e:
+        logger.warning("oi_heatmap: read oi_heatmap_latest failed: %s", e)
+        return [], None
+    finally:
+        if db is not None:
+            db.close()
+
+
+def _hydrate_cache_from_db_rows(rows: List[Dict[str, Any]], updated_iso: Optional[str]) -> None:
+    """Fill in-memory cache from DB if still empty (single writer under lock)."""
+    global _cache_updated_at_mono, _cache_updated_at_iso, _cache_source, _underlying_rank
+    if not rows:
+        return
+    snap = [dict(r) for r in rows]
+    with _cache_lock:
+        if _rows_cache:
+            return
+        _rows_cache[:] = snap
+        _cache_updated_at_mono = time.monotonic()
+        _cache_updated_at_iso = updated_iso or ""
+        _cache_source = "snapshot"
+        _underlying_rank = {
+            str(r.get("underlying_symbol") or "").upper(): int(r["rank"])
+            for r in snap
+            if r.get("underlying_symbol") is not None and r.get("rank") is not None
+        }
+    logger.info("oi_heatmap: hydrated memory from oi_heatmap_latest (%s rows)", len(snap))
+
+
+def maybe_trigger_refresh_if_empty() -> None:
+    """
+    When both memory and DB are empty, kick a one-off Upstox refresh (debounced) so the first
+    dashboard load after deploy can populate without waiting for the interval job.
+    """
+    global _last_api_refresh_attempt_mono
+    if not getattr(settings, "UPSTOX_OI_ENABLED", True):
+        return
+    with _api_refresh_lock:
+        now = time.monotonic()
+        if now - _last_api_refresh_attempt_mono < 120.0:
+            return
+        _last_api_refresh_attempt_mono = now
+
+    def _run() -> None:
+        try:
+            refresh_oi_heatmap_live()
+        except Exception as e:
+            logger.warning("oi_heatmap: on-demand refresh failed: %s", e)
+
+    threading.Thread(target=_run, daemon=True, name="oi-heatmap-on-demand-refresh").start()
+
+
 def get_live_oi_heatmap_json() -> Dict[str, Any]:
     """API payload for GET /scan/dashboard/oi-heatmap."""
     with _cache_lock:
         rows = list(_rows_cache)
         ts = _cache_updated_at_iso
         err = _last_error
+        origin = _cache_source
+
+    if not rows:
+        db_rows, db_ts = load_oi_heatmap_snapshot_from_db()
+        if db_rows:
+            _hydrate_cache_from_db_rows(db_rows, db_ts)
+            with _cache_lock:
+                rows = list(_rows_cache)
+                ts = _cache_updated_at_iso
+                err = _last_error
+                origin = _cache_source
+        else:
+            maybe_trigger_refresh_if_empty()
+
+    empty_help = (
+        "No heatmap rows yet. Weekday sessions refresh from Upstox on a timer; after a server "
+        "restart the last snapshot is loaded from the database when available. If this persists, "
+        "check the Upstox instruments file and API credentials."
+    )
     return {
         "success": True,
         "source": "upstox",
+        "data_origin": origin if rows else "none",
         "updated_at": ts or None,
         "error": err,
         "rows": rows,
+        "message": None if rows else empty_help,
     }
 
 

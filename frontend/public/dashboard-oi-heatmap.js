@@ -159,12 +159,21 @@
             const inner = renderTable(rows);
             host.innerHTML = inner;
             if (msg) {
-                const src = data.source ? " · " + data.source : "";
+                const origin = data.data_origin || "";
+                let originNote = "";
+                if (rows.length > 0) {
+                    if (origin === "snapshot") {
+                        originNote =
+                            " · Last saved snapshot (will update when live Upstox refresh runs)";
+                    } else if (origin === "live") {
+                        originNote = " · Live Upstox";
+                    }
+                }
                 const err = data.error ? " · last error: " + data.error : "";
                 msg.textContent =
                     rows.length > 0
-                        ? rows.length + " symbols (live Upstox)" + src + err
-                        : (data.message || "No rows.") + src + err;
+                        ? rows.length + " symbols" + originNote + err
+                        : (data.message || "No rows.") + err;
                 msg.style.display = "block";
             }
             if (updated && data.updated_at) {
