@@ -47,12 +47,21 @@ W_MOM = 0.20
 
 
 def _parse_candle_date(ts: Any) -> Optional[date]:
+    """
+    Calendar date in Asia/Kolkata for an Upstox candle timestamp (often UTC ISO).
+    Using the raw UTC date breaks NSE daily alignment (evening UTC = previous IST date).
+    """
     if ts is None:
         return None
-    s = str(ts)
-    if "T" in s:
-        s = s.split("T")[0]
+    s = str(ts).strip()
     try:
+        if "T" in s:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = IST.localize(dt)
+            else:
+                dt = dt.astimezone(IST)
+            return dt.date()
         return date.fromisoformat(s[:10])
     except ValueError:
         return None
