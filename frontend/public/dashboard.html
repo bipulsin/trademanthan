@@ -102,7 +102,7 @@
                         </div>
                     </div>
                     <div class="card-content">
-                        <p class="premarket-watchlist-hint">Top 10 of up to 200 F&amp;O names from arbitrage_master, ranked by composite of 10-day OBV slope, opening gap strength vs prev close, and position in the 20-day range. Updated on weekdays ~9:14 AM IST.</p>
+                        <p class="premarket-watchlist-hint">Top 10 of up to 200 F&amp;O names from arbitrage_master, ranked by composite of 10-day OBV slope, opening gap strength vs prev close, and position in the 20-day range. The <strong>LTP</strong> column is the <strong>underlying equity</strong> last price from the broker feed at scan time (≈9:14 AM IST)—it is <strong>not</strong> NSE&rsquo;s pre-open call-auction <strong>IEP / Final</strong> from files such as MW-Pre-Open-Market (those are a different snapshot and price discovery window). Updated on weekdays ~9:14 AM IST.</p>
                         <div class="premarket-watchlist-wrap" id="premarketWatchlistHost">
                             <p class="premarket-watchlist-msg" id="premarketWatchlistMsg">Loading…</p>
                         </div>
@@ -121,7 +121,7 @@
                         </div>
                     </div>
                     <div class="card-content">
-                        <p class="oi-heatmap-hint">Top 10 F&amp;O underlyings use the <strong>same ranked scan</strong> as Pre-Market F&amp;O Watchlist. On weekdays, if today&rsquo;s list is missing, the server can run that scan (morning or <strong>after 15:15 IST</strong> to fill a partial list). OI and price prefer NSE; if NSE blocks the server, data comes from <strong>Upstox</strong> current-month futures. Refresh every 3 minutes (server cache ~2.5 minutes).</p>
+                        <p class="oi-heatmap-hint">Top 10 underlyings use the <strong>same ranked scan</strong> as the watchlist. Price and OI are for the <strong>near-month futures</strong> contract (NSE derivative feed or Upstox)—<strong>not</strong> the equity pre-open IEP in NSE&rsquo;s MW Pre-Open CSV. On weekdays, if today&rsquo;s list is missing, the server can re-run that scan (morning or after <strong>15:15 IST</strong>). Refresh every 3 minutes (server cache ~2.5 minutes).</p>
                         <p class="oi-heatmap-msg" id="oiHeatmapMsg">Loading…</p>
                         <div class="oi-heatmap-wrap" id="oiHeatmapHost"></div>
                     </div>
