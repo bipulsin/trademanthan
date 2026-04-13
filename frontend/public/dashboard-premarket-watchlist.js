@@ -1,5 +1,6 @@
 /**
  * Dashboard: Pre-market F&O Top N (OBV + gap + 52w range + momentum; matches premarket_scoring / test harness).
+ * If today's session has no rows yet (scan not run), shows the most recent prior trading session.
  */
 (function () {
     const API = "/scan/premarket-watchlist";
@@ -10,6 +11,32 @@
         const d = document.createElement("div");
         d.textContent = s;
         return d.innerHTML;
+    }
+
+    /** YYYY-MM-DD for "now" in Asia/Kolkata */
+    function istTodayYmd() {
+        return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+    }
+
+    /** Previous calendar day in UTC civil math, then skip Sat/Sun */
+    function previousTradingDayYmd(ymd) {
+        const p = ymd.split("-").map(function (x) {
+            return parseInt(x, 10);
+        });
+        let y = p[0];
+        let m = p[1];
+        let d = p[2];
+        for (let i = 0; i < 14; i++) {
+            const dt = new Date(Date.UTC(y, m - 1, d - 1));
+            y = dt.getUTCFullYear();
+            m = dt.getUTCMonth() + 1;
+            d = dt.getUTCDate();
+            const wd = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+            if (wd !== 0 && wd !== 6) {
+                return y + "-" + String(m).padStart(2, "0") + "-" + String(d).padStart(2, "0");
+            }
+        }
+        return ymd;
     }
 
     function fmtNum(n, d) {
@@ -34,12 +61,12 @@
 
     function renderTable(rows) {
         if (!rows || rows.length === 0) {
-            return '<p class="premarket-watchlist-empty">No watchlist for this session yet. It is built on weekday mornings after the scheduled scan.</p>';
+            return '<p class="premarket-watchlist-empty">No watchlist data found for recent sessions.</p>';
         }
         const head =
             "<thead><tr>" +
             "<th>#</th><th>Symbol</th><th>OBV slope</th><th>Gap %</th><th>Range pos</th>" +
-            "<th>Score</th><th>LTP</th>" +
+            "<th>Momentum</th><th>Score</th><th>LTP</th>" +
             "</tr></thead>";
         const body = rows
             .map(function (r) {
@@ -91,6 +118,57 @@
         );
     }
 
+    async function fetchSession(ymd) {
+        const url = API + "?session_date=" + encodeURIComponent(ymd);
+        const res = await fetch(url, { cache: "no-store" });
+        const data = await res.json();
+        return { res, data };
+    }
+
+    /**
+     * Prefer today's IST session; if empty, walk back to prior trading days until rows or max steps.
+     */
+    async function loadWithFallback() {
+        const todayYmd = istTodayYmd();
+        let cur = todayYmd;
+        let isFallback = false;
+        let steps = 0;
+        const maxSteps = 12;
+
+        while (steps < maxSteps) {
+            const { res, data } = await fetchSession(cur);
+            if (!res.ok || !data.success) {
+                return {
+                    error: (data && data.message) || res.statusText || "Failed",
+                    rows: [],
+                    session_date: cur,
+                    isFallback: false,
+                    asOf: todayYmd,
+                };
+            }
+            const rows = data.rows || [];
+            if (rows.length > 0) {
+                return {
+                    error: null,
+                    rows: rows,
+                    session_date: data.session_date || cur,
+                    isFallback: isFallback,
+                    asOf: todayYmd,
+                };
+            }
+            isFallback = true;
+            cur = previousTradingDayYmd(cur);
+            steps++;
+        }
+        return {
+            error: null,
+            rows: [],
+            session_date: todayYmd,
+            isFallback: false,
+            asOf: todayYmd,
+        };
+    }
+
     async function load() {
         const host = document.getElementById("premarketWatchlistHost");
         const msg = document.getElementById("premarketWatchlistMsg");
@@ -103,20 +181,35 @@
         }
 
         try {
-            const res = await fetch(API, { cache: "no-store" });
-            const data = await res.json();
-            if (!res.ok || !data.success) {
-                throw new Error((data && data.message) || res.statusText || "Failed");
+            const out = await loadWithFallback();
+            if (out.error) {
+                throw new Error(out.error);
             }
-            const rows = data.rows || [];
-            const sessionDate = data.session_date || "—";
+            const rows = out.rows || [];
+            const sessionDate = out.session_date || "—";
             const inner = renderTable(rows);
             host.innerHTML = inner;
             if (msg) {
-                msg.textContent =
-                    rows.length > 0
-                        ? "Session " + sessionDate + " · " + rows.length + " names"
-                        : "Session " + sessionDate + " — no rows yet.";
+                if (rows.length > 0) {
+                    let line =
+                        "Session " +
+                        sessionDate +
+                        " · " +
+                        rows.length +
+                        " names";
+                    if (out.isFallback) {
+                        line +=
+                            " · Showing last available session (today " +
+                            out.asOf +
+                            " has no scan yet)";
+                    }
+                    msg.textContent = line;
+                } else {
+                    msg.textContent =
+                        "No rows for " +
+                        out.asOf +
+                        " or prior trading days in range — scan may not have run.";
+                }
                 msg.style.display = "block";
             }
             if (updated && rows.length && rows[0].computed_at) {
@@ -144,9 +237,10 @@
 
     document.addEventListener("DOMContentLoaded", function () {
         const btn = document.getElementById("premarketWatchlistRefresh");
-        if (btn) btn.addEventListener("click", function () {
-            load();
-        });
+        if (btn)
+            btn.addEventListener("click", function () {
+                load();
+            });
         load();
         startPoll();
     });

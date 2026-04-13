@@ -6116,8 +6116,8 @@ async def dashboard_sector_movers():
 @router.get("/premarket-watchlist")
 async def premarket_watchlist(session_date: Optional[date] = Query(None, description="IST session date; default today")):
     """
-    Top 10 F&O equities from arbitrage_master (up to 200 scanned), ranked by OBV slope,
-    gap strength, and 20-day range position. Populated by scheduled job on weekday mornings.
+    Top N F&O equities from arbitrage_master (premarket_scoring: OBV, gap, 52w range, momentum).
+    Dashboard requests today (IST) first; if empty, JS falls back to prior trading sessions.
     """
     try:
         import pytz
