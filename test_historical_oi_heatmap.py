@@ -320,11 +320,15 @@ def format_table_text(
     target_h: int,
     target_m: int,
     rows: List[RowOut],
+    *,
+    rank_caption: Optional[str] = None,
 ) -> str:
     lines: List[str] = []
     title = session_d.strftime("%Y-%m-%d") + f" @ {_fmt_clock_ampm(target_h, target_m)}"
     lines.append("")
     lines.append("OI HEATMAP SNAPSHOT: " + title)
+    if rank_caption:
+        lines.append(rank_caption)
     lines.append("=" * 59)
     lines.append(f"{'Symbol':<12} | {'Price Chg%':>10} | {'OI Chg%':>8} | {'Signal':<16} | Status")
     lines.append("-" * 59)
@@ -373,6 +377,14 @@ def main() -> None:
         default="",
         help="Write the same table text to this file (e.g. historical_oi_heatmap_result.txt)",
     )
+    p.add_argument(
+        "--top-movers",
+        type=int,
+        default=0,
+        metavar="N",
+        help="After ranking by heatmap score, keep only the top N rows (0 = show all). "
+        "Score matches live heatmap: abs(ΔOI) + abs(price chg%%)×0.01.",
+    )
     p.add_argument("--sleep", type=float, default=0.15, help="Delay between API calls (rate limit)")
     args = p.parse_args()
 
@@ -395,7 +407,15 @@ def main() -> None:
         args.arbitrage_master,
         args.sleep,
     )
-    text_out = format_table_text(session_d, th, tm, rows)
+    total_scanned = len(rows)
+    rank_caption: Optional[str] = None
+    if args.top_movers and args.top_movers > 0:
+        rows = rows[: args.top_movers]
+        rank_caption = (
+            f"Largest movers: top {len(rows)} of {total_scanned} symbols by heatmap score "
+            f"(|ΔOI| + |price chg%|×0.01)."
+        )
+    text_out = format_table_text(session_d, th, tm, rows, rank_caption=rank_caption)
     print(text_out, end="")
     if args.output.strip():
         outp = Path(args.output.strip())
