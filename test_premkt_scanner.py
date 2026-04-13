@@ -315,14 +315,38 @@ class PremktTester:
                 sim_bar = c
                 break
 
-        if not sim_bar:
-            out["error"] = f"no daily bar for simulation_date {sim} (use a completed session Upstox has)"
-            return out
-
-        day_open = float(sim_bar.get("open") or 0)
+        day_open = float(sim_bar.get("open") or 0) if sim_bar else 0.0
+        day_open_source = "daily"
         if day_open <= 0:
-            out["error"] = "session open missing/zero"
+            # Same calendar day before EOD: Upstox often has no finalized daily yet — use first cash 5m open (≥9:15 IST).
+            m5today = ux.get_historical_candles_by_instrument_key(
+                instrument_key, interval="minutes/5", days_back=2, range_end_date=sim
+            )
+            m5today = _sort_candles(m5today)
+            for c in m5today:
+                ts = str(c.get("timestamp") or "")
+                try:
+                    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    if dt.tzinfo is None:
+                        dt = IST.localize(dt)
+                    else:
+                        dt = dt.astimezone(IST)
+                except Exception:
+                    continue
+                if dt.date() != sim:
+                    continue
+                if dt.hour < 9 or (dt.hour == 9 and dt.minute < 15):
+                    continue
+                o = float(c.get("open") or 0)
+                if o > 0:
+                    day_open = o
+                    day_open_source = "first_5m_open"
+                    break
+
+        if day_open <= 0:
+            out["error"] = f"no session open for {sim} (no daily or intraday 5m yet)"
             return out
+        out["day_open_source"] = day_open_source
 
         gap_pct = (day_open - prev_close) / prev_close * 100.0
         gap_strength = abs(gap_pct)
