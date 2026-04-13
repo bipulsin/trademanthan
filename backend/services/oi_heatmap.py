@@ -370,6 +370,27 @@ def load_oi_heatmap_snapshot_from_db() -> Tuple[List[Dict[str, Any]], Optional[s
             db.close()
 
 
+def replace_cache_with_rows(
+    rows: List[Dict[str, Any]], updated_at_iso: str, *, source: str = "snapshot"
+) -> None:
+    """
+    Replace in-memory heatmap cache (e.g. after loading a historical replay into ``oi_heatmap_latest``).
+    """
+    global _cache_updated_at_mono, _cache_updated_at_iso, _cache_source, _underlying_rank
+    snap = [dict(r) for r in rows]
+    with _cache_lock:
+        _rows_cache[:] = snap
+        _cache_updated_at_mono = time.monotonic()
+        _cache_updated_at_iso = updated_at_iso or ""
+        _cache_source = source if source in ("live", "snapshot") else "snapshot"
+        _underlying_rank = {
+            str(r.get("underlying_symbol") or "").upper(): int(r["rank"])
+            for r in snap
+            if r.get("underlying_symbol") is not None and r.get("rank") is not None
+        }
+    logger.info("oi_heatmap: replaced memory cache (%s rows, source=%s)", len(snap), _cache_source)
+
+
 def _hydrate_cache_from_db_rows(rows: List[Dict[str, Any]], updated_iso: Optional[str]) -> None:
     """Fill in-memory cache from DB if still empty (single writer under lock)."""
     global _cache_updated_at_mono, _cache_updated_at_iso, _cache_source, _underlying_rank
@@ -439,6 +460,12 @@ def get_live_oi_heatmap_json() -> Dict[str, Any]:
         "restart the last snapshot is loaded from the database when available. If this persists, "
         "check the Upstox instruments file and API credentials."
     )
+    snapshot_note = None
+    if rows and origin == "snapshot":
+        snapshot_note = (
+            "Showing last saved snapshot from the database until live data is fetched "
+            "(scheduler: every 15 min, 9:15–15:15 IST on trading days)."
+        )
     return {
         "success": True,
         "source": "upstox",
@@ -447,6 +474,7 @@ def get_live_oi_heatmap_json() -> Dict[str, Any]:
         "error": err,
         "rows": rows,
         "message": None if rows else empty_help,
+        "snapshot_note": snapshot_note,
     }
 
 

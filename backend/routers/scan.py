@@ -6181,11 +6181,21 @@ async def dashboard_oi_heatmap():
         )
 
 
+class OiHeatmapHistoricalApplyBody(BaseModel):
+    """Seed ``oi_heatmap_latest`` + memory from Upstox historical candles (replay)."""
+
+    session_date: str = "2026-04-13"
+    open_time: str = "09:15"
+    target_time: str = "10:15"
+    limit: int = 203
+    sleep_s: float = 0.12
+
+
 @router.get("/dashboard/oi-heatmap")
 async def dashboard_oi_heatmap_live():
     """
     Live Top ~200 NSE stock futures (Upstox batch quotes): OI, OI change, signal, volume.
-    Refreshed by scheduler (OI_REFRESH_INTERVAL); falls back to last cache on API errors.
+    Refreshed on a 15-minute schedule (9:15–15:15 IST); falls back to last DB snapshot when live is unavailable.
     """
     try:
         data = get_live_oi_heatmap_json()
@@ -6199,6 +6209,32 @@ async def dashboard_oi_heatmap_live():
                 "message": str(e),
                 "rows": [],
             },
+        )
+
+
+@router.post("/oi-heatmap/apply-historical-snapshot")
+def oi_heatmap_apply_historical_snapshot(body: OiHeatmapHistoricalApplyBody):
+    """
+    Recompute OI heatmap from historical 1m/5m candles for ``arbitrage_master`` FUT keys and
+    replace ``oi_heatmap_latest`` + in-process cache. Use when live batch quotes are unavailable.
+    """
+    b = body
+    try:
+        from backend.services.oi_heatmap_historical_replay import apply_historical_replay_to_database
+
+        sd = date.fromisoformat(b.session_date.strip())
+        oh, om = [int(x) for x in b.open_time.split(":")]
+        th, tm = [int(x) for x in b.target_time.split(":")]
+        out = apply_historical_replay_to_database(
+            sd, oh, om, th, tm, limit=int(b.limit), sleep_s=float(b.sleep_s)
+        )
+        status = 200 if out.get("success") else 422
+        return JSONResponse(status_code=status, content=out)
+    except Exception as e:
+        logger.exception("oi_heatmap_apply_historical_snapshot: %s", e)
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "message": str(e)},
         )
 
 

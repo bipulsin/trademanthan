@@ -162,7 +162,9 @@
                 const origin = data.data_origin || "";
                 let originNote = "";
                 if (rows.length > 0) {
-                    if (origin === "snapshot") {
+                    if (data.snapshot_note) {
+                        originNote = " · " + data.snapshot_note;
+                    } else if (origin === "snapshot") {
                         originNote =
                             " · Last saved snapshot (will update when live Upstox refresh runs)";
                     } else if (origin === "live") {

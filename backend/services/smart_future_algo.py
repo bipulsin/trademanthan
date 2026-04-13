@@ -11,7 +11,7 @@ Consolidates all scan algorithm schedulers into a single controller:
 - Fin sentiment (weekdays 9:17–13:17 IST, 15 min): NSE corporate announcements + FinBERT for arbitrage_master, store in stock_fin_sentiment (NSE date window: last-run→now; 09:17 only uses today IST)
 - Smart Futures CMS picker (weekdays 9:15, 9:30, then 10:00–15:00 every 30 min IST): arbitrage_master current-month futures → smart_futures_daily
 - Pre-market F&O watchlist (weekdays 9:14 IST default, PREMKET_RUN_TIME): ~203 equities → Top N in premarket_watchlist (same scoring as test_premkt_scanner / premarket_scoring)
-- Live OI heatmap (weekdays, OI_REFRESH_INTERVAL): Upstox batch quotes → oi_heatmap cache + DB
+- Live OI heatmap (weekdays, every 15 min 9:15–15:15 IST): Upstox batch quotes → oi_heatmap cache + DB; API falls back to DB snapshot when live is empty
 
 Interval-driven jobs only run real work between 08:30 and 21:00 IST (see scheduler_window).
 Exception: 8:10 AM Telegram ping (before 8:30).
@@ -733,15 +733,22 @@ class SmartFutureAlgoScheduler:
             else:
                 logger.info("⏭️ Pre-market watchlist not scheduled (PREMKET_ENABLED=false)")
 
-            # Live OI heatmap (Top ~200 stock FUT) — Upstox batch quotes, interval from config
+            # Live OI heatmap (Top ~200 stock FUT) — Upstox batch quotes every 15 min, 9:15–15:15 IST Mon–Fri
             def run_oi_heatmap_tick():
                 if not getattr(settings, "UPSTOX_OI_ENABLED", True):
                     return
-                if not is_allowed_scheduler_window_ist():
-                    return
                 ist = pytz.timezone("Asia/Kolkata")
-                if datetime.now(ist).weekday() >= 5:
+                now = datetime.now(ist)
+                if now.weekday() >= 5:
                     return
+                h, m = now.hour, now.minute
+                # Cron fires at :00,:15,:30,:45 for hours 9–15; restrict to 9:15–15:15 only
+                if h < 9 or (h == 9 and m < 15):
+                    return
+                if h > 15 or (h == 15 and m > 15):
+                    return
+                if h == 9 and m == 0:
+                    return  # skip 9:00 — first run is 9:15
                 try:
                     from backend.services.oi_heatmap import refresh_oi_heatmap_live
 
@@ -749,18 +756,25 @@ class SmartFutureAlgoScheduler:
                 except Exception as e:
                     logger.error("❌ OI heatmap refresh failed: %s", e, exc_info=True)
 
-            _oi_sec = max(30, int(getattr(settings, "OI_REFRESH_INTERVAL", 60)))
             self.scheduler.add_job(
                 run_oi_heatmap_tick,
-                trigger=IntervalTrigger(seconds=_oi_sec, timezone="Asia/Kolkata"),
+                trigger=CronTrigger(
+                    day_of_week="mon-fri",
+                    hour="9-15",
+                    minute="0,15,30,45",
+                    timezone="Asia/Kolkata",
+                ),
                 id="smart_future_oi_heatmap_live",
-                name="OI heatmap live (Upstox)",
+                name="OI heatmap live (Upstox, 15 min 9:15–15:15 IST)",
                 replace_existing=True,
                 max_instances=1,
-                misfire_grace_time=max(60, _oi_sec),
+                misfire_grace_time=300,
                 coalesce=True,
             )
-            logger.info("✅ Scheduled: OI heatmap refresh every %ss (weekdays, scheduler window)", _oi_sec)
+            logger.info(
+                "✅ Scheduled: OI heatmap refresh every 15 min (9:15–15:15 IST, Mon–Fri); "
+                "dashboard falls back to oi_heatmap_latest when live fetch fails"
+            )
 
             # Smart Futures picker — 9:15 (first bar after cash open), 9:30, then 10:00–15:00 every 30 min (weekdays)
             _sf_picker_slots = [(9, 15), (9, 30)]
