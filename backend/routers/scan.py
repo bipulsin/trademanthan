@@ -10,7 +10,7 @@ import json
 import os
 import sys
 import requests
-from urllib.parse import urlencode
+from urllib.parse import urlencode, parse_qs
 import secrets
 import logging
 import asyncio
@@ -143,6 +143,107 @@ def _run_webhook_worker(webhook_data: dict, forced_type: Optional[str]) -> None:
             health_monitor.record_webhook_failure()
     finally:
         db.close()
+
+
+def _chartink_canonical_key(key: str) -> str:
+    """Map common Chartink / client variants to keys expected by process_webhook_data."""
+    k = str(key).strip().lower().replace("-", "_")
+    synonyms = {
+        "stock": "stocks",
+        "symbols": "stocks",
+        "symbol": "stocks",
+        "tickers": "stocks",
+        "ticker": "stocks",
+        "triggerprice": "trigger_prices",
+        "trigger_price": "trigger_prices",
+        "prices": "trigger_prices",
+        "time": "triggered_at",
+        "triggeredat": "triggered_at",
+        "scan": "scan_name",
+        "alert": "alert_name",
+        "scanurl": "scan_url",
+    }
+    return synonyms.get(k, k)
+
+
+def _merge_query_params(qp) -> Dict[str, Any]:
+    merged: Dict[str, Any] = {}
+    for raw_k, v in qp.multi_items():
+        ck = _chartink_canonical_key(raw_k)
+        if ck in merged and merged[ck] not in (None, "") and v not in (None, ""):
+            merged[ck] = f"{merged[ck]},{v}"
+        else:
+            merged[ck] = v
+    return merged
+
+
+def normalize_chartink_dict(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Single dict with canonical keys so GET query + JSON bodies behave the same."""
+    if not raw:
+        return {}
+    out: Dict[str, Any] = {}
+    for k, v in raw.items():
+        if not isinstance(k, str):
+            continue
+        ck = _chartink_canonical_key(k)
+        if ck in ("stocks", "trigger_prices") and ck in out and out[ck] not in (None, "") and v not in (None, ""):
+            out[ck] = f"{out[ck]},{v}"
+        else:
+            out[ck] = v
+    # Coerce lists to comma-separated strings (Chartink str+str path in process_webhook_data)
+    if isinstance(out.get("stocks"), list):
+        out["stocks"] = ",".join(str(x).strip() for x in out["stocks"] if str(x).strip())
+    if isinstance(out.get("trigger_prices"), list):
+        out["trigger_prices"] = ",".join(str(x) for x in out["trigger_prices"])
+    return out
+
+
+async def parse_chartink_webhook_request(request: Request) -> Dict[str, Any]:
+    """
+    Accept Chartink-style payloads from:
+    - GET/PUT: query string
+    - POST: JSON body, application/x-www-form-urlencoded body, or query + body (body wins on same key)
+    """
+    qp = _merge_query_params(request.query_params)
+    if request.method not in ("POST", "PUT", "PATCH"):
+        return normalize_chartink_dict(qp)
+
+    body = await asyncio.wait_for(request.body(), timeout=30.0)
+    if not body or not body.strip():
+        return normalize_chartink_dict(qp)
+
+    ct = (request.headers.get("content-type") or "").lower()
+    parsed: Optional[dict] = None
+
+    try:
+        obj = json.loads(body.decode("utf-8"))
+        if isinstance(obj, dict):
+            parsed = obj
+        elif isinstance(obj, list):
+            parsed = {"stocks": obj}
+    except json.JSONDecodeError:
+        parsed = None
+
+    if parsed is None:
+        if "multipart/form-data" in ct:
+            logger.warning(
+                "Chartink webhook sent multipart/form-data; only query string was merged. Prefer POST JSON."
+            )
+            return normalize_chartink_dict(qp)
+        try:
+            flat: Dict[str, Any] = {}
+            qs = parse_qs(body.decode("utf-8"), keep_blank_values=True)
+            for k, vals in qs.items():
+                ck = _chartink_canonical_key(k)
+                flat[ck] = ",".join(vals) if len(vals) > 1 else (vals[0] if vals else "")
+            merged = {**qp, **flat}
+            return normalize_chartink_dict(merged)
+        except Exception as e:
+            logger.warning(f"Could not parse webhook body (len={len(body)}): {e}")
+            return normalize_chartink_dict(qp)
+
+    merged = {**qp, **parsed}
+    return normalize_chartink_dict(merged)
 
 
 class ChartinkWebhookData(BaseModel):
@@ -4076,33 +4177,16 @@ async def health_check(db: Session = Depends(get_db)):
             }
         )
 
-@router.get("/chartink-webhook-bullish")
-async def chartink_webhook_bullish_get_hint():
-    """
-    Chartink (and browsers) sometimes hit this URL with GET — we do not process GET.
-    Real alerts must use POST with a JSON body.
-    """
-    logger.warning(
-        "GET /scan/chartink-webhook-bullish — ignored. Chartink must use HTTP POST with JSON body."
-    )
-    return JSONResponse(
-        status_code=405,
-        content={
-            "status": "method_not_allowed",
-            "detail": "This URL accepts only HTTP POST (JSON). Chartink alert webhooks must be configured with POST. GET requests are not processed.",
-            "required_method": "POST",
-            "path": "/scan/chartink-webhook-bullish",
-        },
-        headers={"Allow": "POST"},
-    )
-
-
-@router.post("/chartink-webhook-bullish")
+@router.api_route("/chartink-webhook-bullish", methods=["GET", "POST", "PUT"])
 async def receive_bullish_webhook(request: Request):
     """
     Dedicated endpoint for Bullish alerts from Chartink.com
     All alerts received here will be treated as BULLISH with CALL options.
-    
+
+    Accepts POST JSON (preferred), GET/PUT query parameters, or urlencoded form body
+    with the same field names Chartink uses, e.g. stocks, trigger_prices, triggered_at,
+    scan_name, scan_url, alert_name.
+
     Expected JSON format from Chartink:
     {
         "stocks": "SEPOWER,ASTEC,EDUCOMP,KSERASERA,IOLCP,GUJAPOLLO,EMCO",
@@ -4114,29 +4198,21 @@ async def receive_bullish_webhook(request: Request):
     }
     """
     try:
-        # Read raw body bytes first; generous timeout so a concurrent webhook on the same host
-        # does not starve this read (processing runs in thread pool, not on this loop).
-        body_bytes = await asyncio.wait_for(request.body(), timeout=30.0)
-        
-        if not body_bytes:
+        data = await parse_chartink_webhook_request(request)
+        if not data.get("stocks"):
             return JSONResponse(
-                content={"status": "error", "message": "Empty request body"},
-                status_code=400
+                content={
+                    "status": "error",
+                    "message": "Missing stocks in webhook payload (use POST JSON or GET with ?stocks=SYM1,SYM2)",
+                },
+                status_code=400,
             )
-        
-        # Parse JSON before response (fast); heavy work runs in executor thread.
-        try:
-            data = json.loads(body_bytes.decode('utf-8'))
-        except json.JSONDecodeError as e:
-            logger.error(f"❌ Invalid JSON in bullish webhook: {str(e)}")
-            return JSONResponse(
-                content={"status": "error", "message": "Invalid JSON format"},
-                status_code=400
-            )
-        
+
         # Enhanced logging: Log full payload for debugging
         stocks_count = len(data.get('stocks', '').split(',')) if isinstance(data.get('stocks'), str) else len(data.get('stocks', []))
-        logger.info(f"📥 Received bullish webhook with {stocks_count} stocks — queued for thread-pool processing")
+        logger.info(
+            f"📥 Received bullish webhook ({request.method}) with {stocks_count} stocks — queued for thread-pool processing"
+        )
         
         webhook_data = data.copy()
         asyncio.get_running_loop().run_in_executor(None, _run_webhook_worker, webhook_data, "bullish")
@@ -4173,29 +4249,14 @@ async def receive_bullish_webhook(request: Request):
             status_code=500
         )
 
-@router.get("/chartink-webhook-bearish")
-async def chartink_webhook_bearish_get_hint():
-    logger.warning(
-        "GET /scan/chartink-webhook-bearish — ignored. Chartink must use HTTP POST with JSON body."
-    )
-    return JSONResponse(
-        status_code=405,
-        content={
-            "status": "method_not_allowed",
-            "detail": "This URL accepts only HTTP POST (JSON). Chartink alert webhooks must be configured with POST. GET requests are not processed.",
-            "required_method": "POST",
-            "path": "/scan/chartink-webhook-bearish",
-        },
-        headers={"Allow": "POST"},
-    )
-
-
-@router.post("/chartink-webhook-bearish")
+@router.api_route("/chartink-webhook-bearish", methods=["GET", "POST", "PUT"])
 async def receive_bearish_webhook(request: Request):
     """
     Dedicated endpoint for Bearish alerts from Chartink.com
     All alerts received here will be treated as BEARISH with PUT options.
-    
+
+    Accepts POST JSON, GET/PUT query parameters, or urlencoded form (see bullish endpoint).
+
     Expected JSON format from Chartink:
     {
         "stocks": "SEPOWER,ASTEC,EDUCOMP,KSERASERA,IOLCP,GUJAPOLLO,EMCO",
@@ -4207,25 +4268,20 @@ async def receive_bearish_webhook(request: Request):
     }
     """
     try:
-        body_bytes = await asyncio.wait_for(request.body(), timeout=30.0)
-        
-        if not body_bytes:
+        data = await parse_chartink_webhook_request(request)
+        if not data.get("stocks"):
             return JSONResponse(
-                content={"status": "error", "message": "Empty request body"},
-                status_code=400
+                content={
+                    "status": "error",
+                    "message": "Missing stocks in webhook payload (use POST JSON or GET with ?stocks=SYM1,SYM2)",
+                },
+                status_code=400,
             )
-        
-        try:
-            data = json.loads(body_bytes.decode('utf-8'))
-        except json.JSONDecodeError as e:
-            logger.error(f"❌ Invalid JSON in bearish webhook: {str(e)}")
-            return JSONResponse(
-                content={"status": "error", "message": "Invalid JSON format"},
-                status_code=400
-            )
-        
+
         stocks_count = len(data.get('stocks', '').split(',')) if isinstance(data.get('stocks'), str) else len(data.get('stocks', []))
-        logger.info(f"📥 Received bearish webhook with {stocks_count} stocks — queued for thread-pool processing")
+        logger.info(
+            f"📥 Received bearish webhook ({request.method}) with {stocks_count} stocks — queued for thread-pool processing"
+        )
         
         webhook_data = data.copy()
         asyncio.get_running_loop().run_in_executor(None, _run_webhook_worker, webhook_data, "bearish")
@@ -4261,22 +4317,7 @@ async def receive_bearish_webhook(request: Request):
             status_code=500
         )
 
-@router.get("/chartink-webhook")
-async def chartink_webhook_get_hint():
-    logger.warning("GET /scan/chartink-webhook — ignored. Use HTTP POST with JSON body.")
-    return JSONResponse(
-        status_code=405,
-        content={
-            "status": "method_not_allowed",
-            "detail": "This URL accepts only HTTP POST (JSON). Configure Chartink to POST, not GET.",
-            "required_method": "POST",
-            "path": "/scan/chartink-webhook",
-        },
-        headers={"Allow": "POST"},
-    )
-
-
-@router.post("/chartink-webhook")
+@router.api_route("/chartink-webhook", methods=["GET", "POST", "PUT"])
 async def receive_chartink_webhook(request: Request, db: Session = Depends(get_db)):
     """
     Original webhook endpoint with auto-detection (for backward compatibility)
@@ -4300,9 +4341,16 @@ async def receive_chartink_webhook(request: Request, db: Session = Depends(get_d
     }
     """
     try:
-        # Try to read JSON body with timeout protection (increased timeout to reduce client disconnect errors)
-        data = await asyncio.wait_for(request.json(), timeout=5.0)
-        
+        data = await parse_chartink_webhook_request(request)
+        if not data.get("stocks"):
+            return JSONResponse(
+                content={
+                    "status": "error",
+                    "message": "Missing stocks in webhook payload (use POST JSON or GET with ?stocks=SYM1,SYM2)",
+                },
+                status_code=400,
+            )
+
         # Enhanced logging: Log full payload for debugging
         stocks_count = len(data.get('stocks', '').split(',')) if isinstance(data.get('stocks'), str) else len(data.get('stocks', []))
         alert_name = data.get('alert_name', 'N/A')
