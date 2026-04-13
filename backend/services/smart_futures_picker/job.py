@@ -587,6 +587,21 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
     db = SessionLocal()
     try:
         sentiment_map = _load_sentiment_map(db)
+        prior_rows = db.execute(
+            text(
+                """
+                SELECT stock
+                FROM smart_futures_daily
+                WHERE session_date = :sd
+                """
+            ),
+            {"sd": session_date},
+        ).fetchall()
+        already_selected = {
+            str(r[0]).strip().upper()
+            for r in prior_rows
+            if r and r[0] is not None and str(r[0]).strip()
+        }
         rows = db.execute(
             text(
                 """
@@ -620,6 +635,7 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
     reject_counts: Counter[str] = Counter()
     no_entry_outcomes: List[SymbolScoreOutcome] = []
     vix_skipped_long_candidates = 0
+    excluded_already_selected = 0
 
     longs: List[ScoredPick] = []
     shorts: List[ScoredPick] = []
@@ -627,6 +643,9 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
         if not fut_key:
             continue
         st = str(stock).strip().upper()
+        if st in already_selected:
+            excluded_already_selected += 1
+            continue
         try:
             oc = _score_symbol_outcome(
                 upstox,
@@ -665,12 +684,13 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
 
     if not best_long and not best_short:
         logger.info(
-            "smart_futures_picker [%s]: no qualifying picks (longs=%s shorts=%s vix=%s skip_long=%s)",
+            "smart_futures_picker [%s]: no qualifying picks (longs=%s shorts=%s vix=%s skip_long=%s excluded_already_selected=%s)",
             scan_trigger,
             len(longs),
             len(shorts),
             vix,
             skip_long_vix,
+            excluded_already_selected,
         )
         _log_smart_futures_diagnostics(
             scan_trigger,
@@ -691,6 +711,7 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
             "picks": 0,
             "vix": vix,
             "skip_long_vix": skip_long_vix,
+            "excluded_already_selected": excluded_already_selected,
             "reject_histogram": dict(reject_counts),
             "index_long_ok": idx_long_ok,
             "index_short_ok": idx_short_ok,
@@ -715,10 +736,11 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
             saved += 1
 
         logger.info(
-            "smart_futures_picker [%s]: saved=%s vix=%s (long=%s short=%s)",
+            "smart_futures_picker [%s]: saved=%s vix=%s excluded_already_selected=%s (long=%s short=%s)",
             scan_trigger,
             saved,
             vix,
+            excluded_already_selected,
             best_long.stock if best_long else None,
             best_short.stock if best_short else None,
         )
@@ -732,6 +754,7 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
             "scan_trigger": scan_trigger,
             "picks": saved,
             "vix": vix,
+            "excluded_already_selected": excluded_already_selected,
             "best_long": best_long.stock if best_long else None,
             "best_short": best_short.stock if best_short else None,
             "reject_histogram": dict(reject_counts),

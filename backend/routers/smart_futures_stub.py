@@ -9,9 +9,11 @@ import json
 import logging
 import threading
 from collections import OrderedDict
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import pytz
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -30,6 +32,7 @@ from backend.services.smart_futures_session_utils import compute_atr5_14_ratio_f
 from backend.services.upstox_service import UpstoxService
 
 logger = logging.getLogger(__name__)
+IST = pytz.timezone("Asia/Kolkata")
 
 router = APIRouter(tags=["smart-futures"])
 
@@ -116,7 +119,7 @@ def _missing_db_column_error(e: BaseException, column: str) -> bool:
 _SQL_DAILY_FULL = """
                 SELECT id, fut_symbol, fut_instrument_key, side, final_cms, sector_score, combined_sentiment,
                        entry_price, sl_price, target_price, trend_continuation, entry_at,
-                       order_status, buy_price, sell_price, sell_time, session_date, scan_trigger,
+                       order_status, buy_price, sell_price, sell_time, hold_type, session_date, scan_trigger,
                        cms, atr5_14_ratio
                 FROM smart_futures_daily
                 WHERE session_date = :sd
@@ -125,7 +128,7 @@ _SQL_DAILY_FULL = """
 _SQL_DAILY_NO_SELL_TIME = """
                 SELECT id, fut_symbol, fut_instrument_key, side, final_cms, sector_score, combined_sentiment,
                        entry_price, sl_price, target_price, trend_continuation, entry_at,
-                       order_status, buy_price, sell_price, session_date, scan_trigger,
+                       order_status, buy_price, sell_price, hold_type, session_date, scan_trigger,
                        cms, atr5_14_ratio
                 FROM smart_futures_daily
                 WHERE session_date = :sd
@@ -134,7 +137,16 @@ _SQL_DAILY_NO_SELL_TIME = """
 _SQL_DAILY_NO_SELL_PRICE = """
                 SELECT id, fut_symbol, fut_instrument_key, side, final_cms, sector_score, combined_sentiment,
                        entry_price, sl_price, target_price, trend_continuation, entry_at,
-                       order_status, buy_price, session_date, scan_trigger,
+                       order_status, buy_price, hold_type, session_date, scan_trigger,
+                       cms, atr5_14_ratio
+                FROM smart_futures_daily
+                WHERE session_date = :sd
+                ORDER BY entry_at DESC NULLS LAST, id DESC
+                """
+_SQL_DAILY_NO_HOLD_TYPE = """
+                SELECT id, fut_symbol, fut_instrument_key, side, final_cms, sector_score, combined_sentiment,
+                       entry_price, sl_price, target_price, trend_continuation, entry_at,
+                       order_status, buy_price, sell_price, sell_time, session_date, scan_trigger,
                        cms, atr5_14_ratio
                 FROM smart_futures_daily
                 WHERE session_date = :sd
@@ -146,6 +158,9 @@ def _fetch_daily_for_session(db: Session, sd: Any) -> List[Any]:
     try:
         return db.execute(text(_SQL_DAILY_FULL), {"sd": sd}).mappings().all()
     except Exception as e:
+        if _missing_db_column_error(e, "hold_type"):
+            logger.warning("smart_futures /daily: hold_type missing, query without it: %s", e)
+            return db.execute(text(_SQL_DAILY_NO_HOLD_TYPE), {"sd": sd}).mappings().all()
         if _missing_db_column_error(e, "sell_time"):
             logger.warning("smart_futures /daily: sell_time missing, query without it: %s", e)
             try:
@@ -214,6 +229,9 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
             "rows": [],
             "error": str(e),
         }
+
+    now_ist = datetime.now(IST)
+    intraday_force_exit_time = now_ist.replace(hour=15, minute=15, second=0, microsecond=0)
 
     serialized = [_row_to_dict(r) for r in rows]
     for r in serialized:
@@ -287,6 +305,18 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
                 r["exit_reason"] = reason or ""
             except Exception as ex:
                 logger.debug("smart_futures exit hint id=%s: %s", r.get("id"), ex)
+
+    for r in serialized:
+        if str(r.get("order_status") or "").strip().lower() != "bought":
+            continue
+        hold_type = str(r.get("hold_type") or "").strip().lower()
+        if hold_type == "positional":
+            continue
+        if now_ist >= intraday_force_exit_time:
+            if not bool(r.get("exit_suggested")):
+                r["exit_suggested"] = True
+            if not str(r.get("exit_reason") or "").strip():
+                r["exit_reason"] = "Intraday time exit window opened (>= 3:15 PM IST)"
 
     for r in serialized:
         r.pop("fut_instrument_key", None)
