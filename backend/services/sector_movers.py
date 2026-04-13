@@ -1,6 +1,6 @@
 """
-Nifty sector index movers: % change vs previous trading-day close (Yahoo Finance v8 chart).
-Used by dashboard Top Gainers & Losers (sectors).
+Nifty sector index movers: intraday % vs day open when available (Upstox quote / Yahoo today),
+with close-to-close fallbacks. Used by dashboard Top Gainers & Losers (sectors).
 """
 from __future__ import annotations
 
@@ -176,7 +176,7 @@ SECTOR_STOCK_UNIVERSE: Dict[str, List[str]] = {
 }
 
 NIFTY_SECTOR_INDICES: List[Tuple[str, str]] = [
-    # Excluded intentionally: Nifty Bank (covered by PSU/Private bank lenses)
+    ("Nifty Bank", "^NSEBANK"),
     ("Nifty IT", "^CNXIT"),
     ("Nifty Auto", "^CNXAUTO"),
     ("Nifty Pharma", "^CNXPHARMA"),
@@ -196,8 +196,16 @@ NIFTY_SECTOR_INDICES: List[Tuple[str, str]] = [
 
 
 def _fetch_one_sector(label: str, yahoo_symbol: str) -> Optional[Dict[str, Any]]:
-    row = _sector_pct_from_upstox(label)
-    if not row:
+    # 1) Intraday vs day open (Upstox quote) — matches dashboard expectation during session.
+    # 2) Yahoo intraday vs open (same definition as market sentiment "today").
+    # 3) Upstox daily close-to-close (fallback when quote/chart incomplete).
+    # 4) Yahoo close-to-close (last resort).
+    row = _sector_intraday_from_upstox_quote(label)
+    if not row or row.get("pct_change") is None:
+        row = _yahoo_chart_pct(yahoo_symbol, basis="today")
+    if not row or row.get("pct_change") is None:
+        row = _sector_pct_from_upstox(label)
+    if not row or row.get("pct_change") is None:
         row = _yahoo_chart_pct(yahoo_symbol, basis="yesterday")
     if not row or row.get("pct_change") is None:
         return None
@@ -317,9 +325,39 @@ def _previous_trading_close_from_upstox_index(instrument_key: str) -> Optional[f
         return None
 
 
+def _sector_intraday_from_upstox_quote(label: str) -> Optional[Dict[str, Any]]:
+    """
+    Intraday % vs session/day open from Upstox market quote (preferred for dashboard movers).
+    """
+    try:
+        if not upstox_service or not getattr(upstox_service, "access_token", None):
+            return None
+        ikey = UPSTOX_SECTOR_INDEX_KEYS.get(str(label or "").strip())
+        if not ikey:
+            return None
+        q = upstox_service.get_market_quote_by_key(ikey)
+        if not q:
+            return None
+        last = float(q.get("last_price") or 0)
+        ohlc = q.get("ohlc") or {}
+        day_open = float(q.get("open") or ohlc.get("open") or 0)
+        if last <= 0 or day_open <= 0:
+            return None
+        pct = round((last - day_open) / day_open * 100.0, 4)
+        return {
+            "last": last,
+            "open": day_open,
+            "pct_change": pct,
+            "source": "upstox_quote",
+        }
+    except Exception as e:
+        logger.debug("Upstox quote sector failed for %s: %s", label, e)
+        return None
+
+
 def _sector_pct_from_upstox(label: str) -> Optional[Dict[str, Any]]:
     """
-    Compute sector index % using strict close-to-close:
+    Fallback: sector index % using strict close-to-close on daily candles:
     pct = (latest_trading_close - previous_trading_close) / previous_trading_close * 100
     """
     try:
@@ -363,7 +401,8 @@ def _sector_pct_from_upstox(label: str) -> Optional[Dict[str, Any]]:
 
 def build_sector_movers(top_n: int = 3) -> Dict[str, Any]:
     """
-    Top ``top_n`` gaining and losing Nifty sector indices by % vs previous close.
+    Top ``top_n`` gaining and losing Nifty sector indices by intraday % vs day open when
+    available (Upstox quote or Yahoo ``basis=today``), else close-to-close fallbacks.
     """
     rows: List[Dict[str, Any]] = []
     max_workers = min(16, max(4, len(NIFTY_SECTOR_INDICES)))
@@ -386,8 +425,8 @@ def build_sector_movers(top_n: int = 3) -> Dict[str, Any]:
             "updated_at": ts,
             "gainers": [],
             "losers": [],
-            "source": "yahoo",
-            "universe_size": 0,
+        "source": "mixed",
+        "universe_size": 0,
         }
 
     by_hi = sorted(rows, key=lambda x: x["pct_change"], reverse=True)
@@ -400,7 +439,7 @@ def build_sector_movers(top_n: int = 3) -> Dict[str, Any]:
         "updated_at": ts,
         "gainers": gainers,
         "losers": losers,
-        "source": "yahoo",
+        "source": "mixed",
         "universe_size": len(rows),
     }
 
@@ -411,7 +450,9 @@ def _yahoo_display_symbol(yahoo_sym: str) -> str:
 
 
 def _fetch_one_equity_row(yahoo_sym: str) -> Optional[Dict[str, Any]]:
-    row = _yahoo_chart_pct(yahoo_sym, basis="yesterday")
+    row = _yahoo_chart_pct(yahoo_sym, basis="today")
+    if not row or row.get("pct_change") is None:
+        row = _yahoo_chart_pct(yahoo_sym, basis="yesterday")
     if not row or row.get("pct_change") is None:
         return None
     return {
@@ -466,8 +507,8 @@ def _is_fo_stock(symbol: str) -> bool:
 
 def build_sector_stock_detail(sector_label: str, mode: str) -> Dict[str, Any]:
     """
-    Stocks in ``SECTOR_STOCK_UNIVERSE`` for a sector label: top 3 by % vs previous close
-    (mode=gainers) or bottom 3 (mode=losers).
+    Stocks in ``SECTOR_STOCK_UNIVERSE`` for a sector label: top 3 by intraday % vs open
+    when available (Yahoo ``today``), else vs previous close — bottom 3 when mode=losers.
     """
     label = (sector_label or "").strip()
     syms = SECTOR_STOCK_UNIVERSE.get(label)

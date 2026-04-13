@@ -1,6 +1,6 @@
 /**
- * Dashboard: Top 3 Nifty sector gainers & losers by intraday % vs open.
- * Sector names expand to show 3 stocks (highest % in gainers column, lowest % in losers column).
+ * Dashboard: Top 3 Nifty sector gainers & losers (intraday % vs day open when API provides it).
+ * Sector names expand to show 3 stocks in that sector (same basis as the API).
  */
 (function () {
     const API = "/scan/dashboard-sector-movers";
@@ -123,7 +123,15 @@
                 cache: "no-store",
                 credentials: "same-origin",
             });
-            const data = await res.json();
+            const raw = await res.text();
+            const ct = (res.headers.get("content-type") || "").toLowerCase();
+            const looksJson = ct.includes("application/json") || /^\s*[\[{]/.test(raw.slice(0, 40));
+            if (!looksJson) {
+                detailCache[key] = { success: false, message: "Invalid response" };
+                renderDetailPanel(panel, detailCache[key]);
+                return;
+            }
+            const data = JSON.parse(raw);
             detailCache[key] = data;
             renderDetailPanel(panel, data);
         } catch (e) {
@@ -187,7 +195,15 @@
         if (!grid) return;
         try {
             const res = await fetch(API, { cache: "no-store", credentials: "same-origin" });
-            const data = await res.json();
+            const raw = await res.text();
+            const ct = (res.headers.get("content-type") || "").toLowerCase();
+            const looksJson = ct.includes("application/json") || /^\s*[\[{]/.test(raw.slice(0, 40));
+            if (!looksJson) {
+                console.warn("dashboard-sector-movers: non-JSON response");
+                render({ gainers: [], losers: [] });
+                return;
+            }
+            const data = JSON.parse(raw);
             if (data.success) {
                 render(data);
             } else {

@@ -5895,8 +5895,8 @@ async def market_sentiment_dials(basis: str = Query("today")):
 @router.get("/dashboard-sector-movers")
 async def dashboard_sector_movers():
     """
-    Top 3 Nifty sector indices by % vs previous close (gainers) and bottom 3 (losers).
-    Data from Yahoo Finance sector index symbols.
+    Top 3 Nifty sector indices by intraday % vs open when available (gainers) and bottom 3 (losers).
+    Upstox quote first, then Yahoo; close-to-close fallbacks when needed.
     """
     try:
         data = build_sector_movers(top_n=3)
@@ -5918,7 +5918,7 @@ async def dashboard_sector_movers():
 async def dashboard_sector_movers_detail(sector: str, mode: str = "gainers"):
     """
     For a sector label (same string as in Top Gainers / Losers), return 3 NSE equities
-    with highest % vs previous close (mode=gainers) or lowest % (mode=losers) from a fixed universe.
+    with highest intraday % vs open when available (mode=gainers) or lowest % (mode=losers).
     """
     try:
         data = build_sector_stock_detail(sector, mode)
