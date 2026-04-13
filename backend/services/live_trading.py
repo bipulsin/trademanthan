@@ -903,6 +903,24 @@ def _broker_net_long_qty_for_positions(
     return total
 
 
+def get_broker_net_long_qty_for_instrument(instrument_key: str) -> Optional[int]:
+    """
+    Net long quantity for this instrument from Upstox short-term positions.
+    Returns None if the positions API failed (caller may still attempt exit).
+    """
+    if not upstox_service or not getattr(upstox_service, "access_token", None):
+        return None
+    pos_res = upstox_service.get_short_term_positions()
+    if not pos_res.get("success"):
+        logger.warning(
+            "get_broker_net_long_qty: short-term positions failed: %s",
+            pos_res.get("error"),
+        )
+        return None
+    positions = [p for p in (pos_res.get("positions") or []) if isinstance(p, dict)]
+    return _broker_net_long_qty_for_positions(positions, instrument_key)
+
+
 def _load_instrument_dict_by_key(instrument_key: str) -> Optional[Dict[str, Any]]:
     """Return one instruments.json row for this Upstox instrument_key (NSE_FO|…)."""
     try:

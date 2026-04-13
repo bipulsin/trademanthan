@@ -4293,6 +4293,20 @@ def close_all_open_trades():
                 if position.buy_price is None or position.qty is None or position.qty == 0:
                     logger.info(f"⚪ Skipping {stock_name} - no buy_price or qty=0 (never actually entered)")
                     continue
+
+                # User may have manually squared off at the broker; sync DB before any LTP / SELL work
+                try:
+                    if live_trading.reconcile_intraday_exit_from_broker(
+                        db, position, default_exit_reason="manual"
+                    ):
+                        logger.info(
+                            "✅ EOD 3:25: %s already exited at broker — DB reconciled (no SELL order)",
+                            stock_name,
+                        )
+                        closed_count += 1
+                        continue
+                except Exception as _re_early:
+                    logger.debug("EOD early broker reconcile: %s: %s", stock_name, _re_early)
                 
                 # Get current option LTP for final sell price
                 option_ltp = None
@@ -4517,6 +4531,53 @@ def close_all_open_trades():
                 
                 # Use fresh_position for the rest of the operations
                 position = fresh_position
+
+                # Broker shows no long — do not fire a second MARKET SELL (would open a short)
+                try:
+                    if live_trading.reconcile_intraday_exit_from_broker(
+                        db, position, default_exit_reason="manual"
+                    ):
+                        logger.info(
+                            "✅ EOD 3:25: %s reconciled from broker fills before live SELL — skipping order",
+                            stock_name,
+                        )
+                        closed_count += 1
+                        continue
+                except Exception as _re_mid:
+                    logger.debug("EOD mid reconcile: %s: %s", stock_name, _re_mid)
+
+                ikey_eod = (position.instrument_key or "").strip()
+                bro_net = (
+                    live_trading.get_broker_net_long_qty_for_instrument(ikey_eod) if ikey_eod else None
+                )
+                if bro_net is not None and bro_net <= 0:
+                    logger.warning(
+                        "⏰ EOD 3:25: %s broker net long qty=%s — skipping live MARKET SELL",
+                        stock_name,
+                        bro_net,
+                    )
+                    from sqlalchemy.orm.attributes import flag_modified
+
+                    fp = (
+                        float(option_ltp)
+                        if option_ltp and float(option_ltp) > 0
+                        else float(position.sell_price or position.buy_price or 0)
+                    )
+                    position.status = "sold"
+                    position.exit_reason = "manual"
+                    position.sell_time = now
+                    position.sell_price = fp
+                    if position.buy_price and position.qty:
+                        position.pnl = round(
+                            (fp - float(position.buy_price)) * int(position.qty), 2
+                        )
+                        flag_modified(position, "pnl")
+                    flag_modified(position, "status")
+                    flag_modified(position, "exit_reason")
+                    flag_modified(position, "sell_time")
+                    flag_modified(position, "sell_price")
+                    closed_count += 1
+                    continue
                 
                 exit_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
                 live_ok, live_order_id, exit_manual = _try_live_exit(position, 'time_based', option_contract)

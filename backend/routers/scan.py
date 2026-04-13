@@ -4321,7 +4321,9 @@ async def receive_bearish_webhook(request: Request):
 async def receive_chartink_webhook(request: Request, db: Session = Depends(get_db)):
     """
     Original webhook endpoint with auto-detection (for backward compatibility)
-    
+
+    Supports GET/POST/PUT with the same payload rules as the bullish/bearish webhooks.
+
     Auto-detects if alert is Bullish or Bearish based on alert/scan name.
     Alert name should contain "Bullish" or "Bearish" to determine the section.
     If not specified, defaults to Bullish.
@@ -5482,37 +5484,74 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                         logger.error(f"🚨 LIVE EXIT FAILED (profit_target) for {record.stock_name} - keeping trade OPEN")
                                 
                                 elif exit_conditions['time_based']:
-                                    live_exit_result = live_trading.place_live_upstox_exit(
-                                        instrument_key=live_instrument_key,
-                                        qty=record.qty,
-                                        stock_name=record.stock_name,
-                                        option_contract=option_contract,
-                                        buy_order_id=record.buy_order_id,
-                                        tag=f"smart_future_exit_time:{record.buy_order_id or 'no_buy_id'}",
-                                        existing_sell_order_id=record.sell_order_id,
-                                    )
-                                    if live_exit_result.get("success") or live_exit_result.get("skipped_duplicate"):
-                                        record.sell_price = new_option_ltp
-                                        record.sell_time = now
-                                        record.exit_reason = 'time_based'
-                                        record.status = 'sold'
-                                        record.sell_order_id = live_exit_result.get("order_id") or record.sell_order_id
-                                        if record.buy_price and record.qty:
-                                            record.pnl = (new_option_ltp - record.buy_price) * record.qty
-                                        logger.info(f"✅ APPLIED: TIME EXIT for {record.stock_name}: PnL=₹{record.pnl}")
+                                    # Manual exit at broker: sync DB first; never send a second SELL if already flat
+                                    if live_trading.reconcile_intraday_exit_from_broker(
+                                        db, record, default_exit_reason="manual"
+                                    ):
                                         exit_applied = True
-                                    elif live_exit_result.get("exit_manually"):
-                                        from sqlalchemy.orm.attributes import flag_modified
-                                        record.exit_reason = "Exit Manually"
-                                        flag_modified(record, "exit_reason")
-                                        logger.error(
-                                            f"🚨 LIVE EXIT uncertain (time_based) for {record.stock_name} — marked Exit Manually (verify broker)"
+                                        logger.info(
+                                            "✅ TIME EXIT: %s reconciled from broker (already sold) — no SELL order",
+                                            record.stock_name,
                                         )
-                                        exit_applied = True
-                                    elif live_exit_result.get("skipped"):
-                                        logger.warning(f"⚠️ LIVE EXIT skipped (time_based) for {record.stock_name} — keeping trade OPEN")
                                     else:
-                                        logger.error(f"🚨 LIVE EXIT FAILED (time_based) for {record.stock_name} - keeping trade OPEN")
+                                        ikey_chk = (record.instrument_key or live_instrument_key or "").strip()
+                                        bro_net = (
+                                            live_trading.get_broker_net_long_qty_for_instrument(ikey_chk)
+                                            if ikey_chk
+                                            else None
+                                        )
+                                        if bro_net is not None and bro_net <= 0:
+                                            from sqlalchemy.orm.attributes import flag_modified
+
+                                            logger.warning(
+                                                "⏰ TIME EXIT: %s broker net long=%s — skipping live SELL",
+                                                record.stock_name,
+                                                bro_net,
+                                            )
+                                            record.sell_price = new_option_ltp
+                                            record.sell_time = now
+                                            record.exit_reason = "manual"
+                                            record.status = "sold"
+                                            if record.buy_price and record.qty:
+                                                record.pnl = (new_option_ltp - record.buy_price) * record.qty
+                                                flag_modified(record, "pnl")
+                                            flag_modified(record, "sell_price")
+                                            flag_modified(record, "sell_time")
+                                            flag_modified(record, "exit_reason")
+                                            flag_modified(record, "status")
+                                            exit_applied = True
+                                        else:
+                                            live_exit_result = live_trading.place_live_upstox_exit(
+                                                instrument_key=live_instrument_key,
+                                                qty=record.qty,
+                                                stock_name=record.stock_name,
+                                                option_contract=option_contract,
+                                                buy_order_id=record.buy_order_id,
+                                                tag=f"smart_future_exit_time:{record.buy_order_id or 'no_buy_id'}",
+                                                existing_sell_order_id=record.sell_order_id,
+                                            )
+                                            if live_exit_result.get("success") or live_exit_result.get("skipped_duplicate"):
+                                                record.sell_price = new_option_ltp
+                                                record.sell_time = now
+                                                record.exit_reason = 'time_based'
+                                                record.status = 'sold'
+                                                record.sell_order_id = live_exit_result.get("order_id") or record.sell_order_id
+                                                if record.buy_price and record.qty:
+                                                    record.pnl = (new_option_ltp - record.buy_price) * record.qty
+                                                logger.info(f"✅ APPLIED: TIME EXIT for {record.stock_name}: PnL=₹{record.pnl}")
+                                                exit_applied = True
+                                            elif live_exit_result.get("exit_manually"):
+                                                from sqlalchemy.orm.attributes import flag_modified
+                                                record.exit_reason = "Exit Manually"
+                                                flag_modified(record, "exit_reason")
+                                                logger.error(
+                                                    f"🚨 LIVE EXIT uncertain (time_based) for {record.stock_name} — marked Exit Manually (verify broker)"
+                                                )
+                                                exit_applied = True
+                                            elif live_exit_result.get("skipped"):
+                                                logger.warning(f"⚠️ LIVE EXIT skipped (time_based) for {record.stock_name} — keeping trade OPEN")
+                                            else:
+                                                logger.error(f"🚨 LIVE EXIT FAILED (time_based) for {record.stock_name} - keeping trade OPEN")
                                 
                                 # If no exit was applied, just update current price and PnL (trade still OPEN)
                                 if not exit_applied:
