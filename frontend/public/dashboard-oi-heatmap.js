@@ -1,10 +1,12 @@
 /**
- * Dashboard: Live OI heatmap — Top ~200 NSE stock futures (Upstox batch quotes).
+ * Dashboard: Live OI heatmap — API returns ~200 NSE stock futures; UI shows top N only.
  */
 (function () {
     const API_PATH = "/scan/dashboard/oi-heatmap";
     const FETCH_MS = 35000;
     const POLL_MS = 60 * 1000;
+    /** Rows returned by API are sorted; only this many are rendered in the table. */
+    const DISPLAY_TOP_N = 10;
     let timer = null;
     let firstLoad = true;
 
@@ -83,7 +85,7 @@
         return "background: rgba(" + r + "," + g + "," + b + ",0.12);";
     }
 
-    function renderTable(rows) {
+    function renderTable(rows, totalInUniverse) {
         if (!rows || rows.length === 0) {
             return '<p class="oi-heatmap-empty">No heatmap data yet (scheduler or instruments file).</p>';
         }
@@ -141,7 +143,15 @@
             "<tbody>" +
             body +
             "</tbody></table></div>" +
-            '<p class="oi-heatmap-legend">Sorted by |OI change| (Upstox NSE_FO stock futures, near-month per underlying). Colors: buildup / unwind vs price.</p>'
+            '<p class="oi-heatmap-legend">' +
+            (totalInUniverse != null && totalInUniverse > rows.length
+                ? "Displaying top " +
+                  rows.length +
+                  " of " +
+                  totalInUniverse +
+                  ". "
+                : "") +
+            "Sorted by |OI change| (Upstox NSE_FO stock futures, near-month per underlying). Colors: buildup / unwind vs price.</p>"
         );
     }
 
@@ -192,13 +202,14 @@
             if (!res.ok || data.success === false) {
                 throw new Error((data && data.message) || data.error || res.statusText || "Failed");
             }
-            const rows = data.rows || [];
-            const inner = renderTable(rows);
+            const allRows = data.rows || [];
+            const displayRows = allRows.slice(0, DISPLAY_TOP_N);
+            const inner = renderTable(displayRows, allRows.length);
             host.innerHTML = inner;
             if (msg) {
                 const origin = data.data_origin || "";
                 let originNote = "";
-                if (rows.length > 0) {
+                if (allRows.length > 0) {
                     if (data.snapshot_note) {
                         originNote = " · " + data.snapshot_note;
                     } else if (origin === "snapshot") {
@@ -209,9 +220,22 @@
                     }
                 }
                 const err = data.error ? " · last error: " + data.error : "";
+                var summary = "";
+                if (allRows.length > 0) {
+                    if (allRows.length > DISPLAY_TOP_N) {
+                        summary =
+                            "Top " +
+                            DISPLAY_TOP_N +
+                            " of " +
+                            allRows.length +
+                            " symbols";
+                    } else {
+                        summary = allRows.length + " symbol" + (allRows.length === 1 ? "" : "s");
+                    }
+                }
                 msg.textContent =
-                    rows.length > 0
-                        ? rows.length + " symbols" + originNote + err
+                    allRows.length > 0
+                        ? summary + originNote + err
                         : (data.message || "No rows.") + err;
                 msg.style.display = "block";
             }
