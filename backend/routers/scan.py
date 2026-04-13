@@ -79,6 +79,7 @@ from backend.services.premarket_watchlist_job import (
     fetch_premarket_watchlist_for_date,
     run_premarket_watchlist_job,
 )
+from backend.services.dashboard_oi_heatmap import get_dashboard_oi_heatmap_response
 from backend.services import live_trading
 from backend.database import get_db
 from backend.models.trading import IntradayStockOption, MasterStock, HistoricalMarketData
@@ -6155,6 +6156,28 @@ async def premarket_watchlist_run_now():
     except Exception as e:
         logger.exception("premarket_watchlist_run_now: %s", e)
         return JSONResponse(status_code=500, content={"success": False, "message": str(e)})
+
+
+@router.get("/dashboard-oi-heatmap")
+async def dashboard_oi_heatmap():
+    """
+    Top 10 F&O underlyings (premarket list when present, else arbitrage_master): near-month
+    futures OI / price regime from NSE. Response cached ~150s server-side; safe for 180s polling.
+    """
+    try:
+        data = get_dashboard_oi_heatmap_response()
+        status = 200 if data.get("success") else 503
+        return JSONResponse(status_code=status, content=data)
+    except Exception as e:
+        logger.exception("dashboard_oi_heatmap: %s", e)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "message": str(e),
+                "rows": [],
+            },
+        )
 
 
 @router.get("/dashboard-sector-movers-detail")
