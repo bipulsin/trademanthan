@@ -2,9 +2,16 @@
  * Dashboard: Live OI heatmap — Top ~200 NSE stock futures (Upstox batch quotes).
  */
 (function () {
-    const API = "/scan/dashboard/oi-heatmap";
+    const API_PATH = "/scan/dashboard/oi-heatmap";
+    const FETCH_MS = 35000;
     const POLL_MS = 60 * 1000;
     let timer = null;
+    let firstLoad = true;
+
+    function apiUrl() {
+        const base = window.location.origin || "";
+        return base + API_PATH;
+    }
 
     function escapeHtml(s) {
         const d = document.createElement("div");
@@ -142,7 +149,10 @@
         const host = document.getElementById("oiHeatmapHost");
         const msg = document.getElementById("oiHeatmapMsg");
         const updated = document.getElementById("oiHeatmapUpdated");
-        if (!host) return;
+        if (!host) {
+            if (msg) msg.textContent = "Error: heatmap container missing (reload the page).";
+            return;
+        }
 
         if (msg) {
             msg.textContent = "Loading…";
@@ -150,8 +160,35 @@
         }
 
         try {
-            const res = await fetch(API + "?_=" + Date.now(), { cache: "no-store" });
-            const data = await res.json();
+            const qs = new URLSearchParams();
+            qs.set("_", String(Date.now()));
+            if (firstLoad) {
+                qs.set("reload_db", "1");
+                firstLoad = false;
+            }
+            const ctrl = new AbortController();
+            const to = setTimeout(function () {
+                ctrl.abort();
+            }, FETCH_MS);
+            let res;
+            try {
+                res = await fetch(apiUrl() + "?" + qs.toString(), {
+                    cache: "no-store",
+                    credentials: "same-origin",
+                    signal: ctrl.signal,
+                });
+            } finally {
+                clearTimeout(to);
+            }
+            let data;
+            try {
+                const text = await res.text();
+                data = text ? JSON.parse(text) : {};
+            } catch (parseErr) {
+                throw new Error(
+                    "Invalid response from server (not JSON). Status " + res.status + "."
+                );
+            }
             if (!res.ok || data.success === false) {
                 throw new Error((data && data.message) || data.error || res.statusText || "Failed");
             }
@@ -184,8 +221,19 @@
                 updated.textContent = "—";
             }
         } catch (e) {
+            var _abort =
+                e &&
+                (e.name === "AbortError" ||
+                    String(e.message || "")
+                        .toLowerCase()
+                        .indexOf("abort") >= 0);
+            var errMsg = _abort
+                ? "Request timed out after " +
+                  Math.round(FETCH_MS / 1000) +
+                  "s. Click refresh or check your connection."
+                : e.message || String(e);
             host.innerHTML =
-                '<p class="oi-heatmap-error">' + escapeHtml(e.message || String(e)) + "</p>';
+                '<p class="oi-heatmap-error">' + escapeHtml(errMsg) + "</p>";
             if (msg) {
                 msg.textContent = "";
                 msg.style.display = "none";
