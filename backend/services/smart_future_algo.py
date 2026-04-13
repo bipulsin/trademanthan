@@ -10,6 +10,7 @@ Consolidates all scan algorithm schedulers into a single controller:
 - Final reconciliation (3:45 PM & 4:00 PM): broker buy/sell/PnL sync; time_based → Exit-TM after 3:15 PM exits
 - Fin sentiment (weekdays 9:17–13:17 IST, 15 min): NSE corporate announcements + FinBERT for arbitrage_master, store in stock_fin_sentiment (NSE date window: last-run→now; 09:17 only uses today IST)
 - Smart Futures CMS picker (weekdays 9:15, 9:30, then 10:00–15:00 every 30 min IST): arbitrage_master current-month futures → smart_futures_daily
+- Pre-market F&O watchlist (weekdays 9:14 IST): top 200 equities from arbitrage_master by OBV slope + gap + range position → Top 10 in premarket_watchlist table for dashboard
 
 Interval-driven jobs only run real work between 08:30 and 21:00 IST (see scheduler_window).
 Exception: 8:10 AM Telegram ping (before 8:30).
@@ -83,6 +84,7 @@ from backend.services.car_nifty200_updater import run_car_nifty200_update_job
 from backend.services.entry_slip_monitor import run_entry_slip_monitor
 from backend.services.fin_sentiment_job import run_fin_sentiment_job
 from backend.services.smart_futures_picker.job import run_smart_futures_picker_job
+from backend.services.premarket_watchlist_job import run_premarket_watchlist_job
 from backend.services.scheduler_window import is_allowed_scheduler_window_ist
 from backend.services.telegram_trade_channel import send_trade_with_cto_channel_message
 
@@ -114,6 +116,7 @@ job_loggers = [
     logging.getLogger('backend.services.final_reconciliation'),
     logging.getLogger('backend.services.fin_sentiment_job'),
     logging.getLogger('backend.services.smart_futures_picker.job'),
+    logging.getLogger('backend.services.premarket_watchlist_job'),
     logging.getLogger('backend.services.fin_sentiment_reason_openai'),
     logging.getLogger('backend.services.nse_corporate_client'),
 ]
@@ -673,6 +676,36 @@ class SmartFutureAlgoScheduler:
                 "✅ Scheduled: Fin Sentiment (%s weekday slots 9:17–13:17 IST, 15 min)",
                 len(fin_sentiment_times),
             )
+
+            # Pre-market F&O Top 10 watchlist — 9:14 IST (before 9:15 cash open pickers)
+            def run_premarket_watchlist_scheduled():
+                if not is_allowed_scheduler_window_ist():
+                    logger.debug("Outside 08:30–21:00 IST — skip Pre-market watchlist")
+                    return
+                ist = pytz.timezone("Asia/Kolkata")
+                if datetime.now(ist).weekday() >= 5:
+                    return
+                logger.info("🔧 Pre-market F&O watchlist job (Top 200 → Top 10)...")
+                try:
+                    out = run_premarket_watchlist_job()
+                    logger.info(
+                        "✅ Pre-market watchlist completed: top_n=%s",
+                        len(out.get("top") or []),
+                    )
+                except Exception as e:
+                    logger.error("❌ Pre-market watchlist failed: %s", e, exc_info=True)
+
+            self.scheduler.add_job(
+                run_premarket_watchlist_scheduled,
+                trigger=CronTrigger(day_of_week="mon-fri", hour=9, minute=14, timezone="Asia/Kolkata"),
+                id="smart_future_premarket_watchlist",
+                name="Pre-market F&O watchlist (9:14 IST)",
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=600,
+                coalesce=True,
+            )
+            logger.info("✅ Scheduled: Pre-market F&O watchlist (9:14 IST, Mon–Fri)")
 
             # Smart Futures picker — 9:15 (first bar after cash open), 9:30, then 10:00–15:00 every 30 min (weekdays)
             _sf_picker_slots = [(9, 15), (9, 30)]

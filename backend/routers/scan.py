@@ -75,6 +75,10 @@ except ImportError:
 from backend.services.upstox_service import upstox_service as vwap_service
 from backend.services.market_sentiment_dials import build_dial_rows, utc_iso
 from backend.services.sector_movers import build_sector_movers, build_sector_stock_detail
+from backend.services.premarket_watchlist_job import (
+    fetch_premarket_watchlist_for_date,
+    run_premarket_watchlist_job,
+)
 from backend.services import live_trading
 from backend.database import get_db
 from backend.models.trading import IntradayStockOption, MasterStock, HistoricalMarketData
@@ -6105,6 +6109,52 @@ async def dashboard_sector_movers():
                 "losers": [],
             },
         )
+
+
+@router.get("/premarket-watchlist")
+async def premarket_watchlist(session_date: Optional[date] = Query(None, description="IST session date; default today")):
+    """
+    Top 10 F&O equities from arbitrage_master (up to 200 scanned), ranked by OBV slope,
+    gap strength, and 20-day range position. Populated by scheduled job on weekday mornings.
+    """
+    try:
+        import pytz
+
+        ist = pytz.timezone("Asia/Kolkata")
+        sd = session_date or datetime.now(ist).date()
+        rows = fetch_premarket_watchlist_for_date(sd)
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "session_date": sd.isoformat(),
+                "count": len(rows),
+                "rows": rows,
+            },
+        )
+    except Exception as e:
+        logger.exception("premarket_watchlist: %s", e)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "message": str(e),
+                "session_date": None,
+                "count": 0,
+                "rows": [],
+            },
+        )
+
+
+@router.post("/premarket-watchlist/run")
+async def premarket_watchlist_run_now():
+    """On-demand run (same logic as scheduler). Use sparingly — scans ~200 symbols via Upstox."""
+    try:
+        result = run_premarket_watchlist_job()
+        return JSONResponse(status_code=200, content={"success": True, **result})
+    except Exception as e:
+        logger.exception("premarket_watchlist_run_now: %s", e)
+        return JSONResponse(status_code=500, content={"success": False, "message": str(e)})
 
 
 @router.get("/dashboard-sector-movers-detail")

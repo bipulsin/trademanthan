@@ -1992,3 +1992,73 @@ body[data-theme="dark"] .sector-movers-stock-pct--up {
 body[data-theme="dark"] .sector-movers-stock-pct--down {
     color: #f87171;
 }
+
+/* Pre-market F&O watchlist */
+.premarket-watchlist-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.premarket-watchlist-updated {
+    font-size: 0.82rem;
+    color: #64748b;
+}
+body[data-theme="dark"] .premarket-watchlist-updated {
+    color: #94a3b8;
+}
+.premarket-watchlist-hint {
+    font-size: 0.85rem;
+    color: #64748b;
+    margin: 0 0 12px 0;
+    line-height: 1.45;
+}
+body[data-theme="dark"] .premarket-watchlist-hint {
+    color: #94a3b8;
+}
+.premarket-watchlist-msg {
+    font-size: 0.8rem;
+    color: #64748b;
+    margin: 0 0 8px 0;
+}
+.premarket-watchlist-table-wrap {
+    overflow-x: auto;
+}
+.premarket-watchlist-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+.premarket-watchlist-table th,
+.premarket-watchlist-table td {
+    border-bottom: 1px solid var(--theme-border, #e2e8f0);
+    text-align: left;
+    padding: 8px 8px 8px 4px;
+}
+.premarket-watchlist-table th {
+    color: #64748b;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.premarket-gap--up {
+    color: #15803d;
+    font-weight: 600;
+}
+.premarket-gap--down {
+    color: #b91c1c;
+    font-weight: 600;
+}
+body[data-theme="dark"] .premarket-gap--up {
+    color: #4ade80;
+}
+body[data-theme="dark"] .premarket-gap--down {
+    color: #f87171;
+}
+.premarket-watchlist-empty,
+.premarket-watchlist-error {
+    margin: 0;
+    font-size: 0.88rem;
+    color: #64748b;
+}
+.premarket-watchlist-error {
+    color: #b91c1c;
+}

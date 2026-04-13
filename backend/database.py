@@ -538,6 +538,37 @@ def _run_startup_schema_migrations(db_engine):
                     )
                     print("Applied migration: created backtest_smart_future (PostgreSQL)")
 
+            # Pre-market F&O Top 10 watchlist (OBV + gap + range; job weekdays ~9:15 IST)
+            if "premarket_watchlist" not in table_names:
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE premarket_watchlist (
+                                id BIGSERIAL PRIMARY KEY,
+                                session_date DATE NOT NULL,
+                                rank SMALLINT NOT NULL,
+                                stock TEXT NOT NULL,
+                                instrument_key TEXT,
+                                obv_slope DOUBLE PRECISION,
+                                gap_strength DOUBLE PRECISION,
+                                gap_pct_signed DOUBLE PRECISION,
+                                range_position DOUBLE PRECISION,
+                                composite_score DOUBLE PRECISION,
+                                ltp DOUBLE PRECISION,
+                                computed_at TIMESTAMPTZ NOT NULL,
+                                CONSTRAINT uq_premarket_session_rank UNIQUE (session_date, rank)
+                            )
+                            """
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_premarket_session ON premarket_watchlist (session_date DESC)"
+                        )
+                    )
+                    print("Applied migration: created premarket_watchlist (PostgreSQL)")
+
             # Legacy Smart Futures DB tables removed (screener rebuild); drop if still present.
             _sf_tables = (
                 "smart_futures_order_audit",
