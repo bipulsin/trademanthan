@@ -6,10 +6,12 @@ Off-cycle on Sat/Sun: set env SMART_FUTURES_PICKER_FORCE_WEEKEND=1 (manual only)
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
+from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -68,7 +70,7 @@ def _last_n_daily(candles: List[dict], n: int = 10) -> List[dict]:
     return s[-n:]
 
 
-def _ist_date_from_ts(ts: str) -> Optional[datetime.date]:
+def _ist_date_from_ts(ts: str) -> Optional[date]:
     if not ts or len(ts) < 10:
         return None
     try:
@@ -81,7 +83,7 @@ def _ist_date_from_ts(ts: str) -> Optional[datetime.date]:
             return None
 
 
-def _minutes_since_open_ist(ts: str, session_date: datetime.date) -> float:
+def _minutes_since_open_ist(ts: str, session_date: date) -> float:
     """Minutes from 9:15 IST on session_date to candle time (approx if parse fails)."""
     if not ts or len(ts) < 16:
         return SESSION_MINUTES / 2.0
@@ -93,7 +95,7 @@ def _minutes_since_open_ist(ts: str, session_date: datetime.date) -> float:
         return SESSION_MINUTES / 2.0
 
 
-def _session_elapsed_fraction(session_date: datetime.date, m5: List[dict]) -> float:
+def _session_elapsed_fraction(session_date: date, m5: List[dict]) -> float:
     if not m5:
         return 0.25
     last_ts = str(m5[-1].get("timestamp") or "")
@@ -142,6 +144,23 @@ def _entry_price_1m_close(upstox: UpstoxService, fut_key: str, now_ist: datetime
 
 
 @dataclass
+class SymbolScoreOutcome:
+    """Per-symbol Smart Futures scan result (for diagnostics when nothing qualifies)."""
+
+    stock: str
+    pick: Optional["ScoredPick"]
+    reject_code: str
+    reject_note: Optional[str] = None
+    final_cms: Optional[float] = None
+    cms: Optional[float] = None
+    volume_surge: Optional[float] = None
+    sector_score: Optional[float] = None
+    combined_sentiment: Optional[float] = None
+    gate_long: Optional[Dict[str, bool]] = None
+    gate_short: Optional[Dict[str, bool]] = None
+
+
+@dataclass
 class ScoredPick:
     stock: str
     fut_symbol: str
@@ -187,24 +206,40 @@ def _load_sentiment_map(db) -> Dict[str, float]:
     return out
 
 
-def _score_symbol(
+def _score_symbol_outcome(
     upstox: UpstoxService,
     stock: str,
     fut_sym: str,
     fut_key: str,
-    session_date: datetime.date,
+    session_date: date,
     sentiment_map: Dict[str, float],
     sector_index: Optional[str] = None,
     *,
     index_long_ok: bool = False,
     index_short_ok: bool = False,
-) -> Optional[ScoredPick]:
+) -> SymbolScoreOutcome:
+    def _fail(code: str, reject_note: Optional[str] = None, **metrics: Any) -> SymbolScoreOutcome:
+        return SymbolScoreOutcome(
+            stock=stock,
+            pick=None,
+            reject_code=code,
+            reject_note=reject_note,
+            final_cms=metrics.get("final_cms"),
+            cms=metrics.get("cms"),
+            volume_surge=metrics.get("volume_surge"),
+            sector_score=metrics.get("sector_score"),
+            combined_sentiment=metrics.get("combined_sentiment"),
+            gate_long=metrics.get("gate_long"),
+            gate_short=metrics.get("gate_short"),
+        )
+
     daily_raw = upstox.get_historical_candles_by_instrument_key(
         fut_key, interval="days/1", days_back=45
     )
     daily = _last_n_daily(_sort_candles(daily_raw), 10)
     if len(daily) < 10:
-        return None
+        return _fail("insufficient_daily", reject_note=f"need=10 have={len(daily)}")
+
     closes_d = [float(x["close"]) for x in daily]
     vols_d = [float(x.get("volume") or 0) for x in daily]
     avg_daily_vol = sum(vols_d) / 10.0
@@ -218,7 +253,7 @@ def _score_symbol(
     if len(m5_today) < 20:
         m5_today = m5[-max(20, len(m5)) :] if len(m5) >= 20 else []
     if len(m5_today) < 15:
-        return None
+        return _fail("insufficient_m5", reject_note=f"need=15 have={len(m5_today)}")
 
     highs = [float(b["high"]) for b in m5_today]
     lows = [float(b["low"]) for b in m5_today]
@@ -228,16 +263,16 @@ def _score_symbol(
 
     atr = wilder_atr_14(highs, lows, closes)
     if atr is None or atr <= 0:
-        return None
+        return _fail("atr14_invalid")
     atr5 = wilder_atr(highs, lows, closes, 5)
     if atr5 is None or atr5 <= 0:
-        return None
+        return _fail("atr5_invalid")
     atr5_14_ratio = float(atr5) / float(atr)
     adx_curr, adx_prev = adx_14_last_two(highs, lows, closes)
     if adx_curr is None:
-        return None
+        return _fail("adx_missing")
     if not market_regime_ok(float(atr5), float(atr), float(adx_curr), adx_prev):
-        return None
+        return _fail("regime_fail", final_cms=None)
 
     vwap = session_vwap(highs, lows, closes, vols)
     last_close = closes[-1]
@@ -246,7 +281,7 @@ def _score_symbol(
     frac = _session_elapsed_fraction(session_date, m5_today)
     vs = volume_surge_ratio(vols, avg_daily_vol, frac)
     if vs < 1.5:
-        return None
+        return _fail("volume_surge_low", volume_surge=float(vs))
 
     brick = max(atr * 0.1, last_close * 0.0005)
     rm = renko_momentum_score(closes, brick)
@@ -268,23 +303,32 @@ def _score_symbol(
         except (TypeError, ValueError):
             comb = 0.0
         if -0.4 <= comb <= 0.3:
-            return None
+            return _fail(
+                "sentiment_neutral_band",
+                final_cms=float(final_cms),
+                cms=float(cms),
+                volume_surge=float(vs),
+                sector_score=float(sector_score),
+                combined_sentiment=float(comb),
+            )
     else:
         comb = 0.0
 
     th = CMS_FINAL_ENTRY_THRESHOLD
-    long_ok = (
-        final_cms > th
-        and last_close > vwap
-        and sector_score > SECTOR_ALIGN_MIN
-        and index_long_ok
-    )
-    short_ok = (
-        final_cms < -th
-        and last_close < vwap
-        and sector_score < -SECTOR_ALIGN_MIN
-        and index_short_ok
-    )
+    gl = {
+        "final_cms_gt_th": bool(final_cms > th),
+        "close_gt_vwap": bool(last_close > vwap),
+        "sector_gt_min": bool(sector_score > SECTOR_ALIGN_MIN),
+        "index_long_ok": bool(index_long_ok),
+    }
+    gs = {
+        "final_cms_lt_neg_th": bool(final_cms < -th),
+        "close_lt_vwap": bool(last_close < vwap),
+        "sector_lt_neg_min": bool(sector_score < -SECTOR_ALIGN_MIN),
+        "index_short_ok": bool(index_short_ok),
+    }
+    long_ok = all(gl.values())
+    short_ok = all(gs.values())
     if long_ok and not short_ok:
         side = "LONG"
     elif short_ok and not long_ok:
@@ -292,8 +336,17 @@ def _score_symbol(
     elif long_ok and short_ok:
         side = "LONG" if final_cms >= 0 else "SHORT"
     else:
-        return None
-    return ScoredPick(
+        return _fail(
+            "no_entry_signal",
+            final_cms=float(final_cms),
+            cms=float(cms),
+            volume_surge=float(vs),
+            sector_score=float(sector_score),
+            combined_sentiment=float(comb),
+            gate_long=gl,
+            gate_short=gs,
+        )
+    pick = ScoredPick(
         stock=stock,
         fut_symbol=fut_sym or "",
         fut_instrument_key=fut_key,
@@ -313,12 +366,22 @@ def _score_symbol(
         sector_score=float(sector_score),
         combined_sentiment=comb,
     )
+    return SymbolScoreOutcome(
+        stock=stock,
+        pick=pick,
+        reject_code="ok",
+        final_cms=float(final_cms),
+        cms=float(cms),
+        volume_surge=float(vs),
+        sector_score=float(sector_score),
+        combined_sentiment=float(comb),
+    )
 
 
 def _persist_pick(
     db,
     pick: ScoredPick,
-    session_date: datetime.date,
+    session_date: date,
     scan_trigger: str,
     vix: Optional[float],
     entry_price: float,
@@ -435,6 +498,77 @@ def _persist_pick(
     db.commit()
 
 
+def _log_smart_futures_diagnostics(
+    scan_trigger: str,
+    session_date: date,
+    universe_size: int,
+    reject_counts: Counter,
+    idx_long_ok: bool,
+    idx_short_ok: bool,
+    vix: Optional[float],
+    skip_long_vix: bool,
+    no_entry_outcomes: List[SymbolScoreOutcome],
+    long_candidates_after_vix: int,
+    short_candidates: int,
+    vix_skipped_long_candidates: int,
+) -> None:
+    """INFO log explaining why the universe produced few or no picks."""
+    th = CMS_FINAL_ENTRY_THRESHOLD
+    ranked = sorted(
+        no_entry_outcomes,
+        key=lambda o: abs(o.final_cms or 0.0),
+        reverse=True,
+    )[:15]
+    near: List[Dict[str, Any]] = []
+    for o in ranked:
+        near.append(
+            {
+                "stock": o.stock,
+                "final_cms": round(o.final_cms, 4) if o.final_cms is not None else None,
+                "cms": round(o.cms, 4) if o.cms is not None else None,
+                "vs": round(o.volume_surge, 3) if o.volume_surge is not None else None,
+                "sector": round(o.sector_score, 4) if o.sector_score is not None else None,
+                "sent": round(o.combined_sentiment, 3) if o.combined_sentiment is not None else None,
+                "long_gates": o.gate_long,
+                "short_gates": o.gate_short,
+            }
+        )
+    index_only_long = 0
+    index_only_short = 0
+    for o in no_entry_outcomes:
+        gl, gs = o.gate_long, o.gate_short
+        if gl and all(
+            [gl["final_cms_gt_th"], gl["close_gt_vwap"], gl["sector_gt_min"]]
+        ) and not gl["index_long_ok"]:
+            index_only_long += 1
+        if gs and all(
+            [gs["final_cms_lt_neg_th"], gs["close_lt_vwap"], gs["sector_lt_neg_min"]]
+        ) and not gs["index_short_ok"]:
+            index_only_short += 1
+
+    logger.info(
+        "smart_futures_picker [%s] diagnostics session_date=%s universe=%s vix=%s "
+        "idx_long_ok=%s idx_short_ok=%s skip_long_vix=%s cms_th=%s "
+        "reject_hist=%s longs_after_vix=%s shorts=%s vix_skipped_long_candidates=%s "
+        "index_block_long=%s index_block_short=%s near_miss=%s",
+        scan_trigger,
+        session_date.isoformat(),
+        universe_size,
+        vix,
+        idx_long_ok,
+        idx_short_ok,
+        skip_long_vix,
+        th,
+        dict(reject_counts),
+        long_candidates_after_vix,
+        short_candidates,
+        vix_skipped_long_candidates,
+        index_only_long,
+        index_only_short,
+        json.dumps(near, default=str),
+    )
+
+
 def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
     """
     scan_trigger: e.g. '09:30', '10:00' (for logging / row metadata).
@@ -484,6 +618,10 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
         upstox, session_date, range_end_date=session_date
     )
 
+    reject_counts: Counter[str] = Counter()
+    no_entry_outcomes: List[SymbolScoreOutcome] = []
+    vix_skipped_long_candidates = 0
+
     longs: List[ScoredPick] = []
     shorts: List[ScoredPick] = []
     for stock, fut_sym, fut_key, sector_index in rows:
@@ -491,7 +629,7 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
             continue
         st = str(stock).strip().upper()
         try:
-            sc = _score_symbol(
+            oc = _score_symbol_outcome(
                 upstox,
                 st,
                 str(fut_sym or ""),
@@ -503,16 +641,22 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
                 index_short_ok=idx_short_ok,
             )
         except Exception as e:
+            reject_counts["exception"] += 1
             logger.debug("smart_futures_picker: skip %s: %s", st, e)
             continue
-        if not sc:
+        if oc.reject_code != "ok":
+            reject_counts[oc.reject_code] += 1
+            if oc.reject_code == "no_entry_signal":
+                no_entry_outcomes.append(oc)
+        if not oc.pick:
             continue
-        if sc.side == "LONG":
+        if oc.pick.side == "LONG":
             if skip_long_vix:
+                vix_skipped_long_candidates += 1
                 continue
-            longs.append(sc)
+            longs.append(oc.pick)
         else:
-            shorts.append(sc)
+            shorts.append(oc.pick)
 
     longs.sort(key=lambda x: x.final_cms, reverse=True)
     shorts.sort(key=lambda x: x.final_cms)
@@ -529,11 +673,29 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
             vix,
             skip_long_vix,
         )
+        _log_smart_futures_diagnostics(
+            scan_trigger,
+            session_date,
+            len(rows),
+            reject_counts,
+            idx_long_ok,
+            idx_short_ok,
+            vix,
+            skip_long_vix,
+            no_entry_outcomes,
+            len(longs),
+            len(shorts),
+            vix_skipped_long_candidates,
+        )
         return {
             "scan_trigger": scan_trigger,
             "picks": 0,
             "vix": vix,
             "skip_long_vix": skip_long_vix,
+            "reject_histogram": dict(reject_counts),
+            "index_long_ok": idx_long_ok,
+            "index_short_ok": idx_short_ok,
+            "vix_skipped_long_candidates": vix_skipped_long_candidates,
         }
 
     dbw: Optional[Session] = None
@@ -561,12 +723,19 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
             best_long.stock if best_long else None,
             best_short.stock if best_short else None,
         )
+        logger.debug(
+            "smart_futures_picker [%s] reject_hist=%s no_entry_count=%s",
+            scan_trigger,
+            dict(reject_counts),
+            len(no_entry_outcomes),
+        )
         return {
             "scan_trigger": scan_trigger,
             "picks": saved,
             "vix": vix,
             "best_long": best_long.stock if best_long else None,
             "best_short": best_short.stock if best_short else None,
+            "reject_histogram": dict(reject_counts),
         }
     finally:
         if dbw is not None:
