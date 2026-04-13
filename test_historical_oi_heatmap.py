@@ -28,7 +28,10 @@ if str(ROOT) not in sys.path:
 
 import pytz
 
+from sqlalchemy import text
+
 from backend.config import settings
+from backend.database import SessionLocal
 from backend.services.oi_heatmap import (
     filter_stock_futures_rows,
     load_nse_instruments_json,
@@ -195,6 +198,42 @@ def build_universe_near_month(top_n: int, full_200: bool) -> List[Tuple[str, str
     return out
 
 
+def build_universe_arbitrage_master(limit: int) -> List[Tuple[str, str]]:
+    """
+    (currmth_future_instrument_key, stock) from ``arbitrage_master`` — same FUT keys as live OI context.
+    """
+    out: List[Tuple[str, str]] = []
+    if limit <= 0:
+        return out
+    db = SessionLocal()
+    try:
+        q = db.execute(
+            text(
+                """
+                SELECT stock, currmth_future_instrument_key
+                FROM arbitrage_master
+                WHERE currmth_future_instrument_key IS NOT NULL
+                  AND TRIM(currmth_future_instrument_key) <> ''
+                ORDER BY stock
+                LIMIT :lim
+                """
+            ),
+            {"lim": int(limit)},
+        ).fetchall()
+        for stock, ik in q:
+            st = str(stock or "").strip().upper()
+            ikey = str(ik or "").strip()
+            if st and ikey:
+                out.append((ikey, st))
+    except Exception as e:
+        logger.error("arbitrage_master universe: %s", e)
+    finally:
+        db.close()
+    if not out:
+        logger.warning("No rows from arbitrage_master with currmth_future_instrument_key; check DATABASE_URL")
+    return out
+
+
 def build_universe_by_liquidity(top_n: int) -> List[Tuple[str, str]]:
     """Same ranking as live OI heatmap (Upstox batch volume); requires live batch quote API."""
     from backend.services.oi_heatmap import build_liquidity_universe_instrument_keys
@@ -224,11 +263,15 @@ def run_snapshot(
     top_n: int,
     full_200: bool,
     liquidity_rank: bool,
+    arbitrage_master: bool,
     sleep_s: float,
 ) -> List[RowOut]:
     ux = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
-    if liquidity_rank:
-        universe = build_universe_by_liquidity(200 if full_200 else top_n)
+    lim = 200 if full_200 else top_n
+    if arbitrage_master:
+        universe = build_universe_arbitrage_master(lim)
+    elif liquidity_rank:
+        universe = build_universe_by_liquidity(lim)
     else:
         universe = build_universe_near_month(top_n, full_200)
     rows: List[RowOut] = []
@@ -272,28 +315,39 @@ def _fmt_clock_ampm(h: int, m: int) -> str:
     return f"{h12}:{m:02d} {suf}"
 
 
+def format_table_text(
+    session_d: date,
+    target_h: int,
+    target_m: int,
+    rows: List[RowOut],
+) -> str:
+    lines: List[str] = []
+    title = session_d.strftime("%Y-%m-%d") + f" @ {_fmt_clock_ampm(target_h, target_m)}"
+    lines.append("")
+    lines.append("OI HEATMAP SNAPSHOT: " + title)
+    lines.append("=" * 59)
+    lines.append(f"{'Symbol':<12} | {'Price Chg%':>10} | {'OI Chg%':>8} | {'Signal':<16} | Status")
+    lines.append("-" * 59)
+    for r in rows:
+        pfx = "+" if r.price_chg_pct > 0 else ""
+        oi_pfx = "+" if r.oi_chg_pct > 0 else ""
+        lines.append(
+            f"{r.symbol:<12} | {pfx}{r.price_chg_pct:>8.2f}% | {oi_pfx}{r.oi_chg_pct:>6.2f}% | "
+            f"{_signal_display(r.signal):<16} | {_status_emoji(r.signal)}"
+        )
+    if not rows:
+        lines.append("(no rows — check session date is a trading day, times, and Upstox OI in candles)")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def print_table(
     session_d: date,
     target_h: int,
     target_m: int,
     rows: List[RowOut],
 ) -> None:
-    title = session_d.strftime("%Y-%m-%d") + f" @ {_fmt_clock_ampm(target_h, target_m)}"
-    print()
-    print("OI HEATMAP SNAPSHOT:", title)
-    print("=" * 59)
-    print(f"{'Symbol':<12} | {'Price Chg%':>10} | {'OI Chg%':>8} | {'Signal':<16} | Status")
-    print("-" * 59)
-    for r in rows:
-        pfx = "+" if r.price_chg_pct > 0 else ""
-        oi_pfx = "+" if r.oi_chg_pct > 0 else ""
-        print(
-            f"{r.symbol:<12} | {pfx}{r.price_chg_pct:>8.2f}% | {oi_pfx}{r.oi_chg_pct:>6.2f}% | "
-            f"{_signal_display(r.signal):<16} | {_status_emoji(r.signal)}"
-        )
-    if not rows:
-        print("(no rows — check session date is a trading day, times, and Upstox OI in candles)")
-    print()
+    print(format_table_text(session_d, target_h, target_m, rows), end="")
 
 
 def main() -> None:
@@ -308,17 +362,45 @@ def main() -> None:
         action="store_true",
         help="Rank universe by live Upstox volume (like dashboard); slower, extra API batch calls up front",
     )
+    p.add_argument(
+        "--arbitrage-master",
+        action="store_true",
+        help="Use arbitrage_master.currmth_future_instrument_key (top-n / full-200 by --top-n / --full-200)",
+    )
+    p.add_argument(
+        "--output",
+        type=str,
+        default="",
+        help="Write the same table text to this file (e.g. historical_oi_heatmap_result.txt)",
+    )
     p.add_argument("--sleep", type=float, default=0.15, help="Delay between API calls (rate limit)")
     args = p.parse_args()
+
+    if args.liquidity_rank and args.arbitrage_master:
+        p.error("Use only one of --liquidity-rank and --arbitrage-master")
 
     session_d = date.fromisoformat(args.session_date)
     oh, om = [int(x) for x in args.open_time.split(":")]
     th, tm = [int(x) for x in args.target_time.split(":")]
 
     rows = run_snapshot(
-        session_d, oh, om, th, tm, args.top_n, args.full_200, args.liquidity_rank, args.sleep
+        session_d,
+        oh,
+        om,
+        th,
+        tm,
+        args.top_n,
+        args.full_200,
+        args.liquidity_rank,
+        args.arbitrage_master,
+        args.sleep,
     )
-    print_table(session_d, th, tm, rows)
+    text_out = format_table_text(session_d, th, tm, rows)
+    print(text_out, end="")
+    if args.output.strip():
+        outp = Path(args.output.strip())
+        outp.write_text(text_out, encoding="utf-8")
+        logger.info("Wrote %s", outp.resolve())
 
 
 if __name__ == "__main__":
