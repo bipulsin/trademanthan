@@ -56,4 +56,10 @@ class Settings(BaseSettings):
     PREMKET_RUN_TIME: str = os.getenv("PREMKET_RUN_TIME", "09:00")
     PREMKET_TOP_N: int = int(os.getenv("PREMKET_TOP_N", "10"))
 
+    # Pre-market scanner local test harness (test_premkt_scanner.py)
+    TEST_MODE: bool = os.getenv("TEST_MODE", "false").lower() in ("1", "true", "yes")
+    TEST_SIMULATION_DATE: str = os.getenv("TEST_SIMULATION_DATE", "2026-04-13")
+    TEST_SIMULATION_TIME: str = os.getenv("TEST_SIMULATION_TIME", "09:10:00")
+    TEST_SYMBOL_COUNT: int = int(os.getenv("TEST_SYMBOL_COUNT", "200"))
+
 settings = Settings()

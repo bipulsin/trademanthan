@@ -1,0 +1,106 @@
+{
+  "description": "Fallback cached metrics for premkt scanner test harness when --sample (no live Upstox). Not for production.",
+  "simulation_date": "2026-04-10",
+  "rows": [
+    {
+      "stock": "RELIANCE",
+      "instrument_key": "NSE_EQ|INE002A01018",
+      "obv_slope": 0.12,
+      "gap_pct_signed": 0.35,
+      "gap_strength": 0.35,
+      "range_position": 0.78,
+      "momentum": 0.22,
+      "composite_score": 0.412
+    },
+    {
+      "stock": "HDFCBANK",
+      "instrument_key": "NSE_EQ|INE040A01034",
+      "obv_slope": 0.08,
+      "gap_pct_signed": -0.42,
+      "gap_strength": 0.42,
+      "range_position": 0.62,
+      "momentum": 0.15,
+      "composite_score": 0.318
+    },
+    {
+      "stock": "ICICIBANK",
+      "instrument_key": "NSE_EQ|INE090A01021",
+      "obv_slope": 0.15,
+      "gap_pct_signed": 0.18,
+      "gap_strength": 0.18,
+      "range_position": 0.71,
+      "momentum": 0.19,
+      "composite_score": 0.385
+    },
+    {
+      "stock": "INFY",
+      "instrument_key": "NSE_EQ|INE009A01021",
+      "obv_slope": -0.05,
+      "gap_pct_signed": 0.22,
+      "gap_strength": 0.22,
+      "range_position": 0.55,
+      "momentum": 0.11,
+      "composite_score": 0.245
+    },
+    {
+      "stock": "TCS",
+      "instrument_key": "NSE_EQ|INE467B01029",
+      "obv_slope": 0.06,
+      "gap_pct_signed": -0.15,
+      "gap_strength": 0.15,
+      "range_position": 0.48,
+      "momentum": 0.09,
+      "composite_score": 0.228
+    },
+    {
+      "stock": "SBIN",
+      "instrument_key": "NSE_EQ|INE062A01020",
+      "obv_slope": 0.11,
+      "gap_pct_signed": 0.55,
+      "gap_strength": 0.55,
+      "range_position": 0.82,
+      "momentum": 0.25,
+      "composite_score": 0.441
+    },
+    {
+      "stock": "BHARTIARTL",
+      "instrument_key": "NSE_EQ|INE397D01024",
+      "obv_slope": 0.04,
+      "gap_pct_signed": 0.08,
+      "gap_strength": 0.08,
+      "range_position": 0.59,
+      "momentum": 0.14,
+      "composite_score": 0.268
+    },
+    {
+      "stock": "KOTAKBANK",
+      "instrument_key": "NSE_EQ|INE237A01028",
+      "obv_slope": 0.09,
+      "gap_pct_signed": -0.28,
+      "gap_strength": 0.28,
+      "range_position": 0.51,
+      "momentum": 0.12,
+      "composite_score": 0.275
+    },
+    {
+      "stock": "LT",
+      "instrument_key": "NSE_EQ|INE018A01030",
+      "obv_slope": 0.07,
+      "gap_pct_signed": 0.12,
+      "gap_strength": 0.12,
+      "range_position": 0.66,
+      "momentum": 0.16,
+      "composite_score": 0.312
+    },
+    {
+      "stock": "AXISBANK",
+      "instrument_key": "NSE_EQ|INE238A01034",
+      "obv_slope": 0.05,
+      "gap_pct_signed": 0.25,
+      "gap_strength": 0.25,
+      "range_position": 0.58,
+      "momentum": 0.13,
+      "composite_score": 0.285
+    }
+  ]
+}
