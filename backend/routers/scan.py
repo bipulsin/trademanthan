@@ -4076,6 +4076,27 @@ async def health_check(db: Session = Depends(get_db)):
             }
         )
 
+@router.get("/chartink-webhook-bullish")
+async def chartink_webhook_bullish_get_hint():
+    """
+    Chartink (and browsers) sometimes hit this URL with GET — we do not process GET.
+    Real alerts must use POST with a JSON body.
+    """
+    logger.warning(
+        "GET /scan/chartink-webhook-bullish — ignored. Chartink must use HTTP POST with JSON body."
+    )
+    return JSONResponse(
+        status_code=405,
+        content={
+            "status": "method_not_allowed",
+            "detail": "This URL accepts only HTTP POST (JSON). Chartink alert webhooks must be configured with POST. GET requests are not processed.",
+            "required_method": "POST",
+            "path": "/scan/chartink-webhook-bullish",
+        },
+        headers={"Allow": "POST"},
+    )
+
+
 @router.post("/chartink-webhook-bullish")
 async def receive_bullish_webhook(request: Request):
     """
@@ -4152,6 +4173,23 @@ async def receive_bullish_webhook(request: Request):
             status_code=500
         )
 
+@router.get("/chartink-webhook-bearish")
+async def chartink_webhook_bearish_get_hint():
+    logger.warning(
+        "GET /scan/chartink-webhook-bearish — ignored. Chartink must use HTTP POST with JSON body."
+    )
+    return JSONResponse(
+        status_code=405,
+        content={
+            "status": "method_not_allowed",
+            "detail": "This URL accepts only HTTP POST (JSON). Chartink alert webhooks must be configured with POST. GET requests are not processed.",
+            "required_method": "POST",
+            "path": "/scan/chartink-webhook-bearish",
+        },
+        headers={"Allow": "POST"},
+    )
+
+
 @router.post("/chartink-webhook-bearish")
 async def receive_bearish_webhook(request: Request):
     """
@@ -4222,6 +4260,21 @@ async def receive_bearish_webhook(request: Request):
             content={"status": "error", "message": f"Error: {str(e)}"},
             status_code=500
         )
+
+@router.get("/chartink-webhook")
+async def chartink_webhook_get_hint():
+    logger.warning("GET /scan/chartink-webhook — ignored. Use HTTP POST with JSON body.")
+    return JSONResponse(
+        status_code=405,
+        content={
+            "status": "method_not_allowed",
+            "detail": "This URL accepts only HTTP POST (JSON). Configure Chartink to POST, not GET.",
+            "required_method": "POST",
+            "path": "/scan/chartink-webhook",
+        },
+        headers={"Allow": "POST"},
+    )
+
 
 @router.post("/chartink-webhook")
 async def receive_chartink_webhook(request: Request, db: Session = Depends(get_db)):
