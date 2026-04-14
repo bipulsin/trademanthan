@@ -393,6 +393,25 @@ def derive_dynamic_exit_from_smart_future_signal(
     return fb_px, (fb_dt.strftime("%H:%M:%S") if fb_dt else "15:30:00"), "session_end_fallback"
 
 
+def humanize_exit_reason(reason: str) -> str:
+    """Convert internal exit tags into readable report labels."""
+    if not reason:
+        return ""
+    parts = [p.strip() for p in str(reason).split("|") if p.strip()]
+    mapping = {
+        "adx_falling": "Trend strength weakening (ADX falling)",
+        "atr_contracting": "Momentum weakening (ATR(5) below ATR(14))",
+        "bearish_divergence": "Bearish divergence detected",
+        "bullish_divergence": "Bullish divergence detected",
+        "below_vwap": "Price moved below VWAP (long exit)",
+        "above_vwap": "Price moved above VWAP (short exit)",
+        "session_end_fallback": "No exit trigger; closed at session-end fallback",
+        "smart_futures_exit_signal": "Smart Futures exit signal triggered",
+    }
+    human = [mapping.get(p, p.replace("_", " ").title()) for p in parts]
+    return "; ".join(human)
+
+
 def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
     sd = date.fromisoformat(args.date)
     th, tm, _ = [int(x) for x in args.time.split(":")]
@@ -470,7 +489,7 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
                     entry_price_1330=round(entry, 4) if dec.startswith("ENTER") else None,
                     exit_price=round(exit_close, 4) if dec.startswith("ENTER") else None,
                     exit_time=exit_time_hhmmss if dec.startswith("ENTER") else None,
-                    exit_reason=exit_reason if dec.startswith("ENTER") else "",
+                    exit_reason=humanize_exit_reason(exit_reason) if dec.startswith("ENTER") else "",
                     pnl=pnl,
                     roi_pct=roi,
                     hit=hit,
