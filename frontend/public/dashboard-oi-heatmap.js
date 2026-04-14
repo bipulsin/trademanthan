@@ -180,7 +180,7 @@
                 const prevSigClass = /^[A-Z_]+$/.test(prevSig)
                     ? prevSig.replace(/[^A-Z_]/g, "_")
                     : "NEUTRAL";
-                const sym = r.underlying_symbol || r.trading_symbol || "";
+                const sym = r.trading_symbol || r.underlying_symbol || "";
                 return (
                     "<tr>" +
                     "<td>" +
