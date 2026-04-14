@@ -47,6 +47,8 @@ _cache_updated_at_iso: str = ""
 _cache_source: str = "none"  # "live" (Upstox refresh) | "snapshot" (DB) | "none"
 _last_error: Optional[str] = None
 _underlying_rank: Dict[str, int] = {}
+_prev_signal_by_instrument: Dict[str, str] = {}
+_prev_signal_by_underlying: Dict[str, str] = {}
 _api_refresh_lock = threading.Lock()
 _last_api_refresh_attempt_mono: float = 0.0
 
@@ -253,6 +255,42 @@ def finalize_heatmap_rows_for_store(rows: List[Dict[str, Any]]) -> List[Dict[str
     return out
 
 
+def _set_prev_signal_maps_from_rows(rows: List[Dict[str, Any]]) -> None:
+    """Snapshot previous-scan signals from rows for API-derived ``prev_oi_signal`` output."""
+    global _prev_signal_by_instrument, _prev_signal_by_underlying
+    by_i: Dict[str, str] = {}
+    by_u: Dict[str, str] = {}
+    for r in rows or []:
+        sig = str(r.get("oi_signal") or "").strip()
+        if not sig:
+            continue
+        ik = str(r.get("instrument_key") or "").strip()
+        und = str(r.get("underlying_symbol") or "").strip().upper()
+        if ik:
+            by_i[ik] = sig
+        if und:
+            by_u[und] = sig
+    with _cache_lock:
+        _prev_signal_by_instrument = by_i
+        _prev_signal_by_underlying = by_u
+
+
+def _attach_prev_signal_for_api(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Return API rows with derived ``prev_oi_signal`` from previous scan snapshot maps."""
+    with _cache_lock:
+        by_i = dict(_prev_signal_by_instrument)
+        by_u = dict(_prev_signal_by_underlying)
+    out: List[Dict[str, Any]] = []
+    for r in rows or []:
+        d = dict(r)
+        ik = str(d.get("instrument_key") or "").strip()
+        und = str(d.get("underlying_symbol") or "").strip().upper()
+        prev = by_i.get(ik) or by_u.get(und)
+        d["prev_oi_signal"] = prev
+        out.append(d)
+    return out
+
+
 def refresh_oi_heatmap_live() -> Dict[str, Any]:
     """
     Fetch batch quotes for universe keys, sort by |oi_change|, update memory cache + DB.
@@ -328,6 +366,12 @@ def refresh_oi_heatmap_live() -> Dict[str, Any]:
             }
         )
 
+    with _cache_lock:
+        prev_rows = list(_rows_cache)
+    if not prev_rows:
+        prev_rows, _ = load_oi_heatmap_snapshot_from_db()
+    _set_prev_signal_maps_from_rows(prev_rows)
+
     raw_n = len(rows)
     rows = finalize_heatmap_rows_for_store(rows)
     if raw_n != len(rows):
@@ -355,38 +399,6 @@ def _persist_snapshot(rows: List[Dict[str, Any]], updated_at: datetime) -> None:
     db = None
     try:
         db = SessionLocal()
-        prev_by_underlying: Dict[str, str] = {}
-        prev_by_instrument: Dict[str, str] = {}
-        try:
-            old = db.execute(
-                text("SELECT instrument_key, underlying_symbol, oi_signal FROM oi_heatmap_latest")
-            ).fetchall()
-            for ik, und, sig in old:
-                s = str(sig or "").strip()
-                if not s:
-                    continue
-                uk = str(und or "").strip().upper()
-                ikk = str(ik or "").strip()
-                if uk:
-                    prev_by_underlying[uk] = s
-                if ikk:
-                    prev_by_instrument[ikk] = s
-        except Exception:
-            # Table may be absent during first boot/migration; insert path below remains safe.
-            pass
-
-        for r in rows:
-            if r.get("prev_oi_signal"):
-                continue
-            uk = str(r.get("underlying_symbol") or "").strip().upper()
-            ik = str(r.get("instrument_key") or "").strip()
-            prev_sig = None
-            if uk:
-                prev_sig = prev_by_underlying.get(uk)
-            if not prev_sig and ik:
-                prev_sig = prev_by_instrument.get(ik)
-            r["prev_oi_signal"] = prev_sig
-
         db.execute(text("DELETE FROM oi_heatmap_latest"))
         for r in rows:
             db.execute(
@@ -394,10 +406,10 @@ def _persist_snapshot(rows: List[Dict[str, Any]], updated_at: datetime) -> None:
                     """
                     INSERT INTO oi_heatmap_latest (
                         rank, instrument_key, underlying_symbol, trading_symbol, expiry,
-                        ltp, chg_pct, oi, oi_chg, oi_chg_pct, oi_signal, prev_oi_signal, volume, score, updated_at
+                        ltp, chg_pct, oi, oi_chg, oi_chg_pct, oi_signal, volume, score, updated_at
                     ) VALUES (
                         :rank, :instrument_key, :underlying_symbol, :trading_symbol, :expiry,
-                        :ltp, :chg_pct, :oi, :oi_chg, :oi_chg_pct, :oi_signal, :prev_oi_signal, :volume, :score, :updated_at
+                        :ltp, :chg_pct, :oi, :oi_chg, :oi_chg_pct, :oi_signal, :volume, :score, :updated_at
                     )
                     """
                 ),
@@ -413,7 +425,6 @@ def _persist_snapshot(rows: List[Dict[str, Any]], updated_at: datetime) -> None:
                     "oi_chg": int(r["oi_chg"]),
                     "oi_chg_pct": float(r["oi_chg_pct"]),
                     "oi_signal": r.get("oi_signal"),
-                    "prev_oi_signal": r.get("prev_oi_signal"),
                     "volume": int(r.get("volume") or 0),
                     "score": float(r.get("score") or 0),
                     "updated_at": updated_at,
@@ -439,7 +450,7 @@ def load_oi_heatmap_snapshot_from_db() -> Tuple[List[Dict[str, Any]], Optional[s
             text(
                 """
                 SELECT rank, instrument_key, underlying_symbol, trading_symbol, expiry,
-                       ltp, chg_pct, oi, oi_chg, oi_chg_pct, oi_signal, prev_oi_signal, volume, score, updated_at
+                       ltp, chg_pct, oi, oi_chg, oi_chg_pct, oi_signal, volume, score, updated_at
                 FROM oi_heatmap_latest
                 ORDER BY rank ASC
                 """
@@ -585,7 +596,7 @@ def get_live_oi_heatmap_json(force_reload_from_db: bool = False) -> Dict[str, An
         "data_origin": origin if rows else "none",
         "updated_at": ts or None,
         "error": err,
-        "rows": rows,
+        "rows": _attach_prev_signal_for_api(rows),
         "message": None if rows else empty_help,
         "snapshot_note": snapshot_note,
     }
