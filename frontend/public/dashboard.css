@@ -2255,6 +2255,10 @@ body[data-theme="dark"] .oi-heatmap-more-link {
     padding: 18px;
 }
 
+.oi-heatmap-modal-overlay[hidden] {
+    display: none !important;
+}
+
 .oi-heatmap-modal-dialog {
     width: min(1180px, 96vw);
     max-height: 88vh;
