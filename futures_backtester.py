@@ -364,6 +364,7 @@ def derive_dynamic_exit_from_smart_future_signal(
     decision: str,
     session_candles: Sequence[dict],
     entry_dt: datetime,
+    entry_price: float,
     fallback_exit_candle: dict,
 ) -> Tuple[float, str, str]:
     """
@@ -465,7 +466,7 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
                 raise ValueError("missing_session_end_candle_for_exit")
             entry_dt = parse_dt_ist(c1330.get("timestamp")) or IST.localize(datetime.combine(sd, dt_time(th, tm)))
             exit_close, exit_time_hhmmss, exit_reason = derive_dynamic_exit_from_smart_future_signal(
-                dec, candles, entry_dt, fallback_candle
+                dec, candles, entry_dt, entry, fallback_candle
             ) if dec.startswith("ENTER") else (0.0, "", "")
             pnl, roi, hit = evaluate_outcome_fixed_exit(dec, entry, exit_close, ci.lot_size)
 
