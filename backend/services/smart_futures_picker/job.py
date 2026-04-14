@@ -36,6 +36,7 @@ from backend.services.smart_futures_config import (
     CMS_FINAL_ENTRY_THRESHOLD,
     MAX_OPEN_POSITIONS,
     SMART_FUTURES_PICK_SELECTION_TOP_N,
+    buildup_selection_long_short_caps,
     NEUTRAL_BAND,
     OI_BLOCK_ON_CONFLICT,
     OI_GATE_ENABLED,
@@ -1266,8 +1267,7 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
     shorts.sort(key=lambda x: x.final_cms)
 
     tn = max(0, int(SMART_FUTURES_PICK_SELECTION_TOP_N))
-    n_long_cap = tn // 3
-    n_short_cap = tn // 2
+    n_long_cap, n_short_cap = buildup_selection_long_short_caps(tn)
     picked_longs = longs[:n_long_cap] if n_long_cap else []
     picked_shorts = shorts[:n_short_cap] if n_short_cap else []
     merged_picks: List[ScoredPick] = picked_longs + picked_shorts

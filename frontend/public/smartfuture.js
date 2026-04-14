@@ -690,8 +690,12 @@
         const sc =
             cfg.pick_selection_short_cap != null ? Number(cfg.pick_selection_short_cap) : Math.floor(tn / 2);
         const maxOpen = cfg.max_open_positions != null ? Number(cfg.max_open_positions) : '—';
+        const minL =
+            cfg.min_long_buildup_selection != null ? Number(cfg.min_long_buildup_selection) : 3;
         note.textContent =
-            'Picker mix (each scan): up to ' +
+            'Picker mix (each scan): at least ' +
+            minL +
+            ' LONG_BUILDUP when available, up to ' +
             lc +
             ' LONG + ' +
             sc +

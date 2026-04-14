@@ -57,8 +57,29 @@ CAPITAL: float = 800_000.0
 RISK_PCT: float = 1.0
 MAX_OPEN_POSITIONS: int = 3
 
-# Picker: per scan, take up to top_n//3 LONG + up to top_n//2 SHORT (by final_cms), same idea as futures_backtester.
+# Picker / futures_backtester: minimum LONG_BUILDUP slots when the budget (top_n) allows.
+MIN_LONG_BUILDUP_SELECTION: int = 3
+
+# Picker: per scan budget (same formula as backtester); long/short caps from buildup_selection_long_short_caps().
 SMART_FUTURES_PICK_SELECTION_TOP_N: int = 6
+
+
+def buildup_selection_long_short_caps(top_n: int) -> Tuple[int, int]:
+    """
+    Return (long_cap, short_cap) for LONG_BUILDUP vs SHORT_BUILDUP ranking.
+
+    Long side: at least ``max(MIN_LONG_BUILDUP_SELECTION, top_n // 3)`` when possible, but never
+    more than ``top_n`` total budget. Short side: ``top_n // 2``, trimmed so long_cap + short_cap <= top_n.
+    """
+    tn = max(0, int(top_n))
+    if tn <= 0:
+        return 0, 0
+    n_long_target = max(int(MIN_LONG_BUILDUP_SELECTION), tn // 3)
+    n_long = min(n_long_target, tn)
+    n_short = min(tn // 2, max(0, tn - n_long))
+    return n_long, n_short
+
+
 # GAP5: floor(raw_lots * tier_sizing_mult); TIER1 uses higher mult
 TIER1_SIZING_MULT: float = 2.0
 TIER2_SIZING_MULT: float = 1.0

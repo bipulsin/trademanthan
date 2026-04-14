@@ -23,6 +23,7 @@ from sqlalchemy import text
 
 from backend.config import get_instruments_file_path, settings
 from backend.database import SessionLocal
+from backend.services.smart_futures_config import MIN_LONG_BUILDUP_SELECTION, buildup_selection_long_short_caps
 from backend.services.smart_futures_exit import evaluate_exit_with_profit_protection
 from backend.services.upstox_service import UpstoxService
 
@@ -527,8 +528,7 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
         if r.oi_signal in {"LONG_BUILDUP", "SHORT_BUILDUP"} and r.final_decision in {"ENTER_LONG", "ENTER_SHORT"}
     ]
     tn = int(getattr(args, "top_n", 5) or 5)
-    n_long_cap = tn // 3
-    n_short_cap = tn // 2
+    n_long_cap, n_short_cap = buildup_selection_long_short_caps(tn)
     long_cand = [r for r in candidates if r.oi_signal == "LONG_BUILDUP"]
     short_cand = [r for r in candidates if r.oi_signal == "SHORT_BUILDUP"]
     long_cand.sort(key=lambda r: float(r.combo_score or 0.0), reverse=True)
@@ -635,10 +635,12 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
         "contracts_resolved": len(contracts),
         "rows_generated": len(rows),
         "selection_rule": (
-            "Up to top_n//3 LONG_BUILDUP + up to top_n//2 SHORT_BUILDUP by combo_score; "
+            "LONG_BUILDUP: at least min_long (and max(top_n//3, min)) within top_n budget; "
+            "SHORT_BUILDUP: up to top_n//2, trimmed so long_cap+short_cap<=top_n; "
             "if both caps are 0 (e.g. top_n==1), fallback to best combo_score up to top_n"
         ),
         "top_n": int(getattr(args, "top_n", 5) or 5),
+        "min_long_buildup_selection": int(MIN_LONG_BUILDUP_SELECTION),
         "top_n_long_buildup_cap": n_long_cap,
         "top_n_short_buildup_cap": n_short_cap,
         "selected_buildup_count": num_selected_buildup,

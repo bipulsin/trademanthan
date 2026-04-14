@@ -91,12 +91,15 @@ def get_sf_config_stub(user: User = Depends(_require_user)):
     """Admin UI + future screener: persisted parameters (file-backed, not DB)."""
     out = _read_config()
     tn = int(getattr(sfc, "SMART_FUTURES_PICK_SELECTION_TOP_N", 6))
+    pl, ps = sfc.buildup_selection_long_short_caps(tn)
     out["pick_selection_top_n"] = tn
-    out["pick_selection_long_cap"] = tn // 3
-    out["pick_selection_short_cap"] = tn // 2
+    out["pick_selection_long_cap"] = pl
+    out["pick_selection_short_cap"] = ps
+    out["min_long_buildup_selection"] = int(getattr(sfc, "MIN_LONG_BUILDUP_SELECTION", 3))
     out["pick_selection_rule"] = (
-        "Each scan: up to top_n//3 LONG + up to top_n//2 SHORT by Final CMS "
-        "(same mix as futures backtester). Rows saved respect MAX_OPEN_POSITIONS free slots."
+        "Each scan: at least min_long_buildup LONG_BUILDUP (when available), plus SHORT_BUILDUP "
+        "up to top_n//2, with long+short trimmed to top_n budget (same as futures backtester). "
+        "Rows saved respect MAX_OPEN_POSITIONS free slots."
     )
     out["max_open_positions"] = int(getattr(sfc, "MAX_OPEN_POSITIONS", 3))
     return out
@@ -111,6 +114,19 @@ def put_sf_config_stub(body: SmartFuturesConfigUpdate, admin: User = Depends(_re
         _DATA_DIR.mkdir(parents=True, exist_ok=True)
         _CONFIG_PATH.write_text(json.dumps(cur, indent=2), encoding="utf-8")
     logger.info("smart_futures_stub: config saved by admin id=%s", getattr(admin, "id", None))
+    # Re-merge picker caps so the response matches GET /config
+    tn = int(getattr(sfc, "SMART_FUTURES_PICK_SELECTION_TOP_N", 6))
+    pl, ps = sfc.buildup_selection_long_short_caps(tn)
+    cur["pick_selection_top_n"] = tn
+    cur["pick_selection_long_cap"] = pl
+    cur["pick_selection_short_cap"] = ps
+    cur["min_long_buildup_selection"] = int(getattr(sfc, "MIN_LONG_BUILDUP_SELECTION", 3))
+    cur["pick_selection_rule"] = (
+        "Each scan: at least min_long_buildup LONG_BUILDUP (when available), plus SHORT_BUILDUP "
+        "up to top_n//2, with long+short trimmed to top_n budget (same as futures backtester). "
+        "Rows saved respect MAX_OPEN_POSITIONS free slots."
+    )
+    cur["max_open_positions"] = int(getattr(sfc, "MAX_OPEN_POSITIONS", 3))
     return cur
 
 
