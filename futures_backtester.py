@@ -522,11 +522,26 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
             )
 
     candidates = [
-        r for r in rows
+        r
+        for r in rows
         if r.oi_signal in {"LONG_BUILDUP", "SHORT_BUILDUP"} and r.final_decision in {"ENTER_LONG", "ENTER_SHORT"}
     ]
-    candidates.sort(key=lambda r: float(r.combo_score or 0.0), reverse=True)
-    selected_keys = {r.symbol for r in candidates[: int(getattr(args, "top_n", 5) or 5)]}
+    tn = int(getattr(args, "top_n", 5) or 5)
+    n_long_cap = tn // 3
+    n_short_cap = tn // 2
+    long_cand = [r for r in candidates if r.oi_signal == "LONG_BUILDUP"]
+    short_cand = [r for r in candidates if r.oi_signal == "SHORT_BUILDUP"]
+    long_cand.sort(key=lambda r: float(r.combo_score or 0.0), reverse=True)
+    short_cand.sort(key=lambda r: float(r.combo_score or 0.0), reverse=True)
+    picked_long = long_cand[:n_long_cap]
+    picked_short = short_cand[:n_short_cap]
+    selected_keys = {r.symbol for r in picked_long + picked_short}
+    # e.g. top_n==1 → both caps are 0; fall back to best combo_score among buildup candidates
+    if not selected_keys and candidates:
+        candidates.sort(key=lambda r: float(r.combo_score or 0.0), reverse=True)
+        take = min(max(1, tn), len(candidates))
+        selected_keys = {r.symbol for r in candidates[:take]}
+    num_selected_buildup = len(selected_keys)
 
     for r in rows:
         if r.symbol not in selected_keys:
@@ -619,8 +634,15 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
         "symbols_from_arbitrage_master": len(symbols),
         "contracts_resolved": len(contracts),
         "rows_generated": len(rows),
-        "selection_rule": "Top-N by combo score among LONG_BUILDUP/SHORT_BUILDUP only",
+        "selection_rule": (
+            "Up to top_n//3 LONG_BUILDUP + up to top_n//2 SHORT_BUILDUP by combo_score; "
+            "if both caps are 0 (e.g. top_n==1), fallback to best combo_score up to top_n"
+        ),
         "top_n": int(getattr(args, "top_n", 5) or 5),
+        "top_n_long_buildup_cap": n_long_cap,
+        "top_n_short_buildup_cap": n_short_cap,
+        "selected_buildup_count": num_selected_buildup,
+        "selection_display_rows": max(num_selected_buildup, 1),
         "exit_time": "multi-timeframe with profit protection tiers",
         "trade_count": len(trades),
         "wins": len(wins),
@@ -687,7 +709,10 @@ def write_outputs(rows: List[BacktestRow], summary: Dict[str, Any], d: str, t: s
 
     # Public overwrite report: always latest run at fixed URL/path.
     top_n = int(summary.get("top_n") or 5)
-    top_rows = [r for r in rows if r.final_decision in {"ENTER_LONG", "ENTER_SHORT"}][:top_n]
+    display_n = int(summary.get("selection_display_rows") or top_n)
+    cap_l = summary.get("top_n_long_buildup_cap")
+    cap_s = summary.get("top_n_short_buildup_cap")
+    top_rows = [r for r in rows if r.final_decision in {"ENTER_LONG", "ENTER_SHORT"}][:display_n]
     rows_html = "".join(
         "<tr>"
         f"<td>{r.futures_symbol}</td>"
@@ -746,10 +771,10 @@ def write_outputs(rows: List[BacktestRow], summary: Dict[str, Any], d: str, t: s
       <div><div class="k">Avg ROI %</div><div class="v">{summary.get('avg_roi_pct')}</div></div>
       <div><div class="k">Profit Factor</div><div class="v">{summary.get('profit_factor')}</div></div>
       <div><div class="k">Tier3 Reach %</div><div class="v">{summary.get('pct_reach_tier3')}</div></div>
-      <div><div class="k">Selection</div><div class="v">Top {top_n} (LONG/SHORT BUILDUP)</div></div>
+      <div><div class="k">Selection</div><div class="v">Up to {cap_l} LONG + {cap_s} SHORT BUILDUP (top_n={top_n})</div></div>
     </div>
   </div>
-  <h3>Top {top_n} Futures</h3>
+  <h3>Selected futures (up to {display_n})</h3>
   <table>
     <thead>
       <tr>
