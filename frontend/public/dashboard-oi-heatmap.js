@@ -123,6 +123,18 @@
         return map[s] || sig || "—";
     }
 
+    function signalTooltip(sig) {
+        const s = String(sig || "").toUpperCase();
+        if (s === "LONG_BUILDUP") return "FII/DII Buying";
+        if (s === "SHORT_BUILDUP") return "FII / DII Selling";
+        if (s === "SHORT_COVER" || s === "SHORT_COVERING")
+            return "No new buying - Rally temporary";
+        if (s === "LONG_UNWIND" || s === "LONG_UNWINDING")
+            return "No new Selling. Decline temporary";
+        if (s === "NEUTRAL") return "No clear direction";
+        return "";
+    }
+
     function heatStyle(sig) {
         const s = String(sig || "").toUpperCase();
         let r = 156;
@@ -160,9 +172,11 @@
         const body = rows
             .map(function (r) {
                 const sig = r.oi_signal || "";
+                const sigTip = signalTooltip(sig);
                 const hs = heatStyle(sig);
                 const sigClass = /^[A-Z_]+$/.test(sig) ? sig.replace(/[^A-Z_]/g, "_") : "NEUTRAL";
                 const prevSig = r.prev_oi_signal || "";
+                const prevSigTip = signalTooltip(prevSig);
                 const prevSigClass = /^[A-Z_]+$/.test(prevSig)
                     ? prevSig.replace(/[^A-Z_]/g, "_")
                     : "NEUTRAL";
@@ -191,11 +205,15 @@
                     hs +
                     '"><span class="oi-heatmap-signal oi-heatmap-signal--' +
                     sigClass +
+                    '" title="' +
+                    escapeHtml(sigTip) +
                     '">' +
                     escapeHtml(signalLabel(sig)) +
                     "</span></td>" +
                     "<td><span class=\"oi-heatmap-signal oi-heatmap-signal--" +
                     prevSigClass +
+                    "\" title=\"" +
+                    escapeHtml(prevSigTip) +
                     "\">" +
                     escapeHtml(signalLabel(prevSig || "—")) +
                     "</span></td>" +
