@@ -23,7 +23,7 @@ from sqlalchemy import text
 
 from backend.config import get_instruments_file_path, settings
 from backend.database import SessionLocal
-from backend.services.smart_futures_exit import exit_evaluation_from_m5_dicts
+from backend.services.smart_futures_exit import evaluate_exit_with_profit_protection
 from backend.services.upstox_service import UpstoxService
 
 IST = pytz.timezone("Asia/Kolkata")
@@ -54,10 +54,29 @@ class BacktestRow:
     oi_signal: str
     combo_score: float
     final_decision: str
-    entry_price_1330: Optional[float]
-    exit_price: Optional[float]
-    exit_time: Optional[str]
-    exit_reason: str
+    entry_time: Optional[str]
+    entry_price: Optional[float]
+    entry_qty: int
+    hard_stop_loss: Optional[float]
+    breakeven_activated: bool
+    breakeven_activation_time: Optional[str]
+    profit_locking_activated: bool
+    profit_locking_activation_time: Optional[str]
+    profit_locking_stop_level: Optional[float]
+    trailing_stop_activated: bool
+    trailing_stop_activation_time: Optional[str]
+    initial_trailing_stop_level: Optional[float]
+    current_trailing_stop_level: Optional[float]
+    current_active_stop_loss_level: Optional[float]
+    final_exit_price: Optional[float]
+    final_exit_time: Optional[str]
+    final_exit_profit: Optional[float]
+    total_roi_pct: Optional[float]
+    holding_time_minutes: Optional[float]
+    max_profit_achieved: Optional[float]
+    final_exit_reason: str
+    mfe: Optional[float]
+    mae: Optional[float]
     pnl: Optional[float]
     roi_pct: Optional[float]
     hit: str
@@ -360,66 +379,10 @@ def evaluate_outcome_fixed_exit(decision: str, entry: float, exit_close: float, 
     return round(pnl, 2), round(roi, 4), hit
 
 
-def derive_dynamic_exit_from_smart_future_signal(
-    decision: str,
-    session_candles: Sequence[dict],
-    entry_dt: datetime,
-    entry_price: float,
-    fallback_exit_candle: dict,
-) -> Tuple[float, str, str]:
-    """
-    Derive exit from Smart Future exit signal timing:
-    - evaluate exit rule on progressive prefixes (same run timeframe: 1m preferred, else 5m)
-    - take first triggered candle strictly after entry time
-    - fallback to session-end candle when no exit signal fires
-    Returns (exit_price, exit_time_hhmmss, exit_reason).
-    """
-    side = "LONG" if decision == "ENTER_LONG" else "SHORT"
-    seq = sort_candles(list(session_candles or []))
-    for i in range(15, len(seq) + 1):
-        prefix = seq[:i]
-        last = prefix[-1]
-        last_dt = parse_dt_ist(last.get("timestamp"))
-        if not last_dt or last_dt <= entry_dt:
-            continue
-        should_exit, reason = exit_evaluation_from_m5_dicts(side, prefix, entry_price=entry_price)
-        if should_exit:
-            px = float(last.get("close") or 0.0)
-            if px > 0:
-                return px, last_dt.strftime("%H:%M:%S"), str(reason or "smart_futures_exit_signal")
-    fb_dt = parse_dt_ist(fallback_exit_candle.get("timestamp"))
-    fb_px = float(fallback_exit_candle.get("close") or 0.0)
-    if fb_px <= 0:
-        raise ValueError("invalid_fallback_exit_price")
-    return fb_px, (fb_dt.strftime("%H:%M:%S") if fb_dt else "15:30:00"), "session_end_fallback"
-
-
-def humanize_exit_reason(reason: str) -> str:
-    """Convert internal exit tags into readable report labels."""
-    if not reason:
-        return ""
-    if str(reason).strip().startswith("Exit:"):
-        return str(reason).strip()
-    parts = [p.strip() for p in str(reason).split("|") if p.strip()]
-    mapping = {
-        "adx_falling": "Trend strength weakening (ADX falling)",
-        "atr_contracting": "Momentum weakening (ATR(5) below ATR(14))",
-        "bearish_divergence": "Bearish divergence detected",
-        "bullish_divergence": "Bullish divergence detected",
-        "below_vwap": "Price moved below VWAP (long exit)",
-        "above_vwap": "Price moved above VWAP (short exit)",
-        "session_end_fallback": "No exit trigger; closed at session-end fallback",
-        "smart_futures_exit_signal": "Smart Futures exit signal triggered",
-    }
-    human = [mapping.get(p, p.replace("_", " ").title()) for p in parts]
-    return "; ".join(human)
-
-
 def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
     sd = date.fromisoformat(args.date)
     th, tm, _ = [int(x) for x in args.time.split(":")]
     bh, bm, _ = [int(x) for x in args.baseline.split(":")]
-    eh, em = 15, 30
 
     symbols = load_arbitrage_symbols()
     contracts = front_month_resolver(sd, symbols)
@@ -427,6 +390,7 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
     cache_dir = OUT_ROOT / args.date / "candles"
     rows: List[BacktestRow] = []
     failures: List[Dict[str, str]] = []
+    candles_by_symbol: Dict[str, List[dict]] = {}
 
     for sym in symbols:
         ci = contracts.get(sym)
@@ -446,29 +410,17 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
                 raise ValueError("missing_oi_for_baseline_or_signal")
 
             upto_signal = [c for c in candles if (parse_dt_ist(c.get("timestamp")) or datetime.min.replace(tzinfo=IST)).time() <= dt_time(th, tm)]
-            post = [c for c in candles if (parse_dt_ist(c.get("timestamp")) or datetime.min.replace(tzinfo=IST)).time() >= dt_time(th, tm)]
-
             cms_score, cms_dir, cms_tier = cms_from_futures(upto_signal, c0915, c1330)
             p0, p1 = float(c0915["close"]), float(c1330["close"])
             oi0, oi1 = float(c0915["oi"]), float(c1330["oi"])
             price_pct = ((p1 - p0) / p0 * 100.0) if p0 else 0.0
             oi_pct = ((oi1 - oi0) / oi0 * 100.0) if oi0 else 0.0
             oi_sig = oi_signal_rules(price_pct, oi_pct)
-            dec = final_decision(cms_dir, oi_sig)
-            atr = atr14(upto_signal)
-            entry = p1
+            dec = final_decision_buildup_only(oi_sig)
             combo = combo_score_cms_oi(cms_score, oi_pct)
-            # Exit timing/price from Smart Future exit signal over run timeframe candles.
-            fallback_candle = find_candle(candles, sd, eh, em) or find_candle_at_or_before(
-                candles, sd, eh, em, max_lookback_min=30
-            )
-            if not fallback_candle:
-                raise ValueError("missing_session_end_candle_for_exit")
             entry_dt = parse_dt_ist(c1330.get("timestamp")) or IST.localize(datetime.combine(sd, dt_time(th, tm)))
-            exit_close, exit_time_hhmmss, exit_reason = derive_dynamic_exit_from_smart_future_signal(
-                dec, candles, entry_dt, entry, fallback_candle
-            ) if dec.startswith("ENTER") else (0.0, "", "")
-            pnl, roi, hit = evaluate_outcome_fixed_exit(dec, entry, exit_close, ci.lot_size)
+            entry_ts = entry_dt.isoformat()
+            candles_by_symbol[sym] = candles
 
             rows.append(
                 BacktestRow(
@@ -483,13 +435,32 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
                     oi_signal=oi_sig,
                     combo_score=round(combo, 6),
                     final_decision=dec,
-                    entry_price_1330=round(entry, 4) if dec.startswith("ENTER") else None,
-                    exit_price=round(exit_close, 4) if dec.startswith("ENTER") else None,
-                    exit_time=exit_time_hhmmss if dec.startswith("ENTER") else None,
-                    exit_reason=humanize_exit_reason(exit_reason) if dec.startswith("ENTER") else "",
-                    pnl=pnl,
-                    roi_pct=roi,
-                    hit=hit,
+                    entry_time=entry_ts if dec.startswith("ENTER") else None,
+                    entry_price=round(p1, 4) if dec.startswith("ENTER") else None,
+                    entry_qty=ci.lot_size,
+                    hard_stop_loss=None,
+                    breakeven_activated=False,
+                    breakeven_activation_time=None,
+                    profit_locking_activated=False,
+                    profit_locking_activation_time=None,
+                    profit_locking_stop_level=None,
+                    trailing_stop_activated=False,
+                    trailing_stop_activation_time=None,
+                    initial_trailing_stop_level=None,
+                    current_trailing_stop_level=None,
+                    current_active_stop_loss_level=None,
+                    final_exit_price=None,
+                    final_exit_time=None,
+                    final_exit_profit=None,
+                    total_roi_pct=None,
+                    holding_time_minutes=None,
+                    max_profit_achieved=None,
+                    final_exit_reason="",
+                    mfe=None,
+                    mae=None,
+                    pnl=None,
+                    roi_pct=None,
+                    hit="NA",
                     lot_size=ci.lot_size,
                     error="",
                 )
@@ -513,10 +484,29 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
                     oi_signal="NA",
                     combo_score=0.0,
                     final_decision="NO_TRADE",
-                    entry_price_1330=None,
-                    exit_price=None,
-                    exit_time=None,
-                    exit_reason="",
+                    entry_time=None,
+                    entry_price=None,
+                    entry_qty=ci.lot_size if ci else 1,
+                    hard_stop_loss=None,
+                    breakeven_activated=False,
+                    breakeven_activation_time=None,
+                    profit_locking_activated=False,
+                    profit_locking_activation_time=None,
+                    profit_locking_stop_level=None,
+                    trailing_stop_activated=False,
+                    trailing_stop_activation_time=None,
+                    initial_trailing_stop_level=None,
+                    current_trailing_stop_level=None,
+                    current_active_stop_loss_level=None,
+                    final_exit_price=None,
+                    final_exit_time=None,
+                    final_exit_profit=None,
+                    total_roi_pct=None,
+                    holding_time_minutes=None,
+                    max_profit_achieved=None,
+                    final_exit_reason="",
+                    mfe=None,
+                    mae=None,
                     pnl=None,
                     roi_pct=None,
                     hit="NA",
@@ -524,17 +514,6 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
                     error=str(e),
                 )
             )
-
-    for r in rows:
-        r.final_decision = final_decision_buildup_only(r.oi_signal)
-        if r.final_decision not in {"ENTER_LONG", "ENTER_SHORT"}:
-            r.entry_price_1330 = None
-            r.exit_price = None
-            r.exit_time = None
-            r.exit_reason = ""
-            r.pnl = None
-            r.roi_pct = None
-            r.hit = "NA"
 
     candidates = [
         r for r in rows
@@ -546,16 +525,79 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
     for r in rows:
         if r.symbol not in selected_keys:
             r.final_decision = "NO_TRADE"
-            r.entry_price_1330 = None
-            r.exit_price = None
-            r.exit_time = None
-            r.exit_reason = ""
+            r.entry_time = None
+            r.entry_price = None
             r.pnl = None
             r.roi_pct = None
             r.hit = "NA"
 
-    trades = [r for r in rows if r.final_decision in {"ENTER_LONG", "ENTER_SHORT"} and r.pnl is not None]
+    for r in rows:
+        if r.final_decision not in {"ENTER_LONG", "ENTER_SHORT"} or r.entry_price is None or not r.entry_time:
+            continue
+        side = "LONG" if r.final_decision == "ENTER_LONG" else "SHORT"
+        seq = candles_by_symbol.get(r.symbol) or []
+        entry_dt = parse_dt_ist(r.entry_time)
+        post = [c for c in seq if (parse_dt_ist(c.get("timestamp")) and parse_dt_ist(c.get("timestamp")) >= entry_dt)] if entry_dt else seq
+        if not post:
+            r.error = "missing_post_entry_candles"
+            continue
+        try:
+            ex = evaluate_exit_with_profit_protection(side, float(r.entry_price), r.entry_time, int(r.lot_size), post)
+            st = ex.get("state", {}) if isinstance(ex, dict) else {}
+            r.hard_stop_loss = st.get("hard_stop_loss")
+            r.breakeven_activated = bool(st.get("breakeven_activated"))
+            r.breakeven_activation_time = st.get("breakeven_activation_time")
+            r.profit_locking_activated = bool(st.get("profit_locking_activated"))
+            r.profit_locking_activation_time = st.get("profit_locking_activation_time")
+            r.profit_locking_stop_level = st.get("profit_locking_stop_level")
+            r.trailing_stop_activated = bool(st.get("trailing_stop_activated"))
+            r.trailing_stop_activation_time = st.get("trailing_stop_activation_time")
+            r.initial_trailing_stop_level = st.get("initial_trailing_stop_level")
+            r.current_trailing_stop_level = st.get("current_trailing_stop_level")
+            r.current_active_stop_loss_level = st.get("current_active_stop_loss_level")
+            r.max_profit_achieved = st.get("max_profit_achieved")
+            r.final_exit_price = ex.get("final_exit_price")
+            r.final_exit_time = ex.get("final_exit_time")
+            r.final_exit_profit = ex.get("final_exit_profit")
+            r.total_roi_pct = ex.get("total_roi_pct")
+            r.final_exit_reason = str(ex.get("final_exit_reason") or "")
+            r.pnl = r.final_exit_profit
+            r.roi_pct = r.total_roi_pct
+            r.hit = "win" if (r.pnl or 0) > 0 else ("loss" if (r.pnl or 0) < 0 else "flat")
+            ex_dt = parse_dt_ist(r.final_exit_time) if r.final_exit_time else None
+            if entry_dt and ex_dt:
+                r.holding_time_minutes = round(max(0.0, (ex_dt - entry_dt).total_seconds() / 60.0), 2)
+            highs = [float(c.get("high") or c.get("close") or 0.0) for c in post]
+            lows = [float(c.get("low") or c.get("close") or 0.0) for c in post]
+            if highs and lows:
+                if side == "LONG":
+                    r.mfe = round((max(highs) - float(r.entry_price)) * float(r.lot_size), 2)
+                    r.mae = round((min(lows) - float(r.entry_price)) * float(r.lot_size), 2)
+                else:
+                    r.mfe = round((float(r.entry_price) - min(lows)) * float(r.lot_size), 2)
+                    r.mae = round((float(r.entry_price) - max(highs)) * float(r.lot_size), 2)
+        except Exception as ex_err:
+            r.error = f"exit_eval_error: {ex_err}"
+
+    trades = [r for r in rows if r.final_decision in {"ENTER_LONG", "ENTER_SHORT"} and r.final_exit_profit is not None]
     wins = [r for r in trades if (r.pnl or 0) > 0]
+    losses = [r for r in trades if (r.pnl or 0) < 0]
+    sum_wins = sum(float(r.pnl or 0.0) for r in wins)
+    sum_losses_abs = abs(sum(float(r.pnl or 0.0) for r in losses))
+    tier1 = [r for r in trades if r.breakeven_activated]
+    tier2 = [r for r in trades if r.profit_locking_activated]
+    tier3 = [r for r in trades if r.trailing_stop_activated]
+    exit_trailing = [r for r in trades if "Trailing Stop Hit" in str(r.final_exit_reason or "")]
+    exit_primary = [r for r in trades if str(r.final_exit_reason or "").startswith("15-min")]
+    exit_emergency = [r for r in trades if "Emergency Stop" in str(r.final_exit_reason or "")]
+    exit_stoploss = [r for r in trades if "Stop Loss Hit" in str(r.final_exit_reason or "")]
+    avg_holding = round(sum(float(r.holding_time_minutes or 0.0) for r in trades) / len(trades), 2) if trades else 0.0
+    avg_profit = round(sum(float(r.pnl or 0.0) for r in trades) / len(trades), 2) if trades else 0.0
+    avg_mfe = round(sum(float(r.mfe or 0.0) for r in trades) / len(trades), 2) if trades else 0.0
+    avg_mae = round(sum(float(r.mae or 0.0) for r in trades) / len(trades), 2) if trades else 0.0
+    tier3_avg = round(sum(float(r.pnl or 0.0) for r in tier3) / len(tier3), 2) if tier3 else 0.0
+    not_tier3 = [r for r in trades if not r.trailing_stop_activated]
+    non_tier3_avg = round(sum(float(r.pnl or 0.0) for r in not_tier3) / len(not_tier3), 2) if not_tier3 else 0.0
     summary = {
         "date": args.date,
         "signal_time": args.time,
@@ -565,12 +607,26 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
         "rows_generated": len(rows),
         "selection_rule": "Top-N by combo score among LONG_BUILDUP/SHORT_BUILDUP only",
         "top_n": int(getattr(args, "top_n", 5) or 5),
-        "exit_time": "dynamic (smart futures exit signal; fallback 15:30:00)",
+        "exit_time": "multi-timeframe with profit protection tiers",
         "trade_count": len(trades),
         "wins": len(wins),
         "win_rate_pct": round((len(wins) / len(trades) * 100.0), 2) if trades else 0.0,
         "total_pnl": round(sum(float(r.pnl or 0.0) for r in trades), 2),
         "avg_roi_pct": round(sum(float(r.roi_pct or 0.0) for r in trades) / len(trades), 4) if trades else 0.0,
+        "avg_holding_time_minutes": avg_holding,
+        "avg_profit_per_trade": avg_profit,
+        "profit_factor": round((sum_wins / sum_losses_abs), 4) if sum_losses_abs > 0 else (999.0 if sum_wins > 0 else 0.0),
+        "avg_mfe": avg_mfe,
+        "avg_mae": avg_mae,
+        "pct_reach_tier1": round((len(tier1) / len(trades) * 100.0), 2) if trades else 0.0,
+        "pct_reach_tier2": round((len(tier2) / len(trades) * 100.0), 2) if trades else 0.0,
+        "pct_reach_tier3": round((len(tier3) / len(trades) * 100.0), 2) if trades else 0.0,
+        "pct_exit_trailing": round((len(exit_trailing) / len(trades) * 100.0), 2) if trades else 0.0,
+        "pct_exit_primary_15m": round((len(exit_primary) / len(trades) * 100.0), 2) if trades else 0.0,
+        "pct_exit_emergency": round((len(exit_emergency) / len(trades) * 100.0), 2) if trades else 0.0,
+        "pct_exit_stoploss": round((len(exit_stoploss) / len(trades) * 100.0), 2) if trades else 0.0,
+        "avg_profit_tier3": tier3_avg,
+        "avg_profit_non_tier3": non_tier3_avg,
         "failures": failures[:200],
     }
     return rows, summary
@@ -578,11 +634,10 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
 
 def write_outputs(rows: List[BacktestRow], summary: Dict[str, Any], d: str, t: str) -> None:
     OUT_ROOT.mkdir(parents=True, exist_ok=True)
-    t_compact = t.replace(":", "")[:4]
-    csv_path = Path(f"futures_backtest_{d}_{t_compact}.csv")
-    js_path = Path(f"futures_backtest_summary_{d}.json")
-    md_path = Path(f"futures_backtest_report_{d}.md")
-    html_path = Path(f"futures_backtest_dashboard_{d}.html")
+    csv_path = Path("futures_backtest_trades_detailed.csv")
+    js_path = Path("futures_backtest_profit_protection_summary.json")
+    md_path = Path("futures_backtest_performance_report.md")
+    html_path = Path("futures_backtest_dashboard_profit_protection.html")
     public_backtests_dir = Path("frontend/public/backtests")
     public_backtests_dir.mkdir(parents=True, exist_ok=True)
     public_html_path = public_backtests_dir / "futures_backtest.html"
@@ -597,22 +652,20 @@ def write_outputs(rows: List[BacktestRow], summary: Dict[str, Any], d: str, t: s
     md_path.write_text(
         "\n".join(
             [
-                f"# Futures Backtest Report ({d})",
+                f"# Futures Backtest Profit Protection Report ({d})",
                 "",
-                f"- Signal time: `{summary['signal_time']}`",
-                f"- Symbols from arbitrage_master: `{summary['symbols_from_arbitrage_master']}`",
-                f"- Contracts resolved: `{summary['contracts_resolved']}`",
-                f"- Trades: `{summary['trade_count']}`",
-                f"- Win rate: `{summary['win_rate_pct']}%`",
-                f"- Total PnL: `{summary['total_pnl']}`",
-                f"- Avg ROI: `{summary['avg_roi_pct']}%`",
+                f"- Signal time: `{summary.get('signal_time')}`",
+                f"- Trades: `{summary.get('trade_count')}` | Win rate: `{summary.get('win_rate_pct')}%`",
+                f"- Total PnL: `{summary.get('total_pnl')}` | Profit factor: `{summary.get('profit_factor')}`",
+                f"- Tier reach: T1 `{summary.get('pct_reach_tier1')}%`, T2 `{summary.get('pct_reach_tier2')}%`, T3 `{summary.get('pct_reach_tier3')}%`",
+                f"- Exit mix: Trailing `{summary.get('pct_exit_trailing')}%`, Primary15m `{summary.get('pct_exit_primary_15m')}%`, Emergency `{summary.get('pct_exit_emergency')}%`, StopLoss `{summary.get('pct_exit_stoploss')}%`",
             ]
         ),
         encoding="utf-8",
     )
     html_path.write_text(
-        f"""<!doctype html><html><head><meta charset='utf-8'><title>Futures Backtest {d}</title></head>
-<body><h2>Futures Backtest Dashboard ({d})</h2>
+        f"""<!doctype html><html><head><meta charset='utf-8'><title>Futures Backtest Profit Protection</title></head>
+<body><h2>Futures Backtest Dashboard Profit Protection ({d})</h2>
 <pre>{json.dumps(summary, indent=2)}</pre>
 <p>CSV: {csv_path.name}</p></body></html>""",
         encoding="utf-8",
@@ -621,8 +674,6 @@ def write_outputs(rows: List[BacktestRow], summary: Dict[str, Any], d: str, t: s
     # Public overwrite report: always latest run at fixed URL/path.
     top_n = int(summary.get("top_n") or 5)
     top_rows = [r for r in rows if r.final_decision in {"ENTER_LONG", "ENTER_SHORT"}][:top_n]
-    entry_time = str(summary.get("signal_time") or "")
-    exit_time = str(summary.get("exit_time") or "15:15:00")
     rows_html = "".join(
         "<tr>"
         f"<td>{r.futures_symbol}</td>"
@@ -630,13 +681,20 @@ def write_outputs(rows: List[BacktestRow], summary: Dict[str, Any], d: str, t: s
         f"<td>{r.oi_signal}</td>"
         f"<td>{r.combo_score:.4f}</td>"
         f"<td>{r.final_decision}</td>"
-        f"<td>{r.entry_price_1330 if r.entry_price_1330 is not None else '—'}</td>"
-        f"<td>{r.exit_price if r.exit_price is not None else '—'}</td>"
-        f"<td>{r.exit_time if r.exit_time else '—'}</td>"
-        f"<td>{r.exit_reason if r.exit_reason else '—'}</td>"
+        f"<td>{r.entry_time if r.entry_time else '—'}</td>"
+        f"<td>{r.entry_price if r.entry_price is not None else '—'}</td>"
+        f"<td>{r.entry_qty}</td>"
+        f"<td>{'Activated' if r.breakeven_activated else 'Not Activated'}</td>"
+        f"<td>{'Activated' if r.profit_locking_activated else 'Not Activated'}</td>"
+        f"<td>{'Activated' if r.trailing_stop_activated else 'Not Activated'}</td>"
+        f"<td>{r.current_active_stop_loss_level if r.current_active_stop_loss_level is not None else '—'}</td>"
+        f"<td>{r.current_trailing_stop_level if r.current_trailing_stop_level is not None else '—'}</td>"
+        f"<td>{r.final_exit_time if r.final_exit_time else '—'}</td>"
+        f"<td>{r.final_exit_price if r.final_exit_price is not None else '—'}</td>"
+        f"<td>{r.final_exit_reason if r.final_exit_reason else '—'}</td>"
         f"<td>{r.pnl if r.pnl is not None else '—'}</td>"
         f"<td>{r.roi_pct if r.roi_pct is not None else '—'}</td>"
-        f"<td>{r.hit}</td>"
+        f"<td>{r.hit if r.hit else '—'}</td>"
         "</tr>"
         for r in top_rows
     )
@@ -661,8 +719,8 @@ def write_outputs(rows: List[BacktestRow], summary: Dict[str, Any], d: str, t: s
   </style>
 </head>
 <body>
-  <h1>Futures Backtest Report</h1>
-  <div class="sub">Date {summary.get('date')} | Signal {summary.get('signal_time')} | Baseline {summary.get('baseline_time')} | Exit {summary.get('exit_time')}</div>
+  <h1>Futures Backtest Profit Protection Report</h1>
+  <div class="sub">Date {summary.get('date')} | Signal {summary.get('signal_time')} | Baseline {summary.get('baseline_time')}</div>
   <div class="summary">
     <div class="summary-grid">
       <div><div class="k">Symbols from arbitrage_master</div><div class="v">{summary.get('symbols_from_arbitrage_master')}</div></div>
@@ -672,6 +730,8 @@ def write_outputs(rows: List[BacktestRow], summary: Dict[str, Any], d: str, t: s
       <div><div class="k">Win rate %</div><div class="v">{summary.get('win_rate_pct')}</div></div>
       <div><div class="k">Total PnL</div><div class="v">{summary.get('total_pnl')}</div></div>
       <div><div class="k">Avg ROI %</div><div class="v">{summary.get('avg_roi_pct')}</div></div>
+      <div><div class="k">Profit Factor</div><div class="v">{summary.get('profit_factor')}</div></div>
+      <div><div class="k">Tier3 Reach %</div><div class="v">{summary.get('pct_reach_tier3')}</div></div>
       <div><div class="k">Selection</div><div class="v">Top {top_n} (LONG/SHORT BUILDUP)</div></div>
     </div>
   </div>
@@ -684,16 +744,23 @@ def write_outputs(rows: List[BacktestRow], summary: Dict[str, Any], d: str, t: s
         <th>OI Signal</th>
         <th>CMS+OI score</th>
         <th>Decision</th>
-        <th>Entry price ({entry_time})</th>
-        <th>Exit price</th>
+        <th>Entry time</th>
+        <th>Entry price</th>
+        <th>Position Size</th>
+        <th>Tier 1</th>
+        <th>Tier 2</th>
+        <th>Tier 3</th>
+        <th>Active Stop</th>
+        <th>Trailing Stop</th>
         <th>Exit time</th>
+        <th>Exit price</th>
         <th>Exit reason</th>
         <th>PnL</th>
         <th>ROI%</th>
-        <th>Hit (Win/Loss)</th>
+        <th>Result</th>
       </tr>
     </thead>
-    <tbody>{rows_html if rows_html else '<tr><td colspan="12">No selected trades.</td></tr>'}</tbody>
+    <tbody>{rows_html if rows_html else '<tr><td colspan="18">No selected trades.</td></tr>'}</tbody>
   </table>
   <div class="muted">This file is overwritten on every futures_backtester execution.</div>
 </body>
