@@ -206,6 +206,7 @@ def evaluate_exit_with_profit_protection(
     entry_time: str,
     lot_size: int,
     m1_post_entry: Sequence[dict],
+    force_close_at_end: bool = True,
 ) -> Dict[str, Any]:
     """
     Full-position (no partial exits) exit manager:
@@ -410,6 +411,20 @@ def evaluate_exit_with_profit_protection(
                 "state": st.__dict__,
                 "primary_signal_time": last_primary_signal_ts,
             }
+
+    # Optional fallback: close at last bar (backtest mode).
+    if not force_close_at_end:
+        return {
+            "exit": False,
+            "final_exit_price": None,
+            "final_exit_time": None,
+            "final_exit_reason": "",
+            "final_exit_profit": None,
+            "total_roi_pct": None,
+            "holding_time_minutes": None,
+            "state": st.__dict__,
+            "primary_signal_time": last_primary_signal_ts,
+        }
 
     # Fallback: close at last bar
     last = seq1[-1]

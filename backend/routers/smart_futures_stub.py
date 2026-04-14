@@ -24,12 +24,8 @@ from backend.database import get_db
 from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
 from backend.services.smart_futures_exit import (
-    compute_trailing_stop_levels,
-    exit_evaluation_from_m5_dicts,
-    m5_bars_for_session,
+    evaluate_exit_with_profit_protection,
 )
-from backend.services.smart_futures_picker.indicators import wilder_atr_14
-from backend.services.smart_futures_picker.position_sizing import get_futures_lot_size_by_instrument_key
 from backend.services.smart_futures_session_date import effective_session_date_ist_for_trend
 from backend.services.smart_futures_session_utils import compute_atr5_14_ratio_for_session
 from backend.services.upstox_service import UpstoxService
@@ -258,6 +254,20 @@ def _row_to_dict(r: Any) -> Dict[str, Any]:
     return out
 
 
+def _ist_date_from_ts(ts: str):
+    if not ts:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        dt = dt.astimezone(IST) if dt.tzinfo else IST.localize(dt)
+        return dt.date()
+    except Exception:
+        try:
+            return datetime.strptime(str(ts)[:10], "%Y-%m-%d").date()
+        except Exception:
+            return None
+
+
 @router.get("/daily")
 def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = Depends(get_db)):
     """Today's Trend: rows for effective session_date (IST window 9:15 → next session 09:14)."""
@@ -325,7 +335,7 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
                     continue
                 r["atr5_14_ratio"] = float(ratio)
 
-    # Exit hints for open positions (CMS v2 exit rules; divergences not used for entry).
+    # Exit hints + profit protection state for open positions (multi-timeframe manager).
     try:
         us_exit = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
     except Exception as e:
@@ -335,61 +345,68 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
         for r in serialized:
             if str(r.get("order_status") or "").strip().lower() != "bought":
                 continue
-            ikey = str(r.get("fut_instrument_key") or "").strip()
-            if not ikey:
-                continue
             try:
-                raw = us_exit.get_historical_candles_by_instrument_key(
-                    ikey, interval="minutes/5", days_back=5, range_end_date=sd
-                )
-                m5t = m5_bars_for_session(raw, sd)
-                ex, reason = exit_evaluation_from_m5_dicts(str(r.get("side") or ""), m5t)
-                r["exit_suggested"] = bool(ex)
-                r["exit_reason"] = reason or ""
-            except Exception as ex:
-                logger.debug("smart_futures exit hint id=%s: %s", r.get("id"), ex)
-
-        # Trailing stop (breakeven / trail) for bought rows — persists current_stop_price + stop_stage.
-        for r in serialized:
-            if str(r.get("order_status") or "").strip().lower() != "bought":
-                continue
-            ikey2 = str(r.get("fut_instrument_key") or "").strip()
-            if not ikey2:
-                continue
-            rid2 = r.get("id")
-            try:
-                raw2 = us_exit.get_historical_candles_by_instrument_key(
-                    ikey2, interval="minutes/5", days_back=5, range_end_date=sd
-                )
-                m5b = m5_bars_for_session(raw2, sd)
-                if len(m5b) < 15:
+                ikey = str(r.get("fut_instrument_key") or "").strip()
+                if not ikey:
                     continue
-                highs2 = [float(b["high"]) for b in m5b]
-                lows2 = [float(b["low"]) for b in m5b]
-                closes2 = [float(b["close"]) for b in m5b]
-                atr14 = wilder_atr_14(highs2, lows2, closes2)
-                if atr14 is None or atr14 <= 0:
+                raw1 = us_exit.get_historical_candles_by_instrument_key(
+                    ikey, interval="minutes/1", days_back=5, range_end_date=sd
+                )
+                m1 = [
+                    b
+                    for b in sorted(raw1 or [], key=lambda x: str(x.get("timestamp") or ""))
+                    if _ist_date_from_ts(str(b.get("timestamp") or "")) == sd
+                ]
+                if len(m1) < 15:
                     continue
-                lot = max(1, get_futures_lot_size_by_instrument_key(ikey2))
                 entry_px = float(r.get("buy_price") or r.get("entry_price") or 0)
                 if entry_px <= 0:
                     continue
-                lc = float(closes2[-1])
-                cur_stop = r.get("current_stop_price")
-                cur_stop_f = float(cur_stop) if cur_stop is not None else None
-                stg = str(r.get("stop_stage") or "") or None
-                ns, nstage = compute_trailing_stop_levels(
-                    str(r.get("side") or ""),
-                    entry_px,
-                    lc,
-                    float(atr14),
-                    int(lot),
-                    current_stop_price=cur_stop_f,
-                    stop_stage=stg,
+                side = str(r.get("side") or "").strip().upper()
+                if side not in {"LONG", "SHORT"}:
+                    continue
+                entry_at = str(r.get("entry_at") or "")
+                post = [
+                    b for b in m1
+                    if (str(b.get("timestamp") or "") >= entry_at)
+                ] if entry_at else m1
+                if len(post) < 15:
+                    post = m1
+                ex = evaluate_exit_with_profit_protection(
+                    side=side,
+                    entry_price=entry_px,
+                    entry_time=entry_at or str(post[0].get("timestamp") or ""),
+                    lot_size=1,
+                    m1_post_entry=post,
+                    force_close_at_end=False,
                 )
-                if nstage != (stg or "INITIAL") or (
-                    cur_stop_f is not None and abs(ns - cur_stop_f) > 1e-6
-                ) or cur_stop_f is None:
+                state = ex.get("state", {}) if isinstance(ex, dict) else {}
+                r["exit_suggested"] = bool(ex.get("exit"))
+                r["exit_reason"] = str(ex.get("final_exit_reason") or "")
+                r["hard_stop_loss"] = state.get("hard_stop_loss")
+                r["breakeven_activated"] = bool(state.get("breakeven_activated"))
+                r["breakeven_activation_time"] = state.get("breakeven_activation_time")
+                r["profit_locking_activated"] = bool(state.get("profit_locking_activated"))
+                r["profit_locking_activation_time"] = state.get("profit_locking_activation_time")
+                r["profit_locking_stop_level"] = state.get("profit_locking_stop_level")
+                r["trailing_stop_activated"] = bool(state.get("trailing_stop_activated"))
+                r["trailing_stop_activation_time"] = state.get("trailing_stop_activation_time")
+                r["initial_trailing_stop_level"] = state.get("initial_trailing_stop_level")
+                r["current_trailing_stop_level"] = state.get("current_trailing_stop_level")
+                r["current_active_stop_loss_level"] = state.get("current_active_stop_loss_level")
+                r["max_profit_achieved"] = state.get("max_profit_achieved")
+                stage = "INITIAL"
+                if r["trailing_stop_activated"]:
+                    stage = "TRAILING"
+                elif r["profit_locking_activated"]:
+                    stage = "PROFIT_LOCK"
+                elif r["breakeven_activated"]:
+                    stage = "BREAKEVEN"
+                r["stop_stage"] = stage
+                if r.get("current_active_stop_loss_level") is not None:
+                    r["current_stop_price"] = float(r["current_active_stop_loss_level"])
+                rid = r.get("id")
+                if rid is not None:
                     db.execute(
                         text(
                             """
@@ -399,17 +416,15 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
                             """
                         ),
                         {
-                            "id": int(rid2),
+                            "id": int(rid),
                             "sd": sd,
-                            "csp": float(ns),
-                            "stg": nstage,
+                            "csp": float(r.get("current_stop_price") or 0.0),
+                            "stg": str(stage),
                         },
                     )
                     db.commit()
-                r["current_stop_price"] = float(ns)
-                r["stop_stage"] = nstage
-            except Exception as tex:
-                logger.debug("smart_futures trail id=%s: %s", r.get("id"), tex)
+            except Exception as ex:
+                logger.debug("smart_futures exit/protection enrich id=%s: %s", r.get("id"), ex)
 
     for r in serialized:
         if str(r.get("order_status") or "").strip().lower() != "bought":
