@@ -57,6 +57,7 @@ class BacktestRow:
     entry_price_1330: Optional[float]
     exit_price: Optional[float]
     exit_time: Optional[str]
+    exit_reason: str
     pnl: Optional[float]
     roi_pct: Optional[float]
     hit: str
@@ -469,11 +470,12 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
                     entry_price_1330=round(entry, 4) if dec.startswith("ENTER") else None,
                     exit_price=round(exit_close, 4) if dec.startswith("ENTER") else None,
                     exit_time=exit_time_hhmmss if dec.startswith("ENTER") else None,
+                    exit_reason=exit_reason if dec.startswith("ENTER") else "",
                     pnl=pnl,
                     roi_pct=roi,
                     hit=hit,
                     lot_size=ci.lot_size,
-                    error=exit_reason if dec.startswith("ENTER") else "",
+                    error="",
                 )
             )
             # cache metadata per symbol
@@ -498,6 +500,7 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
                     entry_price_1330=None,
                     exit_price=None,
                     exit_time=None,
+                    exit_reason="",
                     pnl=None,
                     roi_pct=None,
                     hit="NA",
@@ -512,6 +515,7 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
             r.entry_price_1330 = None
             r.exit_price = None
             r.exit_time = None
+            r.exit_reason = ""
             r.pnl = None
             r.roi_pct = None
             r.hit = "NA"
@@ -529,6 +533,7 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
             r.entry_price_1330 = None
             r.exit_price = None
             r.exit_time = None
+            r.exit_reason = ""
             r.pnl = None
             r.roi_pct = None
             r.hit = "NA"
@@ -612,6 +617,7 @@ def write_outputs(rows: List[BacktestRow], summary: Dict[str, Any], d: str, t: s
         f"<td>{r.entry_price_1330 if r.entry_price_1330 is not None else '—'}</td>"
         f"<td>{r.exit_price if r.exit_price is not None else '—'}</td>"
         f"<td>{r.exit_time if r.exit_time else '—'}</td>"
+        f"<td>{r.exit_reason if r.exit_reason else '—'}</td>"
         f"<td>{r.pnl if r.pnl is not None else '—'}</td>"
         f"<td>{r.roi_pct if r.roi_pct is not None else '—'}</td>"
         f"<td>{r.hit}</td>"
@@ -665,12 +671,13 @@ def write_outputs(rows: List[BacktestRow], summary: Dict[str, Any], d: str, t: s
         <th>Entry price ({entry_time})</th>
         <th>Exit price</th>
         <th>Exit time</th>
+        <th>Exit reason</th>
         <th>PnL</th>
         <th>ROI%</th>
         <th>Hit (Win/Loss)</th>
       </tr>
     </thead>
-    <tbody>{rows_html if rows_html else '<tr><td colspan="11">No selected trades.</td></tr>'}</tbody>
+    <tbody>{rows_html if rows_html else '<tr><td colspan="12">No selected trades.</td></tr>'}</tbody>
   </table>
   <div class="muted">This file is overwritten on every futures_backtester execution.</div>
 </body>
