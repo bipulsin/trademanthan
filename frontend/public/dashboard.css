@@ -2219,3 +2219,107 @@ body[data-theme="dark"] .oi-heatmap-signal--NEUTRAL {
 .oi-heatmap-error {
     color: #b91c1c;
 }
+
+.oi-heatmap-more-row {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 8px;
+}
+
+.oi-heatmap-more-link {
+    background: transparent;
+    border: none;
+    color: #1976d2;
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 2px 4px;
+}
+
+.oi-heatmap-more-link:hover {
+    text-decoration: underline;
+}
+
+body[data-theme="dark"] .oi-heatmap-more-link {
+    color: #60a5fa;
+}
+
+.oi-heatmap-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1100;
+    padding: 18px;
+}
+
+.oi-heatmap-modal-dialog {
+    width: min(1180px, 96vw);
+    max-height: 88vh;
+    background: var(--theme-card, #fff);
+    color: var(--theme-text, #0f172a);
+    border: 1px solid var(--theme-border, #e2e8f0);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.oi-heatmap-modal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--theme-border, #e2e8f0);
+}
+
+.oi-heatmap-modal-head h3 {
+    margin: 0;
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.oi-heatmap-modal-close {
+    border: none;
+    background: transparent;
+    color: inherit;
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.oi-heatmap-modal-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--theme-border, #e2e8f0);
+}
+
+.oi-heatmap-modal-controls label {
+    font-size: 0.86rem;
+    color: #64748b;
+}
+
+.oi-heatmap-modal-controls select {
+    min-width: 140px;
+    border: 1px solid var(--theme-border, #cbd5e1);
+    background: var(--theme-card, #fff);
+    color: var(--theme-text, #0f172a);
+    border-radius: 6px;
+    padding: 4px 8px;
+}
+
+.oi-heatmap-sort-dir {
+    width: 30px;
+    height: 30px;
+}
+
+.oi-heatmap-modal-body {
+    padding: 10px 14px 14px;
+    overflow: auto;
+}

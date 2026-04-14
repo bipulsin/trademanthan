@@ -11,6 +11,9 @@
     const LIVE_FRESH_WINDOW_MS = 30 * 60 * 1000;
     let timer = null;
     let firstLoad = true;
+    let fullRowsCache = [];
+    let modalSortKey = "symbol";
+    let modalSortDir = "asc";
 
     function apiUrl() {
         const base = window.location.origin || "";
@@ -145,7 +148,7 @@
         return "background: rgba(" + r + "," + g + "," + b + ",0.12);";
     }
 
-    function renderTable(rows) {
+    function renderRowsTable(rows) {
         if (!rows || rows.length === 0) {
             return '<p class="oi-heatmap-empty">No heatmap data yet (scheduler or instruments file).</p>';
         }
@@ -206,6 +209,64 @@
         );
     }
 
+    function renderTable(rows) {
+        return renderRowsTable(rows);
+    }
+
+    function sortedModalRows() {
+        var out = (fullRowsCache || []).slice();
+        var dir = modalSortDir === "desc" ? -1 : 1;
+        out.sort(function (a, b) {
+            if (modalSortKey === "score") {
+                var av = Number(a && a.score) || 0;
+                var bv = Number(b && b.score) || 0;
+                return (av - bv) * dir;
+            }
+            if (modalSortKey === "oi_signal") {
+                var as = String(signalLabel(a && a.oi_signal) || "").toUpperCase();
+                var bs = String(signalLabel(b && b.oi_signal) || "").toUpperCase();
+                if (as < bs) return -1 * dir;
+                if (as > bs) return 1 * dir;
+                return 0;
+            }
+            var asym = String((a && (a.underlying_symbol || a.trading_symbol)) || "").toUpperCase();
+            var bsym = String((b && (b.underlying_symbol || b.trading_symbol)) || "").toUpperCase();
+            if (asym < bsym) return -1 * dir;
+            if (asym > bsym) return 1 * dir;
+            return 0;
+        });
+        return out;
+    }
+
+    function renderModalTable() {
+        var body = document.getElementById("oiHeatmapModalBody");
+        if (!body) return;
+        body.innerHTML = renderRowsTable(sortedModalRows());
+    }
+
+    function updateSortDirButton() {
+        var btn = document.getElementById("oiHeatmapSortDir");
+        if (!btn) return;
+        var isAsc = modalSortDir !== "desc";
+        btn.textContent = isAsc ? "↑" : "↓";
+        btn.title = isAsc ? "Ascending" : "Descending";
+    }
+
+    function openModal() {
+        var modal = document.getElementById("oiHeatmapModal");
+        if (!modal) return;
+        renderModalTable();
+        modal.hidden = false;
+        document.body.style.overflow = "hidden";
+    }
+
+    function closeModal() {
+        var modal = document.getElementById("oiHeatmapModal");
+        if (!modal) return;
+        modal.hidden = true;
+        document.body.style.overflow = "";
+    }
+
     async function load() {
         const host = document.getElementById("oiHeatmapHost");
         const msg = document.getElementById("oiHeatmapMsg");
@@ -254,6 +315,7 @@
                 throw new Error((data && data.message) || data.error || res.statusText || "Failed");
             }
             const allRows = data.rows || [];
+            fullRowsCache = allRows.slice();
             const displayRows = allRows.slice(0, DISPLAY_TOP_N);
             const inner = renderTable(displayRows);
             host.innerHTML = inner;
@@ -276,6 +338,10 @@
             if (updated) {
                 updated.textContent = "";
                 updated.style.display = "none";
+            }
+            var moreBtn = document.getElementById("oiHeatmapMoreBtn");
+            if (moreBtn) {
+                moreBtn.style.display = allRows.length > 0 ? "inline-block" : "none";
             }
         } catch (e) {
             var _abort =
@@ -301,6 +367,9 @@
                 upd.textContent = "";
                 upd.style.display = "none";
             }
+            fullRowsCache = [];
+            var moreBtn2 = document.getElementById("oiHeatmapMoreBtn");
+            if (moreBtn2) moreBtn2.style.display = "none";
         }
     }
 
@@ -315,6 +384,38 @@
             btn.addEventListener("click", function () {
                 load();
             });
+        const moreBtn = document.getElementById("oiHeatmapMoreBtn");
+        if (moreBtn)
+            moreBtn.addEventListener("click", function () {
+                openModal();
+            });
+        const closeBtn = document.getElementById("oiHeatmapModalClose");
+        if (closeBtn)
+            closeBtn.addEventListener("click", function () {
+                closeModal();
+            });
+        const modal = document.getElementById("oiHeatmapModal");
+        if (modal)
+            modal.addEventListener("click", function (e) {
+                if (e.target === modal) closeModal();
+            });
+        const sortKey = document.getElementById("oiHeatmapSortKey");
+        if (sortKey)
+            sortKey.addEventListener("change", function () {
+                modalSortKey = String(sortKey.value || "symbol");
+                renderModalTable();
+            });
+        const sortDirBtn = document.getElementById("oiHeatmapSortDir");
+        if (sortDirBtn)
+            sortDirBtn.addEventListener("click", function () {
+                modalSortDir = modalSortDir === "asc" ? "desc" : "asc";
+                updateSortDirButton();
+                renderModalTable();
+            });
+        document.addEventListener("keydown", function (e) {
+            if (e.key === "Escape") closeModal();
+        });
+        updateSortDirButton();
         load();
         startPoll();
     });

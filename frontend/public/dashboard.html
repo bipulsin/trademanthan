@@ -10,7 +10,7 @@
     <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
     <script src="auth-check.js?v=1"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="stylesheet" href="dashboard.css?v=2.5">
+    <link rel="stylesheet" href="dashboard.css?v=2.6">
     <link rel="stylesheet" href="left-menu.css?v=3.19">
     <link rel="stylesheet" href="theme.css?v=1.3">
 </head>
@@ -133,6 +133,9 @@
                     <div class="card-content">
                         <p class="oi-heatmap-msg" id="oiHeatmapMsg">Loading…</p>
                         <div class="oi-heatmap-wrap" id="oiHeatmapHost"></div>
+                        <div class="oi-heatmap-more-row">
+                            <button type="button" class="oi-heatmap-more-link" id="oiHeatmapMoreBtn" style="display:none;">More...</button>
+                        </div>
                     </div>
                 </div>
 
@@ -339,12 +342,33 @@
         </main>
     </div>
 
+    <div class="oi-heatmap-modal-overlay" id="oiHeatmapModal" role="dialog" aria-modal="true" aria-label="Full OI Buildup Heatmap" hidden>
+        <div class="oi-heatmap-modal-dialog">
+            <div class="oi-heatmap-modal-head">
+                <h3><i class="fas fa-fire-flame-curved" aria-hidden="true"></i> OI Buildup Heatmap - Full List</h3>
+                <button type="button" class="oi-heatmap-modal-close" id="oiHeatmapModalClose" aria-label="Close">&times;</button>
+            </div>
+            <div class="oi-heatmap-modal-controls">
+                <label for="oiHeatmapSortKey">Sort by</label>
+                <select id="oiHeatmapSortKey">
+                    <option value="symbol">Symbol</option>
+                    <option value="score">Score</option>
+                    <option value="oi_signal">OI Signal</option>
+                </select>
+                <button type="button" class="btn-icon oi-heatmap-sort-dir" id="oiHeatmapSortDir" title="Toggle sort direction" aria-label="Toggle sort direction">↑</button>
+            </div>
+            <div class="oi-heatmap-modal-body" id="oiHeatmapModalBody">
+                <p class="oi-heatmap-empty">No heatmap data yet.</p>
+            </div>
+        </div>
+    </div>
+
     <script src="left-menu.js?v=3.19"></script>
     <script src="dashboard.js?v=1.2"></script>
     <script src="market-sentiment-dials.js?v=1.6"></script>
     <script src="dashboard-sector-movers.js?v=1.3"></script>
     <script src="dashboard-premarket-watchlist.js?v=1.3"></script>
-    <script src="dashboard-oi-heatmap.js?v=2.9"></script>
+    <script src="dashboard-oi-heatmap.js?v=3.0"></script>
     <script src="crypto-prices.js?v=1.4"></script>
     <script src="version.js?v=1.0"></script>
     <script src="cache-manager.js?v=1.1"></script>
