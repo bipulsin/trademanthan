@@ -362,24 +362,24 @@ def evaluate_outcome_fixed_exit(decision: str, entry: float, exit_close: float, 
 
 def derive_dynamic_exit_from_smart_future_signal(
     decision: str,
-    session_m5: Sequence[dict],
+    session_candles: Sequence[dict],
     entry_dt: datetime,
     fallback_exit_candle: dict,
 ) -> Tuple[float, str, str]:
     """
     Derive exit from Smart Future exit signal timing:
-    - evaluate exit rule on progressive 5m prefixes
-    - take first triggered candle at/after entry time
+    - evaluate exit rule on progressive prefixes (same run timeframe: 1m preferred, else 5m)
+    - take first triggered candle strictly after entry time
     - fallback to session-end candle when no exit signal fires
     Returns (exit_price, exit_time_hhmmss, exit_reason).
     """
     side = "LONG" if decision == "ENTER_LONG" else "SHORT"
-    m5 = sort_candles(list(session_m5 or []))
-    for i in range(15, len(m5) + 1):
-        prefix = m5[:i]
+    seq = sort_candles(list(session_candles or []))
+    for i in range(15, len(seq) + 1):
+        prefix = seq[:i]
         last = prefix[-1]
         last_dt = parse_dt_ist(last.get("timestamp"))
-        if not last_dt or last_dt < entry_dt:
+        if not last_dt or last_dt <= entry_dt:
             continue
         should_exit, reason = exit_evaluation_from_m5_dicts(side, prefix)
         if should_exit:
@@ -455,21 +455,15 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
             atr = atr14(upto_signal)
             entry = p1
             combo = combo_score_cms_oi(cms_score, oi_pct)
-            # Exit timing/price from Smart Future exit signal over 5m bars.
-            raw_5m = ux.get_historical_candles_by_instrument_key(
-                ci.instrument_key, "minutes/5", 1, range_end_date=sd
-            ) or []
-            m5_day = candles_for_day(sort_candles(raw_5m), sd)
-            if not m5_day:
-                raise ValueError("missing_5m_candles_for_exit_signal")
-            m5_fallback = find_candle(m5_day, sd, eh, em) or find_candle_at_or_before(
-                m5_day, sd, eh, em, max_lookback_min=30
+            # Exit timing/price from Smart Future exit signal over run timeframe candles.
+            fallback_candle = find_candle(candles, sd, eh, em) or find_candle_at_or_before(
+                candles, sd, eh, em, max_lookback_min=30
             )
-            if not m5_fallback:
-                raise ValueError("missing_5m_session_end_candle")
+            if not fallback_candle:
+                raise ValueError("missing_session_end_candle_for_exit")
             entry_dt = parse_dt_ist(c1330.get("timestamp")) or IST.localize(datetime.combine(sd, dt_time(th, tm)))
             exit_close, exit_time_hhmmss, exit_reason = derive_dynamic_exit_from_smart_future_signal(
-                dec, m5_day, entry_dt, m5_fallback
+                dec, candles, entry_dt, fallback_candle
             ) if dec.startswith("ENTER") else (0.0, "", "")
             pnl, roi, hit = evaluate_outcome_fixed_exit(dec, entry, exit_close, ci.lot_size)
 
