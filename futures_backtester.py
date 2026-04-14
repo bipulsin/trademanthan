@@ -383,6 +383,7 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
     sd = date.fromisoformat(args.date)
     th, tm, _ = [int(x) for x in args.time.split(":")]
     bh, bm, _ = [int(x) for x in args.baseline.split(":")]
+    eh, em = 15, 30
 
     symbols = load_arbitrage_symbols()
     contracts = front_month_resolver(sd, symbols)
