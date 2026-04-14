@@ -23,6 +23,7 @@ from sqlalchemy import text
 
 from backend.config import get_instruments_file_path, settings
 from backend.database import SessionLocal
+from backend.services.smart_futures_exit import exit_evaluation_from_m5_dicts
 from backend.services.upstox_service import UpstoxService
 
 IST = pytz.timezone("Asia/Kolkata")
@@ -54,7 +55,8 @@ class BacktestRow:
     combo_score: float
     final_decision: str
     entry_price_1330: Optional[float]
-    exit_price_1515: Optional[float]
+    exit_price: Optional[float]
+    exit_time: Optional[str]
     pnl: Optional[float]
     roi_pct: Optional[float]
     hit: str
@@ -357,11 +359,44 @@ def evaluate_outcome_fixed_exit(decision: str, entry: float, exit_close: float, 
     return round(pnl, 2), round(roi, 4), hit
 
 
+def derive_dynamic_exit_from_smart_future_signal(
+    decision: str,
+    session_m5: Sequence[dict],
+    entry_dt: datetime,
+    fallback_exit_candle: dict,
+) -> Tuple[float, str, str]:
+    """
+    Derive exit from Smart Future exit signal timing:
+    - evaluate exit rule on progressive 5m prefixes
+    - take first triggered candle at/after entry time
+    - fallback to session-end candle when no exit signal fires
+    Returns (exit_price, exit_time_hhmmss, exit_reason).
+    """
+    side = "LONG" if decision == "ENTER_LONG" else "SHORT"
+    m5 = sort_candles(list(session_m5 or []))
+    for i in range(15, len(m5) + 1):
+        prefix = m5[:i]
+        last = prefix[-1]
+        last_dt = parse_dt_ist(last.get("timestamp"))
+        if not last_dt or last_dt < entry_dt:
+            continue
+        should_exit, reason = exit_evaluation_from_m5_dicts(side, prefix)
+        if should_exit:
+            px = float(last.get("close") or 0.0)
+            if px > 0:
+                return px, last_dt.strftime("%H:%M:%S"), str(reason or "smart_futures_exit_signal")
+    fb_dt = parse_dt_ist(fallback_exit_candle.get("timestamp"))
+    fb_px = float(fallback_exit_candle.get("close") or 0.0)
+    if fb_px <= 0:
+        raise ValueError("invalid_fallback_exit_price")
+    return fb_px, (fb_dt.strftime("%H:%M:%S") if fb_dt else "15:30:00"), "session_end_fallback"
+
+
 def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
     sd = date.fromisoformat(args.date)
     th, tm, _ = [int(x) for x in args.time.split(":")]
     bh, bm, _ = [int(x) for x in args.baseline.split(":")]
-    eh, em = 15, 15
+    eh, em = 15, 30
 
     symbols = load_arbitrage_symbols()
     contracts = front_month_resolver(sd, symbols)
@@ -398,8 +433,24 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
             oi_sig = oi_signal_rules(price_pct, oi_pct)
             dec = final_decision(cms_dir, oi_sig)
             atr = atr14(upto_signal)
-            entry, exit_close = p1, float(c1530["close"] or p1)
+            entry = p1
             combo = combo_score_cms_oi(cms_score, oi_pct)
+            # Exit timing/price from Smart Future exit signal over 5m bars.
+            raw_5m = ux.get_historical_candles_by_instrument_key(
+                ci.instrument_key, "minutes/5", 1, range_end_date=sd
+            ) or []
+            m5_day = candles_for_day(sort_candles(raw_5m), sd)
+            if not m5_day:
+                raise ValueError("missing_5m_candles_for_exit_signal")
+            m5_fallback = find_candle(m5_day, sd, eh, em) or find_candle_at_or_before(
+                m5_day, sd, eh, em, max_lookback_min=30
+            )
+            if not m5_fallback:
+                raise ValueError("missing_5m_session_end_candle")
+            entry_dt = parse_dt_ist(c1330.get("timestamp")) or IST.localize(datetime.combine(sd, dt_time(th, tm)))
+            exit_close, exit_time_hhmmss, exit_reason = derive_dynamic_exit_from_smart_future_signal(
+                dec, m5_day, entry_dt, m5_fallback
+            ) if dec.startswith("ENTER") else (0.0, "", "")
             pnl, roi, hit = evaluate_outcome_fixed_exit(dec, entry, exit_close, ci.lot_size)
 
             rows.append(
@@ -416,12 +467,13 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
                     combo_score=round(combo, 6),
                     final_decision=dec,
                     entry_price_1330=round(entry, 4) if dec.startswith("ENTER") else None,
-                    exit_price_1515=round(exit_close, 4) if dec.startswith("ENTER") else None,
+                    exit_price=round(exit_close, 4) if dec.startswith("ENTER") else None,
+                    exit_time=exit_time_hhmmss if dec.startswith("ENTER") else None,
                     pnl=pnl,
                     roi_pct=roi,
                     hit=hit,
                     lot_size=ci.lot_size,
-                    error="",
+                    error=exit_reason if dec.startswith("ENTER") else "",
                 )
             )
             # cache metadata per symbol
@@ -444,7 +496,8 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
                     combo_score=0.0,
                     final_decision="NO_TRADE",
                     entry_price_1330=None,
-                    exit_price_1515=None,
+                    exit_price=None,
+                    exit_time=None,
                     pnl=None,
                     roi_pct=None,
                     hit="NA",
@@ -457,7 +510,8 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
         r.final_decision = final_decision_buildup_only(r.oi_signal)
         if r.final_decision not in {"ENTER_LONG", "ENTER_SHORT"}:
             r.entry_price_1330 = None
-            r.exit_price_1515 = None
+            r.exit_price = None
+            r.exit_time = None
             r.pnl = None
             r.roi_pct = None
             r.hit = "NA"
@@ -473,7 +527,8 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
         if r.symbol not in selected_keys:
             r.final_decision = "NO_TRADE"
             r.entry_price_1330 = None
-            r.exit_price_1515 = None
+            r.exit_price = None
+            r.exit_time = None
             r.pnl = None
             r.roi_pct = None
             r.hit = "NA"
@@ -489,7 +544,7 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
         "rows_generated": len(rows),
         "selection_rule": "Top-N by combo score among LONG_BUILDUP/SHORT_BUILDUP only",
         "top_n": int(getattr(args, "top_n", 5) or 5),
-        "exit_time": "15:15:00",
+        "exit_time": "dynamic (smart futures exit signal; fallback 15:30:00)",
         "trade_count": len(trades),
         "wins": len(wins),
         "win_rate_pct": round((len(wins) / len(trades) * 100.0), 2) if trades else 0.0,
@@ -555,7 +610,8 @@ def write_outputs(rows: List[BacktestRow], summary: Dict[str, Any], d: str, t: s
         f"<td>{r.combo_score:.4f}</td>"
         f"<td>{r.final_decision}</td>"
         f"<td>{r.entry_price_1330 if r.entry_price_1330 is not None else '—'}</td>"
-        f"<td>{r.exit_price_1515 if r.exit_price_1515 is not None else '—'}</td>"
+        f"<td>{r.exit_price if r.exit_price is not None else '—'}</td>"
+        f"<td>{r.exit_time if r.exit_time else '—'}</td>"
         f"<td>{r.pnl if r.pnl is not None else '—'}</td>"
         f"<td>{r.roi_pct if r.roi_pct is not None else '—'}</td>"
         f"<td>{r.hit}</td>"
@@ -607,13 +663,14 @@ def write_outputs(rows: List[BacktestRow], summary: Dict[str, Any], d: str, t: s
         <th>CMS+OI score</th>
         <th>Decision</th>
         <th>Entry price ({entry_time})</th>
-        <th>Exit price ({exit_time})</th>
+        <th>Exit price</th>
+        <th>Exit time</th>
         <th>PnL</th>
         <th>ROI%</th>
         <th>Hit (Win/Loss)</th>
       </tr>
     </thead>
-    <tbody>{rows_html if rows_html else '<tr><td colspan="10">No selected trades.</td></tr>'}</tbody>
+    <tbody>{rows_html if rows_html else '<tr><td colspan="11">No selected trades.</td></tr>'}</tbody>
   </table>
   <div class="muted">This file is overwritten on every futures_backtester execution.</div>
 </body>
