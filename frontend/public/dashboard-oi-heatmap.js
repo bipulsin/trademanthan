@@ -191,7 +191,7 @@
                     fmtInt(r.volume) +
                     "</td>" +
                     "<td>" +
-                    fmtNum(r.score, 4) +
+                    fmtNum(r.score, 2) +
                     "</td>" +
                     "</tr>"
                 );

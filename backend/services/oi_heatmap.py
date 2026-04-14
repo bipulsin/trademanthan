@@ -5,7 +5,7 @@ Live OI heatmap (Top ~200 NSE stock futures) — Upstox only.
    (https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz).
 2) Filter: NSE_FO + instrument_type FUT + equity underlyings (exclude index / commodity FO).
 3) Liquidity: one near-month future per underlying, then batch market quotes → top N by volume.
-4) Refresh: in-memory cache + optional DB table ``oi_heatmap_latest``; persist only rows with non-zero ``score``; scheduler interval from config.
+4) Refresh: in-memory cache + optional DB table ``oi_heatmap_latest``; persist only rows with non-zero raw heat score; stored ``score`` is normalized to 0–100 (batch median → 50); scheduler interval from config.
 """
 from __future__ import annotations
 
@@ -200,15 +200,56 @@ def _row_has_nonzero_score(row: Dict[str, Any]) -> bool:
         return False
 
 
+def _normalize_scores_to_0_100_median_50(rows: List[Dict[str, Any]]) -> None:
+    """
+    In-place: set each row's ``score`` to [0, 100], with the batch **median raw score** mapping to **50**
+    (piecewise linear from min→0 through median→50 to max→100). Single-row batches become 50.
+    """
+    if not rows:
+        return
+    vals: List[float] = []
+    for r in rows:
+        try:
+            vals.append(float(r.get("score") or 0.0))
+        except (TypeError, ValueError):
+            vals.append(0.0)
+    n = len(vals)
+    sv = sorted(vals)
+    min_v = sv[0]
+    max_v = sv[-1]
+    if n % 2 == 1:
+        med = float(sv[n // 2])
+    else:
+        med = (float(sv[n // 2 - 1]) + float(sv[n // 2])) / 2.0
+
+    for i, r in enumerate(rows):
+        v = vals[i]
+        if max_v <= min_v or (max_v - min_v) < 1e-15:
+            norm = 50.0
+        elif v <= med:
+            if med <= min_v:
+                norm = 50.0
+            else:
+                norm = (v - min_v) / (med - min_v) * 50.0
+        else:
+            if max_v <= med:
+                norm = 50.0
+            else:
+                norm = 50.0 + (v - med) / (max_v - med) * 50.0
+        r["score"] = round(max(0.0, min(100.0, float(norm))), 4)
+
+
 def finalize_heatmap_rows_for_store(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    Drop rows with score == 0, sort by |oi_chg| descending, assign rank 1..n.
-    Used for live refresh and historical replay so ``oi_heatmap_latest`` has no zero-score rows.
+    Drop rows with raw heat score == 0, sort by |oi_chg| descending, assign rank 1..n,
+    then normalize ``score`` to 0–100 with batch median at 50.
+    Used for live refresh and historical replay so ``oi_heatmap_latest`` has no zero-raw-score rows.
     """
     out = [r for r in rows if _row_has_nonzero_score(r)]
     out.sort(key=lambda r: abs(int(r.get("oi_chg") or 0)), reverse=True)
     for i, r in enumerate(out, start=1):
         r["rank"] = i
+    _normalize_scores_to_0_100_median_50(out)
     return out
 
 
