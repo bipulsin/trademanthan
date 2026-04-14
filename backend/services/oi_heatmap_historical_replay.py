@@ -210,7 +210,8 @@ def apply_historical_replay_to_database(
     sleep_s: float = 0.1,
 ) -> Dict[str, Any]:
     """
-    Compute historical replay, DELETE/INSERT ``oi_heatmap_latest``, refresh in-memory cache.
+    Compute historical replay, INSERT snapshot rows into ``oi_heatmap_latest`` (append-only history),
+    then refresh in-memory cache to this snapshot.
 
     ``updated_at`` is the snapshot IST datetime (session date + target clock).
     """

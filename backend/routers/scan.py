@@ -6244,7 +6244,8 @@ async def dashboard_oi_heatmap_live(
 def oi_heatmap_apply_historical_snapshot(body: OiHeatmapHistoricalApplyBody):
     """
     Recompute OI heatmap from historical 1m/5m candles for ``arbitrage_master`` FUT keys and
-    replace ``oi_heatmap_latest`` + in-process cache. Use when live batch quotes are unavailable.
+    append snapshot rows to ``oi_heatmap_latest`` + refresh in-process cache. Use when live batch
+    quotes are unavailable.
     """
     b = body
     try:

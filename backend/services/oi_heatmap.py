@@ -399,7 +399,6 @@ def _persist_snapshot(rows: List[Dict[str, Any]], updated_at: datetime) -> None:
     db = None
     try:
         db = SessionLocal()
-        db.execute(text("DELETE FROM oi_heatmap_latest"))
         for r in rows:
             db.execute(
                 text(
@@ -452,6 +451,9 @@ def load_oi_heatmap_snapshot_from_db() -> Tuple[List[Dict[str, Any]], Optional[s
                 SELECT rank, instrument_key, underlying_symbol, trading_symbol, expiry,
                        ltp, chg_pct, oi, oi_chg, oi_chg_pct, oi_signal, volume, score, updated_at
                 FROM oi_heatmap_latest
+                WHERE updated_at = (
+                    SELECT MAX(updated_at) FROM oi_heatmap_latest
+                )
                 ORDER BY rank ASC
                 """
             )
