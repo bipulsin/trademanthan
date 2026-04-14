@@ -86,6 +86,44 @@ def find_candle(candles: Sequence[dict], session_d: date, hh: int, mm: int) -> O
     return None
 
 
+def find_candle_at_or_after(
+    candles: Sequence[dict], session_d: date, hh: int, mm: int, max_delay_min: int = 20
+) -> Optional[dict]:
+    target = IST.localize(datetime.combine(session_d, dt_time(hh, mm)))
+    best = None
+    best_delay = None
+    for c in candles:
+        dt = parse_dt_ist(c.get("timestamp"))
+        if not dt or dt.date() != session_d or dt < target:
+            continue
+        delay = int((dt - target).total_seconds() // 60)
+        if delay < 0 or delay > max_delay_min:
+            continue
+        if best is None or delay < (best_delay or 10**9):
+            best = c
+            best_delay = delay
+    return best
+
+
+def find_candle_at_or_before(
+    candles: Sequence[dict], session_d: date, hh: int, mm: int, max_lookback_min: int = 20
+) -> Optional[dict]:
+    target = IST.localize(datetime.combine(session_d, dt_time(hh, mm)))
+    best = None
+    best_back = None
+    for c in candles:
+        dt = parse_dt_ist(c.get("timestamp"))
+        if not dt or dt.date() != session_d or dt > target:
+            continue
+        back = int((target - dt).total_seconds() // 60)
+        if back < 0 or back > max_lookback_min:
+            continue
+        if best is None or back < (best_back or 10**9):
+            best = c
+            best_back = back
+    return best
+
+
 def candles_for_day(candles: Sequence[dict], session_d: date) -> List[dict]:
     return [c for c in candles if (parse_dt_ist(c.get("timestamp")) or datetime.min.replace(tzinfo=IST)).date() == session_d]
 
@@ -169,12 +207,16 @@ def fetch_futures_day_candles(
     f5 = cache_dir / f"{ci.stock}_5m.json"
 
     raw_1m = ux.get_historical_candles_by_instrument_key(ci.instrument_key, "minutes/1", 0, range_end_date=session_d) or []
+    if not raw_1m:
+        raw_1m = ux.get_historical_candles_by_instrument_key(ci.instrument_key, "minutes/1", 1, range_end_date=session_d) or []
     day_1m = candles_for_day(sort_candles(raw_1m), session_d)
     if day_1m:
         f1.write_text(json.dumps(day_1m), encoding="utf-8")
         return day_1m, "1m"
 
     raw_5m = ux.get_historical_candles_by_instrument_key(ci.instrument_key, "minutes/5", 0, range_end_date=session_d) or []
+    if not raw_5m:
+        raw_5m = ux.get_historical_candles_by_instrument_key(ci.instrument_key, "minutes/5", 1, range_end_date=session_d) or []
     day_5m = candles_for_day(sort_candles(raw_5m), session_d)
     if day_5m:
         f5.write_text(json.dumps(day_5m), encoding="utf-8")
@@ -310,9 +352,9 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
             candles, tf = fetch_futures_day_candles(ux, ci, sd, cache_dir)
             if not candles:
                 raise ValueError("no_candles_for_day")
-            c0915 = find_candle(candles, sd, bh, bm)
-            c1330 = find_candle(candles, sd, th, tm)
-            c1530 = find_candle(candles, sd, eh, em)
+            c0915 = find_candle(candles, sd, bh, bm) or find_candle_at_or_after(candles, sd, bh, bm, max_delay_min=20)
+            c1330 = find_candle(candles, sd, th, tm) or find_candle_at_or_after(candles, sd, th, tm, max_delay_min=20)
+            c1530 = find_candle(candles, sd, eh, em) or find_candle_at_or_before(candles, sd, eh, em, max_lookback_min=20)
             if not c0915 or not c1330 or not c1530:
                 raise ValueError("missing_baseline_or_signal_or_exit_candle")
             if c0915.get("oi") is None or c1330.get("oi") is None:
