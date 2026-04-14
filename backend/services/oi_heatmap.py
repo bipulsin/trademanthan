@@ -47,8 +47,6 @@ _cache_updated_at_iso: str = ""
 _cache_source: str = "none"  # "live" (Upstox refresh) | "snapshot" (DB) | "none"
 _last_error: Optional[str] = None
 _underlying_rank: Dict[str, int] = {}
-_prev_signal_by_instrument: Dict[str, str] = {}
-_prev_signal_by_underlying: Dict[str, str] = {}
 _api_refresh_lock = threading.Lock()
 _last_api_refresh_attempt_mono: float = 0.0
 
@@ -255,31 +253,65 @@ def finalize_heatmap_rows_for_store(rows: List[Dict[str, Any]]) -> List[Dict[str
     return out
 
 
-def _set_prev_signal_maps_from_rows(rows: List[Dict[str, Any]]) -> None:
-    """Snapshot previous-scan signals from rows for API-derived ``prev_oi_signal`` output."""
-    global _prev_signal_by_instrument, _prev_signal_by_underlying
+def _load_prev_signal_maps_from_db(current_updated_at_iso: Optional[str]) -> Tuple[Dict[str, str], Dict[str, str]]:
+    """
+    Previous-scan signal maps (instrument/underlying) from DB for snapshot immediately
+    older than ``current_updated_at_iso``.
+    """
+    if not current_updated_at_iso:
+        return {}, {}
+    try:
+        current_dt = datetime.fromisoformat(str(current_updated_at_iso))
+    except Exception:
+        return {}, {}
+    db = None
     by_i: Dict[str, str] = {}
     by_u: Dict[str, str] = {}
-    for r in rows or []:
-        sig = str(r.get("oi_signal") or "").strip()
-        if not sig:
-            continue
-        ik = str(r.get("instrument_key") or "").strip()
-        und = str(r.get("underlying_symbol") or "").strip().upper()
-        if ik:
-            by_i[ik] = sig
-        if und:
-            by_u[und] = sig
-    with _cache_lock:
-        _prev_signal_by_instrument = by_i
-        _prev_signal_by_underlying = by_u
+    try:
+        db = SessionLocal()
+        prev_ts = db.execute(
+            text(
+                """
+                SELECT MAX(updated_at) AS prev_ts
+                FROM oi_heatmap_latest
+                WHERE updated_at < :cur_ts
+                """
+            ),
+            {"cur_ts": current_dt},
+        ).scalar()
+        if prev_ts is None:
+            return {}, {}
+        prev_rows = db.execute(
+            text(
+                """
+                SELECT instrument_key, underlying_symbol, oi_signal
+                FROM oi_heatmap_latest
+                WHERE updated_at = :prev_ts
+                """
+            ),
+            {"prev_ts": prev_ts},
+        ).fetchall()
+        for ik, und, sig in prev_rows:
+            s = str(sig or "").strip()
+            if not s:
+                continue
+            iks = str(ik or "").strip()
+            uds = str(und or "").strip().upper()
+            if iks:
+                by_i[iks] = s
+            if uds:
+                by_u[uds] = s
+    except Exception as e:
+        logger.debug("oi_heatmap: previous snapshot signals unavailable: %s", e)
+    finally:
+        if db is not None:
+            db.close()
+    return by_i, by_u
 
 
-def _attach_prev_signal_for_api(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Return API rows with derived ``prev_oi_signal`` from previous scan snapshot maps."""
-    with _cache_lock:
-        by_i = dict(_prev_signal_by_instrument)
-        by_u = dict(_prev_signal_by_underlying)
+def _attach_prev_signal_for_api(rows: List[Dict[str, Any]], current_updated_at_iso: Optional[str]) -> List[Dict[str, Any]]:
+    """Return API rows with ``prev_oi_signal`` derived from immediately previous DB snapshot."""
+    by_i, by_u = _load_prev_signal_maps_from_db(current_updated_at_iso)
     out: List[Dict[str, Any]] = []
     for r in rows or []:
         d = dict(r)
@@ -365,12 +397,6 @@ def refresh_oi_heatmap_live() -> Dict[str, Any]:
                 "score": round(_score_row(oi_chg, chg_pct), 4),
             }
         )
-
-    with _cache_lock:
-        prev_rows = list(_rows_cache)
-    if not prev_rows:
-        prev_rows, _ = load_oi_heatmap_snapshot_from_db()
-    _set_prev_signal_maps_from_rows(prev_rows)
 
     raw_n = len(rows)
     rows = finalize_heatmap_rows_for_store(rows)
@@ -598,7 +624,7 @@ def get_live_oi_heatmap_json(force_reload_from_db: bool = False) -> Dict[str, An
         "data_origin": origin if rows else "none",
         "updated_at": ts or None,
         "error": err,
-        "rows": _attach_prev_signal_for_api(rows),
+        "rows": _attach_prev_signal_for_api(rows, ts or None),
         "message": None if rows else empty_help,
         "snapshot_note": snapshot_note,
     }
