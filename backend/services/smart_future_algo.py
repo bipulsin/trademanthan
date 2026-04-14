@@ -15,6 +15,7 @@ Consolidates all scan algorithm schedulers into a single controller:
 
 Interval-driven jobs only run real work between 08:30 and 21:00 IST (see scheduler_window).
 Exception: 8:10 AM Telegram ping (before 8:30).
+Scheduled market-data jobs also skip IST dates listed in the ``holiday`` table (weekends + NSE holidays).
 
 Note: Master Stock download from Dhan has been removed.
 
@@ -88,6 +89,7 @@ from backend.services.fin_sentiment_job import run_fin_sentiment_job
 from backend.services.smart_futures_picker.job import run_smart_futures_picker_job
 from backend.services.premarket_watchlist_job import run_premarket_watchlist_job
 from backend.services.scheduler_window import is_allowed_scheduler_window_ist
+from backend.services.market_holiday import should_skip_scheduled_market_jobs_ist
 from backend.services.telegram_trade_channel import send_trade_with_cto_channel_message
 from backend.config import settings
 
@@ -101,6 +103,14 @@ def _parse_hh_mm(s: str) -> Tuple[int, int]:
         return max(0, min(23, h)), max(0, min(59, m))
     except Exception:
         return 9, 0
+
+
+def _skip_ist_non_trading_job(reason: str, now=None) -> bool:
+    """True when IST date is Sat/Sun or listed in ``holiday`` — skip market data schedulers."""
+    if should_skip_scheduled_market_jobs_ist(now):
+        logger.debug("IST non-trading day (weekend or holiday) — skip %s", reason)
+        return True
+    return False
 
 
 def run_morning_trade_channel_health_ping() -> None:
@@ -207,7 +217,7 @@ def run_smart_future_vwap_update_gated() -> None:
     """
     ist = pytz.timezone("Asia/Kolkata")
     now = datetime.now(ist)
-    if now.weekday() >= 5:
+    if _skip_ist_non_trading_job("VWAP update (5-min)", now):
         return
     t = now.time()
     if t < dt_time(9, 15) or t > dt_time(15, 35):
@@ -255,6 +265,8 @@ class SmartFutureAlgoScheduler:
 
             def _ensure_instruments_bg():
                 try:
+                    if _skip_ist_non_trading_job("startup instruments check"):
+                        return
                     if ensure_instruments_available():
                         logger.info("✅ Instruments file ready for scan/option lookups")
                     else:
@@ -281,6 +293,8 @@ class SmartFutureAlgoScheduler:
             
             # 1. Instruments Downloader - Daily at 9:05 AM
             def run_instruments_download():
+                if _skip_ist_non_trading_job("instruments download"):
+                    return
                 logger.info("🔧 Triggering Instruments Download job...")
                 try:
                     download_daily_instruments()
@@ -308,6 +322,8 @@ class SmartFutureAlgoScheduler:
             for hour, minute in health_check_times:
                 def create_health_check_wrapper(h, m):
                     def run_health_check():
+                        if _skip_ist_non_trading_job(f"health check {h:02d}:{m:02d}"):
+                            return
                         logger.info(f"🔧 Triggering Health Check job at {h:02d}:{m:02d}...")
                         try:
                             health_monitor.perform_health_check()
@@ -330,6 +346,8 @@ class SmartFutureAlgoScheduler:
             
             # Daily health report at 4:00 PM
             def run_daily_health_report():
+                if _skip_ist_non_trading_job("daily health report"):
+                    return
                 logger.info("🔧 Triggering Daily Health Report job...")
                 try:
                     health_monitor.send_daily_health_report()
@@ -368,6 +386,8 @@ class SmartFutureAlgoScheduler:
             
             # EOD Close at 3:25 PM
             def run_eod_close():
+                if _skip_ist_non_trading_job("EOD close all trades"):
+                    return
                 logger.info("🔧 Triggering EOD Close All Trades job...")
                 try:
                     close_all_open_trades()
@@ -389,6 +409,8 @@ class SmartFutureAlgoScheduler:
 
             # Final reconciliation: broker fill alignment + Exit-TM tagging
             def run_final_reconciliation_job():
+                if _skip_ist_non_trading_job("final reconciliation"):
+                    return
                 logger.info("🔧 Triggering Final Reconciliation...")
                 try:
                     run_final_reconciliation()
@@ -420,6 +442,8 @@ class SmartFutureAlgoScheduler:
             
             # VWAP Slope Cycles
             def run_cycle_1():
+                if _skip_ist_non_trading_job("cycle 1 VWAP slope"):
+                    return
                 logger.info("🔧 Triggering Cycle 1 VWAP Slope calculation...")
                 try:
                     import asyncio
@@ -429,6 +453,8 @@ class SmartFutureAlgoScheduler:
                     logger.error(f"❌ Cycle 1 VWAP Slope calculation failed: {e}", exc_info=True)
             
             def run_cycle_2():
+                if _skip_ist_non_trading_job("cycle 2 VWAP slope"):
+                    return
                 logger.info("🔧 Triggering Cycle 2 VWAP Slope calculation...")
                 try:
                     import asyncio
@@ -438,6 +464,8 @@ class SmartFutureAlgoScheduler:
                     logger.error(f"❌ Cycle 2 VWAP Slope calculation failed: {e}", exc_info=True)
             
             def run_cycle_3():
+                if _skip_ist_non_trading_job("cycle 3 VWAP slope"):
+                    return
                 logger.info("🔧 Triggering Cycle 3 VWAP Slope calculation...")
                 try:
                     import asyncio
@@ -447,6 +475,8 @@ class SmartFutureAlgoScheduler:
                     logger.error(f"❌ Cycle 3 VWAP Slope calculation failed: {e}", exc_info=True)
             
             def run_cycle_4():
+                if _skip_ist_non_trading_job("cycle 4 VWAP slope"):
+                    return
                 logger.info("🔧 Triggering Cycle 4 VWAP Slope calculation...")
                 try:
                     import asyncio
@@ -456,6 +486,8 @@ class SmartFutureAlgoScheduler:
                     logger.error(f"❌ Cycle 4 VWAP Slope calculation failed: {e}", exc_info=True)
             
             def run_cycle_5():
+                if _skip_ist_non_trading_job("cycle 5 VWAP slope"):
+                    return
                 logger.info("🔧 Triggering Cycle 5 VWAP Slope calculation...")
                 try:
                     import asyncio
@@ -535,11 +567,7 @@ class SmartFutureAlgoScheduler:
                         now.strftime("%H:%M"),
                     )
                     return
-                # Check if market is open before logging and running
-                
-                # Market hours: 9:15 AM to 3:30 PM IST
-                if now.weekday() >= 5:  # Weekend
-                    logger.debug(f"⏰ Weekend ({now.strftime('%A')}) - skipping Index Price Check")
+                if _skip_ist_non_trading_job("index price check", now):
                     return
                 
                 current_hour = now.hour
@@ -582,6 +610,8 @@ class SmartFutureAlgoScheduler:
             
             # Special jobs for 9:15 AM and 3:30 PM
             def run_index_price_9_15():
+                if _skip_ist_non_trading_job("index price 9:15"):
+                    return
                 logger.info("🔧 Triggering Index Price at 9:15 AM (Market Open) job...")
                 try:
                     index_price_scheduler.fetch_and_store_index_prices()
@@ -590,6 +620,8 @@ class SmartFutureAlgoScheduler:
                     logger.error(f"❌ Index Price at 9:15 AM job failed: {e}", exc_info=True)
             
             def run_index_price_15_30():
+                if _skip_ist_non_trading_job("index price 15:30"):
+                    return
                 logger.info("🔧 Triggering Index Price at 3:30 PM (Market Close) job...")
                 try:
                     index_price_scheduler.fetch_and_store_index_prices()
@@ -623,6 +655,8 @@ class SmartFutureAlgoScheduler:
             def run_entry_slip_monitor_job():
                 if not is_allowed_scheduler_window_ist():
                     logger.debug("Outside 08:30–21:00 IST — skip Entry Slip Monitor tick")
+                    return
+                if _skip_ist_non_trading_job("entry slip monitor"):
                     return
                 logger.info("🔧 Triggering Entry Slip Monitor job (every 15 minutes)...")
                 try:
@@ -660,7 +694,7 @@ class SmartFutureAlgoScheduler:
                         return
                     ist = pytz.timezone("Asia/Kolkata")
                     now = datetime.now(ist)
-                    if now.weekday() >= 5:
+                    if _skip_ist_non_trading_job(f"fin sentiment {h:02d}:{m:02d}", now):
                         return
                     logger.info("🔧 Fin Sentiment job (%02d:%02d IST)...", h, m)
                     try:
@@ -702,7 +736,7 @@ class SmartFutureAlgoScheduler:
                     logger.debug("Outside 08:30–21:00 IST — skip Pre-market watchlist")
                     return
                 ist = pytz.timezone("Asia/Kolkata")
-                if datetime.now(ist).weekday() >= 5:
+                if _skip_ist_non_trading_job("pre-market watchlist", datetime.now(ist)):
                     return
                 logger.info("🔧 Pre-market F&O watchlist job (Top 200 → Top %s)...", getattr(settings, "PREMKET_TOP_N", 10))
                 try:
@@ -739,7 +773,7 @@ class SmartFutureAlgoScheduler:
                     return
                 ist = pytz.timezone("Asia/Kolkata")
                 now = datetime.now(ist)
-                if now.weekday() >= 5:
+                if _skip_ist_non_trading_job("OI heatmap live", now):
                     return
                 h, m = now.hour, now.minute
                 # Cron fires at :00,:15,:30,:45 for hours 9–15; restrict to 9:15–15:15 only
@@ -791,7 +825,7 @@ class SmartFutureAlgoScheduler:
                         logger.debug("Outside 08:30–21:00 IST — skip Smart Futures picker %s", _label)
                         return
                     ist = pytz.timezone("Asia/Kolkata")
-                    if datetime.now(ist).weekday() >= 5:
+                    if _skip_ist_non_trading_job(f"Smart Futures picker {_label}", datetime.now(ist)):
                         return
                     logger.info("🔧 Smart Futures picker (%s IST)...", _label)
                     try:
@@ -828,6 +862,8 @@ class SmartFutureAlgoScheduler:
                 if not is_allowed_scheduler_window_ist():
                     logger.debug("Outside 08:30–21:00 IST — skip CAR NIFTY200 Update tick")
                     return
+                if _skip_ist_non_trading_job("CAR NIFTY200 update"):
+                    return
                 logger.info("🔧 Triggering CAR NIFTY200 Update job...")
                 try:
                     run_car_nifty200_update_job()
@@ -854,6 +890,8 @@ class SmartFutureAlgoScheduler:
             # Run CAR NIFTY200 update once after startup (e.g. after deploy) — background only so HTTP comes up first.
             def _car_nifty_startup_bg():
                 try:
+                    if _skip_ist_non_trading_job("CAR NIFTY200 startup run"):
+                        return
                     logger.info("🔧 Running CAR NIFTY200 Update once on startup...")
                     run_car_nifty200_update_job()
                     logger.info("✅ CAR NIFTY200 startup run completed")

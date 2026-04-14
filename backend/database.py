@@ -620,6 +620,54 @@ def _run_startup_schema_migrations(db_engine):
                     )
                     print("Applied migration: created oi_heatmap_latest (PostgreSQL)")
 
+            # NSE (India) closed dates — IST calendar; scheduled market-data jobs skip these days.
+            _insp_h = inspect(db_engine)
+            _tables_h = _insp_h.get_table_names()
+            if "holiday" not in _tables_h:
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE holiday (
+                                id BIGSERIAL PRIMARY KEY,
+                                holiday_date DATE NOT NULL,
+                                description TEXT,
+                                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                                CONSTRAINT uq_holiday_date UNIQUE (holiday_date)
+                            )
+                            """
+                        )
+                    )
+                    conn.execute(
+                        text("CREATE INDEX IF NOT EXISTS idx_holiday_date ON holiday (holiday_date)")
+                    )
+                    print("Applied migration: created holiday (PostgreSQL)")
+            if "holiday" in inspect(db_engine).get_table_names() and db_engine.dialect.name == "postgresql":
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO holiday (holiday_date, description) VALUES
+                        ('2026-01-15', 'Municipal Corporation Election - Maharashtra'),
+                        ('2026-01-26', 'Republic Day'),
+                        ('2026-03-03', 'Holi'),
+                        ('2026-03-26', 'Shri Ram Navami'),
+                        ('2026-03-31', 'Shri Mahavir Jayanti'),
+                        ('2026-04-03', 'Good Friday'),
+                        ('2026-04-14', 'Dr. Baba Saheb Ambedkar Jayanti'),
+                        ('2026-05-01', 'Maharashtra Day'),
+                        ('2026-05-28', 'Bakri Id'),
+                        ('2026-06-26', 'Muharram'),
+                        ('2026-09-14', 'Ganesh Chaturthi'),
+                        ('2026-10-02', 'Mahatma Gandhi Jayanti'),
+                        ('2026-10-20', 'Dussehra'),
+                        ('2026-11-10', 'Diwali-Balipratipada'),
+                        ('2026-11-24', 'Prakash Gurpurb Sri Guru Nanak Dev'),
+                        ('2026-12-25', 'Christmas')
+                        ON CONFLICT (holiday_date) DO NOTHING
+                        """
+                    )
+                )
+
             # Legacy Smart Futures DB tables removed (screener rebuild); drop if still present.
             _sf_tables = (
                 "smart_futures_order_audit",

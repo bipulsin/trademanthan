@@ -50,6 +50,7 @@ dist/
 # Data files
 *.csv
 !backend/fno_sector_mapping.csv
+!backend/nse_holidays_2026.csv
 *.xlsx
 data/
 

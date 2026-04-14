@@ -30,6 +30,7 @@ from backend.services.sector_movers import (
     normalize_sector_instrument_key,
 )
 from backend.services.upstox_service import UpstoxService
+from backend.services.market_holiday import should_skip_scheduled_market_jobs_ist
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,9 @@ class ArbitrageDailySetupScheduler:
 
     def run_job(self) -> None:
         try:
+            if should_skip_scheduled_market_jobs_ist():
+                logger.debug("IST non-trading day (weekend or holiday) — skip arbitrage daily setup")
+                return
             result = run_arbitrage_daily_setup()
             logger.info(f"arbitrage_dailySetup completed: {result}")
         except Exception as exc:

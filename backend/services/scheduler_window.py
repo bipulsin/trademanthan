@@ -2,6 +2,9 @@
 IST window for scheduled job *execution*: 08:30–21:00 (inclusive of both endpoints).
 Used to skip interval-triggered work outside this window (APScheduler still ticks).
 Morning 8:10 Telegram ping is a deliberate exception and does not use this guard.
+
+Market-data fetch jobs also skip Saturdays/Sundays and dates in the ``holiday`` table
+(see ``backend.services.market_holiday``).
 """
 
 from __future__ import annotations
