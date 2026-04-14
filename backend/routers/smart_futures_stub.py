@@ -23,6 +23,7 @@ from backend.config import settings
 from backend.database import get_db
 from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
+from backend.services import smart_futures_config as sfc
 from backend.services.smart_futures_exit import (
     evaluate_exit_with_profit_protection,
 )
@@ -88,7 +89,17 @@ class SmartFuturesConfigUpdate(BaseModel):
 @router.get("/config")
 def get_sf_config_stub(user: User = Depends(_require_user)):
     """Admin UI + future screener: persisted parameters (file-backed, not DB)."""
-    return _read_config()
+    out = _read_config()
+    tn = int(getattr(sfc, "SMART_FUTURES_PICK_SELECTION_TOP_N", 6))
+    out["pick_selection_top_n"] = tn
+    out["pick_selection_long_cap"] = tn // 3
+    out["pick_selection_short_cap"] = tn // 2
+    out["pick_selection_rule"] = (
+        "Each scan: up to top_n//3 LONG + up to top_n//2 SHORT by Final CMS "
+        "(same mix as futures backtester). Rows saved respect MAX_OPEN_POSITIONS free slots."
+    )
+    out["max_open_positions"] = int(getattr(sfc, "MAX_OPEN_POSITIONS", 3))
+    return out
 
 
 @router.put("/config")

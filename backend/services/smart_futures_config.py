@@ -56,6 +56,9 @@ OI_CMS_WEIGHTS: Dict[str, float] = {
 CAPITAL: float = 800_000.0
 RISK_PCT: float = 1.0
 MAX_OPEN_POSITIONS: int = 3
+
+# Picker: per scan, take up to top_n//3 LONG + up to top_n//2 SHORT (by final_cms), same idea as futures_backtester.
+SMART_FUTURES_PICK_SELECTION_TOP_N: int = 6
 # GAP5: floor(raw_lots * tier_sizing_mult); TIER1 uses higher mult
 TIER1_SIZING_MULT: float = 2.0
 TIER2_SIZING_MULT: float = 1.0

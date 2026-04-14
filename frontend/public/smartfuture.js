@@ -32,6 +32,31 @@
         window.location.replace('index.html');
     }
 
+    async function fetchSfConfigJson() {
+        const paths = ['/api/smart-futures/config', '/smart-futures/config'];
+        let lastErr = null;
+        for (const p of paths) {
+            try {
+                const res = await fetch(API_BASE + p, { headers: authHeaders(), cache: 'no-store' });
+                const raw = await res.text();
+                const ct = (res.headers.get('content-type') || '').toLowerCase();
+                const looksJson =
+                    ct.includes('application/json') || /^\s*[\[{]/.test(raw.slice(0, 20));
+                if (res.ok && looksJson) {
+                    return JSON.parse(raw);
+                }
+                if (isTokenExpiredResponse(res, raw, null)) {
+                    redirectToLoginExpired();
+                    throw new Error('Session expired');
+                }
+                lastErr = new Error(raw.slice(0, 200) || res.statusText);
+            } catch (e) {
+                lastErr = e;
+            }
+        }
+        throw lastErr || new Error('Failed to load Smart Futures config');
+    }
+
     async function fetchDailyJson() {
         const paths = ['/api/smart-futures/daily', '/smart-futures/daily'];
         let lastErr = null;
@@ -652,10 +677,42 @@
         await loadTrend(true);
     }
 
+    function applyPickSelectionNote(cfg) {
+        const note = document.getElementById('sfPickSelectionNote');
+        if (!note) return;
+        if (!cfg || cfg.pick_selection_top_n == null) {
+            note.textContent = '';
+            return;
+        }
+        const tn = Number(cfg.pick_selection_top_n);
+        const lc =
+            cfg.pick_selection_long_cap != null ? Number(cfg.pick_selection_long_cap) : Math.floor(tn / 3);
+        const sc =
+            cfg.pick_selection_short_cap != null ? Number(cfg.pick_selection_short_cap) : Math.floor(tn / 2);
+        const maxOpen = cfg.max_open_positions != null ? Number(cfg.max_open_positions) : '—';
+        note.textContent =
+            'Picker mix (each scan): up to ' +
+            lc +
+            ' LONG + ' +
+            sc +
+            ' SHORT by Final CMS (top_n=' +
+            tn +
+            '). Saves respect max open positions (' +
+            maxOpen +
+            ').';
+    }
+
     async function loadTrend(silent) {
         const updated = document.getElementById('sfTrendUpdated');
         const msg = document.getElementById('sfTrendMsg');
         try {
+            let cfg = null;
+            try {
+                cfg = await fetchSfConfigJson();
+            } catch (ce) {
+                cfg = null;
+            }
+            applyPickSelectionNote(cfg);
             const data = await fetchDailyJson();
             renderGroups(data);
             renderOpenPositions(data);

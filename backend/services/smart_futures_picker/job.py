@@ -35,6 +35,7 @@ from backend.services.smart_futures_config import (
     CAPITAL,
     CMS_FINAL_ENTRY_THRESHOLD,
     MAX_OPEN_POSITIONS,
+    SMART_FUTURES_PICK_SELECTION_TOP_N,
     NEUTRAL_BAND,
     OI_BLOCK_ON_CONFLICT,
     OI_GATE_ENABLED,
@@ -1264,10 +1265,20 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
     longs.sort(key=lambda x: x.final_cms, reverse=True)
     shorts.sort(key=lambda x: x.final_cms)
 
+    tn = max(0, int(SMART_FUTURES_PICK_SELECTION_TOP_N))
+    n_long_cap = tn // 3
+    n_short_cap = tn // 2
+    picked_longs = longs[:n_long_cap] if n_long_cap else []
+    picked_shorts = shorts[:n_short_cap] if n_short_cap else []
+    merged_picks: List[ScoredPick] = picked_longs + picked_shorts
+    if not merged_picks and (longs or shorts) and tn >= 1:
+        pool = longs + shorts
+        merged_picks = pool[: min(tn, len(pool))]
+
     best_long = longs[0] if longs else None
     best_short = shorts[0] if shorts else None
 
-    if not best_long and not best_short:
+    if not merged_picks:
         logger.info(
             "smart_futures_picker [%s]: no qualifying picks (longs=%s shorts=%s vix=%s skip_long=%s excluded_already_selected=%s)",
             scan_trigger,
@@ -1328,10 +1339,9 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
                 "open_positions": open_n,
                 "reject_histogram": dict(reject_counts),
             }
+        slots = max(0, int(MAX_OPEN_POSITIONS) - open_n)
         saved = 0
-        for pick in (best_long, best_short):
-            if not pick:
-                continue
+        for pick in merged_picks[:slots]:
             entry = _entry_price_1m_close(upstox, pick.fut_instrument_key, now_ist)
             if entry is None:
                 q = upstox.get_market_quote_by_key(pick.fut_instrument_key) or {}
@@ -1342,14 +1352,22 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
             if _persist_pick(dbw, pick, session_date, scan_trigger or "", vix, entry, now_ist):
                 saved += 1
 
+        picked_long_syms = [p.stock for p in picked_longs]
+        picked_short_syms = [p.stock for p in picked_shorts]
         logger.info(
-            "smart_futures_picker [%s]: saved=%s vix=%s excluded_already_selected=%s (long=%s short=%s)",
+            "smart_futures_picker [%s]: saved=%s slots=%s vix=%s excluded_already_selected=%s "
+            "caps long=%s short=%s tn=%s picked_long=%s picked_short=%s merged=%s",
             scan_trigger,
             saved,
+            slots,
             vix,
             excluded_already_selected,
-            best_long.stock if best_long else None,
-            best_short.stock if best_short else None,
+            n_long_cap,
+            n_short_cap,
+            tn,
+            picked_long_syms,
+            picked_short_syms,
+            [p.stock for p in merged_picks],
         )
         logger.debug(
             "smart_futures_picker [%s] reject_hist=%s no_entry_count=%s",
@@ -1364,6 +1382,13 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
             "excluded_already_selected": excluded_already_selected,
             "best_long": best_long.stock if best_long else None,
             "best_short": best_short.stock if best_short else None,
+            "pick_selection_top_n": tn,
+            "pick_selection_long_cap": n_long_cap,
+            "pick_selection_short_cap": n_short_cap,
+            "picked_long": picked_long_syms,
+            "picked_short": picked_short_syms,
+            "merged_pick_symbols": [p.stock for p in merged_picks],
+            "open_slots_used": slots,
             "reject_histogram": dict(reject_counts),
         }
     finally:
