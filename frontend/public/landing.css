@@ -243,6 +243,23 @@ body.landing-page {
   text-shadow: 0 2px 20px rgba(0, 0, 0, 0.5);
 }
 
+/* Rotating hero headline (index.html): same slot, crossfade every 5s */
+.landing-hero .hero-headline {
+  margin-bottom: 1.5rem;
+}
+
+.landing-hero .hero-rotating-line {
+  display: inline-block;
+  width: 100%;
+  min-height: 2.55em;
+  transition: opacity 0.4s ease;
+  vertical-align: top;
+}
+
+.landing-hero .hero-rotating-line.hero-rotating-line--hidden {
+  opacity: 0;
+}
+
 .landing-hero .hero-ai-powered {
   color: var(--text-primary);
 }

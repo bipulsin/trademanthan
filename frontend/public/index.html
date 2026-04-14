@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
-    <title>Tradentical - AI-Powered Algorithmic Trading</title>
+    <title>Tradentical - AI-Powered Trading Intelligence</title>
     <meta name="description" content="Trading Identical. AI-based Algo platform by Trade With CTO. Harness the power of advanced AI to automate your trading strategies.">
     <link rel="stylesheet" href="styles.css?v=1.7">
-    <link rel="stylesheet" href="landing.css?v=19">
+    <link rel="stylesheet" href="landing.css?v=20">
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
@@ -52,7 +52,11 @@
             </div>
             <div class="hero-content">
                 <div class="hero-text">
-                    <h1><span class="hero-ai-powered">AI-Powered</span><br><span class="hero-algo-trading hero-algo-trading-sm">Algorithmic Trading</span></h1>
+                    <h1 class="hero-headline" aria-live="polite">
+                        <span class="hero-rotating-line" id="heroRotatingLine">
+                            <span class="hero-ai-powered">AI-Powered</span><br><span class="hero-algo-trading hero-algo-trading-sm">Trading Intelligence</span>
+                        </span>
+                    </h1>
                     <button class="btn-cta" onclick="openLoginPopup()">
                         <i class="fas fa-rocket"></i>
                         Get Started / Try Now
@@ -156,6 +160,28 @@
             const socials = document.querySelector('.landing-nav .social-icons');
             if (socials) socials.style.display = socials.style.display === 'none' ? 'flex' : 'none';
         }
+
+        (function initHeroHeadlineRotation() {
+            var ROTATE_MS = 5000;
+            var FADE_MS = 400;
+            var lines = [
+                '<span class="hero-ai-powered">AI-Powered</span><br><span class="hero-algo-trading hero-algo-trading-sm">Trading Intelligence</span>',
+                '<span class="hero-ai-powered">Algo-Driven</span><br><span class="hero-algo-trading hero-algo-trading-sm">Market Insights</span>',
+                '<span class="hero-ai-powered">Quant-led</span><br><span class="hero-algo-trading hero-algo-trading-sm">Quant-Trader Advantage</span>'
+            ];
+            var el = document.getElementById('heroRotatingLine');
+            if (!el || lines.length < 2) return;
+            var i = 0;
+            function tick() {
+                i = (i + 1) % lines.length;
+                el.classList.add('hero-rotating-line--hidden');
+                window.setTimeout(function () {
+                    el.innerHTML = lines[i];
+                    el.classList.remove('hero-rotating-line--hidden');
+                }, FADE_MS);
+            }
+            window.setInterval(tick, ROTATE_MS);
+        })();
     </script>
 </body>
 </html>
