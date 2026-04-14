@@ -331,6 +331,17 @@ body.theme-page.intraoption-body main.intraoption-embedded .mobile-title-bar {
 body.theme-page.intraoption-body main.intraoption-embedded .mobile-title-content {
     flex: 1;
     min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+/* Product icon (transparent PNG) — works on light/dark theme cards */
+.intraoption-brand-icon {
+    width: clamp(36px, 4.5vw, 48px);
+    height: clamp(36px, 4.5vw, 48px);
+    object-fit: contain;
+    flex-shrink: 0;
 }
 
 body.theme-page.intraoption-body .mobile-title {
