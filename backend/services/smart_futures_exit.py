@@ -147,6 +147,7 @@ def build_15m_from_1m(m1: Sequence[dict]) -> List[dict]:
                         "low": min(float(x.get("low") or 0.0) for x in buf),
                         "close": float(buf[-1].get("close") or 0.0),
                         "volume": sum(float(x.get("volume") or 0.0) for x in buf),
+                        "bucket_complete": True,
                     }
                 )
             buf = []
@@ -161,6 +162,7 @@ def build_15m_from_1m(m1: Sequence[dict]) -> List[dict]:
                 "low": min(float(x.get("low") or 0.0) for x in buf),
                 "close": float(buf[-1].get("close") or 0.0),
                 "volume": sum(float(x.get("volume") or 0.0) for x in buf),
+                "bucket_complete": False,
             }
         )
     return out
@@ -239,7 +241,9 @@ def evaluate_exit_with_profit_protection(
     )
 
     m15_done: List[dict] = []
-    last_15_count = 0
+    # Only *completed* 15m buckets (bucket_complete=True). The last row from build_15m_from_1m is usually
+    # an in-progress partial bar — evaluating exit on that made signals react every 1m (felt like 5m).
+    last_closed_15m_count = 0
     pending_primary_reason: Optional[str] = None
     last_primary_signal_ts: Optional[str] = None
 
@@ -271,16 +275,19 @@ def evaluate_exit_with_profit_protection(
             st.trailing_stop_activated = True
             st.trailing_stop_activation_time = ts
 
-        # Rebuild 15m completions from data up to current bar
+        # Rebuild 15m series; primary + trailing VWAP use *completed* 15m closes only.
         m15_now = build_15m_from_1m(seq1[: i + 1])
-        if len(m15_now) > last_15_count:
-            m15_done = m15_now
-            last_15_count = len(m15_now)
+        closed15 = [b for b in m15_now if bool(b.get("bucket_complete"))]
+        if len(closed15) > last_closed_15m_count:
+            pending_primary_reason = None
+            m15_done = closed15
+            last_closed_15m_count = len(closed15)
             highs15 = [float(x.get("high") or 0.0) for x in m15_done]
             lows15 = [float(x.get("low") or 0.0) for x in m15_done]
             closes15 = [float(x.get("close") or 0.0) for x in m15_done]
             vols15 = [float(x.get("volume") or 0.0) for x in m15_done]
             if len(closes15) >= 10:
+                # Indicators on closed 15m bars only. atr5_15 = Wilder ATR period 5 on 15m series (not 5-minute chart).
                 vwap15 = float(session_vwap(highs15, lows15, closes15, vols15))
                 ema9_15 = _ema_series_last(closes15, 9)
                 atr5_15 = wilder_atr(highs15, lows15, closes15, 5)
@@ -288,7 +295,7 @@ def evaluate_exit_with_profit_protection(
                 st_dir_15 = _supertrend_dir_last(highs15, lows15, closes15)
                 c15 = float(closes15[-1])
 
-                # Update trailing stop on each new 15m close once activated
+                # Update trailing stop on each new *completed* 15m bar once Tier 3 is active
                 if st.trailing_stop_activated and atr14_15 is not None and atr14_15 > 0:
                     candidate = (vwap15 - 0.5 * float(atr14_15)) if sd == "LONG" else (vwap15 + 0.5 * float(atr14_15))
                     if st.current_trailing_stop_level is None:
@@ -300,7 +307,7 @@ def evaluate_exit_with_profit_protection(
                         else:
                             st.current_trailing_stop_level = min(float(st.current_trailing_stop_level), float(candidate))
 
-                # Primary 15m exit conditions (exit on next 1m candle)
+                # Primary 15m exit: last bar in series is the bar that just *closed* (bucket_complete).
                 if sd == "LONG":
                     if (
                         c15 < vwap15
