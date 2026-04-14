@@ -81,7 +81,7 @@ from backend.services.premarket_watchlist_job import (
 )
 from backend.services.dashboard_oi_heatmap import get_dashboard_oi_heatmap_response
 from backend.services.oi_heatmap import get_live_oi_heatmap_json
-from backend.services.market_holiday import is_nse_holiday_ist
+from backend.services.market_holiday import is_nse_holiday_ist, should_skip_scheduled_market_jobs_ist
 from backend.services import live_trading
 from backend.database import get_db
 from backend.models.trading import IntradayStockOption, MasterStock, HistoricalMarketData
@@ -3724,13 +3724,17 @@ async def get_trading_live():
 
 @router.get("/market-holiday-status")
 async def get_market_holiday_status():
-    """Return whether today's IST date exists in holiday table."""
+    """Return whether today is market-closed in IST (weekend or holiday-table date)."""
     import pytz
 
     ist = pytz.timezone("Asia/Kolkata")
     now_ist = datetime.now(ist)
+    is_weekend = now_ist.weekday() >= 5
+    is_holiday_table = bool(is_nse_holiday_ist(now_ist))
     return {
-        "is_holiday": bool(is_nse_holiday_ist(now_ist)),
+        "is_holiday": bool(should_skip_scheduled_market_jobs_ist(now_ist)),
+        "is_weekend": is_weekend,
+        "is_holiday_table": is_holiday_table,
         "date_ist": now_ist.date().isoformat(),
     }
 
