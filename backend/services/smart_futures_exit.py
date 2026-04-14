@@ -159,59 +159,13 @@ def first_5m_bucket_close_after_entry(entry_dt: Optional[datetime]) -> Optional[
     return bk + timedelta(minutes=5)
 
 
-def build_5m_from_1m(m1: Sequence[dict]) -> List[dict]:
-    """Build 5-minute candles from sorted 1-minute candles."""
+def build_15m_from_5m(m5: Sequence[dict]) -> List[dict]:
+    """Build 15-minute candles from sorted 5-minute candles."""
     out: List[dict] = []
-    sorted_1m = sorted([c for c in (m1 or []) if c.get("timestamp")], key=lambda c: str(c.get("timestamp")))
+    sorted_5m = sorted([c for c in (m5 or []) if c.get("timestamp")], key=lambda c: str(c.get("timestamp")))
     cur_key: Optional[datetime] = None
     buf: List[dict] = []
-    for c in sorted_1m:
-        dt = _to_dt(str(c.get("timestamp") or ""))
-        if not dt:
-            continue
-        key = _bucket_5m(dt)
-        if cur_key is None:
-            cur_key = key
-        if key != cur_key:
-            if len(buf) >= 1:
-                out.append(
-                    {
-                        "timestamp": buf[-1].get("timestamp"),
-                        "open": float(buf[0].get("open") or 0.0),
-                        "high": max(float(x.get("high") or 0.0) for x in buf),
-                        "low": min(float(x.get("low") or 0.0) for x in buf),
-                        "close": float(buf[-1].get("close") or 0.0),
-                        "volume": sum(float(x.get("volume") or 0.0) for x in buf),
-                        "bucket_complete": True,
-                    }
-                )
-            buf = []
-            cur_key = key
-        buf.append(c)
-    if len(buf) >= 1:
-        out.append(
-            {
-                "timestamp": buf[-1].get("timestamp"),
-                "open": float(buf[0].get("open") or 0.0),
-                "high": max(float(x.get("high") or 0.0) for x in buf),
-                "low": min(float(x.get("low") or 0.0) for x in buf),
-                "close": float(buf[-1].get("close") or 0.0),
-                "volume": sum(float(x.get("volume") or 0.0) for x in buf),
-                "bucket_complete": False,
-            }
-        )
-    return out
-
-
-def build_15m_from_1m(m1: Sequence[dict]) -> List[dict]:
-    """
-    Build completed 15-minute candles from sorted 1-minute candles.
-    """
-    out: List[dict] = []
-    sorted_1m = sorted([c for c in (m1 or []) if c.get("timestamp")], key=lambda c: str(c.get("timestamp")))
-    cur_key: Optional[datetime] = None
-    buf: List[dict] = []
-    for c in sorted_1m:
+    for c in sorted_5m:
         dt = _to_dt(str(c.get("timestamp") or ""))
         if not dt:
             continue
@@ -288,34 +242,34 @@ def evaluate_exit_with_profit_protection(
     entry_price: float,
     entry_time: str,
     lot_size: int,
-    m1_post_entry: Sequence[dict],
+    m5_post_entry: Sequence[dict],
     *,
-    m1_pre_entry: Optional[Sequence[dict]] = None,
+    m5_pre_entry: Optional[Sequence[dict]] = None,
     force_close_at_end: bool = True,
 ) -> Dict[str, Any]:
     """
     Full-position (no partial exits) exit manager.
 
     All **exit decisions** (emergency, active stops, primary) are evaluated only on **completed
-    5-minute** candles (closes). Underlying series is built from 1m OHLC; no 1m-based exit.
+    5-minute** candles (closes), sourced directly from the 5m feed.
 
     - Primary: 15m signal; execution on the **next** completed 5m close after the signal bar.
     - Emergency (2×ATR) and active stops (initial SL, breakeven, profit lock, trailing): vs **5m close**.
     - Tier activations: updated on each **5m close** after the first 5m bucket containing entry closes.
 
-    ``m1_pre_entry``: same-day 1m before entry so 5m/15m buckets align with the session.
+    ``m5_pre_entry``: same-day 5m candles before entry so 15m buckets align with the session.
     """
     sd = str(side or "").strip().upper()
     if sd not in {"LONG", "SHORT"}:
         return {"exit": False, "reason": "invalid_side"}
-    seq1 = sorted(list(m1_post_entry or []), key=lambda c: str(c.get("timestamp") or ""))
-    if len(seq1) < 5:
-        return {"exit": False, "reason": "insufficient_1m_data"}
+    seq5 = sorted(list(m5_post_entry or []), key=lambda c: str(c.get("timestamp") or ""))
+    if len(seq5) < 2:
+        return {"exit": False, "reason": "insufficient_5m_data"}
 
-    highs1 = [float(c.get("high") or 0.0) for c in seq1]
-    lows1 = [float(c.get("low") or 0.0) for c in seq1]
-    closes1 = [float(c.get("close") or 0.0) for c in seq1]
-    atr14_entry = float(wilder_atr_14(highs1[: min(len(highs1), 30)], lows1[: min(len(lows1), 30)], closes1[: min(len(closes1), 30)]) or 0.0)
+    highs5 = [float(c.get("high") or 0.0) for c in seq5]
+    lows5 = [float(c.get("low") or 0.0) for c in seq5]
+    closes5 = [float(c.get("close") or 0.0) for c in seq5]
+    atr14_entry = float(wilder_atr_14(highs5[: min(len(highs5), 30)], lows5[: min(len(lows5), 30)], closes5[: min(len(closes5), 30)]) or 0.0)
     if atr14_entry <= 0:
         atr14_entry = max(0.01, abs(float(entry_price)) * 0.002)
     hard_sl = float(entry_price) - 1.2 * atr14_entry if sd == "LONG" else float(entry_price) + 1.2 * atr14_entry
@@ -332,9 +286,9 @@ def evaluate_exit_with_profit_protection(
     entry_dt_parsed = _to_dt(str(entry_time))
     first_15m_close_ist = first_15m_bucket_close_after_entry(entry_dt_parsed)
     first_5m_close_ist = first_5m_bucket_close_after_entry(entry_dt_parsed)
-    pre1 = sorted([c for c in (m1_pre_entry or []) if c.get("timestamp")], key=lambda c: str(c.get("timestamp")))
-    combined = sorted(pre1 + seq1, key=lambda c: str(c.get("timestamp") or ""))
-    m5_closed = [b for b in build_5m_from_1m(combined) if bool(b.get("bucket_complete"))]
+    pre5 = sorted([c for c in (m5_pre_entry or []) if c.get("timestamp")], key=lambda c: str(c.get("timestamp")))
+    combined = sorted(pre5 + seq5, key=lambda c: str(c.get("timestamp") or ""))
+    m5_closed = [b for b in combined if bool(b.get("timestamp"))]
     if not m5_closed:
         return {"exit": False, "reason": "insufficient_5m_data"}
 
@@ -404,8 +358,8 @@ def evaluate_exit_with_profit_protection(
         ):
             saved_primary_exit = pending_primary_reason
 
-        # 15m primary + trailing (completed 15m only; first pass after containing-candle close)
-        m15_now = build_15m_from_1m(combined_upto)
+        # 15m primary + trailing (completed 15m from real 5m feed only)
+        m15_now = build_15m_from_5m(combined_upto)
         closed15 = [b for b in m15_now if bool(b.get("bucket_complete"))]
         if len(closed15) > last_closed_15m_count:
             pending_primary_reason = None

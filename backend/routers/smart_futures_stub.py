@@ -349,15 +349,15 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
                 ikey = str(r.get("fut_instrument_key") or "").strip()
                 if not ikey:
                     continue
-                raw1 = us_exit.get_historical_candles_by_instrument_key(
-                    ikey, interval="minutes/1", days_back=5, range_end_date=sd
+                raw5 = us_exit.get_historical_candles_by_instrument_key(
+                    ikey, interval="minutes/5", days_back=5, range_end_date=sd
                 )
-                m1 = [
+                m5 = [
                     b
-                    for b in sorted(raw1 or [], key=lambda x: str(x.get("timestamp") or ""))
+                    for b in sorted(raw5 or [], key=lambda x: str(x.get("timestamp") or ""))
                     if _ist_date_from_ts(str(b.get("timestamp") or "")) == sd
                 ]
-                if len(m1) < 15:
+                if len(m5) < 3:
                     continue
                 entry_px = float(r.get("buy_price") or r.get("entry_price") or 0)
                 if entry_px <= 0:
@@ -367,19 +367,19 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
                     continue
                 entry_at = str(r.get("entry_at") or "")
                 post = [
-                    b for b in m1
+                    b for b in m5
                     if (str(b.get("timestamp") or "") >= entry_at)
-                ] if entry_at else m1
-                pre_m1 = [b for b in m1 if (str(b.get("timestamp") or "") < entry_at)] if entry_at else []
-                if len(post) < 15:
-                    post = m1
+                ] if entry_at else m5
+                pre_m5 = [b for b in m5 if (str(b.get("timestamp") or "") < entry_at)] if entry_at else []
+                if len(post) < 3:
+                    post = m5
                 ex = evaluate_exit_with_profit_protection(
                     side=side,
                     entry_price=entry_px,
                     entry_time=entry_at or str(post[0].get("timestamp") or ""),
                     lot_size=1,
-                    m1_post_entry=post,
-                    m1_pre_entry=pre_m1,
+                    m5_post_entry=post,
+                    m5_pre_entry=pre_m5,
                     force_close_at_end=False,
                 )
                 state = ex.get("state", {}) if isinstance(ex, dict) else {}

@@ -392,6 +392,7 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
     rows: List[BacktestRow] = []
     failures: List[Dict[str, str]] = []
     candles_by_symbol: Dict[str, List[dict]] = {}
+    m5_by_symbol: Dict[str, List[dict]] = {}
 
     for sym in symbols:
         ci = contracts.get(sym)
@@ -422,6 +423,10 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
             entry_dt = parse_dt_ist(c1330.get("timestamp")) or IST.localize(datetime.combine(sd, dt_time(th, tm)))
             entry_ts = entry_dt.isoformat()
             candles_by_symbol[sym] = candles
+            raw_5m = ux.get_historical_candles_by_instrument_key(ci.instrument_key, "minutes/5", 0, range_end_date=sd) or []
+            if not raw_5m:
+                raw_5m = ux.get_historical_candles_by_instrument_key(ci.instrument_key, "minutes/5", 1, range_end_date=sd) or []
+            m5_by_symbol[sym] = candles_for_day(sort_candles(raw_5m), sd)
 
             rows.append(
                 BacktestRow(
@@ -537,10 +542,11 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
             continue
         side = "LONG" if r.final_decision == "ENTER_LONG" else "SHORT"
         seq = candles_by_symbol.get(r.symbol) or []
+        seq5 = m5_by_symbol.get(r.symbol) or []
         entry_dt = parse_dt_ist(r.entry_time)
-        post = [c for c in seq if (parse_dt_ist(c.get("timestamp")) and parse_dt_ist(c.get("timestamp")) >= entry_dt)] if entry_dt else seq
+        post = [c for c in seq5 if (parse_dt_ist(c.get("timestamp")) and parse_dt_ist(c.get("timestamp")) >= entry_dt)] if entry_dt else seq5
         pre = (
-            [c for c in seq if (parse_dt_ist(c.get("timestamp")) and parse_dt_ist(c.get("timestamp")) < entry_dt)]
+            [c for c in seq5 if (parse_dt_ist(c.get("timestamp")) and parse_dt_ist(c.get("timestamp")) < entry_dt)]
             if entry_dt
             else []
         )
@@ -549,7 +555,7 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
             continue
         try:
             ex = evaluate_exit_with_profit_protection(
-                side, float(r.entry_price), r.entry_time, int(r.lot_size), post, m1_pre_entry=pre
+                side, float(r.entry_price), r.entry_time, int(r.lot_size), post, m5_pre_entry=pre
             )
             st = ex.get("state", {}) if isinstance(ex, dict) else {}
             r.hard_stop_loss = st.get("hard_stop_loss")
