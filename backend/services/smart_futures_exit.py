@@ -133,13 +133,74 @@ def first_15m_bucket_close_after_entry(entry_dt: Optional[datetime]) -> Optional
     NSE-style alignment: bucket starts at :00/:15/:30/:45; the candle that "opens" at 09:30
     closes at 09:45 (first 1m of the next segment is when the previous bucket is complete).
 
-    Primary / 15m-trailing logic should not run before this time (stops/emergency stay on 1m).
+    Primary / 15m-trailing logic should not run before this time.
     """
     if entry_dt is None:
         return None
     e = _as_ist(entry_dt)
     bk = _bucket_15m(e)
     return bk + timedelta(minutes=15)
+
+
+def _bucket_5m(dt: datetime) -> datetime:
+    m = (dt.minute // 5) * 5
+    return dt.replace(minute=m, second=0, microsecond=0)
+
+
+def first_5m_bucket_close_after_entry(entry_dt: Optional[datetime]) -> Optional[datetime]:
+    """
+    IST instant when the 5m candle *that contains* entry_time closes (:00/:05/.../:55).
+    Emergency and active stops use 5m closes only after this time.
+    """
+    if entry_dt is None:
+        return None
+    e = _as_ist(entry_dt)
+    bk = _bucket_5m(e)
+    return bk + timedelta(minutes=5)
+
+
+def build_5m_from_1m(m1: Sequence[dict]) -> List[dict]:
+    """Build 5-minute candles from sorted 1-minute candles."""
+    out: List[dict] = []
+    sorted_1m = sorted([c for c in (m1 or []) if c.get("timestamp")], key=lambda c: str(c.get("timestamp")))
+    cur_key: Optional[datetime] = None
+    buf: List[dict] = []
+    for c in sorted_1m:
+        dt = _to_dt(str(c.get("timestamp") or ""))
+        if not dt:
+            continue
+        key = _bucket_5m(dt)
+        if cur_key is None:
+            cur_key = key
+        if key != cur_key:
+            if len(buf) >= 1:
+                out.append(
+                    {
+                        "timestamp": buf[-1].get("timestamp"),
+                        "open": float(buf[0].get("open") or 0.0),
+                        "high": max(float(x.get("high") or 0.0) for x in buf),
+                        "low": min(float(x.get("low") or 0.0) for x in buf),
+                        "close": float(buf[-1].get("close") or 0.0),
+                        "volume": sum(float(x.get("volume") or 0.0) for x in buf),
+                        "bucket_complete": True,
+                    }
+                )
+            buf = []
+            cur_key = key
+        buf.append(c)
+    if len(buf) >= 1:
+        out.append(
+            {
+                "timestamp": buf[-1].get("timestamp"),
+                "open": float(buf[0].get("open") or 0.0),
+                "high": max(float(x.get("high") or 0.0) for x in buf),
+                "low": min(float(x.get("low") or 0.0) for x in buf),
+                "close": float(buf[-1].get("close") or 0.0),
+                "volume": sum(float(x.get("volume") or 0.0) for x in buf),
+                "bucket_complete": False,
+            }
+        )
+    return out
 
 
 def build_15m_from_1m(m1: Sequence[dict]) -> List[dict]:
@@ -233,14 +294,16 @@ def evaluate_exit_with_profit_protection(
     force_close_at_end: bool = True,
 ) -> Dict[str, Any]:
     """
-    Full-position (no partial exits) exit manager:
-    - Primary exit on 15m closes (only after the first 15m bucket close *at or after* entry;
-      e.g. entry at 09:30 IST → first primary window at 09:45 when the 09:30 bucket completes)
-    - Emergency + stop checks on each 1m bar
-    - Tiered profit protection + dynamic trailing
+    Full-position (no partial exits) exit manager.
 
-    ``m1_pre_entry``: same-day 1m candles *before* entry (sorted). Supply from backtests/API so
-    15m buckets align with the full session; post-entry-only series mis-buckets the open.
+    All **exit decisions** (emergency, active stops, primary) are evaluated only on **completed
+    5-minute** candles (closes). Underlying series is built from 1m OHLC; no 1m-based exit.
+
+    - Primary: 15m signal; execution on the **next** completed 5m close after the signal bar.
+    - Emergency (2×ATR) and active stops (initial SL, breakeven, profit lock, trailing): vs **5m close**.
+    - Tier activations: updated on each **5m close** after the first 5m bucket containing entry closes.
+
+    ``m1_pre_entry``: same-day 1m before entry so 5m/15m buckets align with the session.
     """
     sd = str(side or "").strip().upper()
     if sd not in {"LONG", "SHORT"}:
@@ -268,60 +331,93 @@ def evaluate_exit_with_profit_protection(
 
     entry_dt_parsed = _to_dt(str(entry_time))
     first_15m_close_ist = first_15m_bucket_close_after_entry(entry_dt_parsed)
+    first_5m_close_ist = first_5m_bucket_close_after_entry(entry_dt_parsed)
     pre1 = sorted([c for c in (m1_pre_entry or []) if c.get("timestamp")], key=lambda c: str(c.get("timestamp")))
+    combined = sorted(pre1 + seq1, key=lambda c: str(c.get("timestamp") or ""))
+    m5_closed = [b for b in build_5m_from_1m(combined) if bool(b.get("bucket_complete"))]
+    if not m5_closed:
+        return {"exit": False, "reason": "insufficient_5m_data"}
 
     m15_done: List[dict] = []
-    # Only *completed* 15m buckets (bucket_complete=True). The last row from build_15m_from_1m is usually
-    # an in-progress partial bar — evaluating exit on that made signals react every 1m (felt like 5m).
     last_closed_15m_count = 0
     pending_primary_reason: Optional[str] = None
+    pending_primary_m5_idx: Optional[int] = None
     last_primary_signal_ts: Optional[str] = None
 
-    for i, c1 in enumerate(seq1):
-        ts = str(c1.get("timestamp") or "")
-        dt1 = _to_dt(ts)
-        if not dt1:
-            continue
-        h1 = float(c1.get("high") or c1.get("close") or 0.0)
-        l1 = float(c1.get("low") or c1.get("close") or 0.0)
-        px1 = float(c1.get("close") or 0.0)
-        if px1 <= 0:
-            continue
+    def _ret_exit(
+        exit_px: float,
+        ts_out: str,
+        reason: str,
+    ) -> Dict[str, Any]:
+        pnl = _rupee_profit(sd, st.entry_price, exit_px, st.entry_qty)
+        roi = (pnl / max(1e-9, st.entry_price * st.entry_qty)) * 100.0
+        return {
+            "exit": True,
+            "final_exit_price": round(float(exit_px), 4),
+            "final_exit_time": ts_out,
+            "final_exit_reason": reason,
+            "final_exit_profit": round(float(pnl), 2),
+            "total_roi_pct": round(float(roi), 4),
+            "holding_time_minutes": None,
+            "state": st.__dict__,
+            "primary_signal_time": last_primary_signal_ts,
+        }
 
-        # Update max profit and tier activations
-        unreal = _rupee_profit(sd, st.entry_price, px1, st.entry_qty)
-        st.max_profit_achieved = max(float(st.max_profit_achieved), float(unreal))
-        move = (px1 - st.entry_price) if sd == "LONG" else (st.entry_price - px1)
-        if (not st.breakeven_activated) and move >= 0.5 * st.atr14_entry:
-            st.breakeven_activated = True
-            st.breakeven_activation_time = ts
-        if (not st.profit_locking_activated) and move >= 1.0 * st.atr14_entry:
-            st.profit_locking_activated = True
-            st.profit_locking_activation_time = ts
-            st.profit_locking_stop_level = (
-                st.entry_price + 0.5 * st.atr14_entry if sd == "LONG" else st.entry_price - 0.5 * st.atr14_entry
-            )
-        if (not st.trailing_stop_activated) and move >= 1.5 * st.atr14_entry:
-            st.trailing_stop_activated = True
-            st.trailing_stop_activation_time = ts
+    emergency_stop = st.entry_price - 2.0 * st.atr14_entry if sd == "LONG" else st.entry_price + 2.0 * st.atr14_entry
 
-        # Rebuild 15m from session-so-far 1m (pre-entry + post) so buckets match exchange boundaries.
-        combined_1m = pre1 + seq1[: i + 1]
-        m15_now = build_15m_from_1m(combined_1m)
+    for k, c5 in enumerate(m5_closed):
+        ts5 = str(c5.get("timestamp") or "")
+        dt5 = _to_dt(ts5)
+        if not dt5:
+            continue
+        close5 = float(c5.get("close") or 0.0)
+        if close5 <= 0:
+            continue
+        combined_upto = [c for c in combined if str(c.get("timestamp") or "") <= ts5]
+
+        allow_5m = first_5m_close_ist is None or (dt5 >= first_5m_close_ist)
+
+        # Tier updates on 5m close (after first 5m bucket close)
+        if allow_5m:
+            unreal = _rupee_profit(sd, st.entry_price, close5, st.entry_qty)
+            st.max_profit_achieved = max(float(st.max_profit_achieved), float(unreal))
+            move = (close5 - st.entry_price) if sd == "LONG" else (st.entry_price - close5)
+            if (not st.breakeven_activated) and move >= 0.5 * st.atr14_entry:
+                st.breakeven_activated = True
+                st.breakeven_activation_time = ts5
+            if (not st.profit_locking_activated) and move >= 1.0 * st.atr14_entry:
+                st.profit_locking_activated = True
+                st.profit_locking_activation_time = ts5
+                st.profit_locking_stop_level = (
+                    st.entry_price + 0.5 * st.atr14_entry if sd == "LONG" else st.entry_price - 0.5 * st.atr14_entry
+                )
+            if (not st.trailing_stop_activated) and move >= 1.5 * st.atr14_entry:
+                st.trailing_stop_activated = True
+                st.trailing_stop_activation_time = ts5
+
+        # Snapshot before 15m block clears pending on new closed bar (primary exit is due on this 5m close)
+        saved_primary_exit: Optional[str] = None
+        if (
+            pending_primary_reason
+            and pending_primary_m5_idx is not None
+            and k == pending_primary_m5_idx + 1
+        ):
+            saved_primary_exit = pending_primary_reason
+
+        # 15m primary + trailing (completed 15m only; first pass after containing-candle close)
+        m15_now = build_15m_from_1m(combined_upto)
         closed15 = [b for b in m15_now if bool(b.get("bucket_complete"))]
         if len(closed15) > last_closed_15m_count:
             pending_primary_reason = None
+            pending_primary_m5_idx = None
             m15_done = closed15
             last_closed_15m_count = len(closed15)
-            # No primary / 15m-trailing until the 15m candle that contains entry has *closed*
-            # (e.g. entry 09:30 → first signal pass at 09:45 when dt1 is the 09:45 bar).
-            allow_15m = first_15m_close_ist is None or (dt1 >= first_15m_close_ist)
+            allow_15m = first_15m_close_ist is None or (dt5 >= first_15m_close_ist)
             highs15 = [float(x.get("high") or 0.0) for x in m15_done]
             lows15 = [float(x.get("low") or 0.0) for x in m15_done]
             closes15 = [float(x.get("close") or 0.0) for x in m15_done]
             vols15 = [float(x.get("volume") or 0.0) for x in m15_done]
             if allow_15m and len(closes15) >= 10:
-                # Indicators on closed 15m bars only. atr5_15 = Wilder ATR period 5 on 15m series (not 5-minute chart).
                 vwap15 = float(session_vwap(highs15, lows15, closes15, vols15))
                 ema9_15 = _ema_series_last(closes15, 9)
                 atr5_15 = wilder_atr(highs15, lows15, closes15, 5)
@@ -329,7 +425,6 @@ def evaluate_exit_with_profit_protection(
                 st_dir_15 = _supertrend_dir_last(highs15, lows15, closes15)
                 c15 = float(closes15[-1])
 
-                # Update trailing stop on each new *completed* 15m bar once Tier 3 is active
                 if st.trailing_stop_activated and atr14_15 is not None and atr14_15 > 0:
                     candidate = (vwap15 - 0.5 * float(atr14_15)) if sd == "LONG" else (vwap15 + 0.5 * float(atr14_15))
                     if st.current_trailing_stop_level is None:
@@ -341,7 +436,6 @@ def evaluate_exit_with_profit_protection(
                         else:
                             st.current_trailing_stop_level = min(float(st.current_trailing_stop_level), float(candidate))
 
-                # Primary 15m exit: last bar in series is the bar that just *closed* (bucket_complete).
                 if sd == "LONG":
                     if (
                         c15 < vwap15
@@ -350,7 +444,8 @@ def evaluate_exit_with_profit_protection(
                         and c15 < float(ema9_15)
                     ):
                         pending_primary_reason = "15-min Close Below VWAP+Supertrend+EMA"
-                        last_primary_signal_ts = str(m15_done[-1].get("timestamp") or ts)
+                        pending_primary_m5_idx = k
+                        last_primary_signal_ts = str(m15_done[-1].get("timestamp") or ts5)
                     elif (
                         atr5_15 is not None
                         and atr14_15 is not None
@@ -359,7 +454,8 @@ def evaluate_exit_with_profit_protection(
                         and st_dir_15 == -1
                     ):
                         pending_primary_reason = "15-min Momentum Weak + Trend Breakdown"
-                        last_primary_signal_ts = str(m15_done[-1].get("timestamp") or ts)
+                        pending_primary_m5_idx = k
+                        last_primary_signal_ts = str(m15_done[-1].get("timestamp") or ts5)
                 else:
                     if (
                         c15 > vwap15
@@ -368,7 +464,8 @@ def evaluate_exit_with_profit_protection(
                         and c15 > float(ema9_15)
                     ):
                         pending_primary_reason = "15-min Close Above VWAP+Supertrend+EMA"
-                        last_primary_signal_ts = str(m15_done[-1].get("timestamp") or ts)
+                        pending_primary_m5_idx = k
+                        last_primary_signal_ts = str(m15_done[-1].get("timestamp") or ts5)
                     elif (
                         atr5_15 is not None
                         and atr14_15 is not None
@@ -377,81 +474,41 @@ def evaluate_exit_with_profit_protection(
                         and st_dir_15 == 1
                     ):
                         pending_primary_reason = "15-min Momentum Weak + Trend Breakdown"
-                        last_primary_signal_ts = str(m15_done[-1].get("timestamp") or ts)
+                        pending_primary_m5_idx = k
+                        last_primary_signal_ts = str(m15_done[-1].get("timestamp") or ts5)
 
-        # Active stop hierarchy (most favorable)
-        be_stop = st.entry_price if st.breakeven_activated else None
-        st.current_active_stop_loss_level = _favorable_stop(
-            sd,
-            [
-                st.hard_stop_loss,
-                be_stop,
-                st.profit_locking_stop_level if st.profit_locking_activated else None,
-                st.current_trailing_stop_level if st.trailing_stop_activated else None,
-            ],
-        )
-
-        # Priority 1: emergency stop
-        emergency_stop = st.entry_price - 2.0 * st.atr14_entry if sd == "LONG" else st.entry_price + 2.0 * st.atr14_entry
-        if (sd == "LONG" and l1 <= emergency_stop) or (sd == "SHORT" and h1 >= emergency_stop):
-            exit_px = emergency_stop
-            pnl = _rupee_profit(sd, st.entry_price, exit_px, st.entry_qty)
-            roi = (pnl / max(1e-9, st.entry_price * st.entry_qty)) * 100.0
-            return {
-                "exit": True,
-                "final_exit_price": round(float(exit_px), 4),
-                "final_exit_time": ts,
-                "final_exit_reason": "Emergency Stop Hit (2.0×ATR)",
-                "final_exit_profit": round(float(pnl), 2),
-                "total_roi_pct": round(float(roi), 4),
-                "holding_time_minutes": None,
-                "state": st.__dict__,
-                "primary_signal_time": last_primary_signal_ts,
-            }
-
-        # Priority 2/3: active stop / trailing hit (on 1m)
-        if st.current_active_stop_loss_level is not None:
-            sl = float(st.current_active_stop_loss_level)
-            hit = (sd == "LONG" and l1 <= sl) or (sd == "SHORT" and h1 >= sl)
-            if hit:
-                reason = "Stop Loss Hit"
-                if st.trailing_stop_activated and st.current_trailing_stop_level is not None and abs(sl - float(st.current_trailing_stop_level)) < 1e-8:
-                    reason = (
-                        "Trailing Stop Hit (15-min VWAP - 0.5×ATR)"
-                        if sd == "LONG"
-                        else "Trailing Stop Hit (15-min VWAP + 0.5×ATR)"
-                    )
-                exit_px = sl
-                pnl = _rupee_profit(sd, st.entry_price, exit_px, st.entry_qty)
-                roi = (pnl / max(1e-9, st.entry_price * st.entry_qty)) * 100.0
-                return {
-                    "exit": True,
-                    "final_exit_price": round(float(exit_px), 4),
-                    "final_exit_time": ts,
-                    "final_exit_reason": reason,
-                    "final_exit_profit": round(float(pnl), 2),
-                    "total_roi_pct": round(float(roi), 4),
-                    "holding_time_minutes": None,
-                    "state": st.__dict__,
-                    "primary_signal_time": last_primary_signal_ts,
-                }
-
-        # Priority 4: 15m primary signal exits on next 1m candle
-        if pending_primary_reason:
-            exit_px = px1
-            pnl = _rupee_profit(sd, st.entry_price, exit_px, st.entry_qty)
-            roi = (pnl / max(1e-9, st.entry_price * st.entry_qty)) * 100.0
-            return {
-                "exit": True,
-                "final_exit_price": round(float(exit_px), 4),
-                "final_exit_time": ts,
-                "final_exit_reason": pending_primary_reason,
-                "final_exit_profit": round(float(pnl), 2),
-                "total_roi_pct": round(float(roi), 4),
-                "holding_time_minutes": None,
-                "state": st.__dict__,
-                "primary_signal_time": last_primary_signal_ts,
-            }
+        # Exit checks on 5m close after tier + 15m updates (emergency → active → primary)
+        if allow_5m:
+            be_stop = st.entry_price if st.breakeven_activated else None
+            st.current_active_stop_loss_level = _favorable_stop(
+                sd,
+                [
+                    st.hard_stop_loss,
+                    be_stop,
+                    st.profit_locking_stop_level if st.profit_locking_activated else None,
+                    st.current_trailing_stop_level if st.trailing_stop_activated else None,
+                ],
+            )
+            if (sd == "LONG" and close5 <= emergency_stop) or (sd == "SHORT" and close5 >= emergency_stop):
+                return _ret_exit(close5, ts5, "Emergency Stop Hit (2.0×ATR)")
+            if st.current_active_stop_loss_level is not None:
+                sl = float(st.current_active_stop_loss_level)
+                hit = (sd == "LONG" and close5 <= sl) or (sd == "SHORT" and close5 >= sl)
+                if hit:
+                    reason = "Stop Loss Hit"
+                    if (
+                        st.trailing_stop_activated
+                        and st.current_trailing_stop_level is not None
+                        and abs(sl - float(st.current_trailing_stop_level)) < 1e-8
+                    ):
+                        reason = (
+                            "Trailing Stop Hit (15-min VWAP - 0.5×ATR)"
+                            if sd == "LONG"
+                            else "Trailing Stop Hit (15-min VWAP + 0.5×ATR)"
+                        )
+                    return _ret_exit(close5, ts5, reason)
+            if saved_primary_exit:
+                return _ret_exit(close5, ts5, saved_primary_exit)
 
     # Optional fallback: close at last bar (backtest mode).
     if not force_close_at_end:
@@ -467,15 +524,15 @@ def evaluate_exit_with_profit_protection(
             "primary_signal_time": last_primary_signal_ts,
         }
 
-    # Fallback: close at last bar
-    last = seq1[-1]
-    last_px = float(last.get("close") or entry_price)
+    last5 = m5_closed[-1]
+    last_px = float(last5.get("close") or entry_price)
+    last_ts = str(last5.get("timestamp") or "")
     pnl = _rupee_profit(sd, entry_price, last_px, max(1, int(lot_size)))
     roi = (pnl / max(1e-9, float(entry_price) * max(1, int(lot_size)))) * 100.0
     return {
         "exit": True,
         "final_exit_price": round(float(last_px), 4),
-        "final_exit_time": str(last.get("timestamp") or ""),
+        "final_exit_time": last_ts,
         "final_exit_reason": "Session End Exit",
         "final_exit_profit": round(float(pnl), 2),
         "total_roi_pct": round(float(roi), 4),
