@@ -6,8 +6,9 @@ Used by the picker context and by /daily exit hints for open positions.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pytz
 
@@ -79,6 +80,353 @@ def _supertrend_dir_last_two(
             st[i] = flb[i] if float(closes[i]) >= flb[i] else fub[i]
         direction[i] = 1 if float(closes[i]) >= st[i] else -1
     return int(direction[-1]), int(direction[-2])
+
+
+def _supertrend_dir_last(
+    highs: Sequence[float],
+    lows: Sequence[float],
+    closes: Sequence[float],
+    period: int = 10,
+    multiplier: float = 3.0,
+) -> Optional[int]:
+    cur, _ = _supertrend_dir_last_two(highs, lows, closes, period=period, multiplier=multiplier)
+    return cur
+
+
+def _ema_series_last(series: Sequence[float], span: int) -> Optional[float]:
+    if not series:
+        return None
+    k = 2.0 / (float(span) + 1.0)
+    e = float(series[0])
+    for v in series[1:]:
+        e = float(v) * k + e * (1.0 - k)
+    return float(e)
+
+
+def _to_dt(ts: str) -> Optional[datetime]:
+    if not ts:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        return dt.astimezone(IST) if dt.tzinfo else IST.localize(dt)
+    except Exception:
+        try:
+            dt = datetime.strptime(str(ts)[:19], "%Y-%m-%dT%H:%M:%S")
+            return IST.localize(dt)
+        except Exception:
+            return None
+
+
+def _bucket_15m(dt: datetime) -> datetime:
+    m = (dt.minute // 15) * 15
+    return dt.replace(minute=m, second=0, microsecond=0)
+
+
+def build_15m_from_1m(m1: Sequence[dict]) -> List[dict]:
+    """
+    Build completed 15-minute candles from sorted 1-minute candles.
+    """
+    out: List[dict] = []
+    sorted_1m = sorted([c for c in (m1 or []) if c.get("timestamp")], key=lambda c: str(c.get("timestamp")))
+    cur_key: Optional[datetime] = None
+    buf: List[dict] = []
+    for c in sorted_1m:
+        dt = _to_dt(str(c.get("timestamp") or ""))
+        if not dt:
+            continue
+        key = _bucket_15m(dt)
+        if cur_key is None:
+            cur_key = key
+        if key != cur_key:
+            if len(buf) >= 1:
+                out.append(
+                    {
+                        "timestamp": buf[-1].get("timestamp"),
+                        "open": float(buf[0].get("open") or 0.0),
+                        "high": max(float(x.get("high") or 0.0) for x in buf),
+                        "low": min(float(x.get("low") or 0.0) for x in buf),
+                        "close": float(buf[-1].get("close") or 0.0),
+                        "volume": sum(float(x.get("volume") or 0.0) for x in buf),
+                    }
+                )
+            buf = []
+            cur_key = key
+        buf.append(c)
+    if len(buf) >= 1:
+        out.append(
+            {
+                "timestamp": buf[-1].get("timestamp"),
+                "open": float(buf[0].get("open") or 0.0),
+                "high": max(float(x.get("high") or 0.0) for x in buf),
+                "low": min(float(x.get("low") or 0.0) for x in buf),
+                "close": float(buf[-1].get("close") or 0.0),
+                "volume": sum(float(x.get("volume") or 0.0) for x in buf),
+            }
+        )
+    return out
+
+
+@dataclass
+class ProfitProtectionState:
+    entry_price: float
+    entry_time: str
+    entry_qty: int
+    side: str
+    atr14_entry: float
+    hard_stop_loss: float
+    breakeven_activated: bool = False
+    breakeven_activation_time: Optional[str] = None
+    profit_locking_activated: bool = False
+    profit_locking_activation_time: Optional[str] = None
+    profit_locking_stop_level: Optional[float] = None
+    trailing_stop_activated: bool = False
+    trailing_stop_activation_time: Optional[str] = None
+    initial_trailing_stop_level: Optional[float] = None
+    current_trailing_stop_level: Optional[float] = None
+    current_active_stop_loss_level: Optional[float] = None
+    max_profit_achieved: float = 0.0
+
+
+def _favorable_stop(side: str, candidates: Sequence[Optional[float]]) -> Optional[float]:
+    vals = [float(x) for x in candidates if x is not None]
+    if not vals:
+        return None
+    return max(vals) if side == "LONG" else min(vals)
+
+
+def _rupee_profit(side: str, entry: float, px: float, lot: int) -> float:
+    if side == "LONG":
+        return (float(px) - float(entry)) * float(lot)
+    return (float(entry) - float(px)) * float(lot)
+
+
+def evaluate_exit_with_profit_protection(
+    side: str,
+    entry_price: float,
+    entry_time: str,
+    lot_size: int,
+    m1_post_entry: Sequence[dict],
+) -> Dict[str, Any]:
+    """
+    Full-position (no partial exits) exit manager:
+    - Primary exit on 15m closes
+    - Emergency + stop checks on each 1m bar
+    - Tiered profit protection + dynamic trailing
+    """
+    sd = str(side or "").strip().upper()
+    if sd not in {"LONG", "SHORT"}:
+        return {"exit": False, "reason": "invalid_side"}
+    seq1 = sorted(list(m1_post_entry or []), key=lambda c: str(c.get("timestamp") or ""))
+    if len(seq1) < 5:
+        return {"exit": False, "reason": "insufficient_1m_data"}
+
+    highs1 = [float(c.get("high") or 0.0) for c in seq1]
+    lows1 = [float(c.get("low") or 0.0) for c in seq1]
+    closes1 = [float(c.get("close") or 0.0) for c in seq1]
+    atr14_entry = float(wilder_atr_14(highs1[: min(len(highs1), 30)], lows1[: min(len(lows1), 30)], closes1[: min(len(closes1), 30)]) or 0.0)
+    if atr14_entry <= 0:
+        atr14_entry = max(0.01, abs(float(entry_price)) * 0.002)
+    hard_sl = float(entry_price) - 1.2 * atr14_entry if sd == "LONG" else float(entry_price) + 1.2 * atr14_entry
+    st = ProfitProtectionState(
+        entry_price=float(entry_price),
+        entry_time=str(entry_time),
+        entry_qty=max(1, int(lot_size)),
+        side=sd,
+        atr14_entry=float(atr14_entry),
+        hard_stop_loss=float(hard_sl),
+        current_active_stop_loss_level=float(hard_sl),
+    )
+
+    m15_done: List[dict] = []
+    last_15_count = 0
+    pending_primary_reason: Optional[str] = None
+    last_primary_signal_ts: Optional[str] = None
+
+    for i, c1 in enumerate(seq1):
+        ts = str(c1.get("timestamp") or "")
+        dt1 = _to_dt(ts)
+        if not dt1:
+            continue
+        h1 = float(c1.get("high") or c1.get("close") or 0.0)
+        l1 = float(c1.get("low") or c1.get("close") or 0.0)
+        px1 = float(c1.get("close") or 0.0)
+        if px1 <= 0:
+            continue
+
+        # Update max profit and tier activations
+        unreal = _rupee_profit(sd, st.entry_price, px1, st.entry_qty)
+        st.max_profit_achieved = max(float(st.max_profit_achieved), float(unreal))
+        move = (px1 - st.entry_price) if sd == "LONG" else (st.entry_price - px1)
+        if (not st.breakeven_activated) and move >= 0.5 * st.atr14_entry:
+            st.breakeven_activated = True
+            st.breakeven_activation_time = ts
+        if (not st.profit_locking_activated) and move >= 1.0 * st.atr14_entry:
+            st.profit_locking_activated = True
+            st.profit_locking_activation_time = ts
+            st.profit_locking_stop_level = (
+                st.entry_price + 0.5 * st.atr14_entry if sd == "LONG" else st.entry_price - 0.5 * st.atr14_entry
+            )
+        if (not st.trailing_stop_activated) and move >= 1.5 * st.atr14_entry:
+            st.trailing_stop_activated = True
+            st.trailing_stop_activation_time = ts
+
+        # Rebuild 15m completions from data up to current bar
+        m15_now = build_15m_from_1m(seq1[: i + 1])
+        if len(m15_now) > last_15_count:
+            m15_done = m15_now
+            last_15_count = len(m15_now)
+            highs15 = [float(x.get("high") or 0.0) for x in m15_done]
+            lows15 = [float(x.get("low") or 0.0) for x in m15_done]
+            closes15 = [float(x.get("close") or 0.0) for x in m15_done]
+            vols15 = [float(x.get("volume") or 0.0) for x in m15_done]
+            if len(closes15) >= 10:
+                vwap15 = float(session_vwap(highs15, lows15, closes15, vols15))
+                ema9_15 = _ema_series_last(closes15, 9)
+                atr5_15 = wilder_atr(highs15, lows15, closes15, 5)
+                atr14_15 = wilder_atr_14(highs15, lows15, closes15)
+                st_dir_15 = _supertrend_dir_last(highs15, lows15, closes15)
+                c15 = float(closes15[-1])
+
+                # Update trailing stop on each new 15m close once activated
+                if st.trailing_stop_activated and atr14_15 is not None and atr14_15 > 0:
+                    candidate = (vwap15 - 0.5 * float(atr14_15)) if sd == "LONG" else (vwap15 + 0.5 * float(atr14_15))
+                    if st.current_trailing_stop_level is None:
+                        st.current_trailing_stop_level = float(candidate)
+                        st.initial_trailing_stop_level = float(candidate)
+                    else:
+                        if sd == "LONG":
+                            st.current_trailing_stop_level = max(float(st.current_trailing_stop_level), float(candidate))
+                        else:
+                            st.current_trailing_stop_level = min(float(st.current_trailing_stop_level), float(candidate))
+
+                # Primary 15m exit conditions (exit on next 1m candle)
+                if sd == "LONG":
+                    if (
+                        c15 < vwap15
+                        and st_dir_15 == -1
+                        and ema9_15 is not None
+                        and c15 < float(ema9_15)
+                    ):
+                        pending_primary_reason = "15-min Close Below VWAP+Supertrend+EMA"
+                        last_primary_signal_ts = str(m15_done[-1].get("timestamp") or ts)
+                    elif (
+                        atr5_15 is not None
+                        and atr14_15 is not None
+                        and atr5_15 < atr14_15
+                        and c15 < vwap15
+                        and st_dir_15 == -1
+                    ):
+                        pending_primary_reason = "15-min Momentum Weak + Trend Breakdown"
+                        last_primary_signal_ts = str(m15_done[-1].get("timestamp") or ts)
+                else:
+                    if (
+                        c15 > vwap15
+                        and st_dir_15 == 1
+                        and ema9_15 is not None
+                        and c15 > float(ema9_15)
+                    ):
+                        pending_primary_reason = "15-min Close Above VWAP+Supertrend+EMA"
+                        last_primary_signal_ts = str(m15_done[-1].get("timestamp") or ts)
+                    elif (
+                        atr5_15 is not None
+                        and atr14_15 is not None
+                        and atr5_15 < atr14_15
+                        and c15 > vwap15
+                        and st_dir_15 == 1
+                    ):
+                        pending_primary_reason = "15-min Momentum Weak + Trend Breakdown"
+                        last_primary_signal_ts = str(m15_done[-1].get("timestamp") or ts)
+
+        # Active stop hierarchy (most favorable)
+        be_stop = st.entry_price if st.breakeven_activated else None
+        st.current_active_stop_loss_level = _favorable_stop(
+            sd,
+            [
+                st.hard_stop_loss,
+                be_stop,
+                st.profit_locking_stop_level if st.profit_locking_activated else None,
+                st.current_trailing_stop_level if st.trailing_stop_activated else None,
+            ],
+        )
+
+        # Priority 1: emergency stop
+        emergency_stop = st.entry_price - 2.0 * st.atr14_entry if sd == "LONG" else st.entry_price + 2.0 * st.atr14_entry
+        if (sd == "LONG" and l1 <= emergency_stop) or (sd == "SHORT" and h1 >= emergency_stop):
+            exit_px = emergency_stop
+            pnl = _rupee_profit(sd, st.entry_price, exit_px, st.entry_qty)
+            roi = (pnl / max(1e-9, st.entry_price * st.entry_qty)) * 100.0
+            return {
+                "exit": True,
+                "final_exit_price": round(float(exit_px), 4),
+                "final_exit_time": ts,
+                "final_exit_reason": "Emergency Stop Hit (2.0×ATR)",
+                "final_exit_profit": round(float(pnl), 2),
+                "total_roi_pct": round(float(roi), 4),
+                "holding_time_minutes": None,
+                "state": st.__dict__,
+                "primary_signal_time": last_primary_signal_ts,
+            }
+
+        # Priority 2/3: active stop / trailing hit (on 1m)
+        if st.current_active_stop_loss_level is not None:
+            sl = float(st.current_active_stop_loss_level)
+            hit = (sd == "LONG" and l1 <= sl) or (sd == "SHORT" and h1 >= sl)
+            if hit:
+                reason = "Stop Loss Hit"
+                if st.trailing_stop_activated and st.current_trailing_stop_level is not None and abs(sl - float(st.current_trailing_stop_level)) < 1e-8:
+                    reason = (
+                        "Trailing Stop Hit (15-min VWAP - 0.5×ATR)"
+                        if sd == "LONG"
+                        else "Trailing Stop Hit (15-min VWAP + 0.5×ATR)"
+                    )
+                exit_px = sl
+                pnl = _rupee_profit(sd, st.entry_price, exit_px, st.entry_qty)
+                roi = (pnl / max(1e-9, st.entry_price * st.entry_qty)) * 100.0
+                return {
+                    "exit": True,
+                    "final_exit_price": round(float(exit_px), 4),
+                    "final_exit_time": ts,
+                    "final_exit_reason": reason,
+                    "final_exit_profit": round(float(pnl), 2),
+                    "total_roi_pct": round(float(roi), 4),
+                    "holding_time_minutes": None,
+                    "state": st.__dict__,
+                    "primary_signal_time": last_primary_signal_ts,
+                }
+
+        # Priority 4: 15m primary signal exits on next 1m candle
+        if pending_primary_reason:
+            exit_px = px1
+            pnl = _rupee_profit(sd, st.entry_price, exit_px, st.entry_qty)
+            roi = (pnl / max(1e-9, st.entry_price * st.entry_qty)) * 100.0
+            return {
+                "exit": True,
+                "final_exit_price": round(float(exit_px), 4),
+                "final_exit_time": ts,
+                "final_exit_reason": pending_primary_reason,
+                "final_exit_profit": round(float(pnl), 2),
+                "total_roi_pct": round(float(roi), 4),
+                "holding_time_minutes": None,
+                "state": st.__dict__,
+                "primary_signal_time": last_primary_signal_ts,
+            }
+
+    # Fallback: close at last bar
+    last = seq1[-1]
+    last_px = float(last.get("close") or entry_price)
+    pnl = _rupee_profit(sd, entry_price, last_px, max(1, int(lot_size)))
+    roi = (pnl / max(1e-9, float(entry_price) * max(1, int(lot_size)))) * 100.0
+    return {
+        "exit": True,
+        "final_exit_price": round(float(last_px), 4),
+        "final_exit_time": str(last.get("timestamp") or ""),
+        "final_exit_reason": "Session End Exit",
+        "final_exit_profit": round(float(pnl), 2),
+        "total_roi_pct": round(float(roi), 4),
+        "holding_time_minutes": None,
+        "state": st.__dict__,
+        "primary_signal_time": last_primary_signal_ts,
+    }
 
 
 def _sort_candles(candles: Optional[List[dict]]) -> List[dict]:
