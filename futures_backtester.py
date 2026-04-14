@@ -539,11 +539,18 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
         seq = candles_by_symbol.get(r.symbol) or []
         entry_dt = parse_dt_ist(r.entry_time)
         post = [c for c in seq if (parse_dt_ist(c.get("timestamp")) and parse_dt_ist(c.get("timestamp")) >= entry_dt)] if entry_dt else seq
+        pre = (
+            [c for c in seq if (parse_dt_ist(c.get("timestamp")) and parse_dt_ist(c.get("timestamp")) < entry_dt)]
+            if entry_dt
+            else []
+        )
         if not post:
             r.error = "missing_post_entry_candles"
             continue
         try:
-            ex = evaluate_exit_with_profit_protection(side, float(r.entry_price), r.entry_time, int(r.lot_size), post)
+            ex = evaluate_exit_with_profit_protection(
+                side, float(r.entry_price), r.entry_time, int(r.lot_size), post, m1_pre_entry=pre
+            )
             st = ex.get("state", {}) if isinstance(ex, dict) else {}
             r.hard_stop_loss = st.get("hard_stop_loss")
             r.breakeven_activated = bool(st.get("breakeven_activated"))

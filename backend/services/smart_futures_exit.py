@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pytz
@@ -122,6 +122,26 @@ def _bucket_15m(dt: datetime) -> datetime:
     return dt.replace(minute=m, second=0, microsecond=0)
 
 
+def _as_ist(dt: datetime) -> datetime:
+    return dt.astimezone(IST) if dt.tzinfo else IST.localize(dt)
+
+
+def first_15m_bucket_close_after_entry(entry_dt: Optional[datetime]) -> Optional[datetime]:
+    """
+    IST instant when the 15m candle *that contains* entry_time closes.
+
+    NSE-style alignment: bucket starts at :00/:15/:30/:45; the candle that "opens" at 09:30
+    closes at 09:45 (first 1m of the next segment is when the previous bucket is complete).
+
+    Primary / 15m-trailing logic should not run before this time (stops/emergency stay on 1m).
+    """
+    if entry_dt is None:
+        return None
+    e = _as_ist(entry_dt)
+    bk = _bucket_15m(e)
+    return bk + timedelta(minutes=15)
+
+
 def build_15m_from_1m(m1: Sequence[dict]) -> List[dict]:
     """
     Build completed 15-minute candles from sorted 1-minute candles.
@@ -208,13 +228,19 @@ def evaluate_exit_with_profit_protection(
     entry_time: str,
     lot_size: int,
     m1_post_entry: Sequence[dict],
+    *,
+    m1_pre_entry: Optional[Sequence[dict]] = None,
     force_close_at_end: bool = True,
 ) -> Dict[str, Any]:
     """
     Full-position (no partial exits) exit manager:
-    - Primary exit on 15m closes
+    - Primary exit on 15m closes (only after the first 15m bucket close *at or after* entry;
+      e.g. entry at 09:30 IST → first primary window at 09:45 when the 09:30 bucket completes)
     - Emergency + stop checks on each 1m bar
     - Tiered profit protection + dynamic trailing
+
+    ``m1_pre_entry``: same-day 1m candles *before* entry (sorted). Supply from backtests/API so
+    15m buckets align with the full session; post-entry-only series mis-buckets the open.
     """
     sd = str(side or "").strip().upper()
     if sd not in {"LONG", "SHORT"}:
@@ -239,6 +265,10 @@ def evaluate_exit_with_profit_protection(
         hard_stop_loss=float(hard_sl),
         current_active_stop_loss_level=float(hard_sl),
     )
+
+    entry_dt_parsed = _to_dt(str(entry_time))
+    first_15m_close_ist = first_15m_bucket_close_after_entry(entry_dt_parsed)
+    pre1 = sorted([c for c in (m1_pre_entry or []) if c.get("timestamp")], key=lambda c: str(c.get("timestamp")))
 
     m15_done: List[dict] = []
     # Only *completed* 15m buckets (bucket_complete=True). The last row from build_15m_from_1m is usually
@@ -275,18 +305,22 @@ def evaluate_exit_with_profit_protection(
             st.trailing_stop_activated = True
             st.trailing_stop_activation_time = ts
 
-        # Rebuild 15m series; primary + trailing VWAP use *completed* 15m closes only.
-        m15_now = build_15m_from_1m(seq1[: i + 1])
+        # Rebuild 15m from session-so-far 1m (pre-entry + post) so buckets match exchange boundaries.
+        combined_1m = pre1 + seq1[: i + 1]
+        m15_now = build_15m_from_1m(combined_1m)
         closed15 = [b for b in m15_now if bool(b.get("bucket_complete"))]
         if len(closed15) > last_closed_15m_count:
             pending_primary_reason = None
             m15_done = closed15
             last_closed_15m_count = len(closed15)
+            # No primary / 15m-trailing until the 15m candle that contains entry has *closed*
+            # (e.g. entry 09:30 → first signal pass at 09:45 when dt1 is the 09:45 bar).
+            allow_15m = first_15m_close_ist is None or (dt1 >= first_15m_close_ist)
             highs15 = [float(x.get("high") or 0.0) for x in m15_done]
             lows15 = [float(x.get("low") or 0.0) for x in m15_done]
             closes15 = [float(x.get("close") or 0.0) for x in m15_done]
             vols15 = [float(x.get("volume") or 0.0) for x in m15_done]
-            if len(closes15) >= 10:
+            if allow_15m and len(closes15) >= 10:
                 # Indicators on closed 15m bars only. atr5_15 = Wilder ATR period 5 on 15m series (not 5-minute chart).
                 vwap15 = float(session_vwap(highs15, lows15, closes15, vols15))
                 ema9_15 = _ema_series_last(closes15, 9)

@@ -370,6 +370,7 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
                     b for b in m1
                     if (str(b.get("timestamp") or "") >= entry_at)
                 ] if entry_at else m1
+                pre_m1 = [b for b in m1 if (str(b.get("timestamp") or "") < entry_at)] if entry_at else []
                 if len(post) < 15:
                     post = m1
                 ex = evaluate_exit_with_profit_protection(
@@ -378,6 +379,7 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
                     entry_time=entry_at or str(post[0].get("timestamp") or ""),
                     lot_size=1,
                     m1_post_entry=post,
+                    m1_pre_entry=pre_m1,
                     force_close_at_end=False,
                 )
                 state = ex.get("state", {}) if isinstance(ex, dict) else {}
