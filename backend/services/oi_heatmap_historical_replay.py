@@ -20,6 +20,7 @@ from backend.services.oi_heatmap import (
     _interpret_signal,
     _persist_snapshot,
     _score_row,
+    finalize_heatmap_rows_for_store,
     load_nse_instruments_json,
     replace_cache_with_rows,
 )
@@ -196,10 +197,7 @@ def compute_historical_heatmap_rows(
             continue
         rows.append(r)
 
-    rows.sort(key=lambda x: abs(int(x.get("oi_chg") or 0)), reverse=True)
-    for i, r in enumerate(rows, start=1):
-        r["rank"] = i
-    return rows
+    return finalize_heatmap_rows_for_store(rows)
 
 
 def apply_historical_replay_to_database(

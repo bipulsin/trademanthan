@@ -5,7 +5,7 @@ Live OI heatmap (Top ~200 NSE stock futures) — Upstox only.
    (https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz).
 2) Filter: NSE_FO + instrument_type FUT + equity underlyings (exclude index / commodity FO).
 3) Liquidity: one near-month future per underlying, then batch market quotes → top N by volume.
-4) Refresh: in-memory cache + optional DB table ``oi_heatmap_latest``; scheduler interval from config.
+4) Refresh: in-memory cache + optional DB table ``oi_heatmap_latest``; persist only rows with non-zero ``score``; scheduler interval from config.
 """
 from __future__ import annotations
 
@@ -193,6 +193,25 @@ def _score_row(oi_chg: int, chg_pct: float) -> float:
     return abs(float(oi_chg)) + abs(chg_pct) * 0.01
 
 
+def _row_has_nonzero_score(row: Dict[str, Any]) -> bool:
+    try:
+        return float(row.get("score") or 0) != 0.0
+    except (TypeError, ValueError):
+        return False
+
+
+def finalize_heatmap_rows_for_store(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Drop rows with score == 0, sort by |oi_chg| descending, assign rank 1..n.
+    Used for live refresh and historical replay so ``oi_heatmap_latest`` has no zero-score rows.
+    """
+    out = [r for r in rows if _row_has_nonzero_score(r)]
+    out.sort(key=lambda r: abs(int(r.get("oi_chg") or 0)), reverse=True)
+    for i, r in enumerate(out, start=1):
+        r["rank"] = i
+    return out
+
+
 def refresh_oi_heatmap_live() -> Dict[str, Any]:
     """
     Fetch batch quotes for universe keys, sort by |oi_change|, update memory cache + DB.
@@ -268,9 +287,14 @@ def refresh_oi_heatmap_live() -> Dict[str, Any]:
             }
         )
 
-    rows.sort(key=lambda r: abs(int(r.get("oi_chg") or 0)), reverse=True)
-    for i, r in enumerate(rows, start=1):
-        r["rank"] = i
+    raw_n = len(rows)
+    rows = finalize_heatmap_rows_for_store(rows)
+    if raw_n != len(rows):
+        logger.info(
+            "oi_heatmap: persisting %s rows (dropped %s zero-score)",
+            len(rows),
+            raw_n - len(rows),
+        )
     _underlying_rank = {str(r.get("underlying_symbol") or "").upper(): int(r["rank"]) for r in rows if r.get("underlying_symbol")}
 
     now_dt = datetime.now(IST)
