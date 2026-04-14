@@ -8,7 +8,7 @@
     <title>Tradentical - AI-Powered Trading Intelligence</title>
     <meta name="description" content="Trading Identical. AI-based Algo platform by Trade With CTO. Harness the power of advanced AI to automate your trading strategies.">
     <link rel="stylesheet" href="styles.css?v=1.7">
-    <link rel="stylesheet" href="landing.css?v=23">
+    <link rel="stylesheet" href="landing.css?v=24">
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
@@ -52,6 +52,9 @@
             </div>
             <div class="hero-content">
                 <div class="hero-text">
+                    <div class="hero-market-closed" id="heroMarketClosed" role="status" aria-live="polite" hidden>
+                        Market is closed today! Just Relax!!
+                    </div>
                     <h1 class="hero-headline" aria-live="polite">
                         <span class="hero-rotating-line" id="heroRotatingLine">
                             <span class="hero-ai-powered">AI-Powered</span><br><span class="hero-algo-trading hero-algo-trading-sm">Trading Intelligence</span>
@@ -160,6 +163,26 @@
             const socials = document.querySelector('.landing-nav .social-icons');
             if (socials) socials.style.display = socials.style.display === 'none' ? 'flex' : 'none';
         }
+
+        (function initMarketHolidayBanner() {
+            var el = document.getElementById('heroMarketClosed');
+            if (!el) return;
+            fetch((window.location.origin || '') + '/scan/market-holiday-status', {
+                cache: 'no-store',
+                credentials: 'same-origin'
+            })
+                .then(function (res) {
+                    return res.ok ? res.json() : null;
+                })
+                .then(function (data) {
+                    if (data && data.is_holiday === true) {
+                        el.hidden = false;
+                    }
+                })
+                .catch(function () {
+                    // Ignore silently; banner stays hidden on fetch errors.
+                });
+        })();
 
         (function initHeroHeadlineRotation() {
             var ROTATE_MS = 5000;

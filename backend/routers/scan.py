@@ -81,6 +81,7 @@ from backend.services.premarket_watchlist_job import (
 )
 from backend.services.dashboard_oi_heatmap import get_dashboard_oi_heatmap_response
 from backend.services.oi_heatmap import get_live_oi_heatmap_json
+from backend.services.market_holiday import is_nse_holiday_ist
 from backend.services import live_trading
 from backend.database import get_db
 from backend.models.trading import IntradayStockOption, MasterStock, HistoricalMarketData
@@ -3718,6 +3719,19 @@ async def get_trading_live():
     """Get current live trading toggle value"""
     return {
         "trading_live": live_trading.get_trading_live_value()
+    }
+
+
+@router.get("/market-holiday-status")
+async def get_market_holiday_status():
+    """Return whether today's IST date exists in holiday table."""
+    import pytz
+
+    ist = pytz.timezone("Asia/Kolkata")
+    now_ist = datetime.now(ist)
+    return {
+        "is_holiday": bool(is_nse_holiday_ist(now_ist)),
+        "date_ist": now_ist.date().isoformat(),
     }
 
 @router.post("/trading-live")
