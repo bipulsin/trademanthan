@@ -251,26 +251,10 @@ body.landing-page {
 .landing-hero .hero-market-closed {
   display: inline-block;
   margin-bottom: 0.85rem;
-  padding: 0.25rem 0.65rem;
   font-size: clamp(1rem, 2.2vw, 1.25rem);
   font-weight: 700;
   color: #facc15;
-  background: rgba(250, 204, 21, 0.08);
-  border: 1px solid rgba(250, 204, 21, 0.35);
-  border-radius: 10px;
   text-shadow: 0 1px 10px rgba(0, 0, 0, 0.5);
-  animation: heroMarketBlink 1s step-end infinite;
-}
-
-@keyframes heroMarketBlink {
-  0%,
-  50% {
-    opacity: 1;
-  }
-  51%,
-  100% {
-    opacity: 0.3;
-  }
 }
 
 .landing-hero .hero-rotating-line {
