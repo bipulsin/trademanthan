@@ -33,6 +33,54 @@ NIFTY50_KEY = "NSE_INDEX|Nifty 50"
 BANKNIFTY_KEY = "NSE_INDEX|Nifty Bank"
 
 
+def _ema_last(series: Sequence[float], span: int) -> Optional[float]:
+    if not series:
+        return None
+    k = 2.0 / (float(span) + 1.0)
+    e = float(series[0])
+    for v in series[1:]:
+        e = float(v) * k + e * (1.0 - k)
+    return float(e)
+
+
+def _supertrend_dir_last_two(
+    highs: Sequence[float],
+    lows: Sequence[float],
+    closes: Sequence[float],
+    period: int = 10,
+    multiplier: float = 3.0,
+) -> Tuple[Optional[int], Optional[int]]:
+    """
+    Returns (current_dir, previous_dir) where:
+    +1 = green/uptrend, -1 = red/downtrend.
+    """
+    n = len(closes)
+    if n < max(20, period + 3):
+        return None, None
+    fub: List[float] = [0.0] * n
+    flb: List[float] = [0.0] * n
+    st: List[float] = [0.0] * n
+    direction: List[int] = [1] * n
+    for i in range(n):
+        atr_i = wilder_atr(highs[: i + 1], lows[: i + 1], closes[: i + 1], period)
+        if atr_i is None:
+            continue
+        hl2 = (float(highs[i]) + float(lows[i])) / 2.0
+        bub = hl2 + float(multiplier) * float(atr_i)
+        blb = hl2 - float(multiplier) * float(atr_i)
+        if i == 0:
+            fub[i], flb[i], st[i], direction[i] = bub, blb, blb, 1
+            continue
+        fub[i] = bub if (bub < fub[i - 1] or float(closes[i - 1]) > fub[i - 1]) else fub[i - 1]
+        flb[i] = blb if (blb > flb[i - 1] or float(closes[i - 1]) < flb[i - 1]) else flb[i - 1]
+        if st[i - 1] == fub[i - 1]:
+            st[i] = fub[i] if float(closes[i]) <= fub[i] else flb[i]
+        else:
+            st[i] = flb[i] if float(closes[i]) >= flb[i] else fub[i]
+        direction[i] = 1 if float(closes[i]) >= st[i] else -1
+    return int(direction[-1]), int(direction[-2])
+
+
 def _sort_candles(candles: Optional[List[dict]]) -> List[dict]:
     if not candles:
         return []
@@ -126,39 +174,66 @@ def should_exit_position(
     md: float,
     rd: float,
     sd: float,
+    entry_price: Optional[float] = None,
 ) -> Tuple[bool, str]:
     """
-    Exit if any: ADX falling, ATR(5)<ATR(14), opposite-side divergence cluster, price vs VWAP adverse.
+    Multi-factor exit confirmation:
+    - Hard exits: VWAP adverse break, supertrend reversal, hard stop-loss.
+    - Soft warnings (ATR contraction/divergence) require confirmation.
     """
-    reasons: List[str] = []
     sd_u = str(side or "").strip().upper()
     lc = float(closes[-1]) if closes else 0.0
+    ll = float(lows[-1]) if lows else lc
+    hh = float(highs[-1]) if highs else lc
     div_sum = float(md) + float(rd) + float(sd)
+    ema9 = _ema_last(closes, 9)
+    st_curr, st_prev = _supertrend_dir_last_two(highs, lows, closes)
 
-    if adx_curr is not None and adx_prev is not None and adx_curr < adx_prev:
-        reasons.append("adx_falling")
-    if atr5 is not None and atr14 is not None and atr14 > 0 and atr5 < atr14:
-        reasons.append("atr_contracting")
+    # HARD EXIT 1: price adverse to VWAP
+    if sd_u == "LONG" and lc < float(vwap):
+        return True, "Exit: VWAP Breakdown"
+    if sd_u == "SHORT" and lc > float(vwap):
+        return True, "Exit: VWAP Breakout Against Short"
+
+    # HARD EXIT 2: supertrend flip
+    if sd_u == "LONG" and st_prev == 1 and st_curr == -1:
+        return True, "Exit: Supertrend Reversal"
+    if sd_u == "SHORT" and st_prev == -1 and st_curr == 1:
+        return True, "Exit: Supertrend Reversal"
+
+    # HARD EXIT 3: hard stop loss hit
+    if entry_price is not None and atr14 is not None and atr14 > 0:
+        stop_dist = 1.2 * float(atr14)
+        if sd_u == "LONG" and ll <= float(entry_price) - stop_dist:
+            return True, "Exit: Hard Stop Loss Hit"
+        if sd_u == "SHORT" and hh >= float(entry_price) + stop_dist:
+            return True, "Exit: Hard Stop Loss Hit"
+
+    atr_contracting = bool(atr5 is not None and atr14 is not None and atr14 > 0 and atr5 < atr14)
 
     if sd_u == "LONG":
-        if div_sum <= -0.5:
-            reasons.append("bearish_divergence")
-        if lc < float(vwap):
-            reasons.append("below_vwap")
+        # SOFT EXIT A: momentum weakening needs VWAP+supertrend confirmation
+        if atr_contracting and lc < float(vwap) and st_curr == -1:
+            return True, "Exit: Momentum Weakening + VWAP Breakdown"
+        # SOFT EXIT B: bearish divergence needs VWAP or EMA9 breach
+        if div_sum <= -0.5 and (lc < float(vwap) or (ema9 is not None and lc < float(ema9))):
+            if lc < float(vwap):
+                return True, "Exit: Bearish Divergence + VWAP Breakdown"
+            return True, "Exit: Bearish Divergence + EMA 9 Breach"
     elif sd_u == "SHORT":
-        if div_sum >= 0.5:
-            reasons.append("bullish_divergence")
-        if lc > float(vwap):
-            reasons.append("above_vwap")
-
-    if not reasons:
-        return False, ""
-    return True, "|".join(reasons)
+        if atr_contracting and lc > float(vwap) and st_curr == 1:
+            return True, "Exit: Momentum Weakening + VWAP Breakout"
+        if div_sum >= 0.5 and (lc > float(vwap) or (ema9 is not None and lc > float(ema9))):
+            if lc > float(vwap):
+                return True, "Exit: Bullish Divergence + VWAP Breakout"
+            return True, "Exit: Bullish Divergence + EMA 9 Breach"
+    return False, ""
 
 
 def exit_evaluation_from_m5_dicts(
     side: str,
     m5_today: List[dict],
+    entry_price: Optional[float] = None,
 ) -> Tuple[bool, str]:
     """Build OHLC series from session 5m bars and run ``should_exit_position``."""
     if len(m5_today) < 15:
@@ -173,7 +248,7 @@ def exit_evaluation_from_m5_dicts(
     adx_c, adx_p = adx_last_two(highs, lows, closes, ADX_LENGTH)
     md, rd, sd = divergence_bundle(highs, lows, closes)
     return should_exit_position(
-        side, highs, lows, closes, vwap, adx_c, adx_p, atr5, atr14, md, rd, sd
+        side, highs, lows, closes, vwap, adx_c, adx_p, atr5, atr14, md, rd, sd, entry_price=entry_price
     )
 
 

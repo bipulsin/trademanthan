@@ -381,7 +381,7 @@ def derive_dynamic_exit_from_smart_future_signal(
         last_dt = parse_dt_ist(last.get("timestamp"))
         if not last_dt or last_dt <= entry_dt:
             continue
-        should_exit, reason = exit_evaluation_from_m5_dicts(side, prefix)
+        should_exit, reason = exit_evaluation_from_m5_dicts(side, prefix, entry_price=entry_price)
         if should_exit:
             px = float(last.get("close") or 0.0)
             if px > 0:
@@ -397,6 +397,8 @@ def humanize_exit_reason(reason: str) -> str:
     """Convert internal exit tags into readable report labels."""
     if not reason:
         return ""
+    if str(reason).strip().startswith("Exit:"):
+        return str(reason).strip()
     parts = [p.strip() for p in str(reason).split("|") if p.strip()]
     mapping = {
         "adx_falling": "Trend strength weakening (ADX falling)",
