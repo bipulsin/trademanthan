@@ -507,6 +507,9 @@ def write_outputs(rows: List[BacktestRow], summary: Dict[str, Any], d: str, t: s
     js_path = Path(f"futures_backtest_summary_{d}.json")
     md_path = Path(f"futures_backtest_report_{d}.md")
     html_path = Path(f"futures_backtest_dashboard_{d}.html")
+    public_backtests_dir = Path("frontend/public/backtests")
+    public_backtests_dir.mkdir(parents=True, exist_ok=True)
+    public_html_path = public_backtests_dir / "futures_backtest.html"
 
     with csv_path.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=list(asdict(rows[0]).keys()))
@@ -538,7 +541,84 @@ def write_outputs(rows: List[BacktestRow], summary: Dict[str, Any], d: str, t: s
 <p>CSV: {csv_path.name}</p></body></html>""",
         encoding="utf-8",
     )
+
+    # Public overwrite report: always latest run at fixed URL/path.
+    top_n = int(summary.get("top_n") or 5)
+    top_rows = [r for r in rows if r.final_decision in {"ENTER_LONG", "ENTER_SHORT"}][:top_n]
+    rows_html = "".join(
+        "<tr>"
+        f"<td>{r.futures_symbol}</td>"
+        f"<td>{r.cms_score:.4f}</td>"
+        f"<td>{r.oi_signal}</td>"
+        f"<td>{r.combo_score:.4f}</td>"
+        f"<td>{r.final_decision}</td>"
+        f"<td>{r.entry_price_1330 if r.entry_price_1330 is not None else '—'}</td>"
+        f"<td>{r.exit_price_1515 if r.exit_price_1515 is not None else '—'}</td>"
+        f"<td>{r.pnl if r.pnl is not None else '—'}</td>"
+        f"<td>{r.roi_pct if r.roi_pct is not None else '—'}</td>"
+        f"<td>{r.hit}</td>"
+        "</tr>"
+        for r in top_rows
+    )
+    public_html = f"""<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Futures Backtest Report</title>
+  <style>
+    body {{ font-family: Arial, sans-serif; margin: 20px; color: #0f172a; }}
+    h1 {{ margin-bottom: 8px; }}
+    .sub {{ color: #475569; margin-bottom: 16px; }}
+    .summary {{ background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px 14px; margin-bottom:16px; }}
+    .summary-grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:8px 14px; }}
+    .k {{ color:#64748b; font-size:12px; text-transform:uppercase; letter-spacing:.04em; }}
+    .v {{ font-weight:700; font-size:15px; }}
+    table {{ width:100%; border-collapse: collapse; margin-top: 12px; }}
+    th, td {{ border:1px solid #cbd5e1; padding:8px; text-align:left; font-size:13px; }}
+    th {{ background:#f1f5f9; }}
+    .muted {{ color:#64748b; font-size:12px; margin-top:10px; }}
+  </style>
+</head>
+<body>
+  <h1>Futures Backtest Report</h1>
+  <div class="sub">Date {summary.get('date')} | Signal {summary.get('signal_time')} | Baseline {summary.get('baseline_time')} | Exit {summary.get('exit_time')}</div>
+  <div class="summary">
+    <div class="summary-grid">
+      <div><div class="k">Symbols from arbitrage_master</div><div class="v">{summary.get('symbols_from_arbitrage_master')}</div></div>
+      <div><div class="k">Contracts resolved</div><div class="v">{summary.get('contracts_resolved')}</div></div>
+      <div><div class="k">Trade count</div><div class="v">{summary.get('trade_count')}</div></div>
+      <div><div class="k">Wins</div><div class="v">{summary.get('wins')}</div></div>
+      <div><div class="k">Win rate %</div><div class="v">{summary.get('win_rate_pct')}</div></div>
+      <div><div class="k">Total PnL</div><div class="v">{summary.get('total_pnl')}</div></div>
+      <div><div class="k">Avg ROI %</div><div class="v">{summary.get('avg_roi_pct')}</div></div>
+      <div><div class="k">Selection</div><div class="v">Top {top_n} (LONG/SHORT BUILDUP)</div></div>
+    </div>
+  </div>
+  <h3>Top {top_n} Futures</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Futures Symbol</th>
+        <th>CMS</th>
+        <th>OI Signal</th>
+        <th>CMS+OI score</th>
+        <th>Decision</th>
+        <th>Entry price</th>
+        <th>Exit price</th>
+        <th>PnL</th>
+        <th>ROI%</th>
+        <th>Hit (Win/Loss)</th>
+      </tr>
+    </thead>
+    <tbody>{rows_html if rows_html else '<tr><td colspan="10">No selected trades.</td></tr>'}</tbody>
+  </table>
+  <div class="muted">This file is overwritten on every futures_backtester execution.</div>
+</body>
+</html>"""
+    public_html_path.write_text(public_html, encoding="utf-8")
     print(f"Wrote: {csv_path}, {js_path}, {md_path}, {html_path}")
+    print(f"Wrote public report: {public_html_path}")
 
 
 def main() -> None:
