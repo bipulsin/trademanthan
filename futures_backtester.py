@@ -554,8 +554,8 @@ def write_outputs(rows: List[BacktestRow], summary: Dict[str, Any], d: str, t: s
         f"<td>{r.oi_signal}</td>"
         f"<td>{r.combo_score:.4f}</td>"
         f"<td>{r.final_decision}</td>"
-        f"<td>{(str(r.entry_price_1330) + ' @ ' + entry_time) if r.entry_price_1330 is not None else '—'}</td>"
-        f"<td>{(str(r.exit_price_1515) + ' @ ' + exit_time) if r.exit_price_1515 is not None else '—'}</td>"
+        f"<td>{r.entry_price_1330 if r.entry_price_1330 is not None else '—'}</td>"
+        f"<td>{r.exit_price_1515 if r.exit_price_1515 is not None else '—'}</td>"
         f"<td>{r.pnl if r.pnl is not None else '—'}</td>"
         f"<td>{r.roi_pct if r.roi_pct is not None else '—'}</td>"
         f"<td>{r.hit}</td>"
@@ -606,8 +606,8 @@ def write_outputs(rows: List[BacktestRow], summary: Dict[str, Any], d: str, t: s
         <th>OI Signal</th>
         <th>CMS+OI score</th>
         <th>Decision</th>
-        <th>Entry price</th>
-        <th>Exit price</th>
+        <th>Entry price ({entry_time})</th>
+        <th>Exit price ({exit_time})</th>
         <th>PnL</th>
         <th>ROI%</th>
         <th>Hit (Win/Loss)</th>
