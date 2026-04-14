@@ -606,6 +606,7 @@ def _run_startup_schema_migrations(db_engine):
                                 oi_chg BIGINT,
                                 oi_chg_pct DOUBLE PRECISION,
                                 oi_signal TEXT,
+                                prev_oi_signal TEXT,
                                 volume BIGINT,
                                 score DOUBLE PRECISION,
                                 updated_at TIMESTAMPTZ NOT NULL
@@ -619,6 +620,12 @@ def _run_startup_schema_migrations(db_engine):
                         )
                     )
                     print("Applied migration: created oi_heatmap_latest (PostgreSQL)")
+            _insp_oi = inspect(db_engine)
+            if "oi_heatmap_latest" in _insp_oi.get_table_names():
+                _oi_cols = {c["name"] for c in _insp_oi.get_columns("oi_heatmap_latest")}
+                if "prev_oi_signal" not in _oi_cols and db_engine.dialect.name == "postgresql":
+                    conn.execute(text("ALTER TABLE oi_heatmap_latest ADD COLUMN prev_oi_signal TEXT"))
+                    print("Applied migration: added oi_heatmap_latest.prev_oi_signal")
 
             # NSE (India) closed dates — IST calendar; scheduled market-data jobs skip these days.
             _insp_h = inspect(db_engine)

@@ -155,13 +155,17 @@
         const head =
             "<thead><tr>" +
             "<th>#</th><th>Symbol</th><th>LTP</th><th>Chg%</th><th>OI</th><th>OI Chg</th>" +
-            "<th>OI Signal</th><th>Volume</th><th>Score</th>" +
+            "<th>OI Signal</th><th>Prev OI Signal</th><th>Volume</th><th>Score</th>" +
             "</tr></thead>";
         const body = rows
             .map(function (r) {
                 const sig = r.oi_signal || "";
                 const hs = heatStyle(sig);
                 const sigClass = /^[A-Z_]+$/.test(sig) ? sig.replace(/[^A-Z_]/g, "_") : "NEUTRAL";
+                const prevSig = r.prev_oi_signal || "";
+                const prevSigClass = /^[A-Z_]+$/.test(prevSig)
+                    ? prevSig.replace(/[^A-Z_]/g, "_")
+                    : "NEUTRAL";
                 const sym = r.underlying_symbol || r.trading_symbol || "";
                 return (
                     "<tr>" +
@@ -189,6 +193,11 @@
                     sigClass +
                     '">' +
                     escapeHtml(signalLabel(sig)) +
+                    "</span></td>" +
+                    "<td><span class=\"oi-heatmap-signal oi-heatmap-signal--" +
+                    prevSigClass +
+                    "\">" +
+                    escapeHtml(signalLabel(prevSig || "—")) +
                     "</span></td>" +
                     "<td>" +
                     fmtInt(r.volume) +

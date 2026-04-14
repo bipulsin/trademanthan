@@ -355,6 +355,38 @@ def _persist_snapshot(rows: List[Dict[str, Any]], updated_at: datetime) -> None:
     db = None
     try:
         db = SessionLocal()
+        prev_by_underlying: Dict[str, str] = {}
+        prev_by_instrument: Dict[str, str] = {}
+        try:
+            old = db.execute(
+                text("SELECT instrument_key, underlying_symbol, oi_signal FROM oi_heatmap_latest")
+            ).fetchall()
+            for ik, und, sig in old:
+                s = str(sig or "").strip()
+                if not s:
+                    continue
+                uk = str(und or "").strip().upper()
+                ikk = str(ik or "").strip()
+                if uk:
+                    prev_by_underlying[uk] = s
+                if ikk:
+                    prev_by_instrument[ikk] = s
+        except Exception:
+            # Table may be absent during first boot/migration; insert path below remains safe.
+            pass
+
+        for r in rows:
+            if r.get("prev_oi_signal"):
+                continue
+            uk = str(r.get("underlying_symbol") or "").strip().upper()
+            ik = str(r.get("instrument_key") or "").strip()
+            prev_sig = None
+            if uk:
+                prev_sig = prev_by_underlying.get(uk)
+            if not prev_sig and ik:
+                prev_sig = prev_by_instrument.get(ik)
+            r["prev_oi_signal"] = prev_sig
+
         db.execute(text("DELETE FROM oi_heatmap_latest"))
         for r in rows:
             db.execute(
@@ -362,10 +394,10 @@ def _persist_snapshot(rows: List[Dict[str, Any]], updated_at: datetime) -> None:
                     """
                     INSERT INTO oi_heatmap_latest (
                         rank, instrument_key, underlying_symbol, trading_symbol, expiry,
-                        ltp, chg_pct, oi, oi_chg, oi_chg_pct, oi_signal, volume, score, updated_at
+                        ltp, chg_pct, oi, oi_chg, oi_chg_pct, oi_signal, prev_oi_signal, volume, score, updated_at
                     ) VALUES (
                         :rank, :instrument_key, :underlying_symbol, :trading_symbol, :expiry,
-                        :ltp, :chg_pct, :oi, :oi_chg, :oi_chg_pct, :oi_signal, :volume, :score, :updated_at
+                        :ltp, :chg_pct, :oi, :oi_chg, :oi_chg_pct, :oi_signal, :prev_oi_signal, :volume, :score, :updated_at
                     )
                     """
                 ),
@@ -381,6 +413,7 @@ def _persist_snapshot(rows: List[Dict[str, Any]], updated_at: datetime) -> None:
                     "oi_chg": int(r["oi_chg"]),
                     "oi_chg_pct": float(r["oi_chg_pct"]),
                     "oi_signal": r.get("oi_signal"),
+                    "prev_oi_signal": r.get("prev_oi_signal"),
                     "volume": int(r.get("volume") or 0),
                     "score": float(r.get("score") or 0),
                     "updated_at": updated_at,
@@ -406,7 +439,7 @@ def load_oi_heatmap_snapshot_from_db() -> Tuple[List[Dict[str, Any]], Optional[s
             text(
                 """
                 SELECT rank, instrument_key, underlying_symbol, trading_symbol, expiry,
-                       ltp, chg_pct, oi, oi_chg, oi_chg_pct, oi_signal, volume, score, updated_at
+                       ltp, chg_pct, oi, oi_chg, oi_chg_pct, oi_signal, prev_oi_signal, volume, score, updated_at
                 FROM oi_heatmap_latest
                 ORDER BY rank ASC
                 """
