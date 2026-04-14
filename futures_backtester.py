@@ -545,6 +545,8 @@ def write_outputs(rows: List[BacktestRow], summary: Dict[str, Any], d: str, t: s
     # Public overwrite report: always latest run at fixed URL/path.
     top_n = int(summary.get("top_n") or 5)
     top_rows = [r for r in rows if r.final_decision in {"ENTER_LONG", "ENTER_SHORT"}][:top_n]
+    entry_time = str(summary.get("signal_time") or "")
+    exit_time = str(summary.get("exit_time") or "15:15:00")
     rows_html = "".join(
         "<tr>"
         f"<td>{r.futures_symbol}</td>"
@@ -552,8 +554,8 @@ def write_outputs(rows: List[BacktestRow], summary: Dict[str, Any], d: str, t: s
         f"<td>{r.oi_signal}</td>"
         f"<td>{r.combo_score:.4f}</td>"
         f"<td>{r.final_decision}</td>"
-        f"<td>{r.entry_price_1330 if r.entry_price_1330 is not None else '—'}</td>"
-        f"<td>{r.exit_price_1515 if r.exit_price_1515 is not None else '—'}</td>"
+        f"<td>{(str(r.entry_price_1330) + ' @ ' + entry_time) if r.entry_price_1330 is not None else '—'}</td>"
+        f"<td>{(str(r.exit_price_1515) + ' @ ' + exit_time) if r.exit_price_1515 is not None else '—'}</td>"
         f"<td>{r.pnl if r.pnl is not None else '—'}</td>"
         f"<td>{r.roi_pct if r.roi_pct is not None else '—'}</td>"
         f"<td>{r.hit}</td>"
