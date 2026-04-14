@@ -7,6 +7,8 @@
     const POLL_MS = 60 * 1000;
     /** Rows returned by API are sorted; only this many are rendered in the table. */
     const DISPLAY_TOP_N = 10;
+    /** Show "(live)" only if scan is same IST calendar day as now and ≤30 minutes old. */
+    const LIVE_FRESH_WINDOW_MS = 30 * 60 * 1000;
     let timer = null;
     let firstLoad = true;
 
@@ -44,6 +46,64 @@
         } catch (e) {
             return "—";
         }
+    }
+
+    function sameCalendarDayIST(a, b) {
+        var fmt = new Intl.DateTimeFormat("en-CA", {
+            timeZone: "Asia/Kolkata",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+        });
+        return fmt.format(a) === fmt.format(b);
+    }
+
+    /** True when scan time is on today's IST date and not older than 30 minutes (and not in the future). */
+    function isOiHeatmapConsideredLive(updatedIso) {
+        if (!updatedIso) return false;
+        var scan = new Date(updatedIso);
+        if (Number.isNaN(scan.getTime())) return false;
+        var now = new Date();
+        if (scan > now) return false;
+        if (!sameCalendarDayIST(scan, now)) return false;
+        return now - scan <= LIVE_FRESH_WINDOW_MS;
+    }
+
+    function updateOiHeatmapHeader(data) {
+        var modeEl = document.getElementById("oiHeatmapHeaderMode");
+        var scanEl = document.getElementById("oiHeatmapHeaderScan");
+        var sepEl = document.getElementById("oiHeatmapScanSep");
+        if (!modeEl || !scanEl) return;
+        var rows = (data && data.rows) || [];
+        var iso = data && data.updated_at;
+        if (!iso) {
+            modeEl.textContent = "(snapshot)";
+            modeEl.classList.add("oi-heatmap-mode--snapshot");
+            scanEl.textContent = "";
+            if (sepEl) sepEl.style.display = "none";
+            return;
+        }
+        scanEl.textContent = fmtTime(iso) + " IST";
+        if (sepEl) sepEl.style.display = "inline";
+        var live = rows.length > 0 && isOiHeatmapConsideredLive(iso);
+        modeEl.textContent = live ? "(live)" : "(snapshot)";
+        if (live) {
+            modeEl.classList.remove("oi-heatmap-mode--snapshot");
+        } else {
+            modeEl.classList.add("oi-heatmap-mode--snapshot");
+        }
+    }
+
+    function resetOiHeatmapHeader() {
+        var modeEl = document.getElementById("oiHeatmapHeaderMode");
+        var scanEl = document.getElementById("oiHeatmapHeaderScan");
+        var sepEl = document.getElementById("oiHeatmapScanSep");
+        if (modeEl) {
+            modeEl.textContent = "(snapshot)";
+            modeEl.classList.add("oi-heatmap-mode--snapshot");
+        }
+        if (scanEl) scanEl.textContent = "—";
+        if (sepEl) sepEl.style.display = "none";
     }
 
     function signalLabel(sig) {
@@ -206,6 +266,7 @@
             const displayRows = allRows.slice(0, DISPLAY_TOP_N);
             const inner = renderTable(displayRows, allRows.length);
             host.innerHTML = inner;
+            updateOiHeatmapHeader(data);
             if (msg) {
                 const origin = data.data_origin || "";
                 let originNote = "";
@@ -216,7 +277,7 @@
                         originNote =
                             " · Last saved snapshot (will update when live Upstox refresh runs)";
                     } else if (origin === "live") {
-                        originNote = " · Live Upstox";
+                        originNote = " · Upstox source";
                     }
                 }
                 const err = data.error ? " · last error: " + data.error : "";
@@ -239,10 +300,9 @@
                         : (data.message || "No rows.") + err;
                 msg.style.display = "block";
             }
-            if (updated && data.updated_at) {
-                updated.textContent = "Updated " + fmtTime(data.updated_at) + " IST";
-            } else if (updated) {
-                updated.textContent = "—";
+            if (updated) {
+                updated.textContent = "";
+                updated.style.display = "none";
             }
         } catch (e) {
             var _abort =
@@ -262,7 +322,12 @@
                 msg.textContent = "";
                 msg.style.display = "none";
             }
-            if (updated) updated.textContent = "—";
+            resetOiHeatmapHeader();
+            var upd = document.getElementById("oiHeatmapUpdated");
+            if (upd) {
+                upd.textContent = "";
+                upd.style.display = "none";
+            }
         }
     }
 
