@@ -51,9 +51,10 @@ class BacktestRow:
     price_change_0915_to_1330_pct: float
     oi_change_0915_to_1330_pct: float
     oi_signal: str
+    combo_score: float
     final_decision: str
     entry_price_1330: Optional[float]
-    exit_price_1530: Optional[float]
+    exit_price_1515: Optional[float]
     pnl: Optional[float]
     roi_pct: Optional[float]
     hit: str
@@ -278,6 +279,21 @@ def final_decision(cms_dir: str, oi_sig: str) -> str:
     return "NO_TRADE"
 
 
+def final_decision_buildup_only(oi_sig: str) -> str:
+    """Trade direction strictly from OI buildup only."""
+    if oi_sig == "LONG_BUILDUP":
+        return "ENTER_LONG"
+    if oi_sig == "SHORT_BUILDUP":
+        return "ENTER_SHORT"
+    return "NO_TRADE"
+
+
+def combo_score_cms_oi(cms_score: float, oi_change_pct: float) -> float:
+    """Combined ranking score for top-N selection."""
+    oi_component = min(abs(float(oi_change_pct or 0.0)) / 20.0, 1.0)
+    return 0.7 * float(cms_score or 0.0) + 0.3 * oi_component
+
+
 def atr14(candles: Sequence[dict]) -> float:
     if len(candles) < 2:
         return 0.0
@@ -330,11 +346,22 @@ def evaluate_outcome(
     return round(pnl, 2), round(roi, 4), hit
 
 
+def evaluate_outcome_fixed_exit(decision: str, entry: float, exit_close: float, lot: int) -> Tuple[Optional[float], Optional[float], str]:
+    """Fixed-time exit evaluation (no SL/TP path checks)."""
+    if decision not in {"ENTER_LONG", "ENTER_SHORT"}:
+        return None, None, "NA"
+    is_long = decision == "ENTER_LONG"
+    pnl = (exit_close - entry) * lot if is_long else (entry - exit_close) * lot
+    roi = ((exit_close - entry) / entry * 100.0) if is_long else ((entry - exit_close) / entry * 100.0)
+    hit = "win" if pnl > 0 else ("loss" if pnl < 0 else "flat")
+    return round(pnl, 2), round(roi, 4), hit
+
+
 def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
     sd = date.fromisoformat(args.date)
     th, tm, _ = [int(x) for x in args.time.split(":")]
     bh, bm, _ = [int(x) for x in args.baseline.split(":")]
-    eh, em = 15, 30
+    eh, em = 15, 15
 
     symbols = load_arbitrage_symbols()
     contracts = front_month_resolver(sd, symbols)
@@ -372,7 +399,8 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
             dec = final_decision(cms_dir, oi_sig)
             atr = atr14(upto_signal)
             entry, exit_close = p1, float(c1530["close"] or p1)
-            pnl, roi, hit = evaluate_outcome(dec, entry, exit_close, ci.lot_size, post, atr)
+            combo = combo_score_cms_oi(cms_score, oi_pct)
+            pnl, roi, hit = evaluate_outcome_fixed_exit(dec, entry, exit_close, ci.lot_size)
 
             rows.append(
                 BacktestRow(
@@ -385,9 +413,10 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
                     price_change_0915_to_1330_pct=round(price_pct, 4),
                     oi_change_0915_to_1330_pct=round(oi_pct, 4),
                     oi_signal=oi_sig,
+                    combo_score=round(combo, 6),
                     final_decision=dec,
                     entry_price_1330=round(entry, 4) if dec.startswith("ENTER") else None,
-                    exit_price_1530=round(exit_close, 4) if dec.startswith("ENTER") else None,
+                    exit_price_1515=round(exit_close, 4) if dec.startswith("ENTER") else None,
                     pnl=pnl,
                     roi_pct=roi,
                     hit=hit,
@@ -412,9 +441,10 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
                     price_change_0915_to_1330_pct=0.0,
                     oi_change_0915_to_1330_pct=0.0,
                     oi_signal="NA",
+                    combo_score=0.0,
                     final_decision="NO_TRADE",
                     entry_price_1330=None,
-                    exit_price_1530=None,
+                    exit_price_1515=None,
                     pnl=None,
                     roi_pct=None,
                     hit="NA",
@@ -422,6 +452,31 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
                     error=str(e),
                 )
             )
+
+    for r in rows:
+        r.final_decision = final_decision_buildup_only(r.oi_signal)
+        if r.final_decision not in {"ENTER_LONG", "ENTER_SHORT"}:
+            r.entry_price_1330 = None
+            r.exit_price_1515 = None
+            r.pnl = None
+            r.roi_pct = None
+            r.hit = "NA"
+
+    candidates = [
+        r for r in rows
+        if r.oi_signal in {"LONG_BUILDUP", "SHORT_BUILDUP"} and r.final_decision in {"ENTER_LONG", "ENTER_SHORT"}
+    ]
+    candidates.sort(key=lambda r: float(r.combo_score or 0.0), reverse=True)
+    selected_keys = {r.symbol for r in candidates[: int(getattr(args, "top_n", 5) or 5)]}
+
+    for r in rows:
+        if r.symbol not in selected_keys:
+            r.final_decision = "NO_TRADE"
+            r.entry_price_1330 = None
+            r.exit_price_1515 = None
+            r.pnl = None
+            r.roi_pct = None
+            r.hit = "NA"
 
     trades = [r for r in rows if r.final_decision in {"ENTER_LONG", "ENTER_SHORT"} and r.pnl is not None]
     wins = [r for r in trades if (r.pnl or 0) > 0]
@@ -432,6 +487,9 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
         "symbols_from_arbitrage_master": len(symbols),
         "contracts_resolved": len(contracts),
         "rows_generated": len(rows),
+        "selection_rule": "Top-N by combo score among LONG_BUILDUP/SHORT_BUILDUP only",
+        "top_n": int(getattr(args, "top_n", 5) or 5),
+        "exit_time": "15:15:00",
         "trade_count": len(trades),
         "wins": len(wins),
         "win_rate_pct": round((len(wins) / len(trades) * 100.0), 2) if trades else 0.0,
@@ -488,6 +546,7 @@ def main() -> None:
     p.add_argument("--date", required=True, help="YYYY-MM-DD")
     p.add_argument("--time", required=True, help="HH:MM:SS")
     p.add_argument("--baseline", required=True, help="HH:MM:SS")
+    p.add_argument("--top-n", type=int, default=5, help="Top N buildup symbols to trade by combo score")
     args = p.parse_args()
     rows, summary = run(args)
     write_outputs(rows, summary, args.date, args.time)
