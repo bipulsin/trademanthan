@@ -56,6 +56,68 @@ _sync_refresh_cooldown_sec: float = 75.0
 _universe_date: Optional[date] = None
 _universe_keys: List[str] = []
 
+# Upstox v2 batch quotes often omit or zero out ``change_in_oi``; without a fallback every row is NEUTRAL.
+# 1) Intraday: delta vs OI from the previous heatmap refresh (same IST session).
+# 2) First tick / after restart: delta vs prior completed daily candle OI (cached per instrument per day).
+_heatmap_oi_cache_ist_day: Optional[date] = None
+_sess_oi_prev_by_instrument: Dict[str, int] = {}
+_prior_day_oi_ref_by_instrument: Dict[str, int] = {}
+
+
+def _reset_oi_delta_caches_if_new_ist_day() -> None:
+    global _heatmap_oi_cache_ist_day
+    d = datetime.now(IST).date()
+    if _heatmap_oi_cache_ist_day == d:
+        return
+    _sess_oi_prev_by_instrument.clear()
+    _prior_day_oi_ref_by_instrument.clear()
+    _heatmap_oi_cache_ist_day = d
+
+
+def _prior_completed_day_oi_from_daily(ux: Any, instrument_key: str) -> Optional[int]:
+    """OI at prior completed daily bar (sorted[-2]); cached per instrument for the current IST day."""
+    if instrument_key in _prior_day_oi_ref_by_instrument:
+        return _prior_day_oi_ref_by_instrument[instrument_key]
+    try:
+        candles = ux.get_historical_candles_by_instrument_key(
+            instrument_key, interval="days/1", days_back=12
+        )
+    except Exception as e:
+        logger.debug("oi_heatmap: daily OI ref for %s: %s", instrument_key, e)
+        return None
+    if not candles or len(candles) < 2:
+        return None
+    sorted_c = sorted(candles, key=lambda c: str(c.get("timestamp") or ""))
+    prev = sorted_c[-2]
+    p_oi = prev.get("oi")
+    if p_oi is None:
+        return None
+    try:
+        p_int = int(float(p_oi))
+    except (TypeError, ValueError):
+        return None
+    _prior_day_oi_ref_by_instrument[instrument_key] = p_int
+    return p_int
+
+
+def _effective_oi_change(
+    ux: Any,
+    instrument_key: str,
+    raw_change_in_oi: int,
+    current_oi: int,
+) -> int:
+    if raw_change_in_oi != 0:
+        return int(raw_change_in_oi)
+    if current_oi <= 0:
+        return 0
+    prev_sess = _sess_oi_prev_by_instrument.get(instrument_key)
+    if prev_sess is not None:
+        return int(current_oi) - int(prev_sess)
+    ref = _prior_completed_day_oi_from_daily(ux, instrument_key)
+    if ref is not None:
+        return int(current_oi) - ref
+    return 0
+
 
 def ist_use_today_only_db_snapshot(now: Optional[datetime] = None) -> bool:
     """
@@ -445,6 +507,8 @@ def refresh_oi_heatmap_live() -> Dict[str, Any]:
         part = ux.get_market_quote_snapshots_batch(batch, max_per_request=len(batch))
         merged.update(part)
 
+    _reset_oi_delta_caches_if_new_ist_day()
+
     # Reload instrument meta for underlying / symbol labels
     raw = load_nse_instruments_json()
     ik_meta = {((r.get("instrument_key") or "").strip()): r for r in raw if isinstance(r, dict)}
@@ -455,7 +519,8 @@ def refresh_oi_heatmap_live() -> Dict[str, Any]:
         lp = float(s.get("last_price") or 0)
         vol = float(s.get("volume") or 0)
         oi = int(s.get("oi") or 0)
-        oi_chg = int(s.get("change_in_oi") or 0)
+        raw_oi_chg = int(s.get("change_in_oi") or 0)
+        oi_chg = _effective_oi_change(ux, ik, raw_oi_chg, oi)
         net_chg = float(s.get("net_change") or 0)
         ohlc = s.get("ohlc") if isinstance(s.get("ohlc"), dict) else {}
         open_ = float(ohlc.get("open") or 0)
@@ -489,6 +554,10 @@ def refresh_oi_heatmap_live() -> Dict[str, Any]:
                 "score": round(_score_row(oi_chg, chg_pct), 4),
             }
         )
+
+    for _ik in keys:
+        _s = merged.get(_ik) or {}
+        _sess_oi_prev_by_instrument[_ik] = int(_s.get("oi") or 0)
 
     raw_n = len(rows)
     rows = finalize_heatmap_rows_for_store(rows)
