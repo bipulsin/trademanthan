@@ -257,6 +257,11 @@ body.landing-page {
   text-shadow: 0 1px 10px rgba(0, 0, 0, 0.5);
 }
 
+/* [hidden] alone is overridden by .hero-market-closed { display: inline-block } — must win when closed */
+.landing-hero .hero-market-closed[hidden] {
+  display: none !important;
+}
+
 .landing-hero .hero-rotating-line {
   display: inline-block;
   width: 100%;
