@@ -2,7 +2,8 @@
 """
 Fetch 5-minute historical candles from Upstox V3 for a given calendar date.
 
-Uses the same path as the app: UpstoxService.get_historical_candles_by_instrument_key.
+Uses UpstoxService.get_historical_candles_by_instrument_key (5m is built from V2 ``1minute``
+when UPSTOX_HISTORICAL_CANDLE_USE_V2 is enabled, same as production).
 
 Examples (from repo root):
 

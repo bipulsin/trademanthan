@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     UPSTOX_API_KEY: str = os.getenv("UPSTOX_API_KEY", "dd1d3bcc-e1a4-4eed-be7c-1833d9301738")
     UPSTOX_API_SECRET: str = os.getenv("UPSTOX_API_SECRET", "8lvpi8fb1f")
     UPSTOX_REDIRECT_URI: str = os.getenv("UPSTOX_REDIRECT_URI", "https://tradewithcto.com/scan/upstox/callback")
+    # Historical OHLC: V2 API is more reliable for many instruments; V3 used as fallback for unsupported intervals (e.g. hours/1).
+    UPSTOX_HISTORICAL_CANDLE_USE_V2: bool = os.getenv("UPSTOX_HISTORICAL_CANDLE_USE_V2", "true").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
 
     # CAR GPT Configuration
     CAR_NUMBER_OF_WEEKS: int = int(os.getenv("CAR_NUMBER_OF_WEEKS", "52"))

@@ -6,6 +6,7 @@ import logging
 import time
 from datetime import date, datetime, timedelta
 from typing import Dict, Optional, List, Any, Tuple
+from urllib.parse import quote
 import pytz
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,125 @@ def _upstox_v3_max_calendar_span_days(interval: str) -> Optional[int]:
     if unit == "hours":
         return 92
     return None
+
+
+# Upstox V2 historical candle base (interval names: 1minute, 30minute, day, week, month)
+UPSTOX_V2_HISTORICAL_BASE = "https://api.upstox.com/v2"
+
+
+def _candles_rows_to_structured(candles: List[Any]) -> List[Dict[str, Any]]:
+    """Convert Upstox historical `data.candles` rows to dict records (V2/V3 same shape)."""
+    structured: List[Dict[str, Any]] = []
+    for candle in candles or []:
+        if len(candle) >= 6:
+            rec = {
+                "timestamp": candle[0],
+                "open": float(candle[1]),
+                "high": float(candle[2]),
+                "low": float(candle[3]),
+                "close": float(candle[4]),
+                "volume": float(candle[5]),
+            }
+            if len(candle) >= 7:
+                try:
+                    rec["oi"] = float(candle[6])
+                except (TypeError, ValueError, IndexError):
+                    pass
+            structured.append(rec)
+    return structured
+
+
+def _parse_ts_to_aware_ist(ts: Any) -> Optional[datetime]:
+    if ts is None:
+        return None
+    ist = pytz.timezone("Asia/Kolkata")
+    if isinstance(ts, (int, float)):
+        try:
+            v = float(ts)
+            if v > 1_000_000_000_000:
+                v /= 1000.0
+            return datetime.fromtimestamp(v, tz=ist)
+        except Exception:
+            return None
+    s = str(ts).strip()
+    if not s:
+        return None
+    if s.isdigit():
+        try:
+            v = float(s)
+            if v > 1_000_000_000_000:
+                v /= 1000.0
+            return datetime.fromtimestamp(v, tz=ist)
+        except Exception:
+            return None
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00").replace(" ", "T"))
+        return dt.astimezone(ist) if dt.tzinfo else ist.localize(dt)
+    except ValueError:
+        pass
+    try:
+        d = datetime.strptime(s[:10], "%Y-%m-%d")
+        return ist.localize(d)
+    except Exception:
+        return None
+
+
+def _aggregate_1m_to_n_minute(candles: List[Dict[str, Any]], n: int) -> List[Dict[str, Any]]:
+    """Build n-minute OHLCV+OI from 1-minute structured candles (IST bucket starts)."""
+    if n <= 1:
+        return list(candles or [])
+    ist = pytz.timezone("Asia/Kolkata")
+    parsed: List[Tuple[datetime, Dict[str, Any]]] = []
+    for c in candles or []:
+        dt = _parse_ts_to_aware_ist(c.get("timestamp"))
+        if not dt:
+            continue
+        if dt.tzinfo is None:
+            dt = ist.localize(dt)
+        else:
+            dt = dt.astimezone(ist)
+        parsed.append((dt, c))
+    parsed.sort(key=lambda x: x[0])
+    buckets: Dict[str, List[Tuple[datetime, Dict[str, Any]]]] = {}
+    for dt, c in parsed:
+        floored_m = (dt.minute // n) * n
+        floored = dt.replace(minute=floored_m, second=0, microsecond=0)
+        key = floored.isoformat()
+        buckets.setdefault(key, []).append((dt, c))
+    out: List[Dict[str, Any]] = []
+    for key in sorted(buckets.keys()):
+        rows = sorted(buckets[key], key=lambda x: x[0])
+        first_c, last_c = rows[0][1], rows[-1][1]
+        highs = [float(x[1].get("high") or 0) for x in rows]
+        lows = [float(x[1].get("low") or 0) for x in rows]
+        vols = [float(x[1].get("volume") or 0) for x in rows]
+        rec: Dict[str, Any] = {
+            "timestamp": key,
+            "open": float(first_c.get("open") or 0),
+            "high": max(highs) if highs else 0.0,
+            "low": min(lows) if lows else 0.0,
+            "close": float(last_c.get("close") or 0),
+            "volume": sum(vols),
+        }
+        oi_last = last_c.get("oi")
+        if oi_last is not None:
+            try:
+                rec["oi"] = float(oi_last)
+            except (TypeError, ValueError):
+                pass
+        out.append(rec)
+    return out
+
+
+def _v3_interval_to_v2_token(interval: str) -> Optional[str]:
+    """Map V3-style interval to V2 path token; None means use V3 API."""
+    iv = (interval or "").strip().lower()
+    return {
+        "minutes/1": "1minute",
+        "days/1": "day",
+        "months/1": "month",
+        "weeks/1": "week",
+    }.get(iv)
 
 
 # Known NSE equity/derivative holidays (fallback when API omits or returns wrong format).
@@ -1170,6 +1290,53 @@ class UpstoxService:
             logger.error(f"Error getting option VWAP: {str(e)}")
             return None
     
+    def _fetch_historical_v2_candles(
+        self,
+        instrument_key: str,
+        v2_interval: str,
+        to_date: str,
+        from_date: str,
+    ) -> Optional[List[Dict]]:
+        """
+        GET https://api.upstox.com/v2/historical-candle/{instrument_key}/{interval}/{to_date}/{from_date}
+        Instrument key is URL-encoded (e.g. NSE_FO%7C12345).
+        """
+        key_enc = quote(instrument_key, safe="")
+        url = f"{UPSTOX_V2_HISTORICAL_BASE}/historical-candle/{key_enc}/{v2_interval}/{to_date}/{from_date}"
+        logger.info(
+            "📊 V2 historical-candle %s for %s (%s .. %s)",
+            v2_interval,
+            instrument_key,
+            from_date,
+            to_date,
+        )
+        data = self.make_api_request(url, method="GET", timeout=15, max_retries=2)
+        if data and data.get("status") == "success" and "data" in data:
+            raw = data["data"].get("candles", [])
+            structured = _candles_rows_to_structured(raw)
+            logger.info("✅ V2 fetched %s candles for %s", len(structured), instrument_key)
+            return structured
+        logger.warning("⚠️ V2 no candle data for %s", instrument_key)
+        return None
+
+    def _fetch_historical_v3_candles(
+        self,
+        instrument_key: str,
+        interval: str,
+        to_date: str,
+        from_date: str,
+    ) -> Optional[List[Dict]]:
+        url = f"{self.base_url}/historical-candle/{instrument_key}/{interval}/{to_date}/{from_date}"
+        logger.info(f"📊 V3 Fetching {interval} candles for {instrument_key} ({from_date} to {to_date})")
+        data = self.make_api_request(url, method="GET", timeout=15, max_retries=2)
+        if data and data.get("status") == "success" and "data" in data:
+            raw = data["data"].get("candles", [])
+            structured = _candles_rows_to_structured(raw)
+            logger.info(f"✅ V3 Fetched {len(structured)} candles for {instrument_key}")
+            return structured
+        logger.warning(f"⚠️ V3 No candle data for {instrument_key}")
+        return None
+
     def get_historical_candles_by_instrument_key(
         self,
         instrument_key: str,
@@ -1195,8 +1362,11 @@ class UpstoxService:
             List of candle data or None
         """
         try:
+            from backend.config import settings
+
+            use_v2 = getattr(settings, "UPSTOX_HISTORICAL_CANDLE_USE_V2", True)
             # Calculate date range (Upstox path: .../{to_date}/{from_date})
-            ist = pytz.timezone('Asia/Kolkata')
+            ist = pytz.timezone("Asia/Kolkata")
             if range_end_date is not None:
                 end_d = range_end_date
             else:
@@ -1205,7 +1375,7 @@ class UpstoxService:
             span_cap = _upstox_v3_max_calendar_span_days(interval)
             if span_cap is not None and eff_days > span_cap:
                 logger.info(
-                    "Clamping historical candle days_back %s -> %s for interval %s (Upstox V3 limit)",
+                    "Clamping historical candle days_back %s -> %s for interval %s (Upstox limit)",
                     eff_days,
                     span_cap,
                     interval,
@@ -1214,43 +1384,26 @@ class UpstoxService:
             start_d = end_d - timedelta(days=eff_days)
             to_date = end_d.strftime("%Y-%m-%d")
             from_date = start_d.strftime("%Y-%m-%d")
-            
-            # Upstox V3 API endpoint
-            url = f"{self.base_url}/historical-candle/{instrument_key}/{interval}/{to_date}/{from_date}"
-            
-            logger.info(f"📊 Fetching {interval} candles for {instrument_key} ({from_date} to {to_date})")
-            
-            # Use improved API request with retry and token refresh
-            data = self.make_api_request(url, method="GET", timeout=15, max_retries=2)
-            
-            if data and data.get('status') == 'success' and 'data' in data:
-                candles = data['data'].get('candles', [])
-                
-                # Convert to structured format
-                structured_candles = []
-                for candle in candles:
-                    if len(candle) >= 6:
-                        rec = {
-                            'timestamp': candle[0],
-                            'open': float(candle[1]),
-                            'high': float(candle[2]),
-                            'low': float(candle[3]),
-                            'close': float(candle[4]),
-                            'volume': float(candle[5]),
-                        }
-                        if len(candle) >= 7:
-                            try:
-                                rec["oi"] = float(candle[6])
-                            except (TypeError, ValueError, IndexError):
-                                pass
-                        structured_candles.append(rec)
-                
-                logger.info(f"✅ Fetched {len(structured_candles)} candles for {instrument_key}")
-                return structured_candles
-            else:
-                logger.warning(f"⚠️ No candle data for {instrument_key}")
-                return None
-                
+
+            iv = (interval or "").strip().lower()
+
+            if use_v2:
+                if iv == "minutes/5":
+                    one = self._fetch_historical_v2_candles(instrument_key, "1minute", to_date, from_date)
+                    if one:
+                        return _aggregate_1m_to_n_minute(one, 5)
+                    return None
+                if iv == "minutes/15":
+                    one = self._fetch_historical_v2_candles(instrument_key, "1minute", to_date, from_date)
+                    if one:
+                        return _aggregate_1m_to_n_minute(one, 15)
+                    return None
+                v2_tok = _v3_interval_to_v2_token(interval)
+                if v2_tok:
+                    return self._fetch_historical_v2_candles(instrument_key, v2_tok, to_date, from_date)
+
+            return self._fetch_historical_v3_candles(instrument_key, interval, to_date, from_date)
+
         except Exception as e:
             logger.error(f"❌ Error fetching candles for {instrument_key}: {str(e)}")
             return None
@@ -1292,27 +1445,20 @@ class UpstoxService:
         TradingView Auto pivot on 1D uses previous month's OHLC.
         """
         try:
+            from backend.config import settings
+
             ist = pytz.timezone('Asia/Kolkata')
             end_date = datetime.now(ist)
             start_date = end_date - timedelta(days=months_back * 31)
             to_date = end_date.strftime("%Y-%m-%d")
             from_date = start_date.strftime("%Y-%m-%d")
+            if getattr(settings, "UPSTOX_HISTORICAL_CANDLE_USE_V2", True):
+                return self._fetch_historical_v2_candles(instrument_key, "month", to_date, from_date)
             url = f"{self.base_url}/historical-candle/{instrument_key}/months/1/{to_date}/{from_date}"
             data = self.make_api_request(url, method="GET", timeout=15, max_retries=2)
             if data and data.get('status') == 'success' and 'data' in data:
                 candles = data['data'].get('candles', [])
-                structured = []
-                for candle in candles:
-                    if len(candle) >= 6:
-                        structured.append({
-                            'timestamp': candle[0],
-                            'open': float(candle[1]),
-                            'high': float(candle[2]),
-                            'low': float(candle[3]),
-                            'close': float(candle[4]),
-                            'volume': float(candle[5])
-                        })
-                return structured
+                return _candles_rows_to_structured(candles)
             return None
         except Exception as e:
             logger.error(f"❌ Error fetching monthly candles for {instrument_key}: {str(e)}")
