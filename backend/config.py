@@ -54,7 +54,7 @@ class Settings(BaseSettings):
 
     # Pre-market watchlist schedule (IST, HH:MM)
     PREMKET_ENABLED: bool = os.getenv("PREMKET_ENABLED", "true").lower() in ("1", "true", "yes")
-    PREMKET_RUN_TIME: str = os.getenv("PREMKET_RUN_TIME", "09:14")
+    PREMKET_RUN_TIME: str = os.getenv("PREMKET_RUN_TIME", "09:10")
     PREMKET_TOP_N: int = int(os.getenv("PREMKET_TOP_N", "10"))
     PREMKET_UNIVERSE_LIMIT: int = int(os.getenv("PREMKET_UNIVERSE_LIMIT", "203"))
 

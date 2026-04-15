@@ -3,7 +3,7 @@ Pre-market F&O watchlist: rank top N equities from arbitrage_master using the sa
 ``test_premkt_scanner.py`` (``premarket_scoring``): OBV, gap, 52w range position, prior-session
 momentum — weighted composite 30/25/25/20.
 
-Scheduled weekdays 9:14 IST (configurable); persists to ``premarket_watchlist``.
+Scheduled weekdays 9:10 IST (configurable); persists to ``premarket_watchlist``.
 """
 from __future__ import annotations
 

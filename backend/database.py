@@ -546,7 +546,7 @@ def _run_startup_schema_migrations(db_engine):
                     )
                     print("Applied migration: created backtest_smart_future (PostgreSQL)")
 
-            # Pre-market F&O Top 10 watchlist (OBV + gap + range; job weekdays ~9:15 IST)
+            # Pre-market F&O Top 10 watchlist (OBV + gap + range; job weekdays ~9:10 IST)
             if "premarket_watchlist" not in table_names:
                 if db_engine.dialect.name == "postgresql":
                     conn.execute(
