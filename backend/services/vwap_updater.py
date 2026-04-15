@@ -6,6 +6,7 @@ Updates stock VWAP hourly for all open positions during market hours
 import logging
 import sys
 import os
+import threading
 from datetime import datetime, timedelta
 import time
 from typing import List
@@ -21,6 +22,9 @@ from backend.database import SessionLocal
 from backend.models.trading import IntradayStockOption, HistoricalMarketData
 
 logger = logging.getLogger(__name__)
+_UPDATE_VWAP_LOCK = threading.Lock()
+_UPDATE_VWAP_LAST_START_TS = 0.0
+_UPDATE_VWAP_DEBOUNCE_SEC = 20.0
 
 def _ensure_ist(dt_value: datetime, ist_tz) -> datetime:
     """Normalize a datetime to IST and ensure timezone-awareness."""
@@ -326,6 +330,9 @@ def update_vwap_for_all_open_positions():
     
     These values are used for exit decisions (VWAP cross, stop loss, target, etc.)
     """
+    global _UPDATE_VWAP_LAST_START_TS
+    lock_acquired = False
+
     # CRITICAL: Log function entry IMMEDIATELY - use print as ultimate fallback
     import sys
     try:
@@ -341,6 +348,20 @@ def update_vwap_for_all_open_positions():
             pass  # If logger fails, print already captured it
     except Exception as entry_err:
         print(f"CRITICAL: Failed to log function entry: {entry_err}", file=sys.stderr)
+
+    now_ts = time.time()
+    if not _UPDATE_VWAP_LOCK.acquire(blocking=False):
+        logger.warning("⏭️ Skipping VWAP update: previous run still in progress")
+        return
+    lock_acquired = True
+    if now_ts - _UPDATE_VWAP_LAST_START_TS < _UPDATE_VWAP_DEBOUNCE_SEC:
+        logger.warning(
+            "⏭️ Skipping VWAP update: duplicate trigger within %.0fs window",
+            _UPDATE_VWAP_DEBOUNCE_SEC,
+        )
+        _UPDATE_VWAP_LOCK.release()
+        return
+    _UPDATE_VWAP_LAST_START_TS = now_ts
     
     # #region agent log
     import json as json_module
@@ -2222,6 +2243,11 @@ def update_vwap_for_all_open_positions():
         if db:
             try:
                 db.close()
+            except Exception:
+                pass
+        if lock_acquired:
+            try:
+                _UPDATE_VWAP_LOCK.release()
             except Exception:
                 pass
         
