@@ -696,7 +696,8 @@
             cfg.pick_selection_long_cap != null ? Number(cfg.pick_selection_long_cap) : Math.floor(tn / 3);
         const sc =
             cfg.pick_selection_short_cap != null ? Number(cfg.pick_selection_short_cap) : Math.floor(tn / 2);
-        const maxOpen = cfg.max_open_positions != null ? Number(cfg.max_open_positions) : '—';
+        const maxPublish =
+            cfg.max_publish_per_scan != null ? Number(cfg.max_publish_per_scan) : 5;
         const minL =
             cfg.min_long_buildup_selection != null ? Number(cfg.min_long_buildup_selection) : 3;
         note.textContent =
@@ -706,11 +707,11 @@
             lc +
             ' LONG + ' +
             sc +
-            ' SHORT by Final CMS (top_n=' +
+            ' SHORT by CMS (top_n=' +
             tn +
-            '). Saves respect max open positions (' +
-            maxOpen +
-            ').';
+            '). Saves up to ' +
+            maxPublish +
+            ' qualifying symbols per scan (after order-stage filters).';
     }
 
     function showPickerRunBanner(data) {

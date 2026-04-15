@@ -98,10 +98,9 @@ def get_sf_config_stub(user: User = Depends(_require_user)):
     out["min_long_buildup_selection"] = int(getattr(sfc, "MIN_LONG_BUILDUP_SELECTION", 3))
     out["pick_selection_rule"] = (
         "Each scan: at least min_long_buildup LONG_BUILDUP (when available), plus SHORT_BUILDUP "
-        "up to top_n//2, with long+short trimmed to top_n budget (same as futures backtester). "
-        "Rows saved respect MAX_OPEN_POSITIONS free slots."
+        "up to top_n//2, with long+short trimmed to top_n budget (same as futures backtester)."
     )
-    out["max_open_positions"] = int(getattr(sfc, "MAX_OPEN_POSITIONS", 3))
+    out["max_publish_per_scan"] = int(getattr(sfc, "SMART_FUTURES_MAX_PUBLISH_PER_SCAN", 5))
     return out
 
 
@@ -123,10 +122,9 @@ def put_sf_config_stub(body: SmartFuturesConfigUpdate, admin: User = Depends(_re
     cur["min_long_buildup_selection"] = int(getattr(sfc, "MIN_LONG_BUILDUP_SELECTION", 3))
     cur["pick_selection_rule"] = (
         "Each scan: at least min_long_buildup LONG_BUILDUP (when available), plus SHORT_BUILDUP "
-        "up to top_n//2, with long+short trimmed to top_n budget (same as futures backtester). "
-        "Rows saved respect MAX_OPEN_POSITIONS free slots."
+        "up to top_n//2, with long+short trimmed to top_n budget (same as futures backtester)."
     )
-    cur["max_open_positions"] = int(getattr(sfc, "MAX_OPEN_POSITIONS", 3))
+    cur["max_publish_per_scan"] = int(getattr(sfc, "SMART_FUTURES_MAX_PUBLISH_PER_SCAN", 5))
     return cur
 
 

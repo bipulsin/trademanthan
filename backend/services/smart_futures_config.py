@@ -60,7 +60,9 @@ MAX_OPEN_POSITIONS: int = 3
 MIN_LONG_BUILDUP_SELECTION: int = 3
 
 # Picker: per scan budget (same formula as backtester); long/short caps from buildup_selection_long_short_caps().
-SMART_FUTURES_PICK_SELECTION_TOP_N: int = 6
+SMART_FUTURES_PICK_SELECTION_TOP_N: int = 5
+# Hard cap of qualifying rows persisted per scan run.
+SMART_FUTURES_MAX_PUBLISH_PER_SCAN: int = 5
 
 
 def buildup_selection_long_short_caps(top_n: int) -> Tuple[int, int]:

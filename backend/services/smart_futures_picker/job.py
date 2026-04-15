@@ -34,7 +34,7 @@ from backend.services.smart_futures_config import (
     ADX_THRESHOLD,
     CAPITAL,
     CMS_FINAL_ENTRY_THRESHOLD,
-    MAX_OPEN_POSITIONS,
+    SMART_FUTURES_MAX_PUBLISH_PER_SCAN,
     SMART_FUTURES_PICK_SELECTION_TOP_N,
     buildup_selection_long_short_caps,
     NEUTRAL_BAND,
@@ -1340,31 +1340,9 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
     dbw: Optional[Session] = None
     try:
         dbw = SessionLocal()
-        open_n = _count_open_smart_futures(dbw, session_date)
-        if open_n >= int(MAX_OPEN_POSITIONS):
-            logger.warning(
-                "smart_futures_signal %s",
-                json.dumps(
-                    {
-                        "action": "BLOCKED",
-                        "block_reason": "BLOCKED: Max positions reached",
-                        "open_positions": open_n,
-                    },
-                    default=str,
-                ),
-            )
-            return {
-                "scan_trigger": scan_trigger,
-                "picks": 0,
-                "vix": vix,
-                "excluded_already_selected": excluded_already_selected,
-                "blocked": "max_positions",
-                "open_positions": open_n,
-                "reject_histogram": dict(reject_counts),
-            }
-        slots = max(0, int(MAX_OPEN_POSITIONS) - open_n)
+        publish_cap = max(1, int(SMART_FUTURES_MAX_PUBLISH_PER_SCAN))
         saved = 0
-        for pick in merged_picks[:slots]:
+        for pick in merged_picks[:publish_cap]:
             tf_ok, tf_reason = time_of_day_filter(now_ist)
             if not tf_ok:
                 reject_counts["time_window_order"] += 1
@@ -1395,11 +1373,11 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
         picked_long_syms = [p.stock for p in picked_longs]
         picked_short_syms = [p.stock for p in picked_shorts]
         logger.info(
-            "smart_futures_picker [%s]: saved=%s slots=%s vix=%s excluded_already_selected=%s "
+            "smart_futures_picker [%s]: saved=%s publish_cap=%s vix=%s excluded_already_selected=%s "
             "caps long=%s short=%s tn=%s picked_long=%s picked_short=%s merged=%s",
             scan_trigger,
             saved,
-            slots,
+            publish_cap,
             vix,
             excluded_already_selected,
             n_long_cap,
@@ -1437,7 +1415,7 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
                 }
                 for p in merged_picks
             ],
-            "open_slots_used": slots,
+            "publish_cap": publish_cap,
             "reject_histogram": dict(reject_counts),
         }
     finally:
