@@ -88,14 +88,37 @@ class BacktestRow:
 def parse_dt_ist(ts: Any) -> Optional[datetime]:
     if ts is None:
         return None
+    if isinstance(ts, (int, float)):
+        try:
+            v = float(ts)
+            if v > 1_000_000_000_000:  # epoch ms
+                v = v / 1000.0
+            return datetime.fromtimestamp(v, tz=IST)
+        except Exception:
+            return None
     s = str(ts).strip()
-    try:
-        if "T" in s:
-            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
-            return dt.astimezone(IST) if dt.tzinfo else IST.localize(dt)
-    except ValueError:
+    if not s:
         return None
-    return None
+    if s.isdigit():
+        try:
+            v = float(s)
+            if v > 1_000_000_000_000:  # epoch ms
+                v = v / 1000.0
+            return datetime.fromtimestamp(v, tz=IST)
+        except Exception:
+            return None
+    try:
+        # ISO-like variants (with/without T, with/without timezone)
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00").replace(" ", "T"))
+        return dt.astimezone(IST) if dt.tzinfo else IST.localize(dt)
+    except ValueError:
+        pass
+    try:
+        # Date-only fallback
+        d = datetime.strptime(s[:10], "%Y-%m-%d")
+        return IST.localize(d)
+    except Exception:
+        return None
 
 
 def sort_candles(candles: Optional[List[dict]]) -> List[dict]:
