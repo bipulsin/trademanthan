@@ -506,14 +506,37 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
             candles, tf, latest_d = fetch_futures_day_candles(
                 ux, ci, sd, cache_dir, prefer_current_day=is_today_session
             )
+            latest_seen = latest_d
             if not candles:
                 if latest_d and latest_d < sd:
                     raise ValueError(f"no_candles_for_day:last_available={latest_d.isoformat()}")
                 raise ValueError("no_candles_for_day")
             c0915 = find_candle(candles, sd, bh, bm) or find_candle_at_or_after(candles, sd, bh, bm, max_delay_min=20)
             c1330 = find_candle(candles, sd, th, tm) or find_candle_at_or_after(candles, sd, th, tm, max_delay_min=20)
+            # If today's websocket cache is partial (e.g. only a few late ticks), retry via API path.
+            api_latest_for_today: Optional[date] = None
+            if is_today_session and (not c0915 or not c1330):
+                api_candles, api_tf, api_latest_d = fetch_futures_day_candles(
+                    ux, ci, sd, cache_dir, prefer_current_day=False
+                )
+                api_latest_for_today = api_latest_d
+                if api_latest_d and (latest_seen is None or api_latest_d > latest_seen):
+                    latest_seen = api_latest_d
+                if api_candles:
+                    candles = api_candles
+                    tf = api_tf
+                    c0915 = find_candle(candles, sd, bh, bm) or find_candle_at_or_after(
+                        candles, sd, bh, bm, max_delay_min=20
+                    )
+                    c1330 = find_candle(candles, sd, th, tm) or find_candle_at_or_after(
+                        candles, sd, th, tm, max_delay_min=20
+                    )
             c1530 = find_candle(candles, sd, eh, em) or find_candle_at_or_before(candles, sd, eh, em, max_lookback_min=20)
             if not c0915 or not c1330:
+                if is_today_session and api_latest_for_today and api_latest_for_today < sd:
+                    raise ValueError(f"no_candles_for_day:last_available={api_latest_for_today.isoformat()}")
+                if is_today_session and tf == "ws1m":
+                    raise ValueError("insufficient_intraday_coverage_from_ws_cache")
                 raise ValueError("missing_baseline_or_signal_candle")
             exit_data_missing = c1530 is None
             if exit_data_missing and not is_today_session:
