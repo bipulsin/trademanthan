@@ -300,22 +300,56 @@ def build_liquidity_universe_instrument_keys(top_n: int) -> List[str]:
     return [ik for _, ik in vol_pairs[:top_n]]
 
 
-def ensure_daily_universe_cached() -> List[str]:
-    """Rebuild universe list when instruments file changes (IST calendar day)."""
-    global _universe_date, _universe_keys
-    path = _instruments_path()
+def build_universe_instrument_keys_from_arbitrage_master() -> List[str]:
+    """
+    Universe from arbitrage_master (current-month futures keys), preserving stock sort order.
+    This is the canonical source for dashboard/modal coverage.
+    """
+    db = None
+    out: List[str] = []
+    seen = set()
     try:
-        mtime = path.stat().st_mtime
-    except OSError:
-        mtime = 0
-    day = datetime.fromtimestamp(mtime, IST).date()
+        db = SessionLocal()
+        rows = db.execute(
+            text(
+                """
+                SELECT stock, currmth_future_instrument_key
+                FROM arbitrage_master
+                WHERE currmth_future_instrument_key IS NOT NULL
+                  AND TRIM(currmth_future_instrument_key) <> ''
+                ORDER BY stock
+                """
+            )
+        ).fetchall()
+        for _, ik in rows:
+            key = str(ik or "").strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            out.append(key)
+    except Exception as e:
+        logger.warning("oi_heatmap: arbitrage_master universe load failed: %s", e)
+    finally:
+        if db is not None:
+            db.close()
+    return out
+
+
+def ensure_daily_universe_cached() -> List[str]:
+    """Rebuild universe list once per IST day."""
+    global _universe_date, _universe_keys
+    day = datetime.now(IST).date()
     with _cache_lock:
         if _universe_date == day and _universe_keys:
             return _universe_keys
-        n = int(getattr(settings, "OI_HEATMAP_TOP_N", 200))
-        _universe_keys = build_liquidity_universe_instrument_keys(n)
+        _universe_keys = build_universe_instrument_keys_from_arbitrage_master()
+        if not _universe_keys:
+            n = int(getattr(settings, "OI_HEATMAP_TOP_N", 200))
+            _universe_keys = build_liquidity_universe_instrument_keys(n)
+            logger.info("oi_heatmap: universe fallback to liquidity top_n=%s size=%s", n, len(_universe_keys))
+        else:
+            logger.info("oi_heatmap: universe source=arbitrage_master size=%s", len(_universe_keys))
         _universe_date = day
-        logger.info("oi_heatmap: universe size=%s (file day=%s)", len(_universe_keys), day)
         return _universe_keys
 
 
@@ -388,18 +422,10 @@ def _normalize_scores_to_0_100_median_50(rows: List[Dict[str, Any]]) -> None:
 
 def finalize_heatmap_rows_for_store(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    Drop rows with raw heat score == 0, sort by |oi_chg| descending, assign rank 1..n,
+    Keep all rows, sort by |oi_chg| descending, assign rank 1..n,
     then normalize ``score`` to 0–100 with batch median at 50.
-    Used for live refresh and historical replay so ``oi_heatmap_latest`` has no zero-raw-score rows.
     """
-    out = [r for r in rows if _row_has_nonzero_score(r)]
-    if not out and rows:
-        # Flat OI change across the book (e.g. very early prints) — still rank by activity
-        out = sorted(
-            rows,
-            key=lambda r: (abs(int(r.get("oi_chg") or 0)), abs(int(r.get("oi") or 0))),
-            reverse=True,
-        )
+    out = list(rows or [])
     out.sort(key=lambda r: abs(int(r.get("oi_chg") or 0)), reverse=True)
     for i, r in enumerate(out, start=1):
         r["rank"] = i
@@ -592,14 +618,7 @@ def refresh_oi_heatmap_live() -> Dict[str, Any]:
                     pass
         _sess_oi_prev_by_instrument[_ik] = _eff
 
-    raw_n = len(rows)
     rows = finalize_heatmap_rows_for_store(rows)
-    if raw_n != len(rows):
-        logger.info(
-            "oi_heatmap: persisting %s rows (dropped %s zero-score)",
-            len(rows),
-            raw_n - len(rows),
-        )
     _underlying_rank = {str(r.get("underlying_symbol") or "").upper(): int(r["rank"]) for r in rows if r.get("underlying_symbol")}
 
     now_dt = datetime.now(IST)
