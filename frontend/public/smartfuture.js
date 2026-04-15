@@ -196,11 +196,17 @@
     function fmtFilterDot(r) {
         const tf = r && r.time_filter_passed;
         const rf = r && r.regime_filter_passed;
-        if (tf === false || rf === false) {
-            return '<span class="sf-filter-dot sf-filter-bad" title="Filter blocked at scan">●</span>';
-        }
         if (tf === true && rf === true) {
-            return '<span class="sf-filter-dot sf-filter-ok" title="Time + regime OK">●</span>';
+            return '<span class="sf-filter-dot sf-filter-ok" title="Both filters passed">Y</span>';
+        }
+        if (tf === true && rf === false) {
+            return '<span class="sf-filter-dot sf-filter-bad" title="Only time filter passed">T</span>';
+        }
+        if (tf === false && rf === true) {
+            return '<span class="sf-filter-dot sf-filter-bad" title="Only regime filter passed">R</span>';
+        }
+        if (tf === false && rf === false) {
+            return '<span class="sf-filter-dot sf-filter-bad" title="Neither filter passed">X</span>';
         }
         return '—';
     }
@@ -510,7 +516,7 @@
 
         const thead =
             '<thead><tr>' +
-            '<th>Run Slot</th><th>Symbol</th><th>Side</th><th>Tier</th><th>OI</th><th>Filters</th><th>Final CMS</th><th>Sector Score</th><th>Sentiment Score</th>' +
+            '<th>Run Slot</th><th>Symbol</th><th>Side</th><th>Tier</th><th>OI</th><th>Filters</th><th>CMS</th><th>Sector</th><th>Sentiment</th>' +
             '<th>Entry</th><th>SL</th><th>Status</th>' +
             '</tr></thead>';
 
@@ -579,7 +585,7 @@
 
         const thead =
             '<thead><tr>' +
-            '<th>Symbol</th><th>Side</th><th>Tier</th><th>OI</th><th>Stop</th><th>Lots</th><th>Final CMS</th>' +
+            '<th>Symbol</th><th>Side</th><th>Tier</th><th>OI</th><th>Stop</th><th>Lots</th><th>CMS</th>' +
             '<th>Entry</th><th>SL</th><th>Target</th><th>Tier 1</th><th>Tier 2</th><th>Tier 3</th><th>Active SL</th><th>Trail SL</th><th>Exit Reason</th><th>In Trend</th><th>Action</th>' +
             '</tr></thead>';
         let body = '';
