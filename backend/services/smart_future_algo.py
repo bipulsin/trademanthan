@@ -11,7 +11,7 @@ Consolidates all scan algorithm schedulers into a single controller:
 - Fin sentiment (weekdays 9:17–13:17 IST, 15 min): NSE corporate announcements + FinBERT for arbitrage_master, store in stock_fin_sentiment (NSE date window: last-run→now; 09:17 only uses today IST)
 - Smart Futures CMS picker (weekdays every 15 min 9:30–15:00 IST): arbitrage_master current-month futures → smart_futures_daily
 - Pre-market F&O watchlist (weekdays 9:10 IST default, PREMKET_RUN_TIME): ~203 equities → Top N in premarket_watchlist (same scoring as test_premkt_scanner / premarket_scoring)
-- Live OI heatmap (weekdays, every 15 min 9:15–15:15 IST): Upstox batch quotes → oi_heatmap cache + DB; API falls back to DB snapshot when live is empty
+- Live OI heatmap (weekdays, every 15 min 9:15–15:15 IST): Upstox REST batch quotes + optional v3 WebSocket ``full`` feed for live OI → oi_heatmap cache + DB; API falls back to DB snapshot when live is empty
 
 Interval-driven jobs only run real work between 08:30 and 21:00 IST (see scheduler_window).
 Exception: 8:10 AM Telegram ping (before 8:30).

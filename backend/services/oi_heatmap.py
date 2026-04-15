@@ -509,6 +509,19 @@ def refresh_oi_heatmap_live() -> Dict[str, Any]:
 
     _reset_oi_delta_caches_if_new_ist_day()
 
+    _feed_get_ws = None
+    if getattr(settings, "UPSTOX_MARKET_FEED_ENABLED", True):
+        try:
+            from backend.services.upstox_market_feed import (
+                ensure_market_feed_running,
+                get_ws_quote_for_instrument,
+            )
+
+            ensure_market_feed_running(keys)
+            _feed_get_ws = get_ws_quote_for_instrument
+        except Exception as e:
+            logger.warning("oi_heatmap: market feed start skipped: %s", e)
+
     # Reload instrument meta for underlying / symbol labels
     raw = load_nse_instruments_json()
     ik_meta = {((r.get("instrument_key") or "").strip()): r for r in raw if isinstance(r, dict)}
@@ -519,6 +532,18 @@ def refresh_oi_heatmap_live() -> Dict[str, Any]:
         lp = float(s.get("last_price") or 0)
         vol = float(s.get("volume") or 0)
         oi = int(s.get("oi") or 0)
+        if _feed_get_ws:
+            wsq = _feed_get_ws(ik)
+            if wsq and wsq.get("oi") is not None:
+                try:
+                    oi = int(wsq["oi"])
+                except (TypeError, ValueError):
+                    pass
+            if lp <= 1e-9 and wsq and wsq.get("ltp"):
+                try:
+                    lp = float(wsq["ltp"])
+                except (TypeError, ValueError):
+                    pass
         raw_oi_chg = int(s.get("change_in_oi") or 0)
         oi_chg = _effective_oi_change(ux, ik, raw_oi_chg, oi)
         net_chg = float(s.get("net_change") or 0)
@@ -557,7 +582,15 @@ def refresh_oi_heatmap_live() -> Dict[str, Any]:
 
     for _ik in keys:
         _s = merged.get(_ik) or {}
-        _sess_oi_prev_by_instrument[_ik] = int(_s.get("oi") or 0)
+        _eff = int(_s.get("oi") or 0)
+        if _feed_get_ws:
+            _wsq = _feed_get_ws(_ik)
+            if _wsq and _wsq.get("oi") is not None:
+                try:
+                    _eff = int(_wsq["oi"])
+                except (TypeError, ValueError):
+                    pass
+        _sess_oi_prev_by_instrument[_ik] = _eff
 
     raw_n = len(rows)
     rows = finalize_heatmap_rows_for_store(rows)
