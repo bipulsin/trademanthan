@@ -78,6 +78,7 @@ from backend.services.sector_movers import build_sector_movers, build_sector_sto
 from backend.services.premarket_watchlist_job import (
     fetch_premarket_watchlist_for_date,
     run_premarket_watchlist_job_with_lock,
+    should_suppress_prior_premarket_sessions_ui_ist,
 )
 from backend.services.dashboard_oi_heatmap import (
     get_dashboard_oi_heatmap_response,
@@ -6138,7 +6139,7 @@ async def dashboard_sector_movers():
 async def premarket_watchlist(session_date: Optional[date] = Query(None, description="IST session date; default today")):
     """
     Top N F&O equities from arbitrage_master (premarket_scoring: OBV, gap, 52w range, momentum).
-    Dashboard requests today (IST) first; if empty, JS falls back to prior trading sessions.
+    ``show_today_session_only`` tells the dashboard not to walk back to prior sessions after 09:00 IST on a trading day.
     """
     try:
         import pytz
@@ -6146,6 +6147,9 @@ async def premarket_watchlist(session_date: Optional[date] = Query(None, descrip
         ist = pytz.timezone("Asia/Kolkata")
         sd = session_date or datetime.now(ist).date()
         rows = fetch_premarket_watchlist_for_date(sd)
+        show_today_only = False
+        if session_date is None:
+            show_today_only = bool(should_suppress_prior_premarket_sessions_ui_ist())
         return JSONResponse(
             status_code=200,
             content={
@@ -6153,6 +6157,7 @@ async def premarket_watchlist(session_date: Optional[date] = Query(None, descrip
                 "session_date": sd.isoformat(),
                 "count": len(rows),
                 "rows": rows,
+                "show_today_session_only": show_today_only,
             },
         )
     except Exception as e:
@@ -6165,6 +6170,7 @@ async def premarket_watchlist(session_date: Optional[date] = Query(None, descrip
                 "session_date": None,
                 "count": 0,
                 "rows": [],
+                "show_today_session_only": False,
             },
         )
 

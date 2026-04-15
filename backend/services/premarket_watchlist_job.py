@@ -25,10 +25,24 @@ from backend.services.premarket_scoring import (
     score_premarket_raw,
 )
 from backend.services.upstox_service import UpstoxService
+from backend.services.market_holiday import should_skip_scheduled_market_jobs_ist
 
 logger = logging.getLogger(__name__)
 
 IST = pytz.timezone("Asia/Kolkata")
+
+
+def should_suppress_prior_premarket_sessions_ui_ist(now: Optional[datetime] = None) -> bool:
+    """
+    Weekday NSE session from 09:00 IST: dashboard must not show prior days' watchlist when today is empty.
+    Weekends and dates in the ``holiday`` table: allow walking back to the last saved session.
+    """
+    now_ist = datetime.now(IST) if now is None else (now.astimezone(IST) if now.tzinfo else IST.localize(now))
+    if now_ist.weekday() >= 5:
+        return False
+    if should_skip_scheduled_market_jobs_ist(now_ist):
+        return False
+    return now_ist.hour > 9 or (now_ist.hour == 9 and now_ist.minute >= 0)
 SLEEP_BETWEEN_SYMBOLS_SEC = 0.04
 
 # Same path as dashboard_oi_heatmap — one cross-process lock for scheduler / dashboard / manual API

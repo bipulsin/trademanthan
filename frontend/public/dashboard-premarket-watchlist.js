@@ -1,6 +1,7 @@
 /**
  * Dashboard: Pre-market F&O Top N (OBV + gap + 52w range + momentum; matches premarket_scoring / test harness).
- * If today's session has no rows yet (scan not run), shows the most recent prior trading session.
+ * If today's session has no rows yet (scan not run), shows the most recent prior trading session —
+ * except on a trading day after 09:00 IST, when we never show a prior calendar day's list.
  */
 (function () {
     const API = "/scan/premarket-watchlist";
@@ -152,37 +153,75 @@
     }
 
     /**
-     * Prefer today's IST session; if empty, walk back to prior trading days until rows or max steps.
+     * Prefer today's IST session. If the API sets show_today_session_only (after 09:00 IST on a trading day),
+     * do not walk back to prior sessions. Otherwise keep the legacy fallback chain.
      */
     async function loadWithFallback() {
         const todayYmd = istTodayYmd();
-        let cur = todayYmd;
-        let isFallback = false;
+        const { res, data } = await fetchSession(todayYmd);
+        if (!res.ok || !data.success) {
+            return {
+                error: (data && data.message) || res.statusText || "Failed",
+                rows: [],
+                session_date: todayYmd,
+                isFallback: false,
+                asOf: todayYmd,
+                todayOnly: false,
+            };
+        }
+        const showTodayOnly = data.show_today_session_only === true;
+        const rows0 = data.rows || [];
+        if (showTodayOnly) {
+            return {
+                error: null,
+                rows: rows0,
+                session_date: data.session_date || todayYmd,
+                isFallback: false,
+                asOf: todayYmd,
+                todayOnly: true,
+            };
+        }
+        if (rows0.length > 0) {
+            return {
+                error: null,
+                rows: rows0,
+                session_date: data.session_date || todayYmd,
+                isFallback: false,
+                asOf: todayYmd,
+                todayOnly: false,
+            };
+        }
+
+        let cur = previousTradingDayYmd(todayYmd);
+        let isFallback = true;
         let steps = 0;
         const maxSteps = 12;
 
         while (steps < maxSteps) {
-            const { res, data } = await fetchSession(cur);
-            if (!res.ok || !data.success) {
+            const r2 = await fetchSession(cur);
+            const res = r2.res;
+            const data2 = r2.data;
+            if (!res.ok || !data2.success) {
                 return {
-                    error: (data && data.message) || res.statusText || "Failed",
+                    error: (data2 && data2.message) || res.statusText || "Failed",
                     rows: [],
                     session_date: cur,
                     isFallback: false,
                     asOf: todayYmd,
+                    todayOnly: false,
                 };
             }
-            const rows = data.rows || [];
+            const rows = data2.rows || [];
             if (rows.length > 0) {
                 return {
                     error: null,
                     rows: rows,
-                    session_date: data.session_date || cur,
+                    session_date: data2.session_date || cur,
                     isFallback: isFallback,
                     asOf: todayYmd,
+                    todayOnly: false,
                 };
             }
-            isFallback = true;
             cur = previousTradingDayYmd(cur);
             steps++;
         }
@@ -192,6 +231,7 @@
             session_date: todayYmd,
             isFallback: false,
             asOf: todayYmd,
+            todayOnly: false,
         };
     }
 
@@ -237,10 +277,17 @@
                     }
                     msg.textContent = line;
                 } else {
-                    msg.textContent =
-                        "No rows for " +
-                        out.asOf +
-                        " or prior trading days in range — scan may not have run.";
+                    if (out.todayOnly) {
+                        msg.textContent =
+                            "No watchlist for today (" +
+                            out.asOf +
+                            ") yet after 9:00 AM IST — previous days are hidden until today's scan completes.";
+                    } else {
+                        msg.textContent =
+                            "No rows for " +
+                            out.asOf +
+                            " or prior trading days in range — scan may not have run.";
+                    }
                 }
                 msg.style.display = "block";
             }
