@@ -176,20 +176,6 @@ class VWAPUpdater:
     def start(self):
         """Start the VWAP updater scheduler"""
         if not self.is_running:
-            # Update VWAP every hour during market hours (9:30 AM - 3:30 PM)
-            for hour in range(9, 16):  # 9 AM to 3 PM
-                # Run at 15 minutes past each hour (e.g., 9:15, 10:15, 11:15, etc.)
-                self.scheduler.add_job(
-                    update_vwap_for_all_open_positions,
-                    trigger=CronTrigger(hour=hour, minute=15, timezone='Asia/Kolkata'),
-                    id=f'vwap_update_{hour}',
-                    name=f'Update VWAP {hour:02d}:15',
-                    replace_existing=True,
-                    max_instances=1,
-                    misfire_grace_time=300,  # Allow running up to 5 minutes after scheduled time
-                    coalesce=True  # Combine multiple missed runs into one
-                )
-            
             # Close all open trades at 3:25 PM (before market close)
             self.scheduler.add_job(
                 close_all_open_trades,
@@ -299,7 +285,7 @@ class VWAPUpdater:
             
             self.scheduler.start()
             self.is_running = True
-            logger.info("✅ Market Data Updater started - Hourly updates + EOD exits at 3:25 PM + EOD VWAP at 3:30 PM")
+            logger.info("✅ Market Data Updater started - Cycle-driven VWAP checks + EOD exits at 3:25 PM + EOD VWAP at 3:30 PM")
     
     def stop(self):
         """Stop the VWAP updater"""
@@ -2625,8 +2611,8 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
         
         logger.info(f"🔄 Starting Cycle {cycle_number} VWAP slope calculation at {now.strftime('%Y-%m-%d %H:%M:%S IST')}")
 
-        # Ensure exit checks run for active trades during cycles 2-5
-        if cycle_number in {2, 3, 4, 5}:
+        # Exit checks are intentionally executed from cycle runs only.
+        if cycle_number in {1, 2, 3, 4, 5}:
             try:
                 update_vwap_for_all_open_positions()
             except Exception as exit_error:
