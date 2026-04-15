@@ -57,6 +57,8 @@ class Settings(BaseSettings):
         "true",
         "yes",
     )
+    # Drop WebSocket quote if last tick older than this (seconds); gate uses heatmap or WS fallback
+    UPSTOX_MARKET_FEED_STALE_SEC: float = float(os.getenv("UPSTOX_MARKET_FEED_STALE_SEC", "120"))
 
     # Pre-market watchlist schedule (IST, HH:MM)
     PREMKET_ENABLED: bool = os.getenv("PREMKET_ENABLED", "true").lower() in ("1", "true", "yes")

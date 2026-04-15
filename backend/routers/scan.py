@@ -6186,6 +6186,18 @@ async def premarket_watchlist_run_now():
         return JSONResponse(status_code=500, content={"success": False, "message": str(e)})
 
 
+@router.get("/upstox-market-feed/status")
+async def upstox_market_feed_status():
+    """Production health: Upstox v3 WebSocket market feed (live OI for heatmap + Smart Futures fallback)."""
+    try:
+        from backend.services.upstox_market_feed import feed_status
+
+        return JSONResponse(status_code=200, content={"success": True, **feed_status()})
+    except Exception as e:
+        logger.exception("upstox_market_feed_status: %s", e)
+        return JSONResponse(status_code=500, content={"success": False, "message": str(e)})
+
+
 @router.post("/oi-heatmap/refresh")
 async def oi_heatmap_refresh_now():
     """

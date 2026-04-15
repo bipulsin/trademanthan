@@ -691,6 +691,15 @@ def _score_symbol_outcome(
                 oq = try_oiquote_from_heatmap_for_gate(stock)
             except Exception:
                 oq = None
+            if (oq is None or (getattr(oq, "oi", 0) or 0) <= 0) and fut_key:
+                try:
+                    from backend.services.upstox_market_feed import try_oiquote_from_feed_for_gate
+
+                    oq_feed = try_oiquote_from_feed_for_gate(stock, fut_key)
+                    if oq_feed is not None:
+                        oq = oq_feed
+                except Exception:
+                    pass
         if oq is None:
             oq = get_cached_oi_quote(stock, _oi_fetcher_singleton)
         if oq is None:

@@ -281,6 +281,29 @@ class SmartFutureAlgoScheduler:
                     logger.error(f"❌ Startup instruments check failed: {e}", exc_info=True)
 
             threading.Thread(target=_ensure_instruments_bg, name="instruments_startup", daemon=True).start()
+
+            def _warm_upstox_market_feed_bg():
+                try:
+                    if _skip_ist_non_trading_job("warm upstox market feed"):
+                        return
+                    if not getattr(settings, "UPSTOX_MARKET_FEED_ENABLED", True):
+                        return
+                    if not getattr(settings, "UPSTOX_OI_ENABLED", True):
+                        return
+                    from backend.services.oi_heatmap import ensure_daily_universe_cached
+                    from backend.services.upstox_market_feed import ensure_market_feed_running
+
+                    keys = ensure_daily_universe_cached()
+                    if keys:
+                        ensure_market_feed_running(keys)
+                        logger.info(
+                            "✅ Upstox v3 market WebSocket feed prewarmed (%s instruments)",
+                            len(keys),
+                        )
+                except Exception as e:
+                    logger.warning("⚠️ Upstox market feed prewarm failed: %s", e)
+
+            threading.Thread(target=_warm_upstox_market_feed_bg, name="upstox_feed_prewarm", daemon=True).start()
             
             # 0b. Morning Telegram to @TradeWithCTO — 8:10 AM IST (exception to 08:30–21:00 work window)
             self.scheduler.add_job(

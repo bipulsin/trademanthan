@@ -38,9 +38,12 @@ _FEED_THREAD: Optional[threading.Thread] = None
 _STOP_EVENT = threading.Event()
 _LAST_KEYS_SIG: Optional[Tuple[str, ...]] = None
 _FEED_LAST_ERROR: Optional[str] = None
-_STALE_AFTER_SEC = 120.0
 
 _CHUNK = 100
+
+
+def _stale_after_sec() -> float:
+    return float(getattr(settings, "UPSTOX_MARKET_FEED_STALE_SEC", 120.0) or 120.0)
 
 
 def _normalize_ik(key: str) -> str:
@@ -100,9 +103,18 @@ def _ingest_feed_response_dict(d: Dict[str, Any]) -> None:
             if oi is None and ltp is None:
                 continue
             prev = _OI_LTP_BY_KEY.get(ik, {})
+            eff_oi = int(oi) if oi is not None else prev.get("oi")
+            eff_ltp = float(ltp) if ltp is not None else prev.get("ltp")
+            oi_chg_tick = 0
+            if eff_oi is not None and prev.get("oi") is not None:
+                try:
+                    oi_chg_tick = int(eff_oi) - int(prev["oi"])
+                except (TypeError, ValueError):
+                    oi_chg_tick = 0
             row = {
-                "oi": int(oi) if oi is not None else prev.get("oi"),
-                "ltp": float(ltp) if ltp is not None else prev.get("ltp"),
+                "oi": eff_oi,
+                "ltp": eff_ltp,
+                "oi_change": oi_chg_tick,
                 "ts_mono": now,
             }
             if row.get("oi") is None and row.get("ltp") is None:
@@ -132,6 +144,10 @@ def _authorize_ws_url(access_token: str) -> Optional[str]:
             timeout=20,
         )
         data = r.json() if r.content else {}
+        if r.status_code == 401:
+            _FEED_LAST_ERROR = "authorize 401 — token may be expired"
+            logger.warning("upstox_market_feed: authorize 401")
+            return None
         if r.status_code != 200 or (data.get("status") or "").lower() != "success":
             _FEED_LAST_ERROR = str(data.get("message") or data.get("error") or r.text)[:300]
             logger.warning("upstox_market_feed: authorize failed: %s", _FEED_LAST_ERROR)
@@ -195,6 +211,7 @@ async def _run_connection_loop(batches: List[List[str]]) -> None:
             continue
         ws_url = _authorize_ws_url(token)
         if not ws_url:
+            ux.reload_token_from_storage()
             await asyncio.sleep(min(backoff, 60.0))
             backoff = min(backoff * 1.5, 120.0)
             continue
@@ -273,7 +290,7 @@ def get_ws_quote_for_instrument(instrument_key: str) -> Optional[Dict[str, Any]]
             return None
         ts = float(row.get("ts_mono") or 0)
         age = time.monotonic() - ts
-        if age > _STALE_AFTER_SEC:
+        if age > _stale_after_sec():
             return None
         oi = row.get("oi")
         ltp = row.get("ltp")
@@ -282,6 +299,7 @@ def get_ws_quote_for_instrument(instrument_key: str) -> Optional[Dict[str, Any]]
         return {
             "oi": oi,
             "ltp": ltp,
+            "oi_change": row.get("oi_change", 0),
             "age_sec": round(age, 2),
         }
 
@@ -293,7 +311,62 @@ def feed_status() -> Dict[str, Any]:
     alive = _FEED_THREAD is not None and _FEED_THREAD.is_alive()
     return {
         "enabled": getattr(settings, "UPSTOX_MARKET_FEED_ENABLED", True),
+        "stale_after_sec": _stale_after_sec(),
         "thread_alive": alive,
         "cached_instruments": n,
         "last_error": _FEED_LAST_ERROR,
+        "universe_keys": len(_LAST_KEYS_SIG or ()),
     }
+
+
+def try_oiquote_from_feed_for_gate(stock: str, fut_instrument_key: str):
+    """
+    Build ``OIQuote`` from WebSocket cache + one REST quote for prev-close / net_change.
+    Used when heatmap row is missing or REST OI is zero. Returns None if feed disabled or stale.
+    """
+    import time as time_mod
+
+    from backend.services.oi_integration import OIQuote
+
+    if not getattr(settings, "UPSTOX_MARKET_FEED_ENABLED", True):
+        return None
+    if not fut_instrument_key or not str(fut_instrument_key).strip():
+        return None
+    ik = _normalize_ik(fut_instrument_key)
+    wsq = get_ws_quote_for_instrument(ik)
+    if not wsq:
+        return None
+    oi = wsq.get("oi")
+    if oi is None or int(oi) <= 0:
+        return None
+    oi = int(oi)
+    oi_chg = int(wsq.get("oi_change") or 0)
+    ltp = float(wsq.get("ltp") or 0.0)
+    try:
+        ux = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+        ux.reload_token_from_storage()
+        q = ux.get_market_quote_by_key(ik) or {}
+        if ltp <= 1e-9:
+            ltp = float(q.get("last_price") or 0.0)
+        net_chg = float(q.get("net_change") or 0)
+        ohlc = q.get("ohlc") if isinstance(q.get("ohlc"), dict) else {}
+        open_ = float(ohlc.get("open") or 0)
+        if abs(net_chg) > 1e-9:
+            prev = ltp - net_chg
+        elif open_ > 1e-9:
+            prev = open_
+        else:
+            prev = float(ohlc.get("close") or q.get("close_price") or 0)
+        prev_oi = max(0, oi - oi_chg)
+        return OIQuote(
+            symbol=(stock or "").strip().upper(),
+            oi=oi,
+            change_in_oi=oi_chg,
+            last_price=ltp,
+            prev_close=float(prev),
+            prev_oi=int(prev_oi),
+            fetched_at=time_mod.time(),
+        )
+    except Exception as e:
+        logger.debug("upstox_market_feed: OIQuote from feed failed %s: %s", ik, e)
+        return None
