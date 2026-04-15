@@ -16,6 +16,7 @@ import pytz
 from sqlalchemy import text
 
 from backend.database import SessionLocal
+from backend.services.market_holiday import should_skip_scheduled_market_jobs_ist
 from backend.services.oi_integration import NSEOIFetcher, interpret_oi_signal
 from backend.services.premarket_watchlist_job import (
     fetch_premarket_watchlist_for_date,
@@ -45,6 +46,35 @@ _refresh_lock = threading.Lock()
 
 def _session_today_ist() -> date:
     return datetime.now(IST).date()
+
+
+def _is_after_9_ist_trading_session(now: datetime) -> bool:
+    """Weekday NSE session from 09:00 IST — use live Upstox heatmap, not prior-day premarket lists."""
+    n = now.astimezone(IST) if now.tzinfo else IST.localize(now)
+    if n.weekday() >= 5:
+        return False
+    if should_skip_scheduled_market_jobs_ist(n):
+        return False
+    return n.hour > 9 or (n.hour == 9 and n.minute >= 0)
+
+
+def _symbols_from_arbitrage_master(limit: int) -> List[str]:
+    db = SessionLocal()
+    try:
+        r = db.execute(
+            text(
+                """
+                SELECT UPPER(TRIM(stock)) FROM arbitrage_master
+                WHERE stock IS NOT NULL AND TRIM(stock) <> ''
+                ORDER BY stock
+                LIMIT :lim
+                """
+            ),
+            {"lim": int(limit)},
+        )
+        return [str(row[0]) for row in r.fetchall() if row and row[0]]
+    finally:
+        db.close()
 
 
 def _symbols_in_rank_order(rows: List[Dict[str, Any]]) -> List[str]:
@@ -181,18 +211,37 @@ def _fetch_latest_session_date_min_rows(min_rows: int) -> Optional[date]:
 
 def _resolve_top10_symbols() -> Tuple[List[str], str]:
     """
-    Same ranked universe as the scheduled pre-market job (OBV + gap + range), never alphabetical.
+    Symbol sources (premarket OBV+gap+range when available).
 
-    1) Today's premarket_watchlist when it has a full top 10.
-    2) Else: may run ``run_premarket_watchlist_job_with_lock()`` (weekdays): on empty rows anytime,
-       or on partial rows after 15:15 IST (post-market top-up for today). Cooldown between attempts.
-    3) Partial / latest session fallback as before.
+    From 09:00 IST on trading days, Top 10 ranks come from the live Upstox OI heatmap cache
+    when today's premarket list is not ready — not from a prior session's premarket_watchlist.
     """
+    now = datetime.now(IST)
     today = _session_today_ist()
     rows_today = fetch_premarket_watchlist_for_date(today)
 
     if len(rows_today) >= _TOP_N:
         return _symbols_in_rank_order(rows_today), "premarket_today"
+
+    after_9 = _is_after_9_ist_trading_session(now)
+
+    if after_9:
+        try:
+            from backend.services.oi_heatmap import (
+                get_top_underlying_symbols_from_cache,
+                maybe_sync_refresh_heatmap_after_open,
+            )
+
+            syms = get_top_underlying_symbols_from_cache(_TOP_N)
+            if len(syms) < _TOP_N:
+                maybe_sync_refresh_heatmap_after_open("dashboard_top10")
+                syms = get_top_underlying_symbols_from_cache(_TOP_N)
+            if len(syms) >= _TOP_N:
+                return syms[:_TOP_N], "oi_heatmap_live"
+            if syms:
+                return syms, "oi_heatmap_live_partial"
+        except Exception as e:
+            logger.warning("dashboard_oi_heatmap: top10 heatmap path failed: %s", e)
 
     _maybe_run_premarket_for_today()
     rows_today = fetch_premarket_watchlist_for_date(today)
@@ -201,12 +250,18 @@ def _resolve_top10_symbols() -> Tuple[List[str], str]:
     if len(rows_today) > 0:
         return _symbols_in_rank_order(rows_today), "premarket_today_partial"
 
-    if datetime.now(IST).weekday() < 5:
+    if not after_9 and now.weekday() < 5:
         rows_today = _wait_for_premarket_rows(today, 1, max_wait_sec=35.0)
         if len(rows_today) >= _TOP_N:
             return _symbols_in_rank_order(rows_today), "premarket_today"
         if len(rows_today) > 0:
             return _symbols_in_rank_order(rows_today), "premarket_today_partial"
+
+    if after_9:
+        alt = _symbols_from_arbitrage_master(_TOP_N)
+        if alt:
+            return alt[:_TOP_N], "arbitrage_master_fallback"
+        return [], "none"
 
     d10 = _fetch_latest_session_date_min_rows(_TOP_N)
     if d10:

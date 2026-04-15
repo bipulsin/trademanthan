@@ -13,7 +13,7 @@ import json
 import logging
 import threading
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 import pytz
@@ -22,6 +22,7 @@ from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from backend.config import settings
 from backend.database import SessionLocal
+from backend.services.market_holiday import should_skip_scheduled_market_jobs_ist
 
 logger = logging.getLogger(__name__)
 
@@ -49,10 +50,94 @@ _last_error: Optional[str] = None
 _underlying_rank: Dict[str, int] = {}
 _api_refresh_lock = threading.Lock()
 _last_api_refresh_attempt_mono: float = 0.0
+_sync_refresh_cooldown_sec: float = 75.0
 
 # Daily universe of instrument_keys (rebuilt when instruments file mtime changes)
 _universe_date: Optional[date] = None
 _universe_keys: List[str] = []
+
+
+def ist_use_today_only_db_snapshot(now: Optional[datetime] = None) -> bool:
+    """
+    Weekday trading sessions from 09:00 IST: do not read oi_heatmap_latest from a prior calendar day.
+    Before 09:00, weekends, or NSE holidays: allow the latest persisted batch (overnight / off-session).
+    """
+    n = datetime.now(IST) if now is None else (now.astimezone(IST) if now.tzinfo else IST.localize(now))
+    if n.weekday() >= 5:
+        return False
+    if should_skip_scheduled_market_jobs_ist(n):
+        return False
+    return n.hour > 9 or (n.hour == 9 and n.minute >= 0)
+
+
+def get_top_underlying_symbols_from_cache(limit: int) -> List[str]:
+    """Top ``limit`` equity underlyings by heatmap rank (needs populated live cache)."""
+    lim = max(1, min(500, int(limit)))
+    with _cache_lock:
+        ranked = sorted(_rows_cache, key=lambda r: int(r.get("rank") or 10**9))
+    out: List[str] = []
+    for r in ranked:
+        if len(out) >= lim:
+            break
+        u = str(r.get("underlying_symbol") or "").strip().upper()
+        if u:
+            out.append(u)
+    return out
+
+
+def _clear_snapshot_cache_if_from_prior_ist_day() -> None:
+    """Drop in-memory DB snapshot if it predates today's IST date while intraday rules apply."""
+    now = datetime.now(IST)
+    if not ist_use_today_only_db_snapshot(now):
+        return
+    global _rows_cache, _cache_source, _cache_updated_at_iso, _cache_updated_at_mono, _underlying_rank
+    with _cache_lock:
+        if _cache_source != "snapshot" or not _rows_cache:
+            return
+        ts = _cache_updated_at_iso or ""
+    try:
+        ts_clean = ts.replace("Z", "+00:00")
+        tsdt = datetime.fromisoformat(ts_clean)
+        if tsdt.tzinfo is None:
+            tsdt = IST.localize(tsdt)
+        else:
+            tsdt = tsdt.astimezone(IST)
+        if tsdt.date() >= now.date():
+            return
+    except Exception:
+        return
+    with _cache_lock:
+        _rows_cache = []
+        _underlying_rank = {}
+        _cache_source = "none"
+        _cache_updated_at_iso = ""
+        _cache_updated_at_mono = time.monotonic()
+    logger.info("oi_heatmap: cleared in-memory snapshot from prior IST day")
+
+
+def maybe_sync_refresh_heatmap_after_open(reason: str = "get_live") -> None:
+    """
+    After 09:00 IST on a trading day, pull fresh Upstox batch quotes synchronously (debounced)
+    when the API would otherwise stay empty or stale.
+    """
+    now = datetime.now(IST)
+    if not ist_use_today_only_db_snapshot(now):
+        return
+    if should_skip_scheduled_market_jobs_ist(now):
+        return
+    if not getattr(settings, "UPSTOX_OI_ENABLED", True):
+        return
+    global _last_api_refresh_attempt_mono
+    with _api_refresh_lock:
+        tmono = time.monotonic()
+        if tmono - _last_api_refresh_attempt_mono < _sync_refresh_cooldown_sec:
+            return
+        _last_api_refresh_attempt_mono = tmono
+    logger.info("oi_heatmap: running synchronous live refresh (%s)", reason)
+    try:
+        refresh_oi_heatmap_live()
+    except Exception as e:
+        logger.warning("oi_heatmap: synchronous live refresh failed: %s", e, exc_info=True)
 
 
 def _instruments_path():
@@ -246,6 +331,13 @@ def finalize_heatmap_rows_for_store(rows: List[Dict[str, Any]]) -> List[Dict[str
     Used for live refresh and historical replay so ``oi_heatmap_latest`` has no zero-raw-score rows.
     """
     out = [r for r in rows if _row_has_nonzero_score(r)]
+    if not out and rows:
+        # Flat OI change across the book (e.g. very early prints) — still rank by activity
+        out = sorted(
+            rows,
+            key=lambda r: (abs(int(r.get("oi_chg") or 0)), abs(int(r.get("oi") or 0))),
+            reverse=True,
+        )
     out.sort(key=lambda r: abs(int(r.get("oi_chg") or 0)), reverse=True)
     for i, r in enumerate(out, start=1):
         r["rank"] = i
@@ -465,25 +557,50 @@ def _persist_snapshot(rows: List[Dict[str, Any]], updated_at: datetime) -> None:
 
 def load_oi_heatmap_snapshot_from_db() -> Tuple[List[Dict[str, Any]], Optional[str]]:
     """
-    Last persisted snapshot (PostgreSQL ``oi_heatmap_latest``). Used when process memory is empty
-    (e.g. after restart, or before the first scheduler tick; weekends skip live refresh).
+    Last persisted snapshot (PostgreSQL ``oi_heatmap_latest``).
+
+    On weekday trading days **from 09:00 IST**, only rows from **today's IST calendar date**
+    are returned so callers never see yesterday's batch after the session has started.
+    Before 09:00, on weekends, or on NSE holidays, the latest batch overall is used.
     """
     db = None
+    now = datetime.now(IST)
+    use_today_only = ist_use_today_only_db_snapshot(now)
     try:
         db = SessionLocal()
-        r = db.execute(
-            text(
-                """
-                SELECT rank, instrument_key, underlying_symbol, trading_symbol, expiry,
-                       ltp, chg_pct, oi, oi_chg, oi_chg_pct, oi_signal, volume, score, updated_at
-                FROM oi_heatmap_latest
-                WHERE updated_at = (
-                    SELECT MAX(updated_at) FROM oi_heatmap_latest
-                )
-                ORDER BY rank ASC
-                """
+        if use_today_only:
+            day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            day_end = day_start + timedelta(days=1)
+            r = db.execute(
+                text(
+                    """
+                    SELECT rank, instrument_key, underlying_symbol, trading_symbol, expiry,
+                           ltp, chg_pct, oi, oi_chg, oi_chg_pct, oi_signal, volume, score, updated_at
+                    FROM oi_heatmap_latest
+                    WHERE updated_at >= :day_start AND updated_at < :day_end
+                      AND updated_at = (
+                          SELECT MAX(updated_at) FROM oi_heatmap_latest
+                          WHERE updated_at >= :day_start AND updated_at < :day_end
+                      )
+                    ORDER BY rank ASC
+                    """
+                ),
+                {"day_start": day_start, "day_end": day_end},
             )
-        )
+        else:
+            r = db.execute(
+                text(
+                    """
+                    SELECT rank, instrument_key, underlying_symbol, trading_symbol, expiry,
+                           ltp, chg_pct, oi, oi_chg, oi_chg_pct, oi_signal, volume, score, updated_at
+                    FROM oi_heatmap_latest
+                    WHERE updated_at = (
+                        SELECT MAX(updated_at) FROM oi_heatmap_latest
+                    )
+                    ORDER BY rank ASC
+                    """
+                )
+            )
         rows_out: List[Dict[str, Any]] = []
         updated_iso: Optional[str] = None
         for row in r.mappings():
@@ -584,6 +701,8 @@ def maybe_trigger_refresh_if_empty() -> None:
 
 def get_live_oi_heatmap_json(force_reload_from_db: bool = False) -> Dict[str, Any]:
     """API payload for GET /scan/dashboard/oi-heatmap."""
+    _clear_snapshot_cache_if_from_prior_ist_day()
+
     if force_reload_from_db:
         db_rows, db_ts = load_oi_heatmap_snapshot_from_db()
         if db_rows:
@@ -599,6 +718,13 @@ def get_live_oi_heatmap_json(force_reload_from_db: bool = False) -> Dict[str, An
         db_rows, db_ts = load_oi_heatmap_snapshot_from_db()
         if db_rows:
             _hydrate_cache_from_db_rows(db_rows, db_ts)
+            with _cache_lock:
+                rows = list(_rows_cache)
+                ts = _cache_updated_at_iso
+                err = _last_error
+                origin = _cache_source
+        elif ist_use_today_only_db_snapshot():
+            maybe_sync_refresh_heatmap_after_open("empty_cache_intraday")
             with _cache_lock:
                 rows = list(_rows_cache)
                 ts = _cache_updated_at_iso
