@@ -540,17 +540,36 @@
             }
         });
 
-        let html = '<div class="sf-table-wrap"><table class="sf-table">' + thead + '<tbody>';
-        rows.forEach(function (r) {
-            html += trendTableRowHtml(r);
-        });
-        html += '</tbody></table></div>';
+        // Always render qualifying rows even when their slot is outside the
+        // scheduled slot list (e.g. manual/off-cycle scans).
         const extra = flat.filter(function (r) {
             const slot = deriveRunSlot(r);
             return slot && slots.indexOf(slot) === -1;
         });
         if (extra.length) {
-            html += '<p class="sf-meta" style="margin-top:10px;">Additional rows exist outside visible slot window: ' + extra.length + '.</p>';
+            extra
+                .slice()
+                .sort(function (a, b) {
+                    const ea = String((a && a.entry_at) || '');
+                    const eb = String((b && b.entry_at) || '');
+                    return eb.localeCompare(ea);
+                })
+                .forEach(function (r) {
+                    const row = Object.assign({}, r, { __run_slot: deriveRunSlot(r) || '—' });
+                    rows.push(row);
+                });
+        }
+
+        let html = '<div class="sf-table-wrap"><table class="sf-table">' + thead + '<tbody>';
+        rows.forEach(function (r) {
+            html += trendTableRowHtml(r);
+        });
+        html += '</tbody></table></div>';
+        if (extra.length) {
+            html +=
+                '<p class="sf-meta" style="margin-top:10px;">Including ' +
+                extra.length +
+                ' off-slot/manual row(s).</p>';
         }
         host.innerHTML = html;
 
