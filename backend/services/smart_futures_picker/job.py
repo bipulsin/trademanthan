@@ -694,13 +694,19 @@ def _score_symbol_outcome(
             except Exception:
                 _oi_fetcher_singleton = None
         oq = None
+        heatmap_sig: Optional[str] = None
         if getattr(settings, "UPSTOX_OI_ENABLED", True):
             try:
-                from backend.services.oi_heatmap import try_oiquote_from_heatmap_for_gate
+                from backend.services.oi_heatmap import (
+                    try_oiquote_from_heatmap_for_gate,
+                    try_oi_signal_from_heatmap_for_gate,
+                )
 
                 oq = try_oiquote_from_heatmap_for_gate(stock)
+                heatmap_sig = try_oi_signal_from_heatmap_for_gate(stock)
             except Exception:
                 oq = None
+                heatmap_sig = None
             if (oq is None or (getattr(oq, "oi", 0) or 0) <= 0) and fut_key:
                 try:
                     from backend.services.upstox_market_feed import try_oiquote_from_feed_for_gate
@@ -736,7 +742,7 @@ def _score_symbol_outcome(
                     return _fail("oi_stale", reject_note=oi_gate_reason)
             oi_val = int(oq.oi)
             oi_chg = int(oq.change_in_oi)
-            oi_sig = oi_signal_from_quote(oq)
+            oi_sig = str(heatmap_sig or oi_signal_from_quote(oq) or "").strip().upper()
             ok_oi, note_oi = _oi_gate_ok(side, oi_sig)
             oi_gate_passed = ok_oi
             oi_gate_reason = note_oi

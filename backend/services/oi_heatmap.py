@@ -911,6 +911,28 @@ def try_oiquote_from_heatmap_for_gate(stock: str):
     )
 
 
+def try_oi_signal_from_heatmap_for_gate(stock: str) -> Optional[str]:
+    """
+    Return the exact heatmap OI signal for an underlying (for Smart Futures/UI parity).
+    Heatmap stores labels as LONG_BUILDUP / SHORT_BUILDUP / LONG_UNWIND / SHORT_COVER / NEUTRAL.
+    Convert to gate labels expected by Smart Futures: LONG_UNWINDING / SHORT_COVERING.
+    """
+    row = get_snapshot_row_for_underlying(stock)
+    if not row:
+        return None
+    sig = str(row.get("oi_signal") or "").strip().upper()
+    if not sig:
+        return None
+    m = {
+        "LONG_UNWIND": "LONG_UNWINDING",
+        "SHORT_COVER": "SHORT_COVERING",
+        "LONG_BUILDUP": "LONG_BUILDUP",
+        "SHORT_BUILDUP": "SHORT_BUILDUP",
+        "NEUTRAL": "NEUTRAL",
+    }
+    return m.get(sig, sig)
+
+
 def premkt_rank_for_stock(stock: str, session_d: date) -> Optional[int]:
     """Today's premarket_watchlist rank (1–10), if present."""
     from backend.services.premarket_watchlist_job import fetch_premarket_watchlist_for_date
