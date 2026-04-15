@@ -15,9 +15,11 @@ ADX_THRESHOLD: float = 20.0
 
 # --- Time-of-day (IST bar time) ---
 TIME_FILTER_ENABLED: bool = True
-# Allowed windows: (start inclusive, end inclusive for "last minute" — see time_in_trade_windows)
+# Allowed windows: (start inclusive, end inclusive) on IST *bar end* time from the last 5m candle.
+# Must include 9:15 so the scheduled picker at 9:15 IST is not rejected for every symbol (was 9:30–11:45 only).
+# Gap 11:45–14:00 is lunch — no entries; afternoon window 14:00–15:00.
 TRADE_WINDOWS: List[Tuple[time, time]] = [
-    (time(9, 30), time(11, 45)),
+    (time(9, 15), time(11, 45)),
     (time(14, 0), time(15, 0)),
 ]
 
