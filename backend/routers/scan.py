@@ -79,7 +79,10 @@ from backend.services.premarket_watchlist_job import (
     fetch_premarket_watchlist_for_date,
     run_premarket_watchlist_job_with_lock,
 )
-from backend.services.dashboard_oi_heatmap import get_dashboard_oi_heatmap_response
+from backend.services.dashboard_oi_heatmap import (
+    get_dashboard_oi_heatmap_response,
+    invalidate_oi_heatmap_dashboard_cache,
+)
 from backend.services.oi_heatmap import get_live_oi_heatmap_json
 from backend.services.market_holiday import is_nse_holiday_ist, should_skip_scheduled_market_jobs_ist
 from backend.services import live_trading
@@ -6175,6 +6178,32 @@ async def premarket_watchlist_run_now():
     except Exception as e:
         logger.exception("premarket_watchlist_run_now: %s", e)
         return JSONResponse(status_code=500, content={"success": False, "message": str(e)})
+
+
+@router.post("/oi-heatmap/refresh")
+async def oi_heatmap_refresh_now():
+    """
+    On-demand live OI heatmap refresh from Upstox (same as the 15-min scheduler job).
+    Persists to oi_heatmap_latest and clears the dashboard Top-10 response cache (~150s).
+    Can take 1–3 minutes — use a generous HTTP client timeout.
+    """
+    try:
+        from backend.services.oi_heatmap import refresh_oi_heatmap_live
+
+        result = refresh_oi_heatmap_live()
+        try:
+            invalidate_oi_heatmap_dashboard_cache()
+        except Exception as inv_err:
+            logger.warning("oi_heatmap_refresh: dashboard cache clear failed: %s", inv_err)
+        body = dict(result) if isinstance(result, dict) else {"result": result}
+        body["dashboard_cache_cleared"] = True
+        return JSONResponse(status_code=200, content=body)
+    except Exception as e:
+        logger.exception("oi_heatmap_refresh_now: %s", e)
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "message": str(e), "dashboard_cache_cleared": False},
+        )
 
 
 @router.get("/dashboard-oi-heatmap")

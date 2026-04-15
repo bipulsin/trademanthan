@@ -420,3 +420,9 @@ def get_dashboard_oi_heatmap_response() -> Dict[str, Any]:
     out["cached"] = False
     out["cache_age_sec"] = 0.0
     return out
+
+
+def invalidate_oi_heatmap_dashboard_cache() -> None:
+    """Clear server-side cache for GET /scan/dashboard-oi-heatmap (Top 10 widget)."""
+    global _response_cache
+    _response_cache = None
