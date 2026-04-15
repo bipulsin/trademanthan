@@ -87,6 +87,8 @@ INDIA_VIX_KEY = "NSE_INDEX|India VIX"
 SESSION_OPEN = (9, 15)
 SESSION_END = (15, 30)
 SESSION_MINUTES = 375.0  # 9:15–15:30
+STANDARD_REQUIRED_DAYS = 10
+MINIMUM_ABSOLUTE_DAYS = 5
 
 # Re-entry / CMS trace (per process; reset from DB at job start)
 _reentry_track: Dict[str, Dict[str, Any]] = {}
@@ -394,6 +396,8 @@ class ScoredPick:
     calculated_lots: Optional[int] = None
     stop_loss_price: Optional[float] = None
     tier_sizing_mult: float = 1.0
+    history_days_used: int = STANDARD_REQUIRED_DAYS
+    history_status: str = "STANDARD"
 
 
 def _load_sentiment_map(db) -> Dict[str, float]:
@@ -452,13 +456,30 @@ def _score_symbol_outcome(
     daily_raw = upstox.get_historical_candles_by_instrument_key(
         fut_key, interval="days/1", days_back=45
     )
-    daily = _last_n_daily(_sort_candles(daily_raw), 10)
-    if len(daily) < 10:
-        return _fail("insufficient_daily", reject_note=f"need=10 have={len(daily)}")
+    daily_all = _sort_candles(daily_raw)
+    daily_count = len(daily_all)
+    if daily_count < MINIMUM_ABSOLUTE_DAYS:
+        return _fail(
+            "insufficient_daily",
+            reject_note=f"New listing with only {daily_count} days; need at least {MINIMUM_ABSOLUTE_DAYS}",
+        )
+    history_status = "STANDARD"
+    if daily_count >= STANDARD_REQUIRED_DAYS:
+        daily = daily_all[-STANDARD_REQUIRED_DAYS:]
+    else:
+        daily = daily_all
+        history_status = "NEW_FO_LISTING"
+        logger.info(
+            "smart_futures_picker: %s: Using adaptive history (%s days). New F&O Entry detected: Using %s days of history instead of %s.",
+            stock,
+            daily_count,
+            daily_count,
+            STANDARD_REQUIRED_DAYS,
+        )
 
     closes_d = [float(x["close"]) for x in daily]
     vols_d = [float(x.get("volume") or 0) for x in daily]
-    avg_daily_vol = sum(vols_d) / 10.0
+    avg_daily_vol = sum(vols_d) / float(len(vols_d))
     obv_slope = compute_obv_slope_daily(closes_d, vols_d)
 
     m5_raw = upstox.get_historical_candles_by_instrument_key(
@@ -476,17 +497,6 @@ def _score_symbol_outcome(
     if bar_end is None:
         return _fail("bad_bar_ts", reject_note=last_ts[:32])
     tf_ok, tf_reason = time_of_day_filter(bar_end)
-    if not tf_ok:
-        _log_sf_event(
-            {
-                "timestamp": bar_end.isoformat(),
-                "symbol": stock,
-                "action": "BLOCKED",
-                "block_reason": tf_reason,
-                "time_filter_passed": False,
-            }
-        )
-        return _fail("time_window", reject_note=tf_reason)
 
     highs = [float(b["high"]) for b in m5_today]
     lows = [float(b["low"]) for b in m5_today]
@@ -766,8 +776,8 @@ def _score_symbol_outcome(
         signal_tier=sig_tier,
         tier_multiplier=float(tier_mult),
         ema_slope_norm=float(ema_n),
-        time_filter_passed=True,
-        time_filter_reason="",
+        time_filter_passed=bool(tf_ok),
+        time_filter_reason="" if tf_ok else tf_reason,
         regime_filter_passed=True,
         regime_filter_reason="",
         oi_value=oi_val,
@@ -777,6 +787,8 @@ def _score_symbol_outcome(
         oi_gate_reason=oi_gate_reason,
         premkt_rank=premkt_r,
         oi_heat_rank=oi_heat_r,
+        history_days_used=int(len(daily)),
+        history_status=history_status,
     )
     _log_sf_event(
         {
@@ -785,12 +797,14 @@ def _score_symbol_outcome(
             "cms_score_raw": float(cms),
             "cms_final": float(final_cms),
             "signal_tier": sig_tier,
-            "time_filter_passed": True,
+            "time_filter_passed": bool(tf_ok),
             "regime_filter_passed": True,
             "oi_signal": oi_sig,
             "oi_gate_passed": oi_gate_passed,
             "action": "QUALIFIED",
             "block_reason": "",
+            "history_days_used": int(len(daily)),
+            "history_status": history_status,
         }
     )
     return SymbolScoreOutcome(
@@ -1351,6 +1365,23 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
         slots = max(0, int(MAX_OPEN_POSITIONS) - open_n)
         saved = 0
         for pick in merged_picks[:slots]:
+            tf_ok, tf_reason = time_of_day_filter(now_ist)
+            if not tf_ok:
+                reject_counts["time_window_order"] += 1
+                logger.info(
+                    "smart_futures_signal %s",
+                    json.dumps(
+                        {
+                            "symbol": pick.stock,
+                            "action": "BLOCKED",
+                            "block_reason": tf_reason,
+                            "time_filter_passed": False,
+                            "block_stage": "order_execution",
+                        },
+                        default=str,
+                    ),
+                )
+                continue
             entry = _entry_price_1m_close(upstox, pick.fut_instrument_key, now_ist)
             if entry is None:
                 q = upstox.get_market_quote_by_key(pick.fut_instrument_key) or {}
@@ -1397,6 +1428,15 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
             "picked_long": picked_long_syms,
             "picked_short": picked_short_syms,
             "merged_pick_symbols": [p.stock for p in merged_picks],
+            "merged_pick_details": [
+                {
+                    "stock": p.stock,
+                    "side": p.side,
+                    "history_days_used": int(p.history_days_used),
+                    "history_status": p.history_status,
+                }
+                for p in merged_picks
+            ],
             "open_slots_used": slots,
             "reject_histogram": dict(reject_counts),
         }

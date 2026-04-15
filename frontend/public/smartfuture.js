@@ -726,6 +726,18 @@
         const merged = (p.merged_pick_symbols || data.merged_pick_symbols || []).join(', ') || '—';
         const longs = (p.picked_long || data.picked_long || []).join(', ') || '—';
         const shorts = (p.picked_short || data.picked_short || []).join(', ') || '—';
+        const details = p.merged_pick_details || data.merged_pick_details || [];
+        const newFo = details
+            .filter(function (d) {
+                return String((d && d.history_status) || '').toUpperCase() === 'NEW_FO_LISTING';
+            })
+            .map(function (d) {
+                const days = Number(d && d.history_days_used);
+                const suffix = Number.isFinite(days) ? ' (' + String(days) + 'd)' : '';
+                return String((d && d.stock) || '') + suffix;
+            })
+            .filter(Boolean)
+            .join(', ') || '—';
         const hr = data.warmup && data.warmup.heatmap_refresh;
         const warmOk = hr && hr.success !== false && hr.success !== undefined;
         el.innerHTML =
@@ -738,7 +750,9 @@
             ' &nbsp;|&nbsp; <span class="sf-meta">Short:</span> ' +
             escapeHtml(shorts) +
             '<br><span class="sf-meta">Merged filter set:</span> ' +
-            escapeHtml(merged);
+            escapeHtml(merged) +
+            '<br><span class="sf-meta">Status: NEW_FO_LISTING</span> ' +
+            escapeHtml(newFo);
         el.style.display = 'block';
     }
 

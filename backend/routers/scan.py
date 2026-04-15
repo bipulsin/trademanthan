@@ -6234,6 +6234,7 @@ def smart_futures_run_picker_now(
         if isinstance(picker, dict):
             for key in (
                 "merged_pick_symbols",
+                "merged_pick_details",
                 "picked_long",
                 "picked_short",
                 "picks",
