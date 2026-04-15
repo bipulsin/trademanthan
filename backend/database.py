@@ -627,6 +627,36 @@ def _run_startup_schema_migrations(db_engine):
                     conn.execute(text("ALTER TABLE oi_heatmap_latest ADD COLUMN prev_oi_signal TEXT"))
                     print("Applied migration: added oi_heatmap_latest.prev_oi_signal")
 
+            # WebSocket-derived intraday 1m OHLC+OI candles (for today's backtest replay).
+            if "upstox_ws_intraday_1m" not in table_names and db_engine.dialect.name == "postgresql":
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE upstox_ws_intraday_1m (
+                            instrument_key TEXT NOT NULL,
+                            candle_time TIMESTAMPTZ NOT NULL,
+                            open DOUBLE PRECISION NOT NULL,
+                            high DOUBLE PRECISION NOT NULL,
+                            low DOUBLE PRECISION NOT NULL,
+                            close DOUBLE PRECISION NOT NULL,
+                            oi_open BIGINT NOT NULL,
+                            oi_high BIGINT NOT NULL,
+                            oi_low BIGINT NOT NULL,
+                            oi_close BIGINT NOT NULL,
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            CONSTRAINT pk_upstox_ws_intraday_1m PRIMARY KEY (instrument_key, candle_time)
+                        )
+                        """
+                    )
+                )
+                conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS idx_upstox_ws_intraday_1m_time "
+                        "ON upstox_ws_intraday_1m (candle_time DESC)"
+                    )
+                )
+                print("Applied migration: created upstox_ws_intraday_1m (PostgreSQL)")
+
             # NSE (India) closed dates — IST calendar; scheduled market-data jobs skip these days.
             _insp_h = inspect(db_engine)
             _tables_h = _insp_h.get_table_names()

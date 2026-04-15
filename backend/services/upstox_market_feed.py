@@ -20,13 +20,17 @@ import ssl
 import threading
 import time
 import uuid
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+import pytz
 import requests
 import websockets
 from google.protobuf.json_format import MessageToDict
+from sqlalchemy import text
 
 from backend.config import settings
+from backend.database import SessionLocal
 from backend.services.upstox_proto import MarketDataFeedV3_pb2 as feed_pb
 from backend.services.upstox_service import UpstoxService
 
@@ -40,6 +44,110 @@ _LAST_KEYS_SIG: Optional[Tuple[str, ...]] = None
 _FEED_LAST_ERROR: Optional[str] = None
 
 _CHUNK = 100
+_CANDLE_LOCK = threading.Lock()
+_WS_1M_STATE: Dict[Tuple[str, str], Dict[str, Any]] = {}
+_WS_1M_LAST_FLUSH: Dict[Tuple[str, str], float] = {}
+IST = pytz.timezone("Asia/Kolkata")
+
+
+def _flush_debounce_sec() -> float:
+    return float(getattr(settings, "UPSTOX_WS_1M_FLUSH_DEBOUNCE_SEC", 2.0) or 2.0)
+
+
+def _persist_ws_1m_candle(ik: str, minute_iso: str, candle: Dict[str, Any]) -> None:
+    db = SessionLocal()
+    try:
+        db.execute(
+            text(
+                """
+                INSERT INTO upstox_ws_intraday_1m (
+                    instrument_key,
+                    candle_time,
+                    open,
+                    high,
+                    low,
+                    close,
+                    oi_open,
+                    oi_high,
+                    oi_low,
+                    oi_close,
+                    updated_at
+                )
+                VALUES (
+                    :ik,
+                    :candle_time,
+                    :open,
+                    :high,
+                    :low,
+                    :close,
+                    :oi_open,
+                    :oi_high,
+                    :oi_low,
+                    :oi_close,
+                    NOW()
+                )
+                ON CONFLICT (instrument_key, candle_time)
+                DO UPDATE SET
+                    high = GREATEST(upstox_ws_intraday_1m.high, EXCLUDED.high),
+                    low = LEAST(upstox_ws_intraday_1m.low, EXCLUDED.low),
+                    close = EXCLUDED.close,
+                    oi_high = GREATEST(upstox_ws_intraday_1m.oi_high, EXCLUDED.oi_high),
+                    oi_low = LEAST(upstox_ws_intraday_1m.oi_low, EXCLUDED.oi_low),
+                    oi_close = EXCLUDED.oi_close,
+                    updated_at = NOW()
+                """
+            ),
+            {
+                "ik": ik,
+                "candle_time": minute_iso,
+                "open": float(candle["open"]),
+                "high": float(candle["high"]),
+                "low": float(candle["low"]),
+                "close": float(candle["close"]),
+                "oi_open": int(candle["oi_open"]),
+                "oi_high": int(candle["oi_high"]),
+                "oi_low": int(candle["oi_low"]),
+                "oi_close": int(candle["oi_close"]),
+            },
+        )
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.debug("upstox_market_feed: ws 1m persist failed for %s %s: %s", ik, minute_iso, e)
+    finally:
+        db.close()
+
+
+def _update_ws_1m_candle(ik: str, ltp: float, oi: int, now_mono: float) -> None:
+    now_ist = datetime.now(IST)
+    minute_start = now_ist.replace(second=0, microsecond=0)
+    minute_iso = minute_start.isoformat()
+    k = (ik, minute_iso)
+    with _CANDLE_LOCK:
+        c = _WS_1M_STATE.get(k)
+        if not c:
+            c = {
+                "open": float(ltp),
+                "high": float(ltp),
+                "low": float(ltp),
+                "close": float(ltp),
+                "oi_open": int(oi),
+                "oi_high": int(oi),
+                "oi_low": int(oi),
+                "oi_close": int(oi),
+            }
+            _WS_1M_STATE[k] = c
+        else:
+            c["high"] = max(float(c["high"]), float(ltp))
+            c["low"] = min(float(c["low"]), float(ltp))
+            c["close"] = float(ltp)
+            c["oi_high"] = max(int(c["oi_high"]), int(oi))
+            c["oi_low"] = min(int(c["oi_low"]), int(oi))
+            c["oi_close"] = int(oi)
+        last_flush = float(_WS_1M_LAST_FLUSH.get(k) or 0.0)
+        if now_mono - last_flush >= _flush_debounce_sec():
+            _persist_ws_1m_candle(ik, minute_iso, c)
+            _WS_1M_LAST_FLUSH[k] = now_mono
 
 
 def _stale_after_sec() -> float:
@@ -120,6 +228,8 @@ def _ingest_feed_response_dict(d: Dict[str, Any]) -> None:
             if row.get("oi") is None and row.get("ltp") is None:
                 continue
             _OI_LTP_BY_KEY[ik] = row
+            if eff_oi is not None and eff_ltp is not None:
+                _update_ws_1m_candle(ik, float(eff_ltp), int(eff_oi), now)
 
 
 def _decode_and_ingest(binary: bytes) -> None:

@@ -175,6 +175,63 @@ def candles_for_day(candles: Sequence[dict], session_d: date) -> List[dict]:
     return [c for c in candles if (parse_dt_ist(c.get("timestamp")) or datetime.min.replace(tzinfo=IST)).date() == session_d]
 
 
+def latest_candle_date(candles: Sequence[dict]) -> Optional[date]:
+    latest: Optional[date] = None
+    for c in candles or []:
+        dt = parse_dt_ist(c.get("timestamp"))
+        if not dt:
+            continue
+        d = dt.date()
+        if latest is None or d > latest:
+            latest = d
+    return latest
+
+
+def ws_intraday_candles_for_day(instrument_key: str, session_d: date) -> List[dict]:
+    """
+    Load today's 1m candles built from server WebSocket OI/LTP stream.
+    Returns candle-like dicts compatible with the backtester.
+    """
+    if not instrument_key:
+        return []
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT candle_time, open, high, low, close, oi_close
+                FROM upstox_ws_intraday_1m
+                WHERE instrument_key = :ik
+                  AND (candle_time AT TIME ZONE 'Asia/Kolkata')::date = :session_date
+                ORDER BY candle_time ASC
+                """
+            ),
+            {"ik": instrument_key, "session_date": session_d},
+        ).fetchall()
+        out: List[dict] = []
+        for r in rows:
+            ts = r[0]
+            dt = parse_dt_ist(ts.isoformat() if hasattr(ts, "isoformat") else ts)
+            if not dt or dt.date() != session_d:
+                continue
+            out.append(
+                {
+                    "timestamp": dt.isoformat(),
+                    "open": float(r[1]),
+                    "high": float(r[2]),
+                    "low": float(r[3]),
+                    "close": float(r[4]),
+                    "volume": 0.0,
+                    "oi": float(r[5]) if r[5] is not None else 0.0,
+                }
+            )
+        return out
+    except Exception:
+        return []
+    finally:
+        db.close()
+
+
 def load_arbitrage_symbols() -> List[str]:
     db = SessionLocal()
     try:
@@ -247,27 +304,47 @@ def front_month_resolver(session_d: date, symbols: Sequence[str]) -> Dict[str, C
 
 
 def fetch_futures_day_candles(
-    ux: UpstoxService, ci: ContractInfo, session_d: date, cache_dir: Path
-) -> Tuple[List[dict], str]:
+    ux: UpstoxService, ci: ContractInfo, session_d: date, cache_dir: Path, *, prefer_current_day: bool = False
+) -> Tuple[List[dict], str, Optional[date]]:
     cache_dir.mkdir(parents=True, exist_ok=True)
     f1 = cache_dir / f"{ci.stock}_1m.json"
     f5 = cache_dir / f"{ci.stock}_5m.json"
 
-    raw_1m = ux.get_historical_candles_by_instrument_key(ci.instrument_key, "minutes/1", 0, range_end_date=session_d) or []
-    if not raw_1m:
-        raw_1m = ux.get_historical_candles_by_instrument_key(ci.instrument_key, "minutes/1", 1, range_end_date=session_d) or []
+    if prefer_current_day:
+        ws_1m = ws_intraday_candles_for_day(ci.instrument_key, session_d)
+        if ws_1m:
+            f1.write_text(json.dumps(ws_1m), encoding="utf-8")
+            return ws_1m, "ws1m", latest_candle_date(ws_1m)
+        # For today's backtest, fetch a live rolling window ending "now" (Upstox current-day candles).
+        raw_1m = ux.get_historical_candles_by_instrument_key(ci.instrument_key, "minutes/1", 2) or []
+        if not raw_1m:
+            raw_1m = ux.get_historical_candles_by_instrument_key(ci.instrument_key, "minutes/1", 5) or []
+    else:
+        raw_1m = ux.get_historical_candles_by_instrument_key(ci.instrument_key, "minutes/1", 0, range_end_date=session_d) or []
+        if not raw_1m:
+            raw_1m = ux.get_historical_candles_by_instrument_key(ci.instrument_key, "minutes/1", 1, range_end_date=session_d) or []
+        if not raw_1m:
+            raw_1m = ux.get_historical_candles_by_instrument_key(ci.instrument_key, "minutes/1", 5, range_end_date=session_d) or []
     day_1m = candles_for_day(sort_candles(raw_1m), session_d)
     if day_1m:
         f1.write_text(json.dumps(day_1m), encoding="utf-8")
-        return day_1m, "1m"
+        return day_1m, "1m", latest_candle_date(raw_1m)
 
-    raw_5m = ux.get_historical_candles_by_instrument_key(ci.instrument_key, "minutes/5", 0, range_end_date=session_d) or []
-    if not raw_5m:
-        raw_5m = ux.get_historical_candles_by_instrument_key(ci.instrument_key, "minutes/5", 1, range_end_date=session_d) or []
+    if prefer_current_day:
+        raw_5m = ux.get_historical_candles_by_instrument_key(ci.instrument_key, "minutes/5", 2) or []
+        if not raw_5m:
+            raw_5m = ux.get_historical_candles_by_instrument_key(ci.instrument_key, "minutes/5", 5) or []
+    else:
+        raw_5m = ux.get_historical_candles_by_instrument_key(ci.instrument_key, "minutes/5", 0, range_end_date=session_d) or []
+        if not raw_5m:
+            raw_5m = ux.get_historical_candles_by_instrument_key(ci.instrument_key, "minutes/5", 1, range_end_date=session_d) or []
+        if not raw_5m:
+            raw_5m = ux.get_historical_candles_by_instrument_key(ci.instrument_key, "minutes/5", 5, range_end_date=session_d) or []
     day_5m = candles_for_day(sort_candles(raw_5m), session_d)
     if day_5m:
         f5.write_text(json.dumps(day_5m), encoding="utf-8")
-    return day_5m, "5m"
+    latest = latest_candle_date(raw_1m) or latest_candle_date(raw_5m)
+    return day_5m, "5m", latest
 
 
 def tanh_norm(x: float, scale: float) -> float:
@@ -405,6 +482,8 @@ def evaluate_outcome_fixed_exit(decision: str, entry: float, exit_close: float, 
 
 def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
     sd = date.fromisoformat(args.date)
+    today_ist = datetime.now(IST).date()
+    is_today_session = sd == today_ist
     th, tm, _ = [int(x) for x in args.time.split(":")]
     bh, bm, _ = [int(x) for x in args.baseline.split(":")]
     eh, em = 15, 30
@@ -424,14 +503,21 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
             failures.append({"symbol": sym, "error": "no_front_month_future"})
             continue
         try:
-            candles, tf = fetch_futures_day_candles(ux, ci, sd, cache_dir)
+            candles, tf, latest_d = fetch_futures_day_candles(
+                ux, ci, sd, cache_dir, prefer_current_day=is_today_session
+            )
             if not candles:
+                if latest_d and latest_d < sd:
+                    raise ValueError(f"no_candles_for_day:last_available={latest_d.isoformat()}")
                 raise ValueError("no_candles_for_day")
             c0915 = find_candle(candles, sd, bh, bm) or find_candle_at_or_after(candles, sd, bh, bm, max_delay_min=20)
             c1330 = find_candle(candles, sd, th, tm) or find_candle_at_or_after(candles, sd, th, tm, max_delay_min=20)
             c1530 = find_candle(candles, sd, eh, em) or find_candle_at_or_before(candles, sd, eh, em, max_lookback_min=20)
-            if not c0915 or not c1330 or not c1530:
-                raise ValueError("missing_baseline_or_signal_or_exit_candle")
+            if not c0915 or not c1330:
+                raise ValueError("missing_baseline_or_signal_candle")
+            exit_data_missing = c1530 is None
+            if exit_data_missing and not is_today_session:
+                raise ValueError("missing_exit_candle")
             if c0915.get("oi") is None or c1330.get("oi") is None:
                 raise ValueError("missing_oi_for_baseline_or_signal")
 
@@ -485,14 +571,14 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
                     total_roi_pct=None,
                     holding_time_minutes=None,
                     max_profit_achieved=None,
-                    final_exit_reason="",
+                    final_exit_reason="NO_DATA_FOR_EXIT_CONDITION" if exit_data_missing else "",
                     mfe=None,
                     mae=None,
                     pnl=None,
                     roi_pct=None,
                     hit="NA",
                     lot_size=ci.lot_size,
-                    error="",
+                    error="no_data_for_exit_condition" if exit_data_missing else "",
                 )
             )
             # cache metadata per symbol
@@ -577,6 +663,8 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
 
     for r in rows:
         if r.final_decision not in {"ENTER_LONG", "ENTER_SHORT"} or r.entry_price is None or not r.entry_time:
+            continue
+        if str(r.error or "").strip().lower() == "no_data_for_exit_condition":
             continue
         side = "LONG" if r.final_decision == "ENTER_LONG" else "SHORT"
         seq = candles_by_symbol.get(r.symbol) or []
