@@ -60,6 +60,8 @@ from backend.services.upstox_service import UpstoxService
 IST = pytz.timezone("Asia/Kolkata")
 INDIA_VIX_KEY = "NSE_INDEX|India VIX"
 SESSION_MINUTES = 375.0
+BACKTEST_STANDARD_MIN_M5_BARS = 15
+BACKTEST_EARLY_MIN_M5_BARS = 6
 
 # Earliest calendar session_date allowed for backtests (product rule).
 BACKTEST_MIN_SESSION_DATE = date(2026, 2, 1)
@@ -124,6 +126,20 @@ def _m5_session_upto(m5_sorted: List[dict], session_date: date, cutoff_ist: date
             continue
         out.append(b)
     return out
+
+
+def _required_m5_bars_for_cutoff(cutoff_ist: datetime) -> int:
+    """
+    Adaptive m5 requirement for historical backtests:
+    - keep standard 15 bars after sufficient session progress
+    - allow early slots (e.g. 09:45) to run with at least 6 bars
+    """
+    session_open = cutoff_ist.replace(hour=9, minute=15, second=0, microsecond=0)
+    mins = max(0.0, (cutoff_ist - session_open).total_seconds() / 60.0)
+    bars_elapsed = int(mins // 5) + 1  # include current cutoff bar
+    if bars_elapsed >= BACKTEST_STANDARD_MIN_M5_BARS:
+        return BACKTEST_STANDARD_MIN_M5_BARS
+    return min(BACKTEST_STANDARD_MIN_M5_BARS, max(BACKTEST_EARLY_MIN_M5_BARS, bars_elapsed))
 
 
 def _entry_price_at_cutoff(upstox: UpstoxService, fut_key: str, cutoff_ist: datetime) -> Optional[float]:
@@ -203,7 +219,8 @@ def score_symbol_backtest(
     )
     m5 = _sort_candles(m5_raw)
     m5_today = _m5_session_upto(m5, session_date, cutoff_ist)
-    if len(m5_today) < 15:
+    need_m5 = _required_m5_bars_for_cutoff(cutoff_ist)
+    if len(m5_today) < need_m5:
         return None
 
     highs = [float(b["high"]) for b in m5_today]
