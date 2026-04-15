@@ -9,7 +9,7 @@ Consolidates all scan algorithm schedulers into a single controller:
 - Entry slip monitor (every 15 min during market hours): cancel unfilled entry orders after 2 checks
 - Final reconciliation (3:45 PM & 4:00 PM): broker buy/sell/PnL sync; time_based → Exit-TM after 3:15 PM exits
 - Fin sentiment (weekdays 9:17–13:17 IST, 15 min): NSE corporate announcements + FinBERT for arbitrage_master, store in stock_fin_sentiment (NSE date window: last-run→now; 09:17 only uses today IST)
-- Smart Futures CMS picker (weekdays 9:15, 9:30, then 10:00–15:00 every 30 min IST): arbitrage_master current-month futures → smart_futures_daily
+- Smart Futures CMS picker (weekdays every 15 min 9:30–15:00 IST): arbitrage_master current-month futures → smart_futures_daily
 - Pre-market F&O watchlist (weekdays 9:10 IST default, PREMKET_RUN_TIME): ~203 equities → Top N in premarket_watchlist (same scoring as test_premkt_scanner / premarket_scoring)
 - Live OI heatmap (weekdays, every 15 min 9:15–15:15 IST): Upstox batch quotes → oi_heatmap cache + DB; API falls back to DB snapshot when live is empty
 
@@ -29,7 +29,7 @@ import time
 import requests
 from pathlib import Path
 from datetime import datetime, time as dt_time
-from typing import Tuple
+from typing import List, Tuple
 import pytz
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -851,12 +851,17 @@ class SmartFutureAlgoScheduler:
                 "dashboard falls back to oi_heatmap_latest when live fetch fails"
             )
 
-            # Smart Futures picker — 9:15 (first bar after cash open), 9:30, then 10:00–15:00 every 30 min (weekdays)
-            _sf_picker_slots = [(9, 15), (9, 30)]
-            for _h in range(10, 15):
-                for _m in (0, 30):
-                    _sf_picker_slots.append((_h, _m))
-            _sf_picker_slots.append((15, 0))
+            # Smart Futures picker — every 15 minutes 9:30–15:00 IST (weekdays); aligns with TRADE_WINDOWS
+            _sf_picker_slots: List[Tuple[int, int]] = []
+            _ph, _pm = 9, 30
+            while True:
+                _sf_picker_slots.append((_ph, _pm))
+                if _ph == 15 and _pm == 0:
+                    break
+                _pm += 15
+                if _pm >= 60:
+                    _ph += 1
+                    _pm -= 60
 
             def _create_sf_picker_wrapper(_hh: int, _mm: int):
                 _label = f"{_hh:02d}:{_mm:02d}"
@@ -894,7 +899,7 @@ class SmartFutureAlgoScheduler:
                     coalesce=True,
                 )
             logger.info(
-                "✅ Scheduled: Smart Futures picker (%s weekday slots 9:15/9:30 + 30 min to 15:00 IST)",
+                "✅ Scheduled: Smart Futures picker (%s weekday slots, every 15 min 9:30–15:00 IST)",
                 len(_sf_picker_slots),
             )
 

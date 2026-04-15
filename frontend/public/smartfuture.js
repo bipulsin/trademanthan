@@ -340,10 +340,11 @@
     }
 
     function scheduledSlotsForSession(sessionDate) {
-        const out = ['09:15'];
-        for (let h = 9, m = 30; h < 15 || (h === 15 && m === 0); ) {
+        const out = [];
+        for (let h = 9, m = 30; ; ) {
             out.push(pad2(h) + ':' + pad2(m));
-            m += 30;
+            if (h === 15 && m === 0) break;
+            m += 15;
             if (m >= 60) {
                 h += 1;
                 m -= 60;
