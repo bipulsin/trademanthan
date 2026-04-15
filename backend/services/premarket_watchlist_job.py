@@ -7,6 +7,7 @@ Scheduled weekdays 9:10 IST (configurable); persists to ``premarket_watchlist``.
 """
 from __future__ import annotations
 
+import fcntl
 import logging
 import time
 from datetime import date, datetime
@@ -29,6 +30,9 @@ logger = logging.getLogger(__name__)
 
 IST = pytz.timezone("Asia/Kolkata")
 SLEEP_BETWEEN_SYMBOLS_SEC = 0.04
+
+# Same path as dashboard_oi_heatmap — one cross-process lock for scheduler / dashboard / manual API
+PREMARKET_JOB_FLOCK_PATH = "/tmp/tm_heatmap_premarket_job.flock"
 
 
 def _universe_limit() -> int:
@@ -215,6 +219,22 @@ def run_premarket_watchlist_job(session_date: Optional[date] = None) -> Dict[str
             for r in top
         ],
     }
+
+
+def run_premarket_watchlist_job_with_lock(session_date: Optional[date] = None) -> Dict[str, Any]:
+    """Serialize with dashboard / other workers so only one full scan runs at a time."""
+    with open(PREMARKET_JOB_FLOCK_PATH, "w") as fp:
+        fcntl.flock(fp.fileno(), fcntl.LOCK_EX)
+        try:
+            return run_premarket_watchlist_job(session_date=session_date)
+        finally:
+            fcntl.flock(fp.fileno(), fcntl.LOCK_UN)
+
+
+def premarket_incomplete_for_session_date(session_date: date) -> bool:
+    """True when fewer than PREMKET_TOP_N rows exist for the session (needs refresh)."""
+    rows = fetch_premarket_watchlist_for_date(session_date)
+    return len(rows) < _top_n()
 
 
 def fetch_premarket_watchlist_for_date(session_date: date) -> List[Dict[str, Any]]:

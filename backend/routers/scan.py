@@ -77,7 +77,7 @@ from backend.services.market_sentiment_dials import build_dial_rows, utc_iso
 from backend.services.sector_movers import build_sector_movers, build_sector_stock_detail
 from backend.services.premarket_watchlist_job import (
     fetch_premarket_watchlist_for_date,
-    run_premarket_watchlist_job,
+    run_premarket_watchlist_job_with_lock,
 )
 from backend.services.dashboard_oi_heatmap import get_dashboard_oi_heatmap_response
 from backend.services.oi_heatmap import get_live_oi_heatmap_json
@@ -6170,7 +6170,7 @@ async def premarket_watchlist(session_date: Optional[date] = Query(None, descrip
 async def premarket_watchlist_run_now():
     """On-demand run (same logic as scheduler). Use sparingly — scans ~200 symbols via Upstox."""
     try:
-        result = run_premarket_watchlist_job()
+        result = run_premarket_watchlist_job_with_lock()
         return JSONResponse(status_code=200, content={"success": True, **result})
     except Exception as e:
         logger.exception("premarket_watchlist_run_now: %s", e)

@@ -25,6 +25,7 @@ All logs go to logs/smart_future_algo.log
 import logging
 import os
 import threading
+import time
 import requests
 from pathlib import Path
 from datetime import datetime, time as dt_time
@@ -87,7 +88,10 @@ from backend.services.car_nifty200_updater import run_car_nifty200_update_job
 from backend.services.entry_slip_monitor import run_entry_slip_monitor
 from backend.services.fin_sentiment_job import run_fin_sentiment_job
 from backend.services.smart_futures_picker.job import run_smart_futures_picker_job
-from backend.services.premarket_watchlist_job import run_premarket_watchlist_job
+from backend.services.premarket_watchlist_job import (
+    premarket_incomplete_for_session_date,
+    run_premarket_watchlist_job_with_lock,
+)
 from backend.services.scheduler_window import is_allowed_scheduler_window_ist
 from backend.services.market_holiday import should_skip_scheduled_market_jobs_ist
 from backend.services.telegram_trade_channel import send_trade_with_cto_channel_message
@@ -740,7 +744,7 @@ class SmartFutureAlgoScheduler:
                     return
                 logger.info("🔧 Pre-market F&O watchlist job (Top 200 → Top %s)...", getattr(settings, "PREMKET_TOP_N", 10))
                 try:
-                    out = run_premarket_watchlist_job()
+                    out = run_premarket_watchlist_job_with_lock()
                     logger.info(
                         "✅ Pre-market watchlist completed: top_n=%s",
                         len(out.get("top") or []),
@@ -748,7 +752,32 @@ class SmartFutureAlgoScheduler:
                 except Exception as e:
                     logger.error("❌ Pre-market watchlist failed: %s", e, exc_info=True)
 
+            def run_premarket_watchlist_backup_scheduled():
+                """If primary run missed or failed (insufficient_data), retry once ~18m later."""
+                if not getattr(settings, "PREMKET_ENABLED", True):
+                    return
+                if not is_allowed_scheduler_window_ist():
+                    return
+                ist = pytz.timezone("Asia/Kolkata")
+                now = datetime.now(ist)
+                if _skip_ist_non_trading_job("pre-market watchlist backup", now):
+                    return
+                if not premarket_incomplete_for_session_date(now.date()):
+                    logger.info("premarket backup: list already complete for %s — skip", now.date().isoformat())
+                    return
+                logger.info("🔧 Pre-market F&O watchlist backup (incomplete rows for %s)...", now.date().isoformat())
+                try:
+                    out = run_premarket_watchlist_job_with_lock()
+                    logger.info(
+                        "✅ Pre-market watchlist backup completed: top_n=%s",
+                        len(out.get("top") or []),
+                    )
+                except Exception as e:
+                    logger.error("❌ Pre-market watchlist backup failed: %s", e, exc_info=True)
+
             if getattr(settings, "PREMKET_ENABLED", True):
+                # Long misfire window: deploy/restart after 9:10 still runs same morning
+                _pm_misfire = int(getattr(settings, "PREMKET_MISFIRE_GRACE_SEC", 21600))
                 self.scheduler.add_job(
                     run_premarket_watchlist_scheduled,
                     trigger=CronTrigger(day_of_week="mon-fri", hour=pm_h, minute=pm_m, timezone="Asia/Kolkata"),
@@ -756,7 +785,7 @@ class SmartFutureAlgoScheduler:
                     name="Pre-market F&O watchlist (config IST)",
                     replace_existing=True,
                     max_instances=1,
-                    misfire_grace_time=600,
+                    misfire_grace_time=_pm_misfire,
                     coalesce=True,
                 )
                 logger.info(
@@ -764,6 +793,18 @@ class SmartFutureAlgoScheduler:
                     pm_h,
                     pm_m,
                 )
+                # Backup only when today's table is still short (primary missed, failed, or insufficient_data)
+                self.scheduler.add_job(
+                    run_premarket_watchlist_backup_scheduled,
+                    trigger=CronTrigger(day_of_week="mon-fri", hour=9, minute=28, timezone="Asia/Kolkata"),
+                    id="smart_future_premarket_watchlist_backup",
+                    name="Pre-market F&O watchlist backup (9:28 IST if incomplete)",
+                    replace_existing=True,
+                    max_instances=1,
+                    misfire_grace_time=_pm_misfire,
+                    coalesce=True,
+                )
+                logger.info("✅ Scheduled: Pre-market F&O watchlist backup (09:28 IST if incomplete)")
             else:
                 logger.info("⏭️ Pre-market watchlist not scheduled (PREMKET_ENABLED=false)")
 
@@ -899,7 +940,41 @@ class SmartFutureAlgoScheduler:
                     logger.error(f"❌ CAR NIFTY200 startup run failed: {e}", exc_info=True)
 
             threading.Thread(target=_car_nifty_startup_bg, name="car_nifty200_startup", daemon=True).start()
-            
+
+            def _premarket_watchlist_catchup_after_start():
+                time.sleep(25)
+                try:
+                    if not getattr(settings, "PREMKET_ENABLED", True):
+                        return
+                    ist = pytz.timezone("Asia/Kolkata")
+                    now = datetime.now(ist)
+                    if now.weekday() >= 5:
+                        return
+                    if _skip_ist_non_trading_job("premarket startup catch-up", now):
+                        return
+                    hm = now.hour * 60 + now.minute
+                    if hm < 9 * 60 + 10 or hm > 15 * 60 + 30:
+                        return
+                    if not premarket_incomplete_for_session_date(now.date()):
+                        return
+                    logger.info(
+                        "🔧 Pre-market watchlist startup catch-up (incomplete for %s)...",
+                        now.date().isoformat(),
+                    )
+                    out = run_premarket_watchlist_job_with_lock()
+                    logger.info(
+                        "✅ Pre-market watchlist startup catch-up done: top_n=%s",
+                        len(out.get("top") or []),
+                    )
+                except Exception as e:
+                    logger.error("❌ Pre-market startup catch-up failed: %s", e, exc_info=True)
+
+            threading.Thread(
+                target=_premarket_watchlist_catchup_after_start,
+                name="premarket_catchup_startup",
+                daemon=True,
+            ).start()
+
             total_jobs = len(self.scheduler.get_jobs())
             logger.info("=" * 60)
             logger.info(f"✅ Smart Future Algo Scheduler Controller STARTED")

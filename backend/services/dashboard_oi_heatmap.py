@@ -6,7 +6,6 @@ quotes (OI + price) when NSE blocks datacenter IPs. Server-side response cache +
 """
 from __future__ import annotations
 
-import fcntl
 import logging
 import threading
 import time
@@ -20,7 +19,7 @@ from backend.database import SessionLocal
 from backend.services.oi_integration import NSEOIFetcher, interpret_oi_signal
 from backend.services.premarket_watchlist_job import (
     fetch_premarket_watchlist_for_date,
-    run_premarket_watchlist_job,
+    run_premarket_watchlist_job_with_lock,
 )
 
 logger = logging.getLogger(__name__)
@@ -33,8 +32,7 @@ _RESPONSE_CACHE_TTL_SEC = 150.0
 _SLEEP_BETWEEN_NSE_CALLS_SEC = 0.06
 _TOP_N = 10
 
-# Serialize premarket job across workers; cooldown avoids hammering Upstox if the job keeps failing.
-_PREMARKET_FLOCK_PATH = "/tmp/tm_heatmap_premarket_job.flock"
+# Premarket scan serialized via ``run_premarket_watchlist_job_with_lock``; cooldown avoids hammering Upstox if the job keeps failing.
 _PREMARKET_ATTEMPT_COOLDOWN_SEC = 45 * 60.0
 _last_premarket_attempt_mono: float = 0.0
 
@@ -123,12 +121,7 @@ def _nse_derivative_usable(raw: Dict[str, Any]) -> bool:
 
 
 def _run_premarket_job_under_flock() -> None:
-    with open(_PREMARKET_FLOCK_PATH, "w") as fp:
-        fcntl.flock(fp.fileno(), fcntl.LOCK_EX)
-        try:
-            run_premarket_watchlist_job()
-        finally:
-            fcntl.flock(fp.fileno(), fcntl.LOCK_UN)
+    run_premarket_watchlist_job_with_lock()
 
 
 def _needs_auto_premarket_job(rows: List[Dict[str, Any]]) -> bool:
@@ -191,7 +184,7 @@ def _resolve_top10_symbols() -> Tuple[List[str], str]:
     Same ranked universe as the scheduled pre-market job (OBV + gap + range), never alphabetical.
 
     1) Today's premarket_watchlist when it has a full top 10.
-    2) Else: may run ``run_premarket_watchlist_job()`` under flock (weekdays): on empty rows anytime,
+    2) Else: may run ``run_premarket_watchlist_job_with_lock()`` (weekdays): on empty rows anytime,
        or on partial rows after 15:15 IST (post-market top-up for today). Cooldown between attempts.
     3) Partial / latest session fallback as before.
     """

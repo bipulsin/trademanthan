@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     # Pre-market watchlist schedule (IST, HH:MM)
     PREMKET_ENABLED: bool = os.getenv("PREMKET_ENABLED", "true").lower() in ("1", "true", "yes")
     PREMKET_RUN_TIME: str = os.getenv("PREMKET_RUN_TIME", "09:10")
+    # APScheduler misfire grace for primary premarket cron (sec). Deploy after 9:10 still runs same morning.
+    PREMKET_MISFIRE_GRACE_SEC: int = int(os.getenv("PREMKET_MISFIRE_GRACE_SEC", "21600"))
     PREMKET_TOP_N: int = int(os.getenv("PREMKET_TOP_N", "10"))
     PREMKET_UNIVERSE_LIMIT: int = int(os.getenv("PREMKET_UNIVERSE_LIMIT", "203"))
 
