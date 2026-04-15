@@ -178,6 +178,31 @@
         .sf-filter-dot { font-size: 0.65rem; cursor: default; }
         .sf-filter-ok { color: #22c55e; }
         .sf-filter-bad { color: #ef4444; }
+        .sf-btn-run-picker {
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            cursor: pointer;
+            border: 1px solid #0d9488;
+            background: #0f766e;
+            color: #fff;
+        }
+        .sf-btn-run-picker:hover:not(:disabled) { background: #115e59; }
+        .sf-btn-run-picker:disabled { opacity: 0.55; cursor: not-allowed; }
+        .sf-picker-run-banner {
+            margin-top: 10px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            background: rgba(15, 118, 110, 0.12);
+            border: 1px solid rgba(15, 118, 110, 0.35);
+            font-size: 0.88rem;
+            line-height: 1.45;
+        }
+        body[data-theme="dark"] .sf-picker-run-banner {
+            background: rgba(45, 212, 191, 0.1);
+            border-color: rgba(45, 212, 191, 0.35);
+        }
     </style>
 </head>
 <body class="theme-page">
@@ -207,11 +232,15 @@
                         <h2><i class="fas fa-chart-line"></i> Today&apos;s Trend</h2>
                         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
                             <button type="button" class="sf-btn-refresh" id="sfTrendRefresh" title="Refresh" aria-label="Refresh today&apos;s trend"><i class="fas fa-sync-alt" aria-hidden="true"></i></button>
+                            <button type="button" class="sf-btn-run-picker" id="sfRunPicker" title="Run CMS picker once (refreshes OI heatmap + live feed first)">
+                                Run scan now
+                            </button>
                             <span class="sf-meta">Session (IST): <span id="sfTrendSession">—</span></span>
                             <span class="sf-meta">Updated: <span id="sfTrendUpdated">—</span></span>
                         </div>
                     </div>
                     <p class="sf-meta" id="sfTrendMsg"></p>
+                    <div id="sfPickerRunBanner" class="sf-picker-run-banner" style="display:none;" role="status" aria-live="polite"></div>
                     <p class="sf-meta" id="sfPickSelectionNote" style="margin-top:6px;"></p>
                     <div id="sfTrendGroups"></div>
                 </div>
@@ -227,6 +256,6 @@
         </main>
     </div>
     <script src="left-menu.js?v=3.19"></script>
-    <script src="smartfuture.js?v=31"></script>
+    <script src="smartfuture.js?v=32"></script>
 </body>
 </html>

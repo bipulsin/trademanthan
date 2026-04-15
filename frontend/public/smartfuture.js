@@ -707,6 +707,75 @@
             ').';
     }
 
+    function showPickerRunBanner(data) {
+        const el = document.getElementById('sfPickerRunBanner');
+        if (!el) return;
+        if (!data || data.success === false) {
+            el.style.display = 'none';
+            return;
+        }
+        const p = data.picker || {};
+        const skipped = p.skipped || data.skipped;
+        if (skipped) {
+            el.innerHTML =
+                '<strong>Picker:</strong> skipped (' + escapeHtml(String(skipped)) + ').';
+            el.style.display = 'block';
+            return;
+        }
+        const picks = p.picks != null ? p.picks : data.picks;
+        const merged = (p.merged_pick_symbols || data.merged_pick_symbols || []).join(', ') || '—';
+        const longs = (p.picked_long || data.picked_long || []).join(', ') || '—';
+        const shorts = (p.picked_short || data.picked_short || []).join(', ') || '—';
+        const hr = data.warmup && data.warmup.heatmap_refresh;
+        const warmOk = hr && hr.success !== false && hr.success !== undefined;
+        el.innerHTML =
+            '<strong>Manual scan complete.</strong> New rows saved: <strong>' +
+            escapeHtml(String(picks != null ? picks : '0')) +
+            '</strong>. ' +
+            (warmOk ? 'OI heatmap was refreshed first (live OI + WebSocket). ' : '') +
+            '<br><span class="sf-meta">Long:</span> ' +
+            escapeHtml(longs) +
+            ' &nbsp;|&nbsp; <span class="sf-meta">Short:</span> ' +
+            escapeHtml(shorts) +
+            '<br><span class="sf-meta">Merged filter set:</span> ' +
+            escapeHtml(merged);
+        el.style.display = 'block';
+    }
+
+    async function runPickerScan() {
+        const btn = document.getElementById('sfRunPicker');
+        const msg = document.getElementById('sfTrendMsg');
+        if (btn) btn.disabled = true;
+        if (msg) msg.textContent = 'Running CMS picker (OI heatmap warmup can take 1–3 minutes)…';
+        try {
+            const url = API_BASE + '/scan/smart-futures/run-picker?warmup_oi=true';
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                cache: 'no-store',
+            });
+            const raw = await res.text();
+            let data = null;
+            try {
+                data = JSON.parse(raw);
+            } catch (e) {
+                data = null;
+            }
+            if (!res.ok) {
+                const err = (data && (data.message || data.detail)) || raw || res.statusText;
+                if (msg) msg.textContent = err;
+                return;
+            }
+            showPickerRunBanner(data);
+            if (msg) msg.textContent = '';
+            await loadTrend(true);
+        } catch (e) {
+            if (msg) msg.textContent = String(e.message || e);
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    }
+
     async function loadTrend(silent) {
         const updated = document.getElementById('sfTrendUpdated');
         const msg = document.getElementById('sfTrendMsg');
@@ -737,6 +806,8 @@
     document.addEventListener('DOMContentLoaded', function () {
         const ref = document.getElementById('sfTrendRefresh');
         if (ref) ref.addEventListener('click', function () { loadTrend(false); });
+        const runPicker = document.getElementById('sfRunPicker');
+        if (runPicker) runPicker.addEventListener('click', function () { runPickerScan(); });
         loadTrend(false);
         window.setInterval(function () { loadTrend(true); }, 15 * 60 * 1000);
     });

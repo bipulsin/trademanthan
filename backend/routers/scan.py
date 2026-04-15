@@ -6198,6 +6198,62 @@ async def upstox_market_feed_status():
         return JSONResponse(status_code=500, content={"success": False, "message": str(e)})
 
 
+@router.post("/smart-futures/run-picker")
+def smart_futures_run_picker_now(
+    warmup_oi: bool = Query(
+        True,
+        description="When true, refresh OI heatmap (REST + WebSocket overlay) before CMS picker so OI gates match live data.",
+    ),
+):
+    """
+    One-off Smart Futures CMS picker (same job as the 15-minute scheduler).
+    Optionally warms OI: market WebSocket + full heatmap refresh, then runs ``run_smart_futures_picker_job``.
+    Can take several minutes when ``warmup_oi`` is true; use a long HTTP client timeout.
+    """
+    logger.info("smart_futures_run_picker_now: warmup_oi=%s", warmup_oi)
+    warmup: Dict[str, Any] = {}
+    try:
+        if warmup_oi:
+            try:
+                from backend.services.oi_heatmap import ensure_daily_universe_cached, refresh_oi_heatmap_live
+                from backend.services.upstox_market_feed import ensure_market_feed_running
+
+                keys = ensure_daily_universe_cached()
+                if keys:
+                    ensure_market_feed_running(keys)
+                hr = refresh_oi_heatmap_live()
+                warmup["heatmap_refresh"] = hr
+                warmup["universe_keys"] = len(keys or [])
+            except Exception as e:
+                logger.warning("smart_futures_run_picker_now: warmup failed (continuing): %s", e, exc_info=True)
+                warmup["error"] = str(e)
+        from backend.services.smart_futures_picker.job import run_smart_futures_picker_job
+
+        picker = run_smart_futures_picker_job(scan_trigger="manual_api")
+        out: Dict[str, Any] = {"success": True, "warmup": warmup or None, "picker": picker}
+        if isinstance(picker, dict):
+            for key in (
+                "merged_pick_symbols",
+                "picked_long",
+                "picked_short",
+                "picks",
+                "scan_trigger",
+                "skipped",
+                "blocked",
+                "vix",
+                "reject_histogram",
+            ):
+                if key in picker:
+                    out[key] = picker[key]
+        return JSONResponse(status_code=200, content=out)
+    except Exception as e:
+        logger.exception("smart_futures_run_picker_now: %s", e)
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "message": str(e), "warmup": warmup},
+        )
+
+
 @router.post("/oi-heatmap/refresh")
 async def oi_heatmap_refresh_now():
     """
