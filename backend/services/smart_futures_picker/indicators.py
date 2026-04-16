@@ -100,6 +100,20 @@ def session_vwap(highs: Sequence[float], lows: Sequence[float], closes: Sequence
     return (num / den) if den > 0 else float(closes[-1])
 
 
+def session_vwap_close(closes: Sequence[float], volumes: Sequence[float]) -> float:
+    """Session VWAP using close source (anchor=session, offset=0)."""
+    if not closes:
+        return 0.0
+    num = 0.0
+    den = 0.0
+    for i in range(len(closes)):
+        c = float(closes[i])
+        v = max(0.0, float(volumes[i]) if i < len(volumes) else 0.0)
+        num += c * v
+        den += v
+    return (num / den) if den > 0 else float(closes[-1])
+
+
 def volume_surge_ratio(
     m5_volumes: Sequence[float], avg_daily_vol: float, session_elapsed_fraction: float
 ) -> float:

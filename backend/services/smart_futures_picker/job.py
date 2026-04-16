@@ -67,7 +67,7 @@ from backend.services.smart_futures_picker.indicators import (
     ha_trend_score,
     market_regime_ok,
     renko_momentum_score,
-    session_vwap,
+    session_vwap_close,
     volume_surge_ratio,
     vwap_deviation_atr_norm,
     wilder_atr,
@@ -327,6 +327,24 @@ def _session_elapsed_fraction(session_date: date, m5: List[dict]) -> float:
     return max(0.05, min(1.0, mins / SESSION_MINUTES))
 
 
+def _m15_session_upto(
+    m15_sorted: List[dict],
+    session_date: date,
+    upto_ist: Optional[datetime] = None,
+) -> List[dict]:
+    out: List[dict] = []
+    for b in m15_sorted:
+        ts = str(b.get("timestamp") or "")
+        if _ist_date_from_ts(ts) != session_date:
+            continue
+        if upto_ist is not None:
+            t_end = _bar_end_ist_from_ts(ts)
+            if t_end is None or t_end > upto_ist:
+                continue
+        out.append(b)
+    return out
+
+
 def _vix_last_close_5m(upstox: UpstoxService) -> Optional[float]:
     try:
         c = upstox.get_historical_candles_by_instrument_key(
@@ -554,9 +572,21 @@ def _score_symbol_outcome(
         )
         return _fail("regime_fail", reject_note="BLOCKED: regime filter failed", final_cms=None)
 
-    vwap = session_vwap(highs, lows, closes, vols)
+    m15_raw = upstox.get_historical_candles_by_instrument_key(
+        fut_key, interval="minutes/15", days_back=6
+    )
+    m15 = _sort_candles(m15_raw)
+    m15_today = _m15_session_upto(m15, session_date, bar_end)
+    if not m15_today:
+        return _fail("insufficient_m15", reject_note="need>=1 session m15 bars")
+    m15_closes = [float(b.get("close") or 0.0) for b in m15_today]
+    m15_vols = [float(b.get("volume") or 0.0) for b in m15_today]
+    vwap = session_vwap_close(m15_closes, m15_vols)
     last_close = closes[-1]
-    vwap_dev = vwap_deviation_atr_norm(last_close, vwap, float(atr))
+    q = upstox.get_market_quote_by_key(fut_key) or {}
+    ltp = float(q.get("last_price") or 0.0)
+    gate_price = ltp if ltp > 0 else last_close
+    vwap_dev = vwap_deviation_atr_norm(gate_price, vwap, float(atr))
 
     frac = _session_elapsed_fraction(session_date, m5_today)
     vs = volume_surge_ratio(vols, avg_daily_vol, frac)
@@ -580,7 +610,7 @@ def _score_symbol_outcome(
                 _oi_fetcher_singleton = None
         oq = get_cached_oi_quote(stock, _oi_fetcher_singleton)
         if oq is not None:
-            prov_side = "LONG" if last_close >= vwap else "SHORT"
+            prov_side = "LONG" if gate_price >= vwap else "SHORT"
             oi_score_norm = normalized_oi_score_for_side(oq, prov_side)
 
     cms = compute_cms_core(
@@ -636,14 +666,14 @@ def _score_symbol_outcome(
     gl = {
         "tier_ok_long": bool(t_long != "NO_SIGNAL"),
         "final_cms_ge_th": bool(final_cms >= th - 1e-12),
-        "close_gt_vwap": bool(last_close > vwap),
+        "close_gt_vwap": bool(gate_price > vwap),
         "sector_gt_min": bool(sector_score > SECTOR_ALIGN_MIN),
         "index_long_ok": bool(index_long_ok),
     }
     gs = {
         "tier_ok_short": bool(t_short != "NO_SIGNAL"),
         "final_cms_le_neg_th": bool(final_cms <= -th + 1e-12),
-        "close_lt_vwap": bool(last_close < vwap),
+        "close_lt_vwap": bool(gate_price < vwap),
         "sector_lt_neg_min": bool(sector_score < -SECTOR_ALIGN_MIN),
         "index_short_ok": bool(index_short_ok),
     }

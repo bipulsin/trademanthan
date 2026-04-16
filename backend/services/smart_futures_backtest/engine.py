@@ -43,7 +43,7 @@ from backend.services.smart_futures_picker.indicators import (
     ha_trend_score,
     market_regime_ok,
     renko_momentum_score,
-    session_vwap,
+    session_vwap_close,
     volume_surge_ratio,
     vwap_deviation_atr_norm,
     wilder_atr,
@@ -119,6 +119,19 @@ def _daily_last_n_upto(daily_raw: Optional[List[dict]], session_date: date, n: i
 def _m5_session_upto(m5_sorted: List[dict], session_date: date, cutoff_ist: datetime) -> List[dict]:
     out: List[dict] = []
     for b in m5_sorted:
+        ts = str(b.get("timestamp") or "")
+        if _ist_date_from_ts(ts) != session_date:
+            continue
+        t_end = _parse_bar_end_ist(ts)
+        if t_end is None or t_end > cutoff_ist:
+            continue
+        out.append(b)
+    return out
+
+
+def _m15_session_upto(m15_sorted: List[dict], session_date: date, cutoff_ist: datetime) -> List[dict]:
+    out: List[dict] = []
+    for b in m15_sorted:
         ts = str(b.get("timestamp") or "")
         if _ist_date_from_ts(ts) != session_date:
             continue
@@ -245,9 +258,19 @@ def score_symbol_backtest(
     ):
         return None
 
-    vwap = session_vwap(highs, lows, closes, vols)
+    m15_raw = upstox.get_historical_candles_by_instrument_key(
+        fut_key, interval="minutes/15", days_back=120, range_end_date=session_date
+    )
+    m15 = _sort_candles(m15_raw)
+    m15_today = _m15_session_upto(m15, session_date, cutoff_ist)
+    if not m15_today:
+        return None
+    m15_closes = [float(b.get("close") or 0.0) for b in m15_today]
+    m15_vols = [float(b.get("volume") or 0.0) for b in m15_today]
+    vwap = session_vwap_close(m15_closes, m15_vols)
     last_close = closes[-1]
-    vwap_dev = vwap_deviation_atr_norm(last_close, vwap, float(atr))
+    ltp_proxy = _entry_price_at_cutoff(upstox, fut_key, cutoff_ist) or last_close
+    vwap_dev = vwap_deviation_atr_norm(ltp_proxy, vwap, float(atr))
 
     frac = _session_elapsed_fraction(session_date, m5_today)
     vs = volume_surge_ratio(vols, avg_daily_vol, frac)
@@ -285,13 +308,13 @@ def score_symbol_backtest(
     th = float(TIER2_THRESHOLD)
     long_ok = (
         final_cms >= th
-        and last_close > vwap
+        and ltp_proxy > vwap
         and sector_score > SECTOR_ALIGN_MIN
         and index_long_ok
     )
     short_ok = (
         final_cms <= -th
-        and last_close < vwap
+        and ltp_proxy < vwap
         and sector_score < -SECTOR_ALIGN_MIN
         and index_short_ok
     )
