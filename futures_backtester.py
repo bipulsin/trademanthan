@@ -12,6 +12,7 @@ import argparse
 import csv
 import json
 import math
+import time
 from dataclasses import dataclass, asdict
 from datetime import date, datetime, time as dt_time
 from pathlib import Path
@@ -23,8 +24,26 @@ from sqlalchemy import text
 
 from backend.config import get_instruments_file_path, settings
 from backend.database import SessionLocal
-from backend.services.smart_futures_config import MIN_LONG_BUILDUP_SELECTION, buildup_selection_long_short_caps
+from backend.services.smart_futures_backtest.april_2026_universe import (
+    load_april_2026_futures_by_underlying,
+    use_fixed_april_2026_futures,
+)
+from backend.services.smart_futures_backtest.engine import (
+    BACKTEST_MIN_SESSION_DATE,
+    _entry_price_at_cutoff,
+    _vix_at_cutoff,
+    merge_scored_picks_like_picker,
+    score_symbol_backtest,
+)
+from backend.services.smart_futures_backtest.sentiment import load_sentiment_map_for_session_date
+from backend.services.smart_futures_config import (
+    MIN_LONG_BUILDUP_SELECTION,
+    SMART_FUTURES_MAX_PUBLISH_PER_SCAN,
+    SMART_FUTURES_PICK_SELECTION_TOP_N,
+    buildup_selection_long_short_caps,
+)
 from backend.services.smart_futures_exit import evaluate_exit_with_profit_protection
+from backend.services.smart_futures_picker.job import ScoredPick
 from backend.services.upstox_service import UpstoxService
 
 IST = pytz.timezone("Asia/Kolkata")
@@ -303,6 +322,24 @@ def front_month_resolver(session_d: date, symbols: Sequence[str]) -> Dict[str, C
     return out
 
 
+def contract_info_from_instrument_key(stock: str, futures_symbol: str, instrument_key: str) -> Optional[ContractInfo]:
+    """Lot/expiry from instruments JSON for a known FUT instrument_key (matches smart_futures_backtest universe)."""
+    for c in load_instruments():
+        if not isinstance(c, dict):
+            continue
+        if str(c.get("instrument_key") or "").strip() != instrument_key:
+            continue
+        lot = int(float(c.get("lot_size") or c.get("quantity") or c.get("minimum_lot") or 1))
+        expiry = int(c.get("expiry") or 0)
+        tsym = str(c.get("trading_symbol") or c.get("tradingsymbol") or "").strip()
+        cm = ""
+        if tsym:
+            parts = tsym.split()
+            cm = parts[-1] if parts else ""
+        return ContractInfo(stock, instrument_key, expiry, max(1, lot), tsym or futures_symbol, cm)
+    return None
+
+
 def fetch_futures_day_candles(
     ux: UpstoxService, ci: ContractInfo, session_d: date, cache_dir: Path, *, prefer_current_day: bool = False
 ) -> Tuple[List[dict], str, Optional[date]]:
@@ -480,7 +517,7 @@ def evaluate_outcome_fixed_exit(decision: str, entry: float, exit_close: float, 
     return round(pnl, 2), round(roi, 4), hit
 
 
-def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
+def _run_legacy_backtest(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
     sd = date.fromisoformat(args.date)
     today_ist = datetime.now(IST).date()
     is_today_session = sd == today_ist
@@ -768,6 +805,10 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
         "symbols_from_arbitrage_master": len(symbols),
         "contracts_resolved": len(contracts),
         "rows_generated": len(rows),
+        "selection_mode": "legacy",
+        "selection_caption": (
+            f"Up to {n_long_cap} LONG + {n_short_cap} SHORT BUILDUP (top_n={int(getattr(args, 'top_n', 5) or 5)})"
+        ),
         "selection_rule": (
             "LONG_BUILDUP: at least min_long (and max(top_n//3, min)) within top_n budget; "
             "SHORT_BUILDUP: up to top_n//2, trimmed so long_cap+short_cap<=top_n; "
@@ -804,8 +845,431 @@ def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
     return rows, summary
 
 
+def _run_smart_futures_selection(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
+    """
+    Symbol selection aligned with ``run_smart_futures_picker_job`` / ``score_symbol_backtest``:
+    same CMS gates, same long/short cap merge, same publish cap; index 5m gates match production (disabled).
+    """
+    sd = date.fromisoformat(args.date)
+    today_ist = datetime.now(IST).date()
+    is_today_session = sd == today_ist
+    tparts = [int(x) for x in args.time.strip().split(":")]
+    th, tm = tparts[0], tparts[1]
+    tsec = tparts[2] if len(tparts) > 2 else 0
+    cutoff_ist = IST.localize(datetime.combine(sd, dt_time(th, tm, tsec)))
+    eh, em = 15, 30
+    tn = int(getattr(args, "top_n", None) or SMART_FUTURES_PICK_SELECTION_TOP_N)
+    publish_cap = max(1, int(SMART_FUTURES_MAX_PUBLISH_PER_SCAN))
+
+    if sd < BACKTEST_MIN_SESSION_DATE:
+        return [], {
+            "date": args.date,
+            "signal_time": args.time,
+            "baseline_time": args.baseline,
+            "selection_mode": "smart_futures",
+            "error": (
+                f"session_date must be on or after {BACKTEST_MIN_SESSION_DATE.isoformat()} "
+                "(same as smart_futures_backtest). Use --selection-mode legacy for older dates."
+            ),
+            "trade_count": 0,
+            "failures": [],
+        }
+
+    db = SessionLocal()
+    try:
+        sentiment_map, sent_note, sent_match = load_sentiment_map_for_session_date(db, sd)
+        am_rows = db.execute(
+            text(
+                """
+                SELECT stock, currmth_future_symbol, currmth_future_instrument_key, sector_index
+                FROM arbitrage_master
+                WHERE currmth_future_instrument_key IS NOT NULL
+                  AND TRIM(currmth_future_instrument_key) <> ''
+                ORDER BY stock
+                """
+            )
+        ).fetchall()
+    finally:
+        db.close()
+
+    apr_map: Optional[Dict[str, Tuple[str, str]]] = None
+    if use_fixed_april_2026_futures(sd):
+        apr_map = load_april_2026_futures_by_underlying()
+
+    ux = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+    vix = _vix_at_cutoff(ux, sd, cutoff_ist)
+    skip_long_vix = vix is not None and vix > 22.0
+
+    # Match production smart_futures_picker (job.py): index alignment gates off.
+    idx_long_ok, idx_short_ok = True, True
+
+    longs: List[ScoredPick] = []
+    shorts: List[ScoredPick] = []
+    scored: Dict[str, Optional[ScoredPick]] = {}
+    failures: List[Dict[str, str]] = []
+    throttle_sec = 0.04
+
+    for stock, fut_sym_am, fut_key_am, sector_index in am_rows:
+        st = str(stock).strip().upper()
+        if apr_map is not None:
+            pair = apr_map.get(st)
+            if not pair:
+                continue
+            fut_sym, fk = pair[0], pair[1]
+        else:
+            if not fut_key_am:
+                continue
+            fut_sym, fk = str(fut_sym_am or ""), str(fut_key_am).strip()
+
+        try:
+            sc = score_symbol_backtest(
+                ux,
+                st,
+                str(fut_sym or ""),
+                fk,
+                sd,
+                cutoff_ist,
+                sentiment_map,
+                str(sector_index).strip() if sector_index else None,
+                index_long_ok=idx_long_ok,
+                index_short_ok=idx_short_ok,
+            )
+        except Exception as e:
+            failures.append({"symbol": st, "error": str(e)})
+            scored[st] = None
+            time.sleep(throttle_sec)
+            continue
+
+        time.sleep(throttle_sec)
+        scored[st] = sc
+        if sc is None:
+            continue
+        if sc.side == "LONG":
+            if skip_long_vix:
+                continue
+            longs.append(sc)
+        else:
+            shorts.append(sc)
+
+    merged, n_long_cap, n_short_cap = merge_scored_picks_like_picker(longs, shorts, tn)
+    traded = merged[:publish_cap]
+    selected_stocks = {p.stock for p in traded}
+
+    rows: List[BacktestRow] = []
+    contract_by_symbol: Dict[str, ContractInfo] = {}
+    cache_dir = OUT_ROOT / args.date / "candles"
+
+    for stock, fut_sym_am, fut_key_am, sector_index in am_rows:
+        st = str(stock).strip().upper()
+        if apr_map is not None:
+            pair = apr_map.get(st)
+            if not pair:
+                continue
+            fut_sym, fk = pair[0], pair[1]
+        else:
+            if not fut_key_am:
+                continue
+            fut_sym, fk = str(fut_sym_am or ""), str(fut_key_am).strip()
+
+        pick = scored.get(st)
+        ci = contract_info_from_instrument_key(st, str(fut_sym or ""), fk)
+        if not ci:
+            failures.append({"symbol": st, "error": "no_instrument_metadata_for_key"})
+            rows.append(
+                BacktestRow(
+                    symbol=st,
+                    futures_symbol=str(fut_sym or ""),
+                    expiry="0",
+                    cms_score=0.0,
+                    cms_direction="NA",
+                    cms_tier="NA",
+                    price_change_0915_to_1330_pct=0.0,
+                    oi_change_0915_to_1330_pct=0.0,
+                    oi_signal="NA",
+                    combo_score=0.0,
+                    final_decision="NO_TRADE",
+                    entry_time=None,
+                    entry_price=None,
+                    entry_qty=1,
+                    hard_stop_loss=None,
+                    breakeven_activated=False,
+                    breakeven_activation_time=None,
+                    profit_locking_activated=False,
+                    profit_locking_activation_time=None,
+                    profit_locking_stop_level=None,
+                    trailing_stop_activated=False,
+                    trailing_stop_activation_time=None,
+                    initial_trailing_stop_level=None,
+                    current_trailing_stop_level=None,
+                    current_active_stop_loss_level=None,
+                    final_exit_price=None,
+                    final_exit_time=None,
+                    final_exit_profit=None,
+                    total_roi_pct=None,
+                    holding_time_minutes=None,
+                    max_profit_achieved=None,
+                    final_exit_reason="",
+                    mfe=None,
+                    mae=None,
+                    pnl=None,
+                    roi_pct=None,
+                    hit="NA",
+                    lot_size=1,
+                    error="no_instrument_metadata_for_key",
+                )
+            )
+            continue
+
+        contract_by_symbol[st] = ci
+        tier_str = "NA"
+        if pick:
+            tier_str = "POSITIONAL" if abs(float(pick.final_cms)) > 1.2 else "INTRADAY"
+
+        dec = "NO_TRADE"
+        entry_ts: Optional[str] = None
+        entry_px: Optional[float] = None
+        err = ""
+        if pick is not None and st in selected_stocks:
+            ep = _entry_price_at_cutoff(ux, pick.fut_instrument_key, cutoff_ist)
+            if ep is None or ep <= 0:
+                err = "no_entry_price_at_cutoff"
+            else:
+                dec = "ENTER_LONG" if pick.side == "LONG" else "ENTER_SHORT"
+                entry_ts = cutoff_ist.isoformat()
+                entry_px = round(float(ep), 4)
+
+        rows.append(
+            BacktestRow(
+                symbol=st,
+                futures_symbol=ci.futures_symbol,
+                expiry=str(ci.expiry),
+                cms_score=round(float(pick.final_cms), 4) if pick else 0.0,
+                cms_direction=pick.side if pick else "NA",
+                cms_tier=tier_str,
+                price_change_0915_to_1330_pct=0.0,
+                oi_change_0915_to_1330_pct=0.0,
+                oi_signal="PICKER_CMS" if pick else "NA",
+                combo_score=round(float(pick.final_cms), 6) if pick else 0.0,
+                final_decision=dec,
+                entry_time=entry_ts if dec.startswith("ENTER") else None,
+                entry_price=entry_px if dec.startswith("ENTER") else None,
+                entry_qty=ci.lot_size,
+                hard_stop_loss=None,
+                breakeven_activated=False,
+                breakeven_activation_time=None,
+                profit_locking_activated=False,
+                profit_locking_activation_time=None,
+                profit_locking_stop_level=None,
+                trailing_stop_activated=False,
+                trailing_stop_activation_time=None,
+                initial_trailing_stop_level=None,
+                current_trailing_stop_level=None,
+                current_active_stop_loss_level=None,
+                final_exit_price=None,
+                final_exit_time=None,
+                final_exit_profit=None,
+                total_roi_pct=None,
+                holding_time_minutes=None,
+                max_profit_achieved=None,
+                final_exit_reason="",
+                mfe=None,
+                mae=None,
+                pnl=None,
+                roi_pct=None,
+                hit="NA",
+                lot_size=ci.lot_size,
+                error=err,
+            )
+        )
+        (cache_dir / f"{st}_meta.json").write_text(
+            json.dumps({"timeframe": "smart_futures_picker", **asdict(ci)}, indent=2), encoding="utf-8"
+        )
+
+    candles_by_symbol: Dict[str, List[dict]] = {}
+    m5_by_symbol: Dict[str, List[dict]] = {}
+
+    for r in rows:
+        if r.final_decision not in {"ENTER_LONG", "ENTER_SHORT"} or r.entry_price is None or not r.entry_time:
+            continue
+        ci = contract_by_symbol.get(r.symbol)
+        if not ci:
+            continue
+        try:
+            candles, tf, latest_d = fetch_futures_day_candles(
+                ux, ci, sd, cache_dir, prefer_current_day=is_today_session
+            )
+            if not candles:
+                r.error = "no_candles_for_exit_path"
+                continue
+            c1530 = find_candle(candles, sd, eh, em) or find_candle_at_or_before(
+                candles, sd, eh, em, max_lookback_min=20
+            )
+            exit_data_missing = c1530 is None
+            if exit_data_missing and not is_today_session:
+                r.error = "missing_exit_candle"
+                r.final_exit_reason = "missing_exit_candle"
+                continue
+            if exit_data_missing and is_today_session:
+                r.final_exit_reason = "NO_DATA_FOR_EXIT_CONDITION"
+                r.error = "no_data_for_exit_condition"
+            raw_5m = ux.get_historical_candles_by_instrument_key(ci.instrument_key, "minutes/5", 0, range_end_date=sd) or []
+            if not raw_5m:
+                raw_5m = ux.get_historical_candles_by_instrument_key(ci.instrument_key, "minutes/5", 1, range_end_date=sd) or []
+            m5_by_symbol[r.symbol] = candles_for_day(sort_candles(raw_5m), sd)
+            candles_by_symbol[r.symbol] = candles
+        except Exception as e:
+            r.error = str(e)
+
+    for r in rows:
+        if r.final_decision not in {"ENTER_LONG", "ENTER_SHORT"} or r.entry_price is None or not r.entry_time:
+            continue
+        if str(r.error or "").strip().lower() == "no_data_for_exit_condition":
+            continue
+        side = "LONG" if r.final_decision == "ENTER_LONG" else "SHORT"
+        seq5 = m5_by_symbol.get(r.symbol) or []
+        entry_dt = parse_dt_ist(r.entry_time)
+        post = (
+            [c for c in seq5 if (parse_dt_ist(c.get("timestamp")) and parse_dt_ist(c.get("timestamp")) >= entry_dt)]
+            if entry_dt
+            else seq5
+        )
+        pre = (
+            [c for c in seq5 if (parse_dt_ist(c.get("timestamp")) and parse_dt_ist(c.get("timestamp")) < entry_dt)]
+            if entry_dt
+            else []
+        )
+        if not post:
+            r.error = "missing_post_entry_candles"
+            continue
+        try:
+            ex = evaluate_exit_with_profit_protection(
+                side, float(r.entry_price), r.entry_time, int(r.lot_size), post, m5_pre_entry=pre
+            )
+            st = ex.get("state", {}) if isinstance(ex, dict) else {}
+            r.hard_stop_loss = st.get("hard_stop_loss")
+            r.breakeven_activated = bool(st.get("breakeven_activated"))
+            r.breakeven_activation_time = st.get("breakeven_activation_time")
+            r.profit_locking_activated = bool(st.get("profit_locking_activated"))
+            r.profit_locking_activation_time = st.get("profit_locking_activation_time")
+            r.profit_locking_stop_level = st.get("profit_locking_stop_level")
+            r.trailing_stop_activated = bool(st.get("trailing_stop_activated"))
+            r.trailing_stop_activation_time = st.get("trailing_stop_activation_time")
+            r.initial_trailing_stop_level = st.get("initial_trailing_stop_level")
+            r.current_trailing_stop_level = st.get("current_trailing_stop_level")
+            r.current_active_stop_loss_level = st.get("current_active_stop_loss_level")
+            r.max_profit_achieved = st.get("max_profit_achieved")
+            r.final_exit_price = ex.get("final_exit_price")
+            r.final_exit_time = ex.get("final_exit_time")
+            r.final_exit_profit = ex.get("final_exit_profit")
+            r.total_roi_pct = ex.get("total_roi_pct")
+            r.final_exit_reason = str(ex.get("final_exit_reason") or "")
+            r.pnl = r.final_exit_profit
+            r.roi_pct = r.total_roi_pct
+            r.hit = "win" if (r.pnl or 0) > 0 else ("loss" if (r.pnl or 0) < 0 else "flat")
+            ex_dt = parse_dt_ist(r.final_exit_time) if r.final_exit_time else None
+            if entry_dt and ex_dt:
+                r.holding_time_minutes = round(max(0.0, (ex_dt - entry_dt).total_seconds() / 60.0), 2)
+            highs = [float(c.get("high") or c.get("close") or 0.0) for c in post]
+            lows = [float(c.get("low") or c.get("close") or 0.0) for c in post]
+            if highs and lows:
+                if side == "LONG":
+                    r.mfe = round((max(highs) - float(r.entry_price)) * float(r.lot_size), 2)
+                    r.mae = round((min(lows) - float(r.entry_price)) * float(r.lot_size), 2)
+                else:
+                    r.mfe = round((float(r.entry_price) - min(lows)) * float(r.lot_size), 2)
+                    r.mae = round((float(r.entry_price) - max(highs)) * float(r.lot_size), 2)
+        except Exception as ex_err:
+            r.error = f"exit_eval_error: {ex_err}"
+
+    trades = [r for r in rows if r.final_decision in {"ENTER_LONG", "ENTER_SHORT"} and r.final_exit_profit is not None]
+    wins = [r for r in trades if (r.pnl or 0) > 0]
+    losses = [r for r in trades if (r.pnl or 0) < 0]
+    sum_wins = sum(float(r.pnl or 0.0) for r in wins)
+    sum_losses_abs = abs(sum(float(r.pnl or 0.0) for r in losses))
+    tier1 = [r for r in trades if r.breakeven_activated]
+    tier2 = [r for r in trades if r.profit_locking_activated]
+    tier3 = [r for r in trades if r.trailing_stop_activated]
+    exit_trailing = [r for r in trades if "Trailing Stop Hit" in str(r.final_exit_reason or "")]
+    exit_primary = [r for r in trades if str(r.final_exit_reason or "").startswith("15-min")]
+    exit_emergency = [r for r in trades if "Emergency Stop" in str(r.final_exit_reason or "")]
+    exit_stoploss = [r for r in trades if "Stop Loss Hit" in str(r.final_exit_reason or "")]
+    avg_holding = round(sum(float(r.holding_time_minutes or 0.0) for r in trades) / len(trades), 2) if trades else 0.0
+    avg_profit = round(sum(float(r.pnl or 0.0) for r in trades) / len(trades), 2) if trades else 0.0
+    avg_mfe = round(sum(float(r.mfe or 0.0) for r in trades) / len(trades), 2) if trades else 0.0
+    avg_mae = round(sum(float(r.mae or 0.0) for r in trades) / len(trades), 2) if trades else 0.0
+    tier3_avg = round(sum(float(r.pnl or 0.0) for r in tier3) / len(tier3), 2) if tier3 else 0.0
+    not_tier3 = [r for r in trades if not r.trailing_stop_activated]
+    non_tier3_avg = round(sum(float(r.pnl or 0.0) for r in not_tier3) / len(not_tier3), 2) if not_tier3 else 0.0
+    num_selected = len(traded)
+
+    summary = {
+        "date": args.date,
+        "signal_time": args.time,
+        "baseline_time": args.baseline,
+        "selection_mode": "smart_futures",
+        "selection_rule": (
+            "Same as run_smart_futures_picker_job: score_symbol_backtest (historical m5/daily up to cutoff), "
+            "merge via buildup_selection_long_short_caps, then truncate to SMART_FUTURES_MAX_PUBLISH_PER_SCAN. "
+            "Index gates match production (disabled). VIX>22 skips new longs."
+        ),
+        "selection_caption": (
+            f"Smart Futures picker: merged={len(merged)} publish_cap={publish_cap} "
+            f"(top_n={tn} long_cap={n_long_cap} short_cap={n_short_cap})"
+        ),
+        "sentiment_source_note": sent_note,
+        "sentiment_run_at_match_count": sent_match,
+        "vix_at_cutoff": vix,
+        "skip_long_vix": skip_long_vix,
+        "merged_pick_symbols": [p.stock for p in merged],
+        "traded_symbols": [p.stock for p in traded],
+        "symbols_from_arbitrage_master": len(am_rows),
+        "contracts_resolved": len(contract_by_symbol),
+        "rows_generated": len(rows),
+        "top_n": tn,
+        "min_long_buildup_selection": int(MIN_LONG_BUILDUP_SELECTION),
+        "top_n_long_buildup_cap": n_long_cap,
+        "top_n_short_buildup_cap": n_short_cap,
+        "selected_buildup_count": num_selected,
+        "selection_display_rows": max(num_selected, 1),
+        "exit_time": "multi-timeframe with profit protection tiers",
+        "trade_count": len(trades),
+        "wins": len(wins),
+        "win_rate_pct": round((len(wins) / len(trades) * 100.0), 2) if trades else 0.0,
+        "total_pnl": round(sum(float(r.pnl or 0.0) for r in trades), 2),
+        "avg_roi_pct": round(sum(float(r.roi_pct or 0.0) for r in trades) / len(trades), 4) if trades else 0.0,
+        "avg_holding_time_minutes": avg_holding,
+        "avg_profit_per_trade": avg_profit,
+        "profit_factor": round((sum_wins / sum_losses_abs), 4) if sum_losses_abs > 0 else (999.0 if sum_wins > 0 else 0.0),
+        "avg_mfe": avg_mfe,
+        "avg_mae": avg_mae,
+        "pct_reach_tier1": round((len(tier1) / len(trades) * 100.0), 2) if trades else 0.0,
+        "pct_reach_tier2": round((len(tier2) / len(trades) * 100.0), 2) if trades else 0.0,
+        "pct_reach_tier3": round((len(tier3) / len(trades) * 100.0), 2) if trades else 0.0,
+        "pct_exit_trailing": round((len(exit_trailing) / len(trades) * 100.0), 2) if trades else 0.0,
+        "pct_exit_primary_15m": round((len(exit_primary) / len(trades) * 100.0), 2) if trades else 0.0,
+        "pct_exit_emergency": round((len(exit_emergency) / len(trades) * 100.0), 2) if trades else 0.0,
+        "pct_exit_stoploss": round((len(exit_stoploss) / len(trades) * 100.0), 2) if trades else 0.0,
+        "avg_profit_tier3": tier3_avg,
+        "avg_profit_non_tier3": non_tier3_avg,
+        "failures": failures[:200],
+    }
+    return rows, summary
+
+
+def run(args: argparse.Namespace) -> Tuple[List[BacktestRow], Dict[str, Any]]:
+    mode = getattr(args, "selection_mode", "smart_futures")
+    if mode == "legacy":
+        return _run_legacy_backtest(args)
+    return _run_smart_futures_selection(args)
+
+
 def write_outputs(rows: List[BacktestRow], summary: Dict[str, Any], d: str, t: str) -> None:
     OUT_ROOT.mkdir(parents=True, exist_ok=True)
+    if not rows:
+        js_path = Path("futures_backtest_profit_protection_summary.json")
+        js_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        print(f"No symbol rows; wrote summary only: {js_path}")
+        return
     csv_path = Path("futures_backtest_trades_detailed.csv")
     js_path = Path("futures_backtest_profit_protection_summary.json")
     md_path = Path("futures_backtest_performance_report.md")
@@ -907,7 +1371,7 @@ def write_outputs(rows: List[BacktestRow], summary: Dict[str, Any], d: str, t: s
       <div><div class="k">Avg ROI %</div><div class="v">{summary.get('avg_roi_pct')}</div></div>
       <div><div class="k">Profit Factor</div><div class="v">{summary.get('profit_factor')}</div></div>
       <div><div class="k">Tier3 Reach %</div><div class="v">{summary.get('pct_reach_tier3')}</div></div>
-      <div><div class="k">Selection</div><div class="v">Up to {cap_l} LONG + {cap_s} SHORT BUILDUP (top_n={top_n})</div></div>
+      <div><div class="k">Selection</div><div class="v">{summary.get('selection_caption', f'Up to {cap_l} LONG + {cap_s} SHORT BUILDUP (top_n={top_n})')}</div></div>
     </div>
   </div>
   <h3>Selected futures (up to {display_n})</h3>
@@ -948,9 +1412,20 @@ def write_outputs(rows: List[BacktestRow], summary: Dict[str, Any], d: str, t: s
 def main() -> None:
     p = argparse.ArgumentParser(description="SmartFuture futures-only backtester")
     p.add_argument("--date", required=True, help="YYYY-MM-DD")
-    p.add_argument("--time", required=True, help="HH:MM:SS")
-    p.add_argument("--baseline", required=True, help="HH:MM:SS")
-    p.add_argument("--top-n", type=int, default=5, help="Top N buildup symbols to trade by combo score")
+    p.add_argument("--time", required=True, help="HH:MM:SS (signal / cutoff IST; smart_futures uses this as replay cutoff)")
+    p.add_argument("--baseline", required=True, help="HH:MM:SS (legacy OI path only; ignored for smart_futures)")
+    p.add_argument(
+        "--selection-mode",
+        choices=("smart_futures", "legacy"),
+        default="smart_futures",
+        help="smart_futures: same scoring/merge as smart futures picker (historical replay). legacy: OI buildup + combo_score path.",
+    )
+    p.add_argument(
+        "--top-n",
+        type=int,
+        default=None,
+        help=f"Selection budget (default: SMART_FUTURES_PICK_SELECTION_TOP_N={SMART_FUTURES_PICK_SELECTION_TOP_N})",
+    )
     args = p.parse_args()
     rows, summary = run(args)
     write_outputs(rows, summary, args.date, args.time)

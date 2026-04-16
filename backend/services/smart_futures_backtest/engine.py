@@ -30,6 +30,7 @@ from backend.services.smart_futures_config import (
     ADX_THRESHOLD,
     NEUTRAL_BAND,
     TIER2_THRESHOLD,
+    buildup_selection_long_short_caps,
 )
 from backend.services.smart_futures_picker.indicators import (
     adx_last_two,
@@ -322,6 +323,25 @@ def score_symbol_backtest(
         sector_score=float(sector_score),
         combined_sentiment=comb,
     )
+
+
+def merge_scored_picks_like_picker(
+    longs: List[ScoredPick],
+    shorts: List[ScoredPick],
+    top_n: int,
+) -> Tuple[List[ScoredPick], int, int]:
+    """
+    Same merge as ``run_smart_futures_picker_job`` (long/short caps, then pool fallback).
+    """
+    tn = max(0, int(top_n))
+    n_long_cap, n_short_cap = buildup_selection_long_short_caps(tn)
+    picked_longs = longs[:n_long_cap] if n_long_cap else []
+    picked_shorts = shorts[:n_short_cap] if n_short_cap else []
+    merged: List[ScoredPick] = list(picked_longs) + list(picked_shorts)
+    if not merged and (longs or shorts) and tn >= 1:
+        pool = longs + shorts
+        merged = pool[: min(tn, len(pool))]
+    return merged, n_long_cap, n_short_cap
 
 
 def _persist_backtest_rows(
