@@ -1,7 +1,7 @@
 """
 Smart Futures picker job: arbitrage_master universe → CMS / Final_CMS → smart_futures_daily.
 
-Schedules: 09:15 and 09:30 IST; then 10:00–15:00 every 30 minutes (weekdays).
+Schedules: Smart Future Algo runs the picker every 15 minutes 9:30–15:00 IST (weekdays); see ``smart_future_algo.py``.
 Off-cycle on Sat/Sun: set env SMART_FUTURES_PICKER_FORCE_WEEKEND=1 (manual only).
 """
 from __future__ import annotations
@@ -81,6 +81,31 @@ from backend.services.smart_futures_picker.sector_score import compute_sector_sc
 from backend.services.upstox_service import UpstoxService
 
 logger = logging.getLogger(__name__)
+
+# smart_futures_daily INTEGER columns are PostgreSQL int4; OI / change can exceed 2^31-1.
+_PG_INT32_MAX = 2_147_483_647
+_PG_INT32_MIN = -2_147_483_648
+
+
+def _to_pg_int32(column: str, value: Optional[int]) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return None
+    if n > _PG_INT32_MAX:
+        logger.warning(
+            "smart_futures_picker: %s=%s exceeds PostgreSQL INTEGER max; clamping to %s",
+            column,
+            n,
+            _PG_INT32_MAX,
+        )
+        return _PG_INT32_MAX
+    if n < _PG_INT32_MIN:
+        return _PG_INT32_MIN
+    return n
+
 
 IST = pytz.timezone("Asia/Kolkata")
 INDIA_VIX_KEY = "NSE_INDEX|India VIX"
@@ -957,15 +982,15 @@ def _persist_pick(
         "signal_tier": pick.signal_tier,
         "tier_multiplier": pick.tier_multiplier,
         "sizing_tier_mult": pick.tier_sizing_mult,
-        "calculated_lots": pick.calculated_lots,
+        "calculated_lots": _to_pg_int32("calculated_lots", pick.calculated_lots),
         "stop_loss_price": pick.stop_loss_price,
         "stop_stage": "INITIAL",
         "current_stop_price": float(sl),
         "time_filter_passed": pick.time_filter_passed,
         "regime_filter_passed": pick.regime_filter_passed,
         "regime_filter_reason": pick.regime_filter_reason or "",
-        "oi_value": pick.oi_value,
-        "oi_change": pick.oi_change,
+        "oi_value": _to_pg_int32("oi_value", pick.oi_value),
+        "oi_change": _to_pg_int32("oi_change", pick.oi_change),
         "oi_signal": pick.oi_signal or "",
         "oi_gate_passed": pick.oi_gate_passed,
         "oi_gate_reason": pick.oi_gate_reason or "",
@@ -973,8 +998,8 @@ def _persist_pick(
         "cms_score_raw": float(pick.cms),
         "cms_final": float(pick.final_cms),
         "reentry_apply": bool(reentry_flag),
-        "premkt_rank": pick.premkt_rank,
-        "oi_heat_rank": pick.oi_heat_rank,
+        "premkt_rank": _to_pg_int32("premkt_rank", pick.premkt_rank),
+        "oi_heat_rank": _to_pg_int32("oi_heat_rank", pick.oi_heat_rank),
     }
 
     ex = db.execute(
