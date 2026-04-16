@@ -436,6 +436,59 @@ def _entry_price_1m_close(upstox: UpstoxService, fut_key: str, now_ist: datetime
         return None
 
 
+def _latest_same_session_5m_close_from_1m(
+    upstox: UpstoxService,
+    fut_key: str,
+    session_date: date,
+    cutoff_ist: Optional[datetime] = None,
+) -> Optional[float]:
+    """
+    Build 5m buckets from same-session 1m bars and return latest completed 5m close.
+    Used only for LONG/SHORT gating when same-session 5m coverage is insufficient.
+    """
+    try:
+        c = upstox.get_historical_candles_by_instrument_key(fut_key, interval="minutes/1", days_back=2)
+        s = _sort_candles(c)
+        buckets: Dict[str, List[dict]] = {}
+        for bar in s:
+            ts = str(bar.get("timestamp") or "")
+            t_end = _bar_end_ist_from_ts(ts)
+            if t_end is None:
+                continue
+            if t_end.date() != session_date:
+                continue
+            if cutoff_ist is not None and t_end > cutoff_ist:
+                continue
+            minute = t_end.minute - (t_end.minute % 5) + 5
+            hour = t_end.hour
+            day = t_end.date()
+            if minute >= 60:
+                minute -= 60
+                hour += 1
+                if hour >= 24:
+                    hour = 0
+                    day = day + timedelta(days=1)
+            bucket_end = t_end.replace(
+                year=day.year, month=day.month, day=day.day, hour=hour, minute=minute, second=0, microsecond=0
+            )
+            key = bucket_end.strftime("%Y-%m-%dT%H:%M:%S+05:30")
+            buckets.setdefault(key, []).append(bar)
+        if not buckets:
+            return None
+        for key in sorted(buckets.keys(), reverse=True):
+            grp = buckets[key]
+            if len(grp) < 5:
+                continue
+            grp = sorted(grp, key=lambda x: str(x.get("timestamp") or ""))
+            cl = float(grp[-1].get("close") or 0.0)
+            if cl > 0:
+                return cl
+        return None
+    except Exception as e:
+        logger.debug("same-session 1m->5m close for %s: %s", fut_key, e)
+        return None
+
+
 @dataclass
 class SymbolScoreOutcome:
     """Per-symbol Smart Futures scan result (for diagnostics when nothing qualifies)."""
@@ -580,7 +633,8 @@ def _score_symbol_outcome(
         fut_key, interval="minutes/5", days_back=6
     )
     m5 = _sort_candles(m5_raw)
-    m5_today = [b for b in m5 if _ist_date_from_ts(str(b.get("timestamp") or "")) == session_date]
+    m5_today_same_session = [b for b in m5 if _ist_date_from_ts(str(b.get("timestamp") or "")) == session_date]
+    m5_today = list(m5_today_same_session)
     if len(m5_today) < 20:
         m5_today = m5[-max(20, len(m5)) :] if len(m5) >= 20 else []
     if len(m5_today) < 15:
@@ -636,9 +690,16 @@ def _score_symbol_outcome(
     m15_vols = [float(b.get("volume") or 0.0) for b in m15_today]
     vwap = session_vwap_close(m15_closes, m15_vols)
     last_close = closes[-1]
-    q = upstox.get_market_quote_by_key(fut_key) or {}
-    ltp = float(q.get("last_price") or 0.0)
-    gate_price = ltp if ltp > 0 else last_close
+    if len(m5_today_same_session) < 15:
+        gate_price = _latest_same_session_5m_close_from_1m(upstox, fut_key, session_date, bar_end)
+        if gate_price is None:
+            q = upstox.get_market_quote_by_key(fut_key) or {}
+            ltp = float(q.get("last_price") or 0.0)
+            gate_price = ltp if ltp > 0 else last_close
+    else:
+        q = upstox.get_market_quote_by_key(fut_key) or {}
+        ltp = float(q.get("last_price") or 0.0)
+        gate_price = ltp if ltp > 0 else last_close
     vwap_dev = vwap_deviation_atr_norm(gate_price, vwap, float(atr))
 
     frac = _session_elapsed_fraction(session_date, m5_today)
