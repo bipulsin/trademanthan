@@ -415,6 +415,7 @@ def _entry_price_1m_close(upstox: UpstoxService, fut_key: str, now_ist: datetime
         s = _sort_candles(c)
         if not s:
             return None
+        session_date = now_ist.astimezone(IST).date()
         for bar in reversed(s):
             ts = str(bar.get("timestamp") or "")
             if len(ts) < 19:
@@ -423,11 +424,13 @@ def _entry_price_1m_close(upstox: UpstoxService, fut_key: str, now_ist: datetime
                 t_end = datetime.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=IST)
             except ValueError:
                 continue
+            # Never reuse prior-session 1m prices for a new scan slot.
+            if t_end.date() != session_date:
+                continue
             if t_end <= now_ist:
                 cl = float(bar.get("close") or 0)
                 return cl if cl > 0 else None
-        cl = float(s[-1].get("close") or 0)
-        return cl if cl > 0 else None
+        return None
     except Exception as e:
         logger.debug("1m entry for %s: %s", fut_key, e)
         return None
