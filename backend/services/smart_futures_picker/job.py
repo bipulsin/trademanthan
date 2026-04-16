@@ -345,6 +345,54 @@ def _m15_session_upto(
     return out
 
 
+def _aggregate_m5_to_m15_session(
+    m5_session: List[dict],
+    *,
+    upto_ist: Optional[datetime] = None,
+) -> List[dict]:
+    """
+    Build 15m candles from 5m session candles (for symbols where minutes/15 is unavailable).
+    Uses 3 consecutive 5m bars per 15m bucket, keyed by 15-minute bar-end timestamp.
+    """
+    buckets: Dict[str, List[dict]] = {}
+    for b in m5_session:
+        ts = str(b.get("timestamp") or "")
+        t_end = _bar_end_ist_from_ts(ts)
+        if t_end is None:
+            continue
+        if upto_ist is not None and t_end > upto_ist:
+            continue
+        minute = t_end.minute - (t_end.minute % 15) + 15
+        hour = t_end.hour
+        day = t_end.date()
+        if minute >= 60:
+            minute -= 60
+            hour += 1
+            if hour >= 24:
+                hour = 0
+                day = day + timedelta(days=1)
+        bucket_end = t_end.replace(year=day.year, month=day.month, day=day.day, hour=hour, minute=minute, second=0, microsecond=0)
+        key = bucket_end.strftime("%Y-%m-%dT%H:%M:%S+05:30")
+        buckets.setdefault(key, []).append(b)
+    out: List[dict] = []
+    for key in sorted(buckets.keys()):
+        grp = buckets[key]
+        if len(grp) < 3:
+            continue
+        grp = sorted(grp, key=lambda x: str(x.get("timestamp") or ""))
+        out.append(
+            {
+                "timestamp": key,
+                "open": float(grp[0].get("open") or 0.0),
+                "high": max(float(x.get("high") or 0.0) for x in grp),
+                "low": min(float(x.get("low") or 0.0) for x in grp),
+                "close": float(grp[-1].get("close") or 0.0),
+                "volume": sum(float(x.get("volume") or 0.0) for x in grp),
+            }
+        )
+    return out
+
+
 def _vix_last_close_5m(upstox: UpstoxService) -> Optional[float]:
     try:
         c = upstox.get_historical_candles_by_instrument_key(
@@ -577,6 +625,8 @@ def _score_symbol_outcome(
     )
     m15 = _sort_candles(m15_raw)
     m15_today = _m15_session_upto(m15, session_date, bar_end)
+    if not m15_today:
+        m15_today = _aggregate_m5_to_m15_session(m5_today, upto_ist=bar_end)
     if not m15_today:
         return _fail("insufficient_m15", reject_note="need>=1 session m15 bars")
     m15_closes = [float(b.get("close") or 0.0) for b in m15_today]
