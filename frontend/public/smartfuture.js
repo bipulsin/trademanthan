@@ -337,9 +337,25 @@
         const sym = r && r.fut_symbol != null && r.fut_symbol !== '' ? String(r.fut_symbol) : '—';
         const ratio = r && r.atr5_14_ratio != null && r.atr5_14_ratio !== '' ? Number(r.atr5_14_ratio) : NaN;
         const hot = Number.isFinite(ratio) && ratio >= 1.1;
-        const tip = Number.isFinite(ratio)
-            ? 'ATR(5)/ATR(14) = ' + ratio.toFixed(3) + ' (session 5‑minute bars). Fire when ≥ 1.1.'
-            : '';
+        const m15Close = r && r.m15_last_close != null && r.m15_last_close !== '' ? Number(r.m15_last_close) : NaN;
+        const m15Vwap = r && r.m15_vwap != null && r.m15_vwap !== '' ? Number(r.m15_vwap) : NaN;
+        const tipParts = [];
+        if (Number.isFinite(ratio)) {
+            tipParts.push('ATR(5)/ATR(14) = ' + ratio.toFixed(3) + ' (session 5‑minute bars). Fire when ≥ 1.1.');
+        }
+        if (Number.isFinite(m15Close) && Number.isFinite(m15Vwap)) {
+            const rel = m15Close > m15Vwap ? 'above' : (m15Close < m15Vwap ? 'below' : 'at');
+            tipParts.push(
+                '15m Close = ' +
+                    m15Close.toFixed(2) +
+                    ', 15m VWAP = ' +
+                    m15Vwap.toFixed(2) +
+                    ' (' +
+                    rel +
+                    ' VWAP)'
+            );
+        }
+        const tip = tipParts.join(' ');
         const titleAttr = tip ? ' title="' + escapeAttr(tip) + '"' : '';
         const label = sym === '—' ? sym : escapeHtml(sym);
         const fire =

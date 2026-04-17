@@ -415,6 +415,45 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
         logger.warning("smart_futures /daily exit enrich: Upstox init failed: %s", e)
         us_exit = None
     if us_exit is not None:
+        m15_snapshot_cache: Dict[str, Dict[str, Optional[float]]] = {}
+        for r in serialized:
+            ikey = str(r.get("fut_instrument_key") or "").strip()
+            if not ikey:
+                r["m15_last_close"] = None
+                r["m15_vwap"] = None
+                continue
+            if ikey in m15_snapshot_cache:
+                snap = m15_snapshot_cache[ikey]
+                r["m15_last_close"] = snap.get("m15_last_close")
+                r["m15_vwap"] = snap.get("m15_vwap")
+                continue
+            snap: Dict[str, Optional[float]] = {"m15_last_close": None, "m15_vwap": None}
+            try:
+                raw15 = us_exit.get_historical_candles_by_instrument_key(
+                    ikey, interval="minutes/15", days_back=6, range_end_date=sd
+                )
+                m15 = [
+                    b
+                    for b in sorted(raw15 or [], key=lambda x: str(x.get("timestamp") or ""))
+                    if _ist_date_from_ts(str(b.get("timestamp") or "")) == sd
+                ]
+                if m15:
+                    closes15 = [float(b.get("close") or 0.0) for b in m15]
+                    vols15 = [float(b.get("volume") or 0.0) for b in m15]
+                    last_close15 = float(closes15[-1]) if closes15 else 0.0
+                    den = sum(v for v in vols15 if v > 0)
+                    if den > 0:
+                        vwap15 = sum(c * max(v, 0.0) for c, v in zip(closes15, vols15)) / den
+                    else:
+                        vwap15 = 0.0
+                    snap["m15_last_close"] = round(last_close15, 2) if last_close15 > 0 else None
+                    snap["m15_vwap"] = round(vwap15, 2) if vwap15 > 0 else None
+            except Exception:
+                pass
+            m15_snapshot_cache[ikey] = snap
+            r["m15_last_close"] = snap.get("m15_last_close")
+            r["m15_vwap"] = snap.get("m15_vwap")
+
         for r in serialized:
             if str(r.get("order_status") or "").strip().lower() != "bought":
                 continue
