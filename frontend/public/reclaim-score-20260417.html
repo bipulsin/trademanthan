@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Reclaim Probability Score — 2026-04-17 | TradeWithCTO</title>
+    <meta name="description" content="Reclaim probability score per scan for ADANIENSOL, IEX, VBL and BHEL Smart Futures on 2026-04-17, and how it drives the blinking Sell button on the Smart Futures page." />
+    <style>
+        :root {
+            --bg: #0b1220;
+            --panel: #111a2e;
+            --border: #1f2a44;
+            --text: #e5e7eb;
+            --muted: #94a3b8;
+            --accent: #ff7f0e;
+            --good: #2ca02c;
+            --bad: #d62728;
+            --link: #60a5fa;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            padding: 24px 18px 64px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.55;
+        }
+        .wrap { max-width: 1080px; margin: 0 auto; }
+        h1 { font-size: 1.6rem; margin: 0 0 4px; }
+        h2 { font-size: 1.2rem; margin: 32px 0 10px; color: #f8fafc; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+        h3 { font-size: 1.02rem; margin: 20px 0 6px; color: #f1f5f9; }
+        p, li { color: var(--text); }
+        .muted { color: var(--muted); font-size: 0.9rem; }
+        a { color: var(--link); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        code, .kbd {
+            background: #0f172a;
+            border: 1px solid var(--border);
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-family: SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 0.85rem;
+        }
+        .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.78rem; font-weight: 700; }
+        .pill-good { background: rgba(44,160,44,0.15); color: #7be07b; border: 1px solid rgba(44,160,44,0.35); }
+        .pill-bad  { background: rgba(214,39,40,0.15); color: #ff9a9a; border: 1px solid rgba(214,39,40,0.40); }
+        .pill-neutral { background: #1f2a44; color: #cbd5e1; border: 1px solid var(--border); }
+        table {
+            width: 100%; border-collapse: collapse; margin: 10px 0 4px;
+            background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+        }
+        th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 0.92rem; }
+        th { background: #16213a; color: #e2e8f0; font-weight: 600; }
+        tr:last-child td { border-bottom: none; }
+        .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; margin: 14px 0; }
+        .formula {
+            background: #0d1628; border: 1px dashed var(--border); border-radius: 8px; padding: 10px 14px;
+            font-family: SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.88rem; color: #dbeafe; white-space: pre-wrap;
+        }
+        figure { margin: 14px 0 28px; text-align: center; }
+        figure img { max-width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--border); background: #fff; }
+        figcaption { margin-top: 8px; color: var(--muted); font-size: 0.9rem; }
+        .legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 6px 0 14px; }
+        .legend span { display: inline-flex; align-items: center; gap: 6px; font-size: 0.9rem; color: var(--muted); }
+        .swatch { display: inline-block; width: 14px; height: 10px; border-radius: 3px; border: 1px solid rgba(255,255,255,0.1); }
+        .swatch-blue { background: #1f77b4; }
+        .swatch-grey { background: #888; }
+        .swatch-green { background: #2ca02c; }
+        .swatch-orange { background: #ff7f0e; }
+        .swatch-red-band { background: rgba(214,39,40,0.18); border: 1px dashed rgba(214,39,40,0.5); }
+        .callout { border-left: 3px solid var(--accent); padding: 10px 14px; background: #14213d; border-radius: 0 8px 8px 0; margin: 10px 0 18px; }
+        .nav { margin-bottom: 10px; }
+        .nav a { margin-right: 12px; }
+        .grid-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; margin: 8px 0; }
+        .metric { background: #0f1a33; border: 1px solid var(--border); padding: 8px 10px; border-radius: 8px; }
+        .metric .k { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+        .metric .v { font-size: 1.1rem; font-weight: 700; color: #f8fafc; }
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <div class="nav">
+        <a href="/smartfuture.html">&larr; Smart Futures</a>
+        <a href="/dashboard.html">Dashboard</a>
+    </div>
+    <h1>Reclaim Probability Score</h1>
+    <div class="muted">Session: <strong>2026-04-17</strong> (IST) · Four bought Smart Futures positions</div>
+
+    <div class="callout">
+        <strong>Rule of thumb.</strong> On every scan for an open LONG/SHORT position, if price is on the <em>wrong</em>
+        side of the session <strong>15-minute VWAP</strong> (LONG below, SHORT above) we compute a
+        <strong>0–100 reclaim probability score</strong>. If the score is <strong>below 45</strong>
+        (“panic”), the Sell button on the Smart Futures <em>Open Positions</em> section starts
+        <strong>blinking</strong> and the exit reason is surfaced as a hint — otherwise (“calm”) we
+        intentionally stay patient and do <em>not</em> press the panic button even though price is below VWAP.
+    </div>
+
+    <h2>How the score is constructed</h2>
+    <p>
+        The score is computed only when <code>scan_price</code> is adverse relative to the live 15m session VWAP, so for
+        a LONG position this means <code>LTP &lt; m15_vwap</code>. It is a weighted blend of four components that,
+        together, try to say <em>“does this dip look reclaimable in the next few bars?”</em>
+    </p>
+    <div class="formula">score = distance (0–40) + structure (0–25) + momentum (0–15) + sector (0–20)
+distance = 40 × (1 − min(gap_in_ATR14 / 2.5, 1))     # shallower dip ⇒ larger
+structure = reward last 5m bars closing in favorable half of range + recent direction
+momentum = +15 if last 3 closes are monotonically favorable, else +8 if last 2 are, else 0
+sector = 10 + 10 × sector_score, clamped to [0, 20]</div>
+    <ul>
+        <li><strong>Distance (0–40).</strong> Normalizes how far LTP is below VWAP in units of the 14-period ATR on
+            the 5-minute session series. Small dips &lt; 0.5 ATR get close to 40 points; dips &gt; 2.5 ATR get 0.</li>
+        <li><strong>Structure (0–25).</strong> Rewards the last two 5m candles closing in the favorable half of the
+            bar range and a favorable 1-bar direction — i.e. signs of buyers absorbing the dip.</li>
+        <li><strong>Momentum (0–15).</strong> Rewards monotone favorable closes in the last 3 5-minute bars.</li>
+        <li><strong>Sector (0–20).</strong> Uses the existing <code>sector_score</code> on the row as a slow bias;
+            symbols in weak sectors lose points.</li>
+    </ul>
+
+    <h3>Panic vs calm</h3>
+    <table>
+        <thead><tr><th>Condition</th><th>Action</th></tr></thead>
+        <tbody>
+            <tr>
+                <td>Price is <em>above</em> VWAP (not adverse)</td>
+                <td><span class="pill pill-neutral">score N/A</span> — no change to existing exit hints</td>
+            </tr>
+            <tr>
+                <td>Adverse <em>and</em> score ≥ 45 (calm)</td>
+                <td>
+                    <span class="pill pill-good">Do NOT panic</span> —
+                    we actively <em>suppress</em> the soft 15m primary VWAP exits
+                    (<code>15-min Close Below VWAP+Supertrend+EMA</code>,
+                    <code>15-min Momentum Weak + Trend Breakdown</code>).
+                </td>
+            </tr>
+            <tr>
+                <td>Adverse <em>and</em> score &lt; 45 (panic)</td>
+                <td>
+                    <span class="pill pill-bad">Force exit</span> —
+                    set <code>exit_suggested = true</code> with reason
+                    <code>Below 15m VWAP — low reclaim probability (panic)</code>,
+                    which makes the Open Positions <strong>Sell button blink</strong>.
+                    Emergency / hard-stop / trailing-stop exits are always respected.
+                </td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h3>Chart legend</h3>
+    <div class="legend">
+        <span><span class="swatch swatch-blue"></span> 5m close (LTP proxy)</span>
+        <span><span class="swatch swatch-grey"></span> 15m session VWAP</span>
+        <span><span class="swatch swatch-green"></span> Buy price</span>
+        <span><span class="swatch swatch-orange"></span> Reclaim score (0–100, right axis)</span>
+        <span><span class="swatch swatch-red-band"></span> Panic band (score &lt; 45, price adverse)</span>
+    </div>
+
+    <h2>Case studies — 2026-04-17 bought positions</h2>
+
+    <section class="card">
+        <h3>ADANIENSOL FUT 28 APR 26 &nbsp; <span class="pill pill-bad">Losing exit</span></h3>
+        <div class="grid-metrics">
+            <div class="metric"><div class="k">Side</div><div class="v">LONG</div></div>
+            <div class="metric"><div class="k">Buy</div><div class="v">₹1,248.90</div></div>
+            <div class="metric"><div class="k">Sold @</div><div class="v">₹1,231.00 (11:51)</div></div>
+            <div class="metric"><div class="k">Sector score</div><div class="v">+0.44</div></div>
+            <div class="metric"><div class="k">Panic scans</div><div class="v">7 of 23 adverse</div></div>
+            <div class="metric"><div class="k">First panic</div><div class="v">10:30</div></div>
+        </div>
+        <figure>
+            <img src="reclaim_adaniensol_20260417.png" alt="ADANIENSOL reclaim score chart" loading="lazy" />
+            <figcaption>Score drops below 45 at 10:30, 10:55, 11:20, 11:25, 11:35, 11:45 — an hour-plus of panic fires before the 11:51 manual exit.</figcaption>
+        </figure>
+        <p>
+            The first scan at 09:45 was briefly below VWAP but with a high score of 66.5 (shallow dip, bullish 5m
+            structure) — correctly held. From ~10:30 onwards price lost VWAP decisively and the score collapsed into
+            the 30–45 band, repeatedly firing panic. Any of these would have blinked the Sell button well before the
+            operator pressed Sell at 11:51.
+        </p>
+    </section>
+
+    <section class="card">
+        <h3>IEX FUT 28 APR 26 &nbsp; <span class="pill pill-bad">Losing exit</span></h3>
+        <div class="grid-metrics">
+            <div class="metric"><div class="k">Side</div><div class="v">LONG</div></div>
+            <div class="metric"><div class="k">Buy</div><div class="v">₹136.62</div></div>
+            <div class="metric"><div class="k">Sold @</div><div class="v">₹135.41 (15:25)</div></div>
+            <div class="metric"><div class="k">Sector score</div><div class="v">+0.44</div></div>
+            <div class="metric"><div class="k">Panic scans</div><div class="v">4 of 8 adverse</div></div>
+            <div class="metric"><div class="k">First panic</div><div class="v">15:10</div></div>
+        </div>
+        <figure>
+            <img src="reclaim_iex_20260417.png" alt="IEX reclaim score chart" loading="lazy" />
+            <figcaption>Above VWAP for almost the entire holding — score stays silent. Once 15m VWAP breaks at 15:10, score immediately drops to 20–30 and the panic band fires until the 15:25 exit.</figcaption>
+        </figure>
+        <p>
+            Silence for two-and-a-half hours is the right behavior: you do not want the algo nagging when price is
+            actually above VWAP. The score only kicks in when the breakdown is real — and when it does, it is
+            unambiguous: 15:10 onwards every scan is in panic.
+        </p>
+    </section>
+
+    <section class="card">
+        <h3>VBL FUT 28 APR 26 &nbsp; <span class="pill pill-good">Profitable exit</span></h3>
+        <div class="grid-metrics">
+            <div class="metric"><div class="k">Side</div><div class="v">LONG</div></div>
+            <div class="metric"><div class="k">Buy</div><div class="v">₹466.75</div></div>
+            <div class="metric"><div class="k">Sold @</div><div class="v">₹471.05 (11:03)</div></div>
+            <div class="metric"><div class="k">Sector score</div><div class="v">+0.13</div></div>
+            <div class="metric"><div class="k">Panic scans</div><div class="v">5 of 10 adverse</div></div>
+            <div class="metric"><div class="k">First panic</div><div class="v">09:30</div></div>
+        </div>
+        <figure>
+            <img src="reclaim_vbl_20260417.png" alt="VBL reclaim score chart" loading="lazy" />
+            <figcaption>Early red band 09:30–09:55 near the open, then clean run above VWAP until the 11:03 profitable exit.</figcaption>
+        </figure>
+        <p>
+            VBL is a useful stress test: it <strong>did</strong> trade below VWAP in the first 20–25 minutes after
+            entry, so the Sell button <em>would have blinked</em> at the open while the score was in the panic zone.
+            However, price reclaimed VWAP by 09:55 and ran to +4 rupees. In live trading the operator is free to
+            ignore a panic blink if they have conviction; the gate only <em>suggests</em> exit, it does not auto-sell.
+            If we want fewer false positives on new positions, a simple improvement is to require the first 15m
+            bucket after entry to complete before arming panic (same as how 15m primary exits are gated).
+        </p>
+    </section>
+
+    <section class="card">
+        <h3>BHEL FUT 28 APR 26 &nbsp; <span class="pill pill-good">Profitable exit</span></h3>
+        <div class="grid-metrics">
+            <div class="metric"><div class="k">Side</div><div class="v">LONG</div></div>
+            <div class="metric"><div class="k">Buy</div><div class="v">₹310.66</div></div>
+            <div class="metric"><div class="k">Sold @</div><div class="v">₹313.65 (11:02)</div></div>
+            <div class="metric"><div class="k">Sector score</div><div class="v">+0.16</div></div>
+            <div class="metric"><div class="k">Panic scans</div><div class="v">2 of 4 adverse</div></div>
+            <div class="metric"><div class="k">First panic</div><div class="v">09:40</div></div>
+        </div>
+        <figure>
+            <img src="reclaim_bhel_20260417.png" alt="BHEL reclaim score chart" loading="lazy" />
+            <figcaption>Two isolated panic scans (09:40 and 11:00). Large profitable stretch in between with price well above VWAP has no score at all — desired silence.</figcaption>
+        </figure>
+        <p>
+            BHEL is the cleanest example of the score <em>helping</em>. It was silent for the entire profitable
+            stretch (09:50 to ~10:55) because price sat above VWAP. It only spoke up briefly at the very start and
+            right at the point of a late minor VWAP dip near 11:00, which also happened to be when the operator
+            actually sold for a profit of ~₹3.
+        </p>
+    </section>
+
+    <h2>How this shows up on the live Smart Futures page</h2>
+    <p>
+        The backend now computes the reclaim score on every <code>GET /smart-futures/daily</code> for every
+        <code>bought</code> position. When the score fires panic, two things happen on
+        <a href="/smartfuture.html">/smartfuture.html</a>:
+    </p>
+    <ul>
+        <li>
+            The <strong>Sell button</strong> in the <em>Open Positions</em> row starts blinking
+            (class <code>sf-btn-sell--blink</code>). This is the existing UI for <code>exit_suggested</code>;
+            the reclaim gate simply sets that flag for adverse-VWAP + low-score scans.
+        </li>
+        <li>
+            Hovering the Sell button shows the panic reason plus
+            <em>“Reclaim probability score: NN.N/100 (higher ≈ VWAP reclaim more likely).”</em>
+        </li>
+    </ul>
+    <p>
+        The gate is conservative by design: it never overrides Emergency, Stop-Loss or Trailing-Stop exits. It
+        <em>only</em> (a) suppresses the soft 15m primary VWAP exit reasons when the score is high, or
+        (b) forces an exit hint when the score is low and price is adverse.
+    </p>
+
+    <h2>Combined chart</h2>
+    <figure>
+        <img src="reclaim_score_20260417.png" alt="Combined reclaim score chart for all four symbols" loading="lazy" />
+        <figcaption>All four positions stacked; same axes and legend as the individual charts.</figcaption>
+    </figure>
+
+    <p class="muted" style="margin-top: 28px;">
+        Data: Upstox 5m candles for the session, 15m session VWAP from the same feed used on Smart Futures.
+        Threshold = 45. Score implementation: <code>backend/services/smart_futures_exit.py</code> &rarr;
+        <code>compute_reclaim_probability_score</code> / <code>apply_reclaim_vwap_gate</code>.
+    </p>
+</div>
+</body>
+</html>
