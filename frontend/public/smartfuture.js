@@ -619,14 +619,11 @@
     }
 
     function openTableRowHtml(r) {
-        const tier1 = r.breakeven_activated ? 'Activated' : 'Not Activated';
-        const tier2 = r.profit_locking_activated ? 'Activated' : 'Not Activated';
-        const tier3 = r.trailing_stop_activated ? 'Activated' : 'Not Activated';
-        const dispSl = deriveOpenDisplaySl(r);
         const dispTarget = deriveOpenDisplayTarget(r);
         const activeStop = r.current_active_stop_loss_level != null ? fmtNum(r.current_active_stop_loss_level, 2) : '—';
         const trailStop = r.current_trailing_stop_level != null ? fmtNum(r.current_trailing_stop_level, 2) : '—';
         const exitReason = r.exit_reason ? escapeHtml(String(r.exit_reason)) : '—';
+        const m15VwapNow = (r.m15_vwap != null && r.m15_vwap !== '') ? r.m15_vwap : r.m15_vwap_at_scan;
         return (
             '<tr data-row-id="' +
             r.id +
@@ -653,22 +650,16 @@
             fmtNum(r.final_cms, 2) +
             '</td>' +
             '<td>' +
-            fmtNum(r.entry_price, 2) +
-            '</td>' +
-            '<td>' +
-            fmtNum(dispSl, 2) +
+            fmtNum(r.buy_price, 2) +
             '</td>' +
             '<td>' +
             fmtNum(dispTarget, 2) +
             '</td>' +
             '<td>' +
-            tier1 +
+            fmtNum(r.current_ltp, 2) +
             '</td>' +
             '<td>' +
-            tier2 +
-            '</td>' +
-            '<td>' +
-            tier3 +
+            fmtNum(m15VwapNow, 2) +
             '</td>' +
             '<td>' +
             activeStop +
@@ -678,9 +669,6 @@
             '</td>' +
             '<td>' +
             exitReason +
-            '</td>' +
-            '<td>' +
-            fmtTrendCell(r) +
             '</td>' +
             '<td>' +
             fmtOpenActionCell(r) +
@@ -919,18 +907,15 @@
 
         if (!bought.length) {
             host.innerHTML =
-                '<div class="sf-table-wrap"><table class="sf-table"><tbody><tr><td colspan="21" style="padding:14px;">No open positions</td></tr></tbody></table></div>';
+                '<div class="sf-table-wrap"><table class="sf-table"><tbody><tr><td colspan="15" style="padding:14px;">No open positions</td></tr></tbody></table></div>';
             return;
         }
 
         const thead =
             '<thead><tr>' +
             '<th>Symbol</th><th>Side</th><th>Tier</th><th>OI</th><th>Stop</th><th>Lots</th><th>CMS</th>' +
-            '<th>Entry</th><th title="Displayed SL is constrained vs 15m VWAP for risk sanity">SL</th><th title="Displayed target rebased from buy_price">Target</th>' +
-            '<th title="Profit protection stage 1: Breakeven">Tier 1 (BE)</th>' +
-            '<th title="Profit protection stage 2: Profit lock">Tier 2 (PL)</th>' +
-            '<th title="Profit protection stage 3: Trailing stop">Tier 3 (Trail)</th>' +
-            '<th>Active SL</th><th>Trail SL</th><th>Exit Reason</th><th>In Trend</th><th>Action</th>' +
+            '<th>Entry</th><th title="Displayed target rebased from buy_price">Target</th><th>LTP</th><th>15m VWAP</th>' +
+            '<th>Active SL</th><th>Trail SL</th><th>Exit Reason</th><th>Action</th>' +
             '</tr></thead>';
         let body = '';
         bought.forEach(function (r) {

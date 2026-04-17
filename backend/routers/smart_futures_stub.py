@@ -432,6 +432,7 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
         us_exit = None
     if us_exit is not None:
         m15_snapshot_cache: Dict[str, Dict[str, Any]] = {}
+        ltp_cache: Dict[str, Optional[float]] = {}
         for r in serialized:
             ikey = str(r.get("fut_instrument_key") or "").strip()
             if not ikey:
@@ -439,6 +440,7 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
                 r["m15_vwap"] = None
                 r["m15_vwap_at_scan"] = None
                 r["m15_last_close_at_scan"] = None
+                r["current_ltp"] = None
                 continue
             if ikey not in m15_snapshot_cache:
                 snap: Dict[str, Any] = {
@@ -483,6 +485,14 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
             r["m15_vwap"] = snap.get("m15_vwap")
             r["m15_vwap_at_scan"] = None
             r["m15_last_close_at_scan"] = None
+            if ikey not in ltp_cache:
+                try:
+                    q = us_exit.get_market_quote_by_key(ikey) or {}
+                    lp = float(q.get("last_price") or 0.0)
+                    ltp_cache[ikey] = round(lp, 2) if lp > 0 else None
+                except Exception:
+                    ltp_cache[ikey] = None
+            r["current_ltp"] = ltp_cache.get(ikey)
             try:
                 entry_dt = _parse_any_ts_to_ist(r.get("entry_at"))
                 bars = snap.get("bars") or []
