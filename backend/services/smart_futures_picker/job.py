@@ -689,6 +689,7 @@ def _score_symbol_outcome(
     m15_closes = [float(b.get("close") or 0.0) for b in m15_today]
     m15_vols = [float(b.get("volume") or 0.0) for b in m15_today]
     vwap = session_vwap_close(m15_closes, m15_vols)
+    m15_last_close = float(m15_closes[-1]) if m15_closes else 0.0
     last_close = closes[-1]
     if len(m5_today_same_session) < 15:
         gate_price = _latest_same_session_5m_close_from_1m(upstox, fut_key, session_date, bar_end)
@@ -781,6 +782,7 @@ def _score_symbol_outcome(
         "tier_ok_long": bool(t_long != "NO_SIGNAL"),
         "final_cms_ge_th": bool(final_cms >= th - 1e-12),
         "close_gt_vwap": bool(gate_price > vwap),
+        "m15_close_gt_vwap": bool(m15_last_close > vwap),
         "sector_gt_min": bool(sector_score > SECTOR_ALIGN_MIN),
         "index_long_ok": bool(index_long_ok),
     }
@@ -788,6 +790,7 @@ def _score_symbol_outcome(
         "tier_ok_short": bool(t_short != "NO_SIGNAL"),
         "final_cms_le_neg_th": bool(final_cms <= -th + 1e-12),
         "close_lt_vwap": bool(gate_price < vwap),
+        "m15_close_lt_vwap": bool(m15_last_close < vwap),
         "sector_lt_neg_min": bool(sector_score < -SECTOR_ALIGN_MIN),
         "index_short_ok": bool(index_short_ok),
     }
