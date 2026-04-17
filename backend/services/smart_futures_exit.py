@@ -203,6 +203,188 @@ def build_15m_from_5m(m5: Sequence[dict]) -> List[dict]:
     return out
 
 
+# Scan-time LTP vs 15m session VWAP (same candles as Smart Futures UI). Higher score = more likely
+# VWAP is reclaimed soon — avoid panic exit; lower score forces exit suggestion.
+RECLAIM_SCORE_PANIC_THRESHOLD = 45.0
+
+RECLAIM_SUPPRESSIBLE_EXIT_REASONS = frozenset(
+    {
+        "15-min Close Below VWAP+Supertrend+EMA",
+        "15-min Momentum Weak + Trend Breakdown",
+        "15-min Close Above VWAP+Supertrend+EMA",
+    }
+)
+
+
+def _is_hard_smart_futures_exit_reason(reason: str) -> bool:
+    r = (reason or "").strip()
+    if not r:
+        return False
+    if r.startswith("Emergency"):
+        return True
+    if r.startswith("Stop Loss Hit"):
+        return True
+    if r.startswith("Trailing Stop Hit"):
+        return True
+    return False
+
+
+def compute_reclaim_probability_score(
+    side: str,
+    scan_price: float,
+    vwap15: float,
+    m5_session: Sequence[dict],
+    *,
+    sector_score: Optional[float] = None,
+) -> Dict[str, Any]:
+    """
+    Heuristic 0–100 score: higher = better odds of reclaiming 15m session VWAP soon.
+
+    Meaningful when price is on the **adverse** side of VWAP (LONG: below; SHORT: above).
+    Inputs should match the UI: session 5m bars for microstructure; VWAP from 15m snapshot.
+    """
+    sd = str(side or "").strip().upper()
+    out: Dict[str, Any] = {
+        "score": None,
+        "vwap_adverse": False,
+        "applicable": False,
+    }
+    if sd not in {"LONG", "SHORT"} or scan_price <= 0 or vwap15 <= 0 or not m5_session:
+        return out
+
+    seq = sorted([c for c in m5_session if c.get("timestamp")], key=lambda c: str(c.get("timestamp") or ""))
+    if len(seq) < 3:
+        return out
+
+    highs5 = [float(c.get("high") or 0.0) for c in seq]
+    lows5 = [float(c.get("low") or 0.0) for c in seq]
+    closes5 = [float(c.get("close") or 0.0) for c in seq]
+    atr14 = float(wilder_atr_14(highs5, lows5, closes5) or 0.0)
+    if atr14 <= 0:
+        atr14 = max(0.01, abs(float(scan_price)) * 0.002)
+
+    if sd == "LONG":
+        adverse = scan_price < vwap15
+        gap = float(vwap15) - float(scan_price)
+    else:
+        adverse = scan_price > vwap15
+        gap = float(scan_price) - float(vwap15)
+
+    if not adverse:
+        out["applicable"] = True
+        out["vwap_adverse"] = False
+        return out
+
+    out["applicable"] = True
+    out["vwap_adverse"] = True
+
+    gap_atr = gap / atr14
+    dist_pts = max(0.0, 40.0 * (1.0 - min(gap_atr / 2.5, 1.0)))
+
+    struct_pts = 0.0
+    for c in seq[-2:]:
+        h = float(c.get("high") or 0.0)
+        l = float(c.get("low") or 0.0)
+        cl = float(c.get("close") or 0.0)
+        rng = h - l
+        if rng <= 1e-12:
+            continue
+        loc = (cl - l) / rng
+        if sd == "LONG":
+            if loc >= 0.55:
+                struct_pts += 10.0
+            elif loc >= 0.4:
+                struct_pts += 4.0
+        else:
+            loc_s = 1.0 - loc
+            if loc_s >= 0.55:
+                struct_pts += 10.0
+            elif loc_s >= 0.4:
+                struct_pts += 4.0
+
+    if len(closes5) >= 2:
+        if sd == "LONG" and closes5[-1] > closes5[-2]:
+            struct_pts += 8.0
+        elif sd == "SHORT" and closes5[-1] < closes5[-2]:
+            struct_pts += 8.0
+    struct_pts = min(25.0, struct_pts)
+
+    mom_pts = 0.0
+    if len(closes5) >= 4:
+        a, b, c_ = closes5[-3], closes5[-2], closes5[-1]
+        if sd == "LONG" and c_ > b > a:
+            mom_pts = 15.0
+        elif sd == "SHORT" and c_ < b < a:
+            mom_pts = 15.0
+        elif (sd == "LONG" and c_ > b) or (sd == "SHORT" and c_ < b):
+            mom_pts = 8.0
+
+    sect_pts = 10.0
+    if sector_score is not None:
+        try:
+            ss = float(sector_score)
+            sect_pts = max(0.0, min(20.0, 10.0 + ss * 10.0))
+        except (TypeError, ValueError):
+            sect_pts = 10.0
+
+    total = dist_pts + struct_pts + mom_pts + sect_pts
+    out["score"] = round(max(0.0, min(100.0, total)), 1)
+    return out
+
+
+def apply_reclaim_vwap_gate(
+    *,
+    side: str,
+    exit_suggested: bool,
+    exit_reason: str,
+    scan_price: Optional[float],
+    vwap15: Optional[float],
+    m5_session: Sequence[dict],
+    sector_score: Optional[float] = None,
+) -> Tuple[bool, str, Dict[str, Any]]:
+    """
+    After ``evaluate_exit_with_profit_protection``, adjust exit hints when scan price is on the
+    wrong side of 15m session VWAP: low reclaim score → force exit (panic); high score →
+    suppress soft 15m primary VWAP exits only (never overrides emergency / stops / trailing).
+    """
+    try:
+        spx = float(scan_price or 0.0)
+        vw = float(vwap15 or 0.0)
+    except (TypeError, ValueError):
+        return exit_suggested, exit_reason, {"score": None, "vwap_adverse": False, "applicable": False}
+
+    detail = compute_reclaim_probability_score(
+        side,
+        spx,
+        vw,
+        m5_session,
+        sector_score=sector_score,
+    )
+    sp = detail.get("score")
+    adverse = bool(detail.get("vwap_adverse"))
+
+    ex = bool(exit_suggested)
+    reason = str(exit_reason or "")
+
+    if not adverse or sp is None:
+        return ex, reason, detail
+
+    if float(sp) >= RECLAIM_SCORE_PANIC_THRESHOLD:
+        if ex and (reason in RECLAIM_SUPPRESSIBLE_EXIT_REASONS) and not _is_hard_smart_futures_exit_reason(reason):
+            return False, "", detail
+        return ex, reason, detail
+
+    if _is_hard_smart_futures_exit_reason(reason) and ex:
+        return ex, reason, detail
+
+    panic_reason = (
+        "Below 15m VWAP — low reclaim probability (panic)"
+        if str(side).strip().upper() == "LONG"
+        else "Above 15m VWAP — low reclaim probability (panic)"
+    )
+    return True, panic_reason, detail
+
+
 @dataclass
 class ProfitProtectionState:
     entry_price: float

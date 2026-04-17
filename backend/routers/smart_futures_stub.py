@@ -25,6 +25,7 @@ from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
 from backend.services import smart_futures_config as sfc
 from backend.services.smart_futures_exit import (
+    apply_reclaim_vwap_gate,
     evaluate_exit_with_profit_protection,
 )
 from backend.services.smart_futures_session_date import effective_session_date_ist_for_trend
@@ -557,6 +558,34 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
                 state = ex.get("state", {}) if isinstance(ex, dict) else {}
                 r["exit_suggested"] = bool(ex.get("exit"))
                 r["exit_reason"] = str(ex.get("final_exit_reason") or "")
+                scan_px = r.get("current_ltp")
+                try:
+                    if scan_px is None or float(scan_px) <= 0:
+                        scan_px = r.get("m15_last_close")
+                except (TypeError, ValueError):
+                    scan_px = r.get("m15_last_close")
+                try:
+                    sp_f = float(scan_px) if scan_px is not None else None
+                except (TypeError, ValueError):
+                    sp_f = None
+                vw_f = r.get("m15_vwap")
+                try:
+                    vw_use = float(vw_f) if vw_f is not None else None
+                except (TypeError, ValueError):
+                    vw_use = None
+                new_ex, new_reason, _reclaim = apply_reclaim_vwap_gate(
+                    side=side,
+                    exit_suggested=bool(r["exit_suggested"]),
+                    exit_reason=str(r["exit_reason"] or ""),
+                    scan_price=sp_f,
+                    vwap15=vw_use,
+                    m5_session=m5,
+                    sector_score=r.get("sector_score"),
+                )
+                r["exit_suggested"] = new_ex
+                r["exit_reason"] = new_reason
+                r["reclaim_probability_score"] = _reclaim.get("score")
+                r["vwap_adverse_at_scan"] = bool(_reclaim.get("vwap_adverse"))
                 r["hard_stop_loss"] = state.get("hard_stop_loss")
                 r["breakeven_activated"] = bool(state.get("breakeven_activated"))
                 r["breakeven_activation_time"] = state.get("breakeven_activation_time")

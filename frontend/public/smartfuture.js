@@ -425,9 +425,14 @@
                 : '';
         const blink = exitOk ? ' sf-btn-sell--blink' : '';
         const reason = escapeAttr(String(r.exit_reason || ''));
+        const rs = r && r.reclaim_probability_score != null && r.reclaim_probability_score !== '' ? Number(r.reclaim_probability_score) : NaN;
+        const reclaimTip =
+            r && r.vwap_adverse_at_scan && Number.isFinite(rs)
+                ? ' Reclaim probability score: ' + rs.toFixed(1) + '/100 (higher ≈ VWAP reclaim more likely).'
+                : '';
         const title = exitOk
-            ? 'Manual square-off — enter price in the dialog. Exit signal is active. ' + (reason ? reason : '')
-            : 'Manual square-off — enter your execution price in the dialog.';
+            ? 'Manual square-off — enter price in the dialog. Exit signal is active. ' + (reason ? reason : '') + reclaimTip
+            : 'Manual square-off — enter your execution price in the dialog.' + reclaimTip;
         return (
             '<button type="button" class="sf-btn-sell' +
             blink +
