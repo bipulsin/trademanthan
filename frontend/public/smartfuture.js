@@ -208,6 +208,38 @@
         return Number.isFinite(n) ? escapeHtml(String(n)) : '—';
     }
 
+    function deriveOpenDisplaySl(r) {
+        const side = String((r && r.side) || '').trim().toUpperCase();
+        const rawSl = Number(r && r.sl_price);
+        const vwap = Number(
+            (r && (r.m15_vwap_at_scan != null ? r.m15_vwap_at_scan : r.m15_vwap)) || NaN
+        );
+        const hasRawSl = Number.isFinite(rawSl);
+        const hasVwap = Number.isFinite(vwap) && vwap > 0;
+        if (!hasRawSl && !hasVwap) return null;
+        if (side === 'SHORT') {
+            // For shorts, protective stop should stay above VWAP.
+            if (hasRawSl && hasVwap) return Math.max(rawSl, vwap + 0.01);
+            if (hasVwap) return vwap + 0.01;
+            return rawSl;
+        }
+        // Default LONG: protective stop should stay below VWAP.
+        if (hasRawSl && hasVwap) return Math.min(rawSl, vwap - 0.01);
+        if (hasVwap) return vwap - 0.01;
+        return rawSl;
+    }
+
+    function deriveOpenDisplayTarget(r) {
+        const buy = Number(r && r.buy_price);
+        const entry = Number(r && r.entry_price);
+        const target = Number(r && r.target_price);
+        if (Number.isFinite(buy) && Number.isFinite(entry) && Number.isFinite(target)) {
+            // Preserve original scan target distance, but rebase to actual buy_price.
+            return buy + (target - entry);
+        }
+        return Number.isFinite(target) ? target : null;
+    }
+
     function escapeHtml(s) {
         return String(s)
             .replace(/&/g, '&amp;')
@@ -590,6 +622,8 @@
         const tier1 = r.breakeven_activated ? 'Activated' : 'Not Activated';
         const tier2 = r.profit_locking_activated ? 'Activated' : 'Not Activated';
         const tier3 = r.trailing_stop_activated ? 'Activated' : 'Not Activated';
+        const dispSl = deriveOpenDisplaySl(r);
+        const dispTarget = deriveOpenDisplayTarget(r);
         const activeStop = r.current_active_stop_loss_level != null ? fmtNum(r.current_active_stop_loss_level, 2) : '—';
         const trailStop = r.current_trailing_stop_level != null ? fmtNum(r.current_trailing_stop_level, 2) : '—';
         const exitReason = r.exit_reason ? escapeHtml(String(r.exit_reason)) : '—';
@@ -622,10 +656,10 @@
             fmtNum(r.entry_price, 2) +
             '</td>' +
             '<td>' +
-            fmtNum(r.sl_price, 2) +
+            fmtNum(dispSl, 2) +
             '</td>' +
             '<td>' +
-            fmtNum(r.target_price, 2) +
+            fmtNum(dispTarget, 2) +
             '</td>' +
             '<td>' +
             tier1 +
@@ -892,7 +926,11 @@
         const thead =
             '<thead><tr>' +
             '<th>Symbol</th><th>Side</th><th>Tier</th><th>OI</th><th>Stop</th><th>Lots</th><th>CMS</th>' +
-            '<th>Entry</th><th>SL</th><th>Target</th><th>Tier 1</th><th>Tier 2</th><th>Tier 3</th><th>Active SL</th><th>Trail SL</th><th>Exit Reason</th><th>In Trend</th><th>Action</th>' +
+            '<th>Entry</th><th title="Displayed SL is constrained vs 15m VWAP for risk sanity">SL</th><th title="Displayed target rebased from buy_price">Target</th>' +
+            '<th title="Profit protection stage 1: Breakeven">Tier 1 (BE)</th>' +
+            '<th title="Profit protection stage 2: Profit lock">Tier 2 (PL)</th>' +
+            '<th title="Profit protection stage 3: Trailing stop">Tier 3 (Trail)</th>' +
+            '<th>Active SL</th><th>Trail SL</th><th>Exit Reason</th><th>In Trend</th><th>Action</th>' +
             '</tr></thead>';
         let body = '';
         bought.forEach(function (r) {
