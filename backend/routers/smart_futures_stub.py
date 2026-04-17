@@ -581,6 +581,8 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
                     vwap15=vw_use,
                     m5_session=m5,
                     sector_score=r.get("sector_score"),
+                    entry_at=entry_at,
+                    scan_time_ist=now_ist,
                 )
                 r["exit_suggested"] = new_ex
                 r["exit_reason"] = new_reason

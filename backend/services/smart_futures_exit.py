@@ -341,17 +341,27 @@ def apply_reclaim_vwap_gate(
     vwap15: Optional[float],
     m5_session: Sequence[dict],
     sector_score: Optional[float] = None,
+    entry_at: Optional[str] = None,
+    scan_time_ist: Optional[datetime] = None,
 ) -> Tuple[bool, str, Dict[str, Any]]:
     """
     After ``evaluate_exit_with_profit_protection``, adjust exit hints when scan price is on the
     wrong side of 15m session VWAP: low reclaim score → force exit (panic); high score →
     suppress soft 15m primary VWAP exits only (never overrides emergency / stops / trailing).
+
+    The **panic** branch only arms after the first 15m bucket that contains ``entry_at`` has
+    closed — same gating as the 15m primary exit. Calm suppression is independent of this gate.
     """
     try:
         spx = float(scan_price or 0.0)
         vw = float(vwap15 or 0.0)
     except (TypeError, ValueError):
-        return exit_suggested, exit_reason, {"score": None, "vwap_adverse": False, "applicable": False}
+        return exit_suggested, exit_reason, {
+            "score": None,
+            "vwap_adverse": False,
+            "applicable": False,
+            "panic_armed": False,
+        }
 
     detail = compute_reclaim_probability_score(
         side,
@@ -360,6 +370,18 @@ def apply_reclaim_vwap_gate(
         m5_session,
         sector_score=sector_score,
     )
+
+    entry_dt = _to_dt(str(entry_at or ""))
+    first_close = first_15m_bucket_close_after_entry(entry_dt)
+    if scan_time_ist is None or first_close is None:
+        panic_armed = True
+    else:
+        st_ist = _as_ist(scan_time_ist)
+        panic_armed = st_ist >= first_close
+    detail["panic_armed"] = bool(panic_armed)
+    if first_close is not None:
+        detail["panic_arm_time"] = first_close.isoformat()
+
     sp = detail.get("score")
     adverse = bool(detail.get("vwap_adverse"))
 
@@ -372,6 +394,9 @@ def apply_reclaim_vwap_gate(
     if float(sp) >= RECLAIM_SCORE_PANIC_THRESHOLD:
         if ex and (reason in RECLAIM_SUPPRESSIBLE_EXIT_REASONS) and not _is_hard_smart_futures_exit_reason(reason):
             return False, "", detail
+        return ex, reason, detail
+
+    if not panic_armed:
         return ex, reason, detail
 
     if _is_hard_smart_futures_exit_reason(reason) and ex:
