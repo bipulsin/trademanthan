@@ -268,7 +268,7 @@
             background: transparent;
             color: var(--theme-text, #0f172a);
         }
-        #sfSellModalErr { min-height: 1.2em; margin-top: 8px; color: #b91c1c; font-size: 0.85rem; }
+        #sfSellModalErr, #sfOrderModalErr { min-height: 1.2em; margin-top: 8px; color: #b91c1c; font-size: 0.85rem; }
     </style>
 </head>
 <body class="theme-page">
@@ -343,7 +343,24 @@
             </div>
         </div>
     </div>
+    <div id="sfOrderModal" class="sf-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="sfOrderModalTitle">
+        <div class="sf-modal-backdrop" id="sfOrderModalBackdrop"></div>
+        <div class="sf-modal-panel">
+            <h3 id="sfOrderModalTitle">Mark bought (manual)</h3>
+            <p class="sf-meta" id="sfOrderModalSymbol"></p>
+            <label for="sfOrderPriceInput">Buy price (₹)</label>
+            <input type="number" id="sfOrderPriceInput" class="sf-modal-input" inputmode="decimal" step="any" min="0" placeholder="Your fill price" autocomplete="off" />
+            <label for="sfOrderLotsInput" style="margin-top:12px;">Lots</label>
+            <input type="number" id="sfOrderLotsInput" class="sf-modal-input" inputmode="numeric" min="1" step="1" value="1" />
+            <p class="sf-meta" style="margin-top:6px;">Number of contracts (default 1).</p>
+            <p id="sfOrderModalErr" aria-live="polite"></p>
+            <div class="sf-modal-actions">
+                <button type="button" class="sf-btn-modal-cancel" id="sfOrderModalCancel">Cancel</button>
+                <button type="button" class="sf-btn-order" id="sfOrderModalConfirm">Confirm buy</button>
+            </div>
+        </div>
+    </div>
     <script src="left-menu.js?v=3.19"></script>
-    <script src="smartfuture.js?v=35"></script>
+    <script src="smartfuture.js?v=36"></script>
 </body>
 </html>

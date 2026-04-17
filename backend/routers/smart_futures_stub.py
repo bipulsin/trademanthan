@@ -92,6 +92,16 @@ class SmartFuturesSellBody(BaseModel):
     sell_price: Optional[float] = Field(default=None, description="Manual square-off price (bookkeeping)")
 
 
+class SmartFuturesOrderBody(BaseModel):
+    """POST /daily/{id}/order: manual buy price + lot count, or omit buy_price to use broker LTP."""
+
+    buy_price: Optional[float] = Field(
+        default=None,
+        description="Manual buy price; if omitted, last traded price from broker is used.",
+    )
+    calculated_lots: int = Field(default=1, ge=1, le=10000, description="Number of lots (position size).")
+
+
 @router.get("/config")
 def get_sf_config_stub(user: User = Depends(_require_user)):
     """Admin UI + future screener: persisted parameters (file-backed, not DB)."""
@@ -550,10 +560,11 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
 @router.post("/daily/{row_id}/order")
 def post_smart_futures_daily_order(
     row_id: int,
+    body: SmartFuturesOrderBody = Body(default_factory=SmartFuturesOrderBody),
     user: User = Depends(_require_user),
     db: Session = Depends(get_db),
 ):
-    """Mark row as bought and store LTP at click time (Upstox quote)."""
+    """Mark row as bought with manual buy price + lots (JSON) or broker LTP if buy_price omitted."""
     sd = effective_session_date_ist_for_trend()
     row = db.execute(
         text(
@@ -579,29 +590,76 @@ def post_smart_futures_daily_order(
     if not ikey:
         raise HTTPException(status_code=400, detail="Missing instrument key")
 
-    try:
-        us = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
-        q = us.get_market_quote_by_key(ikey) or {}
-        ltp = float(q.get("last_price") or 0)
-    except Exception as e:
-        logger.error("smart_futures order LTP failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=502, detail=f"LTP fetch failed: {e}") from e
-    if ltp <= 0:
-        raise HTTPException(status_code=502, detail="Could not read last price from broker")
+    lots = int(body.calculated_lots)
 
-    db.execute(
-        text(
-            """
-            UPDATE smart_futures_daily
-            SET order_status = 'bought', buy_price = :ltp, updated_at = CURRENT_TIMESTAMP
-            WHERE id = :id AND (order_status IS NULL OR LOWER(TRIM(order_status)) <> 'bought')
-            """
-        ),
-        {"id": row_id, "ltp": ltp},
-    )
+    manual_bp = body.buy_price
+    if manual_bp is not None:
+        try:
+            ltp = float(manual_bp)
+        except (TypeError, ValueError):
+            ltp = 0.0
+        if ltp <= 0 or ltp != ltp:
+            raise HTTPException(status_code=400, detail="buy_price must be a positive number")
+    else:
+        try:
+            us = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+            q = us.get_market_quote_by_key(ikey) or {}
+            ltp = float(q.get("last_price") or 0)
+        except Exception as e:
+            logger.error("smart_futures order LTP failed: %s", e, exc_info=True)
+            raise HTTPException(status_code=502, detail=f"LTP fetch failed: {e}") from e
+        if ltp <= 0:
+            raise HTTPException(status_code=502, detail="Could not read last price from broker")
+
+    try:
+        db.execute(
+            text(
+                """
+                UPDATE smart_futures_daily
+                SET order_status = 'bought',
+                    buy_price = :ltp,
+                    calculated_lots = :lots,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = :id AND (order_status IS NULL OR LOWER(TRIM(order_status)) <> 'bought')
+                """
+            ),
+            {"id": row_id, "ltp": ltp, "lots": lots},
+        )
+    except Exception as e:
+        if _missing_db_column_error(e, "calculated_lots"):
+            logger.warning("smart_futures order: calculated_lots missing, update without it: %s", e)
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            db.execute(
+                text(
+                    """
+                    UPDATE smart_futures_daily
+                    SET order_status = 'bought', buy_price = :ltp, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = :id AND (order_status IS NULL OR LOWER(TRIM(order_status)) <> 'bought')
+                    """
+                ),
+                {"id": row_id, "ltp": ltp},
+            )
+        else:
+            raise
     db.commit()
-    logger.info("smart_futures order: user=%s row=%s buy_price=%s", getattr(user, "id", None), row_id, ltp)
-    return {"success": True, "id": row_id, "order_status": "bought", "buy_price": ltp}
+    logger.info(
+        "smart_futures order: user=%s row=%s buy_price=%s calculated_lots=%s manual_price=%s",
+        getattr(user, "id", None),
+        row_id,
+        ltp,
+        lots,
+        manual_bp is not None,
+    )
+    return {
+        "success": True,
+        "id": row_id,
+        "order_status": "bought",
+        "buy_price": ltp,
+        "calculated_lots": lots,
+    }
 
 
 @router.post("/daily/{row_id}/sell")

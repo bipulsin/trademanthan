@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Patch buy_price for specific Smart Futures rows (smart_futures_daily).
+Patch buy_price and calculated_lots for specific Smart Futures rows (smart_futures_daily).
 
 Usage (from repo root):
   PYTHONPATH=. python backend/scripts/patch_smart_futures_buy_prices.py
@@ -20,11 +20,11 @@ from sqlalchemy import text
 from backend.database import SessionLocal
 from backend.services.smart_futures_session_date import effective_session_date_ist_for_trend
 
-# (stock column / underlying, buy_price)
-PATCHES: list[tuple[str, float]] = [
-    ("VBL", 466.75),
-    ("BHEL", 310.66),
-    ("ADANIENSOL", 1248.90),
+# (stock column / underlying, buy_price, calculated_lots)
+PATCHES: list[tuple[str, float, int]] = [
+    ("VBL", 466.75, 1),
+    ("BHEL", 310.66, 1),
+    ("ADANIENSOL", 1248.90, 1),
 ]
 
 
@@ -44,25 +44,28 @@ def main() -> int:
 
     db = SessionLocal()
     try:
-        for stock, price in PATCHES:
+        for stock, price, lots in PATCHES:
             res = db.execute(
                 text(
                     """
                     UPDATE smart_futures_daily
-                    SET buy_price = :bp, updated_at = CURRENT_TIMESTAMP
+                    SET buy_price = :bp,
+                        calculated_lots = :lots,
+                        updated_at = CURRENT_TIMESTAMP
                     WHERE session_date = :sd
                       AND UPPER(TRIM(stock)) = UPPER(:stock)
-                    RETURNING id, stock, fut_symbol, buy_price, order_status
+                    RETURNING id, stock, fut_symbol, buy_price, calculated_lots, order_status
                     """
                 ),
-                {"bp": float(price), "sd": sd, "stock": stock.strip()},
+                {"bp": float(price), "lots": int(lots), "sd": sd, "stock": stock.strip()},
             )
             row = res.mappings().first()
             db.commit()
             if row:
                 print(
                     f"OK {stock}: id={row['id']} fut_symbol={row['fut_symbol']} "
-                    f"buy_price={row['buy_price']} order_status={row['order_status']}"
+                    f"buy_price={row['buy_price']} calculated_lots={row.get('calculated_lots')} "
+                    f"order_status={row['order_status']}"
                 )
             else:
                 print(f"NO ROW for stock={stock!r} session_date={sd} (no update)")

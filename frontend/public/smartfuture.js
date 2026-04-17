@@ -294,10 +294,13 @@
             }
             return hint + '<span class="sf-order-status">' + displayStatus + '</span>';
         }
+        const sym = r && r.fut_symbol != null && r.fut_symbol !== '' ? String(r.fut_symbol) : '';
         return (
-            '<button type="button" class="sf-btn-order" data-order-id="' +
+            '<button type="button" class="sf-btn-order sf-btn-trend-order" data-order-id="' +
             r.id +
-            '">Order</button>'
+            '" data-fut-symbol="' +
+            escapeAttr(sym) +
+            '" title="Mark bought — enter buy price and lots">Order</button>'
         );
     }
 
@@ -619,8 +622,8 @@
         host.innerHTML = html;
 
         host.onclick = function (ev) {
-            const ob = ev.target && ev.target.closest ? ev.target.closest('.sf-btn-order') : null;
-            if (ob) onOrderClick(ev);
+            const ob = ev.target && ev.target.closest ? ev.target.closest('.sf-btn-trend-order') : null;
+            if (ob) onTrendOrderClick(ev);
         };
     }
 
@@ -790,44 +793,120 @@
         };
     }
 
-    async function onOrderClick(ev) {
-        const btn = ev.target && ev.target.closest ? ev.target.closest('.sf-btn-order') : null;
+    let _sfOrderModalTriggerBtn = null;
+
+    function onTrendOrderClick(ev) {
+        const btn = ev.target && ev.target.closest ? ev.target.closest('.sf-btn-trend-order') : null;
         if (!btn) return;
         const id = btn.getAttribute('data-order-id');
         if (!id || btn.disabled) return;
-        if (!window.confirm('Mark this row as bought at current LTP?')) return;
-        btn.disabled = true;
+        const sym = btn.getAttribute('data-fut-symbol') || '';
+        openOrderModal(btn, id, sym);
+    }
+
+    function openOrderModal(btn, rowId, symbol) {
+        const modal = document.getElementById('sfOrderModal');
+        const symEl = document.getElementById('sfOrderModalSymbol');
+        const priceInp = document.getElementById('sfOrderPriceInput');
+        const lotsInp = document.getElementById('sfOrderLotsInput');
+        const errEl = document.getElementById('sfOrderModalErr');
+        if (!modal || !priceInp || !lotsInp) return;
+        _sfOrderModalTriggerBtn = btn;
+        modal.dataset.orderRowId = rowId;
+        if (symEl) {
+            symEl.textContent = symbol ? 'Symbol: ' + symbol : 'Mark bought';
+        }
+        if (errEl) errEl.textContent = '';
+        priceInp.value = '';
+        lotsInp.value = '1';
+        const cBtn = document.getElementById('sfOrderModalConfirm');
+        if (cBtn) cBtn.disabled = false;
+        modal.classList.add('sf-modal--open');
+        modal.setAttribute('aria-hidden', 'false');
+        setTimeout(function () {
+            priceInp.focus();
+        }, 30);
+    }
+
+    function closeOrderModal() {
+        const modal = document.getElementById('sfOrderModal');
+        if (!modal) return;
+        modal.classList.remove('sf-modal--open');
+        modal.setAttribute('aria-hidden', 'true');
+        delete modal.dataset.orderRowId;
+        _sfOrderModalTriggerBtn = null;
+        const c = document.getElementById('sfOrderModalConfirm');
+        if (c) c.disabled = false;
+    }
+
+    async function submitOrderModal() {
+        const modal = document.getElementById('sfOrderModal');
+        const priceInp = document.getElementById('sfOrderPriceInput');
+        const lotsInp = document.getElementById('sfOrderLotsInput');
+        const errEl = document.getElementById('sfOrderModalErr');
+        const confirmBtn = document.getElementById('sfOrderModalConfirm');
+        const id = modal && modal.dataset.orderRowId;
+        if (!id || !priceInp || !lotsInp) return;
+        const rawP = String(priceInp.value || '').trim().replace(/,/g, '');
+        const price = parseFloat(rawP);
+        if (!Number.isFinite(price) || price <= 0) {
+            if (errEl) errEl.textContent = 'Enter a valid buy price greater than zero.';
+            return;
+        }
+        const lotsRaw = String(lotsInp.value || '').trim();
+        const lots = parseInt(lotsRaw, 10);
+        if (!Number.isFinite(lots) || lots < 1) {
+            if (errEl) errEl.textContent = 'Lots must be an integer at least 1.';
+            return;
+        }
+        if (errEl) errEl.textContent = '';
+        const triggerBtn = _sfOrderModalTriggerBtn;
+        if (confirmBtn) confirmBtn.disabled = true;
+        if (triggerBtn) triggerBtn.disabled = true;
+
         const paths = ['/api/smart-futures/daily/' + id + '/order', '/smart-futures/daily/' + id + '/order'];
         let ok = false;
         let errText = '';
+        const payload = JSON.stringify({ buy_price: price, calculated_lots: lots });
         for (const p of paths) {
             try {
-                const res = await fetch(API_BASE + p, { method: 'POST', headers: authHeaders() });
+                const res = await fetch(API_BASE + p, {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    body: payload,
+                });
+                const resText = await res.text();
+                let data = null;
+                try {
+                    data = JSON.parse(resText);
+                } catch (e) {
+                    data = null;
+                }
                 if (res.ok) {
                     ok = true;
                     break;
                 }
-                const raw = (await res.text()) || res.statusText;
-                let data = null;
-                try {
-                    data = JSON.parse(raw);
-                } catch (e) {
-                    data = null;
-                }
-                if (isTokenExpiredResponse(res, raw, data)) {
+                if (isTokenExpiredResponse(res, resText, data)) {
                     redirectToLoginExpired();
+                    if (triggerBtn) triggerBtn.disabled = false;
+                    if (confirmBtn) confirmBtn.disabled = false;
                     return;
                 }
-                errText = (data && data.detail) || raw || res.statusText;
+                errText =
+                    (data && (data.detail || data.message)) ||
+                    resText ||
+                    res.statusText;
             } catch (e) {
                 errText = String(e.message || e);
             }
         }
         if (!ok) {
             alert(errText || 'Order failed');
-            btn.disabled = false;
+            if (triggerBtn) triggerBtn.disabled = false;
+            if (confirmBtn) confirmBtn.disabled = false;
             return;
         }
+        closeOrderModal();
         await loadTrend(true);
     }
 
@@ -1111,8 +1190,31 @@
                 }
             });
         }
+        const orderModal = document.getElementById('sfOrderModal');
+        const orderBackdrop = document.getElementById('sfOrderModalBackdrop');
+        const orderCancel = document.getElementById('sfOrderModalCancel');
+        const orderConfirm = document.getElementById('sfOrderModalConfirm');
+        const orderPriceInp = document.getElementById('sfOrderPriceInput');
+        const orderLotsInp = document.getElementById('sfOrderLotsInput');
+        if (orderCancel) orderCancel.addEventListener('click', closeOrderModal);
+        if (orderBackdrop) orderBackdrop.addEventListener('click', closeOrderModal);
+        if (orderConfirm) orderConfirm.addEventListener('click', function () { submitOrderModal(); });
+        function orderModalSubmitOnEnter(ev) {
+            if (ev.key === 'Enter') {
+                ev.preventDefault();
+                submitOrderModal();
+            }
+        }
+        if (orderPriceInp) orderPriceInp.addEventListener('keydown', orderModalSubmitOnEnter);
+        if (orderLotsInp) orderLotsInp.addEventListener('keydown', orderModalSubmitOnEnter);
+
         document.addEventListener('keydown', function (ev) {
-            if (ev.key === 'Escape' && sellModal && sellModal.classList.contains('sf-modal--open')) {
+            if (ev.key !== 'Escape') return;
+            if (orderModal && orderModal.classList.contains('sf-modal--open')) {
+                closeOrderModal();
+                return;
+            }
+            if (sellModal && sellModal.classList.contains('sf-modal--open')) {
                 closeSellPriceModal();
             }
         });
