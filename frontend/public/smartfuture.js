@@ -574,7 +574,7 @@
             fmtNum(r.combined_sentiment, 3) +
             '</td>' +
             '<td>' +
-            fmtNum((r.buy_price != null && r.buy_price !== '') ? r.buy_price : r.entry_price, 2) +
+            fmtNum(r.buy_price, 2) +
             '</td>' +
             '<td>' +
             fmtNum(r.sl_price, 2) +
