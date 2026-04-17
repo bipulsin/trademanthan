@@ -367,6 +367,14 @@
         const hot = Number.isFinite(ratio) && ratio >= 1.1;
         const m15Close = r && r.m15_last_close != null && r.m15_last_close !== '' ? Number(r.m15_last_close) : NaN;
         const m15Vwap = r && r.m15_vwap != null && r.m15_vwap !== '' ? Number(r.m15_vwap) : NaN;
+        const m15CloseScan =
+            r && r.m15_last_close_at_scan != null && r.m15_last_close_at_scan !== ''
+                ? Number(r.m15_last_close_at_scan)
+                : NaN;
+        const m15VwapScan =
+            r && r.m15_vwap_at_scan != null && r.m15_vwap_at_scan !== ''
+                ? Number(r.m15_vwap_at_scan)
+                : NaN;
         const tipParts = [];
         if (Number.isFinite(ratio)) {
             tipParts.push('ATR(5)/ATR(14) = ' + ratio.toFixed(3) + ' (session 5‑minute bars). Fire when ≥ 1.1.');
@@ -380,6 +388,18 @@
                     m15Vwap.toFixed(2) +
                     ' (' +
                     rel +
+                    ' VWAP)'
+            );
+        }
+        if (Number.isFinite(m15CloseScan) && Number.isFinite(m15VwapScan)) {
+            const relScan = m15CloseScan > m15VwapScan ? 'above' : (m15CloseScan < m15VwapScan ? 'below' : 'at');
+            tipParts.push(
+                'At scan: 15m Close = ' +
+                    m15CloseScan.toFixed(2) +
+                    ', 15m VWAP = ' +
+                    m15VwapScan.toFixed(2) +
+                    ' (' +
+                    relScan +
                     ' VWAP)'
             );
         }

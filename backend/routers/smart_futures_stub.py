@@ -341,6 +341,22 @@ def _ist_date_from_ts(ts: str):
             return None
 
 
+def _parse_any_ts_to_ist(ts: Any) -> Optional[datetime]:
+    """Parse common timestamp forms to timezone-aware IST datetime."""
+    if ts is None:
+        return None
+    if isinstance(ts, datetime):
+        return ts.astimezone(IST) if ts.tzinfo else IST.localize(ts)
+    s = str(ts).strip()
+    if not s:
+        return None
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        return dt.astimezone(IST) if dt.tzinfo else IST.localize(dt)
+    except Exception:
+        return None
+
+
 @router.get("/daily")
 def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = Depends(get_db)):
     """Today's Trend: rows for effective session_date (IST window 9:15 → next session 09:10)."""
@@ -415,44 +431,77 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
         logger.warning("smart_futures /daily exit enrich: Upstox init failed: %s", e)
         us_exit = None
     if us_exit is not None:
-        m15_snapshot_cache: Dict[str, Dict[str, Optional[float]]] = {}
+        m15_snapshot_cache: Dict[str, Dict[str, Any]] = {}
         for r in serialized:
             ikey = str(r.get("fut_instrument_key") or "").strip()
             if not ikey:
                 r["m15_last_close"] = None
                 r["m15_vwap"] = None
+                r["m15_vwap_at_scan"] = None
+                r["m15_last_close_at_scan"] = None
                 continue
-            if ikey in m15_snapshot_cache:
-                snap = m15_snapshot_cache[ikey]
-                r["m15_last_close"] = snap.get("m15_last_close")
-                r["m15_vwap"] = snap.get("m15_vwap")
-                continue
-            snap: Dict[str, Optional[float]] = {"m15_last_close": None, "m15_vwap": None}
-            try:
-                raw15 = us_exit.get_historical_candles_by_instrument_key(
-                    ikey, interval="minutes/15", days_back=6, range_end_date=sd
-                )
-                m15 = [
-                    b
-                    for b in sorted(raw15 or [], key=lambda x: str(x.get("timestamp") or ""))
-                    if _ist_date_from_ts(str(b.get("timestamp") or "")) == sd
-                ]
-                if m15:
-                    closes15 = [float(b.get("close") or 0.0) for b in m15]
-                    vols15 = [float(b.get("volume") or 0.0) for b in m15]
-                    last_close15 = float(closes15[-1]) if closes15 else 0.0
-                    den = sum(v for v in vols15 if v > 0)
-                    if den > 0:
-                        vwap15 = sum(c * max(v, 0.0) for c, v in zip(closes15, vols15)) / den
-                    else:
-                        vwap15 = 0.0
-                    snap["m15_last_close"] = round(last_close15, 2) if last_close15 > 0 else None
-                    snap["m15_vwap"] = round(vwap15, 2) if vwap15 > 0 else None
-            except Exception:
-                pass
-            m15_snapshot_cache[ikey] = snap
+            if ikey not in m15_snapshot_cache:
+                snap: Dict[str, Any] = {
+                    "m15_last_close": None,
+                    "m15_vwap": None,
+                    "bars": [],
+                }
+                try:
+                    raw15 = us_exit.get_historical_candles_by_instrument_key(
+                        ikey, interval="minutes/15", days_back=6, range_end_date=sd
+                    )
+                    m15 = [
+                        b
+                        for b in sorted(raw15 or [], key=lambda x: str(x.get("timestamp") or ""))
+                        if _ist_date_from_ts(str(b.get("timestamp") or "")) == sd
+                    ]
+                    bars = []
+                    for b in m15:
+                        ts_ist = _parse_any_ts_to_ist(b.get("timestamp"))
+                        if ts_ist is None:
+                            continue
+                        close_v = float(b.get("close") or 0.0)
+                        vol_v = float(b.get("volume") or 0.0)
+                        bars.append({"ts": ts_ist, "close": close_v, "volume": vol_v})
+                    snap["bars"] = bars
+                    if bars:
+                        closes15 = [float(x["close"]) for x in bars]
+                        vols15 = [float(x["volume"]) for x in bars]
+                        last_close15 = float(closes15[-1]) if closes15 else 0.0
+                        den = sum(v for v in vols15 if v > 0)
+                        if den > 0:
+                            vwap15 = sum(c * max(v, 0.0) for c, v in zip(closes15, vols15)) / den
+                        else:
+                            vwap15 = 0.0
+                        snap["m15_last_close"] = round(last_close15, 2) if last_close15 > 0 else None
+                        snap["m15_vwap"] = round(vwap15, 2) if vwap15 > 0 else None
+                except Exception:
+                    pass
+                m15_snapshot_cache[ikey] = snap
+            snap = m15_snapshot_cache.get(ikey, {})
             r["m15_last_close"] = snap.get("m15_last_close")
             r["m15_vwap"] = snap.get("m15_vwap")
+            r["m15_vwap_at_scan"] = None
+            r["m15_last_close_at_scan"] = None
+            try:
+                entry_dt = _parse_any_ts_to_ist(r.get("entry_at"))
+                bars = snap.get("bars") or []
+                if entry_dt is not None and bars:
+                    upto = [x for x in bars if x.get("ts") is not None and x["ts"] <= entry_dt]
+                    if upto:
+                        closes_u = [float(x["close"]) for x in upto]
+                        vols_u = [float(x["volume"]) for x in upto]
+                        last_u = float(closes_u[-1]) if closes_u else 0.0
+                        den_u = sum(v for v in vols_u if v > 0)
+                        vwap_u = (
+                            sum(c * max(v, 0.0) for c, v in zip(closes_u, vols_u)) / den_u
+                            if den_u > 0
+                            else 0.0
+                        )
+                        r["m15_last_close_at_scan"] = round(last_u, 2) if last_u > 0 else None
+                        r["m15_vwap_at_scan"] = round(vwap_u, 2) if vwap_u > 0 else None
+            except Exception:
+                pass
 
         for r in serialized:
             if str(r.get("order_status") or "").strip().lower() != "bought":
