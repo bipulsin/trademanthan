@@ -422,6 +422,7 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
                 ]
                 if len(m5) < 3:
                     continue
+                # Manual "Order" fill uses buy_price; that is the basis for exit / protection vs candles.
                 entry_px = float(r.get("buy_price") or r.get("entry_price") or 0)
                 if entry_px <= 0:
                     continue
@@ -496,6 +497,25 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
             r["realized_pnl"] = _compute_realized_pnl_rupees_for_row(r)
         else:
             r.pop("realized_pnl", None)
+
+    # Expose per-contract lot size (shares per lot) for UI; requires fut_instrument_key before pop.
+    try:
+        from backend.services.smart_futures_picker.position_sizing import (
+            get_futures_lot_size_by_instrument_key,
+        )
+    except Exception:
+        get_futures_lot_size_by_instrument_key = None  # type: ignore[assignment]
+
+    for r in serialized:
+        ik = str(r.get("fut_instrument_key") or "").strip()
+        if not ik or get_futures_lot_size_by_instrument_key is None:
+            r["instrument_lot_size"] = None
+            continue
+        try:
+            ls = int(get_futures_lot_size_by_instrument_key(ik))
+            r["instrument_lot_size"] = ls if ls > 0 else None
+        except Exception:
+            r["instrument_lot_size"] = None
 
     for r in serialized:
         if str(r.get("order_status") or "").strip().lower() != "bought":

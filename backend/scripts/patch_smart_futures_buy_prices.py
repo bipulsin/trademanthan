@@ -24,6 +24,7 @@ from backend.services.smart_futures_session_date import effective_session_date_i
 PATCHES: list[tuple[str, float]] = [
     ("VBL", 466.75),
     ("BHEL", 310.66),
+    ("ADANIENSOL", 1248.90),
 ]
 
 

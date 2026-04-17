@@ -144,6 +144,20 @@
         return '<span class="' + cls + '">₹' + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</span>';
     }
 
+    function fmtLotsCell(r) {
+        const v = r && r.calculated_lots;
+        if (v == null || v === '') return '—';
+        const n = Number(v);
+        return Number.isFinite(n) ? escapeHtml(String(n)) : '—';
+    }
+
+    function fmtLotSizeCell(r) {
+        const v = r && r.instrument_lot_size;
+        if (v == null || v === '') return '—';
+        const n = Number(v);
+        return Number.isFinite(n) ? escapeHtml(String(n)) : '—';
+    }
+
     function escapeHtml(s) {
         return String(s)
             .replace(/&/g, '&amp;')
@@ -635,6 +649,12 @@
             fmtNum(r.sell_price, 2) +
             '</td>' +
             '<td>' +
+            fmtLotsCell(r) +
+            '</td>' +
+            '<td>' +
+            fmtLotSizeCell(r) +
+            '</td>' +
+            '<td>' +
             fmtPnlCell(r.realized_pnl) +
             '</td>' +
             '<td>' +
@@ -663,7 +683,7 @@
 
         if (!sold.length) {
             host.innerHTML =
-                '<div class="sf-table-wrap"><table class="sf-table sf-closed-table"><tbody><tr><td colspan="7" style="padding:14px;">No closed positions this session</td></tr></tbody></table></div>';
+                '<div class="sf-table-wrap"><table class="sf-table sf-closed-table"><tbody><tr><td colspan="9" style="padding:14px;">No closed positions this session</td></tr></tbody></table></div>';
             return;
         }
 
@@ -700,7 +720,10 @@
 
         const thead =
             '<thead><tr>' +
-            '<th>Symbol</th><th>Buy time</th><th>Buy price</th><th>Sell time</th><th>Sell price</th><th>PnL</th><th>Win / Loss</th>' +
+            '<th>Symbol</th><th>Buy time</th><th>Buy price</th><th>Sell time</th><th>Sell price</th>' +
+            '<th title="Number of lots (position sizing)">Lots</th>' +
+            '<th title="Units per lot (from instruments)">Lot size</th>' +
+            '<th>PnL</th><th>Win / Loss</th>' +
             '</tr></thead>';
         let body = '';
         sold.forEach(function (r) {
@@ -708,7 +731,7 @@
         });
         const foot =
             '<tfoot><tr class="sf-closed-footer-row">' +
-            '<td colspan="5"><strong>Session totals</strong></td>' +
+            '<td colspan="7"><strong>Session totals</strong></td>' +
             '<td><strong>' +
             sumStr +
             '</strong><div class="sf-meta" style="margin-top:4px;">Cumulative PnL (rows with PnL)</div></td>' +
