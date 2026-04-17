@@ -15,6 +15,56 @@
         };
     }
 
+    /** Same rule as left-menu.js: DB isAdmin "Yes" -> API isAdmin / is_admin. */
+    function isUserAdmin(user) {
+        if (!user || typeof user !== 'object') return false;
+        const raw = user.isAdmin != null ? user.isAdmin : user.is_admin;
+        if (raw == null || raw === '') return false;
+        return String(raw).trim().toLowerCase() === 'yes';
+    }
+
+    function readStoredUser() {
+        try {
+            return JSON.parse(localStorage.getItem('trademanthan_user') || '{}');
+        } catch (e) {
+            return {};
+        }
+    }
+
+    async function refreshUserFromMe() {
+        const paths = [API_BASE + '/api/auth/me', API_BASE + '/auth/me'];
+        for (const p of paths) {
+            try {
+                const res = await fetch(p, { headers: authHeaders(), cache: 'no-store' });
+                if (!res.ok) continue;
+                const me = await res.json();
+                try {
+                    const prev = readStoredUser();
+                    localStorage.setItem('trademanthan_user', JSON.stringify(Object.assign({}, prev, me)));
+                } catch (e2) {
+                    localStorage.setItem('trademanthan_user', JSON.stringify(me));
+                }
+                return me;
+            } catch (e) {
+                /* try next path */
+            }
+        }
+        return null;
+    }
+
+    function setRunPickerAllowed(isAdmin) {
+        const btn = document.getElementById('sfRunPicker');
+        if (!btn) return;
+        if (isAdmin) {
+            btn.disabled = false;
+            btn.style.display = '';
+            btn.title = 'Run CMS picker once (refreshes OI heatmap + live feed first)';
+            return;
+        }
+        btn.disabled = true;
+        btn.title = 'Administrator only';
+    }
+
     function isTokenExpiredResponse(res, payloadText, payloadJson) {
         if (res && Number(res.status) === 401) return true;
         const detail =
@@ -1171,6 +1221,10 @@
     async function runPickerScan() {
         const btn = document.getElementById('sfRunPicker');
         const msg = document.getElementById('sfTrendMsg');
+        if (btn && btn.disabled) {
+            if (msg) msg.textContent = 'Run scan now is enabled for administrators only.';
+            return;
+        }
         if (btn) btn.disabled = true;
         if (msg) msg.textContent = 'Running CMS picker (OI heatmap warmup can take 1–3 minutes)…';
         try {
@@ -1237,6 +1291,13 @@
         if (ref) ref.addEventListener('click', function () { loadTrend(false); });
         const runPicker = document.getElementById('sfRunPicker');
         if (runPicker) runPicker.addEventListener('click', function () { runPickerScan(); });
+        setRunPickerAllowed(false);
+        refreshUserFromMe().then(function (me) {
+            const user = me || readStoredUser();
+            setRunPickerAllowed(isUserAdmin(user));
+        }).catch(function () {
+            setRunPickerAllowed(isUserAdmin(readStoredUser()));
+        });
 
         const sellModal = document.getElementById('sfSellModal');
         const sellBackdrop = document.getElementById('sfSellModalBackdrop');
