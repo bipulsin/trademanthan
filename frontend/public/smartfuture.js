@@ -287,26 +287,31 @@
         );
     }
 
-    /** Open Positions: Sell only when exit_suggested; blink when enabled. */
+    /** Open Positions: Sell always enabled; blink when algo suggests exit. Manual price via modal. */
     function fmtOpenActionCell(r) {
         const id = r.id;
         const exitOk = Boolean(r.exit_suggested);
-        const reason = escapeAttr(String(r.exit_reason || ''));
-        const dis = exitOk ? '' : ' disabled';
+        const sym = r && r.fut_symbol != null && r.fut_symbol !== '' ? String(r.fut_symbol) : '';
+        const bp =
+            r.buy_price != null && r.buy_price !== ''
+                ? String(r.buy_price)
+                : '';
         const blink = exitOk ? ' sf-btn-sell--blink' : '';
+        const reason = escapeAttr(String(r.exit_reason || ''));
         const title = exitOk
-            ? 'Square off at LTP — exit signal is active'
-            : 'Disabled until the algo signals exit (see Today\'s Trend Exit hint)';
+            ? 'Manual square-off — enter price in the dialog. Exit signal is active. ' + (reason ? reason : '')
+            : 'Manual square-off — enter your execution price in the dialog.';
         return (
             '<button type="button" class="sf-btn-sell' +
             blink +
             '" data-sell-id="' +
             id +
-            '" data-open-sell="1"' +
-            dis +
-            ' title="' +
-            title +
-            (reason && exitOk ? ' — ' + reason : '') +
+            '" data-open-sell="1" data-fut-symbol="' +
+            escapeAttr(sym) +
+            '" data-buy-price="' +
+            escapeAttr(bp) +
+            '" title="' +
+            escapeAttr(title) +
             '">Sell</button>'
         );
     }
@@ -803,24 +808,79 @@
         await loadTrend(true);
     }
 
-    async function onSellClick(ev) {
-        const btn = ev.target && ev.target.closest ? ev.target.closest('.sf-btn-sell[data-open-sell]') : null;
-        if (!btn) return;
-        if (btn.disabled) return;
-        const id = btn.getAttribute('data-sell-id');
-        if (!id) return;
-        if (!window.confirm('Mark this position as sold at current LTP?')) return;
-        btn.disabled = true;
+    let _sfSellModalTriggerBtn = null;
+
+    function openSellPriceModal(btn, rowId, symbol, buyPriceHint) {
+        const modal = document.getElementById('sfSellModal');
+        const symEl = document.getElementById('sfSellModalSymbol');
+        const inp = document.getElementById('sfSellPriceInput');
+        const errEl = document.getElementById('sfSellModalErr');
+        if (!modal || !inp) return;
+        _sfSellModalTriggerBtn = btn;
+        modal.dataset.sellRowId = rowId;
+        if (symEl) {
+            symEl.textContent = symbol ? 'Symbol: ' + symbol : 'Square-off';
+        }
+        if (errEl) errEl.textContent = '';
+        const cBtn = document.getElementById('sfSellModalConfirm');
+        if (cBtn) cBtn.disabled = false;
+        inp.value = '';
+        const n = Number(buyPriceHint);
+        if (buyPriceHint != null && buyPriceHint !== '' && Number.isFinite(n) && n > 0) {
+            inp.value = String(n);
+        }
+        modal.classList.add('sf-modal--open');
+        modal.setAttribute('aria-hidden', 'false');
+        setTimeout(function () {
+            inp.focus();
+            inp.select();
+        }, 30);
+    }
+
+    function closeSellPriceModal() {
+        const modal = document.getElementById('sfSellModal');
+        if (!modal) return;
+        modal.classList.remove('sf-modal--open');
+        modal.setAttribute('aria-hidden', 'true');
+        delete modal.dataset.sellRowId;
+        _sfSellModalTriggerBtn = null;
+        const c = document.getElementById('sfSellModalConfirm');
+        if (c) c.disabled = false;
+    }
+
+    async function submitSellPriceModal() {
+        const modal = document.getElementById('sfSellModal');
+        const inp = document.getElementById('sfSellPriceInput');
+        const errEl = document.getElementById('sfSellModalErr');
+        const confirmBtn = document.getElementById('sfSellModalConfirm');
+        const id = modal && modal.dataset.sellRowId;
+        if (!id || !inp) return;
+        const raw = String(inp.value || '').trim().replace(/,/g, '');
+        const price = parseFloat(raw);
+        if (!Number.isFinite(price) || price <= 0) {
+            if (errEl) errEl.textContent = 'Enter a valid sell price greater than zero.';
+            return;
+        }
+        if (errEl) errEl.textContent = '';
+        const triggerBtn = _sfSellModalTriggerBtn;
+        if (confirmBtn) confirmBtn.disabled = true;
+        if (triggerBtn) triggerBtn.disabled = true;
+
         const paths = ['/api/smart-futures/daily/' + id + '/sell', '/smart-futures/daily/' + id + '/sell'];
         let ok = false;
         let errText = '';
+        const payload = JSON.stringify({ sell_price: price });
         for (const p of paths) {
             try {
-                const res = await fetch(API_BASE + p, { method: 'POST', headers: authHeaders() });
-                const raw = await res.text();
+                const res = await fetch(API_BASE + p, {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    body: payload,
+                });
+                const resText = await res.text();
                 let data = null;
                 try {
-                    data = JSON.parse(raw);
+                    data = JSON.parse(resText);
                 } catch (e) {
                     data = null;
                 }
@@ -828,21 +888,39 @@
                     ok = true;
                     break;
                 }
-                if (isTokenExpiredResponse(res, raw, data)) {
+                if (isTokenExpiredResponse(res, resText, data)) {
                     redirectToLoginExpired();
+                    if (triggerBtn) triggerBtn.disabled = false;
+                    if (confirmBtn) confirmBtn.disabled = false;
                     return;
                 }
-                errText = (data && data.detail) || raw || res.statusText;
+                errText =
+                    (data && (data.detail || data.message)) ||
+                    resText ||
+                    res.statusText;
             } catch (e) {
                 errText = String(e.message || e);
             }
         }
         if (!ok) {
             alert(errText || 'Sell failed');
-            btn.disabled = false;
+            if (triggerBtn) triggerBtn.disabled = false;
+            if (confirmBtn) confirmBtn.disabled = false;
             return;
         }
+        closeSellPriceModal();
         await loadTrend(true);
+    }
+
+    function onSellClick(ev) {
+        const btn = ev.target && ev.target.closest ? ev.target.closest('.sf-btn-sell[data-open-sell]') : null;
+        if (!btn) return;
+        if (btn.disabled) return;
+        const id = btn.getAttribute('data-sell-id');
+        if (!id) return;
+        const sym = btn.getAttribute('data-fut-symbol') || '';
+        const buyHint = btn.getAttribute('data-buy-price') || '';
+        openSellPriceModal(btn, id, sym, buyHint);
     }
 
     function applyPickSelectionNote(cfg) {
@@ -993,6 +1071,29 @@
         if (ref) ref.addEventListener('click', function () { loadTrend(false); });
         const runPicker = document.getElementById('sfRunPicker');
         if (runPicker) runPicker.addEventListener('click', function () { runPickerScan(); });
+
+        const sellModal = document.getElementById('sfSellModal');
+        const sellBackdrop = document.getElementById('sfSellModalBackdrop');
+        const sellCancel = document.getElementById('sfSellModalCancel');
+        const sellConfirm = document.getElementById('sfSellModalConfirm');
+        const sellInp = document.getElementById('sfSellPriceInput');
+        if (sellCancel) sellCancel.addEventListener('click', closeSellPriceModal);
+        if (sellBackdrop) sellBackdrop.addEventListener('click', closeSellPriceModal);
+        if (sellConfirm) sellConfirm.addEventListener('click', function () { submitSellPriceModal(); });
+        if (sellInp) {
+            sellInp.addEventListener('keydown', function (ev) {
+                if (ev.key === 'Enter') {
+                    ev.preventDefault();
+                    submitSellPriceModal();
+                }
+            });
+        }
+        document.addEventListener('keydown', function (ev) {
+            if (ev.key === 'Escape' && sellModal && sellModal.classList.contains('sf-modal--open')) {
+                closeSellPriceModal();
+            }
+        });
+
         loadTrend(false);
         window.setInterval(function () { loadTrend(true); }, 15 * 60 * 1000);
     });

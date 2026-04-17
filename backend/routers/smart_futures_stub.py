@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pytz
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -84,6 +84,12 @@ class SmartFuturesConfigUpdate(BaseModel):
     partial_exit_enabled: Optional[bool] = None
     brick_atr_period: Optional[int] = Field(None, ge=2, le=99)
     brick_atr_override: Optional[float] = None
+
+
+class SmartFuturesSellBody(BaseModel):
+    """POST /daily/{id}/sell: optional manual price; if omitted, broker LTP is used."""
+
+    sell_price: Optional[float] = Field(default=None, description="Manual square-off price (bookkeeping)")
 
 
 @router.get("/config")
@@ -581,10 +587,11 @@ def post_smart_futures_daily_order(
 @router.post("/daily/{row_id}/sell")
 def post_smart_futures_daily_sell(
     row_id: int,
+    body: SmartFuturesSellBody = Body(default_factory=SmartFuturesSellBody),
     user: User = Depends(_require_user),
     db: Session = Depends(get_db),
 ):
-    """Mark row as sold at current LTP (exit / square-off bookkeeping)."""
+    """Mark row as sold at a manual price (JSON body) or current LTP if sell_price omitted."""
     sd = effective_session_date_ist_for_trend()
     row = db.execute(
         text(
@@ -611,15 +618,25 @@ def post_smart_futures_daily_sell(
     if not ikey:
         raise HTTPException(status_code=400, detail="Missing instrument key")
 
-    try:
-        us = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
-        q = us.get_market_quote_by_key(ikey) or {}
-        ltp = float(q.get("last_price") or 0)
-    except Exception as e:
-        logger.error("smart_futures sell LTP failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=502, detail=f"LTP fetch failed: {e}") from e
-    if ltp <= 0:
-        raise HTTPException(status_code=502, detail="Could not read last price from broker")
+    ltp: Optional[float] = None
+    manual = body.sell_price is not None
+    if manual:
+        try:
+            ltp = float(body.sell_price)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            ltp = None
+        if ltp is None or ltp <= 0 or ltp != ltp:
+            raise HTTPException(status_code=400, detail="sell_price must be a positive number")
+    else:
+        try:
+            us = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+            q = us.get_market_quote_by_key(ikey) or {}
+            ltp = float(q.get("last_price") or 0)
+        except Exception as e:
+            logger.error("smart_futures sell LTP failed: %s", e, exc_info=True)
+            raise HTTPException(status_code=502, detail=f"LTP fetch failed: {e}") from e
+        if ltp <= 0:
+            raise HTTPException(status_code=502, detail="Could not read last price from broker")
 
     sell_time_iso: Optional[str] = None
     try:
@@ -704,11 +721,12 @@ def post_smart_futures_daily_sell(
             raise
     db.commit()
     logger.info(
-        "smart_futures sell: user=%s row=%s sell_price=%s sell_time=%s",
+        "smart_futures sell: user=%s row=%s sell_price=%s sell_time=%s manual=%s",
         getattr(user, "id", None),
         row_id,
         ltp,
         sell_time_iso,
+        manual,
     )
     return {
         "success": True,
