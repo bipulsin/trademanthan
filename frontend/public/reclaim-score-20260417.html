@@ -96,6 +96,16 @@
         intentionally stay patient and do <em>not</em> press the panic button even though price is below VWAP.
     </div>
 
+    <div class="callout" style="border-left-color:#60a5fa;">
+        <strong>Panic arm-time.</strong> Panic firing is deliberately delayed until the <strong>first 15-minute
+        bucket containing <code>entry_at</code> has closed</strong>. This matches the gating used for the 15m primary
+        exit in <code>evaluate_exit_with_profit_protection</code> and avoids noisy exit hints in the first few 5-minute
+        candles after a new position is marked bought. In the charts below, the dotted blue vertical marks the
+        <em>panic-armed</em> instant; red bands only appear at or after it. <em>Calm</em> suppression of soft 15m
+        primary exits is not gated — if the score is high, any matching soft 15m VWAP reason is suppressed regardless
+        of arm time (which is moot because those soft reasons themselves require the first 15m bucket close too).
+    </div>
+
     <h2>How the score is constructed</h2>
     <p>
         The score is computed only when <code>scan_price</code> is adverse relative to the live 15m session VWAP, so for
@@ -153,7 +163,8 @@ sector = 10 + 10 × sector_score, clamped to [0, 20]</div>
         <span><span class="swatch swatch-grey"></span> 15m session VWAP</span>
         <span><span class="swatch swatch-green"></span> Buy price</span>
         <span><span class="swatch swatch-orange"></span> Reclaim score (0–100, right axis)</span>
-        <span><span class="swatch swatch-red-band"></span> Panic band (score &lt; 45, price adverse)</span>
+        <span><span class="swatch" style="background:#60a5fa; border-left:2px dotted #60a5fa;"></span> Panic armed (first 15m bucket close after entry)</span>
+        <span><span class="swatch swatch-red-band"></span> Panic band (post-arm, score &lt; 45, price adverse)</span>
     </div>
 
     <h2>Case studies — 2026-04-17 bought positions</h2>
@@ -165,12 +176,13 @@ sector = 10 + 10 × sector_score, clamped to [0, 20]</div>
             <div class="metric"><div class="k">Buy</div><div class="v">₹1,248.90</div></div>
             <div class="metric"><div class="k">Sold @</div><div class="v">₹1,231.00 (11:51)</div></div>
             <div class="metric"><div class="k">Sector score</div><div class="v">+0.44</div></div>
-            <div class="metric"><div class="k">Panic scans</div><div class="v">7 of 23 adverse</div></div>
+            <div class="metric"><div class="k">Panic armed</div><div class="v">10:00</div></div>
+            <div class="metric"><div class="k">Panic scans</div><div class="v">7 (post-arm)</div></div>
             <div class="metric"><div class="k">First panic</div><div class="v">10:30</div></div>
         </div>
         <figure>
             <img src="reclaim_adaniensol_20260417.png" alt="ADANIENSOL reclaim score chart" loading="lazy" />
-            <figcaption>Score drops below 45 at 10:30, 10:55, 11:20, 11:25, 11:35, 11:45 — an hour-plus of panic fires before the 11:51 manual exit.</figcaption>
+            <figcaption>Entry 09:45 → panic armed at 10:00 (first 15m bucket close). Score drops below 45 at 10:30, 10:55, 11:20, 11:25, 11:35, 11:45 — an hour-plus of panic fires before the 11:51 manual exit.</figcaption>
         </figure>
         <p>
             The first scan at 09:45 was briefly below VWAP but with a high score of 66.5 (shallow dip, bullish 5m
@@ -187,12 +199,13 @@ sector = 10 + 10 × sector_score, clamped to [0, 20]</div>
             <div class="metric"><div class="k">Buy</div><div class="v">₹136.62</div></div>
             <div class="metric"><div class="k">Sold @</div><div class="v">₹135.41 (15:25)</div></div>
             <div class="metric"><div class="k">Sector score</div><div class="v">+0.44</div></div>
-            <div class="metric"><div class="k">Panic scans</div><div class="v">4 of 8 adverse</div></div>
+            <div class="metric"><div class="k">Panic armed</div><div class="v">12:30</div></div>
+            <div class="metric"><div class="k">Panic scans</div><div class="v">4 (post-arm)</div></div>
             <div class="metric"><div class="k">First panic</div><div class="v">15:10</div></div>
         </div>
         <figure>
             <img src="reclaim_iex_20260417.png" alt="IEX reclaim score chart" loading="lazy" />
-            <figcaption>Above VWAP for almost the entire holding — score stays silent. Once 15m VWAP breaks at 15:10, score immediately drops to 20–30 and the panic band fires until the 15:25 exit.</figcaption>
+            <figcaption>Entry 12:15 → armed at 12:30. Above VWAP for almost the entire holding — score stays silent. Once 15m VWAP breaks at 15:10, score immediately drops to 20–30 and the panic band fires until the 15:25 exit.</figcaption>
         </figure>
         <p>
             Silence for two-and-a-half hours is the right behavior: you do not want the algo nagging when price is
@@ -208,20 +221,20 @@ sector = 10 + 10 × sector_score, clamped to [0, 20]</div>
             <div class="metric"><div class="k">Buy</div><div class="v">₹466.75</div></div>
             <div class="metric"><div class="k">Sold @</div><div class="v">₹471.05 (11:03)</div></div>
             <div class="metric"><div class="k">Sector score</div><div class="v">+0.13</div></div>
-            <div class="metric"><div class="k">Panic scans</div><div class="v">5 of 10 adverse</div></div>
-            <div class="metric"><div class="k">First panic</div><div class="v">09:30</div></div>
+            <div class="metric"><div class="k">Panic armed</div><div class="v">09:45</div></div>
+            <div class="metric"><div class="k">Panic scans</div><div class="v">2 (post-arm)</div></div>
+            <div class="metric"><div class="k">First panic</div><div class="v">09:50</div></div>
         </div>
         <figure>
             <img src="reclaim_vbl_20260417.png" alt="VBL reclaim score chart" loading="lazy" />
-            <figcaption>Early red band 09:30–09:55 near the open, then clean run above VWAP until the 11:03 profitable exit.</figcaption>
+            <figcaption>Entry 09:30 → armed at 09:45. Three pre-arm adverse scans (09:30, 09:35, 09:40) are ignored by design; only the brief 09:50 dip and a single late 11:05 scan fire panic before the 11:03 profitable exit.</figcaption>
         </figure>
         <p>
-            VBL is a useful stress test: it <strong>did</strong> trade below VWAP in the first 20–25 minutes after
-            entry, so the Sell button <em>would have blinked</em> at the open while the score was in the panic zone.
-            However, price reclaimed VWAP by 09:55 and ran to +4 rupees. In live trading the operator is free to
-            ignore a panic blink if they have conviction; the gate only <em>suggests</em> exit, it does not auto-sell.
-            If we want fewer false positives on new positions, a simple improvement is to require the first 15m
-            bucket after entry to complete before arming panic (same as how 15m primary exits are gated).
+            VBL is the reason the arm gate exists: it <strong>did</strong> trade below VWAP in the first 15 minutes
+            after entry, which would have produced three false panic fires right after marking bought. With the
+            15m-bucket arm gate only the 09:50 dip triggers once, then price reclaims VWAP and runs to +4 rupees by
+            10:45. The gate only <em>suggests</em> exit — the operator can still ignore a blink if they have
+            conviction — so the net effect is materially fewer nags at the start of a new position.
         </p>
     </section>
 
@@ -232,18 +245,18 @@ sector = 10 + 10 × sector_score, clamped to [0, 20]</div>
             <div class="metric"><div class="k">Buy</div><div class="v">₹310.66</div></div>
             <div class="metric"><div class="k">Sold @</div><div class="v">₹313.65 (11:02)</div></div>
             <div class="metric"><div class="k">Sector score</div><div class="v">+0.16</div></div>
-            <div class="metric"><div class="k">Panic scans</div><div class="v">2 of 4 adverse</div></div>
-            <div class="metric"><div class="k">First panic</div><div class="v">09:40</div></div>
+            <div class="metric"><div class="k">Panic armed</div><div class="v">09:45</div></div>
+            <div class="metric"><div class="k">Panic scans</div><div class="v">1 (post-arm)</div></div>
+            <div class="metric"><div class="k">First panic</div><div class="v">11:00</div></div>
         </div>
         <figure>
             <img src="reclaim_bhel_20260417.png" alt="BHEL reclaim score chart" loading="lazy" />
-            <figcaption>Two isolated panic scans (09:40 and 11:00). Large profitable stretch in between with price well above VWAP has no score at all — desired silence.</figcaption>
+            <figcaption>Entry 09:30 → armed at 09:45. One pre-arm adverse scan at 09:40 is ignored; the only post-arm panic fire is right at 11:00 — the same minute the operator sold for a profit.</figcaption>
         </figure>
         <p>
             BHEL is the cleanest example of the score <em>helping</em>. It was silent for the entire profitable
-            stretch (09:50 to ~10:55) because price sat above VWAP. It only spoke up briefly at the very start and
-            right at the point of a late minor VWAP dip near 11:00, which also happened to be when the operator
-            actually sold for a profit of ~₹3.
+            stretch (09:50 to ~10:55) because price sat above VWAP. It only spoke up right at the point of a late
+            minor VWAP dip near 11:00, which also happened to be when the operator actually sold for a profit of ~₹3.
         </p>
     </section>
 
