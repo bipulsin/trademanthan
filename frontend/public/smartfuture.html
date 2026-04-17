@@ -203,6 +203,21 @@
             background: rgba(45, 212, 191, 0.1);
             border-color: rgba(45, 212, 191, 0.35);
         }
+        .sf-pnl-pos { color: #15803d; font-weight: 600; }
+        .sf-pnl-neg { color: #b91c1c; font-weight: 600; }
+        .sf-pnl-flat { color: var(--theme-muted, #64748b); }
+        body[data-theme="dark"] .sf-pnl-pos { color: #4ade80; }
+        body[data-theme="dark"] .sf-pnl-neg { color: #f87171; }
+        .sf-wl-win { color: #15803d; font-weight: 700; }
+        .sf-wl-loss { color: #b91c1c; font-weight: 700; }
+        .sf-wl-flat { color: var(--theme-muted, #64748b); }
+        body[data-theme="dark"] .sf-wl-win { color: #4ade80; }
+        body[data-theme="dark"] .sf-wl-loss { color: #f87171; }
+        table.sf-closed-table tfoot .sf-closed-footer-row td {
+            border-top: 2px solid var(--theme-border, #e2e8f0);
+            background: rgba(148, 163, 184, 0.08);
+        }
+        table.sf-closed-table tfoot .sf-closed-footer-row td { padding-top: 12px; padding-bottom: 12px; }
     </style>
 </head>
 <body class="theme-page">
@@ -252,10 +267,18 @@
                     <p class="sf-meta" id="sfOpenMsg"></p>
                     <div id="sfOpenPositions"></div>
                 </div>
+                <div class="sf-card">
+                    <div class="sf-card-head">
+                        <h2><i class="fas fa-archive"></i> Closed Positions</h2>
+                        <p class="sf-meta" style="margin:0;">Square-offs this session. PnL uses lot size from instruments × lots (see API).</p>
+                    </div>
+                    <p class="sf-meta" id="sfClosedMsg"></p>
+                    <div id="sfClosedPositions"></div>
+                </div>
             </div>
         </main>
     </div>
     <script src="left-menu.js?v=3.19"></script>
-    <script src="smartfuture.js?v=32"></script>
+    <script src="smartfuture.js?v=33"></script>
 </body>
 </html>

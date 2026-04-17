@@ -247,6 +247,38 @@ def _atr_ratio_needs_backfill(v: Any) -> bool:
         return True
 
 
+def _compute_realized_pnl_rupees_for_row(r: Dict[str, Any]) -> Optional[float]:
+    """
+    Approximate closed-trade PnL in INR for a sold Smart Futures row:
+    price diff × lot size (from instruments) × calculated_lots. LONG: (sell−buy); SHORT: (buy−sell).
+    """
+    try:
+        from backend.services.smart_futures_picker.position_sizing import (
+            get_futures_lot_size_by_instrument_key,
+        )
+
+        bp = r.get("buy_price")
+        sp = r.get("sell_price")
+        if bp is None or sp is None:
+            return None
+        bp_f = float(bp)
+        sp_f = float(sp)
+        lots = int(r.get("calculated_lots") or 0)
+        if lots < 1:
+            return None
+        ikey = str(r.get("fut_instrument_key") or "").strip()
+        if not ikey:
+            return None
+        lot_size = int(get_futures_lot_size_by_instrument_key(ikey))
+        if lot_size <= 0:
+            return None
+        side = str(r.get("side") or "").strip().upper()
+        pts = (bp_f - sp_f) if side == "SHORT" else (sp_f - bp_f)
+        return round(pts * float(lot_size) * float(lots), 2)
+    except Exception:
+        return None
+
+
 def _row_to_dict(r: Any) -> Dict[str, Any]:
     out = dict(r)
     sd = out.get("session_date")
@@ -452,6 +484,12 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
                     db.commit()
             except Exception as ex:
                 logger.debug("smart_futures exit/protection enrich id=%s: %s", r.get("id"), ex)
+
+    for r in serialized:
+        if str(r.get("order_status") or "").strip().lower() == "sold":
+            r["realized_pnl"] = _compute_realized_pnl_rupees_for_row(r)
+        else:
+            r.pop("realized_pnl", None)
 
     for r in serialized:
         if str(r.get("order_status") or "").strip().lower() != "bought":

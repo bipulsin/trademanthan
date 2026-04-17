@@ -122,6 +122,28 @@
         return String(iso);
     }
 
+    /** Signal / row time when the pick was created (used as buy-time proxy before a dedicated column exists). */
+    function fmtBuyTime(iso) {
+        return fmtSellTime(iso);
+    }
+
+    function winLossLabel(pnl) {
+        if (pnl == null || pnl === '') return '—';
+        const n = Number(pnl);
+        if (!Number.isFinite(n)) return '—';
+        if (n > 0) return '<span class="sf-wl-win">Win</span>';
+        if (n < 0) return '<span class="sf-wl-loss">Loss</span>';
+        return '<span class="sf-wl-flat">Flat</span>';
+    }
+
+    function fmtPnlCell(pnl) {
+        if (pnl == null || pnl === '') return '—';
+        const n = Number(pnl);
+        if (!Number.isFinite(n)) return '—';
+        const cls = n > 0 ? 'sf-pnl-pos' : n < 0 ? 'sf-pnl-neg' : 'sf-pnl-flat';
+        return '<span class="' + cls + '">₹' + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</span>';
+    }
+
     function escapeHtml(s) {
         return String(s)
             .replace(/&/g, '&amp;')
@@ -513,6 +535,10 @@
 
         const groups = data.groups && data.groups.length ? data.groups : [];
         const flat = flattenRows(data);
+        const flatTrend = flat.filter(function (r) {
+            const o = String(r.order_status || '').trim().toLowerCase();
+            return o !== 'bought' && o !== 'sold';
+        });
 
         const thead =
             '<thead><tr>' +
@@ -522,7 +548,7 @@
 
         const slots = scheduledSlotsForSession(data.session_date);
         const bySlot = {};
-        flat.forEach(function (r) {
+        flatTrend.forEach(function (r) {
             const slot = deriveRunSlot(r);
             if (!slot) return;
             if (!bySlot[slot]) bySlot[slot] = [];
@@ -542,7 +568,7 @@
 
         // Always render qualifying rows even when their slot is outside the
         // scheduled slot list (e.g. manual/off-cycle scans).
-        const extra = flat.filter(function (r) {
+        const extra = flatTrend.filter(function (r) {
             const slot = deriveRunSlot(r);
             return slot && slots.indexOf(slot) === -1;
         });
@@ -577,6 +603,122 @@
             const ob = ev.target && ev.target.closest ? ev.target.closest('.sf-btn-order') : null;
             if (ob) onOrderClick(ev);
         };
+    }
+
+    function closedTableRowHtml(r) {
+        const sym =
+            r && r.fut_symbol != null && r.fut_symbol !== '' ? escapeHtml(String(r.fut_symbol)) : '—';
+        const buyT = fmtBuyTime(r.entry_at);
+        const sellT = fmtSellTime(r.sell_time);
+        return (
+            '<tr data-row-id="' +
+            r.id +
+            '">' +
+            '<td>' +
+            sym +
+            '</td>' +
+            '<td>' +
+            escapeHtml(buyT || '—') +
+            '</td>' +
+            '<td>' +
+            fmtNum(r.buy_price, 2) +
+            '</td>' +
+            '<td>' +
+            escapeHtml(sellT || '—') +
+            '</td>' +
+            '<td>' +
+            fmtNum(r.sell_price, 2) +
+            '</td>' +
+            '<td>' +
+            fmtPnlCell(r.realized_pnl) +
+            '</td>' +
+            '<td>' +
+            winLossLabel(r.realized_pnl) +
+            '</td>' +
+            '</tr>'
+        );
+    }
+
+    function renderClosedPositions(data) {
+        const host = document.getElementById('sfClosedPositions');
+        const msg = document.getElementById('sfClosedMsg');
+        if (!host) return;
+
+        const all = flattenRows(data);
+        const sold = all.filter(function (r) {
+            return String(r.order_status || '').trim().toLowerCase() === 'sold';
+        });
+        sold.sort(function (a, b) {
+            const sa = String(a.sell_time || '');
+            const sb = String(b.sell_time || '');
+            return sb.localeCompare(sa);
+        });
+
+        if (msg) msg.textContent = '';
+
+        if (!sold.length) {
+            host.innerHTML =
+                '<div class="sf-table-wrap"><table class="sf-table sf-closed-table"><tbody><tr><td colspan="7" style="padding:14px;">No closed positions this session</td></tr></tbody></table></div>';
+            return;
+        }
+
+        let sumPnl = 0;
+        let nPnl = 0;
+        let wins = 0;
+        sold.forEach(function (r) {
+            const p = r.realized_pnl;
+            if (p == null || p === '') return;
+            const n = Number(p);
+            if (!Number.isFinite(n)) return;
+            nPnl += 1;
+            sumPnl += n;
+            if (n > 0) wins += 1;
+        });
+        const winRatioPct = nPnl > 0 ? (wins / nPnl) * 100 : null;
+        const sumStr =
+            nPnl > 0
+                ? '<span class="' +
+                  (sumPnl >= 0 ? 'sf-pnl-pos' : 'sf-pnl-neg') +
+                  '">₹' +
+                  sumPnl.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) +
+                  '</span>'
+                : '—';
+        const ratioStr =
+            winRatioPct != null
+                ? wins +
+                  ' / ' +
+                  nPnl +
+                  ' (' +
+                  winRatioPct.toFixed(1) +
+                  '%)'
+                : '—';
+
+        const thead =
+            '<thead><tr>' +
+            '<th>Symbol</th><th>Buy time</th><th>Buy price</th><th>Sell time</th><th>Sell price</th><th>PnL</th><th>Win / Loss</th>' +
+            '</tr></thead>';
+        let body = '';
+        sold.forEach(function (r) {
+            body += closedTableRowHtml(r);
+        });
+        const foot =
+            '<tfoot><tr class="sf-closed-footer-row">' +
+            '<td colspan="5"><strong>Session totals</strong></td>' +
+            '<td><strong>' +
+            sumStr +
+            '</strong><div class="sf-meta" style="margin-top:4px;">Cumulative PnL (rows with PnL)</div></td>' +
+            '<td><strong>' +
+            escapeHtml(ratioStr) +
+            '</strong><div class="sf-meta" style="margin-top:4px;">Win ratio</div></td>' +
+            '</tr></tfoot>';
+        host.innerHTML =
+            '<div class="sf-table-wrap"><table class="sf-table sf-closed-table">' +
+            thead +
+            '<tbody>' +
+            body +
+            '</tbody>' +
+            foot +
+            '</table></div>';
     }
 
     function renderOpenPositions(data) {
@@ -830,6 +972,7 @@
             const data = await fetchDailyJson();
             renderGroups(data);
             renderOpenPositions(data);
+            renderClosedPositions(data);
             if (updated) updated.textContent = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
         } catch (e) {
             if (!silent && msg) msg.textContent = String(e.message || e);
@@ -840,6 +983,8 @@
             }
             const openHost = document.getElementById('sfOpenPositions');
             if (openHost) openHost.innerHTML = '';
+            const closedHost = document.getElementById('sfClosedPositions');
+            if (closedHost) closedHost.innerHTML = '';
         }
     }
 
