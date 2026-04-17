@@ -271,6 +271,25 @@
         );
     }
 
+    function trendOrderGateByVwap(r) {
+        const scanLtp = r && r.entry_price != null && r.entry_price !== '' ? Number(r.entry_price) : NaN;
+        const m15Vwap = r && r.m15_vwap != null && r.m15_vwap !== '' ? Number(r.m15_vwap) : NaN;
+        if (!Number.isFinite(scanLtp) || !Number.isFinite(m15Vwap) || m15Vwap <= 0) {
+            return { allowed: true, reason: '' };
+        }
+        if (scanLtp < m15Vwap) {
+            return {
+                allowed: false,
+                reason:
+                    'Order disabled: last scanned LTP ' +
+                    scanLtp.toFixed(2) +
+                    ' is below 15m VWAP ' +
+                    m15Vwap.toFixed(2),
+            };
+        }
+        return { allowed: true, reason: '' };
+    }
+
     /** First section: status text for bought/sold — no Sell here. */
     function fmtTrendActionCell(r) {
         const ost = String(r.order_status || '').trim().toLowerCase();
@@ -295,12 +314,21 @@
             return hint + '<span class="sf-order-status">' + displayStatus + '</span>';
         }
         const sym = r && r.fut_symbol != null && r.fut_symbol !== '' ? String(r.fut_symbol) : '';
+        const gate = trendOrderGateByVwap(r);
+        const dis = gate.allowed ? '' : ' disabled';
+        const title = gate.allowed
+            ? 'Mark bought — enter buy price and lots'
+            : gate.reason;
         return (
             '<button type="button" class="sf-btn-order sf-btn-trend-order" data-order-id="' +
             r.id +
             '" data-fut-symbol="' +
             escapeAttr(sym) +
-            '" title="Mark bought — enter buy price and lots">Order</button>'
+            '"' +
+            dis +
+            ' title="' +
+            escapeAttr(title) +
+            '">Order</button>'
         );
     }
 
