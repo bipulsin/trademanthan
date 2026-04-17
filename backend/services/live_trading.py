@@ -945,6 +945,38 @@ def _load_instrument_dict_by_key(instrument_key: str) -> Optional[Dict[str, Any]
     return None
 
 
+def _broker_short_term_position_row_is_option_leg(pos: Dict[str, Any]) -> bool:
+    """
+    True if this Upstox short-term position row is an F&O option (CE/PE), not a future (FUT).
+
+    Scan reconciliation only aligns intraday option rows; futures must not create orphans or
+    affect qty aggregation for the same book.
+    """
+    if not isinstance(pos, dict):
+        return False
+    ikey = (pos.get("instrument_token") or pos.get("instrument_key") or "").strip()
+    if not ikey:
+        return False
+    u = ikey.upper()
+    if "NSE_FO" not in u and "BSE_FO" not in u:
+        return False
+    inst = _load_instrument_dict_by_key(ikey)
+    if isinstance(inst, dict):
+        it = str(inst.get("instrument_type") or "").strip().upper()
+        if it == "FUT":
+            return False
+        if it in ("CE", "PE"):
+            return True
+    tsym = str(pos.get("trading_symbol") or "").strip().upper()
+    if not tsym and isinstance(inst, dict):
+        tsym = str(inst.get("trading_symbol") or inst.get("tradingsymbol") or "").strip().upper()
+    if tsym.endswith("FUT"):
+        return False
+    if tsym.endswith("CE") or tsym.endswith("PE"):
+        return True
+    return False
+
+
 def apply_broker_buy_fill_to_intraday_trade(db, trade) -> bool:
     """
     Find today's completed BUY on Upstox for this row's instrument_key (or buy_order_id),
@@ -1901,12 +1933,13 @@ def place_live_upstox_exit(
 
 def reconcile_scan_algo_today_with_broker(db, force: bool = False) -> Dict[str, Any]:
     """
-    Align today's `intraday_stock_options` with Upstox short-term positions + order book.
+    Align today's `intraday_stock_options` with Upstox short-term positions + order book
+    (options only — futures positions are ignored).
 
     - Promotes no_entry / alert_received / cancelled when a same-day BUY exists (apply_broker_buy_fill).
     - Refreshes buy avg / ids for bought rows (final_reconciliation_refresh_trade_from_broker).
     - Syncs qty to broker net long when the row is open bought.
-    - Inserts a minimal row for a long F&O position at Upstox with no matching DB row (orphan fill).
+    - Inserts a minimal row for a long option position at Upstox with no matching DB row (orphan fill).
 
     Does not require trading_live. Commits on success when changes were made.
     """
@@ -1949,6 +1982,7 @@ def reconcile_scan_algo_today_with_broker(db, force: bool = False) -> Dict[str, 
         out["error"] = pos_res.get("error") or "positions_failed"
         return out
     positions = [p for p in (pos_res.get("positions") or []) if isinstance(p, dict)]
+    positions = [p for p in positions if _broker_short_term_position_row_is_option_leg(p)]
 
     rows = (
         db.query(IntradayStockOption)
@@ -2010,7 +2044,7 @@ def reconcile_scan_algo_today_with_broker(db, force: bool = False) -> Dict[str, 
         .all()
     )
 
-    # Orphan long F&O positions: broker has qty, DB has no row for this instrument_key
+    # Orphan long option positions: broker has qty, DB has no row for this instrument_key
     def _row_exists_for_ikey(ikey: str) -> bool:
         for tr in rows:
             ik = (getattr(tr, "instrument_key", None) or "").strip()
