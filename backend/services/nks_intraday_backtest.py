@@ -71,14 +71,15 @@ RISK_CAP_RUPEES = 10_000.0
 
 # ---------------------------------------------------------------------------
 # V2 (expert, 1-lot discipline) -- futures-only ruleset applied on top of v1.
-# Enter 1 lot at the 10:15 VWAP *only* when the structural stop (15-min OR low)
-# keeps the worst-case loss bounded at <= STOP_CAP_RUPEES_V2 per trade AND the
-# composite confidence score >= CONF_MIN_V2. Exit on the first of:
-#   (a) 1-min candle low <= stop between 10:16 and 15:15 (stopped out @ stop),
+# Enter 1 lot at the 10:15 VWAP. Exit on the first of:
+#   (a) a 15-minute bar CLOSES below the session VWAP as of that bar's end
+#       (the "VWAP flip" -- volume-weighted sentiment turned against us), or
 #   (b) 15:15 IST close (realistic end-of-day exit; no "best slot" oracle).
-# Rationale: in FUT you can't size fractionally, so a realistic stop is the
-# only honest way to cap downside and still keep enough trades on the table.
-STOP_CAP_RUPEES_V2 = 12_000.0
+# Rationale: in FUT you can't size fractionally, so a dynamic, VWAP-anchored
+# stop is the cleanest way to bound losses without fixed-distance arbitrariness.
+# The stop moves with the volume-weighted average, rewarding strong rallies
+# (VWAP rises with them) and cutting losers when sellers control the tape.
+# Confidence score >= CONF_MIN_V2 and ORB pass remain as hard floors.
 CONF_MIN_V2 = 50
 FIFTEEN_MIN_EXIT_HHMM = (15, 15)
 V2_MIN_DATE = date(2026, 3, 20)  # V2 artifact only covers csv_date >= this
@@ -145,14 +146,13 @@ class BacktestRow:
     trade_taken: Optional[bool] = None               # all gates pass -> TAKEN
     skip_reasons: List[str] = field(default_factory=list)
     # V2 (expert, 1-lot discipline) fields -------------------------------------
-    or_low_0930: Optional[float] = None              # 15-minute OR low (09:15 -> 09:30)
-    stop_price_v2: Optional[float] = None            # structural stop (= OR low)
-    stop_distance_points_v2: Optional[float] = None  # vwap_entry - stop_price
-    stop_distance_rupees_v2: Optional[float] = None  # stop_distance_points * lot
-    stopped_out_v2: Optional[bool] = None            # stop got hit intraday
-    stop_hit_at_v2: Optional[str] = None             # HH:MM of the stop hit
-    realistic_exit_price_v2: Optional[float] = None  # stop price or 15:15 close
-    realistic_exit_at_v2: Optional[str] = None       # HH:MM ("stop" event or 15:15)
+    or_low_0930: Optional[float] = None              # 15-min OR low (09:15->09:30); used for tightness score
+    vwap_flip_at_v2: Optional[str] = None            # HH:MM of the 15-min bar whose close triggered the flip
+    vwap_flip_close_v2: Optional[float] = None       # that 15-min bar's close price
+    vwap_flip_session_vwap_v2: Optional[float] = None # session VWAP (09:15 -> flip HH:MM) at flip
+    flipped_out_v2: Optional[bool] = None            # True = stopped via VWAP flip, False = held to 15:15
+    realistic_exit_price_v2: Optional[float] = None  # flip close or 15:15 close
+    realistic_exit_at_v2: Optional[str] = None       # HH:MM of the flip candle or "15:15"
     realistic_pnl_points_v2: Optional[float] = None  # exit - vwap_entry
     realistic_pnl_rupees_v2: Optional[float] = None  # * lot
     sustained_low_5m_v2: Optional[float] = None      # min of 5m-bucket closes after 10:15
@@ -206,11 +206,10 @@ class BacktestRow:
             "trade_taken": self.trade_taken,
             "skip_reasons": self.skip_reasons,
             "or_low_0930": self.or_low_0930,
-            "stop_price_v2": self.stop_price_v2,
-            "stop_distance_points_v2": self.stop_distance_points_v2,
-            "stop_distance_rupees_v2": self.stop_distance_rupees_v2,
-            "stopped_out_v2": self.stopped_out_v2,
-            "stop_hit_at_v2": self.stop_hit_at_v2,
+            "vwap_flip_at_v2": self.vwap_flip_at_v2,
+            "vwap_flip_close_v2": self.vwap_flip_close_v2,
+            "vwap_flip_session_vwap_v2": self.vwap_flip_session_vwap_v2,
+            "flipped_out_v2": self.flipped_out_v2,
             "realistic_exit_price_v2": self.realistic_exit_price_v2,
             "realistic_exit_at_v2": self.realistic_exit_at_v2,
             "realistic_pnl_points_v2": self.realistic_pnl_points_v2,
@@ -561,33 +560,48 @@ def _range_volume_sum(
     return total
 
 
-def _first_stop_hit(
+def _first_vwap_flip_15m(
     buckets: Dict[Tuple[int, int], Dict[str, Any]],
-    start_hhmm: Tuple[int, int],
-    end_hhmm: Tuple[int, int],
-    stop_price: float,
-) -> Optional[Tuple[int, int]]:
-    """Return the HH:MM of the first 1-minute candle *after* start_hhmm whose
-    low is at/below ``stop_price`` (up to and including end_hhmm). The start
-    candle itself is skipped because that's the entry candle -- an expert
-    trader would take the fill at the entry's open, not be stopped out on the
-    same bar. ``None`` when the stop is never touched.
+    entry_hhmm: Tuple[int, int],
+    session_start: Tuple[int, int] = MARKET_OPEN_HHMM,
+    session_end: Tuple[int, int] = FIFTEEN_MIN_EXIT_HHMM,
+) -> Optional[Tuple[Tuple[int, int], float, float]]:
+    """Return ``(flip_close_hhmm, bucket_close_price, session_vwap_at_flip)``
+    for the first 15-minute bar whose close (the 1-min candle at boundary-1)
+    prints below the session VWAP from ``session_start`` through that candle,
+    inclusive. The walk steps through 15-min grid boundaries strictly after
+    ``entry_hhmm`` up to and including ``session_end``. ``None`` means the
+    long survived to ``session_end`` without a flip (held to 15:15 close).
     """
-    hits: List[Tuple[int, int]] = []
-    for (h, m), c in buckets.items():
-        if (h, m) <= start_hhmm:
-            continue
-        if (h, m) > end_hhmm:
-            continue
-        _, _, lo, _, _ = _candle_ohlcv(c)
-        if lo is None or lo <= 0:
-            continue
-        if lo <= stop_price:
-            hits.append((h, m))
-    if not hits:
-        return None
-    hits.sort()
-    return hits[0]
+    def _prev_minute(hhmm: Tuple[int, int]) -> Tuple[int, int]:
+        h, m = hhmm
+        m -= 1
+        if m < 0:
+            m = 59
+            h -= 1
+        return (h, m)
+
+    entry_total = entry_hhmm[0] * 60 + entry_hhmm[1]
+    end_total = session_end[0] * 60 + session_end[1]
+
+    # First 15-min grid boundary strictly after entry. For entry=10:15 this
+    # yields 10:30 (the close of the [10:15, 10:30) bucket lands at 10:29).
+    t = ((entry_total // 15) + 1) * 15
+    while t <= end_total:
+        h, m = t // 60, t % 60
+        close_hhmm = _prev_minute((h, m))
+        close_candle = buckets.get(close_hhmm)
+        if close_candle is not None:
+            _, _, _, bucket_close, _ = _candle_ohlcv(close_candle)
+            vwap_to = _session_vwap_upto(buckets, session_start, close_hhmm)
+            if (
+                bucket_close is not None and bucket_close > 0
+                and vwap_to is not None and vwap_to > 0
+            ):
+                if float(bucket_close) < float(vwap_to):
+                    return (close_hhmm, float(bucket_close), float(vwap_to))
+        t += 15
+    return None
 
 
 def _sustained_5m_low_from(
@@ -868,18 +882,8 @@ def compute_backtest_row(
     or_low = _range_low(buckets, MARKET_OPEN_HHMM, OR_RANGE_END_HHMM)
     if or_low is not None:
         br.or_low_0930 = round(float(or_low), 2)
-        br.stop_price_v2 = br.or_low_0930
 
     lot = int(br.fut_lot_size or 0) or None
-
-    stop_dist_pts: Optional[float] = None
-    stop_dist_rs: Optional[float] = None
-    if vwap_entry is not None and or_low is not None:
-        stop_dist_pts = float(vwap_entry) - float(or_low)
-        br.stop_distance_points_v2 = round(stop_dist_pts, 2)
-        if lot:
-            stop_dist_rs = stop_dist_pts * lot
-            br.stop_distance_rupees_v2 = round(stop_dist_rs, 2)
 
     # 15:15 close price (the natural end-of-day exit).
     eod_candle = buckets.get(FIFTEEN_MIN_EXIT_HHMM)
@@ -888,21 +892,28 @@ def compute_backtest_row(
         _, _, _, _cl, _ = _candle_ohlcv(eod_candle)
         if _cl is not None and _cl > 0:
             eod_close = float(_cl)
-    # Fallback: use price_1515 (open at 15:15) if close isn't available.
     if eod_close is None and p1515 is not None:
         eod_close = float(p1515)
 
-    # Realistic exit: first of (stop hit between 10:16 and 15:15) or (15:15).
-    if vwap_entry is not None and or_low is not None:
-        stop_hit_at = _first_stop_hit(buckets, ENTRY_HHMM, FIFTEEN_MIN_EXIT_HHMM, float(or_low))
-        if stop_hit_at is not None:
-            br.stopped_out_v2 = True
-            br.stop_hit_at_v2 = f"{stop_hit_at[0]:02d}:{stop_hit_at[1]:02d}"
-            br.realistic_exit_price_v2 = round(float(or_low), 2)
-            br.realistic_exit_at_v2 = br.stop_hit_at_v2
-            exit_pts = float(or_low) - float(vwap_entry)
+    # Realistic exit: first of (15-min VWAP flip after 10:15) or (15:15 close).
+    # The VWAP flip triggers when a 15-min bar closes below the session VWAP
+    # from 09:15 through that bar's end candle -- a tape-based, volume-weighted
+    # stop that avoids 1-min wicks and moves with the rally.
+    if vwap_entry is not None:
+        flip = _first_vwap_flip_15m(
+            buckets, ENTRY_HHMM, MARKET_OPEN_HHMM, FIFTEEN_MIN_EXIT_HHMM
+        )
+        if flip is not None:
+            flip_hhmm, flip_close, flip_vwap = flip
+            br.flipped_out_v2 = True
+            br.vwap_flip_at_v2 = f"{flip_hhmm[0]:02d}:{flip_hhmm[1]:02d}"
+            br.vwap_flip_close_v2 = round(flip_close, 2)
+            br.vwap_flip_session_vwap_v2 = round(flip_vwap, 2)
+            br.realistic_exit_price_v2 = round(flip_close, 2)
+            br.realistic_exit_at_v2 = br.vwap_flip_at_v2
+            exit_pts = flip_close - float(vwap_entry)
         elif eod_close is not None:
-            br.stopped_out_v2 = False
+            br.flipped_out_v2 = False
             br.realistic_exit_price_v2 = round(float(eod_close), 2)
             br.realistic_exit_at_v2 = "15:15"
             exit_pts = float(eod_close) - float(vwap_entry)
@@ -927,7 +938,7 @@ def compute_backtest_row(
                 br.sustained_dd_rupees_v2 = round(sd_pts * lot, 2)
 
     # Confidence score (0..100). Each sub-score is independent; sum + clamp.
-    breakdown: Dict[str, int] = {"orb": 0, "stop": 0, "vwap_slope": 0,
+    breakdown: Dict[str, int] = {"orb": 0, "tightness": 0, "vwap_slope": 0,
                                  "volume": 0, "extension": 0}
 
     # 1. ORB margin (0..25): how comfortably 10:15 > OR high.
@@ -944,18 +955,24 @@ def compute_backtest_row(
         else:
             breakdown["orb"] = 0
 
-    # 2. Stop-distance cost (0..25): smaller rupee stop = higher score.
-    if stop_dist_rs is not None:
-        if stop_dist_rs <= 3_000:
-            breakdown["stop"] = 25
-        elif stop_dist_rs <= 5_000:
-            breakdown["stop"] = 22
-        elif stop_dist_rs <= 8_000:
-            breakdown["stop"] = 16
-        elif stop_dist_rs <= 12_000:
-            breakdown["stop"] = 8
+    # 2. Structural tightness (0..25): (OR high - OR low) / entry VWAP, as %.
+    #    Tighter opening-range structure = cleaner setup, typically smaller
+    #    VWAP-flip losses. Replaces the old fixed-stop-cost component.
+    if (
+        orh is not None and or_low is not None
+        and vwap_entry is not None and float(vwap_entry) > 0
+    ):
+        rng_pct = (float(orh) - float(or_low)) / float(vwap_entry) * 100.0
+        if rng_pct <= 0.50:
+            breakdown["tightness"] = 25
+        elif rng_pct <= 0.80:
+            breakdown["tightness"] = 20
+        elif rng_pct <= 1.20:
+            breakdown["tightness"] = 14
+        elif rng_pct <= 2.00:
+            breakdown["tightness"] = 6
         else:
-            breakdown["stop"] = 0
+            breakdown["tightness"] = 0
 
     # 3. VWAP slope (0..20): session VWAP 09:15 -> 09:45 vs 09:15 -> 10:15.
     vwap_early = _session_vwap_upto(buckets, MARKET_OPEN_HHMM, ANCHOR_HHMM)
@@ -1005,17 +1022,14 @@ def compute_backtest_row(
     br.confidence_score_v2 = score
     br.confidence_breakdown_v2 = breakdown
 
-    # V2 decision. Hard floors: ORB pass + stop rupees <= cap + non-null VWAP.
-    # Soft gate: confidence >= CONF_MIN_V2.
+    # V2 decision. Hard floors: non-null VWAP + ORB pass.
+    # Soft gate: confidence >= CONF_MIN_V2. No fixed stop-cost cap -- the
+    # VWAP-flip stop is dynamic and doesn't have a pre-trade rupee floor.
     v2_reasons: List[str] = []
     if vwap_entry is None:
         v2_reasons.append("no_vwap")
     if br.orb_pass is not True:
         v2_reasons.append("orb_failed")
-    if stop_dist_rs is None:
-        v2_reasons.append("stop_unknown")
-    elif stop_dist_rs > STOP_CAP_RUPEES_V2:
-        v2_reasons.append("stop_gt_cap")
     if score < CONF_MIN_V2:
         v2_reasons.append(f"low_confidence_{score}")
     br.skip_reasons_v2 = v2_reasons
@@ -1117,13 +1131,11 @@ def build_output_document(
     v2_take = v2_skip = 0
     v2_skip_by_reason: Dict[str, int] = {
         "orb_failed": 0,
-        "stop_gt_cap": 0,
         "no_vwap": 0,
-        "stop_unknown": 0,
         "low_confidence": 0,
         "other": 0,
     }
-    v2_stopped = v2_held_to_close = 0
+    v2_flipped = v2_held_to_close = 0
     v2_pos_pnl = v2_neg_pnl = 0
     v2_sum_pnl_rupees = 0.0
     v2_worst_pnl_rupees: Optional[float] = None
@@ -1191,8 +1203,8 @@ def build_output_document(
         dec = r.get("decision_v2")
         if dec == "TAKE":
             v2_take += 1
-            if r.get("stopped_out_v2") is True:
-                v2_stopped += 1
+            if r.get("flipped_out_v2") is True:
+                v2_flipped += 1
             else:
                 v2_held_to_close += 1
             pnl_r_v2 = r.get("realistic_pnl_rupees_v2")
@@ -1259,7 +1271,7 @@ def build_output_document(
             "v2_take_rows": v2_take,
             "v2_skip_rows": v2_skip,
             "v2_skip_by_reason": v2_skip_by_reason,
-            "v2_stopped_out": v2_stopped,
+            "v2_flipped_out": v2_flipped,
             "v2_held_to_close": v2_held_to_close,
             "v2_positive_pnl_rows": v2_pos_pnl,
             "v2_negative_pnl_rows": v2_neg_pnl,
@@ -1276,7 +1288,7 @@ def build_output_document(
                 if v2_worst_sustained_dd_rupees is not None else None
             ),
             "v2_score_distribution": v2_score_bucket,
-            "v2_stop_cap_rupees": STOP_CAP_RUPEES_V2,
+            "v2_stop_rule": "15-min VWAP flip (bar close < session VWAP)",
             "v2_confidence_min": CONF_MIN_V2,
             "v2_min_date": V2_MIN_DATE.isoformat(),
         },

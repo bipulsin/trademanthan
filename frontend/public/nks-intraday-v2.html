@@ -6,12 +6,12 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
-<title>NKS Best-Buy Intraday Futures Backtest — V2 (expert, 1-lot, FUT-only) | TradeWithCTO</title>
-<link rel="stylesheet" href="nks-intraday.css?v=6" />
+<title>NKS Best-Buy Intraday Futures Backtest — V2 (expert, 1-lot, VWAP-flip stop) | TradeWithCTO</title>
+<link rel="stylesheet" href="nks-intraday.css?v=7" />
 </head>
 <body data-day="v2">
 <div class="wrap">
-  <h1>NKS Best-Buy Intraday Futures Backtest — V2 (expert, 1-lot, FUT-only)</h1>
+  <h1>NKS Best-Buy Intraday Futures Backtest — V2 (expert, 1-lot, VWAP-flip stop)</h1>
   <div class="day-toggle" role="tablist" aria-label="Backtest mode">
     <a href="nks-intraday.html">Same day (pro filters)</a>
     <a href="nks-intraday-next.html">Next trading day</a>
@@ -19,23 +19,31 @@
   </div>
   <p class="lede">
     Futures-only simulation for the tradable window (CSV date ≥ <b>20-Mar-2026</b>, <b>FUT contracts only</b> — no EQ fallbacks).
-    Each trade is <b>exactly 1 lot</b>, with a real structural stop so worst-case loss is bounded — this is the honest way to
-    backtest a size-locked instrument. Entry at 10:15 IST priced at session VWAP (09:15 → 10:15); stop at the 15-minute
-    opening-range low. Exit is whichever happens first: <b>stop hit</b> or <b>15:15 close</b> (no "best slot" oracle).
+    Each trade is <b>exactly 1 lot</b>. Entry at 10:15 IST priced at session VWAP (09:15 → 10:15).
+    Stop is a <b>15-minute VWAP flip</b> — we exit when a 15-min bar closes below the session VWAP
+    as of that bar's end. This is a tape-based, volume-weighted stop that moves with the rally, cuts losers
+    cleanly, and avoids 1-min wick whipsaws.
   </p>
   <div class="callout" style="border-left-color: var(--good);">
     <b>Hard floors — trade is SKIPPED if any fail:</b>
     <br/>· <b>ORB pass:</b> 10:15 candle opens ≥ 15-minute OR high (09:15 → 09:30).
-    <br/>· <b>Stop affordable:</b> (VWAP entry − OR low) × lot size ≤ <b>₹12,000</b>.
     <br/>· <b>Confidence ≥ 50 / 100</b> from the composite score below.
+    <br/>No fixed stop-cost gate — VWAP flip is a dynamic stop, not a fixed-distance one.
   </div>
   <div class="callout" style="border-left-color: var(--accent);">
     <b>Confidence score (0–100):</b>
-    <br/>· <b>ORB margin</b> (25): how far 10:15 open clears OR high.
-    <br/>· <b>Stop cost</b> (25): cheaper stops score higher (best ≤ ₹3k, worst > ₹12k).
-    <br/>· <b>VWAP slope</b> (20): 09:15→09:45 VWAP vs 09:15→10:15 VWAP rising = momentum.
+    <br/>· <b>ORB margin</b> (25): how far 10:15 clears OR high.
+    <br/>· <b>Tightness</b> (25): (OR high − OR low) / entry, as %. Tight range = clean structure, typically smaller VWAP-flip losses.
+    <br/>· <b>VWAP slope</b> (20): 09:45 vs 10:15 session VWAP rising = momentum building.
     <br/>· <b>Volume buildup</b> (20): volume in 10:00–10:15 vs early-session average.
     <br/>· <b>Not extended</b> (10): entry within 1% above OR high (not chasing a blow-off).
+  </div>
+  <div class="callout" style="border-left-color: var(--warn); background: #fff7e8;">
+    <b>Exit logic (realistic, no oracle):</b>
+    <br/>· Walk 15-min grid boundaries after 10:15 (10:30, 10:45, …, 15:15).
+    <br/>· At each boundary, if the prior bar's close is below the session VWAP up to that close — <b>flip, exit at that close</b>.
+    <br/>· Otherwise hold; exit at 15:15 close.
+    <br/>· No "best slot" cherry-picking. No 1-min tick stop-outs.
   </div>
 
   <div class="callout" id="errBanner" style="display:none;"></div>
@@ -64,8 +72,8 @@
 
   <div class="legend">
     <span><b>Entry:</b> 10:15 IST · session VWAP 09:15 → 10:15</span>
-    <span><b>Stop:</b> 15-min OR low (09:15 → 09:30)</span>
-    <span><b>Exit:</b> stop hit (at stop price) OR 15:15 close — whichever first</span>
+    <span><b>Stop:</b> 15-min bar close &lt; session VWAP at bar end</span>
+    <span><b>Exit:</b> first VWAP flip OR 15:15 close</span>
     <span><b>Sustained DD:</b> min of 5-min bucket closes vs VWAP entry (ignores 1-min wicks)</span>
     <span>Skipped rows are muted; PnL summary counts only TAKE trades.</span>
   </div>
@@ -73,12 +81,12 @@
   <div class="table-wrap">
     <table class="data" id="resultsTable">
       <thead><tr></tr></thead>
-      <tbody id="tbody"><tr><td class="nodata" colspan="13">Loading…</td></tr></tbody>
+      <tbody id="tbody"><tr><td class="nodata" colspan="12">Loading…</td></tr></tbody>
     </table>
   </div>
 
   <p class="footer" id="footerMeta"></p>
 </div>
-<script src="nks-intraday.js?v=6"></script>
+<script src="nks-intraday.js?v=7"></script>
 </body>
 </html>

@@ -94,14 +94,14 @@ def _emit(rows, out_path: Path, mode: str, throttle: float, log) -> int:
     s = doc["summary"]
     if mode == "v2":
         log.info(
-            "[v2] wrote %s FUT rows to %s | TAKE=%s SKIP=%s stopped=%s held=%s "
+            "[v2] wrote %s FUT rows to %s | TAKE=%s SKIP=%s flipped=%s held=%s "
             "Σ₹=%s worst=%s best=%s Σsus_dd₹=%s worst_sus_dd₹=%s "
             "skip_reasons=%s score_dist=%s",
             s["total_rows"],
             out_path,
             s.get("v2_take_rows"),
             s.get("v2_skip_rows"),
-            s.get("v2_stopped_out"),
+            s.get("v2_flipped_out"),
             s.get("v2_held_to_close"),
             s.get("v2_sum_pnl_rupees"),
             s.get("v2_worst_pnl_rupees"),
