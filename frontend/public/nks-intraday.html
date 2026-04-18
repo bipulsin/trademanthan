@@ -6,34 +6,45 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
-<title>NKS Best-Buy Intraday Futures Backtest — Same Day | TradeWithCTO</title>
-<link rel="stylesheet" href="nks-intraday.css?v=3" />
+<title>NKS Best-Buy Intraday Futures Backtest — Same Day (pro-grade filters) | TradeWithCTO</title>
+<link rel="stylesheet" href="nks-intraday.css?v=4" />
 </head>
 <body data-day="same">
 <div class="wrap">
-  <h1>NKS Best-Buy Intraday Futures Backtest</h1>
+  <h1>NKS Best-Buy Intraday Futures Backtest — Same Day</h1>
   <div class="day-toggle" role="tablist" aria-label="Trading day">
     <a href="nks-intraday.html" class="active" aria-current="page">Same day</a>
     <a href="nks-intraday-next.html">Next trading day</a>
   </div>
   <p class="lede">
-    For each shortlisted stock from the NKS momentum list, we take the front-month equity
-    futures price at <b>09:45 IST</b> on the shortlist date and measure how the contract
-    moved at three intraday checkpoints — <b>12:30</b>, <b>14:00</b> and <b>15:15</b> IST.
-    &ldquo;Best slot&rdquo; is whichever of those three times produced the largest
-    absolute price move vs 09:45, &ldquo;PnL pts&rdquo; is the signed points move for that
-    best slot, and &ldquo;PnL ₹&rdquo; is those points × the current FUT lot size for that
-    underlying (used as position size even for EQ-sourced rows).
-    Source = <span class="pill pill-fut">FUT</span> when the front-month contract
-    is resolvable, else <span class="pill pill-eq">EQ</span> (underlying cash price — intraday
-    future tracks cash 1:1 within the session).
+    For each shortlisted NKS stock, the simulation assumes a <b>long entry at the
+    09:45 IST session VWAP</b> (not the 09:45 tick price) on the front-month future,
+    sized at the current FUT lot size. Three professional-grade gates decide whether the
+    trade is <span class="status-pill status-taken">TAKEN</span> or
+    <span class="status-pill status-skip">SKIPPED</span>:
   </p>
+  <div class="callout" style="border-left-color: var(--good);">
+    <b>Gate&nbsp;1 · VWAP entry.</b> Entry price = Σ((H+L+C)/3 · V) / Σ(V) over 09:15 → 09:45 candles.
+    <br/>
+    <b>Gate&nbsp;2 · Risk cap.</b> If (VWAP entry − intraday low) × lot size &gt; <b>₹10,000</b>, the trade is skipped.
+    <br/>
+    <b>Gate&nbsp;3 · ORB confirmation.</b> The opening range high (max high 09:15 → 09:45) must be
+    held through 09:46 → 10:00: every minute-low in that window must be ≥ ORH and the 10:00 open
+    must be ≥ ORH. Fail ⇒ skipped.
+  </div>
 
   <div class="callout" id="errBanner" style="display:none;"></div>
 
   <div class="summary" id="summaryGrid"></div>
 
   <div class="filters">
+    <label>Status
+      <select id="fltStatus">
+        <option value="">All</option>
+        <option value="taken">Taken only</option>
+        <option value="skipped">Skipped only</option>
+      </select>
+    </label>
     <label>Source
       <select id="fltSource">
         <option value="">All</option>
@@ -62,39 +73,22 @@
   </div>
 
   <div class="legend">
-    <span><b>Anchor:</b> 09:45 IST open price</span>
-    <span><b>Slots:</b> 12:30, 14:00, 15:15</span>
-    <span><b>PnL pts</b> = signed price move from 09:45 to the best slot</span>
-    <span><b>PnL ₹</b> = PnL pts × current FUT lot size</span>
-    <span><b>Max DD pts</b> = lowest traded price after 09:45 − 09:45 price</span>
-    <span><b>Max DD ₹</b> = Max DD pts × current FUT lot size (hover for low &amp; time)</span>
+    <span><b>Entry:</b> 09:45 session VWAP</span>
+    <span><b>ORH:</b> max high, 09:15 → 09:45</span>
+    <span><b>Risk ₹:</b> (entry − day low) × lot, capped at ₹10k</span>
+    <span><b>PnL / DD:</b> measured against the VWAP entry (pts × lot for rupees)</span>
+    <span>Skipped rows are muted; aggregate summary counts only <b>TAKEN</b> trades.</span>
   </div>
 
   <div class="table-wrap">
     <table class="data" id="resultsTable">
-      <thead>
-        <tr>
-          <th data-key="csv_date">Shortlist date</th>
-          <th data-key="source">Src</th>
-          <th data-key="trading_symbol">Contract</th>
-          <th data-key="fut_lot_size" class="num">Lot (qty)</th>
-          <th data-key="price_0945" class="num">09:45</th>
-          <th data-key="price_1230" class="num">12:30</th>
-          <th data-key="price_1400" class="num">14:00</th>
-          <th data-key="price_1515" class="num">15:15</th>
-          <th data-key="best_slot">Best slot</th>
-          <th data-key="best_diff_points" class="num">PnL pts</th>
-          <th data-key="pnl_rupees" class="num">PnL ₹</th>
-          <th data-key="drawdown_points" class="num">Max DD pts</th>
-          <th data-key="drawdown_rupees" class="num">Max DD ₹</th>
-        </tr>
-      </thead>
-      <tbody id="tbody"><tr><td class="nodata" colspan="12">Loading…</td></tr></tbody>
+      <thead><tr></tr></thead>
+      <tbody id="tbody"><tr><td class="nodata" colspan="17">Loading…</td></tr></tbody>
     </table>
   </div>
 
   <p class="footer" id="footerMeta"></p>
 </div>
-<script src="nks-intraday.js?v=3"></script>
+<script src="nks-intraday.js?v=4"></script>
 </body>
 </html>

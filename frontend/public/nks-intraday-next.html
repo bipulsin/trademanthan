@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>NKS Best-Buy Intraday Futures Backtest — Next Trading Day | TradeWithCTO</title>
-<link rel="stylesheet" href="nks-intraday.css?v=3" />
+<link rel="stylesheet" href="nks-intraday.css?v=4" />
 </head>
 <body data-day="next">
 <div class="wrap">
@@ -17,14 +17,12 @@
     <a href="nks-intraday-next.html" class="active" aria-current="page">Next trading day</a>
   </div>
   <p class="lede">
-    This is the same study as the same-day view, but prices are sampled on the
-    <b>next trading session</b> after the shortlist date (weekends and market
-    holidays are skipped automatically). Use this to compare holding the NKS pick
-    to the next day's open-to-close action on the front-month future.
-    Source = <span class="pill pill-fut">FUT</span> when the front-month contract
-    is resolvable, else <span class="pill pill-eq">EQ</span>.
-    &ldquo;PnL ₹&rdquo; = signed PnL points × current FUT lot size
-    (used as position size even for EQ-sourced rows).
+    This is the raw-anchor companion to the <a href="nks-intraday.html">same-day page</a>,
+    but prices are sampled on the <b>next trading session</b> after the shortlist date
+    (weekends and market holidays are skipped automatically). Entry reference here is the
+    09:45 tick price of that next session; the pro-grade VWAP / risk / ORB filters applied on the
+    same-day page are not shown here. &ldquo;PnL ₹&rdquo; and &ldquo;Max DD ₹&rdquo; use the
+    current front-month FUT lot size as position size.
   </p>
 
   <div class="callout" id="errBanner" style="display:none;"></div>
@@ -60,40 +58,22 @@
   </div>
 
   <div class="legend">
-    <span><b>Anchor:</b> 09:45 IST open price (next trading day)</span>
+    <span><b>Anchor:</b> 09:45 IST open (next trading day)</span>
     <span><b>Slots:</b> 12:30, 14:00, 15:15 on next trading day</span>
     <span><b>PnL pts</b> = signed price move from 09:45 to the best slot</span>
     <span><b>PnL ₹</b> = PnL pts × current FUT lot size</span>
-    <span><b>Max DD pts</b> = lowest traded price after 09:45 − 09:45 price</span>
-    <span><b>Max DD ₹</b> = Max DD pts × current FUT lot size (hover for low &amp; time)</span>
+    <span><b>Max DD</b> = lowest traded price after 09:45 − 09:45 price (hover for low &amp; time)</span>
   </div>
 
   <div class="table-wrap">
     <table class="data" id="resultsTable">
-      <thead>
-        <tr>
-          <th data-key="csv_date">Shortlist date</th>
-          <th data-key="session_date">Priced on</th>
-          <th data-key="source">Src</th>
-          <th data-key="trading_symbol">Contract</th>
-          <th data-key="fut_lot_size" class="num">Lot (qty)</th>
-          <th data-key="price_0945" class="num">09:45</th>
-          <th data-key="price_1230" class="num">12:30</th>
-          <th data-key="price_1400" class="num">14:00</th>
-          <th data-key="price_1515" class="num">15:15</th>
-          <th data-key="best_slot">Best slot</th>
-          <th data-key="best_diff_points" class="num">PnL pts</th>
-          <th data-key="pnl_rupees" class="num">PnL ₹</th>
-          <th data-key="drawdown_points" class="num">Max DD pts</th>
-          <th data-key="drawdown_rupees" class="num">Max DD ₹</th>
-        </tr>
-      </thead>
-      <tbody id="tbody"><tr><td class="nodata" colspan="13">Loading…</td></tr></tbody>
+      <thead><tr></tr></thead>
+      <tbody id="tbody"><tr><td class="nodata" colspan="14">Loading…</td></tr></tbody>
     </table>
   </div>
 
   <p class="footer" id="footerMeta"></p>
 </div>
-<script src="nks-intraday.js?v=3"></script>
+<script src="nks-intraday.js?v=4"></script>
 </body>
 </html>

@@ -52,6 +52,20 @@ SLOT_LABELS: Dict[Tuple[int, int], str] = {
 # session has already expired and the EQ fallback is used instead.
 FRONT_MONTH_MAX_FORWARD_DAYS = 45
 
+# Pro-grade entry filters (applied on top of the raw backtest):
+# 1. VWAP entry: the simulated entry price is the session VWAP at 09:45 IST
+#    (typical-price * volume, anchored to 09:15), not the 09:45 open.
+# 2. Risk cap: skip the trade when (vwap_entry - day_low) * fut_lot_size
+#    exceeds this rupee threshold. The measure uses the intraday low from
+#    09:45 onward (worst-case drawdown from the simulated entry).
+# 3. Opening-range-breakout (ORB) confirmation: the opening range high is
+#    the max high between 09:15 and 09:45 inclusive; the trade is confirmed
+#    only if the 1-minute candle lows between 09:46 and 10:00 inclusive all
+#    stay at/above that level AND the 10:00 candle opens at/above it.
+MARKET_OPEN_HHMM = (9, 15)
+ORB_CONFIRM_HHMM = (10, 0)
+RISK_CAP_RUPEES = 10_000.0
+
 
 @dataclass
 class InstrumentRef:
@@ -98,6 +112,20 @@ class BacktestRow:
     min_price_at: Optional[str] = None
     drawdown_points: Optional[float] = None
     drawdown_rupees: Optional[float] = None
+    # Pro-grade filter fields --------------------------------------------------
+    vwap_0945: Optional[float] = None                # session VWAP at 09:45 IST
+    or_high_0945: Optional[float] = None             # opening range high (09:15 -> 09:45 incl)
+    orb_confirm_min_low: Optional[float] = None      # min low (09:46 -> 10:00 incl)
+    orb_price_at_1000: Optional[float] = None        # 10:00 candle open
+    orb_pass: Optional[bool] = None                  # ORB confirmation gate
+    risk_rupees: Optional[float] = None              # (vwap_entry - day_low) * lot
+    risk_pass: Optional[bool] = None                 # risk_rupees <= RISK_CAP_RUPEES
+    pnl_points_vwap: Optional[float] = None          # best_slot_price - vwap_entry
+    pnl_rupees_vwap: Optional[float] = None          # pnl_points_vwap * lot
+    drawdown_points_vwap: Optional[float] = None     # min_price - vwap_entry
+    drawdown_rupees_vwap: Optional[float] = None     # drawdown_points_vwap * lot
+    trade_taken: Optional[bool] = None               # all gates pass -> TAKEN
+    skip_reasons: List[str] = field(default_factory=list)
     error: Optional[str] = None
     notes: List[str] = field(default_factory=list)
 
@@ -126,6 +154,19 @@ class BacktestRow:
             "min_price_at": self.min_price_at,
             "drawdown_points": self.drawdown_points,
             "drawdown_rupees": self.drawdown_rupees,
+            "vwap_0945": self.vwap_0945,
+            "or_high_0945": self.or_high_0945,
+            "orb_confirm_min_low": self.orb_confirm_min_low,
+            "orb_price_at_1000": self.orb_price_at_1000,
+            "orb_pass": self.orb_pass,
+            "risk_rupees": self.risk_rupees,
+            "risk_pass": self.risk_pass,
+            "pnl_points_vwap": self.pnl_points_vwap,
+            "pnl_rupees_vwap": self.pnl_rupees_vwap,
+            "drawdown_points_vwap": self.drawdown_points_vwap,
+            "drawdown_rupees_vwap": self.drawdown_rupees_vwap,
+            "trade_taken": self.trade_taken,
+            "skip_reasons": self.skip_reasons,
             "error": self.error,
             "notes": self.notes,
         }
@@ -363,42 +404,97 @@ def _bucket_candles_by_hhmm(
     return out
 
 
-def _intraday_min_low_from(
-    buckets: Dict[Tuple[int, int], Dict[str, Any]],
-    start_hhmm: Tuple[int, int],
-) -> Tuple[Optional[float], Optional[Tuple[int, int]]]:
-    """Return the lowest candle ``low`` observed at or after ``start_hhmm``,
-    together with the HH:MM of the candle that produced it. Candles are keyed
-    by their start-of-minute timestamp.
+def _candle_ohlcv(c: Any) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float], Optional[float]]:
+    """Extract (open, high, low, close, volume) from a Upstox minute candle.
 
-    Upstox V2 minute candles expose OHLC as a list ``[ts, o, h, l, c, v, ...]``
-    or as a dict with ``open/high/low/close``; we tolerate both.
+    Upstox V2 candles are typically returned as lists ``[ts, o, h, l, c, v, ...]``
+    but the service normalises them to dicts in some paths — we tolerate both.
     """
-    def _low_of(c: Any) -> Optional[float]:
-        if isinstance(c, dict):
-            v = c.get("low")
-        elif isinstance(c, (list, tuple)) and len(c) >= 4:
-            v = c[3]
-        else:
-            v = None
+    if isinstance(c, dict):
+        op = c.get("open"); hi = c.get("high"); lo = c.get("low")
+        cl = c.get("close"); v = c.get("volume")
+    elif isinstance(c, (list, tuple)) and len(c) >= 6:
+        op, hi, lo, cl, v = c[1], c[2], c[3], c[4], c[5]
+    else:
+        return None, None, None, None, None
+
+    def _f(x: Any) -> Optional[float]:
         try:
-            vf = float(v)
-            return vf if vf > 0 else None
+            return float(x)
         except (TypeError, ValueError):
             return None
 
+    return _f(op), _f(hi), _f(lo), _f(cl), _f(v)
+
+
+def _intraday_min_low_from(
+    buckets: Dict[Tuple[int, int], Dict[str, Any]],
+    start_hhmm: Tuple[int, int],
+    end_hhmm: Optional[Tuple[int, int]] = None,
+) -> Tuple[Optional[float], Optional[Tuple[int, int]]]:
+    """Return the lowest candle ``low`` between ``start_hhmm`` and
+    ``end_hhmm`` (inclusive, both endpoints) together with the HH:MM of the
+    candle that produced it. ``end_hhmm=None`` means "through end of day".
+    """
     best_low: Optional[float] = None
     best_at: Optional[Tuple[int, int]] = None
     for (h, m), c in buckets.items():
         if (h, m) < start_hhmm:
             continue
-        lo = _low_of(c)
-        if lo is None:
+        if end_hhmm is not None and (h, m) > end_hhmm:
+            continue
+        _, _, lo, _, _ = _candle_ohlcv(c)
+        if lo is None or lo <= 0:
             continue
         if best_low is None or lo < best_low:
             best_low = lo
             best_at = (h, m)
     return best_low, best_at
+
+
+def _range_high(
+    buckets: Dict[Tuple[int, int], Dict[str, Any]],
+    start_hhmm: Tuple[int, int],
+    end_hhmm: Tuple[int, int],
+) -> Optional[float]:
+    """Maximum ``high`` across candles in the inclusive HH:MM window."""
+    best: Optional[float] = None
+    for (h, m), c in buckets.items():
+        if (h, m) < start_hhmm or (h, m) > end_hhmm:
+            continue
+        _, hi, _, _, _ = _candle_ohlcv(c)
+        if hi is None or hi <= 0:
+            continue
+        if best is None or hi > best:
+            best = hi
+    return best
+
+
+def _session_vwap_upto(
+    buckets: Dict[Tuple[int, int], Dict[str, Any]],
+    start_hhmm: Tuple[int, int],
+    end_hhmm: Tuple[int, int],
+) -> Optional[float]:
+    """Volume-weighted average price over the inclusive HH:MM window,
+    computed as ``Σ((H+L+C)/3 * V) / Σ(V)`` across 1-minute candles.
+    Returns ``None`` when the cumulative volume is zero.
+    """
+    num = 0.0
+    vol_sum = 0.0
+    for (h, m), c in buckets.items():
+        if (h, m) < start_hhmm or (h, m) > end_hhmm:
+            continue
+        _, hi, lo, cl, v = _candle_ohlcv(c)
+        if hi is None or lo is None or cl is None or v is None:
+            continue
+        if not (hi > 0 and lo > 0 and cl > 0) or v <= 0:
+            continue
+        typical = (hi + lo + cl) / 3.0
+        num += typical * v
+        vol_sum += v
+    if vol_sum <= 0:
+        return None
+    return num / vol_sum
 
 
 def fetch_intraday_1m_candles(
@@ -535,6 +631,74 @@ def compute_backtest_row(
         br.drawdown_points = round(dd_pts, 2)
         if br.fut_lot_size:
             br.drawdown_rupees = round(dd_pts * int(br.fut_lot_size), 2)
+
+    # -- Pro-grade entry filters ---------------------------------------------
+    # VWAP entry: session VWAP from market open (09:15) through 09:45 inclusive.
+    vwap_entry = _session_vwap_upto(buckets, MARKET_OPEN_HHMM, ANCHOR_HHMM)
+    if vwap_entry is not None:
+        br.vwap_0945 = round(float(vwap_entry), 2)
+
+    # Opening range high (09:15 -> 09:45 inclusive).
+    orh = _range_high(buckets, MARKET_OPEN_HHMM, ANCHOR_HHMM)
+    if orh is not None:
+        br.or_high_0945 = round(float(orh), 2)
+
+    # ORB confirmation window: min low from 09:46 through 10:00 inclusive.
+    orb_start = (ANCHOR_HHMM[0], ANCHOR_HHMM[1] + 1)  # (9, 46)
+    orb_min_low, _ = _intraday_min_low_from(buckets, orb_start, ORB_CONFIRM_HHMM)
+    if orb_min_low is not None:
+        br.orb_confirm_min_low = round(float(orb_min_low), 2)
+    br.orb_price_at_1000 = _price_at_slot(buckets, ORB_CONFIRM_HHMM)
+
+    # ORB pass: every candle in the confirmation window stayed at/above ORH
+    # AND the 10:00 open is at/above ORH.
+    if orh is not None and orb_min_low is not None and br.orb_price_at_1000 is not None:
+        br.orb_pass = bool(
+            orb_min_low >= orh and float(br.orb_price_at_1000) >= orh
+        )
+    else:
+        br.orb_pass = None
+
+    # Risk cap in rupees: (vwap_entry - day_low) * lot_size. Positive = the
+    # rupee drawdown incurred if we held from VWAP entry to the day's low.
+    if (
+        vwap_entry is not None
+        and min_low is not None
+        and br.fut_lot_size
+    ):
+        risk_rs = (float(vwap_entry) - float(min_low)) * int(br.fut_lot_size)
+        br.risk_rupees = round(risk_rs, 2)
+        br.risk_pass = bool(risk_rs <= RISK_CAP_RUPEES)
+
+    # VWAP-anchored PnL / drawdown. PnL points use the SAME best-slot price
+    # identified above; only the reference (entry) changes from 09:45 to VWAP.
+    if vwap_entry is not None:
+        if best_signed is not None:
+            best_slot_price = float(p0945) + float(best_signed)
+            pnl_v = best_slot_price - float(vwap_entry)
+            br.pnl_points_vwap = round(pnl_v, 2)
+            if br.fut_lot_size:
+                br.pnl_rupees_vwap = round(pnl_v * int(br.fut_lot_size), 2)
+        if min_low is not None:
+            dd_v = float(min_low) - float(vwap_entry)
+            br.drawdown_points_vwap = round(dd_v, 2)
+            if br.fut_lot_size:
+                br.drawdown_rupees_vwap = round(dd_v * int(br.fut_lot_size), 2)
+
+    # Composite decision. Missing VWAP or unresolved gates fail safe.
+    reasons: List[str] = []
+    if vwap_entry is None:
+        reasons.append("no_vwap")
+    if br.risk_pass is False:
+        reasons.append("risk_gt_10k")
+    elif br.risk_pass is None:
+        reasons.append("risk_unknown")
+    if br.orb_pass is False:
+        reasons.append("orb_failed")
+    elif br.orb_pass is None:
+        reasons.append("orb_unknown")
+    br.skip_reasons = reasons
+    br.trade_taken = bool(not reasons)
     return br
 
 
@@ -616,6 +780,17 @@ def build_output_document(
     sum_dd_points = 0.0
     sum_dd_rupees = 0.0
     worst_dd_rupees: Optional[float] = None
+    taken = skipped = 0
+    skip_by_reason: Dict[str, int] = {
+        "risk_gt_10k": 0,
+        "orb_failed": 0,
+        "no_vwap": 0,
+        "other": 0,
+    }
+    taken_pos_pnl = taken_neg_pnl = 0
+    sum_taken_pnl_rupees = 0.0
+    sum_taken_dd_rupees = 0.0
+    worst_taken_dd_rupees: Optional[float] = None
     for r in results:
         slot = r.get("best_slot")
         if slot in slot_wins:
@@ -638,6 +813,28 @@ def build_output_document(
             sum_dd_rupees += float(dd_r)
             if worst_dd_rupees is None or dd_r < worst_dd_rupees:
                 worst_dd_rupees = float(dd_r)
+
+        if r.get("trade_taken") is True:
+            taken += 1
+            pnl_v = r.get("pnl_rupees_vwap")
+            if isinstance(pnl_v, (int, float)):
+                sum_taken_pnl_rupees += float(pnl_v)
+                if pnl_v > 0:
+                    taken_pos_pnl += 1
+                elif pnl_v < 0:
+                    taken_neg_pnl += 1
+            dd_v = r.get("drawdown_rupees_vwap")
+            if isinstance(dd_v, (int, float)):
+                sum_taken_dd_rupees += float(dd_v)
+                if worst_taken_dd_rupees is None or dd_v < worst_taken_dd_rupees:
+                    worst_taken_dd_rupees = float(dd_v)
+        else:
+            skipped += 1
+            for rsn in (r.get("skip_reasons") or []):
+                if rsn in skip_by_reason:
+                    skip_by_reason[rsn] += 1
+                else:
+                    skip_by_reason["other"] += 1
     return {
         "generated_at": datetime.now(IST).isoformat(),
         "day_mode": day_mode,
@@ -659,6 +856,19 @@ def build_output_document(
             "worst_drawdown_rupees": (
                 round(worst_dd_rupees, 2) if worst_dd_rupees is not None else None
             ),
+            # Pro-grade filtered-book metrics ----------------------------------
+            "taken_rows": taken,
+            "skipped_rows": skipped,
+            "skipped_by_reason": skip_by_reason,
+            "taken_positive_pnl_rows": taken_pos_pnl,
+            "taken_negative_pnl_rows": taken_neg_pnl,
+            "taken_sum_pnl_rupees": round(sum_taken_pnl_rupees, 2),
+            "taken_sum_drawdown_rupees": round(sum_taken_dd_rupees, 2),
+            "taken_worst_drawdown_rupees": (
+                round(worst_taken_dd_rupees, 2)
+                if worst_taken_dd_rupees is not None else None
+            ),
+            "risk_cap_rupees": RISK_CAP_RUPEES,
         },
         "rows": results,
     }
