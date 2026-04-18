@@ -28,9 +28,10 @@
     <br/>
     <b>Gate&nbsp;2 · Risk cap.</b> If (VWAP entry − intraday low) × lot size &gt; <b>₹10,000</b>, the trade is skipped.
     <br/>
-    <b>Gate&nbsp;3 · ORB confirmation.</b> The opening range high (max high 09:15 → 09:45) must be
-    held through 09:46 → 10:00: every minute-low in that window must be ≥ ORH and the 10:00 open
-    must be ≥ ORH. Fail ⇒ skipped.
+    <b>Gate&nbsp;3 · ORB confirmation.</b> The opening range high (max high 09:15 → 09:45) must
+    still be breached <b>at 10:00 IST</b> — i.e. the 10:00 candle opens ≥ ORH, confirming the
+    breakout held into the post-open trend. Fail ⇒ skipped. (The 09:46 → 10:00 min low is
+    recorded as context on the cell tooltip but doesn't gate by itself.)
   </div>
 
   <div class="callout" id="errBanner" style="display:none;"></div>

@@ -650,12 +650,13 @@ def compute_backtest_row(
         br.orb_confirm_min_low = round(float(orb_min_low), 2)
     br.orb_price_at_1000 = _price_at_slot(buckets, ORB_CONFIRM_HHMM)
 
-    # ORB pass: every candle in the confirmation window stayed at/above ORH
-    # AND the 10:00 open is at/above ORH.
-    if orh is not None and orb_min_low is not None and br.orb_price_at_1000 is not None:
-        br.orb_pass = bool(
-            orb_min_low >= orh and float(br.orb_price_at_1000) >= orh
-        )
+    # ORB pass: at the 10:00 confirmation, the breakout is still above the
+    # opening range high (i.e. the market has "stayed above the 09:45 high
+    # after 10:00 AM"). The 09:46->10:00 min low is kept as tooltip context
+    # only -- requiring it to hold ORH throughout is too tight and rejects
+    # otherwise clean breakouts that briefly retested the level intraday.
+    if orh is not None and br.orb_price_at_1000 is not None:
+        br.orb_pass = bool(float(br.orb_price_at_1000) >= orh)
     else:
         br.orb_pass = None
 
