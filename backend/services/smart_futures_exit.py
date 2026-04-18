@@ -207,6 +207,12 @@ def build_15m_from_5m(m5: Sequence[dict]) -> List[dict]:
 # VWAP is reclaimed soon — avoid panic exit; lower score forces exit suggestion.
 RECLAIM_SCORE_PANIC_THRESHOLD = 45.0
 
+# Entry-time gates (pre-entry quality filter). Signals that fail these should remain
+# visible on the UI but must not be promoted to "entry recommended" — they're greyed out.
+RECLAIM_ENTRY_SCORE_THRESHOLD = 55.0
+ENTRY_TIME_CUTOFF_HHMM = (14, 0)  # hard block for new intraday entries at/after 14:00 IST
+ENTRY_OPTIMAL_WINDOW_MINUTES = 5  # operator "enter within" informational window
+
 RECLAIM_SUPPRESSIBLE_EXIT_REASONS = frozenset(
     {
         "15-min Close Below VWAP+Supertrend+EMA",
@@ -408,6 +414,158 @@ def apply_reclaim_vwap_gate(
         else "Above 15m VWAP — low reclaim probability (panic)"
     )
     return True, panic_reason, detail
+
+
+def _bars_upto_ist(m5_session: Sequence[dict], cutoff_ist: Optional[datetime]) -> List[dict]:
+    """Return m5 bars whose timestamp is ≤ cutoff_ist (IST). Input bars are timestamp strings."""
+    if not m5_session:
+        return []
+    if cutoff_ist is None:
+        return [b for b in m5_session if b.get("timestamp")]
+    out: List[dict] = []
+    for b in m5_session:
+        ts = b.get("timestamp")
+        if not ts:
+            continue
+        dt = _to_dt(str(ts))
+        if dt is None:
+            continue
+        if dt <= cutoff_ist:
+            out.append(b)
+    return out
+
+
+def is_entry_permitted(
+    *,
+    side: str,
+    entry_price: Optional[float],
+    vwap15: Optional[float],
+    entry_at_ist: Optional[datetime],
+    m5_session: Sequence[dict],
+    sector_score: Optional[float] = None,
+    now_ist: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """
+    Evaluate the three hard entry gates for a fresh Smart Futures signal.
+
+    - Score gate: reclaim probability ≥ 55 when price is adverse to 15m VWAP at trigger.
+      When price is on the favorable side of VWAP the score gate passes automatically
+      (reclaim is only meaningful for adverse prices). When m5 is too thin to compute the
+      score and price is adverse, gate is treated as **fail** to stay conservative.
+    - Time gate: entry_at_ist must be strictly before 14:00 IST on its own session day.
+    - VWAP gate: LONG → entry_price > vwap15; SHORT → entry_price < vwap15.
+
+    Velocity and the optional 5-minute window are informational only and returned alongside
+    the hard gates so the UI can surface them next to the Order button.
+    """
+    sd = str(side or "").strip().upper()
+    gate_score = True
+    gate_time = True
+    gate_vwap = True
+    reasons: List[str] = []
+
+    trig_ist = _as_ist(entry_at_ist) if entry_at_ist is not None else None
+    try:
+        px = float(entry_price) if entry_price is not None else None
+    except (TypeError, ValueError):
+        px = None
+    try:
+        vw = float(vwap15) if vwap15 is not None else None
+    except (TypeError, ValueError):
+        vw = None
+
+    score_at_trigger: Optional[float] = None
+    adverse_at_trigger = False
+    score_applicable = False
+    if sd in {"LONG", "SHORT"} and px is not None and vw is not None and px > 0 and vw > 0:
+        bars_at_trigger = _bars_upto_ist(m5_session, trig_ist)
+        detail = compute_reclaim_probability_score(
+            sd,
+            px,
+            vw,
+            bars_at_trigger,
+            sector_score=sector_score,
+        )
+        score_applicable = bool(detail.get("applicable"))
+        adverse_at_trigger = bool(detail.get("vwap_adverse"))
+        sp = detail.get("score")
+        if isinstance(sp, (int, float)):
+            score_at_trigger = float(sp)
+
+    if sd in {"LONG", "SHORT"} and px is not None and vw is not None and px > 0 and vw > 0:
+        if sd == "LONG":
+            gate_vwap = px > vw
+            if not gate_vwap:
+                reasons.append(
+                    "Price below 15m VWAP at trigger — long entry suppressed "
+                    f"(entry {px:.2f}, VWAP {vw:.2f})"
+                )
+        else:
+            gate_vwap = px < vw
+            if not gate_vwap:
+                reasons.append(
+                    "Price above 15m VWAP at trigger — short entry suppressed "
+                    f"(entry {px:.2f}, VWAP {vw:.2f})"
+                )
+    else:
+        gate_vwap = True
+
+    if adverse_at_trigger:
+        if score_at_trigger is None:
+            gate_score = False
+            reasons.append(
+                "Reclaim score not computable at trigger (insufficient 5m data) — weak signal"
+            )
+        else:
+            gate_score = score_at_trigger >= RECLAIM_ENTRY_SCORE_THRESHOLD
+            if not gate_score:
+                reasons.append(
+                    f"Weak signal — reclaim score {score_at_trigger:.0f}/100 "
+                    f"(minimum {int(RECLAIM_ENTRY_SCORE_THRESHOLD)} required for entry)"
+                )
+    else:
+        gate_score = True
+
+    if trig_ist is not None:
+        cutoff = trig_ist.replace(
+            hour=ENTRY_TIME_CUTOFF_HHMM[0],
+            minute=ENTRY_TIME_CUTOFF_HHMM[1],
+            second=0,
+            microsecond=0,
+        )
+        gate_time = trig_ist < cutoff
+        if not gate_time:
+            reasons.append(
+                f"Late session — entry blocked (triggered at "
+                f"{trig_ist.strftime('%H:%M')} IST, cutoff "
+                f"{ENTRY_TIME_CUTOFF_HHMM[0]:02d}:{ENTRY_TIME_CUTOFF_HHMM[1]:02d})"
+            )
+
+    permitted = bool(gate_score and gate_time and gate_vwap)
+    minutes_since_trigger: Optional[float] = None
+    if trig_ist is not None and now_ist is not None:
+        delta = _as_ist(now_ist) - trig_ist
+        minutes_since_trigger = delta.total_seconds() / 60.0
+
+    return {
+        "permitted": permitted,
+        "gate_score_pass": bool(gate_score),
+        "gate_time_pass": bool(gate_time),
+        "gate_vwap_pass": bool(gate_vwap),
+        "score_at_trigger": score_at_trigger,
+        "score_threshold": RECLAIM_ENTRY_SCORE_THRESHOLD,
+        "score_applicable": bool(score_applicable),
+        "vwap_adverse_at_trigger": bool(adverse_at_trigger),
+        "time_cutoff_hhmm": (
+            f"{ENTRY_TIME_CUTOFF_HHMM[0]:02d}:{ENTRY_TIME_CUTOFF_HHMM[1]:02d}"
+        ),
+        "entry_price": px,
+        "vwap_at_trigger": vw,
+        "reasons": reasons,
+        "minutes_since_trigger": minutes_since_trigger,
+        "optimal_window_minutes": ENTRY_OPTIMAL_WINDOW_MINUTES,
+        "eligible_watchlist": bool(gate_score and gate_vwap and not gate_time),
+    }
 
 
 @dataclass

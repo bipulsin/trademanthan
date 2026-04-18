@@ -353,6 +353,133 @@
         );
     }
 
+    function buildGateChecklist(r) {
+        const scoreAtTrigger = r && r.score_at_trigger != null && r.score_at_trigger !== ''
+            ? Number(r.score_at_trigger)
+            : NaN;
+        const threshold = r && r.entry_gate_score_threshold != null
+            ? Number(r.entry_gate_score_threshold)
+            : 55;
+        const scorePass = Boolean(r && r.entry_gate_score_pass);
+        const timePass = Boolean(r && r.entry_gate_time_pass);
+        const vwapPass = Boolean(r && r.entry_gate_vwap_pass);
+        const timeCutoff = (r && r.entry_gate_time_cutoff) || '14:00';
+        const ea = String((r && r.entry_at) || '');
+        const triggerHHMM = (ea.match(/T(\d{2}):(\d{2})/) || [])[0]
+            ? ea.substring(11, 16)
+            : '—';
+        const px = r && r.entry_price != null && r.entry_price !== '' ? Number(r.entry_price) : NaN;
+        const vw = r && r.vwap_at_trigger != null && r.vwap_at_trigger !== ''
+            ? Number(r.vwap_at_trigger)
+            : (r && r.m15_vwap_at_scan != null && r.m15_vwap_at_scan !== ''
+                ? Number(r.m15_vwap_at_scan)
+                : (r && r.m15_vwap != null && r.m15_vwap !== '' ? Number(r.m15_vwap) : NaN));
+        const scoreLabel = Number.isFinite(scoreAtTrigger)
+            ? scoreAtTrigger.toFixed(0) + '/100'
+            : (r && r.vwap_adverse_at_trigger === false ? 'favorable' : 'n/a');
+        const scoreCls = scorePass ? 'sf-gate-pass' : 'sf-gate-fail';
+        const timeCls = timePass ? 'sf-gate-pass' : 'sf-gate-fail';
+        const vwapCls = vwapPass ? 'sf-gate-pass' : 'sf-gate-fail';
+        const priceLabel = Number.isFinite(px) ? px.toFixed(2) : '—';
+        const vwapLabel = Number.isFinite(vw) ? vw.toFixed(2) : '—';
+        return (
+            '<div class="sf-gate-list" title="Entry gates: Score ≥ ' + threshold +
+            ', trigger before ' + timeCutoff +
+            ' IST, price on the favorable side of 15m VWAP at trigger.">' +
+            '<div class="sf-gate-row ' + scoreCls + '">' +
+                '<span class="sf-gate-icon">' + (scorePass ? '✓' : '✗') + '</span>' +
+                'Score ≥ ' + threshold +
+                ' <span class="sf-gate-meta">[' + escapeHtml(scoreLabel) + ']</span>' +
+            '</div>' +
+            '<div class="sf-gate-row ' + timeCls + '">' +
+                '<span class="sf-gate-icon">' + (timePass ? '✓' : '✗') + '</span>' +
+                'Before ' + timeCutoff +
+                ' <span class="sf-gate-meta">[' + escapeHtml(triggerHHMM) + ']</span>' +
+            '</div>' +
+            '<div class="sf-gate-row ' + vwapCls + '">' +
+                '<span class="sf-gate-icon">' + (vwapPass ? '✓' : '✗') + '</span>' +
+                'Price ' + (String(r && r.side || '').toUpperCase() === 'SHORT' ? '<' : '>') + ' VWAP' +
+                ' <span class="sf-gate-meta">[' + escapeHtml(priceLabel) + ' / ' + escapeHtml(vwapLabel) + ']</span>' +
+            '</div>' +
+            '</div>'
+        );
+    }
+
+    function buildVelocityChip(r) {
+        const vel = r && r.reclaim_score_velocity != null && r.reclaim_score_velocity !== ''
+            ? Number(r.reclaim_score_velocity)
+            : NaN;
+        if (!Number.isFinite(vel)) return '';
+        let cls = 'sf-velocity-chip--weak';
+        let label;
+        if (vel >= 10) {
+            cls = 'sf-velocity-chip--strong';
+            label = '+' + vel.toFixed(0) + ' pts momentum';
+        } else if (vel <= 0) {
+            cls = 'sf-velocity-chip--retreat';
+            label = vel.toFixed(0) + ' retreating';
+        } else {
+            label = '+' + vel.toFixed(0) + ' pts weak';
+        }
+        return (
+            '<span class="sf-velocity-chip ' + cls +
+            '" title="Reclaim score velocity = current − previous scan (' +
+            (r.reclaim_score_last != null ? r.reclaim_score_last : '—') + ' vs ' +
+            (r.reclaim_score_prev != null ? r.reclaim_score_prev : '—') + ').">' +
+            escapeHtml(label) + '</span>'
+        );
+    }
+
+    function buildCountdownPill(r) {
+        const ea = String((r && r.entry_at) || '');
+        if (!ea) return '';
+        const optimal = r && r.entry_gate_optimal_window_minutes != null
+            ? Number(r.entry_gate_optimal_window_minutes)
+            : 5;
+        return (
+            '<span class="sf-countdown" data-sf-countdown="1" data-sf-entry-at="' +
+            escapeAttr(ea) + '" data-sf-optimal="' + escapeAttr(String(optimal)) + '">' +
+            '<i class="fas fa-stopwatch" aria-hidden="true"></i> ' +
+            '<span data-sf-countdown-label>…</span>' +
+            '</span>'
+        );
+    }
+
+    function refreshCountdownPills() {
+        const nodes = document.querySelectorAll('[data-sf-countdown="1"]');
+        if (!nodes || !nodes.length) return;
+        const now = Date.now();
+        nodes.forEach(function (el) {
+            const ea = el.getAttribute('data-sf-entry-at') || '';
+            if (!ea) return;
+            let t;
+            try {
+                t = new Date(ea).getTime();
+            } catch (e) { t = NaN; }
+            if (!Number.isFinite(t)) return;
+            const optimal = Number(el.getAttribute('data-sf-optimal') || 5);
+            const diffMs = now - t;
+            const minutes = diffMs / 60000;
+            const labelEl = el.querySelector('[data-sf-countdown-label]');
+            if (!labelEl) return;
+            el.classList.remove('sf-countdown--passed', 'sf-countdown--stale');
+            if (minutes < 0) {
+                labelEl.textContent = 'Trigger in ' + Math.ceil(-minutes) + ' min';
+            } else if (minutes <= optimal) {
+                const remaining = Math.max(0, optimal - minutes);
+                const m = Math.floor(remaining);
+                const s = Math.max(0, Math.round((remaining - m) * 60));
+                labelEl.textContent = '⚡ Enter in ' + m + 'm ' + String(s).padStart(2, '0') + 's';
+            } else if (minutes <= 15) {
+                el.classList.add('sf-countdown--passed');
+                labelEl.textContent = '🕐 Optimal window passed — expect slippage';
+            } else {
+                el.classList.add('sf-countdown--stale');
+                labelEl.textContent = '⏳ Signal aging — reclaim may have changed';
+            }
+        });
+    }
+
     function trendOrderGateByVwap(r) {
         const scanLtp = r && r.entry_price != null && r.entry_price !== '' ? Number(r.entry_price) : NaN;
         const m15Vwap = r && r.m15_vwap != null && r.m15_vwap !== '' ? Number(r.m15_vwap) : NaN;
@@ -396,13 +523,88 @@
             return hint + '<span class="sf-order-status">' + displayStatus + '</span>';
         }
         const sym = r && r.fut_symbol != null && r.fut_symbol !== '' ? String(r.fut_symbol) : '';
-        const gate = trendOrderGateByVwap(r);
-        const dis = gate.allowed ? '' : ' disabled';
-        const title = gate.allowed
-            ? 'Mark bought — enter buy price and lots'
-            : gate.reason;
-        return (
-            '<button type="button" class="sf-btn-order sf-btn-trend-order" data-order-id="' +
+        const hasGateFields = r && (
+            r.entry_gate_score_pass !== undefined ||
+            r.entry_gate_time_pass !== undefined ||
+            r.entry_gate_vwap_pass !== undefined
+        );
+        let gateHtml = '';
+        let blocked = false;
+        let amber = false;
+        let blockedReason = '';
+        if (hasGateFields) {
+            gateHtml = buildGateChecklist(r);
+            const scorePass = Boolean(r.entry_gate_score_pass);
+            const timePass = Boolean(r.entry_gate_time_pass);
+            const vwapPass = Boolean(r.entry_gate_vwap_pass);
+            blocked = !(scorePass && timePass && vwapPass);
+            if (blocked) {
+                const reasons = Array.isArray(r.entry_gate_reasons) ? r.entry_gate_reasons : [];
+                blockedReason = reasons.length
+                    ? reasons.join(' | ')
+                    : 'Entry gates not passed — see checklist above';
+            } else {
+                const vel = r.reclaim_score_velocity != null ? Number(r.reclaim_score_velocity) : NaN;
+                if (Number.isFinite(vel) && vel <= 0) amber = true;
+            }
+        } else {
+            const legacy = trendOrderGateByVwap(r);
+            blocked = !legacy.allowed;
+            blockedReason = legacy.reason;
+        }
+        const countdown = buildCountdownPill(r);
+        const banners = [];
+        if (hasGateFields) {
+            if (!r.entry_gate_time_pass) {
+                banners.push(
+                    '<span class="sf-gate-banner sf-gate-banner--late" title="Entry not recommended after 14:00 IST">⏰ Late session — entry blocked (triggered after ' +
+                        escapeHtml(String(r.entry_gate_time_cutoff || '14:00')) +
+                        ')</span>'
+                );
+            }
+            if (!r.entry_gate_vwap_pass) {
+                banners.push(
+                    '<span class="sf-gate-banner sf-gate-banner--amber">⚠️ ' +
+                        escapeHtml(String(r.side || '').toUpperCase() === 'SHORT'
+                            ? 'Price above VWAP at trigger — short signal suppressed'
+                            : 'Price below VWAP at trigger — long signal suppressed') +
+                        '</span>'
+                );
+            }
+            if (!r.entry_gate_score_pass) {
+                const scoreVal = r.score_at_trigger != null && r.score_at_trigger !== ''
+                    ? Number(r.score_at_trigger).toFixed(0)
+                    : '—';
+                const threshold = r.entry_gate_score_threshold != null ? r.entry_gate_score_threshold : 55;
+                banners.push(
+                    '<span class="sf-gate-banner sf-gate-banner--weak">Weak signal — score ' +
+                        escapeHtml(scoreVal) + '/100. Minimum ' + escapeHtml(String(threshold)) +
+                        ' required for entry.</span>'
+                );
+            }
+            const vel = r.reclaim_score_velocity != null ? Number(r.reclaim_score_velocity) : NaN;
+            if (amber && Number.isFinite(vel)) {
+                banners.push(
+                    '<span class="sf-gate-banner sf-gate-banner--retreat">⚠️ Score retreating at trigger — consider 50% position size</span>'
+                );
+            }
+        }
+
+        let btnClass = 'sf-btn-order sf-btn-trend-order';
+        let dis = '';
+        let title;
+        if (blocked) {
+            btnClass += ' sf-btn-order--blocked';
+            dis = ' disabled';
+            title = blockedReason || 'Entry gates not passed — see checklist above';
+        } else if (amber) {
+            btnClass += ' sf-btn-order--amber';
+            title = 'Score retreating — consider smaller size. Mark bought — enter buy price and lots.';
+        } else {
+            title = 'Mark bought — enter buy price and lots';
+        }
+        const button =
+            '<button type="button" class="' + btnClass + '" data-order-id="' +
             r.id +
             '" data-fut-symbol="' +
             escapeAttr(sym) +
@@ -410,7 +612,20 @@
             dis +
             ' title="' +
             escapeAttr(title) +
-            '">Order</button>'
+            '">Order</button>';
+        const bannerHtml = banners.length
+            ? '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;">' + banners.join('') + '</div>'
+            : '';
+        const countdownHtml = countdown
+            ? '<div style="margin-top:4px;">' + countdown + '</div>'
+            : '';
+        return (
+            '<div class="sf-gate-block">' +
+                gateHtml +
+                bannerHtml +
+                countdownHtml +
+                '<div style="margin-top:6px;">' + button + '</div>' +
+            '</div>'
         );
     }
 
@@ -433,6 +648,12 @@
         const title = exitOk
             ? 'Manual square-off — enter price in the dialog. Exit signal is active. ' + (reason ? reason : '') + reclaimTip
             : 'Manual square-off — enter your execution price in the dialog.' + reclaimTip;
+        const scoreForOverride = Number.isFinite(rs) ? rs : '';
+        const overrideable = (() => {
+            if (exitOk) return false;
+            if (!Number.isFinite(rs)) return true;
+            return rs >= 55;
+        })();
         return (
             '<button type="button" class="sf-btn-sell' +
             blink +
@@ -442,6 +663,10 @@
             escapeAttr(sym) +
             '" data-buy-price="' +
             escapeAttr(bp) +
+            '" data-reclaim-score="' +
+            escapeAttr(String(scoreForOverride)) +
+            '" data-override-eligible="' +
+            (overrideable ? '1' : '0') +
             '" title="' +
             escapeAttr(title) +
             '">Sell</button>'
@@ -495,10 +720,11 @@
         const label = sym === '—' ? sym : escapeHtml(sym);
         const fire =
             hot ? '<span class="sf-atr-fire" aria-hidden="true">🔥</span> ' : '';
-        if (tip) {
-            return '<span class="sf-symbol-wrap"' + titleAttr + '>' + fire + label + '</span>';
-        }
-        return fire ? fire + label : label;
+        const chip = buildVelocityChip(r);
+        const core = tip
+            ? '<span class="sf-symbol-wrap"' + titleAttr + '>' + fire + label + '</span>'
+            : (fire ? fire + label : label);
+        return core + chip;
     }
 
     function fmtEntryGroupLabel(bucket) {
@@ -579,10 +805,28 @@
 
     function trendTableRowHtml(r) {
         const runSlot = escapeHtml(String((r && r.__run_slot) || deriveRunSlot(r) || ''));
+        const ost = String(r.order_status || '').trim().toLowerCase();
+        const futKey = String((r && r.fut_instrument_key) || '');
+        const carryHit = !!(futKey && _sfCarryKeys.has(futKey));
+        let rowCls = '';
+        if (ost !== 'bought' && ost !== 'sold') {
+            const gated = Boolean(r && (
+                r.entry_gate_score_pass === false ||
+                r.entry_gate_time_pass === false ||
+                r.entry_gate_vwap_pass === false
+            ));
+            const vel = r && r.reclaim_score_velocity != null ? Number(r.reclaim_score_velocity) : NaN;
+            const retreating = !gated && Number.isFinite(vel) && vel <= 0;
+            if (gated) rowCls = ' class="sf-row-muted' + (carryHit ? ' sf-row-carry' : '') + '"';
+            else if (retreating) rowCls = ' class="sf-row-amber' + (carryHit ? ' sf-row-carry' : '') + '"';
+            else if (carryHit) rowCls = ' class="sf-row-carry"';
+        } else if (carryHit) {
+            rowCls = ' class="sf-row-carry"';
+        }
         return (
             '<tr data-row-id="' +
-            r.id +
-            '">' +
+            r.id + '"' + rowCls +
+            '>' +
             '<td>' +
             runSlot +
             '</td>' +
@@ -1053,6 +1297,64 @@
     }
 
     let _sfSellModalTriggerBtn = null;
+    let _sfSellPendingReason = null;
+
+    let _sfEarlyExitPending = null;
+
+    function openEarlyExitModal(btn, rowId, symbol, buyHint, scoreRaw) {
+        const modal = document.getElementById('sfEarlyExitModal');
+        if (!modal) {
+            _sfEarlyExitPending = null;
+            openSellPriceModal(btn, rowId, symbol, buyHint);
+            return;
+        }
+        _sfEarlyExitPending = { btn, rowId, symbol, buyHint };
+        const symEl = document.getElementById('sfEarlyExitModalSymbol');
+        const scoreEl = document.getElementById('sfEarlyExitScore');
+        const errEl = document.getElementById('sfEarlyExitModalErr');
+        if (symEl) symEl.textContent = symbol ? 'Symbol: ' + symbol : '';
+        if (scoreEl) {
+            const n = Number(scoreRaw);
+            scoreEl.textContent = Number.isFinite(n) ? n.toFixed(0) + '/100' : '—';
+        }
+        if (errEl) errEl.textContent = '';
+        const radios = modal.querySelectorAll('input[name="sfEarlyExitReason"]');
+        radios.forEach(function (radio) { radio.checked = false; });
+        modal.classList.add('sf-modal--open');
+        modal.setAttribute('aria-hidden', 'false');
+    }
+
+    function closeEarlyExitModal() {
+        const modal = document.getElementById('sfEarlyExitModal');
+        if (!modal) return;
+        modal.classList.remove('sf-modal--open');
+        modal.setAttribute('aria-hidden', 'true');
+        _sfEarlyExitPending = null;
+    }
+
+    function confirmEarlyExit() {
+        if (!_sfEarlyExitPending) {
+            closeEarlyExitModal();
+            return;
+        }
+        const modal = document.getElementById('sfEarlyExitModal');
+        const errEl = document.getElementById('sfEarlyExitModalErr');
+        const radios = modal
+            ? modal.querySelectorAll('input[name="sfEarlyExitReason"]')
+            : [];
+        let chosen = null;
+        radios.forEach(function (radio) {
+            if (radio.checked) chosen = radio.value;
+        });
+        if (!chosen) {
+            if (errEl) errEl.textContent = 'Select a reason before confirming exit.';
+            return;
+        }
+        const pending = _sfEarlyExitPending;
+        _sfSellPendingReason = chosen;
+        closeEarlyExitModal();
+        openSellPriceModal(pending.btn, pending.rowId, pending.symbol, pending.buyHint);
+    }
 
     function openSellPriceModal(btn, rowId, symbol, buyPriceHint) {
         const modal = document.getElementById('sfSellModal');
@@ -1088,6 +1390,7 @@
         modal.setAttribute('aria-hidden', 'true');
         delete modal.dataset.sellRowId;
         _sfSellModalTriggerBtn = null;
+        _sfSellPendingReason = null;
         const c = document.getElementById('sfSellModalConfirm');
         if (c) c.disabled = false;
     }
@@ -1113,7 +1416,11 @@
         const paths = ['/api/smart-futures/daily/' + id + '/sell', '/smart-futures/daily/' + id + '/sell'];
         let ok = false;
         let errText = '';
-        const payload = JSON.stringify({ sell_price: price });
+        const payloadObj = { sell_price: price };
+        if (_sfSellPendingReason) {
+            payloadObj.manual_exit_reason = _sfSellPendingReason;
+        }
+        const payload = JSON.stringify(payloadObj);
         for (const p of paths) {
             try {
                 const res = await fetch(API_BASE + p, {
@@ -1164,6 +1471,13 @@
         if (!id) return;
         const sym = btn.getAttribute('data-fut-symbol') || '';
         const buyHint = btn.getAttribute('data-buy-price') || '';
+        const overrideEligible = btn.getAttribute('data-override-eligible') === '1';
+        const scoreRaw = btn.getAttribute('data-reclaim-score') || '';
+        _sfSellPendingReason = null;
+        if (overrideEligible) {
+            openEarlyExitModal(btn, id, sym, buyHint, scoreRaw);
+            return;
+        }
         openSellPriceModal(btn, id, sym, buyHint);
     }
 
@@ -1284,6 +1598,59 @@
         }
     }
 
+    // Set of fut_instrument_keys that were carried forward from a prior session — used by
+    // trendTableRowHtml() to highlight matching rows today.
+    const _sfCarryKeys = new Set();
+    let _sfCarryRows = [];
+
+    async function fetchWatchlistJson() {
+        const paths = ['/api/smart-futures/watchlist?days=3', '/smart-futures/watchlist?days=3'];
+        for (const p of paths) {
+            try {
+                const res = await fetch(API_BASE + p, { headers: authHeaders(), cache: 'no-store' });
+                if (!res.ok) continue;
+                const raw = await res.text();
+                try { return JSON.parse(raw); } catch (_) { /* try next */ }
+            } catch (_) { /* try next */ }
+        }
+        return null;
+    }
+
+    function renderCarryBanner(wl) {
+        const host = document.getElementById('sfCarryBanner');
+        if (!host) return;
+        _sfCarryKeys.clear();
+        _sfCarryRows = [];
+        if (!wl || !Array.isArray(wl.rows) || !wl.rows.length) {
+            host.style.display = 'none';
+            host.innerHTML = '';
+            return;
+        }
+        const today = String(wl.today_session_date || '');
+        const priorRows = wl.rows.filter(function (r) {
+            return String(r.trigger_date || '') !== today;
+        });
+        if (!priorRows.length) {
+            host.style.display = 'none';
+            host.innerHTML = '';
+            return;
+        }
+        _sfCarryRows = priorRows;
+        priorRows.forEach(function (r) {
+            if (r && r.fut_instrument_key) _sfCarryKeys.add(String(r.fut_instrument_key));
+        });
+        const chips = priorRows.map(function (r) {
+            const sym = String(r.fut_symbol || r.symbol || '—');
+            const date = String(r.trigger_date || '').slice(0, 10);
+            return '<span class="sf-carry-chip" title="Carry from ' + escapeAttr(date) + '">' +
+                escapeHtml(sym) + '</span>';
+        }).join('');
+        host.innerHTML =
+            '<b>👁️ Carry-forward watchlist</b> — late-session clean signals from prior days. Monitor for a fresh trigger today:<br/>' +
+            chips;
+        host.style.display = '';
+    }
+
     async function loadTrend(silent) {
         const updated = document.getElementById('sfTrendUpdated');
         const msg = document.getElementById('sfTrendMsg');
@@ -1295,6 +1662,10 @@
                 cfg = null;
             }
             applyPickSelectionNote(cfg);
+            try {
+                const wl = await fetchWatchlistJson();
+                renderCarryBanner(wl);
+            } catch (_) { /* non-fatal */ }
             const data = await fetchDailyJson();
             renderGroups(data);
             renderOpenPositions(data);
@@ -1361,8 +1732,20 @@
         if (orderPriceInp) orderPriceInp.addEventListener('keydown', orderModalSubmitOnEnter);
         if (orderLotsInp) orderLotsInp.addEventListener('keydown', orderModalSubmitOnEnter);
 
+        const earlyModal = document.getElementById('sfEarlyExitModal');
+        const earlyBackdrop = document.getElementById('sfEarlyExitModalBackdrop');
+        const earlyCancel = document.getElementById('sfEarlyExitModalCancel');
+        const earlyConfirm = document.getElementById('sfEarlyExitModalConfirm');
+        if (earlyCancel) earlyCancel.addEventListener('click', closeEarlyExitModal);
+        if (earlyBackdrop) earlyBackdrop.addEventListener('click', closeEarlyExitModal);
+        if (earlyConfirm) earlyConfirm.addEventListener('click', confirmEarlyExit);
+
         document.addEventListener('keydown', function (ev) {
             if (ev.key !== 'Escape') return;
+            if (earlyModal && earlyModal.classList.contains('sf-modal--open')) {
+                closeEarlyExitModal();
+                return;
+            }
             if (orderModal && orderModal.classList.contains('sf-modal--open')) {
                 closeOrderModal();
                 return;
@@ -1374,5 +1757,7 @@
 
         loadTrend(false);
         window.setInterval(function () { loadTrend(true); }, 15 * 60 * 1000);
+        refreshCountdownPills();
+        window.setInterval(refreshCountdownPills, 1000);
     });
 })();

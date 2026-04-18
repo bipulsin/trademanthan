@@ -491,6 +491,56 @@ def _run_startup_schema_migrations(db_engine):
                     print("Applied migration: added smart_futures_daily.oi_heat_rank")
                     _sfd_cols.add("oi_heat_rank")
 
+                # Entry-gate / reclaim-score persistence (non-breaking ADD COLUMN set).
+                _sfd_entry_gate_cols = [
+                    ("reclaim_score_last", "DOUBLE PRECISION"),
+                    ("reclaim_score_prev", "DOUBLE PRECISION"),
+                    ("reclaim_score_updated_at", "TIMESTAMP WITH TIME ZONE"),
+                    ("manual_exit_reason", "VARCHAR(32)"),
+                    ("manual_exit_at", "TIMESTAMP WITH TIME ZONE"),
+                ]
+                for _cname, _ctype in _sfd_entry_gate_cols:
+                    if _cname not in _sfd_cols:
+                        conn.execute(
+                            text(f"ALTER TABLE smart_futures_daily ADD COLUMN {_cname} {_ctype}")
+                        )
+                        print(f"Applied migration: added smart_futures_daily.{_cname}")
+                        _sfd_cols.add(_cname)
+
+            # Smart Futures carry-forward watchlist: late-session picks that passed score+VWAP.
+            _insp_wl = inspect(db_engine)
+            if "smart_futures_watchlist" not in _insp_wl.get_table_names():
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE smart_futures_watchlist (
+                                id BIGSERIAL PRIMARY KEY,
+                                trigger_date DATE NOT NULL,
+                                daily_id BIGINT,
+                                symbol TEXT NOT NULL,
+                                fut_symbol TEXT,
+                                fut_instrument_key TEXT NOT NULL,
+                                side TEXT NOT NULL,
+                                trigger_score DOUBLE PRECISION,
+                                trigger_price DOUBLE PRECISION,
+                                vwap_at_trigger DOUBLE PRECISION,
+                                trigger_at TIMESTAMP WITH TIME ZONE,
+                                added_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+                                cleared_at TIMESTAMP WITH TIME ZONE,
+                                CONSTRAINT uq_sf_watchlist_date_ikey UNIQUE (trigger_date, fut_instrument_key)
+                            )
+                            """
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_sf_watchlist_trigger_date "
+                            "ON smart_futures_watchlist (trigger_date DESC)"
+                        )
+                    )
+                    print("Applied migration: created smart_futures_watchlist (PostgreSQL)")
+
             # Smart Futures backtest results (separate from live smart_futures_daily)
             if "backtest_smart_future" not in table_names:
                 if db_engine.dialect.name == "postgresql":

@@ -203,6 +203,37 @@
             background: rgba(45, 212, 191, 0.1);
             border-color: rgba(45, 212, 191, 0.35);
         }
+        .sf-carry-banner {
+            margin-top: 10px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            color: #1e3a8a;
+            font-size: 0.85rem;
+            line-height: 1.45;
+        }
+        .sf-carry-banner b { color: #1d4ed8; }
+        .sf-carry-chip {
+            display: inline-block;
+            padding: 2px 8px;
+            margin: 2px 4px 2px 0;
+            border-radius: 999px;
+            background: #dbeafe;
+            color: #1e3a8a;
+            font-weight: 700;
+            font-size: 0.72rem;
+            letter-spacing: 0.02em;
+        }
+        body[data-theme="dark"] .sf-carry-banner {
+            background: rgba(59, 130, 246, 0.12);
+            border-color: rgba(59, 130, 246, 0.35);
+            color: #bfdbfe;
+        }
+        body[data-theme="dark"] .sf-carry-banner b { color: #93c5fd; }
+        body[data-theme="dark"] .sf-carry-chip { background: rgba(59, 130, 246, 0.25); color: #bfdbfe; }
+        .sf-row-carry { background: #eff6ff !important; }
+        body[data-theme="dark"] .sf-row-carry { background: rgba(59, 130, 246, 0.12) !important; }
         .sf-pnl-pos { color: #15803d; font-weight: 600; }
         .sf-pnl-neg { color: #b91c1c; font-weight: 600; }
         .sf-pnl-flat { color: var(--theme-muted, #64748b); }
@@ -269,6 +300,45 @@
             color: var(--theme-text, #0f172a);
         }
         #sfSellModalErr, #sfOrderModalErr { min-height: 1.2em; margin-top: 8px; color: #b91c1c; font-size: 0.85rem; }
+
+        /* Entry-gate checklist + conditional Order button + countdown + velocity chip */
+        .sf-gate-block{display:flex;flex-direction:column;gap:6px;min-width:220px;}
+        .sf-gate-list{display:flex;flex-direction:column;gap:3px;font-size:0.75rem;line-height:1.3;color:var(--theme-text,#0f172a);}
+        .sf-gate-row{display:flex;align-items:center;gap:6px;white-space:nowrap;}
+        .sf-gate-icon{display:inline-flex;width:16px;justify-content:center;font-weight:800;}
+        .sf-gate-pass .sf-gate-icon{color:#16a34a;}
+        .sf-gate-fail .sf-gate-icon{color:#ef4444;}
+        .sf-gate-meta{color:var(--theme-muted,#64748b);font-size:0.72rem;}
+        .sf-btn-order.sf-btn-order--blocked{background:#94a3b8;cursor:not-allowed;}
+        body[data-theme="dark"] .sf-btn-order.sf-btn-order--blocked{background:#475569;}
+        .sf-btn-order.sf-btn-order--amber{background:#d97706;}
+        .sf-btn-order.sf-btn-order--amber:hover:not(:disabled){background:#b45309;}
+        tr.sf-row-muted td{background:rgba(148,163,184,0.08);color:var(--theme-muted,#64748b);}
+        tr.sf-row-muted .sf-side-pill{opacity:0.7;}
+        tr.sf-row-amber td{background:rgba(234,179,8,0.10);}
+        body[data-theme="dark"] tr.sf-row-amber td{background:rgba(250,204,21,0.10);}
+        .sf-gate-banner{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border-radius:6px;font-size:0.72rem;font-weight:700;}
+        .sf-gate-banner--late{background:#334155;color:#e2e8f0;}
+        .sf-gate-banner--amber{background:#fde68a;color:#78350f;}
+        .sf-gate-banner--weak{background:#cbd5e1;color:#1e293b;}
+        .sf-gate-banner--retreat{background:#fecaca;color:#7f1d1d;}
+        .sf-velocity-chip{display:inline-block;padding:1px 7px;border-radius:999px;font-size:0.68rem;font-weight:700;margin-left:6px;vertical-align:middle;letter-spacing:0.02em;}
+        .sf-velocity-chip--strong{background:#bbf7d0;color:#14532d;}
+        .sf-velocity-chip--weak{background:#fef08a;color:#713f12;}
+        .sf-velocity-chip--retreat{background:#fecaca;color:#7f1d1d;}
+        .sf-countdown{display:inline-flex;align-items:center;gap:6px;padding:2px 7px;border-radius:6px;font-size:0.72rem;font-weight:600;color:#065f46;background:#d1fae5;white-space:nowrap;}
+        .sf-countdown--passed{color:#991b1b;background:#fee2e2;}
+        .sf-countdown--stale{color:#78350f;background:#fde68a;}
+
+        /* Early-exit override modal */
+        .sf-modal-panel.sf-modal-panel--wide{max-width:420px;}
+        .sf-early-exit-intro{font-size:0.92rem;line-height:1.4;margin:6px 0 4px;}
+        .sf-early-exit-score{font-size:0.95rem;font-weight:700;color:#b45309;margin:4px 0 8px;}
+        .sf-early-exit-reason{display:flex;flex-direction:column;gap:8px;margin-top:12px;}
+        .sf-early-exit-reason label{display:flex;align-items:center;gap:8px;font-size:0.9rem;margin:0;font-weight:500;cursor:pointer;}
+        .sf-early-exit-reason input[type="radio"]{accent-color:#b45309;}
+        .sf-btn-modal-keep{padding:8px 16px;border-radius:8px;font-weight:600;font-size:0.9rem;cursor:pointer;border:1px solid #15803d;background:#16a34a;color:#fff;}
+        .sf-btn-modal-keep:hover:not(:disabled){background:#15803d;}
     </style>
 </head>
 <body class="theme-page">
@@ -307,6 +377,7 @@
                     </div>
                     <p class="sf-meta" id="sfTrendMsg"></p>
                     <div id="sfPickerRunBanner" class="sf-picker-run-banner" style="display:none;" role="status" aria-live="polite"></div>
+                    <div id="sfCarryBanner" class="sf-carry-banner" style="display:none;" role="status" aria-live="polite"></div>
                     <p class="sf-meta" id="sfPickSelectionNote" style="margin-top:6px;"></p>
                     <div id="sfTrendGroups"></div>
                 </div>
@@ -360,7 +431,25 @@
             </div>
         </div>
     </div>
+    <div id="sfEarlyExitModal" class="sf-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="sfEarlyExitModalTitle">
+        <div class="sf-modal-backdrop" id="sfEarlyExitModalBackdrop"></div>
+        <div class="sf-modal-panel sf-modal-panel--wide">
+            <h3 id="sfEarlyExitModalTitle">⚠️ Early Exit Warning</h3>
+            <p class="sf-meta" id="sfEarlyExitModalSymbol"></p>
+            <p class="sf-early-exit-intro">Reclaim score is still <span id="sfEarlyExitScore">—</span>. Signal has <strong>not</strong> triggered a panic exit and the simulated target has not been reached.</p>
+            <p class="sf-meta">Are you exiting based on:</p>
+            <div class="sf-early-exit-reason" role="radiogroup" aria-label="Exit reason">
+                <label><input type="radio" name="sfEarlyExitReason" value="rules" /> My rules / system signal</label>
+                <label><input type="radio" name="sfEarlyExitReason" value="emotion" /> Emotion / fear</label>
+            </div>
+            <p id="sfEarlyExitModalErr" aria-live="polite"></p>
+            <div class="sf-modal-actions">
+                <button type="button" class="sf-btn-modal-keep" id="sfEarlyExitModalCancel">Cancel — Stay In</button>
+                <button type="button" class="sf-btn-order" id="sfEarlyExitModalConfirm">Confirm Exit</button>
+            </div>
+        </div>
+    </div>
     <script src="left-menu.js?v=3.19"></script>
-    <script src="smartfuture.js?v=43"></script>
+    <script src="smartfuture.js?v=45"></script>
 </body>
 </html>

@@ -13,6 +13,24 @@
     <link rel="stylesheet" href="dashboard.css?v=2.7">
     <link rel="stylesheet" href="left-menu.css?v=3.19">
     <link rel="stylesheet" href="theme.css?v=1.3">
+    <style>
+        .sf-watchlist-card .sf-wl-toolbar { display: flex; align-items: center; gap: 8px; }
+        .sf-watchlist-card .sf-wl-updated { font-size: 11px; color: #64748b; white-space: nowrap; }
+        .sf-watchlist-card .sf-wl-hint { margin: 0 0 8px 0; font-size: 12px; color: #475569; }
+        .sf-watchlist-card .sf-wl-msg { margin: 0 0 6px 0; font-size: 12px; color: #64748b; min-height: 1em; }
+        .sf-watchlist-card .sf-wl-empty { margin: 6px 0; font-size: 13px; color: #64748b; font-style: italic; }
+        .sf-watchlist-card .sf-wl-wrap { overflow-x: auto; }
+        .sf-watchlist-card .sf-wl-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .sf-watchlist-card .sf-wl-table th,
+        .sf-watchlist-card .sf-wl-table td { padding: 6px 10px; text-align: left; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+        .sf-watchlist-card .sf-wl-table th { background: #f8fafc; font-weight: 600; color: #334155; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+        .sf-watchlist-card .sf-wl-table tbody tr:hover { background: #f1f5f9; }
+        .sf-watchlist-card .sf-wl-row-today { background: #ecfdf5; }
+        .sf-watchlist-card .sf-wl-row-today:hover { background: #d1fae5; }
+        .sf-watchlist-card .sf-side-pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: 0.03em; }
+        .sf-watchlist-card .sf-side-long { background: #dcfce7; color: #166534; }
+        .sf-watchlist-card .sf-side-short { background: #fee2e2; color: #991b1b; }
+    </style>
 </head>
 <body>
     <!-- Mobile Title Bar -->
@@ -87,6 +105,24 @@
                                 <ul class="sector-movers-list" id="sectorMoversLosers" aria-label="Top losing sectors"></ul>
                             </div>
                         </div>
+                    </div>
+                </div>
+
+                <!-- Smart Futures Carry-Forward Watch: late-session picks that passed score+VWAP -->
+                <div class="dashboard-card sf-watchlist-card full-width">
+                    <div class="card-header compact">
+                        <h3><i class="fas fa-clipboard-list"></i> Carry-Forward Watch — Review Pre-Market Tomorrow</h3>
+                        <div class="sf-wl-toolbar">
+                            <span class="sf-wl-updated" id="sfWatchlistUpdated">—</span>
+                            <button type="button" class="btn-icon" id="sfWatchlistRefresh" title="Refresh carry-forward watchlist" aria-label="Refresh carry-forward watchlist">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-content">
+                        <p class="sf-wl-hint">Smart Futures signals that fired <strong>after 14:00 IST</strong> but still passed the reclaim-score (≥ 55) and VWAP gates. Review these pre-market tomorrow for fresh entries.</p>
+                        <p class="sf-wl-msg" id="sfWatchlistMsg">Loading…</p>
+                        <div id="sfWatchlistHost"></div>
                     </div>
                 </div>
 
@@ -368,6 +404,7 @@
     <script src="market-sentiment-dials.js?v=1.6"></script>
     <script src="dashboard-sector-movers.js?v=1.3"></script>
     <script src="dashboard-premarket-watchlist.js?v=1.4"></script>
+    <script src="dashboard-sf-watchlist.js?v=1.0"></script>
     <script src="dashboard-oi-heatmap.js?v=3.3"></script>
     <script src="crypto-prices.js?v=1.4"></script>
     <script src="version.js?v=1.0"></script>

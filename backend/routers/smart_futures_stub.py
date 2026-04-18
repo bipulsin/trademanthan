@@ -9,7 +9,7 @@ import json
 import logging
 import threading
 from collections import OrderedDict
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -25,8 +25,11 @@ from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
 from backend.services import smart_futures_config as sfc
 from backend.services.smart_futures_exit import (
+    RECLAIM_ENTRY_SCORE_THRESHOLD,
+    RECLAIM_SCORE_PANIC_THRESHOLD,
     apply_reclaim_vwap_gate,
     evaluate_exit_with_profit_protection,
+    is_entry_permitted,
 )
 from backend.services.smart_futures_session_date import effective_session_date_ist_for_trend
 from backend.services.smart_futures_session_utils import compute_atr5_14_ratio_for_session
@@ -91,6 +94,14 @@ class SmartFuturesSellBody(BaseModel):
     """POST /daily/{id}/sell: optional manual price; if omitted, broker LTP is used."""
 
     sell_price: Optional[float] = Field(default=None, description="Manual square-off price (bookkeeping)")
+    manual_exit_reason: Optional[str] = Field(
+        default=None,
+        max_length=32,
+        description=(
+            "Operator's stated reason when exiting before the algo panics "
+            "(e.g. 'rules', 'emotion'). Persisted on smart_futures_daily.manual_exit_reason."
+        ),
+    )
 
 
 class SmartFuturesOrderBody(BaseModel):
@@ -164,7 +175,9 @@ _SQL_DAILY_FULL = """
                        cms, atr5_14_ratio,
                        signal_tier, tier_multiplier, calculated_lots, stop_stage, current_stop_price,
                        oi_signal, oi_gate_passed, time_filter_passed, regime_filter_passed, ema_slope_norm,
-                       premkt_rank, oi_heat_rank
+                       premkt_rank, oi_heat_rank,
+                       reclaim_score_last, reclaim_score_prev, reclaim_score_updated_at,
+                       manual_exit_reason, manual_exit_at
                 FROM smart_futures_daily
                 WHERE session_date = :sd
                 ORDER BY entry_at DESC NULLS LAST, id DESC
@@ -213,6 +226,21 @@ def _fetch_daily_for_session(db: Session, sd: Any) -> List[Any]:
     try:
         return db.execute(text(_SQL_DAILY_FULL), {"sd": sd}).mappings().all()
     except Exception as e:
+        if (
+            _missing_db_column_error(e, "reclaim_score_last")
+            or _missing_db_column_error(e, "reclaim_score_prev")
+            or _missing_db_column_error(e, "reclaim_score_updated_at")
+            or _missing_db_column_error(e, "manual_exit_reason")
+            or _missing_db_column_error(e, "manual_exit_at")
+        ):
+            logger.warning(
+                "smart_futures /daily: entry-gate columns missing, using pre-gate query: %s", e
+            )
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            return db.execute(text(_SQL_DAILY_NO_RANK), {"sd": sd}).mappings().all()
         if _missing_db_column_error(e, "premkt_rank") or _missing_db_column_error(e, "oi_heat_rank"):
             logger.warning("smart_futures /daily: premkt_rank/oi_heat_rank missing, legacy query: %s", e)
             return db.execute(text(_SQL_DAILY_NO_RANK), {"sd": sd}).mappings().all()
@@ -307,6 +335,10 @@ def _row_to_dict(r: Any) -> Dict[str, Any]:
     st = out.get("sell_time")
     if st is not None and hasattr(st, "isoformat"):
         out["sell_time"] = st.isoformat()
+    for _ts_col in ("reclaim_score_updated_at", "manual_exit_at"):
+        v = out.get(_ts_col)
+        if v is not None and hasattr(v, "isoformat"):
+            out[_ts_col] = v.isoformat()
     for k in (
         "cms",
         "final_cms",
@@ -434,6 +466,25 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
     if us_exit is not None:
         m15_snapshot_cache: Dict[str, Dict[str, Any]] = {}
         ltp_cache: Dict[str, Optional[float]] = {}
+        m5_session_cache: Dict[str, List[Dict[str, Any]]] = {}
+
+        def _get_m5_session(ikey: str) -> List[Dict[str, Any]]:
+            if ikey in m5_session_cache:
+                return m5_session_cache[ikey]
+            bars: List[Dict[str, Any]] = []
+            try:
+                raw5 = us_exit.get_historical_candles_by_instrument_key(
+                    ikey, interval="minutes/5", days_back=5, range_end_date=sd
+                )
+                bars = [
+                    b
+                    for b in sorted(raw5 or [], key=lambda x: str(x.get("timestamp") or ""))
+                    if _ist_date_from_ts(str(b.get("timestamp") or "")) == sd
+                ]
+            except Exception:
+                bars = []
+            m5_session_cache[ikey] = bars
+            return bars
         for r in serialized:
             ikey = str(r.get("fut_instrument_key") or "").strip()
             if not ikey:
@@ -521,14 +572,7 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
                 ikey = str(r.get("fut_instrument_key") or "").strip()
                 if not ikey:
                     continue
-                raw5 = us_exit.get_historical_candles_by_instrument_key(
-                    ikey, interval="minutes/5", days_back=5, range_end_date=sd
-                )
-                m5 = [
-                    b
-                    for b in sorted(raw5 or [], key=lambda x: str(x.get("timestamp") or ""))
-                    if _ist_date_from_ts(str(b.get("timestamp") or "")) == sd
-                ]
+                m5 = _get_m5_session(ikey)
                 if len(m5) < 3:
                     continue
                 # Manual "Order" fill uses buy_price; that is the basis for exit / protection vs candles.
@@ -630,6 +674,160 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
                     db.commit()
             except Exception as ex:
                 logger.debug("smart_futures exit/protection enrich id=%s: %s", r.get("id"), ex)
+
+        # Entry-gate enrichment + reclaim-score velocity persistence for every row.
+        # Runs inside the `us_exit is not None` block because it needs m5 bars.
+        for r in serialized:
+            try:
+                ikey = str(r.get("fut_instrument_key") or "").strip()
+                side = str(r.get("side") or "").strip().upper()
+                if not ikey or side not in {"LONG", "SHORT"}:
+                    continue
+                m5 = _get_m5_session(ikey)
+                entry_dt = _parse_any_ts_to_ist(r.get("entry_at"))
+                vwap_for_entry_gate = r.get("m15_vwap_at_scan")
+                if vwap_for_entry_gate is None:
+                    vwap_for_entry_gate = r.get("m15_vwap")
+                try:
+                    vwap_gate_in = (
+                        float(vwap_for_entry_gate) if vwap_for_entry_gate is not None else None
+                    )
+                except (TypeError, ValueError):
+                    vwap_gate_in = None
+                try:
+                    px_gate_in = (
+                        float(r.get("entry_price"))
+                        if r.get("entry_price") is not None
+                        else None
+                    )
+                except (TypeError, ValueError):
+                    px_gate_in = None
+                gate = is_entry_permitted(
+                    side=side,
+                    entry_price=px_gate_in,
+                    vwap15=vwap_gate_in,
+                    entry_at_ist=entry_dt,
+                    m5_session=m5,
+                    sector_score=r.get("sector_score"),
+                    now_ist=now_ist,
+                )
+                r["entry_gate_permitted"] = bool(gate.get("permitted"))
+                r["entry_gate_score_pass"] = bool(gate.get("gate_score_pass"))
+                r["entry_gate_time_pass"] = bool(gate.get("gate_time_pass"))
+                r["entry_gate_vwap_pass"] = bool(gate.get("gate_vwap_pass"))
+                r["entry_gate_reasons"] = list(gate.get("reasons") or [])
+                r["entry_gate_score_threshold"] = gate.get("score_threshold")
+                r["entry_gate_time_cutoff"] = gate.get("time_cutoff_hhmm")
+                r["entry_gate_optimal_window_minutes"] = gate.get("optimal_window_minutes")
+                r["entry_gate_minutes_since_trigger"] = gate.get("minutes_since_trigger")
+                r["score_at_trigger"] = gate.get("score_at_trigger")
+                r["vwap_at_trigger"] = gate.get("vwap_at_trigger")
+                r["vwap_adverse_at_trigger"] = bool(gate.get("vwap_adverse_at_trigger"))
+                r["watchlist_eligible"] = bool(gate.get("eligible_watchlist"))
+
+                prev_last = r.get("reclaim_score_last")
+                cur_last = r.get("reclaim_probability_score")
+                if cur_last is None and gate.get("score_at_trigger") is not None:
+                    cur_last = gate.get("score_at_trigger")
+                if cur_last is not None:
+                    try:
+                        cur_f = float(cur_last)
+                    except (TypeError, ValueError):
+                        cur_f = None
+                else:
+                    cur_f = None
+                prev_f = None
+                if prev_last is not None:
+                    try:
+                        prev_f = float(prev_last)
+                    except (TypeError, ValueError):
+                        prev_f = None
+                if cur_f is not None:
+                    persisted_prev = (
+                        prev_f if prev_f is not None else cur_f
+                    )
+                    velocity = cur_f - persisted_prev
+                    r["reclaim_score_prev"] = round(persisted_prev, 2)
+                    r["reclaim_score_last"] = round(cur_f, 2)
+                    r["reclaim_score_velocity"] = round(velocity, 2)
+                    rid = r.get("id")
+                    if rid is not None and (prev_f is None or abs(velocity) > 1e-6):
+                        try:
+                            db.execute(
+                                text(
+                                    """
+                                    UPDATE smart_futures_daily
+                                    SET reclaim_score_prev = COALESCE(reclaim_score_last, :cur),
+                                        reclaim_score_last = :cur,
+                                        reclaim_score_updated_at = CURRENT_TIMESTAMP,
+                                        updated_at = CURRENT_TIMESTAMP
+                                    WHERE id = :id AND session_date = :sd
+                                    """
+                                ),
+                                {"id": int(rid), "sd": sd, "cur": float(cur_f)},
+                            )
+                            db.commit()
+                        except Exception as persist_ex:
+                            logger.debug(
+                                "smart_futures reclaim-score persist id=%s: %s",
+                                rid,
+                                persist_ex,
+                            )
+                            try:
+                                db.rollback()
+                            except Exception:
+                                pass
+                else:
+                    r["reclaim_score_velocity"] = None
+
+                if (
+                    bool(gate.get("eligible_watchlist"))
+                    and str(r.get("order_status") or "").strip().lower() != "bought"
+                    and entry_dt is not None
+                ):
+                    try:
+                        db.execute(
+                            text(
+                                """
+                                INSERT INTO smart_futures_watchlist (
+                                    trigger_date, daily_id, symbol, fut_symbol, fut_instrument_key,
+                                    side, trigger_score, trigger_price, vwap_at_trigger, trigger_at
+                                ) VALUES (
+                                    :trigger_date, :daily_id, :symbol, :fut_symbol, :fut_instrument_key,
+                                    :side, :trigger_score, :trigger_price, :vwap_at_trigger, :trigger_at
+                                )
+                                ON CONFLICT (trigger_date, fut_instrument_key) DO NOTHING
+                                """
+                            ),
+                            {
+                                "trigger_date": sd,
+                                "daily_id": int(r.get("id")) if r.get("id") is not None else None,
+                                "symbol": str(r.get("fut_symbol") or "")[:64]
+                                or ikey.split("|")[-1][:64],
+                                "fut_symbol": r.get("fut_symbol"),
+                                "fut_instrument_key": ikey,
+                                "side": side,
+                                "trigger_score": gate.get("score_at_trigger"),
+                                "trigger_price": px_gate_in,
+                                "vwap_at_trigger": vwap_gate_in,
+                                "trigger_at": entry_dt,
+                            },
+                        )
+                        db.commit()
+                    except Exception as wl_ex:
+                        logger.debug(
+                            "smart_futures watchlist insert id=%s: %s",
+                            r.get("id"),
+                            wl_ex,
+                        )
+                        try:
+                            db.rollback()
+                        except Exception:
+                            pass
+            except Exception as gate_ex:
+                logger.debug(
+                    "smart_futures entry-gate enrich id=%s: %s", r.get("id"), gate_ex
+                )
 
     for r in serialized:
         if str(r.get("order_status") or "").strip().lower() == "sold":
@@ -846,18 +1044,23 @@ def post_smart_futures_daily_sell(
             raise HTTPException(status_code=502, detail="Could not read last price from broker")
 
     sell_time_iso: Optional[str] = None
+    manual_reason_in = (body.manual_exit_reason or "").strip().lower() or None
+    if manual_reason_in is not None and manual_reason_in not in {"rules", "emotion"}:
+        manual_reason_in = manual_reason_in[:32]
     try:
         res = db.execute(
             text(
                 """
                 UPDATE smart_futures_daily
                 SET order_status = 'sold', sell_price = :ltp, sell_time = CURRENT_TIMESTAMP,
+                    manual_exit_reason = :mer,
+                    manual_exit_at = CASE WHEN :mer IS NULL THEN manual_exit_at ELSE CURRENT_TIMESTAMP END,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = :id AND LOWER(TRIM(order_status)) = 'bought'
                 RETURNING sell_price, sell_time
                 """
             ),
-            {"id": row_id, "ltp": ltp},
+            {"id": row_id, "ltp": ltp, "mer": manual_reason_in},
         )
         upd = res.mappings().first()
         if not upd:
@@ -869,7 +1072,39 @@ def post_smart_futures_daily_sell(
     except HTTPException:
         raise
     except Exception as e:
-        if _missing_db_column_error(e, "sell_time"):
+        if _missing_db_column_error(e, "manual_exit_reason") or _missing_db_column_error(
+            e, "manual_exit_at"
+        ):
+            logger.warning(
+                "smart_futures sell: manual_exit_reason missing, falling back: %s", e
+            )
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            res_legacy = db.execute(
+                text(
+                    """
+                    UPDATE smart_futures_daily
+                    SET order_status = 'sold', sell_price = :ltp, sell_time = CURRENT_TIMESTAMP,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = :id AND LOWER(TRIM(order_status)) = 'bought'
+                    RETURNING sell_price, sell_time
+                    """
+                ),
+                {"id": row_id, "ltp": ltp},
+            )
+            upd_legacy = res_legacy.mappings().first()
+            if not upd_legacy:
+                db.rollback()
+                raise HTTPException(
+                    status_code=400,
+                    detail="Could not sell — position not open or already sold",
+                )
+            st = upd_legacy.get("sell_time")
+            if st is not None and hasattr(st, "isoformat"):
+                sell_time_iso = st.isoformat()
+        elif _missing_db_column_error(e, "sell_time"):
             logger.warning("smart_futures sell: sell_time column missing, update without it: %s", e)
             try:
                 r2 = db.execute(
@@ -941,4 +1176,75 @@ def post_smart_futures_daily_sell(
         "order_status": "sold",
         "sell_price": ltp,
         "sell_time": sell_time_iso,
+        "manual_exit_reason": manual_reason_in,
+    }
+
+
+@router.get("/watchlist")
+def get_smart_futures_watchlist(
+    days: int = 3,
+    user: User = Depends(_require_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Carry-forward watch: picks that fired after the 14:00 IST cutoff but still passed the
+    reclaim-score and VWAP entry gates. Displayed on the dashboard as pre-market review items.
+
+    The list is sourced from ``smart_futures_watchlist``; the ``today_session_date`` is the
+    current effective session so the UI can highlight rows triggered on the previous session.
+    """
+    try:
+        lookback = max(1, min(int(days or 3), 30))
+    except Exception:
+        lookback = 3
+    sd = effective_session_date_ist_for_trend()
+    try:
+        rows = (
+            db.execute(
+                text(
+                    """
+                    SELECT id, trigger_date, daily_id, symbol, fut_symbol, fut_instrument_key,
+                           side, trigger_score, trigger_price, vwap_at_trigger, trigger_at,
+                           added_at, cleared_at
+                    FROM smart_futures_watchlist
+                    WHERE trigger_date >= :from_date
+                    ORDER BY trigger_date DESC, trigger_at DESC, id DESC
+                    """
+                ),
+                {"from_date": sd - timedelta(days=lookback)},
+            )
+            .mappings()
+            .all()
+        )
+    except Exception as e:
+        logger.warning("smart_futures /watchlist query failed: %s", e)
+        return {
+            "today_session_date": sd.isoformat(),
+            "rows": [],
+            "error": str(e),
+        }
+    out: List[Dict[str, Any]] = []
+    for r in rows:
+        d = dict(r)
+        for k in ("trigger_date",):
+            v = d.get(k)
+            if v is not None and hasattr(v, "isoformat"):
+                d[k] = v.isoformat()
+        for k in ("trigger_at", "added_at", "cleared_at"):
+            v = d.get(k)
+            if v is not None and hasattr(v, "isoformat"):
+                d[k] = v.isoformat()
+        for k in ("trigger_score", "trigger_price", "vwap_at_trigger"):
+            v = d.get(k)
+            if v is not None:
+                try:
+                    d[k] = float(v)
+                except (TypeError, ValueError):
+                    d[k] = None
+        out.append(d)
+    return {
+        "today_session_date": sd.isoformat(),
+        "entry_score_threshold": RECLAIM_ENTRY_SCORE_THRESHOLD,
+        "panic_score_threshold": RECLAIM_SCORE_PANIC_THRESHOLD,
+        "rows": out,
     }
