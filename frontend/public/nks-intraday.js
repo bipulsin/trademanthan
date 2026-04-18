@@ -162,6 +162,69 @@
       '">SKIPPED</span></td>';
   }
 
+  // ---------- V2 (expert, 1-lot) cell builders ------------------------------
+  function cellScore(r) {
+    const s = r.confidence_score_v2;
+    if (typeof s !== 'number') return '<td class="num">—</td>';
+    const cls = s >= 70 ? 'gate-ok' : (s >= 50 ? 'pnl-flat' : 'pnl-neg');
+    const br = r.confidence_breakdown_v2 || {};
+    const tip = 'ORB ' + (br.orb || 0) + '/25 · Stop ' + (br.stop || 0) + '/25 · VWAP slope ' +
+      (br.vwap_slope || 0) + '/20 · Vol ' + (br.volume || 0) + '/20 · Extension ' +
+      (br.extension || 0) + '/10';
+    return '<td class="num ' + cls + '" title="' + escapeHtml(tip) + '">' + s + '</td>';
+  }
+  function cellStopRupees(r) {
+    const v = r.stop_distance_rupees_v2;
+    if (typeof v !== 'number') return '<td class="num">—</td>';
+    const cls = v > 12000 ? 'pnl-neg' : (v > 8000 ? 'pnl-flat' : 'gate-ok');
+    const tip = 'Stop @ ' + fmtNum(r.stop_price_v2) + ' (OR low) · distance ' +
+      fmtNum(r.stop_distance_points_v2) + ' pts';
+    return '<td class="num ' + cls + '" title="' + escapeHtml(tip) +
+      '">₹' + Math.round(v).toLocaleString('en-IN') + '</td>';
+  }
+  function cellExit(r) {
+    if (r.decision_v2 !== 'TAKE') return '<td class="num">—</td>';
+    const at = r.realistic_exit_at_v2 || '';
+    const px = r.realistic_exit_price_v2;
+    if (at === '15:15' || at === '') {
+      return '<td title="Held to 15:15 close">15:15 @ ' + fmtNum(px) + '</td>';
+    }
+    return '<td class="pnl-neg" title="Stopped out on 15-min OR low">⛔ ' +
+      escapeHtml(at) + ' @ ' + fmtNum(px) + '</td>';
+  }
+  function cellRealPnl(r) {
+    if (r.decision_v2 !== 'TAKE') return '<td class="num">—</td>';
+    const v = r.realistic_pnl_rupees_v2;
+    return '<td class="num ' + pnlCls(v) + '">' + fmtRupees(v) + '</td>';
+  }
+  function cellSustainedDd(r) {
+    if (r.decision_v2 !== 'TAKE') return '<td class="num">—</td>';
+    const v = r.sustained_dd_rupees_v2;
+    const cls = (typeof v === 'number' && v < 0) ? 'pnl-neg' : 'pnl-flat';
+    const lo = r.sustained_low_5m_v2;
+    const at = r.sustained_low_5m_at_v2;
+    const tip = (lo != null)
+      ? ('5m low ' + fmtNum(lo) + (at ? ' at ' + at : '') + ' (vs VWAP entry ' + fmtNum(r.vwap_entry) + ')')
+      : '';
+    return '<td class="num ' + cls + '" title="' + escapeHtml(tip) + '">' + fmtRupees(v) + '</td>';
+  }
+  function cellDecisionV2(r) {
+    if (r.decision_v2 === 'TAKE') {
+      return '<td><span class="status-pill status-taken">TAKE 1 lot</span></td>';
+    }
+    const reasons = Array.isArray(r.skip_reasons_v2) ? r.skip_reasons_v2 : [];
+    const pretty = reasons.map(function (rr) {
+      if (rr === 'orb_failed') return 'ORB failed';
+      if (rr === 'stop_gt_cap') return 'Stop > ₹12k';
+      if (rr === 'no_vwap') return 'VWAP missing';
+      if (rr === 'stop_unknown') return 'Stop unknown';
+      if (rr && rr.indexOf('low_confidence') === 0) return 'Low confidence (' + rr.split('_').pop() + ')';
+      return rr;
+    }).join(', ');
+    return '<td><span class="status-pill status-skip" title="' + escapeHtml(pretty) +
+      '">SKIP</span></td>';
+  }
+
   // ---------- per-mode column specs -----------------------------------------
   // Each spec: { key, label, align?, cell(r) }
   const COLS_SAME = [
@@ -199,7 +262,23 @@
     { key: 'drawdown_points',  label: 'Max DD pts', align: 'num', cell: cellDdPts('drawdown_points') },
     { key: 'drawdown_rupees',  label: 'Max DD ₹',   align: 'num', cell: cellDdRupees('drawdown_rupees') },
   ];
-  const COLS = DAY_MODE === 'same' ? COLS_SAME : COLS_NEXT;
+  const COLS_V2 = [
+    { key: 'csv_date',                  label: 'Date',        cell: cellDate },
+    { key: 'trading_symbol',            label: 'Contract',    cell: cellContract },
+    { key: 'fut_lot_size',              label: 'Lot',         align: 'num', cell: cellLot },
+    { key: 'vwap_entry',                label: 'VWAP entry',  align: 'num', cell: cellPx('vwap_entry') },
+    { key: 'or_high_0930',              label: '15m ORH',     align: 'num', cell: cellPx('or_high_0930') },
+    { key: 'or_low_0930',               label: 'OR low',      align: 'num', cell: cellPx('or_low_0930') },
+    { key: 'stop_price_v2',             label: 'Stop',        align: 'num', cell: cellPx('stop_price_v2') },
+    { key: 'stop_distance_rupees_v2',   label: 'Stop ₹',      align: 'num', cell: cellStopRupees },
+    { key: 'confidence_score_v2',       label: 'Conf',        align: 'num', cell: cellScore },
+    { key: 'decision_v2',               label: 'Decision',    cell: cellDecisionV2 },
+    { key: 'realistic_exit_at_v2',      label: 'Exit',        cell: cellExit },
+    { key: 'realistic_pnl_rupees_v2',   label: 'PnL ₹ (real)', align: 'num', cell: cellRealPnl },
+    { key: 'sustained_dd_rupees_v2',    label: 'Sust. DD ₹',  align: 'num', cell: cellSustainedDd },
+  ];
+  const COLS = DAY_MODE === 'v2' ? COLS_V2
+            : DAY_MODE === 'same' ? COLS_SAME : COLS_NEXT;
 
   // Keys whose natural sort direction is descending (biggest moves first).
   const DESC_KEYS = new Set([
@@ -209,6 +288,7 @@
     'drawdown_points', 'drawdown_rupees',
     'drawdown_points_vwap', 'drawdown_rupees_vwap',
     'risk_rupees',
+    'confidence_score_v2', 'realistic_pnl_rupees_v2',
   ]);
 
   // ---------- network -------------------------------------------------------
@@ -230,7 +310,56 @@
   function buildSummaryMetrics(doc) {
     const s = (doc && doc.summary) || {};
     const isSame = DAY_MODE === 'same';
+    const isV2 = DAY_MODE === 'v2';
     const cards = [];
+
+    if (isV2) {
+      cards.push({ k: 'FUT rows (post-20-Mar)', v: s.total_rows != null ? s.total_rows : '—' });
+      cards.push({ k: 'TAKE (1 lot)',
+        v: s.v2_take_rows != null ? s.v2_take_rows : '—',
+        cls: 'good' });
+      cards.push({ k: 'SKIP',
+        v: s.v2_skip_rows != null ? s.v2_skip_rows : '—',
+        cls: 'bad',
+        tip: (function () {
+          const br = s.v2_skip_by_reason || {};
+          return 'ORB fail: ' + (br.orb_failed || 0) +
+            ' · Stop > ₹12k: ' + (br.stop_gt_cap || 0) +
+            ' · Low conf: ' + (br.low_confidence || 0) +
+            (br.no_vwap ? ' · No VWAP: ' + br.no_vwap : '');
+        })() });
+      cards.push({ k: 'Stopped / Held',
+        v: (s.v2_stopped_out != null ? s.v2_stopped_out : '—') + ' / ' +
+           (s.v2_held_to_close != null ? s.v2_held_to_close : '—') });
+      cards.push({ k: 'Win / Loss',
+        v: (s.v2_positive_pnl_rows != null ? s.v2_positive_pnl_rows : '—') + ' / ' +
+           (s.v2_negative_pnl_rows != null ? s.v2_negative_pnl_rows : '—') });
+      cards.push({ k: 'Σ PnL ₹ (realistic)',
+        v: fmtRupees(s.v2_sum_pnl_rupees),
+        cls: (Number(s.v2_sum_pnl_rupees) > 0 ? 'good'
+              : Number(s.v2_sum_pnl_rupees) < 0 ? 'bad' : '') });
+      cards.push({ k: 'Best trade ₹',
+        v: fmtRupees(s.v2_best_pnl_rupees),
+        cls: 'good' });
+      cards.push({ k: 'Worst trade ₹',
+        v: fmtRupees(s.v2_worst_pnl_rupees),
+        cls: (Number(s.v2_worst_pnl_rupees) < 0 ? 'bad' : '') });
+      cards.push({ k: 'Σ Sust. DD ₹ (taken)',
+        v: fmtRupees(s.v2_sum_sustained_dd_rupees),
+        cls: (Number(s.v2_sum_sustained_dd_rupees) < 0 ? 'bad' : '') });
+      cards.push({ k: 'Worst sust. DD ₹',
+        v: fmtRupees(s.v2_worst_sustained_dd_rupees),
+        cls: (Number(s.v2_worst_sustained_dd_rupees) < 0 ? 'bad' : '') });
+
+      const host = document.getElementById('summaryGrid');
+      host.innerHTML = cards.map(function (c) {
+        const tip = c.tip ? ' title="' + escapeHtml(c.tip) + '"' : '';
+        return '<div class="metric"' + tip + '><div class="k">' + escapeHtml(c.k) + '</div>' +
+          '<div class="v ' + (c.cls || '') + '">' + escapeHtml(String(c.v)) + '</div></div>';
+      }).join('');
+      return;
+    }
+
     cards.push({ k: 'Rows', v: s.total_rows != null ? s.total_rows : '—' });
     cards.push({ k: 'With prices', v: s.rows_with_prices != null ? s.rows_with_prices : '—' });
     cards.push({ k: 'FUT / EQ',
@@ -290,6 +419,8 @@
     const to = (document.getElementById('fltTo') || {}).value || '';
     const minAbs = parseFloat((document.getElementById('fltMinAbs') || {}).value);
     const status = (document.getElementById('fltStatus') || {}).value || '';
+    const decisionV2 = (document.getElementById('fltDecisionV2') || {}).value || '';
+    const minConf = parseFloat((document.getElementById('fltMinConf') || {}).value);
     return rows.filter(function (r) {
       if (src && r.source !== src) return false;
       if (slot && r.best_slot !== slot) return false;
@@ -302,6 +433,12 @@
       }
       if (status === 'taken' && r.trade_taken !== true) return false;
       if (status === 'skipped' && r.trade_taken === true) return false;
+      if (decisionV2 === 'take' && r.decision_v2 !== 'TAKE') return false;
+      if (decisionV2 === 'skip' && r.decision_v2 !== 'SKIP') return false;
+      if (Number.isFinite(minConf)) {
+        const c = Number(r.confidence_score_v2);
+        if (!Number.isFinite(c) || c < minConf) return false;
+      }
       return true;
     });
   }
@@ -344,7 +481,9 @@
       return;
     }
     tbody.innerHTML = sorted.map(function (r) {
-      const rowCls = (DAY_MODE === 'same' && r.trade_taken === false) ? ' class="row-skipped"' : '';
+      let rowCls = '';
+      if (DAY_MODE === 'same' && r.trade_taken === false) rowCls = ' class="row-skipped"';
+      else if (DAY_MODE === 'v2' && r.decision_v2 === 'SKIP') rowCls = ' class="row-skipped"';
       const cells = COLS.map(function (col) { return col.cell(r); }).join('');
       return '<tr' + rowCls + '>' + cells + '</tr>';
     }).join('');
@@ -379,7 +518,8 @@
   }
 
   function wireFilters() {
-    ['fltSource', 'fltSlot', 'fltFrom', 'fltTo', 'fltMinAbs', 'fltStatus'].forEach(function (id) {
+    ['fltSource', 'fltSlot', 'fltFrom', 'fltTo', 'fltMinAbs', 'fltStatus',
+     'fltDecisionV2', 'fltMinConf'].forEach(function (id) {
       const el = document.getElementById(id);
       if (!el) return;
       el.addEventListener('input', renderTable);
@@ -408,6 +548,11 @@
       if (doc.artifact_path) meta.push('Source: ' + doc.artifact_path);
       if (DAY_MODE === 'same' && doc.summary && doc.summary.risk_cap_rupees) {
         meta.push('Risk cap: ₹' + doc.summary.risk_cap_rupees.toLocaleString('en-IN'));
+      }
+      if (DAY_MODE === 'v2' && doc.summary) {
+        if (doc.summary.v2_stop_cap_rupees) meta.push('Stop cap: ₹' + doc.summary.v2_stop_cap_rupees.toLocaleString('en-IN'));
+        if (doc.summary.v2_confidence_min) meta.push('Min confidence: ' + doc.summary.v2_confidence_min);
+        if (doc.summary.v2_min_date) meta.push('Since: ' + doc.summary.v2_min_date);
       }
       document.getElementById('footerMeta').textContent = meta.join(' · ');
       renderTable();

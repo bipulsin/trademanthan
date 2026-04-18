@@ -28,7 +28,12 @@ router = APIRouter(tags=["nks-intraday"])
 
 
 def _candidate_paths(day: str) -> tuple[Path, ...]:
-    suffix = "_nextday" if day == "next" else ""
+    if day == "next":
+        suffix = "_nextday"
+    elif day == "v2":
+        suffix = "_v2"
+    else:
+        suffix = ""
     fname = f"nks_intraday_backtest{suffix}.json"
     return (
         Path(f"/home/ubuntu/trademanthan/data/{fname}"),
@@ -49,7 +54,7 @@ def _find_data_file(day: str) -> Optional[Path]:
 
 @router.get("/data")
 def get_nks_intraday_data(
-    day: str = Query("same", regex="^(same|next)$"),
+    day: str = Query("same", regex="^(same|next|v2)$"),
 ) -> Dict[str, Any]:
     """Return the cached NKS intraday backtest document.
 

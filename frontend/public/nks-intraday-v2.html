@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
+<title>NKS Best-Buy Intraday Futures Backtest — V2 (expert, 1-lot, FUT-only) | TradeWithCTO</title>
+<link rel="stylesheet" href="nks-intraday.css?v=6" />
+</head>
+<body data-day="v2">
+<div class="wrap">
+  <h1>NKS Best-Buy Intraday Futures Backtest — V2 (expert, 1-lot, FUT-only)</h1>
+  <div class="day-toggle" role="tablist" aria-label="Backtest mode">
+    <a href="nks-intraday.html">Same day (pro filters)</a>
+    <a href="nks-intraday-next.html">Next trading day</a>
+    <a href="nks-intraday-v2.html" class="active" aria-current="page">V2 · Expert 1-lot</a>
+  </div>
+  <p class="lede">
+    Futures-only simulation for the tradable window (CSV date ≥ <b>20-Mar-2026</b>, <b>FUT contracts only</b> — no EQ fallbacks).
+    Each trade is <b>exactly 1 lot</b>, with a real structural stop so worst-case loss is bounded — this is the honest way to
+    backtest a size-locked instrument. Entry at 10:15 IST priced at session VWAP (09:15 → 10:15); stop at the 15-minute
+    opening-range low. Exit is whichever happens first: <b>stop hit</b> or <b>15:15 close</b> (no "best slot" oracle).
+  </p>
+  <div class="callout" style="border-left-color: var(--good);">
+    <b>Hard floors — trade is SKIPPED if any fail:</b>
+    <br/>· <b>ORB pass:</b> 10:15 candle opens ≥ 15-minute OR high (09:15 → 09:30).
+    <br/>· <b>Stop affordable:</b> (VWAP entry − OR low) × lot size ≤ <b>₹12,000</b>.
+    <br/>· <b>Confidence ≥ 50 / 100</b> from the composite score below.
+  </div>
+  <div class="callout" style="border-left-color: var(--accent);">
+    <b>Confidence score (0–100):</b>
+    <br/>· <b>ORB margin</b> (25): how far 10:15 open clears OR high.
+    <br/>· <b>Stop cost</b> (25): cheaper stops score higher (best ≤ ₹3k, worst > ₹12k).
+    <br/>· <b>VWAP slope</b> (20): 09:15→09:45 VWAP vs 09:15→10:15 VWAP rising = momentum.
+    <br/>· <b>Volume buildup</b> (20): volume in 10:00–10:15 vs early-session average.
+    <br/>· <b>Not extended</b> (10): entry within 1% above OR high (not chasing a blow-off).
+  </div>
+
+  <div class="callout" id="errBanner" style="display:none;"></div>
+
+  <div class="summary" id="summaryGrid"></div>
+
+  <div class="filters">
+    <label>Decision
+      <select id="fltDecisionV2">
+        <option value="">All</option>
+        <option value="take">Take only</option>
+        <option value="skip">Skip only</option>
+      </select>
+    </label>
+    <label>Min confidence
+      <input type="number" id="fltMinConf" min="0" max="100" step="5" placeholder="0" />
+    </label>
+    <label>Date from
+      <input type="date" id="fltFrom" />
+    </label>
+    <label>Date to
+      <input type="date" id="fltTo" />
+    </label>
+    <span class="count" id="rowCount">—</span>
+  </div>
+
+  <div class="legend">
+    <span><b>Entry:</b> 10:15 IST · session VWAP 09:15 → 10:15</span>
+    <span><b>Stop:</b> 15-min OR low (09:15 → 09:30)</span>
+    <span><b>Exit:</b> stop hit (at stop price) OR 15:15 close — whichever first</span>
+    <span><b>Sustained DD:</b> min of 5-min bucket closes vs VWAP entry (ignores 1-min wicks)</span>
+    <span>Skipped rows are muted; PnL summary counts only TAKE trades.</span>
+  </div>
+
+  <div class="table-wrap">
+    <table class="data" id="resultsTable">
+      <thead><tr></tr></thead>
+      <tbody id="tbody"><tr><td class="nodata" colspan="13">Loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <p class="footer" id="footerMeta"></p>
+</div>
+<script src="nks-intraday.js?v=6"></script>
+</body>
+</html>

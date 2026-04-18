@@ -69,6 +69,20 @@ OR_RANGE_END_HHMM = (9, 30)          # 15-minute opening range (09:15 -> 09:30)
 ENTRY_HHMM = (10, 15)                # entry + ORB confirmation time
 RISK_CAP_RUPEES = 10_000.0
 
+# ---------------------------------------------------------------------------
+# V2 (expert, 1-lot discipline) -- futures-only ruleset applied on top of v1.
+# Enter 1 lot at the 10:15 VWAP *only* when the structural stop (15-min OR low)
+# keeps the worst-case loss bounded at <= STOP_CAP_RUPEES_V2 per trade AND the
+# composite confidence score >= CONF_MIN_V2. Exit on the first of:
+#   (a) 1-min candle low <= stop between 10:16 and 15:15 (stopped out @ stop),
+#   (b) 15:15 IST close (realistic end-of-day exit; no "best slot" oracle).
+# Rationale: in FUT you can't size fractionally, so a realistic stop is the
+# only honest way to cap downside and still keep enough trades on the table.
+STOP_CAP_RUPEES_V2 = 12_000.0
+CONF_MIN_V2 = 50
+FIFTEEN_MIN_EXIT_HHMM = (15, 15)
+V2_MIN_DATE = date(2026, 3, 20)  # V2 artifact only covers csv_date >= this
+
 
 @dataclass
 class InstrumentRef:
@@ -130,6 +144,25 @@ class BacktestRow:
     drawdown_rupees_vwap: Optional[float] = None     # drawdown_points_vwap * lot
     trade_taken: Optional[bool] = None               # all gates pass -> TAKEN
     skip_reasons: List[str] = field(default_factory=list)
+    # V2 (expert, 1-lot discipline) fields -------------------------------------
+    or_low_0930: Optional[float] = None              # 15-minute OR low (09:15 -> 09:30)
+    stop_price_v2: Optional[float] = None            # structural stop (= OR low)
+    stop_distance_points_v2: Optional[float] = None  # vwap_entry - stop_price
+    stop_distance_rupees_v2: Optional[float] = None  # stop_distance_points * lot
+    stopped_out_v2: Optional[bool] = None            # stop got hit intraday
+    stop_hit_at_v2: Optional[str] = None             # HH:MM of the stop hit
+    realistic_exit_price_v2: Optional[float] = None  # stop price or 15:15 close
+    realistic_exit_at_v2: Optional[str] = None       # HH:MM ("stop" event or 15:15)
+    realistic_pnl_points_v2: Optional[float] = None  # exit - vwap_entry
+    realistic_pnl_rupees_v2: Optional[float] = None  # * lot
+    sustained_low_5m_v2: Optional[float] = None      # min of 5m-bucket closes after 10:15
+    sustained_low_5m_at_v2: Optional[str] = None
+    sustained_dd_points_v2: Optional[float] = None   # sustained_low - vwap_entry
+    sustained_dd_rupees_v2: Optional[float] = None
+    confidence_score_v2: Optional[int] = None        # 0..100
+    confidence_breakdown_v2: Dict[str, int] = field(default_factory=dict)
+    decision_v2: Optional[str] = None                # "TAKE" or "SKIP"
+    skip_reasons_v2: List[str] = field(default_factory=list)
     error: Optional[str] = None
     notes: List[str] = field(default_factory=list)
 
@@ -172,6 +205,24 @@ class BacktestRow:
             "drawdown_rupees_vwap": self.drawdown_rupees_vwap,
             "trade_taken": self.trade_taken,
             "skip_reasons": self.skip_reasons,
+            "or_low_0930": self.or_low_0930,
+            "stop_price_v2": self.stop_price_v2,
+            "stop_distance_points_v2": self.stop_distance_points_v2,
+            "stop_distance_rupees_v2": self.stop_distance_rupees_v2,
+            "stopped_out_v2": self.stopped_out_v2,
+            "stop_hit_at_v2": self.stop_hit_at_v2,
+            "realistic_exit_price_v2": self.realistic_exit_price_v2,
+            "realistic_exit_at_v2": self.realistic_exit_at_v2,
+            "realistic_pnl_points_v2": self.realistic_pnl_points_v2,
+            "realistic_pnl_rupees_v2": self.realistic_pnl_rupees_v2,
+            "sustained_low_5m_v2": self.sustained_low_5m_v2,
+            "sustained_low_5m_at_v2": self.sustained_low_5m_at_v2,
+            "sustained_dd_points_v2": self.sustained_dd_points_v2,
+            "sustained_dd_rupees_v2": self.sustained_dd_rupees_v2,
+            "confidence_score_v2": self.confidence_score_v2,
+            "confidence_breakdown_v2": self.confidence_breakdown_v2,
+            "decision_v2": self.decision_v2,
+            "skip_reasons_v2": self.skip_reasons_v2,
             "error": self.error,
             "notes": self.notes,
         }
@@ -475,6 +526,104 @@ def _range_high(
     return best
 
 
+def _range_low(
+    buckets: Dict[Tuple[int, int], Dict[str, Any]],
+    start_hhmm: Tuple[int, int],
+    end_hhmm: Tuple[int, int],
+) -> Optional[float]:
+    """Minimum ``low`` across candles in the inclusive HH:MM window."""
+    best: Optional[float] = None
+    for (h, m), c in buckets.items():
+        if (h, m) < start_hhmm or (h, m) > end_hhmm:
+            continue
+        _, _, lo, _, _ = _candle_ohlcv(c)
+        if lo is None or lo <= 0:
+            continue
+        if best is None or lo < best:
+            best = lo
+    return best
+
+
+def _range_volume_sum(
+    buckets: Dict[Tuple[int, int], Dict[str, Any]],
+    start_hhmm: Tuple[int, int],
+    end_hhmm: Tuple[int, int],
+) -> float:
+    """Sum of ``volume`` across candles in the inclusive HH:MM window."""
+    total = 0.0
+    for (h, m), c in buckets.items():
+        if (h, m) < start_hhmm or (h, m) > end_hhmm:
+            continue
+        _, _, _, _, v = _candle_ohlcv(c)
+        if v is None or v <= 0:
+            continue
+        total += float(v)
+    return total
+
+
+def _first_stop_hit(
+    buckets: Dict[Tuple[int, int], Dict[str, Any]],
+    start_hhmm: Tuple[int, int],
+    end_hhmm: Tuple[int, int],
+    stop_price: float,
+) -> Optional[Tuple[int, int]]:
+    """Return the HH:MM of the first 1-minute candle *after* start_hhmm whose
+    low is at/below ``stop_price`` (up to and including end_hhmm). The start
+    candle itself is skipped because that's the entry candle -- an expert
+    trader would take the fill at the entry's open, not be stopped out on the
+    same bar. ``None`` when the stop is never touched.
+    """
+    hits: List[Tuple[int, int]] = []
+    for (h, m), c in buckets.items():
+        if (h, m) <= start_hhmm:
+            continue
+        if (h, m) > end_hhmm:
+            continue
+        _, _, lo, _, _ = _candle_ohlcv(c)
+        if lo is None or lo <= 0:
+            continue
+        if lo <= stop_price:
+            hits.append((h, m))
+    if not hits:
+        return None
+    hits.sort()
+    return hits[0]
+
+
+def _sustained_5m_low_from(
+    buckets: Dict[Tuple[int, int], Dict[str, Any]],
+    start_hhmm: Tuple[int, int],
+    end_hhmm: Optional[Tuple[int, int]] = None,
+) -> Tuple[Optional[float], Optional[Tuple[int, int]]]:
+    """Return the minimum of 5-minute *bucket closes* after ``start_hhmm``. A
+    5-min bucket close better captures sustained pressure than a 1-min low
+    (which can be a single-tick wick). Returned HH:MM is the close time of
+    the bucket containing the minimum.
+    """
+    # Aggregate 1-min candles into 5-min buckets (start-of-bucket key).
+    buckets_5m: Dict[Tuple[int, int], List[Tuple[Tuple[int, int], Dict[str, Any]]]] = {}
+    for (h, m), c in buckets.items():
+        if (h, m) < start_hhmm:
+            continue
+        if end_hhmm is not None and (h, m) > end_hhmm:
+            continue
+        floor_m = (m // 5) * 5
+        buckets_5m.setdefault((h, floor_m), []).append(((h, m), c))
+
+    best: Optional[float] = None
+    best_at: Optional[Tuple[int, int]] = None
+    for key in sorted(buckets_5m.keys()):
+        rows = sorted(buckets_5m[key], key=lambda x: x[0])
+        _, _, _, cl, _ = _candle_ohlcv(rows[-1][1])
+        if cl is None or cl <= 0:
+            continue
+        if best is None or cl < best:
+            best = cl
+            # Close time of the bucket = last 1-min candle in the bucket.
+            best_at = rows[-1][0]
+    return best, best_at
+
+
 def _session_vwap_upto(
     buckets: Dict[Tuple[int, int], Dict[str, Any]],
     start_hhmm: Tuple[int, int],
@@ -712,6 +861,166 @@ def compute_backtest_row(
         reasons.append("orb_unknown")
     br.skip_reasons = reasons
     br.trade_taken = bool(not reasons)
+
+    # -- V2 (expert, 1-lot discipline) ---------------------------------------
+    # Compute regardless of v1 outcome; the v2 artifact is filtered to the
+    # FUT-only / post-20-Mar slice at the script layer.
+    or_low = _range_low(buckets, MARKET_OPEN_HHMM, OR_RANGE_END_HHMM)
+    if or_low is not None:
+        br.or_low_0930 = round(float(or_low), 2)
+        br.stop_price_v2 = br.or_low_0930
+
+    lot = int(br.fut_lot_size or 0) or None
+
+    stop_dist_pts: Optional[float] = None
+    stop_dist_rs: Optional[float] = None
+    if vwap_entry is not None and or_low is not None:
+        stop_dist_pts = float(vwap_entry) - float(or_low)
+        br.stop_distance_points_v2 = round(stop_dist_pts, 2)
+        if lot:
+            stop_dist_rs = stop_dist_pts * lot
+            br.stop_distance_rupees_v2 = round(stop_dist_rs, 2)
+
+    # 15:15 close price (the natural end-of-day exit).
+    eod_candle = buckets.get(FIFTEEN_MIN_EXIT_HHMM)
+    eod_close: Optional[float] = None
+    if eod_candle is not None:
+        _, _, _, _cl, _ = _candle_ohlcv(eod_candle)
+        if _cl is not None and _cl > 0:
+            eod_close = float(_cl)
+    # Fallback: use price_1515 (open at 15:15) if close isn't available.
+    if eod_close is None and p1515 is not None:
+        eod_close = float(p1515)
+
+    # Realistic exit: first of (stop hit between 10:16 and 15:15) or (15:15).
+    if vwap_entry is not None and or_low is not None:
+        stop_hit_at = _first_stop_hit(buckets, ENTRY_HHMM, FIFTEEN_MIN_EXIT_HHMM, float(or_low))
+        if stop_hit_at is not None:
+            br.stopped_out_v2 = True
+            br.stop_hit_at_v2 = f"{stop_hit_at[0]:02d}:{stop_hit_at[1]:02d}"
+            br.realistic_exit_price_v2 = round(float(or_low), 2)
+            br.realistic_exit_at_v2 = br.stop_hit_at_v2
+            exit_pts = float(or_low) - float(vwap_entry)
+        elif eod_close is not None:
+            br.stopped_out_v2 = False
+            br.realistic_exit_price_v2 = round(float(eod_close), 2)
+            br.realistic_exit_at_v2 = "15:15"
+            exit_pts = float(eod_close) - float(vwap_entry)
+        else:
+            exit_pts = None  # type: ignore[assignment]
+
+        if exit_pts is not None:  # type: ignore[comparison-overlap]
+            br.realistic_pnl_points_v2 = round(float(exit_pts), 2)
+            if lot:
+                br.realistic_pnl_rupees_v2 = round(float(exit_pts) * lot, 2)
+
+    # Sustained drawdown (5-min bucket closes after 10:15, vs VWAP entry).
+    sus_low, sus_at = _sustained_5m_low_from(buckets, ENTRY_HHMM, FIFTEEN_MIN_EXIT_HHMM)
+    if sus_low is not None:
+        br.sustained_low_5m_v2 = round(float(sus_low), 2)
+        if sus_at is not None:
+            br.sustained_low_5m_at_v2 = f"{sus_at[0]:02d}:{sus_at[1]:02d}"
+        if vwap_entry is not None:
+            sd_pts = float(sus_low) - float(vwap_entry)
+            br.sustained_dd_points_v2 = round(sd_pts, 2)
+            if lot:
+                br.sustained_dd_rupees_v2 = round(sd_pts * lot, 2)
+
+    # Confidence score (0..100). Each sub-score is independent; sum + clamp.
+    breakdown: Dict[str, int] = {"orb": 0, "stop": 0, "vwap_slope": 0,
+                                 "volume": 0, "extension": 0}
+
+    # 1. ORB margin (0..25): how comfortably 10:15 > OR high.
+    if orh is not None and br.orb_price_at_1015 is not None:
+        margin_pct = (float(br.orb_price_at_1015) - float(orh)) / float(orh) * 100.0
+        if margin_pct >= 0.50:
+            breakdown["orb"] = 25
+        elif margin_pct >= 0.25:
+            breakdown["orb"] = 20
+        elif margin_pct >= 0.10:
+            breakdown["orb"] = 15
+        elif margin_pct >= 0.0:
+            breakdown["orb"] = 10
+        else:
+            breakdown["orb"] = 0
+
+    # 2. Stop-distance cost (0..25): smaller rupee stop = higher score.
+    if stop_dist_rs is not None:
+        if stop_dist_rs <= 3_000:
+            breakdown["stop"] = 25
+        elif stop_dist_rs <= 5_000:
+            breakdown["stop"] = 22
+        elif stop_dist_rs <= 8_000:
+            breakdown["stop"] = 16
+        elif stop_dist_rs <= 12_000:
+            breakdown["stop"] = 8
+        else:
+            breakdown["stop"] = 0
+
+    # 3. VWAP slope (0..20): session VWAP 09:15 -> 09:45 vs 09:15 -> 10:15.
+    vwap_early = _session_vwap_upto(buckets, MARKET_OPEN_HHMM, ANCHOR_HHMM)
+    if vwap_early is not None and vwap_entry is not None:
+        if float(vwap_entry) > float(vwap_early):
+            slope_pct = (float(vwap_entry) - float(vwap_early)) / float(vwap_early) * 100.0
+            if slope_pct >= 0.50:
+                breakdown["vwap_slope"] = 20
+            elif slope_pct >= 0.25:
+                breakdown["vwap_slope"] = 15
+            elif slope_pct >= 0.10:
+                breakdown["vwap_slope"] = 10
+            else:
+                breakdown["vwap_slope"] = 5
+
+    # 4. Volume buildup (0..20): 10:00-10:15 sum vs 09:15-09:45 avg-per-30min
+    #    (scaled to 15 min for a fair comparison). Rising volume into entry
+    #    = engagement, stronger conviction.
+    vol_early = _range_volume_sum(buckets, MARKET_OPEN_HHMM, ANCHOR_HHMM)  # 30 min
+    vol_late = _range_volume_sum(buckets, (10, 0), (10, 14))               # 15 min
+    if vol_early > 0 and vol_late > 0:
+        ratio = vol_late / (vol_early / 2.0)   # normalise early to 15 min
+        if ratio >= 1.50:
+            breakdown["volume"] = 20
+        elif ratio >= 1.10:
+            breakdown["volume"] = 14
+        elif ratio >= 0.80:
+            breakdown["volume"] = 8
+        else:
+            breakdown["volume"] = 0
+
+    # 5. Not-too-extended (0..10): entry VWAP is not more than 1% above ORH.
+    if orh is not None and vwap_entry is not None:
+        ext = (float(vwap_entry) - float(orh)) / float(orh) * 100.0
+        if ext <= 0.25:
+            breakdown["extension"] = 10
+        elif ext <= 0.60:
+            breakdown["extension"] = 6
+        elif ext <= 1.00:
+            breakdown["extension"] = 3
+        else:
+            breakdown["extension"] = 0
+
+    score = int(sum(breakdown.values()))
+    if score > 100:
+        score = 100
+    br.confidence_score_v2 = score
+    br.confidence_breakdown_v2 = breakdown
+
+    # V2 decision. Hard floors: ORB pass + stop rupees <= cap + non-null VWAP.
+    # Soft gate: confidence >= CONF_MIN_V2.
+    v2_reasons: List[str] = []
+    if vwap_entry is None:
+        v2_reasons.append("no_vwap")
+    if br.orb_pass is not True:
+        v2_reasons.append("orb_failed")
+    if stop_dist_rs is None:
+        v2_reasons.append("stop_unknown")
+    elif stop_dist_rs > STOP_CAP_RUPEES_V2:
+        v2_reasons.append("stop_gt_cap")
+    if score < CONF_MIN_V2:
+        v2_reasons.append(f"low_confidence_{score}")
+    br.skip_reasons_v2 = v2_reasons
+    br.decision_v2 = "TAKE" if not v2_reasons else "SKIP"
+
     return br
 
 
@@ -804,6 +1113,24 @@ def build_output_document(
     sum_taken_pnl_rupees = 0.0
     sum_taken_dd_rupees = 0.0
     worst_taken_dd_rupees: Optional[float] = None
+    # --- V2 (expert, 1-lot) aggregates -----------------------------------
+    v2_take = v2_skip = 0
+    v2_skip_by_reason: Dict[str, int] = {
+        "orb_failed": 0,
+        "stop_gt_cap": 0,
+        "no_vwap": 0,
+        "stop_unknown": 0,
+        "low_confidence": 0,
+        "other": 0,
+    }
+    v2_stopped = v2_held_to_close = 0
+    v2_pos_pnl = v2_neg_pnl = 0
+    v2_sum_pnl_rupees = 0.0
+    v2_worst_pnl_rupees: Optional[float] = None
+    v2_best_pnl_rupees: Optional[float] = None
+    v2_sum_sustained_dd_rupees = 0.0
+    v2_worst_sustained_dd_rupees: Optional[float] = None
+    v2_score_bucket: Dict[str, int] = {"<50": 0, "50-69": 0, "70-84": 0, "85+": 0}
     for r in results:
         slot = r.get("best_slot")
         if slot in slot_wins:
@@ -848,6 +1175,52 @@ def build_output_document(
                     skip_by_reason[rsn] += 1
                 else:
                     skip_by_reason["other"] += 1
+
+        # --- V2 aggregation ----------------------------------------------
+        score = r.get("confidence_score_v2")
+        if isinstance(score, (int, float)):
+            sc = int(score)
+            if sc < 50:
+                v2_score_bucket["<50"] += 1
+            elif sc < 70:
+                v2_score_bucket["50-69"] += 1
+            elif sc < 85:
+                v2_score_bucket["70-84"] += 1
+            else:
+                v2_score_bucket["85+"] += 1
+        dec = r.get("decision_v2")
+        if dec == "TAKE":
+            v2_take += 1
+            if r.get("stopped_out_v2") is True:
+                v2_stopped += 1
+            else:
+                v2_held_to_close += 1
+            pnl_r_v2 = r.get("realistic_pnl_rupees_v2")
+            if isinstance(pnl_r_v2, (int, float)):
+                v2_sum_pnl_rupees += float(pnl_r_v2)
+                if pnl_r_v2 > 0:
+                    v2_pos_pnl += 1
+                elif pnl_r_v2 < 0:
+                    v2_neg_pnl += 1
+                if v2_worst_pnl_rupees is None or pnl_r_v2 < v2_worst_pnl_rupees:
+                    v2_worst_pnl_rupees = float(pnl_r_v2)
+                if v2_best_pnl_rupees is None or pnl_r_v2 > v2_best_pnl_rupees:
+                    v2_best_pnl_rupees = float(pnl_r_v2)
+            sdd = r.get("sustained_dd_rupees_v2")
+            if isinstance(sdd, (int, float)):
+                v2_sum_sustained_dd_rupees += float(sdd)
+                if v2_worst_sustained_dd_rupees is None or sdd < v2_worst_sustained_dd_rupees:
+                    v2_worst_sustained_dd_rupees = float(sdd)
+        elif dec == "SKIP":
+            v2_skip += 1
+            for rsn in (r.get("skip_reasons_v2") or []):
+                key = rsn
+                if rsn.startswith("low_confidence"):
+                    key = "low_confidence"
+                if key in v2_skip_by_reason:
+                    v2_skip_by_reason[key] += 1
+                else:
+                    v2_skip_by_reason["other"] += 1
     return {
         "generated_at": datetime.now(IST).isoformat(),
         "day_mode": day_mode,
@@ -882,6 +1255,30 @@ def build_output_document(
                 if worst_taken_dd_rupees is not None else None
             ),
             "risk_cap_rupees": RISK_CAP_RUPEES,
+            # V2 (expert, 1-lot) metrics --------------------------------------
+            "v2_take_rows": v2_take,
+            "v2_skip_rows": v2_skip,
+            "v2_skip_by_reason": v2_skip_by_reason,
+            "v2_stopped_out": v2_stopped,
+            "v2_held_to_close": v2_held_to_close,
+            "v2_positive_pnl_rows": v2_pos_pnl,
+            "v2_negative_pnl_rows": v2_neg_pnl,
+            "v2_sum_pnl_rupees": round(v2_sum_pnl_rupees, 2),
+            "v2_worst_pnl_rupees": (
+                round(v2_worst_pnl_rupees, 2) if v2_worst_pnl_rupees is not None else None
+            ),
+            "v2_best_pnl_rupees": (
+                round(v2_best_pnl_rupees, 2) if v2_best_pnl_rupees is not None else None
+            ),
+            "v2_sum_sustained_dd_rupees": round(v2_sum_sustained_dd_rupees, 2),
+            "v2_worst_sustained_dd_rupees": (
+                round(v2_worst_sustained_dd_rupees, 2)
+                if v2_worst_sustained_dd_rupees is not None else None
+            ),
+            "v2_score_distribution": v2_score_bucket,
+            "v2_stop_cap_rupees": STOP_CAP_RUPEES_V2,
+            "v2_confidence_min": CONF_MIN_V2,
+            "v2_min_date": V2_MIN_DATE.isoformat(),
         },
         "rows": results,
     }
