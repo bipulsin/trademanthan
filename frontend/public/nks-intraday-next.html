@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>NKS Best-Buy Intraday Futures Backtest — Next Trading Day | TradeWithCTO</title>
-<link rel="stylesheet" href="nks-intraday.css?v=2" />
+<link rel="stylesheet" href="nks-intraday.css?v=3" />
 </head>
 <body data-day="next">
 <div class="wrap">
@@ -64,6 +64,8 @@
     <span><b>Slots:</b> 12:30, 14:00, 15:15 on next trading day</span>
     <span><b>PnL pts</b> = signed price move from 09:45 to the best slot</span>
     <span><b>PnL ₹</b> = PnL pts × current FUT lot size</span>
+    <span><b>Max DD pts</b> = lowest traded price after 09:45 − 09:45 price</span>
+    <span><b>Max DD ₹</b> = Max DD pts × current FUT lot size (hover for low &amp; time)</span>
   </div>
 
   <div class="table-wrap">
@@ -82,14 +84,16 @@
           <th data-key="best_slot">Best slot</th>
           <th data-key="best_diff_points" class="num">PnL pts</th>
           <th data-key="pnl_rupees" class="num">PnL ₹</th>
+          <th data-key="drawdown_points" class="num">Max DD pts</th>
+          <th data-key="drawdown_rupees" class="num">Max DD ₹</th>
         </tr>
       </thead>
-      <tbody id="tbody"><tr><td class="nodata" colspan="11">Loading…</td></tr></tbody>
+      <tbody id="tbody"><tr><td class="nodata" colspan="13">Loading…</td></tr></tbody>
     </table>
   </div>
 
   <p class="footer" id="footerMeta"></p>
 </div>
-<script src="nks-intraday.js?v=2"></script>
+<script src="nks-intraday.js?v=3"></script>
 </body>
 </html>

@@ -55,7 +55,7 @@ def _emit(rows, out_path: Path, mode: str, throttle: float, log) -> int:
     tmp.replace(out_path)
     s = doc["summary"]
     log.info(
-        "[%s] wrote %s rows to %s (fut=%s eq=%s with_prices=%s Σpts=%s Σ₹=%s)",
+        "[%s] wrote %s rows to %s (fut=%s eq=%s with_prices=%s Σpts=%s Σ₹=%s Σdd_pts=%s Σdd₹=%s worst_dd₹=%s)",
         mode,
         s["total_rows"],
         out_path,
@@ -64,6 +64,9 @@ def _emit(rows, out_path: Path, mode: str, throttle: float, log) -> int:
         s["rows_with_prices"],
         s["sum_pnl_points"],
         s["sum_pnl_rupees"],
+        s.get("sum_drawdown_points"),
+        s.get("sum_drawdown_rupees"),
+        s.get("worst_drawdown_rupees"),
     )
     return s["total_rows"]
 

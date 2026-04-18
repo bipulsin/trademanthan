@@ -88,6 +88,16 @@
         v: fmtRupees(s.sum_pnl_rupees),
         cls: (Number(s.sum_pnl_rupees) > 0 ? 'good' : (Number(s.sum_pnl_rupees) < 0 ? 'bad' : '')),
       },
+      {
+        k: 'Σ Max DD ₹',
+        v: fmtRupees(s.sum_drawdown_rupees),
+        cls: (Number(s.sum_drawdown_rupees) < 0 ? 'bad' : ''),
+      },
+      {
+        k: 'Worst DD ₹',
+        v: fmtRupees(s.worst_drawdown_rupees),
+        cls: (Number(s.worst_drawdown_rupees) < 0 ? 'bad' : ''),
+      },
     ];
     const host = document.getElementById('summaryGrid');
     host.innerHTML = cards.map(function (c) {
@@ -138,7 +148,7 @@
     document.getElementById('rowCount').textContent =
       filtered.length + ' of ' + state.all.length + ' rows';
     const tbody = document.getElementById('tbody');
-    const colspan = DAY_MODE === 'next' ? 11 : 10;
+    const colspan = DAY_MODE === 'next' ? 13 : 12;
     if (!sorted.length) {
       tbody.innerHTML = '<tr><td class="nodata" colspan="' + colspan + '">No rows match the current filters.</td></tr>';
       return;
@@ -160,6 +170,15 @@
       const pnlR = r.pnl_rupees;
       const pnlRCls = (typeof pnlR === 'number' && pnlR > 0) ? 'pnl-pos'
         : (typeof pnlR === 'number' && pnlR < 0) ? 'pnl-neg' : 'pnl-flat';
+      const ddP = r.drawdown_points;
+      const ddPCls = (typeof ddP === 'number' && ddP < 0) ? 'pnl-neg' : 'pnl-flat';
+      const ddPText = (typeof ddP === 'number')
+        ? ((ddP > 0 ? '+' : '') + fmtNum(ddP, 2)) : '—';
+      const ddR = r.drawdown_rupees;
+      const ddRCls = (typeof ddR === 'number' && ddR < 0) ? 'pnl-neg' : 'pnl-flat';
+      const ddTooltip = (r.min_price != null)
+        ? ('Low ' + fmtNum(r.min_price) + (r.min_price_at ? ' at ' + r.min_price_at : ''))
+        : '';
       const errNote = r.error ? '<div class="err-note">' + escapeHtml(r.error) + '</div>' : '';
       const sessionCell = DAY_MODE === 'next'
         ? '<td>' + escapeHtml(fmtDate(r.session_date)) + '</td>'
@@ -178,6 +197,8 @@
         '<td>' + slotHtml + '</td>' +
         '<td class="num ' + pnlCls + '">' + pnlText + '</td>' +
         '<td class="num ' + pnlRCls + '">' + fmtRupees(pnlR) + '</td>' +
+        '<td class="num ' + ddPCls + '" title="' + escapeHtml(ddTooltip) + '">' + ddPText + '</td>' +
+        '<td class="num ' + ddRCls + '" title="' + escapeHtml(ddTooltip) + '">' + fmtRupees(ddR) + '</td>' +
         '</tr>';
     }).join('');
   }
@@ -203,7 +224,8 @@
         } else {
           state.sort.key = k;
           state.sort.dir = (k === 'csv_date' || k === 'session_date' || k === 'best_abs_diff'
-            || k === 'pnl_rupees' || k === 'best_diff_points') ? 'desc' : 'asc';
+            || k === 'pnl_rupees' || k === 'best_diff_points'
+            || k === 'drawdown_points' || k === 'drawdown_rupees') ? 'desc' : 'asc';
         }
         updateSortHeaders();
         renderTable();
@@ -244,7 +266,7 @@
     } catch (e) {
       showError('Could not load backtest artifact: ' + (e.message || e) +
         ' — Run `python3 backend/scripts/run_nks_intraday_backtest.py --mode both` on the server to generate it.');
-      const colspan = DAY_MODE === 'next' ? 11 : 10;
+      const colspan = DAY_MODE === 'next' ? 13 : 12;
       document.getElementById('tbody').innerHTML =
         '<tr><td class="nodata" colspan="' + colspan + '">Backtest data not yet available.</td></tr>';
     }

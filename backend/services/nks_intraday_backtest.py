@@ -90,6 +90,14 @@ class BacktestRow:
     best_diff_points: Optional[float] = None
     best_abs_diff: Optional[float] = None
     pnl_rupees: Optional[float] = None
+    # Max intraday drawdown: lowest traded price from 09:45 onward minus
+    # the 09:45 price (so drawdown_points <= 0 in practice). Rupee amount is
+    # drawdown_points * fut_lot_size. ``min_price_at`` is the HH:MM of the
+    # minute-candle whose ``low`` produced the minimum (for UI tooltip).
+    min_price: Optional[float] = None
+    min_price_at: Optional[str] = None
+    drawdown_points: Optional[float] = None
+    drawdown_rupees: Optional[float] = None
     error: Optional[str] = None
     notes: List[str] = field(default_factory=list)
 
@@ -114,6 +122,10 @@ class BacktestRow:
             "best_diff_points": self.best_diff_points,
             "best_abs_diff": self.best_abs_diff,
             "pnl_rupees": self.pnl_rupees,
+            "min_price": self.min_price,
+            "min_price_at": self.min_price_at,
+            "drawdown_points": self.drawdown_points,
+            "drawdown_rupees": self.drawdown_rupees,
             "error": self.error,
             "notes": self.notes,
         }
@@ -351,6 +363,44 @@ def _bucket_candles_by_hhmm(
     return out
 
 
+def _intraday_min_low_from(
+    buckets: Dict[Tuple[int, int], Dict[str, Any]],
+    start_hhmm: Tuple[int, int],
+) -> Tuple[Optional[float], Optional[Tuple[int, int]]]:
+    """Return the lowest candle ``low`` observed at or after ``start_hhmm``,
+    together with the HH:MM of the candle that produced it. Candles are keyed
+    by their start-of-minute timestamp.
+
+    Upstox V2 minute candles expose OHLC as a list ``[ts, o, h, l, c, v, ...]``
+    or as a dict with ``open/high/low/close``; we tolerate both.
+    """
+    def _low_of(c: Any) -> Optional[float]:
+        if isinstance(c, dict):
+            v = c.get("low")
+        elif isinstance(c, (list, tuple)) and len(c) >= 4:
+            v = c[3]
+        else:
+            v = None
+        try:
+            vf = float(v)
+            return vf if vf > 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    best_low: Optional[float] = None
+    best_at: Optional[Tuple[int, int]] = None
+    for (h, m), c in buckets.items():
+        if (h, m) < start_hhmm:
+            continue
+        lo = _low_of(c)
+        if lo is None:
+            continue
+        if best_low is None or lo < best_low:
+            best_low = lo
+            best_at = (h, m)
+    return best_low, best_at
+
+
 def fetch_intraday_1m_candles(
     upstox: UpstoxService, instrument_key: str, session_date: date
 ) -> Optional[List[Dict[str, Any]]]:
@@ -472,6 +522,19 @@ def compute_backtest_row(
     br.best_abs_diff = round(best_abs, 2) if best_abs is not None else None
     if best_signed is not None and br.fut_lot_size:
         br.pnl_rupees = round(float(best_signed) * int(br.fut_lot_size), 2)
+
+    # Intraday max drawdown from the 09:45 anchor: use the minimum ``low`` of
+    # any 1m candle from 09:45 IST onward. Drawdown_points is signed; it will
+    # be 0 only if 09:45 itself was the lowest traded price of the session.
+    min_low, min_at = _intraday_min_low_from(buckets, ANCHOR_HHMM)
+    if min_low is not None:
+        br.min_price = round(float(min_low), 2)
+        if min_at is not None:
+            br.min_price_at = f"{min_at[0]:02d}:{min_at[1]:02d}"
+        dd_pts = float(min_low) - float(p0945)
+        br.drawdown_points = round(dd_pts, 2)
+        if br.fut_lot_size:
+            br.drawdown_rupees = round(dd_pts * int(br.fut_lot_size), 2)
     return br
 
 
@@ -550,6 +613,9 @@ def build_output_document(
     pos_pnl = neg_pnl = 0
     sum_pnl = 0.0
     sum_pnl_rupees = 0.0
+    sum_dd_points = 0.0
+    sum_dd_rupees = 0.0
+    worst_dd_rupees: Optional[float] = None
     for r in results:
         slot = r.get("best_slot")
         if slot in slot_wins:
@@ -564,6 +630,14 @@ def build_output_document(
         pnl_r = r.get("pnl_rupees")
         if isinstance(pnl_r, (int, float)):
             sum_pnl_rupees += float(pnl_r)
+        dd_p = r.get("drawdown_points")
+        if isinstance(dd_p, (int, float)):
+            sum_dd_points += float(dd_p)
+        dd_r = r.get("drawdown_rupees")
+        if isinstance(dd_r, (int, float)):
+            sum_dd_rupees += float(dd_r)
+            if worst_dd_rupees is None or dd_r < worst_dd_rupees:
+                worst_dd_rupees = float(dd_r)
     return {
         "generated_at": datetime.now(IST).isoformat(),
         "day_mode": day_mode,
@@ -580,6 +654,11 @@ def build_output_document(
             "negative_pnl_rows": neg_pnl,
             "sum_pnl_points": round(sum_pnl, 2),
             "sum_pnl_rupees": round(sum_pnl_rupees, 2),
+            "sum_drawdown_points": round(sum_dd_points, 2),
+            "sum_drawdown_rupees": round(sum_dd_rupees, 2),
+            "worst_drawdown_rupees": (
+                round(worst_dd_rupees, 2) if worst_dd_rupees is not None else None
+            ),
         },
         "rows": results,
     }
