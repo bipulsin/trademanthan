@@ -53,17 +53,20 @@ SLOT_LABELS: Dict[Tuple[int, int], str] = {
 FRONT_MONTH_MAX_FORWARD_DAYS = 45
 
 # Pro-grade entry filters (applied on top of the raw backtest):
-# 1. VWAP entry: the simulated entry price is the session VWAP at 09:45 IST
-#    (typical-price * volume, anchored to 09:15), not the 09:45 open.
-# 2. Risk cap: skip the trade when (vwap_entry - day_low) * fut_lot_size
-#    exceeds this rupee threshold. The measure uses the intraday low from
-#    09:45 onward (worst-case drawdown from the simulated entry).
-# 3. Opening-range-breakout (ORB) confirmation: the opening range high is
-#    the max high between 09:15 and 09:45 inclusive; the trade is confirmed
-#    only if the 1-minute candle lows between 09:46 and 10:00 inclusive all
-#    stay at/above that level AND the 10:00 candle opens at/above it.
+# 1. VWAP entry: the simulated long entry happens at 10:15 IST, priced at
+#    the session VWAP computed from 09:15 through 10:15 (typical-price * V,
+#    cumulative). This keeps the entry close to the volume-weighted average
+#    while waiting for the breakout to confirm.
+# 2. Risk cap: skip the trade when the worst-case drawdown from the VWAP
+#    entry to the lowest traded price FROM 10:15 ONWARDS, priced per-lot,
+#    exceeds this rupee threshold. Only the post-entry window is counted.
+# 3. Opening-range-breakout (ORB) confirmation: the classical 15-minute
+#    opening range high is the max high from 09:15 through 09:30 inclusive;
+#    the trade is confirmed only when the 10:15 candle opens at/above that
+#    level (i.e. the breakout is still holding at the 10:15 entry check).
 MARKET_OPEN_HHMM = (9, 15)
-ORB_CONFIRM_HHMM = (10, 0)
+OR_RANGE_END_HHMM = (9, 30)          # 15-minute opening range (09:15 -> 09:30)
+ENTRY_HHMM = (10, 15)                # entry + ORB confirmation time
 RISK_CAP_RUPEES = 10_000.0
 
 
@@ -113,16 +116,17 @@ class BacktestRow:
     drawdown_points: Optional[float] = None
     drawdown_rupees: Optional[float] = None
     # Pro-grade filter fields --------------------------------------------------
-    vwap_0945: Optional[float] = None                # session VWAP at 09:45 IST
-    or_high_0945: Optional[float] = None             # opening range high (09:15 -> 09:45 incl)
-    orb_confirm_min_low: Optional[float] = None      # min low (09:46 -> 10:00 incl)
-    orb_price_at_1000: Optional[float] = None        # 10:00 candle open
-    orb_pass: Optional[bool] = None                  # ORB confirmation gate
-    risk_rupees: Optional[float] = None              # (vwap_entry - day_low) * lot
+    vwap_entry: Optional[float] = None               # session VWAP 09:15 -> 10:15
+    or_high_0930: Optional[float] = None             # 15-minute OR high (09:15 -> 09:30)
+    orb_price_at_1015: Optional[float] = None        # 10:15 candle open (entry time)
+    orb_pass: Optional[bool] = None                  # 10:15 price >= OR high
+    min_price_from_entry: Optional[float] = None     # min low from 10:15 onward
+    min_price_from_entry_at: Optional[str] = None    # HH:MM of that low
+    risk_rupees: Optional[float] = None              # (vwap_entry - min_from_entry) * lot
     risk_pass: Optional[bool] = None                 # risk_rupees <= RISK_CAP_RUPEES
     pnl_points_vwap: Optional[float] = None          # best_slot_price - vwap_entry
     pnl_rupees_vwap: Optional[float] = None          # pnl_points_vwap * lot
-    drawdown_points_vwap: Optional[float] = None     # min_price - vwap_entry
+    drawdown_points_vwap: Optional[float] = None     # min_price_from_entry - vwap_entry
     drawdown_rupees_vwap: Optional[float] = None     # drawdown_points_vwap * lot
     trade_taken: Optional[bool] = None               # all gates pass -> TAKEN
     skip_reasons: List[str] = field(default_factory=list)
@@ -154,11 +158,12 @@ class BacktestRow:
             "min_price_at": self.min_price_at,
             "drawdown_points": self.drawdown_points,
             "drawdown_rupees": self.drawdown_rupees,
-            "vwap_0945": self.vwap_0945,
-            "or_high_0945": self.or_high_0945,
-            "orb_confirm_min_low": self.orb_confirm_min_low,
-            "orb_price_at_1000": self.orb_price_at_1000,
+            "vwap_entry": self.vwap_entry,
+            "or_high_0930": self.or_high_0930,
+            "orb_price_at_1015": self.orb_price_at_1015,
             "orb_pass": self.orb_pass,
+            "min_price_from_entry": self.min_price_from_entry,
+            "min_price_from_entry_at": self.min_price_from_entry_at,
             "risk_rupees": self.risk_rupees,
             "risk_pass": self.risk_pass,
             "pnl_points_vwap": self.pnl_points_vwap,
@@ -633,46 +638,53 @@ def compute_backtest_row(
             br.drawdown_rupees = round(dd_pts * int(br.fut_lot_size), 2)
 
     # -- Pro-grade entry filters ---------------------------------------------
-    # VWAP entry: session VWAP from market open (09:15) through 09:45 inclusive.
-    vwap_entry = _session_vwap_upto(buckets, MARKET_OPEN_HHMM, ANCHOR_HHMM)
+    # Entry at 10:15 IST, priced at the session VWAP from 09:15 through 10:15
+    # (typical-price * volume, cumulative). Waiting till 10:15 lets us confirm
+    # the 15-minute opening-range breakout has held, and VWAP keeps the entry
+    # close to the market's volume-weighted average during that window.
+    vwap_entry = _session_vwap_upto(buckets, MARKET_OPEN_HHMM, ENTRY_HHMM)
     if vwap_entry is not None:
-        br.vwap_0945 = round(float(vwap_entry), 2)
+        br.vwap_entry = round(float(vwap_entry), 2)
 
-    # Opening range high (09:15 -> 09:45 inclusive).
-    orh = _range_high(buckets, MARKET_OPEN_HHMM, ANCHOR_HHMM)
+    # Classical 15-minute opening range high (09:15 -> 09:30 inclusive).
+    orh = _range_high(buckets, MARKET_OPEN_HHMM, OR_RANGE_END_HHMM)
     if orh is not None:
-        br.or_high_0945 = round(float(orh), 2)
+        br.or_high_0930 = round(float(orh), 2)
 
-    # ORB confirmation window: min low from 09:46 through 10:00 inclusive.
-    orb_start = (ANCHOR_HHMM[0], ANCHOR_HHMM[1] + 1)  # (9, 46)
-    orb_min_low, _ = _intraday_min_low_from(buckets, orb_start, ORB_CONFIRM_HHMM)
-    if orb_min_low is not None:
-        br.orb_confirm_min_low = round(float(orb_min_low), 2)
-    br.orb_price_at_1000 = _price_at_slot(buckets, ORB_CONFIRM_HHMM)
+    # 10:15 entry-check price (open of the 10:15 1-minute candle).
+    br.orb_price_at_1015 = _price_at_slot(buckets, ENTRY_HHMM)
 
-    # ORB pass: at the 10:00 confirmation, the breakout is still above the
-    # opening range high (i.e. the market has "stayed above the 09:45 high
-    # after 10:00 AM"). The 09:46->10:00 min low is kept as tooltip context
-    # only -- requiring it to hold ORH throughout is too tight and rejects
-    # otherwise clean breakouts that briefly retested the level intraday.
-    if orh is not None and br.orb_price_at_1000 is not None:
-        br.orb_pass = bool(float(br.orb_price_at_1000) >= orh)
+    # ORB pass: breakout is still holding at 10:15 -- i.e. the 10:15 candle
+    # opens at/above the 15-minute OR high.
+    if orh is not None and br.orb_price_at_1015 is not None:
+        br.orb_pass = bool(float(br.orb_price_at_1015) >= orh)
     else:
         br.orb_pass = None
 
-    # Risk cap in rupees: (vwap_entry - day_low) * lot_size. Positive = the
-    # rupee drawdown incurred if we held from VWAP entry to the day's low.
+    # Drawdown is measured from the 10:15 entry onwards -- that's the window
+    # the strategy is actually exposed in.
+    min_low_entry, min_low_entry_at = _intraday_min_low_from(buckets, ENTRY_HHMM)
+    if min_low_entry is not None:
+        br.min_price_from_entry = round(float(min_low_entry), 2)
+        if min_low_entry_at is not None:
+            br.min_price_from_entry_at = f"{min_low_entry_at[0]:02d}:{min_low_entry_at[1]:02d}"
+
+    # Risk cap in rupees: (vwap_entry - min_from_entry) * lot_size. Positive
+    # means we'd take on a drawdown; negative means price never retraced
+    # below VWAP after 10:15 (which is favourable -> passes automatically).
     if (
         vwap_entry is not None
-        and min_low is not None
+        and min_low_entry is not None
         and br.fut_lot_size
     ):
-        risk_rs = (float(vwap_entry) - float(min_low)) * int(br.fut_lot_size)
+        risk_rs = (float(vwap_entry) - float(min_low_entry)) * int(br.fut_lot_size)
         br.risk_rupees = round(risk_rs, 2)
         br.risk_pass = bool(risk_rs <= RISK_CAP_RUPEES)
 
-    # VWAP-anchored PnL / drawdown. PnL points use the SAME best-slot price
-    # identified above; only the reference (entry) changes from 09:45 to VWAP.
+    # VWAP-anchored PnL / drawdown. PnL reference is the VWAP entry; the best
+    # slot (based on the 09:45 abs-move anchor) is still the candidate exit --
+    # 12:30 / 14:00 / 15:15 all land after the 10:15 entry so they remain
+    # valid exit points for this simulation.
     if vwap_entry is not None:
         if best_signed is not None:
             best_slot_price = float(p0945) + float(best_signed)
@@ -680,8 +692,8 @@ def compute_backtest_row(
             br.pnl_points_vwap = round(pnl_v, 2)
             if br.fut_lot_size:
                 br.pnl_rupees_vwap = round(pnl_v * int(br.fut_lot_size), 2)
-        if min_low is not None:
-            dd_v = float(min_low) - float(vwap_entry)
+        if min_low_entry is not None:
+            dd_v = float(min_low_entry) - float(vwap_entry)
             br.drawdown_points_vwap = round(dd_v, 2)
             if br.fut_lot_size:
                 br.drawdown_rupees_vwap = round(dd_v * int(br.fut_lot_size), 2)

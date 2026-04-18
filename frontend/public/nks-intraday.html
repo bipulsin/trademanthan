@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>NKS Best-Buy Intraday Futures Backtest — Same Day (pro-grade filters) | TradeWithCTO</title>
-<link rel="stylesheet" href="nks-intraday.css?v=4" />
+<link rel="stylesheet" href="nks-intraday.css?v=5" />
 </head>
 <body data-day="same">
 <div class="wrap">
@@ -17,21 +17,21 @@
     <a href="nks-intraday-next.html">Next trading day</a>
   </div>
   <p class="lede">
-    For each shortlisted NKS stock, the simulation assumes a <b>long entry at the
-    09:45 IST session VWAP</b> (not the 09:45 tick price) on the front-month future,
-    sized at the current FUT lot size. Three professional-grade gates decide whether the
-    trade is <span class="status-pill status-taken">TAKEN</span> or
+    For each shortlisted NKS stock, the simulation waits for the classical 15-minute
+    opening-range breakout to confirm, then takes a <b>long entry at 10:15 IST priced at
+    the session VWAP</b> on the front-month future, sized at the current FUT lot size.
+    Three professional-grade gates decide whether the trade is
+    <span class="status-pill status-taken">TAKEN</span> or
     <span class="status-pill status-skip">SKIPPED</span>:
   </p>
   <div class="callout" style="border-left-color: var(--good);">
-    <b>Gate&nbsp;1 · VWAP entry.</b> Entry price = Σ((H+L+C)/3 · V) / Σ(V) over 09:15 → 09:45 candles.
+    <b>Gate&nbsp;1 · VWAP entry.</b> Entry price = Σ((H+L+C)/3 · V) / Σ(V) cumulated over 09:15 → 10:15 candles.
     <br/>
-    <b>Gate&nbsp;2 · Risk cap.</b> If (VWAP entry − intraday low) × lot size &gt; <b>₹10,000</b>, the trade is skipped.
+    <b>Gate&nbsp;2 · Risk cap.</b> If (VWAP entry − post-10:15 intraday low) × lot size &gt; <b>₹10,000</b>, the trade is skipped.
     <br/>
-    <b>Gate&nbsp;3 · ORB confirmation.</b> The opening range high (max high 09:15 → 09:45) must
-    still be breached <b>at 10:00 IST</b> — i.e. the 10:00 candle opens ≥ ORH, confirming the
-    breakout held into the post-open trend. Fail ⇒ skipped. (The 09:46 → 10:00 min low is
-    recorded as context on the cell tooltip but doesn't gate by itself.)
+    <b>Gate&nbsp;3 · ORB confirmation.</b> The 15-minute opening range high (max high 09:15 → 09:30) must
+    still be holding <b>at 10:15 IST</b> — i.e. the 10:15 candle opens ≥ ORH, confirming the
+    breakout didn't fade during the first hour. Fail ⇒ skipped.
   </div>
 
   <div class="callout" id="errBanner" style="display:none;"></div>
@@ -74,9 +74,9 @@
   </div>
 
   <div class="legend">
-    <span><b>Entry:</b> 09:45 session VWAP</span>
-    <span><b>ORH:</b> max high, 09:15 → 09:45</span>
-    <span><b>Risk ₹:</b> (entry − day low) × lot, capped at ₹10k</span>
+    <span><b>Entry:</b> 10:15 IST · session VWAP 09:15 → 10:15</span>
+    <span><b>ORH:</b> max high, 09:15 → 09:30 (15-min OR)</span>
+    <span><b>Risk ₹:</b> (entry − post-10:15 low) × lot, capped at ₹10k</span>
     <span><b>PnL / DD:</b> measured against the VWAP entry (pts × lot for rupees)</span>
     <span>Skipped rows are muted; aggregate summary counts only <b>TAKEN</b> trades.</span>
   </div>
@@ -90,6 +90,6 @@
 
   <p class="footer" id="footerMeta"></p>
 </div>
-<script src="nks-intraday.js?v=4"></script>
+<script src="nks-intraday.js?v=5"></script>
 </body>
 </html>

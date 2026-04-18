@@ -100,24 +100,28 @@
       return '<td class="num ' + pnlCls(v) + '">' + fmtRupees(v) + '</td>';
     };
   }
+  function ddTip(r, key) {
+    const usePost = String(key).indexOf('vwap') >= 0;
+    const lo = usePost ? r.min_price_from_entry : r.min_price;
+    const at = usePost ? r.min_price_from_entry_at : r.min_price_at;
+    if (lo == null) return '';
+    const label = usePost ? 'Low post-10:15 ' : 'Low ';
+    return label + fmtNum(lo) + (at ? ' at ' + at : '');
+  }
   function cellDdPts(key) {
     return function (r) {
       const v = r[key];
       const cls = (typeof v === 'number' && v < 0) ? 'pnl-neg' : 'pnl-flat';
-      const tip = (r.min_price != null)
-        ? ('Low ' + fmtNum(r.min_price) + (r.min_price_at ? ' at ' + r.min_price_at : ''))
-        : '';
-      return '<td class="num ' + cls + '" title="' + escapeHtml(tip) + '">' + signed(v, 2) + '</td>';
+      return '<td class="num ' + cls + '" title="' + escapeHtml(ddTip(r, key)) +
+        '">' + signed(v, 2) + '</td>';
     };
   }
   function cellDdRupees(key) {
     return function (r) {
       const v = r[key];
       const cls = (typeof v === 'number' && v < 0) ? 'pnl-neg' : 'pnl-flat';
-      const tip = (r.min_price != null)
-        ? ('Low ' + fmtNum(r.min_price) + (r.min_price_at ? ' at ' + r.min_price_at : ''))
-        : '';
-      return '<td class="num ' + cls + '" title="' + escapeHtml(tip) + '">' + fmtRupees(v) + '</td>';
+      return '<td class="num ' + cls + '" title="' + escapeHtml(ddTip(r, key)) +
+        '">' + fmtRupees(v) + '</td>';
     };
   }
   function cellRiskRupees(r) {
@@ -127,18 +131,19 @@
     const cap = (typeof v === 'number')
       ? '₹' + Math.round(v).toLocaleString('en-IN')
       : '—';
-    return '<td class="num ' + cls + '" title="Cap ₹10,000 per trade">' + cap + '</td>';
+    const tip = 'Drawdown from 10:15 VWAP entry to post-entry low (cap ₹10,000)';
+    return '<td class="num ' + cls + '" title="' + escapeHtml(tip) + '">' + cap + '</td>';
   }
   function cellOrb(r) {
+    const mk = function () {
+      return '15m ORH ' + fmtNum(r.or_high_0930) +
+        ' | px 10:15 ' + fmtNum(r.orb_price_at_1015);
+    };
     if (r.orb_pass === true) {
-      const tip = 'ORH ' + fmtNum(r.or_high_0945) + ' | low 09:46-10:00 ' +
-        fmtNum(r.orb_confirm_min_low) + ' | px 10:00 ' + fmtNum(r.orb_price_at_1000);
-      return '<td class="gate-ok" title="' + escapeHtml(tip) + '">✓</td>';
+      return '<td class="gate-ok" title="' + escapeHtml(mk()) + '">✓</td>';
     }
     if (r.orb_pass === false) {
-      const tip = 'ORH ' + fmtNum(r.or_high_0945) + ' | low 09:46-10:00 ' +
-        fmtNum(r.orb_confirm_min_low) + ' | px 10:00 ' + fmtNum(r.orb_price_at_1000);
-      return '<td class="gate-bad" title="' + escapeHtml(tip) + '">✗</td>';
+      return '<td class="gate-bad" title="' + escapeHtml(mk()) + '">✗</td>';
     }
     return '<td class="gate-na">—</td>';
   }
@@ -164,8 +169,8 @@
     { key: 'source',               label: 'Src',          cell: cellSrc },
     { key: 'trading_symbol',       label: 'Contract',     cell: cellContract },
     { key: 'fut_lot_size',         label: 'Lot',          align: 'num', cell: cellLot },
-    { key: 'vwap_0945',            label: '09:45 VWAP',   align: 'num', cell: cellPx('vwap_0945') },
-    { key: 'or_high_0945',         label: '09:45 ORH',    align: 'num', cell: cellPx('or_high_0945') },
+    { key: 'vwap_entry',           label: '10:15 VWAP',   align: 'num', cell: cellPx('vwap_entry') },
+    { key: 'or_high_0930',         label: '15m ORH',      align: 'num', cell: cellPx('or_high_0930') },
     { key: 'price_1230',           label: '12:30',        align: 'num', cell: cellPx('price_1230') },
     { key: 'price_1400',           label: '14:00',        align: 'num', cell: cellPx('price_1400') },
     { key: 'price_1515',           label: '15:15',        align: 'num', cell: cellPx('price_1515') },
