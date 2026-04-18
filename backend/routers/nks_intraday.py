@@ -1,14 +1,17 @@
 """
-Public read-only API for the NKS intraday momentum backtest artifact.
+Public read-only API for the NKS intraday momentum backtest artifacts.
 
-The data JSON is produced by
-``backend/scripts/run_nks_intraday_backtest.py`` and cached on disk at
-``/home/ubuntu/trademanthan/data/nks_intraday_backtest.json`` (default) or a
-local fallback under ``backend/data/`` for development. This router simply
-reads the cached file and returns it verbatim.
+Two artifacts are produced by
+``backend/scripts/run_nks_intraday_backtest.py`` and cached on disk:
 
-No authentication: the page at ``/nks-intraday.html`` is intended to be
-publicly viewable.
+- ``nks_intraday_backtest.json``        — prices from the **same day** as the CSV shortlist date
+- ``nks_intraday_backtest_nextday.json`` — prices from the **next trading day**
+
+Default location on EC2: ``/home/ubuntu/trademanthan/data/``. A local fallback
+under ``backend/data/`` is checked for development.
+
+No authentication: the pages at ``/nks-intraday.html`` and
+``/nks-intraday-next.html`` are publicly viewable.
 """
 from __future__ import annotations
 
@@ -17,22 +20,25 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["nks-intraday"])
 
 
-_CANDIDATE_PATHS = (
-    Path("/home/ubuntu/trademanthan/data/nks_intraday_backtest.json"),
-    Path(__file__).resolve().parents[2] / "backend" / "data" / "nks_intraday_backtest.json",
-    Path(__file__).resolve().parents[2] / "data" / "nks_intraday_backtest.json",
-)
+def _candidate_paths(day: str) -> tuple[Path, ...]:
+    suffix = "_nextday" if day == "next" else ""
+    fname = f"nks_intraday_backtest{suffix}.json"
+    return (
+        Path(f"/home/ubuntu/trademanthan/data/{fname}"),
+        Path(__file__).resolve().parents[2] / "backend" / "data" / fname,
+        Path(__file__).resolve().parents[2] / "data" / fname,
+    )
 
 
-def _find_data_file() -> Optional[Path]:
-    for p in _CANDIDATE_PATHS:
+def _find_data_file(day: str) -> Optional[Path]:
+    for p in _candidate_paths(day):
         try:
             if p.is_file():
                 return p
@@ -42,15 +48,22 @@ def _find_data_file() -> Optional[Path]:
 
 
 @router.get("/data")
-def get_nks_intraday_data() -> Dict[str, Any]:
-    """Return the cached NKS intraday backtest document."""
-    path = _find_data_file()
+def get_nks_intraday_data(
+    day: str = Query("same", regex="^(same|next)$"),
+) -> Dict[str, Any]:
+    """Return the cached NKS intraday backtest document.
+
+    ``day=same`` (default) returns prices from the shortlist date itself;
+    ``day=next`` returns prices from the next trading session after it.
+    """
+    path = _find_data_file(day)
     if path is None:
         raise HTTPException(
             status_code=503,
             detail=(
-                "NKS intraday backtest artifact not found. Run "
-                "`python3 backend/scripts/run_nks_intraday_backtest.py` to generate it."
+                f"NKS intraday backtest artifact (day={day}) not found. Run "
+                "`python3 backend/scripts/run_nks_intraday_backtest.py --mode both` "
+                "to generate it."
             ),
         )
     try:
@@ -61,4 +74,5 @@ def get_nks_intraday_data() -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"Could not read artifact: {e}")
     if isinstance(doc, dict):
         doc["artifact_path"] = str(path)
+        doc.setdefault("day_mode", day)
     return doc

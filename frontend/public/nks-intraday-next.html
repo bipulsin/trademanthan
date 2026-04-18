@@ -6,27 +6,25 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
-<title>NKS Best-Buy Intraday Futures Backtest — Same Day | TradeWithCTO</title>
+<title>NKS Best-Buy Intraday Futures Backtest — Next Trading Day | TradeWithCTO</title>
 <link rel="stylesheet" href="nks-intraday.css?v=2" />
 </head>
-<body data-day="same">
+<body data-day="next">
 <div class="wrap">
-  <h1>NKS Best-Buy Intraday Futures Backtest</h1>
+  <h1>NKS Best-Buy Intraday Futures Backtest — Next Trading Day</h1>
   <div class="day-toggle" role="tablist" aria-label="Trading day">
-    <a href="nks-intraday.html" class="active" aria-current="page">Same day</a>
-    <a href="nks-intraday-next.html">Next trading day</a>
+    <a href="nks-intraday.html">Same day</a>
+    <a href="nks-intraday-next.html" class="active" aria-current="page">Next trading day</a>
   </div>
   <p class="lede">
-    For each shortlisted stock from the NKS momentum list, we take the front-month equity
-    futures price at <b>09:45 IST</b> on the shortlist date and measure how the contract
-    moved at three intraday checkpoints — <b>12:30</b>, <b>14:00</b> and <b>15:15</b> IST.
-    &ldquo;Best slot&rdquo; is whichever of those three times produced the largest
-    absolute price move vs 09:45, &ldquo;PnL pts&rdquo; is the signed points move for that
-    best slot, and &ldquo;PnL ₹&rdquo; is those points × the current FUT lot size for that
-    underlying (used as position size even for EQ-sourced rows).
+    This is the same study as the same-day view, but prices are sampled on the
+    <b>next trading session</b> after the shortlist date (weekends and market
+    holidays are skipped automatically). Use this to compare holding the NKS pick
+    to the next day's open-to-close action on the front-month future.
     Source = <span class="pill pill-fut">FUT</span> when the front-month contract
-    is resolvable, else <span class="pill pill-eq">EQ</span> (underlying cash price — intraday
-    future tracks cash 1:1 within the session).
+    is resolvable, else <span class="pill pill-eq">EQ</span>.
+    &ldquo;PnL ₹&rdquo; = signed PnL points × current FUT lot size
+    (used as position size even for EQ-sourced rows).
   </p>
 
   <div class="callout" id="errBanner" style="display:none;"></div>
@@ -49,10 +47,10 @@
         <option value="15:15">15:15</option>
       </select>
     </label>
-    <label>Date from
+    <label>Shortlist from
       <input type="date" id="fltFrom" />
     </label>
-    <label>Date to
+    <label>Shortlist to
       <input type="date" id="fltTo" />
     </label>
     <label>Min |PnL|
@@ -62,8 +60,8 @@
   </div>
 
   <div class="legend">
-    <span><b>Anchor:</b> 09:45 IST open price</span>
-    <span><b>Slots:</b> 12:30, 14:00, 15:15</span>
+    <span><b>Anchor:</b> 09:45 IST open price (next trading day)</span>
+    <span><b>Slots:</b> 12:30, 14:00, 15:15 on next trading day</span>
     <span><b>PnL pts</b> = signed price move from 09:45 to the best slot</span>
     <span><b>PnL ₹</b> = PnL pts × current FUT lot size</span>
   </div>
@@ -73,6 +71,7 @@
       <thead>
         <tr>
           <th data-key="csv_date">Shortlist date</th>
+          <th data-key="session_date">Priced on</th>
           <th data-key="source">Src</th>
           <th data-key="trading_symbol">Contract</th>
           <th data-key="fut_lot_size" class="num">Lot (qty)</th>
@@ -85,7 +84,7 @@
           <th data-key="pnl_rupees" class="num">PnL ₹</th>
         </tr>
       </thead>
-      <tbody id="tbody"><tr><td class="nodata" colspan="10">Loading…</td></tr></tbody>
+      <tbody id="tbody"><tr><td class="nodata" colspan="11">Loading…</td></tr></tbody>
     </table>
   </div>
 

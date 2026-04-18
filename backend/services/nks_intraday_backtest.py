@@ -62,13 +62,17 @@ class InstrumentRef:
     instrument_key: str
     expiry_date: Optional[date] = None
     lot_size: Optional[int] = None
+    # Always the current front-month FUT lot size for the underlying (used for
+    # PnL-in-rupees calculation even when ``source == "EQ"``).
+    fut_lot_size: Optional[int] = None
 
 
 @dataclass
 class BacktestRow:
     """Computed backtest result for one CSV row."""
 
-    session_date: str
+    csv_date: str  # original date from the CSV (the shortlist date)
+    session_date: str  # the actual date we fetched candles for (same or next trading day)
     symbol: str
     marketcapname: str
     sector: str
@@ -77,6 +81,7 @@ class BacktestRow:
     instrument_key: Optional[str] = None
     expiry_date: Optional[str] = None
     lot_size: Optional[int] = None
+    fut_lot_size: Optional[int] = None
     price_0945: Optional[float] = None
     price_1230: Optional[float] = None
     price_1400: Optional[float] = None
@@ -84,11 +89,13 @@ class BacktestRow:
     best_slot: Optional[str] = None
     best_diff_points: Optional[float] = None
     best_abs_diff: Optional[float] = None
+    pnl_rupees: Optional[float] = None
     error: Optional[str] = None
     notes: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
+            "csv_date": self.csv_date,
             "session_date": self.session_date,
             "symbol": self.symbol,
             "marketcapname": self.marketcapname,
@@ -98,6 +105,7 @@ class BacktestRow:
             "instrument_key": self.instrument_key,
             "expiry_date": self.expiry_date,
             "lot_size": self.lot_size,
+            "fut_lot_size": self.fut_lot_size,
             "price_0945": self.price_0945,
             "price_1230": self.price_1230,
             "price_1400": self.price_1400,
@@ -105,6 +113,7 @@ class BacktestRow:
             "best_slot": self.best_slot,
             "best_diff_points": self.best_diff_points,
             "best_abs_diff": self.best_abs_diff,
+            "pnl_rupees": self.pnl_rupees,
             "error": self.error,
             "notes": self.notes,
         }
@@ -186,6 +195,36 @@ def _index_instruments(
     return fut_by_und, eq_by_symbol
 
 
+def _current_fut_lot_size(
+    symbol: str, *, fut_by_und: Dict[str, List[Dict[str, Any]]]
+) -> Optional[int]:
+    """Return the lot size of the nearest-expiry currently-listed FUT for ``symbol``.
+
+    This is used to compute PnL in rupees for both FUT- and EQ-sourced rows, so
+    the EQ fallback (for older session dates whose own contract is no longer
+    listed) still reports a realistic futures position size.
+    """
+    sym_u = (symbol or "").strip().upper()
+    lst = fut_by_und.get(sym_u) or []
+    best_exp: Optional[date] = None
+    best_lot: Optional[int] = None
+    for inst in lst:
+        exp = _expiry_ms_to_ist_date(inst.get("expiry"))
+        if exp is None:
+            continue
+        ls_raw = inst.get("lot_size")
+        try:
+            ls = int(ls_raw) if ls_raw is not None else None
+        except (TypeError, ValueError):
+            ls = None
+        if not ls:
+            continue
+        if best_exp is None or exp < best_exp:
+            best_exp = exp
+            best_lot = ls
+    return best_lot
+
+
 def resolve_instrument(
     symbol: str,
     session_date: date,
@@ -210,13 +249,16 @@ def resolve_instrument(
         if best_exp is None or exp < best_exp:
             best_exp = exp
             best_fut = inst
+    cur_fut_lot = _current_fut_lot_size(sym_u, fut_by_und=fut_by_und)
     if best_fut and best_exp:
+        fut_lot = int(best_fut.get("lot_size") or 0) or None
         return InstrumentRef(
             source="FUT",
             trading_symbol=str(best_fut.get("trading_symbol") or best_fut.get("tradingsymbol") or ""),
             instrument_key=str(best_fut.get("instrument_key") or ""),
             expiry_date=best_exp,
-            lot_size=int(best_fut.get("lot_size") or 0) or None,
+            lot_size=fut_lot,
+            fut_lot_size=fut_lot or cur_fut_lot,
         )
     eq = eq_by_symbol.get(sym_u)
     if eq:
@@ -226,6 +268,7 @@ def resolve_instrument(
             instrument_key=str(eq.get("instrument_key") or ""),
             expiry_date=None,
             lot_size=int(eq.get("lot_size") or 0) or None,
+            fut_lot_size=cur_fut_lot,
         )
     return None
 
@@ -318,22 +361,50 @@ def fetch_intraday_1m_candles(
     )
 
 
+def _find_next_trading_day_with_candles(
+    upstox: UpstoxService,
+    instrument_key: str,
+    base_date: date,
+    *,
+    max_forward_days: int = 7,
+) -> Tuple[Optional[date], Optional[List[Dict[str, Any]]]]:
+    """Return the first calendar day > ``base_date`` that returns intraday
+    candles, skipping weekends and market holidays. Falls back to returning
+    ``(None, None)`` when no candles are found within ``max_forward_days``.
+    """
+    for i in range(1, max_forward_days + 1):
+        candidate = base_date + timedelta(days=i)
+        if candidate.weekday() >= 5:  # Sat/Sun
+            continue
+        candles = fetch_intraday_1m_candles(upstox, instrument_key, candidate)
+        if candles:
+            return candidate, candles
+    return None, None
+
+
 def compute_backtest_row(
     upstox: UpstoxService,
     row: Dict[str, Any],
     *,
     fut_by_und: Dict[str, List[Dict[str, Any]]],
     eq_by_symbol: Dict[str, Dict[str, Any]],
+    day_mode: str = "same",
 ) -> BacktestRow:
-    sd: date = row["session_date"]
+    csv_date: date = row["session_date"]
     sym: str = row["symbol"]
     br = BacktestRow(
-        session_date=sd.isoformat(),
+        csv_date=csv_date.isoformat(),
+        session_date=csv_date.isoformat(),
         symbol=sym,
         marketcapname=str(row.get("marketcapname") or ""),
         sector=str(row.get("sector") or ""),
     )
-    ref = resolve_instrument(sym, sd, fut_by_und=fut_by_und, eq_by_symbol=eq_by_symbol)
+    # Resolve the contract using the ORIGINAL csv date so the expiry/front-month
+    # lookup matches the timeframe of the shortlist. The next-day mode re-uses
+    # the same contract and just fetches candles for the following session.
+    ref = resolve_instrument(
+        sym, csv_date, fut_by_und=fut_by_und, eq_by_symbol=eq_by_symbol
+    )
     if ref is None or not ref.instrument_key:
         br.error = "instrument_not_resolved"
         return br
@@ -342,14 +413,26 @@ def compute_backtest_row(
     br.instrument_key = ref.instrument_key
     br.expiry_date = ref.expiry_date.isoformat() if ref.expiry_date else None
     br.lot_size = ref.lot_size
+    br.fut_lot_size = ref.fut_lot_size
     if ref.source == "EQ":
         br.notes.append("EQ cash proxy (front-month FUT not in instruments snapshot)")
 
-    candles = fetch_intraday_1m_candles(upstox, ref.instrument_key, sd)
-    if not candles:
-        br.error = "no_candles"
-        return br
-    buckets = _bucket_candles_by_hhmm(candles, sd)
+    if day_mode == "next":
+        eff_date, candles = _find_next_trading_day_with_candles(
+            upstox, ref.instrument_key, csv_date
+        )
+        if eff_date is None or not candles:
+            br.error = "no_next_day_candles"
+            return br
+        br.session_date = eff_date.isoformat()
+    else:
+        eff_date = csv_date
+        candles = fetch_intraday_1m_candles(upstox, ref.instrument_key, eff_date)
+        if not candles:
+            br.error = "no_candles"
+            return br
+
+    buckets = _bucket_candles_by_hhmm(candles, eff_date)
     if not buckets:
         br.error = "no_session_candles"
         return br
@@ -387,6 +470,8 @@ def compute_backtest_row(
     br.best_slot = best_slot
     br.best_diff_points = round(best_signed, 2) if best_signed is not None else None
     br.best_abs_diff = round(best_abs, 2) if best_abs is not None else None
+    if best_signed is not None and br.fut_lot_size:
+        br.pnl_rupees = round(float(best_signed) * int(br.fut_lot_size), 2)
     return br
 
 
@@ -396,13 +481,23 @@ def run_backtest(
     throttle_sec: float = 0.08,
     progress_every: int = 25,
     logger_fn=None,
+    day_mode: str = "same",
 ) -> List[Dict[str, Any]]:
-    """Run the NKS intraday backtest across all rows and return serialized results."""
+    """Run the NKS intraday backtest across all rows and return serialized results.
+
+    ``day_mode`` is ``"same"`` (default) to price the same day as the CSV date
+    or ``"next"`` to price the **next trading session** after the CSV date
+    (weekends and holidays are skipped automatically).
+    """
     log = logger_fn or (lambda msg: logger.info(msg))
+    mode = (day_mode or "same").lower()
+    if mode not in ("same", "next"):
+        raise ValueError(f"day_mode must be 'same' or 'next' (got {day_mode!r})")
+
     instruments = _load_instruments()
     fut_by_und, eq_by_symbol = _index_instruments(instruments)
     log(
-        f"nks_intraday_backtest: loaded {len(instruments)} instruments "
+        f"nks_intraday_backtest[{mode}]: loaded {len(instruments)} instruments "
         f"({len(fut_by_und)} FUT underlyings, {len(eq_by_symbol)} EQ symbols)"
     )
 
@@ -413,12 +508,18 @@ def run_backtest(
     for idx, row in enumerate(rows, start=1):
         try:
             br = compute_backtest_row(
-                upstox, row, fut_by_und=fut_by_und, eq_by_symbol=eq_by_symbol
+                upstox,
+                row,
+                fut_by_und=fut_by_und,
+                eq_by_symbol=eq_by_symbol,
+                day_mode=mode,
             )
         except Exception as e:
-            logger.exception("nks_intraday_backtest row %s/%s failed", idx, total)
+            logger.exception("nks_intraday_backtest[%s] row %s/%s failed", mode, idx, total)
+            csv_iso = row["session_date"].isoformat() if row.get("session_date") else ""
             br = BacktestRow(
-                session_date=row["session_date"].isoformat() if row.get("session_date") else "",
+                csv_date=csv_iso,
+                session_date=csv_iso,
                 symbol=str(row.get("symbol") or ""),
                 marketcapname=str(row.get("marketcapname") or ""),
                 sector=str(row.get("sector") or ""),
@@ -426,13 +527,15 @@ def run_backtest(
             )
         out.append(br.to_dict())
         if idx % progress_every == 0 or idx == total:
-            log(f"nks_intraday_backtest: {idx}/{total} rows processed")
+            log(f"nks_intraday_backtest[{mode}]: {idx}/{total} rows processed")
         if throttle_sec > 0:
             time.sleep(throttle_sec)
     return out
 
 
-def build_output_document(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+def build_output_document(
+    results: List[Dict[str, Any]], *, day_mode: str = "same"
+) -> Dict[str, Any]:
     """Wrap per-row results with summary metadata for the public JSON artifact."""
     total = len(results)
     with_prices = sum(
@@ -446,6 +549,7 @@ def build_output_document(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     slot_wins: Dict[str, int] = {"12:30": 0, "14:00": 0, "15:15": 0}
     pos_pnl = neg_pnl = 0
     sum_pnl = 0.0
+    sum_pnl_rupees = 0.0
     for r in results:
         slot = r.get("best_slot")
         if slot in slot_wins:
@@ -457,11 +561,16 @@ def build_output_document(results: List[Dict[str, Any]]) -> Dict[str, Any]:
                 pos_pnl += 1
             elif pnl < 0:
                 neg_pnl += 1
+        pnl_r = r.get("pnl_rupees")
+        if isinstance(pnl_r, (int, float)):
+            sum_pnl_rupees += float(pnl_r)
     return {
         "generated_at": datetime.now(IST).isoformat(),
+        "day_mode": day_mode,
         "anchor_time": "09:45 IST",
         "target_slots": ["12:30", "14:00", "15:15"],
         "summary": {
+            "day_mode": day_mode,
             "total_rows": total,
             "rows_with_prices": with_prices,
             "rows_fut_source": fut_count,
@@ -470,6 +579,7 @@ def build_output_document(results: List[Dict[str, Any]]) -> Dict[str, Any]:
             "positive_pnl_rows": pos_pnl,
             "negative_pnl_rows": neg_pnl,
             "sum_pnl_points": round(sum_pnl, 2),
+            "sum_pnl_rupees": round(sum_pnl_rupees, 2),
         },
         "rows": results,
     }
