@@ -598,7 +598,6 @@ def confirm_sell(db: Session, user_id: int, trade_id: int, exit_time: str, exit_
 
 
 def webhook_secret_ok(provided: Optional[str]) -> bool:
-    expected = (os.getenv("CHARTINK_DAILY_FUTURES_SECRET") or "").strip()
-    if not expected:
-        return False
+    default_secret = "tradewithctodailyfuture"
+    expected = (os.getenv("CHARTINK_DAILY_FUTURES_SECRET") or default_secret).strip()
     return bool(provided and provided.strip() == expected)

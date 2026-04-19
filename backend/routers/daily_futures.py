@@ -84,8 +84,10 @@ async def chartink_webhook(
 ) -> Dict[str, Any]:
     """
     ChartInk (or any caller) sends symbols every ~15 minutes.
-    Query: ?secret=... or header X-Daily-Futures-Secret (must match CHARTINK_DAILY_FUTURES_SECRET).
-    Body: JSON object with symbols / symbol / stocks list, or a plain JSON array, or text/plain symbols.
+    Query: ?secret=tradewithctodailyfuture (or header X-Daily-Futures-Secret). If env
+    CHARTINK_DAILY_FUTURES_SECRET is set, it overrides the default secret.
+    Body supports the same ChartInk shape used by /scan/chartink-webhook-bullish
+    (e.g. stocks, trigger_prices, scan_name, alert_name), plus plain symbol lists.
     """
     prov = secret or x_daily_futures_secret or ""
     if not webhook_secret_ok(prov):

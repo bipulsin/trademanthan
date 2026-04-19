@@ -71,8 +71,10 @@
                     <h1 class="settings-title"><i class="fas fa-calendar-day" style="margin-right:10px;color:#2563eb;"></i> Daily Futures</h1>
                     <p class="settings-subtitle">
                         ChartInk webhook populates picks from <strong>arbitrage_master</strong> current-month futures (Upstox LTP + conviction).
-                        Session date is IST trading day. Configure server env <code>CHARTINK_DAILY_FUTURES_SECRET</code> and POST symbols to
-                        <code>/api/daily-futures/webhook/chartink</code>.
+                        Session date is IST trading day. Webhook URL:
+                        <code>https://www.tradewithcto.com/api/daily-futures/webhook/chartink?secret=tradewithctodailyfuture</code>.
+                        Payload can be the same JSON used for
+                        <code>https://www.tradewithcto.com/scan/chartink-webhook-bullish</code>.
                     </p>
                 </div>
             </div>
