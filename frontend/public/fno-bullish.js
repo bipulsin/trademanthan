@@ -392,9 +392,16 @@
     }
     if (!doc) {
       const banner = document.getElementById('errBanner');
-      banner.style.display = '';
-      banner.style.borderLeftColor = 'var(--bad)';
-      banner.textContent = 'Failed to load backtest data: ' + (lastErr ? lastErr.message : 'no data');
+      if (banner) {
+        banner.style.display = '';
+        banner.style.borderLeftColor = 'var(--bad)';
+        banner.textContent = 'Failed to load backtest data: ' + (lastErr ? lastErr.message : 'no data');
+      }
+      const tbodyFail = document.getElementById('tbody');
+      if (tbodyFail) {
+        tbodyFail.innerHTML = '<tr><td class="nodata" colspan="' + COLS.length +
+          '">Could not load data. Check API or try again.</td></tr>';
+      }
       return;
     }
     const raw = Array.isArray(doc.rows) ? doc.rows.slice() : [];
@@ -481,12 +488,16 @@
   // ---------- filters + sorting --------------------------------------------
 
   function applyFilters() {
-    const from = document.getElementById('fltFrom').value;
-    const to = document.getElementById('fltTo').value;
-    const src = document.getElementById('fltSource').value;
+    const fromEl = document.getElementById('fltFrom');
+    const toEl = document.getElementById('fltTo');
+    const from = fromEl ? fromEl.value : '';
+    const to = toEl ? toEl.value : '';
+    const srcEl = document.getElementById('fltSource');
+    const src = srcEl ? srcEl.value : '';
     const kindEl = document.getElementById('fltKind');
     const kind = kindEl ? kindEl.value : '';
-    const symQ = (document.getElementById('fltSymbol').value || '').trim().toUpperCase();
+    const symEl = document.getElementById('fltSymbol');
+    const symQ = (symEl && symEl.value ? symEl.value : '').trim().toUpperCase();
 
     let rows = state.all.filter(function (r) {
       if (from && r.trade_date < from) return false;
@@ -625,7 +636,19 @@
       el.addEventListener('input', applyFilters);
       el.addEventListener('change', applyFilters);
     });
-    load();
+    load().catch(function (err) {
+      const banner = document.getElementById('errBanner');
+      if (banner) {
+        banner.style.display = '';
+        banner.style.borderLeftColor = 'var(--bad)';
+        banner.textContent = 'Failed to load: ' + (err && err.message ? err.message : String(err));
+      }
+      const tbodyFail = document.getElementById('tbody');
+      if (tbodyFail) {
+        tbodyFail.innerHTML = '<tr><td class="nodata" colspan="' + COLS.length +
+          '">Unexpected error — see banner above.</td></tr>';
+      }
+    });
   }
 
   if (document.readyState === 'loading') {
