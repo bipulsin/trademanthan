@@ -24,6 +24,7 @@ import backend.routers.smart_futures_stub as smart_futures
 import backend.routers.smart_futures_backtest_router as smart_futures_backtest
 import backend.routers.nks_intraday as nks_intraday
 import backend.routers.fno_bullish as fno_bullish
+import backend.routers.daily_futures as daily_futures
 # OLD SCHEDULERS - DISABLED - Migrated to smart_future_algo
 # from backend.services.master_stock_scheduler import start_scheduler, stop_scheduler
 # from backend.services.instruments_downloader import start_instruments_scheduler, stop_instruments_scheduler
@@ -234,6 +235,8 @@ app.include_router(nks_intraday.router, prefix="/api/nks-intraday")
 app.include_router(nks_intraday.router, prefix="/nks-intraday")
 app.include_router(fno_bullish.router, prefix="/api/fno-bullish")
 app.include_router(fno_bullish.router, prefix="/fno-bullish")
+app.include_router(daily_futures.router, prefix="/api")
+app.include_router(daily_futures.router, prefix="")
 
 # Create/migrate tables in a daemon thread so import + uvicorn bind is not blocked by long DB locks
 # (idle-in-transaction + migrations used to delay port 8000 for minutes → nginx 502).

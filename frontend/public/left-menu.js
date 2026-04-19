@@ -13,7 +13,7 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html?v=3.19';
+const MENU_HTML_PATH = 'left-menu.html?v=3.20';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 const NOTIFY_TRADE_CHANNEL_SCRIPT = 'notify-trade-channel.js?v=3';
 
@@ -34,7 +34,7 @@ class LeftMenu {
 
     isThemePage() {
         const path = window.location.pathname;
-        return /dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|smartfuture|admintwc/.test(path);
+        return /dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|smartfuture|dailyfutures|admintwc/.test(path);
     }
 
     getCurrentPage() {
@@ -48,6 +48,7 @@ class LeftMenu {
         if (path.includes('reports')) return 'reports';
         if (path.includes('intraoption')) return 'intraoption';
         if (path.includes('smartfuture')) return 'smartfuture';
+        if (path.includes('dailyfutures')) return 'dailyfutures';
         if (path.includes('pivot-breakout')) return 'pivot-breakout';
         if (path.includes('arbitrage')) return 'arbitrage';
         if (path.includes('carsetup') || path.includes('cargpt')) return 'cargpt';
@@ -89,6 +90,7 @@ class LeftMenu {
                     currentPath.includes('carsetup') || currentPath.includes('cargpt') ||
                     currentPath.includes('arbitrage') || currentPath.includes('pivot-breakout') ||
                     currentPath.includes('intraoption') || currentPath.includes('smartfuture') ||
+                    currentPath.includes('dailyfutures') ||
                     currentPath.includes('admintwc');
                 if (!hasRedirected && isProtectedPage) {
                     hasRedirected = true;
@@ -247,6 +249,7 @@ class LeftMenu {
                 <li class="nav-item" data-page="dashboard.html"><i class="fas fa-chart-line"></i><span>Dashboard</span></li>
                 <li class="nav-item" data-page="intraoption.html"><img src="icons/intraday-option.png?v=1" alt="" class="nav-item-icon-img" width="33" height="33" /><span>Intraday Option</span></li>
                 <li class="nav-item" data-page="smartfuture.html"><img src="icons/smart-futures.png?v=3" alt="" class="nav-item-icon-img" width="33" height="33" /><span>Smart Futures</span></li>
+                <li class="nav-item" data-page="dailyfutures.html"><i class="fas fa-calendar-day"></i><span>Daily Futures</span></li>
                 <li class="nav-item" data-page="pivot-breakout.html"><i class="fas fa-bullseye"></i><span>Pivot Breakout</span></li>
                 <li class="nav-item" data-page="arbitrage.html"><i class="fas fa-shuffle"></i><span>Arbitrage Selection</span></li>
                 <li class="nav-item" data-page="cargpt.html"><i class="fas fa-chart-area"></i><span>Composite Avg</span></li>
@@ -653,6 +656,7 @@ class LeftMenu {
             dashboard: 'Dashboard',
             intraoption: 'Intraday Stock Options Algo',
             smartfuture: 'Smart Futures',
+            dailyfutures: 'Daily Futures',
             'pivot-breakout': 'Pivot Breakout',
             arbitrage: 'Arbitrage Selection',
             cargpt: 'Composite Average Reversal',
@@ -735,6 +739,7 @@ class LeftMenu {
             case 'reports': return 'reports.html';
             case 'intraoption': return 'intraoption.html';
             case 'smartfuture': return 'smartfuture.html';
+            case 'dailyfutures': return 'dailyfutures.html';
             case 'pivot-breakout': return 'pivot-breakout.html';
             case 'arbitrage': return 'arbitrage.html';
             case 'settings': return 'settings.html';
