@@ -20,6 +20,127 @@
     sort: { key: 'trade_date', dir: 'desc' },
   };
 
+  /** Minutes from midnight for intra-day ordering (entry trigger ordering). */
+  function scanTimeToMinutes(hhmm) {
+    if (!hhmm || typeof hhmm !== 'string') return 99999;
+    const m = hhmm.trim().match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return 99999;
+    return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+  }
+
+  /** Peak-to-trough drawdown on cumulative realised P&amp;L ordered by entry (first_scan). */
+  function portfolioMaxDrawdownRupees(pairsSorted) {
+    let peak = 0;
+    let eq = 0;
+    let maxDd = 0;
+    for (let i = 0; i < pairsSorted.length; i++) {
+      const p = pairsSorted[i].pnl;
+      if (typeof p !== 'number' || !Number.isFinite(p)) continue;
+      eq += p;
+      peak = Math.max(peak, eq);
+      maxDd = Math.max(maxDd, peak - eq);
+    }
+    return maxDd;
+  }
+
+  function aggregateDayStats(dayRows) {
+    let sumRs = 0;
+    let sumPts = 0;
+    let wins = 0;
+    let losses = 0;
+    let flat = 0;
+    let worst = null;
+    let best = null;
+    const withPnl = [];
+    for (let i = 0; i < dayRows.length; i++) {
+      const r = dayRows[i];
+      const rs = r.exit2_pnl_rupees;
+      const pt = r.exit2_pnl_points;
+      if (typeof rs === 'number' && Number.isFinite(rs)) {
+        sumRs += rs;
+        withPnl.push({ pnl: rs, min: scanTimeToMinutes(r.first_scan_time), sym: r.symbol || '' });
+      }
+      if (typeof pt === 'number' && Number.isFinite(pt)) sumPts += pt;
+      if (typeof rs === 'number' && Number.isFinite(rs)) {
+        if (rs > 0) wins++;
+        else if (rs < 0) losses++;
+        else flat++;
+        if (worst === null || rs < worst) worst = rs;
+        if (best === null || rs > best) best = rs;
+      }
+    }
+    withPnl.sort((a, b) => {
+      if (a.min !== b.min) return a.min - b.min;
+      return String(a.sym).localeCompare(String(b.sym));
+    });
+    const maxDdRs = portfolioMaxDrawdownRupees(withPnl);
+    return {
+      n: dayRows.length,
+      sumRs: sumRs,
+      sumPts: sumPts,
+      wins: wins,
+      losses: losses,
+      flat: flat,
+      worst: worst,
+      best: best,
+      maxDdRs: maxDdRs,
+    };
+  }
+
+  function renderSummaryFromFilteredRows(rows) {
+    const grid = document.getElementById('summaryGrid');
+    if (!grid || !IS_EOD) return;
+    let fut = 0;
+    let eq = 0;
+    let withEntry = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (r.source === 'FUT') fut++;
+      else if (r.source === 'EQ') eq++;
+      if (r.entry_price != null) withEntry++;
+    }
+    let sumRs = 0;
+    let wins = 0;
+    let losses = 0;
+    let worst = null;
+    let best = null;
+    const forDd = [];
+    for (let i = 0; i < rows.length; i++) {
+      const rs = rows[i].exit2_pnl_rupees;
+      if (typeof rs !== 'number' || !Number.isFinite(rs)) continue;
+      sumRs += rs;
+      if (rs > 0) wins++;
+      else if (rs < 0) losses++;
+      if (worst === null || rs < worst) worst = rs;
+      if (best === null || rs > best) best = rs;
+      forDd.push({
+        pnl: rs,
+        min: scanTimeToMinutes(rows[i].first_scan_time),
+        sym: rows[i].symbol || '',
+      });
+    }
+    forDd.sort((a, b) => {
+      if (a.min !== b.min) return a.min - b.min;
+      return String(a.sym).localeCompare(String(b.sym));
+    });
+    const portfolioMdd = portfolioMaxDrawdownRupees(forDd);
+
+    const cards = [
+      ['Exit rule', '15:15 IST · 1× per symbol · day', 'First scanner streak only (no re-entry rows)'],
+      ['Trades (filtered)', fmtInt(rows.length), 'FUT=' + fmtInt(fut) + ' · EQ=' + fmtInt(eq) + ' · with entry=' + fmtInt(withEntry)],
+      ['Σ PnL @ 15:15', fmtRupees(sumRs), wins + ' W / ' + losses + ' L'],
+      ['Portfolio max DD (₹)', fmtRupees(portfolioMdd), 'prefix path along entry-time order · worst trade ' + fmtRupees(worst)],
+      ['Best / Worst trade', fmtRupees(best) + ' / ' + fmtRupees(worst), 'single-symbol extremes'],
+    ];
+    grid.innerHTML = cards.map(([title, val, sub]) => (
+      '<div class="card">' +
+        '<div class="title">' + escapeHtml(title) + '</div>' +
+        '<div class="value">' + escapeHtml(val || '—') + '</div>' +
+        '<div class="sub">' + escapeHtml(sub || '') + '</div>' +
+      '</div>'
+    )).join('');
+  }
+
   // ---------- formatters ---------------------------------------------------
 
   function escapeHtml(s) {
@@ -38,6 +159,7 @@
     return Math.round(n).toLocaleString('en-IN');
   }
   function fmtRupees(v) {
+    if (v === null || v === undefined) return '—';
     const n = Number(v);
     if (!Number.isFinite(n)) return '—';
     const sign = n > 0 ? '+' : (n < 0 ? '-' : '');
@@ -71,12 +193,11 @@
       sortVal: r => r.trade_date || '' },
     { key: 'symbol', label: 'Symbol', sortable: true,
       cell: r => {
-        const tag = r.is_reentry ? '<span class="reentry-dot" title="Re-entry #' + r.run_index + '"></span>' : '';
         const sym = escapeHtml(r.symbol || '');
         const tsym = r.trading_symbol ? '<div class="cell-note">' + escapeHtml(r.trading_symbol) + '</div>' : '';
-        return '<td class="cell-symbol">' + tag + sym + tsym + '</td>';
+        return '<td class="cell-symbol">' + sym + tsym + '</td>';
       },
-      sortVal: r => (r.symbol || '') + '_' + (r.run_index || 1) },
+      sortVal: r => r.symbol || '' },
     { key: 'source', label: 'Src', sortable: true,
       cell: r => '<td>' + escapeHtml(r.source || '—') + '</td>',
       sortVal: r => r.source || '' },
@@ -199,9 +320,16 @@
       banner.textContent = 'Failed to load backtest data: ' + (lastErr ? lastErr.message : 'no data');
       return;
     }
-    state.all = Array.isArray(doc.rows) ? doc.rows.slice() : [];
+    const raw = Array.isArray(doc.rows) ? doc.rows.slice() : [];
+    state.all = IS_EOD ? raw.filter(function (r) {
+      return Number(r.run_index) === 1;
+    }) : raw;
     renderHeader();
-    renderSummary(doc.summary || {});
+    if (IS_EOD) {
+      renderSummaryFromFilteredRows(state.all);
+    } else {
+      renderSummary(doc.summary || {});
+    }
     renderFooter(doc);
     applyFilters();
   }
@@ -234,26 +362,7 @@
 
   function renderSummary(s) {
     const grid = document.getElementById('summaryGrid');
-    if (!grid) return;
-
-    if (IS_EOD) {
-      const e2 = s.exit2 || {};
-      const cards = [
-        ['Exit rule', '15:15 IST only', 'All rows use session close — no disappearance exit'],
-        ['Trades', fmtInt(s.total_trades), (s.reentry_trades || 0) + ' re-entries'],
-        ['With entry price', fmtInt(s.trades_with_entry), 'Σ FUT=' + fmtInt(s.fut_rows) + ' / EQ=' + fmtInt(s.eq_rows)],
-        ['Σ PnL @ 15:15', fmtRupees(e2.sum_pnl_rupees), (e2.positive_rows || 0) + ' wins / ' + (e2.negative_rows || 0) + ' losses'],
-        ['Best / Worst trade', fmtRupees(e2.best_pnl_rupees) + ' / ' + fmtRupees(e2.worst_pnl_rupees), 'single-trade extremes'],
-      ];
-      grid.innerHTML = cards.map(([title, val, sub]) => (
-        '<div class="card">' +
-          '<div class="title">' + escapeHtml(title) + '</div>' +
-          '<div class="value">' + escapeHtml(val || '—') + '</div>' +
-          '<div class="sub">' + escapeHtml(sub || '') + '</div>' +
-        '</div>'
-      )).join('');
-      return;
-    }
+    if (!grid || IS_EOD) return;
 
     const e1 = s.exit1 || {};
     const e2 = s.exit2 || {};
@@ -286,7 +395,9 @@
     if (doc.generated_at) bits.push('Generated: ' + escapeHtml(doc.generated_at));
     if (doc.strategy) bits.push(escapeHtml(doc.strategy));
     if (doc.artifact_path) bits.push('<span class="muted">' + escapeHtml(doc.artifact_path) + '</span>');
-    if (IS_EOD) bits.push('<span class="muted">View: EOD exit (15:15) only</span>');
+    if (IS_EOD) {
+      bits.push('<span class="muted">EOD 15:15 · one row per symbol per day (first scanner run only)</span>');
+    }
     f.innerHTML = bits.join(' · ');
   }
 
@@ -296,48 +407,131 @@
     const from = document.getElementById('fltFrom').value;
     const to = document.getElementById('fltTo').value;
     const src = document.getElementById('fltSource').value;
-    const kind = document.getElementById('fltKind').value;
+    const kindEl = document.getElementById('fltKind');
+    const kind = kindEl ? kindEl.value : '';
     const symQ = (document.getElementById('fltSymbol').value || '').trim().toUpperCase();
 
-    let rows = state.all.filter(r => {
+    let rows = state.all.filter(function (r) {
       if (from && r.trade_date < from) return false;
       if (to && r.trade_date > to) return false;
       if (src && r.source !== src) return false;
-      if (kind === 'first' && r.is_reentry) return false;
-      if (kind === 'reentry' && !r.is_reentry) return false;
-      if (kind === 'never' && r.exit1_kind !== 'never_disappeared') return false;
+      if (!IS_EOD) {
+        if (kind === 'first' && r.is_reentry) return false;
+        if (kind === 'reentry' && !r.is_reentry) return false;
+        if (kind === 'never' && r.exit1_kind !== 'never_disappeared') return false;
+      }
       if (symQ && !(r.symbol || '').toUpperCase().includes(symQ)) return false;
       return true;
     });
 
-    const col = COLS.find(c => c.key === state.sort.key);
-    if (col) {
-      const dir = state.sort.dir === 'desc' ? -1 : 1;
-      rows.sort((a, b) => {
-        const va = col.sortVal(a);
-        const vb = col.sortVal(b);
-        if (va === vb) return 0;
-        if (va == null) return 1;
-        if (vb == null) return -1;
-        return va < vb ? -1 * dir : 1 * dir;
+    const col = COLS.find(function (c) { return c.key === state.sort.key; });
+
+    if (IS_EOD) {
+      const byDate = {};
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        const d = r.trade_date;
+        if (!byDate[d]) byDate[d] = [];
+        byDate[d].push(r);
+      }
+      let dates = Object.keys(byDate);
+      if (state.sort.key === 'trade_date') {
+        dates.sort(function (a, b) {
+          const cmp = a.localeCompare(b);
+          return state.sort.dir === 'desc' ? -cmp : cmp;
+        });
+      } else {
+        dates.sort(function (a, b) { return b.localeCompare(a); });
+      }
+      dates.forEach(function (d) {
+        const arr = byDate[d];
+        if (col && state.sort.key !== 'trade_date') {
+          const dir = state.sort.dir === 'desc' ? -1 : 1;
+          arr.sort(function (a, b) {
+            const va = col.sortVal(a);
+            const vb = col.sortVal(b);
+            if (va === vb) return 0;
+            if (va == null) return 1;
+            if (vb == null) return -1;
+            return va < vb ? -1 * dir : 1 * dir;
+          });
+        } else {
+          arr.sort(function (a, b) {
+            return String(a.symbol || '').localeCompare(String(b.symbol || ''));
+          });
+        }
       });
+
+      document.getElementById('rowCount').textContent =
+        rows.length + ' / ' + state.all.length + ' trades (1× symbol / day)';
+      renderSummaryFromFilteredRows(rows);
+
+      const tbody = document.getElementById('tbody');
+      if (!rows.length) {
+        tbody.innerHTML = '<tr><td class="nodata" colspan="' + COLS.length +
+          '">No rows match the filters.</td></tr>';
+      } else {
+        const parts = [];
+        const nc = COLS.length;
+        const labelCols = nc - 2;
+        for (let di = 0; di < dates.length; di++) {
+          const d = dates[di];
+          const dayRows = byDate[d];
+          parts.push(
+            '<tr class="fno-date-head"><td colspan="' + nc + '">' +
+            '<strong>' + escapeHtml(fmtDate(d)) + '</strong> · ' + dayRows.length + ' symbol(s)' +
+            '</td></tr>'
+          );
+          const st = aggregateDayStats(dayRows);
+          for (let j = 0; j < dayRows.length; j++) {
+            const r = dayRows[j];
+            parts.push('<tr>' + COLS.map(function (c) { return c.cell(r); }).join('') + '</tr>');
+          }
+          parts.push(
+            '<tr class="fno-date-subtotal">' +
+            '<td colspan="' + labelCols + '">' +
+            '<strong>Subtotal</strong> · ' + escapeHtml(fmtDate(d)) +
+            ' · Σ ' + fmtRupees(st.sumRs) +
+            ' · ' + st.wins + ' W / ' + st.losses + ' L' +
+            (st.flat ? ' · ' + st.flat + ' flat' : '') +
+            ' · portfolio MDD ' + fmtRupees(st.maxDdRs) +
+            ' · worst trade ' + fmtRupees(st.worst) +
+            '</td>' +
+            '<td class="num">' + (Number.isFinite(st.sumPts) ? signedPts(st.sumPts) : '—') + '</td>' +
+            '<td class="num ' + pnlCls(st.sumRs) + '">' + fmtRupees(st.sumRs) + '</td>' +
+            '</tr>'
+          );
+        }
+        tbody.innerHTML = parts.join('');
+      }
+    } else {
+      if (col) {
+        const dir = state.sort.dir === 'desc' ? -1 : 1;
+        rows.sort(function (a, b) {
+          const va = col.sortVal(a);
+          const vb = col.sortVal(b);
+          if (va === vb) return 0;
+          if (va == null) return 1;
+          if (vb == null) return -1;
+          return va < vb ? -1 * dir : 1 * dir;
+        });
+      }
+
+      document.getElementById('rowCount').textContent =
+        rows.length + ' / ' + state.all.length + ' trades';
+
+      const tbody = document.getElementById('tbody');
+      if (!rows.length) {
+        tbody.innerHTML = '<tr><td class="nodata" colspan="' + COLS.length +
+          '">No rows match the filters.</td></tr>';
+      } else {
+        tbody.innerHTML = rows.map(function (r) {
+          return '<tr>' + COLS.map(function (c) { return c.cell(r); }).join('') + '</tr>';
+        }).join('');
+      }
     }
 
-    document.getElementById('rowCount').textContent =
-      rows.length + ' / ' + state.all.length + ' trades';
-
-    const tbody = document.getElementById('tbody');
-    if (!rows.length) {
-      tbody.innerHTML = '<tr><td class="nodata" colspan="' + COLS.length + '">No rows match the filters.</td></tr>';
-      return;
-    }
-    const html = rows.map(r => {
-      const cells = COLS.map(c => c.cell(r)).join('');
-      return '<tr>' + cells + '</tr>';
-    }).join('');
-    tbody.innerHTML = html;
-
-    document.querySelectorAll('#resultsTable thead th').forEach(th => {
+    document.querySelectorAll('#resultsTable thead th').forEach(function (th) {
       th.classList.remove('sort-asc', 'sort-desc');
       if (th.dataset && th.dataset.key === state.sort.key) {
         th.classList.add(state.sort.dir === 'asc' ? 'sort-asc' : 'sort-desc');
