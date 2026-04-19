@@ -94,6 +94,9 @@ class TradeRow:
     exit2_pnl_points: Optional[float] = None
     exit2_pnl_rupees: Optional[float] = None
 
+    upstox_margin_rupees: Optional[float] = None   # POST /v2/charges/margin (FUT rows)
+    upstox_margin_product: Optional[str] = None   # "I" or "D" when margin succeeded
+
     error: Optional[str] = None
     notes: List[str] = field(default_factory=list)
 
@@ -126,6 +129,8 @@ class TradeRow:
             "exit2_price": self.exit2_price,
             "exit2_pnl_points": self.exit2_pnl_points,
             "exit2_pnl_rupees": self.exit2_pnl_rupees,
+            "upstox_margin_rupees": self.upstox_margin_rupees,
+            "upstox_margin_product": self.upstox_margin_product,
             "error": self.error,
             "notes": self.notes,
         }
@@ -267,6 +272,54 @@ def _session_candles(
     return buckets
 
 
+def _margin_required_from_charge_response(resp: Optional[Dict[str, Any]]) -> Optional[float]:
+    if not isinstance(resp, dict) or resp.get("status") != "success":
+        return None
+    data = resp.get("data")
+    if not isinstance(data, dict):
+        return None
+    for key in ("required_margin", "final_margin"):
+        v = data.get(key)
+        if v is not None:
+            try:
+                return round(float(v), 2)
+            except (TypeError, ValueError):
+                pass
+    return None
+
+
+def _attach_upstox_margin(upstox: UpstoxService, tr: TradeRow) -> None:
+    """Set ``upstox_margin_rupees`` via Upstox Margin Details API for one long FUT lot."""
+    if tr.source != "FUT" or not tr.instrument_key or not tr.fut_lot_size:
+        return
+    try:
+        qty_i = int(tr.fut_lot_size)
+    except (TypeError, ValueError):
+        return
+    if qty_i <= 0:
+        return
+    base: Dict[str, Any] = {
+        "instrument_key": tr.instrument_key,
+        "quantity": qty_i,
+        "transaction_type": "BUY",
+    }
+    if tr.entry_price is not None:
+        try:
+            base["price"] = round(float(tr.entry_price), 2)
+        except (TypeError, ValueError):
+            pass
+    # Try intraday (I) first for same-day closed simulation; fall back to delivery-style (D).
+    for product in ("I", "D"):
+        payload = [dict(base, product=product)]
+        resp = upstox.get_charges_margin(payload)
+        m = _margin_required_from_charge_response(resp)
+        if m is not None:
+            tr.upstox_margin_rupees = m
+            tr.upstox_margin_product = product
+            return
+    tr.notes.append("upstox_margin_unavailable")
+
+
 def _pnl(exit_px: Optional[float], entry_px: Optional[float], lot: Optional[int]) -> Tuple[Optional[float], Optional[float]]:
     if entry_px is None or exit_px is None:
         return None, None
@@ -360,6 +413,8 @@ def compute_trade_row(
     lot = tr.fut_lot_size
     tr.exit1_pnl_points, tr.exit1_pnl_rupees = _pnl(tr.exit1_price, tr.entry_price, lot)
     tr.exit2_pnl_points, tr.exit2_pnl_rupees = _pnl(tr.exit2_price, tr.entry_price, lot)
+
+    _attach_upstox_margin(upstox, tr)
 
     return tr
 

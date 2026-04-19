@@ -339,7 +339,28 @@ class UpstoxService:
             "Accept": "application/json",
             "Authorization": f"Bearer {self.access_token}"
         }
-    
+
+    def get_charges_margin(
+        self,
+        instruments: List[Dict[str, Any]],
+        timeout: int = 15,
+    ) -> Optional[Dict[str, Any]]:
+        """POST ``/v2/charges/margin`` — margin required per instrument (max 20 per request).
+
+        Each instrument dict must include ``instrument_key``, ``quantity``, ``transaction_type``
+        (BUY/SELL), ``product`` (I/D/CO/MTF); optional ``price``.
+        https://upstox.com/developer/api-documentation/margin
+        """
+        if not instruments:
+            return None
+        url = f"{UPSTOX_V2_HISTORICAL_BASE}/charges/margin"
+        return self.make_api_request(
+            url,
+            method="POST",
+            data={"instruments": instruments[:20]},
+            timeout=timeout,
+        )
+
     def make_api_request(
         self,
         url: str,

@@ -27,6 +27,7 @@
     border-bottom: 2px solid var(--border); color: var(--muted);
   }
   tr.fno-date-subtotal td.num { color: var(--text); font-weight: 600; }
+  table.data th.num, table.fno-quick-summary th.num { text-align: right; }
   .fno-quick-h2 {
     font-size: 1.08rem; margin: 18px 0 10px;
     border-bottom: 1px solid var(--border); padding-bottom: 6px; color: #f8fafc;
@@ -88,12 +89,12 @@
   <div class="table-wrap">
     <table class="data" id="resultsTable">
       <thead><tr></tr></thead>
-      <tbody id="tbody"><tr><td class="nodata" colspan="12">Loading…</td></tr></tbody>
+      <tbody id="tbody"><tr><td class="nodata" colspan="13">Loading…</td></tr></tbody>
     </table>
   </div>
 
   <p class="footer" id="footerMeta"></p>
 </div>
-<script src="fno-bullish.js?v=5"></script>
+<script src="fno-bullish.js?v=6"></script>
 </body>
 </html>

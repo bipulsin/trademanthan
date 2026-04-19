@@ -92,9 +92,17 @@
     });
     const maxDdRs = portfolioMaxDrawdownRupees(withPnl);
     let sumMarginEst = 0;
+    let sumUpstoxMargin = 0;
+    let worstNegativePnl = null;
     for (let i = 0; i < dayRows.length; i++) {
       const m = estMarginRs(dayRows[i]);
       if (typeof m === 'number' && Number.isFinite(m)) sumMarginEst += m;
+      const ux = dayRows[i].upstox_margin_rupees;
+      if (typeof ux === 'number' && Number.isFinite(ux)) sumUpstoxMargin += ux;
+      const rsn = dayRows[i].exit2_pnl_rupees;
+      if (typeof rsn === 'number' && Number.isFinite(rsn) && rsn < 0) {
+        if (worstNegativePnl === null || rsn < worstNegativePnl) worstNegativePnl = rsn;
+      }
     }
     return {
       n: dayRows.length,
@@ -107,6 +115,8 @@
       best: best,
       maxDdRs: maxDdRs,
       sumMarginEst: sumMarginEst,
+      sumUpstoxMargin: sumUpstoxMargin,
+      worstNegativePnl: worstNegativePnl,
     };
   }
 
@@ -115,11 +125,14 @@
     if (!grid || !IS_EOD) return;
     let withEntry = 0;
     let sumMarginAll = 0;
+    let sumUpstoxAll = 0;
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
       if (r.entry_price != null) withEntry++;
       const m = estMarginRs(r);
       if (typeof m === 'number' && Number.isFinite(m)) sumMarginAll += m;
+      const ux = r.upstox_margin_rupees;
+      if (typeof ux === 'number' && Number.isFinite(ux)) sumUpstoxAll += ux;
     }
     let sumRs = 0;
     let wins = 0;
@@ -150,7 +163,8 @@
     const cards = [
       ['Exit rule', '15:15 IST · FUT only · 1× symbol / day', 'First scanner streak · EQ rows excluded'],
       ['Trades (filtered)', fmtInt(rows.length), 'with entry price=' + fmtInt(withEntry)],
-      ['Σ est. margin @ entry', fmtRupees(sumMarginAll), Math.round(EST_MARGIN_FRAC * 100) + '% of contract value · illustrative'],
+      ['Σ margin (Upstox API)', fmtMarginRs(sumUpstoxAll), 'POST /v2/charges/margin · regenerate JSON if blank'],
+      ['Σ illustrative margin', fmtRupees(sumMarginAll), Math.round(EST_MARGIN_FRAC * 100) + '% of contract value · rough scale'],
       ['Σ PnL @ 15:15', fmtRupees(sumRs), wins + ' W / ' + losses + ' L'],
       ['Portfolio max DD (₹)', fmtRupees(portfolioMdd), 'prefix path along entry-time order · worst trade ' + fmtRupees(worst)],
       ['Best / Worst trade', fmtRupees(best) + ' / ' + fmtRupees(worst), 'single-symbol extremes'],
@@ -206,7 +220,7 @@
       '<table class="data fno-quick-summary" id="fnoQuickSummaryTable">' +
       '<thead><tr>' +
       '<th>Date</th><th class="num">Trades</th><th class="num">Σ PnL</th>' +
-      '<th class="num">Worst trade</th><th class="num">Est. total margin</th>' +
+      '<th class="num">Worst trade</th><th class="num">Σ Upstox margin</th>' +
       '</tr></thead><tbody>' +
       body.join('') +
       '<tr class="fno-quick-total">' +
@@ -214,11 +228,12 @@
       '<td class="num"><strong>' + fmtInt(totTrades) + '</strong></td>' +
       '<td class="num ' + pnlClsTot + '"><strong>' + fmtRupees(totPnl) + '</strong></td>' +
       '<td class="num">—</td>' +
-      '<td class="num"><strong>' + fmtRupees(totMargin) + '</strong></td>' +
+      '<td class="num"><strong>' + fmtMarginRs(totMargin) + '</strong></td>' +
       '</tr></tbody></table></div>' +
       '<p class="cell-note" style="margin:8px 0 0; font-size:0.85rem;">' +
-      'Est. total margin = sum of (entry price × lot size × ' + (EST_MARGIN_FRAC * 100) +
-      '%) for each trade that day. Use as a scale figure; actual SPAN + exposure is set by the exchange and your broker.</p>';
+      '<b>Worst trade</b> is the largest loss (most negative PnL) that day; — if none. ' +
+      '<b>Σ Upstox margin</b> sums API margin from the backtest JSON (regenerate after deploy if empty). ' +
+      'Illustrative ' + (EST_MARGIN_FRAC * 100) + '% contract-value margin remains in detail subtotals as a scale check.</p>';
   }
 
   // ---------- formatters ---------------------------------------------------
@@ -244,6 +259,13 @@
     if (!Number.isFinite(n)) return '—';
     const sign = n > 0 ? '+' : (n < 0 ? '-' : '');
     return sign + '₹' + Math.abs(n).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+  }
+  /** Non-directional rupees (e.g. margin amounts). */
+  function fmtMarginRs(v) {
+    if (v === null || v === undefined) return '—';
+    const n = Number(v);
+    if (!Number.isFinite(n)) return '—';
+    return '₹' + Math.abs(n).toLocaleString('en-IN', { maximumFractionDigits: 0 });
   }
   function fmtDate(iso) {
     if (!iso) return '—';
@@ -296,6 +318,15 @@
     { key: 'entry_price', label: 'Entry ₹', sortable: true,
       cell: r => '<td class="num">' + fmtNum(r.entry_price) + '</td>',
       sortVal: r => Number(r.entry_price) || 0 },
+    { key: 'upstox_margin_rupees', label: 'Margin (Upstox)', sortable: true,
+      cell: r => {
+        const v = r.upstox_margin_rupees;
+        const prod = r.upstox_margin_product;
+        const tip = prod ? ('Upstox /v2/charges/margin · product ' + prod) : 'Upstox Margin Details API';
+        const inner = (typeof v === 'number' && Number.isFinite(v)) ? fmtMarginRs(v) : '—';
+        return '<td class="num" title="' + escapeHtml(tip) + '">' + inner + '</td>';
+      },
+      sortVal: r => Number(r.upstox_margin_rupees) || 0 },
     { key: 'exit2_time', label: 'Exit @', sortable: true,
       cell: r => '<td title="Fixed session exit">' + escapeHtml(r.exit2_time || '15:15') + '</td>',
       sortVal: r => r.exit2_time || '' },
@@ -584,8 +615,9 @@
             ' · ' + st.wins + ' W / ' + st.losses + ' L' +
             (st.flat ? ' · ' + st.flat + ' flat' : '') +
             ' · portfolio MDD ' + fmtRupees(st.maxDdRs) +
-            ' · worst trade ' + fmtRupees(st.worst) +
-            ' · est. margin ' + fmtRupees(st.sumMarginEst) +
+            ' · worst loss ' + (st.worstNegativePnl === null ? '—' : fmtRupees(st.worstNegativePnl)) +
+            ' · Upstox margin Σ ' + fmtMarginRs(st.sumUpstoxMargin) +
+            ' · illus. margin Σ ' + fmtMarginRs(st.sumMarginEst) +
             '</td>' +
             '<td class="num">' + (Number.isFinite(st.sumPts) ? signedPts(st.sumPts) : '—') + '</td>' +
             '<td class="num ' + pnlCls(st.sumRs) + '">' + fmtRupees(st.sumRs) + '</td>' +
