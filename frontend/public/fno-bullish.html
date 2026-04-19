@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
+<title>F&amp;O Bullish Trend Scanner Backtest — Two-exit PnL | TradeWithCTO</title>
+<link rel="stylesheet" href="nks-intraday.css?v=7" />
+<style>
+  /* Light-touch additions specific to this page -- the NKS CSS is reused
+     as-is for tables, summary grid, filters, etc. */
+  .sub-toggle { display: inline-flex; gap: 8px; margin: 6px 0 14px; flex-wrap: wrap; }
+  .sub-toggle .pill {
+    display: inline-block; padding: 6px 14px; font-size: 0.82rem; font-weight: 600;
+    color: var(--muted); background: var(--panel); border: 1px solid var(--border);
+    border-radius: 999px; letter-spacing: 0.02em;
+  }
+  .reentry-dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--amber); margin-right: 6px; vertical-align: middle;
+  }
+  td.cell-symbol { white-space: nowrap; }
+  td.cell-note { color: var(--muted); font-size: 0.82rem; }
+  /* Keep exit1 / exit2 columns easy to compare visually. */
+  .col-exit1 { border-left: 1px dashed var(--border); }
+  .col-exit2 { border-left: 1px dashed var(--border); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>F&amp;O Bullish Trend Scanner Backtest — Two-exit PnL</h1>
+  <div class="sub-toggle">
+    <span class="pill">Scanner: MA + ADX + MACD (15-min)</span>
+    <span class="pill">Entry = first-appearance + 5 min</span>
+    <span class="pill">Exit 1 = disappearance + 5 min</span>
+    <span class="pill">Exit 2 = 15:15 IST</span>
+  </div>
+  <p class="lede">
+    Each contiguous run where a symbol appears in the 15-minute <b>Bullish Trend</b>
+    scanner becomes one simulated long trade on the front-month future.
+    Entry is taken <b>5 minutes after the first scan</b> the symbol appeared in
+    (a.k.a. LTP at first_scan + 5 min), and two exits are measured: (1) 5 minutes
+    after the symbol <b>first disappears</b> from the scanner later that day,
+    (2) a hard <b>15:15 IST</b> session close. Each re-appearance within the
+    same day generates a fresh trade <span class="reentry-dot" title="re-entry"></span>.
+    Quantity is the current 1-lot size of the future.
+  </p>
+
+  <div class="callout" style="border-left-color: var(--good);">
+    <b>Read it as a head-to-head.</b> Exit 1 is the scanner's own "trend-broken" signal —
+    how fast the move fades matters. Exit 2 is the dumb "hold-to-EOD" baseline.
+    If Σ(Exit 1) &gt; Σ(Exit 2), the disappearance signal is adding alpha over
+    time-stops; if reversed, the disappearance is exiting too early.
+  </div>
+
+  <div class="callout" id="errBanner" style="display:none;"></div>
+
+  <div class="summary" id="summaryGrid"></div>
+
+  <div class="filters">
+    <label>Date from
+      <input type="date" id="fltFrom" />
+    </label>
+    <label>Date to
+      <input type="date" id="fltTo" />
+    </label>
+    <label>Source
+      <select id="fltSource">
+        <option value="">All</option>
+        <option value="FUT">FUT</option>
+        <option value="EQ">EQ</option>
+      </select>
+    </label>
+    <label>Entry kind
+      <select id="fltKind">
+        <option value="">All</option>
+        <option value="first">First entries only</option>
+        <option value="reentry">Re-entries only</option>
+        <option value="never">Never-disappeared</option>
+      </select>
+    </label>
+    <label>Symbol
+      <input type="text" id="fltSymbol" placeholder="e.g. TITAN" />
+    </label>
+    <span class="count" id="rowCount">—</span>
+  </div>
+
+  <div class="legend">
+    <span><b>First / Last scan:</b> 15-min scanner slots the symbol was present in</span>
+    <span><b>Disappear:</b> first scan where it was absent after the run</span>
+    <span><b>Entry:</b> 1-min open at first_scan + 5 min</span>
+    <span><b>Exit 1 / Exit 2:</b> 1-min open at disappear + 5 min / 15:15 IST</span>
+    <span><b>PnL ₹:</b> (exit − entry) × 1 lot size</span>
+  </div>
+
+  <div class="table-wrap">
+    <table class="data" id="resultsTable">
+      <thead><tr></tr></thead>
+      <tbody id="tbody"><tr><td class="nodata" colspan="16">Loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <p class="footer" id="footerMeta"></p>
+</div>
+<script src="fno-bullish.js?v=1"></script>
+</body>
+</html>
