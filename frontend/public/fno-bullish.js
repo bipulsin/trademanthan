@@ -13,12 +13,29 @@
   const MODE = (document.body && document.body.dataset && document.body.dataset.fnoMode) || 'dual';
   const IS_EOD = MODE === 'eod';
 
+  /** Illustrative NRML-style margin ≈ this fraction of contract value at entry (SPAN varies by broker). */
+  const EST_MARGIN_FRAC = 0.125;
+
   const API_PATHS = ['/api/fno-bullish/data', '/fno-bullish/data'];
 
   const state = {
     all: [],
     sort: { key: 'trade_date', dir: 'desc' },
   };
+
+  function entryContractValue(r) {
+    const p = Number(r.entry_price);
+    const lot = Number(r.fut_lot_size || r.lot_size);
+    if (!Number.isFinite(p) || !Number.isFinite(lot) || lot <= 0) return null;
+    return p * lot;
+  }
+
+  /** Rough margin rupees for one position (contract value × EST_MARGIN_FRAC). */
+  function estMarginRs(r) {
+    const cv = entryContractValue(r);
+    if (cv == null) return null;
+    return cv * EST_MARGIN_FRAC;
+  }
 
   /** Minutes from midnight for intra-day ordering (entry trigger ordering). */
   function scanTimeToMinutes(hhmm) {
@@ -74,6 +91,11 @@
       return String(a.sym).localeCompare(String(b.sym));
     });
     const maxDdRs = portfolioMaxDrawdownRupees(withPnl);
+    let sumMarginEst = 0;
+    for (let i = 0; i < dayRows.length; i++) {
+      const m = estMarginRs(dayRows[i]);
+      if (typeof m === 'number' && Number.isFinite(m)) sumMarginEst += m;
+    }
     return {
       n: dayRows.length,
       sumRs: sumRs,
@@ -84,20 +106,20 @@
       worst: worst,
       best: best,
       maxDdRs: maxDdRs,
+      sumMarginEst: sumMarginEst,
     };
   }
 
   function renderSummaryFromFilteredRows(rows) {
     const grid = document.getElementById('summaryGrid');
     if (!grid || !IS_EOD) return;
-    let fut = 0;
-    let eq = 0;
     let withEntry = 0;
+    let sumMarginAll = 0;
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
-      if (r.source === 'FUT') fut++;
-      else if (r.source === 'EQ') eq++;
       if (r.entry_price != null) withEntry++;
+      const m = estMarginRs(r);
+      if (typeof m === 'number' && Number.isFinite(m)) sumMarginAll += m;
     }
     let sumRs = 0;
     let wins = 0;
@@ -126,8 +148,9 @@
     const portfolioMdd = portfolioMaxDrawdownRupees(forDd);
 
     const cards = [
-      ['Exit rule', '15:15 IST · 1× per symbol · day', 'First scanner streak only (no re-entry rows)'],
-      ['Trades (filtered)', fmtInt(rows.length), 'FUT=' + fmtInt(fut) + ' · EQ=' + fmtInt(eq) + ' · with entry=' + fmtInt(withEntry)],
+      ['Exit rule', '15:15 IST · FUT only · 1× symbol / day', 'First scanner streak · EQ rows excluded'],
+      ['Trades (filtered)', fmtInt(rows.length), 'with entry price=' + fmtInt(withEntry)],
+      ['Σ est. margin @ entry', fmtRupees(sumMarginAll), Math.round(EST_MARGIN_FRAC * 100) + '% of contract value · illustrative'],
       ['Σ PnL @ 15:15', fmtRupees(sumRs), wins + ' W / ' + losses + ' L'],
       ['Portfolio max DD (₹)', fmtRupees(portfolioMdd), 'prefix path along entry-time order · worst trade ' + fmtRupees(worst)],
       ['Best / Worst trade', fmtRupees(best) + ' / ' + fmtRupees(worst), 'single-symbol extremes'],
@@ -139,6 +162,63 @@
         '<div class="sub">' + escapeHtml(sub || '') + '</div>' +
       '</div>'
     )).join('');
+  }
+
+  function renderDateQuickSummary(rows) {
+    const host = document.getElementById('fnoDateQuickSummary');
+    if (!host || !IS_EOD) return;
+    if (!rows.length) {
+      host.innerHTML = '<p class="lede" style="margin:0 0 10px;">No FUT rows for the current filters.</p>';
+      return;
+    }
+    const byDate = {};
+    for (let i = 0; i < rows.length; i++) {
+      const d = rows[i].trade_date;
+      if (!byDate[d]) byDate[d] = [];
+      byDate[d].push(rows[i]);
+    }
+    const dates = Object.keys(byDate).sort(function (a, b) { return b.localeCompare(a); });
+    let totTrades = 0;
+    let totPnl = 0;
+    let totMargin = 0;
+    const body = [];
+    for (let i = 0; i < dates.length; i++) {
+      const d = dates[i];
+      const dayRows = byDate[d];
+      const st = aggregateDayStats(dayRows);
+      totTrades += st.n;
+      totPnl += st.sumRs;
+      totMargin += st.sumMarginEst;
+      body.push(
+        '<tr>' +
+        '<td>' + escapeHtml(fmtDate(d)) + '</td>' +
+        '<td class="num">' + fmtInt(st.n) + '</td>' +
+        '<td class="num ' + pnlCls(st.sumRs) + '">' + fmtRupees(st.sumRs) + '</td>' +
+        '<td class="num ' + pnlCls(st.worst) + '">' + fmtRupees(st.worst) + '</td>' +
+        '<td class="num">' + fmtRupees(st.sumMarginEst) + '</td>' +
+        '</tr>'
+      );
+    }
+    const pnlClsTot = pnlCls(totPnl);
+    host.innerHTML =
+      '<h2 class="fno-quick-h2">Date-wise summary (FUT · filtered)</h2>' +
+      '<div class="table-wrap">' +
+      '<table class="data fno-quick-summary" id="fnoQuickSummaryTable">' +
+      '<thead><tr>' +
+      '<th>Date</th><th class="num">Trades</th><th class="num">Σ PnL</th>' +
+      '<th class="num">Worst trade</th><th class="num">Est. total margin</th>' +
+      '</tr></thead><tbody>' +
+      body.join('') +
+      '<tr class="fno-quick-total">' +
+      '<td><strong>Total</strong></td>' +
+      '<td class="num"><strong>' + fmtInt(totTrades) + '</strong></td>' +
+      '<td class="num ' + pnlClsTot + '"><strong>' + fmtRupees(totPnl) + '</strong></td>' +
+      '<td class="num">—</td>' +
+      '<td class="num"><strong>' + fmtRupees(totMargin) + '</strong></td>' +
+      '</tr></tbody></table></div>' +
+      '<p class="cell-note" style="margin:8px 0 0; font-size:0.85rem;">' +
+      'Est. total margin = sum of (entry price × lot size × ' + (EST_MARGIN_FRAC * 100) +
+      '%) for each trade that day. Use as a scale figure; actual SPAN + exposure is set by the exchange and your broker.</p>';
   }
 
   // ---------- formatters ---------------------------------------------------
@@ -198,9 +278,6 @@
         return '<td class="cell-symbol">' + sym + tsym + '</td>';
       },
       sortVal: r => r.symbol || '' },
-    { key: 'source', label: 'Src', sortable: true,
-      cell: r => '<td>' + escapeHtml(r.source || '—') + '</td>',
-      sortVal: r => r.source || '' },
     { key: 'lot_size', label: 'Lot', sortable: true,
       cell: r => '<td class="num">' + fmtInt(r.fut_lot_size || r.lot_size) + '</td>',
       sortVal: r => Number(r.fut_lot_size || r.lot_size) || 0 },
@@ -322,7 +399,7 @@
     }
     const raw = Array.isArray(doc.rows) ? doc.rows.slice() : [];
     state.all = IS_EOD ? raw.filter(function (r) {
-      return Number(r.run_index) === 1;
+      return Number(r.run_index) === 1 && r.source === 'FUT';
     }) : raw;
     renderHeader();
     if (IS_EOD) {
@@ -396,7 +473,7 @@
     if (doc.strategy) bits.push(escapeHtml(doc.strategy));
     if (doc.artifact_path) bits.push('<span class="muted">' + escapeHtml(doc.artifact_path) + '</span>');
     if (IS_EOD) {
-      bits.push('<span class="muted">EOD 15:15 · one row per symbol per day (first scanner run only)</span>');
+      bits.push('<span class="muted">EOD 15:15 · FUT only · first run / symbol / day</span>');
     }
     f.innerHTML = bits.join(' · ');
   }
@@ -414,7 +491,7 @@
     let rows = state.all.filter(function (r) {
       if (from && r.trade_date < from) return false;
       if (to && r.trade_date > to) return false;
-      if (src && r.source !== src) return false;
+      if (!IS_EOD && src && r.source !== src) return false;
       if (!IS_EOD) {
         if (kind === 'first' && r.is_reentry) return false;
         if (kind === 'reentry' && !r.is_reentry) return false;
@@ -463,8 +540,9 @@
       });
 
       document.getElementById('rowCount').textContent =
-        rows.length + ' / ' + state.all.length + ' trades (1× symbol / day)';
+        rows.length + ' / ' + state.all.length + ' FUT trades (1× symbol / day)';
       renderSummaryFromFilteredRows(rows);
+      renderDateQuickSummary(rows);
 
       const tbody = document.getElementById('tbody');
       if (!rows.length) {
@@ -496,6 +574,7 @@
             (st.flat ? ' · ' + st.flat + ' flat' : '') +
             ' · portfolio MDD ' + fmtRupees(st.maxDdRs) +
             ' · worst trade ' + fmtRupees(st.worst) +
+            ' · est. margin ' + fmtRupees(st.sumMarginEst) +
             '</td>' +
             '<td class="num">' + (Number.isFinite(st.sumPts) ? signedPts(st.sumPts) : '—') + '</td>' +
             '<td class="num ' + pnlCls(st.sumRs) + '">' + fmtRupees(st.sumRs) + '</td>' +

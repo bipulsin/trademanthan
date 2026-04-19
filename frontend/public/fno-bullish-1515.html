@@ -27,6 +27,12 @@
     border-bottom: 2px solid var(--border); color: var(--muted);
   }
   tr.fno-date-subtotal td.num { color: var(--text); font-weight: 600; }
+  .fno-quick-h2 {
+    font-size: 1.08rem; margin: 18px 0 10px;
+    border-bottom: 1px solid var(--border); padding-bottom: 6px; color: #f8fafc;
+  }
+  table.fno-quick-summary { margin-bottom: 20px; }
+  tr.fno-quick-total td { background: var(--panel); font-weight: 600; border-top: 2px solid var(--accent); }
 </style>
 </head>
 <body data-fno-mode="eod">
@@ -37,26 +43,26 @@
     <a href="fno-bullish-1515.html" class="active" aria-current="page">15:15 only</a>
   </div>
   <div class="sub-toggle">
-    <span class="pill">Scanner: MA + ADX + MACD (15-min)</span>
-    <span class="pill">One symbol · day · first streak only</span>
+    <span class="pill">F&amp;O futures rows only</span>
+    <span class="pill">One symbol · day · first streak</span>
     <span class="pill">Exit = 15:15 IST</span>
   </div>
   <p class="lede">
-    Each calendar day you see at most <b>one simulated long per underlying symbol</b>:
-    the     first time that symbol appears in the scanner we take entry <b>5 minutes after that
-    first 15-min scan</b>, using only that initial streak (first scanner run of the day).
-    Later re-entries the same day are ignored here.
-    Exit is always <b>15:15 IST</b>. Rows are grouped by trigger date with a subtotal per date:
-    Σ PnL, win/loss count, <b>portfolio max drawdown</b> (prefix equity path ordered by first-scan
-    time), and worst single-trade loss.
+    At most <b>one simulated long per underlying per day</b> on the <b>listed front-month future</b>
+    (cash EQ proxy rows removed). Entry is <b>5 minutes after the first 15-min scan</b> of that
+    symbol’s first streak; exit is <b>15:15 IST</b>. Below is a compact <b>date-wise summary</b>;
+    then card metrics and the detail table grouped by date.
+    <b>Est. total margin</b> sums illustrative margins (see footnote — not exchange SPAN).
   </p>
 
   <div class="callout" style="border-left-color: var(--neutral);">
-    <b>Same JSON artifact</b> as other views — this page filters to first appearance per symbol
-    per day and recomputes summaries from those rows (totals no longer match the unfiltered file).
+    Rows are filtered in the browser to <b>run_index === 1</b> and <b>source === FUT</b>.
+    Figures differ from the raw JSON counts.
   </div>
 
   <div class="callout" id="errBanner" style="display:none;"></div>
+
+  <div id="fnoDateQuickSummary"></div>
 
   <div class="summary" id="summaryGrid"></div>
 
@@ -67,13 +73,6 @@
     <label>Date to
       <input type="date" id="fltTo" />
     </label>
-    <label>Source
-      <select id="fltSource">
-        <option value="">All</option>
-        <option value="FUT">FUT</option>
-        <option value="EQ">EQ</option>
-      </select>
-    </label>
     <label>Symbol
       <input type="text" id="fltSymbol" placeholder="e.g. TITAN" />
     </label>
@@ -81,22 +80,20 @@
   </div>
 
   <div class="legend">
-    <span><b>Grouping:</b> by trigger date (descending)</span>
-    <span><b>Entry:</b> first streak only · 1-min open at first_scan + 5 min</span>
+    <span><b>Quick summary:</b> trades/day, Σ PnL, worst trade, estimated total margin (12.5% × contract value @ entry)</span>
+    <span><b>Detail table:</b> grouped by trigger date · subtotal includes est. margin for that day</span>
     <span><b>Exit:</b> 15:15 IST</span>
-    <span><b>Subtotal MDD:</b> max peak-to-trough on cumulative Σ PnL when trades are stacked in first-scan order (same-day portfolio path)</span>
-    <span><b>Worst trade:</b> most negative single-symbol PnL that day</span>
   </div>
 
   <div class="table-wrap">
     <table class="data" id="resultsTable">
       <thead><tr></tr></thead>
-      <tbody id="tbody"><tr><td class="nodata" colspan="13">Loading…</td></tr></tbody>
+      <tbody id="tbody"><tr><td class="nodata" colspan="12">Loading…</td></tr></tbody>
     </table>
   </div>
 
   <p class="footer" id="footerMeta"></p>
 </div>
-<script src="fno-bullish.js?v=3"></script>
+<script src="fno-bullish.js?v=4"></script>
 </body>
 </html>
