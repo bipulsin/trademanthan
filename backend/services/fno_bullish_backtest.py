@@ -24,6 +24,7 @@ from __future__ import annotations
 import csv
 import logging
 import time
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -34,6 +35,7 @@ import pytz
 from backend.config import settings
 from backend.services.nks_intraday_backtest import (
     _bucket_candles_by_hhmm,
+    _candle_ohlcv,
     _index_instruments,
     _load_instruments,
     _price_at_slot,
@@ -97,6 +99,11 @@ class TradeRow:
     upstox_margin_rupees: Optional[float] = None   # POST /v2/charges/margin (FUT rows)
     upstox_margin_product: Optional[str] = None   # "I" or "D" when margin succeeded
 
+    # Conviction (basis first 15-min scan slot of the run; VWAP 09:15 → first_scan; OI vs open)
+    conviction_session_vwap_first_scan: Optional[float] = None
+    conviction_price_vs_vwap_pct: Optional[float] = None   # (close@first_scan − VWAP) / VWAP · 100
+    conviction_oi_change_pct: Optional[float] = None     # session OI % change (total OI proxy)
+
     error: Optional[str] = None
     notes: List[str] = field(default_factory=list)
 
@@ -131,6 +138,9 @@ class TradeRow:
             "exit2_pnl_rupees": self.exit2_pnl_rupees,
             "upstox_margin_rupees": self.upstox_margin_rupees,
             "upstox_margin_product": self.upstox_margin_product,
+            "conviction_session_vwap_first_scan": self.conviction_session_vwap_first_scan,
+            "conviction_price_vs_vwap_pct": self.conviction_price_vs_vwap_pct,
+            "conviction_oi_change_pct": self.conviction_oi_change_pct,
             "error": self.error,
             "notes": self.notes,
         }
@@ -328,6 +338,188 @@ def _pnl(exit_px: Optional[float], entry_px: Optional[float], lot: Optional[int]
     return round(pts, 2), (round(rs, 2) if rs is not None else None)
 
 
+def _candle_oi(c: Any) -> Optional[float]:
+    """Open interest on a 1-minute candle (F&O); EQ cash often has no OI."""
+    if isinstance(c, dict):
+        v = c.get("oi")
+        if v is None:
+            v = c.get("open_interest")
+    elif isinstance(c, (list, tuple)) and len(c) >= 7:
+        v = c[6]
+    else:
+        return None
+    try:
+        x = float(v)
+        return x if x >= 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _close_price_at_bucket(
+    buckets: Dict[Tuple[int, int], Dict[str, Any]],
+    hhmm: Tuple[int, int],
+) -> Optional[float]:
+    c = buckets.get(hhmm)
+    if not c:
+        return None
+    _, _, _, cl, _ = _candle_ohlcv(c)
+    try:
+        return float(cl) if cl is not None and float(cl) > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _first_oi_time_ordered(
+    buckets: Dict[Tuple[int, int], Dict[str, Any]],
+    start_hhmm: Tuple[int, int],
+    end_hhmm: Tuple[int, int],
+) -> Optional[float]:
+    """First non-null OI in ``[start_hhmm, end_hhmm]`` by clock order."""
+    keys = sorted(k for k in buckets if start_hhmm <= k <= end_hhmm)
+    for k in keys:
+        oi = _candle_oi(buckets[k])
+        if oi is not None:
+            return float(oi)
+    return None
+
+
+def _oi_at_or_after(
+    buckets: Dict[Tuple[int, int], Dict[str, Any]],
+    hhmm: Tuple[int, int],
+    max_steps: int = 15,
+) -> Optional[float]:
+    """OI at ``hhmm`` or the next few minutes if missing."""
+    keys = sorted(k for k in buckets if k >= hhmm)
+    for i, k in enumerate(keys[: max_steps + 5]):
+        if i > max_steps:
+            break
+        oi = _candle_oi(buckets[k])
+        if oi is not None:
+            return float(oi)
+    return None
+
+
+def _vwap_session_through(
+    buckets: Dict[Tuple[int, int], Dict[str, Any]],
+    start_hhmm: Tuple[int, int],
+    end_hhmm: Tuple[int, int],
+) -> Optional[float]:
+    """Session VWAP from ``start_hhmm`` through ``end_hhmm`` inclusive (typical price × volume)."""
+    tp_num = 0.0
+    den = 0.0
+    for k in sorted(k for k in buckets if start_hhmm <= k <= end_hhmm):
+        c = buckets[k]
+        o, h, l, cl, vol = _candle_ohlcv(c)
+        try:
+            v = float(vol) if vol is not None else 0.0
+        except (TypeError, ValueError):
+            v = 0.0
+        if v <= 0:
+            continue
+        tp = None
+        try:
+            if h is not None and l is not None and cl is not None:
+                tp = (float(h) + float(l) + float(cl)) / 3.0
+            elif cl is not None:
+                tp = float(cl)
+        except (TypeError, ValueError):
+            tp = None
+        if tp is None or tp <= 0:
+            continue
+        tp_num += tp * v
+        den += v
+    if den <= 0:
+        return None
+    return round(tp_num / den, 4)
+
+
+def _fill_conviction_raw_metrics(
+    tr: TradeRow,
+    buckets: Dict[Tuple[int, int], Dict[str, Any]],
+    run: List[Tuple[int, int]],
+) -> None:
+    """Reference = first scan time of this run (15-min grid). No gating — metrics only."""
+    if not run:
+        return
+    first_scan = run[0]
+    vwap = _vwap_session_through(buckets, MARKET_OPEN_HHMM, first_scan)
+    tr.conviction_session_vwap_first_scan = vwap
+    cl = _close_price_at_bucket(buckets, first_scan)
+    if vwap is not None and float(vwap) > 0 and cl is not None:
+        tr.conviction_price_vs_vwap_pct = round(
+            (float(cl) - float(vwap)) / float(vwap) * 100.0, 4
+        )
+
+    # OI: % change from first available morning OI (09:15–09:29) to OI at/near first scan.
+    # Total contract OI is used as proxy for positioning; separate long/short OI is not in feed.
+    oi_open = _first_oi_time_ordered(buckets, MARKET_OPEN_HHMM, (9, 29))
+    if oi_open is None:
+        oi_open = _first_oi_time_ordered(buckets, MARKET_OPEN_HHMM, (10, 30))
+    oi_ref = _oi_at_or_after(buckets, first_scan)
+    if (
+        oi_open is not None
+        and oi_ref is not None
+        and float(oi_open) > 0
+    ):
+        tr.conviction_oi_change_pct = round(
+            (float(oi_ref) - float(oi_open)) / float(oi_open) * 100.0, 4
+        )
+
+
+def _vwap_proximity_score_0_50(dist_pct: Optional[float]) -> float:
+    """Reward price just above session VWAP (sweet spot ~+0.2% to +0.8%); soft otherwise."""
+    if dist_pct is None:
+        return 25.0
+    d = float(dist_pct)
+    if d < 0:
+        return max(0.0, min(35.0, 35.0 + d * 4.0))
+    if d < 0.2:
+        return 35.0 + (d / 0.2) * 15.0
+    if d <= 0.8:
+        return 50.0
+    if d <= 2.0:
+        return 50.0 - ((d - 0.8) / 1.2) * 28.0
+    return max(5.0, 22.0 - (d - 2.0) * 6.0)
+
+
+def finalize_conviction_scores(rows: List[Dict[str, Any]]) -> None:
+    """Populate ``conviction_score`` (0–100) and breakdown. OI leg: per-day rank → 0–50."""
+    by_day: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for r in rows:
+        by_day[str(r.get("trade_date") or "")].append(r)
+
+    for _day, day_rows in by_day.items():
+        with_oi: List[Dict[str, Any]] = []
+        for r in day_rows:
+            v = r.get("conviction_oi_change_pct")
+            if isinstance(v, (int, float)):
+                with_oi.append(r)
+        with_oi.sort(key=lambda x: float(x["conviction_oi_change_pct"]), reverse=True)
+        n = len(with_oi)
+        rank_map = {id(r): idx for idx, r in enumerate(with_oi)}
+
+        for r in day_rows:
+            vw = _vwap_proximity_score_0_50(
+                float(r["conviction_price_vs_vwap_pct"])
+                if isinstance(r.get("conviction_price_vs_vwap_pct"), (int, float))
+                else None
+            )
+            rid = id(r)
+            if rid in rank_map and n > 1:
+                rk = rank_map[rid]
+                oi_s = (n - 1 - rk) / (n - 1) * 50.0
+            elif rid in rank_map and n == 1:
+                oi_s = 50.0
+            else:
+                oi_s = 25.0
+            total = round(min(100.0, max(0.0, oi_s + vw)), 1)
+            r["conviction_score"] = total
+            r["conviction_score_breakdown"] = {
+                "oi": round(oi_s, 1),
+                "vwap": round(vw, 1),
+            }
+
+
 def compute_trade_row(
     *,
     trade_date: date,
@@ -414,6 +606,8 @@ def compute_trade_row(
     tr.exit1_pnl_points, tr.exit1_pnl_rupees = _pnl(tr.exit1_price, tr.entry_price, lot)
     tr.exit2_pnl_points, tr.exit2_pnl_rupees = _pnl(tr.exit2_price, tr.entry_price, lot)
 
+    _fill_conviction_raw_metrics(tr, buckets, run)
+
     _attach_upstox_margin(upstox, tr)
 
     return tr
@@ -479,6 +673,7 @@ def run_backtest(
         if idx % 25 == 0 or idx == total_keys:
             log(f"fno_bullish_backtest: {idx}/{total_keys} (date, symbol) pairs processed")
 
+    finalize_conviction_scores(results)
     return results
 
 

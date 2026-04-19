@@ -20,7 +20,9 @@
 
   const state = {
     all: [],
-    sort: { key: 'trade_date', dir: 'desc' },
+    sort: IS_EOD
+      ? { key: 'conviction_score', dir: 'desc' }
+      : { key: 'trade_date', dir: 'desc' },
   };
 
   function entryContractValue(r) {
@@ -286,6 +288,34 @@
     const sign = v > 0 ? '+' : '';
     return sign + v.toFixed(2);
   }
+  /** Signed percent for tooltips (conviction raw metrics). */
+  function fmtPct4(v) {
+    if (typeof v !== 'number' || !Number.isFinite(v)) return '—';
+    const sign = v > 0 ? '+' : '';
+    return sign + v.toFixed(2) + '%';
+  }
+
+  function convictionTooltip(r) {
+    const br = r.conviction_score_breakdown || {};
+    const parts = [
+      'Basis: first 15-min scan of the streak (session VWAP 09:15→that minute; close that minute vs VWAP).',
+      'Total futures OI % change from first morning OI to first-scan OI (rank within that day → 0–50).',
+      'VWAP leg 0–50: best near +0.2% to +0.8% above VWAP.',
+    ];
+    if (typeof br.oi === 'number' && Number.isFinite(br.oi)) {
+      parts.push('OI leg (rank): ' + br.oi.toFixed(1));
+    }
+    if (typeof br.vwap === 'number' && Number.isFinite(br.vwap)) {
+      parts.push('VWAP leg: ' + br.vwap.toFixed(1));
+    }
+    if (typeof r.conviction_oi_change_pct === 'number' && Number.isFinite(r.conviction_oi_change_pct)) {
+      parts.push('Raw OI Δ: ' + fmtPct4(r.conviction_oi_change_pct));
+    }
+    if (typeof r.conviction_price_vs_vwap_pct === 'number' && Number.isFinite(r.conviction_price_vs_vwap_pct)) {
+      parts.push('Price vs VWAP: ' + fmtPct4(r.conviction_price_vs_vwap_pct));
+    }
+    return parts.join(' ');
+  }
 
   // ---------- column specs ------------------------------------------------
 
@@ -306,6 +336,17 @@
     { key: 'first_scan_time', label: '1st scan', sortable: true,
       cell: r => '<td>' + escapeHtml(r.first_scan_time || '—') + '</td>',
       sortVal: r => r.first_scan_time || '' },
+    { key: 'conviction_score', label: 'Conviction', sortable: true,
+      cell: r => {
+        const v = r.conviction_score;
+        const tip = convictionTooltip(r);
+        const inner = (typeof v === 'number' && Number.isFinite(v)) ? v.toFixed(1) : '—';
+        return '<td class="num" title="' + escapeHtml(tip) + '">' + inner + '</td>';
+      },
+      sortVal: r =>
+        (typeof r.conviction_score === 'number' && Number.isFinite(r.conviction_score))
+          ? r.conviction_score
+          : null },
     { key: 'last_scan_time', label: 'Last scan', sortable: true,
       cell: r => '<td>' + escapeHtml(r.last_scan_time || '—') + '</td>',
       sortVal: r => r.last_scan_time || '' },

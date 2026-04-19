@@ -61,6 +61,13 @@
     Figures differ from the raw JSON counts.
   </div>
 
+  <div class="callout" style="border-left-color: var(--accent);">
+    <b>Conviction score</b> (0–100, display-only): half from same-day rank of
+    <b>intraday % change in total futures OI</b> from open through the <b>first scan</b> minute,
+    half from <b>price vs session VWAP</b> at that minute (sweet spot ~+0.2% to +0.8% above VWAP).
+    Does not block entries — sort the table by this column to review highest-conviction names first.
+  </div>
+
   <div class="callout" id="errBanner" style="display:none;"></div>
 
   <div id="fnoDateQuickSummary"></div>
@@ -89,12 +96,12 @@
   <div class="table-wrap">
     <table class="data" id="resultsTable">
       <thead><tr></tr></thead>
-      <tbody id="tbody"><tr><td class="nodata" colspan="13">Loading…</td></tr></tbody>
+      <tbody id="tbody"><tr><td class="nodata" colspan="14">Loading…</td></tr></tbody>
     </table>
   </div>
 
   <p class="footer" id="footerMeta"></p>
 </div>
-<script src="fno-bullish.js?v=6"></script>
+<script src="fno-bullish.js?v=7"></script>
 </body>
 </html>
