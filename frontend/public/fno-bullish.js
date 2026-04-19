@@ -1,13 +1,17 @@
 /**
  * F&O Bullish Trend scanner backtest renderer.
  *
- * Loads /api/fno-bullish/data (or fallback /fno-bullish/data) and renders the
- * summary cards, filters, and trade table. Two PnL columns (Exit 1 and Exit 2)
- * are shown side by side so disappearance-based exits can be compared against
- * a 15:15 hold-to-close baseline.
+ * ``<body data-fno-mode="dual">`` — two exits (disappearance + 15:15), full table.
+ * ``<body data-fno-mode="eod">`` — fixed exit at 15:15 IST only; summary + columns
+ * use exit2 fields only.
+ *
+ * Loads /api/fno-bullish/data (or fallback /fno-bullish/data).
  */
 (function () {
   'use strict';
+
+  const MODE = (document.body && document.body.dataset && document.body.dataset.fnoMode) || 'dual';
+  const IS_EOD = MODE === 'eod';
 
   const API_PATHS = ['/api/fno-bullish/data', '/fno-bullish/data'];
 
@@ -59,9 +63,56 @@
     return sign + v.toFixed(2);
   }
 
-  // ---------- column spec ---------------------------------------------------
+  // ---------- column specs ------------------------------------------------
 
-  const COLS = [
+  const COLS_EOD = [
+    { key: 'trade_date', label: 'Date', sortable: true,
+      cell: r => '<td>' + fmtDate(r.trade_date) + '</td>',
+      sortVal: r => r.trade_date || '' },
+    { key: 'symbol', label: 'Symbol', sortable: true,
+      cell: r => {
+        const tag = r.is_reentry ? '<span class="reentry-dot" title="Re-entry #' + r.run_index + '"></span>' : '';
+        const sym = escapeHtml(r.symbol || '');
+        const tsym = r.trading_symbol ? '<div class="cell-note">' + escapeHtml(r.trading_symbol) + '</div>' : '';
+        return '<td class="cell-symbol">' + tag + sym + tsym + '</td>';
+      },
+      sortVal: r => (r.symbol || '') + '_' + (r.run_index || 1) },
+    { key: 'source', label: 'Src', sortable: true,
+      cell: r => '<td>' + escapeHtml(r.source || '—') + '</td>',
+      sortVal: r => r.source || '' },
+    { key: 'lot_size', label: 'Lot', sortable: true,
+      cell: r => '<td class="num">' + fmtInt(r.fut_lot_size || r.lot_size) + '</td>',
+      sortVal: r => Number(r.fut_lot_size || r.lot_size) || 0 },
+    { key: 'first_scan_time', label: '1st scan', sortable: true,
+      cell: r => '<td>' + escapeHtml(r.first_scan_time || '—') + '</td>',
+      sortVal: r => r.first_scan_time || '' },
+    { key: 'last_scan_time', label: 'Last scan', sortable: true,
+      cell: r => '<td>' + escapeHtml(r.last_scan_time || '—') + '</td>',
+      sortVal: r => r.last_scan_time || '' },
+    { key: 'scan_count', label: '#Scans', sortable: true,
+      cell: r => '<td class="num">' + fmtInt(r.scan_count) + '</td>',
+      sortVal: r => Number(r.scan_count) || 0 },
+    { key: 'entry_time', label: 'Entry @', sortable: true,
+      cell: r => '<td>' + escapeHtml(r.entry_time || '—') + '</td>',
+      sortVal: r => r.entry_time || '' },
+    { key: 'entry_price', label: 'Entry ₹', sortable: true,
+      cell: r => '<td class="num">' + fmtNum(r.entry_price) + '</td>',
+      sortVal: r => Number(r.entry_price) || 0 },
+    { key: 'exit2_time', label: 'Exit @', sortable: true,
+      cell: r => '<td title="Fixed session exit">' + escapeHtml(r.exit2_time || '15:15') + '</td>',
+      sortVal: r => r.exit2_time || '' },
+    { key: 'exit2_price', label: 'Exit ₹', sortable: true,
+      cell: r => '<td class="num col-eod-exit">' + fmtNum(r.exit2_price) + '</td>',
+      sortVal: r => Number(r.exit2_price) || 0 },
+    { key: 'exit2_pnl_points', label: 'PnL pts', sortable: true,
+      cell: r => '<td class="num ' + pnlCls(r.exit2_pnl_points) + '">' + signedPts(r.exit2_pnl_points) + '</td>',
+      sortVal: r => Number(r.exit2_pnl_points) || 0 },
+    { key: 'exit2_pnl_rupees', label: 'PnL ₹', sortable: true,
+      cell: r => '<td class="num ' + pnlCls(r.exit2_pnl_rupees) + '">' + fmtRupees(r.exit2_pnl_rupees) + '</td>',
+      sortVal: r => Number(r.exit2_pnl_rupees) || 0 },
+  ];
+
+  const COLS_DUAL = [
     { key: 'trade_date', label: 'Date', sortable: true,
       cell: r => '<td>' + fmtDate(r.trade_date) + '</td>',
       sortVal: r => r.trade_date || '' },
@@ -102,7 +153,6 @@
     { key: 'entry_price', label: 'Entry ₹', sortable: true,
       cell: r => '<td class="num">' + fmtNum(r.entry_price) + '</td>',
       sortVal: r => Number(r.entry_price) || 0 },
-    // Exit 1 block
     { key: 'exit1_time', label: 'Exit 1 @', sortable: true,
       cell: r => '<td class="col-exit1">' + escapeHtml(r.exit1_time || '—') + '</td>',
       sortVal: r => r.exit1_time || '' },
@@ -115,7 +165,6 @@
     { key: 'exit1_pnl_rupees', label: 'PnL₁ ₹', sortable: true,
       cell: r => '<td class="num ' + pnlCls(r.exit1_pnl_rupees) + '">' + fmtRupees(r.exit1_pnl_rupees) + '</td>',
       sortVal: r => Number(r.exit1_pnl_rupees) || 0 },
-    // Exit 2 block
     { key: 'exit2_price', label: 'Exit 2 ₹ (15:15)', sortable: true,
       cell: r => '<td class="num col-exit2">' + fmtNum(r.exit2_price) + '</td>',
       sortVal: r => Number(r.exit2_price) || 0 },
@@ -123,6 +172,8 @@
       cell: r => '<td class="num ' + pnlCls(r.exit2_pnl_rupees) + '">' + fmtRupees(r.exit2_pnl_rupees) + '</td>',
       sortVal: r => Number(r.exit2_pnl_rupees) || 0 },
   ];
+
+  const COLS = IS_EOD ? COLS_EOD : COLS_DUAL;
 
   // ---------- fetch + render ------------------------------------------------
 
@@ -158,7 +209,7 @@
   function renderHeader() {
     const tr = document.querySelector('#resultsTable thead tr');
     tr.innerHTML = '';
-    COLS.forEach((c, i) => {
+    COLS.forEach((c) => {
       const th = document.createElement('th');
       th.textContent = c.label;
       if (c.sortable) {
@@ -184,6 +235,26 @@
   function renderSummary(s) {
     const grid = document.getElementById('summaryGrid');
     if (!grid) return;
+
+    if (IS_EOD) {
+      const e2 = s.exit2 || {};
+      const cards = [
+        ['Exit rule', '15:15 IST only', 'All rows use session close — no disappearance exit'],
+        ['Trades', fmtInt(s.total_trades), (s.reentry_trades || 0) + ' re-entries'],
+        ['With entry price', fmtInt(s.trades_with_entry), 'Σ FUT=' + fmtInt(s.fut_rows) + ' / EQ=' + fmtInt(s.eq_rows)],
+        ['Σ PnL @ 15:15', fmtRupees(e2.sum_pnl_rupees), (e2.positive_rows || 0) + ' wins / ' + (e2.negative_rows || 0) + ' losses'],
+        ['Best / Worst trade', fmtRupees(e2.best_pnl_rupees) + ' / ' + fmtRupees(e2.worst_pnl_rupees), 'single-trade extremes'],
+      ];
+      grid.innerHTML = cards.map(([title, val, sub]) => (
+        '<div class="card">' +
+          '<div class="title">' + escapeHtml(title) + '</div>' +
+          '<div class="value">' + escapeHtml(val || '—') + '</div>' +
+          '<div class="sub">' + escapeHtml(sub || '') + '</div>' +
+        '</div>'
+      )).join('');
+      return;
+    }
+
     const e1 = s.exit1 || {};
     const e2 = s.exit2 || {};
     const cards = [
@@ -215,6 +286,7 @@
     if (doc.generated_at) bits.push('Generated: ' + escapeHtml(doc.generated_at));
     if (doc.strategy) bits.push(escapeHtml(doc.strategy));
     if (doc.artifact_path) bits.push('<span class="muted">' + escapeHtml(doc.artifact_path) + '</span>');
+    if (IS_EOD) bits.push('<span class="muted">View: EOD exit (15:15) only</span>');
     f.innerHTML = bits.join(' · ');
   }
 
@@ -265,7 +337,6 @@
     }).join('');
     tbody.innerHTML = html;
 
-    // repaint sort indicator on the header
     document.querySelectorAll('#resultsTable thead th').forEach(th => {
       th.classList.remove('sort-asc', 'sort-desc');
       if (th.dataset && th.dataset.key === state.sort.key) {
@@ -273,8 +344,6 @@
       }
     });
   }
-
-  // ---------- wire up -------------------------------------------------------
 
   function init() {
     ['fltFrom','fltTo','fltSource','fltKind','fltSymbol'].forEach(id => {
