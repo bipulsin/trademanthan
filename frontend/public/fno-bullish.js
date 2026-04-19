@@ -5,7 +5,8 @@
  * ``<body data-fno-mode="eod">`` — fixed exit at 15:15 IST only; summary + columns
  * use exit2 fields only.
  *
- * Loads /api/fno-bullish/data (or fallback /fno-bullish/data).
+ * EOD page: `/api/fno-bullish/data-1515` (2+ scans, entry after 2nd bar+5m), then legacy data.
+ * Dual page: `/api/fno-bullish/data`.
  */
 (function () {
   'use strict';
@@ -16,10 +17,14 @@
   /** Illustrative NRML-style margin ≈ this fraction of contract value at entry (SPAN varies by broker). */
   const EST_MARGIN_FRAC = 0.125;
 
-  const API_PATHS = ['/api/fno-bullish/data', '/fno-bullish/data'];
+  const API_PATHS = IS_EOD
+    ? ['/api/fno-bullish/data-1515', '/fno-bullish/data-1515']
+    : ['/api/fno-bullish/data', '/fno-bullish/data'];
 
   const state = {
     all: [],
+    /** Set from API `summary` (conviction_scan_index, min_scan_count, …). */
+    summaryMeta: {},
     sort: IS_EOD
       ? { key: 'conviction_score', dir: 'desc' }
       : { key: 'trade_date', dir: 'desc' },
@@ -297,9 +302,13 @@
 
   function convictionTooltip(r) {
     const br = r.conviction_score_breakdown || {};
+    const idx = state.summaryMeta && typeof state.summaryMeta.conviction_scan_index === 'number'
+      ? state.summaryMeta.conviction_scan_index
+      : 0;
+    const scanOrdinal = idx === 0 ? 'first' : idx === 1 ? 'second' : ('#' + (idx + 1));
     const parts = [
-      'Basis: first 15-min scan of the streak (session VWAP 09:15→that minute; close that minute vs VWAP).',
-      'Total futures OI % change from first morning OI to first-scan OI (rank within that day → 0–50).',
+      'Basis: ' + scanOrdinal + ' 15-min scan of the streak (session VWAP 09:15→that minute; close vs VWAP).',
+      'OI leg: total futures OI % change from open to that scan (same-day rank → 0–50).',
       'VWAP leg 0–50: best near +0.2% to +0.8% above VWAP.',
     ];
     if (typeof br.oi === 'number' && Number.isFinite(br.oi)) {
@@ -467,7 +476,11 @@
       if (banner) {
         banner.style.display = '';
         banner.style.borderLeftColor = 'var(--bad)';
-        banner.textContent = 'Failed to load backtest data: ' + (lastErr ? lastErr.message : 'no data');
+        const hint = IS_EOD
+          ? ' Ensure the server has run: python3 backend/scripts/run_fno_bullish_backtest.py --1515-second-scan'
+          : '';
+        banner.textContent =
+          'Failed to load backtest data: ' + (lastErr ? lastErr.message : 'no data') + hint;
       }
       const tbodyFail = document.getElementById('tbody');
       if (tbodyFail) {
@@ -476,9 +489,10 @@
       }
       return;
     }
+    state.summaryMeta = doc.summary || {};
     const raw = Array.isArray(doc.rows) ? doc.rows.slice() : [];
     state.all = IS_EOD ? raw.filter(function (r) {
-      return Number(r.run_index) === 1 && r.source === 'FUT';
+      return Number(r.run_index) === 1 && r.source === 'FUT' && Number(r.scan_count) > 1;
     }) : raw;
     renderHeader();
     if (IS_EOD) {

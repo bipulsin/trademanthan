@@ -5,7 +5,9 @@ Driven by a CSV of 15-minute scanner hits (``date`` columns like
 ``17-02-2026 1:00 pm``) and turns each symbol's appearance-run into a simulated
 futures trade:
 
-* Entry = LTP at ``first_scan_time + 5min`` IST (open of that 1-min candle).
+* Entry = LTP at ``anchor_scan_time + 5min`` IST (open of that 1-min candle).
+  Default anchor = first 15-min scan of the run; optional anchor = second scan when
+  ``entry_scan_index=1`` and runs with fewer than ``min_scan_count`` slots are omitted.
 * Exit 1 = LTP at ``disappear_scan_time + 5min`` IST (1-min open) -- the first
   15-min scan where the symbol is *absent* after having appeared.
 * Exit 2 = LTP at 15:15 IST (hard end-of-day).
@@ -50,7 +52,7 @@ IST = pytz.timezone("Asia/Kolkata")
 
 MARKET_OPEN_HHMM = (9, 15)
 EOD_EXIT_HHMM = (15, 15)      # Exit-2: hard EOD
-ENTRY_OFFSET_MIN = 5          # Entry  = first_scan  + 5 min
+ENTRY_OFFSET_MIN = 5          # Entry  = anchor_scan + 5 min (anchor = run[entry_scan_index])
 EXIT1_OFFSET_MIN = 5          # Exit-1 = disappear_scan + 5 min
 SCAN_STEP_MIN = 15            # The scanner is a 15-minute schedule.
 
@@ -437,14 +439,17 @@ def _fill_conviction_raw_metrics(
     tr: TradeRow,
     buckets: Dict[Tuple[int, int], Dict[str, Any]],
     run: List[Tuple[int, int]],
+    *,
+    conviction_scan_index: int = 0,
 ) -> None:
-    """Reference = first scan time of this run (15-min grid). No gating — metrics only."""
+    """Reference = scan slot ``run[conviction_scan_index]`` (15-min grid). No gating."""
     if not run:
         return
-    first_scan = run[0]
-    vwap = _vwap_session_through(buckets, MARKET_OPEN_HHMM, first_scan)
+    i = max(0, min(conviction_scan_index, len(run) - 1))
+    ref_scan = run[i]
+    vwap = _vwap_session_through(buckets, MARKET_OPEN_HHMM, ref_scan)
     tr.conviction_session_vwap_first_scan = vwap
-    cl = _close_price_at_bucket(buckets, first_scan)
+    cl = _close_price_at_bucket(buckets, ref_scan)
     if vwap is not None and float(vwap) > 0 and cl is not None:
         tr.conviction_price_vs_vwap_pct = round(
             (float(cl) - float(vwap)) / float(vwap) * 100.0, 4
@@ -455,7 +460,7 @@ def _fill_conviction_raw_metrics(
     oi_open = _first_oi_time_ordered(buckets, MARKET_OPEN_HHMM, (9, 29))
     if oi_open is None:
         oi_open = _first_oi_time_ordered(buckets, MARKET_OPEN_HHMM, (10, 30))
-    oi_ref = _oi_at_or_after(buckets, first_scan)
+    oi_ref = _oi_at_or_after(buckets, ref_scan)
     if (
         oi_open is not None
         and oi_ref is not None
@@ -532,6 +537,8 @@ def compute_trade_row(
     fut_by_und: Dict[str, List[Dict[str, Any]]],
     eq_by_symbol: Dict[str, Dict[str, Any]],
     candle_cache: Dict[Tuple[str, date], Dict[Tuple[int, int], Dict[str, Any]]],
+    entry_scan_index: int = 0,
+    conviction_scan_index: int = 0,
 ) -> TradeRow:
     tr = TradeRow(
         trade_date=trade_date.isoformat(),
@@ -565,13 +572,14 @@ def compute_trade_row(
         tr.error = "no_session_candles"
         return tr
 
-    # Entry = first_scan + 5 min.
-    entry_t = _add_minutes(run[0], ENTRY_OFFSET_MIN)
+    # Entry = anchor scan (run[entry_scan_index]) + 5 min.
+    anchor = run[entry_scan_index]
+    entry_t = _add_minutes(anchor, ENTRY_OFFSET_MIN)
     entry_t, entry_capped = _cap_to_eod(entry_t)
     tr.entry_time = _fmt_hhmm(entry_t)
     tr.entry_price = _price_at_slot(buckets, entry_t)
     if entry_capped:
-        tr.notes.append("entry_capped_to_15:15 (first scan too late)")
+        tr.notes.append("entry_capped_to_15:15 (anchor scan too late)")
 
     # Disappear scan. The run ends at ``run[-1]``; the "next" scan slot on the
     # 15-min grid is where the symbol would be absent. We don't re-check the
@@ -606,7 +614,9 @@ def compute_trade_row(
     tr.exit1_pnl_points, tr.exit1_pnl_rupees = _pnl(tr.exit1_price, tr.entry_price, lot)
     tr.exit2_pnl_points, tr.exit2_pnl_rupees = _pnl(tr.exit2_price, tr.entry_price, lot)
 
-    _fill_conviction_raw_metrics(tr, buckets, run)
+    _fill_conviction_raw_metrics(
+        tr, buckets, run, conviction_scan_index=conviction_scan_index
+    )
 
     _attach_upstox_margin(upstox, tr)
 
@@ -618,6 +628,9 @@ def run_backtest(
     *,
     throttle_sec: float = 0.05,
     logger_fn=None,
+    min_scan_count: int = 1,
+    entry_scan_index: int = 0,
+    conviction_scan_index: int = 0,
 ) -> List[Dict[str, Any]]:
     log = logger_fn or (lambda _msg: None)
     instruments = _load_instruments()
@@ -642,7 +655,12 @@ def run_backtest(
         sector = entries[0][2] if entries else ""
 
         runs = _split_runs(hhmm_list, step_min=SCAN_STEP_MIN)
-        for run_idx, run in enumerate(runs, start=1):
+        qualifying = [
+            r
+            for r in runs
+            if len(r) >= min_scan_count and entry_scan_index < len(r)
+        ]
+        for run_idx, run in enumerate(qualifying, start=1):
             try:
                 tr = compute_trade_row(
                     trade_date=trade_date,
@@ -655,6 +673,8 @@ def run_backtest(
                     fut_by_und=fut_by_und,
                     eq_by_symbol=eq_by_symbol,
                     candle_cache=candle_cache,
+                    entry_scan_index=entry_scan_index,
+                    conviction_scan_index=conviction_scan_index,
                 )
             except Exception as e:  # noqa: BLE001
                 tr = TradeRow(
@@ -682,7 +702,13 @@ def run_backtest(
 # ---------------------------------------------------------------------------
 
 
-def build_output_document(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+def build_output_document(
+    results: List[Dict[str, Any]],
+    *,
+    min_scan_count: int = 1,
+    entry_scan_index: int = 0,
+    conviction_scan_index: int = 0,
+) -> Dict[str, Any]:
     total = len(results)
     reentries = sum(1 for r in results if r.get("is_reentry"))
     with_entry = sum(1 for r in results if r.get("entry_price") is not None)
@@ -727,9 +753,15 @@ def build_output_document(results: List[Dict[str, Any]]) -> Dict[str, Any]:
             if best_e2 is None or v2 > best_e2:
                 best_e2 = float(v2)
 
+    strategy_note = (
+        "F&O Bullish Trend (MA + ADX + MACD) — 15-min scanner · EOD 15:15 · "
+        f"≥{min_scan_count} scan(s) per streak · entry @ scan[{entry_scan_index}] + {ENTRY_OFFSET_MIN} min"
+        if (min_scan_count > 1 or entry_scan_index > 0)
+        else "F&O Bullish Trend (MA + ADX + MACD) — 15-min scanner"
+    )
     return {
         "generated_at": datetime.now(IST).isoformat(),
-        "strategy": "F&O Bullish Trend (MA + ADX + MACD) — 15-min scanner",
+        "strategy": strategy_note,
         "summary": {
             "total_trades": total,
             "trades_with_entry": with_entry,
@@ -738,6 +770,9 @@ def build_output_document(results: List[Dict[str, Any]]) -> Dict[str, Any]:
             "eq_rows": eq_rows,
             "never_disappeared_rows": never_disappeared,
             "exit1_capped_to_1515": capped_exit1,
+            "min_scan_count": min_scan_count,
+            "entry_scan_index": entry_scan_index,
+            "conviction_scan_index": conviction_scan_index,
             "entry_offset_min": ENTRY_OFFSET_MIN,
             "exit1_offset_min": EXIT1_OFFSET_MIN,
             "scan_step_min": SCAN_STEP_MIN,

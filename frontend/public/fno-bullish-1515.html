@@ -45,25 +45,27 @@
   </div>
   <div class="sub-toggle">
     <span class="pill">F&amp;O futures rows only</span>
-    <span class="pill">One symbol · day · first streak</span>
+    <span class="pill">≥2 scans in streak · 1st streak only</span>
     <span class="pill">Exit = 15:15 IST</span>
   </div>
   <p class="lede">
     At most <b>one simulated long per underlying per day</b> on the <b>listed front-month future</b>
-    (cash EQ proxy rows removed). Entry is <b>5 minutes after the first 15-min scan</b> of that
-    symbol’s first streak; exit is <b>15:15 IST</b>. Below is a compact <b>date-wise summary</b>;
+    (cash EQ proxy rows removed). Only scanner streaks with <b>at least two consecutive 15-min hits</b>
+    are simulated. Entry is <b>5 minutes after the second 15-min scan</b> of that symbol’s first streak;
+    exit is <b>15:15 IST</b>. Below is a compact <b>date-wise summary</b>;
     then card metrics and the detail table grouped by date.
     <b>Est. total margin</b> sums illustrative margins (see footnote — not exchange SPAN).
   </p>
 
   <div class="callout" style="border-left-color: var(--neutral);">
-    Rows are filtered in the browser to <b>run_index === 1</b> and <b>source === FUT</b>.
+    Rows are filtered in the browser to <b>run_index === 1</b>, <b>source === FUT</b>, and
+    <b>scan_count &gt; 1</b> (artifact is built with 2+ scans per streak only).
     Figures differ from the raw JSON counts.
   </div>
 
   <div class="callout" style="border-left-color: var(--accent);">
     <b>Conviction score</b> (0–100, display-only): half from same-day rank of
-    <b>intraday % change in total futures OI</b> from open through the <b>first scan</b> minute,
+    <b>intraday % change in total futures OI</b> through the <b>second scan</b> minute,
     half from <b>price vs session VWAP</b> at that minute (sweet spot ~+0.2% to +0.8% above VWAP).
     Does not block entries — sort the table by this column to review highest-conviction names first.
   </div>
@@ -102,6 +104,6 @@
 
   <p class="footer" id="footerMeta"></p>
 </div>
-<script src="fno-bullish.js?v=7"></script>
+<script src="fno-bullish.js?v=8"></script>
 </body>
 </html>
