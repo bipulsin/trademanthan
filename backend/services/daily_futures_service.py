@@ -9,6 +9,7 @@ import re
 import time
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple
+from urllib.parse import quote
 
 import pytz
 from sqlalchemy import text
@@ -23,7 +24,7 @@ from backend.services.nks_intraday_backtest import (
     _load_instruments,
     fetch_intraday_1m_candles,
 )
-from backend.services.upstox_service import UpstoxService
+from backend.services.upstox_service import UpstoxService, _candles_rows_to_structured
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +142,18 @@ def _fetch_intraday_1m_cached(upstox: UpstoxService, instrument_key: str, trade_
         ) or []
     except Exception:
         candles = []
+    # Fallback for current-day snapshots: historical endpoint can be empty intraday.
+    # Use Upstox intraday-candle endpoint for minute bars when needed.
+    if not candles and trade_date == ist_today():
+        try:
+            key_enc = quote(instrument_key, safe="")
+            intraday_url = f"{upstox.base_url}/historical-candle/intraday/{key_enc}/minutes/1"
+            raw = upstox.make_api_request(intraday_url, method="GET", timeout=15, max_retries=2) or {}
+            if isinstance(raw, dict) and raw.get("status") == "success":
+                rows = ((raw.get("data") or {}).get("candles")) or []
+                candles = _candles_rows_to_structured(rows) or []
+        except Exception:
+            candles = candles or []
     _DF_INTRADAY_1M_CACHE[ck] = {"ts": now, "candles": candles}
     return list(candles)
 
