@@ -89,7 +89,7 @@
     const el = document.getElementById('dfPicksTable');
     if (!el) return;
     if (!picks || !picks.length) {
-      el.innerHTML = '<p class="df-meta">No picks yet. When ChartInk posts symbols, rows appear here (stock must be in arbitrage master with a current-month future key).</p>';
+      el.innerHTML = '<p class="df-meta">No picks yet.</p>';
       return;
     }
     const th =
