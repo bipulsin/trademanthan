@@ -14,6 +14,9 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
+from backend.services.smart_futures_picker.position_sizing import (
+    get_futures_lot_size_by_instrument_key,
+)
 
 router = APIRouter(prefix="/futures-reports", tags=["futures-reports"])
 
@@ -83,7 +86,8 @@ def _fetch_merged_sold_rows(
                 d.session_date::date AS trade_date,
                 'Smart Futures'::text AS source,
                 COALESCE(d.fut_symbol, d.stock)::text AS symbol,
-                COALESCE(NULLIF(d.calculated_lots, 0), 1)::integer AS qty,
+                COALESCE(NULLIF(d.calculated_lots, 0), 1)::integer AS lots,
+                d.fut_instrument_key::text AS fut_instrument_key,
                 COALESCE(TO_CHAR((d.entry_at AT TIME ZONE 'Asia/Kolkata'), 'HH24:MI'), '')::text AS entry_time,
                 d.buy_price::numeric AS entry_price,
                 COALESCE(TO_CHAR((d.sell_time AT TIME ZONE 'Asia/Kolkata'), 'HH24:MI'), '')::text AS exit_time,
@@ -101,13 +105,27 @@ def _fetch_merged_sold_rows(
             ORDER BY d.session_date DESC, d.updated_at DESC
         """
         rows = db.execute(text(smart_sql), {"sd": sd, "ed": ed}).mappings().all()
+        lot_size_cache: Dict[str, int] = {}
         for r in rows:
+            lots = int(r["lots"]) if r["lots"] is not None else 1
+            ikey = str(r.get("fut_instrument_key") or "").strip()
+            if ikey:
+                if ikey not in lot_size_cache:
+                    try:
+                        ls = int(get_futures_lot_size_by_instrument_key(ikey) or 0)
+                    except Exception:
+                        ls = 0
+                    lot_size_cache[ikey] = ls
+                ls = lot_size_cache.get(ikey, 0)
+            else:
+                ls = 0
+            qty_units = lots * ls if ls > 0 else lots
             out.append(
                 {
                     "date": str(r["trade_date"]),
                     "source": "Smart Futures",
                     "symbol": r["symbol"],
-                    "qty": int(r["qty"]) if r["qty"] is not None else None,
+                    "qty": int(qty_units),
                     "entry_time": r["entry_time"],
                     "entry_price": float(r["entry_price"]) if r["entry_price"] is not None else None,
                     "exit_time": r["exit_time"],
