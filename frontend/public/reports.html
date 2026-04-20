@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="reports.css?v=1.1">
     <link rel="stylesheet" href="reports-intraday.css?v=1.3">
+    <link rel="stylesheet" href="reports-futures.css?v=1.0">
     <link rel="stylesheet" href="arbitrage.css?v=1.1">
     <link rel="stylesheet" href="left-menu.css?v=3.19">
     <link rel="stylesheet" href="theme.css?v=1.3">
@@ -97,7 +98,71 @@
                 </div>
             </details>
 
-            <!-- Section 2: My Arbitrage Report -->
+            <!-- Section 2: Futures Trading Report -->
+            <details class="reports-accordion">
+                <summary class="reports-accordion-summary">
+                    <span class="reports-accordion-title"><i class="fas fa-chart-line"></i> Futures Trading Report</span>
+                    <span class="reports-accordion-hint">Daily Futures + Smart Futures (sold)</span>
+                </summary>
+                <div class="reports-accordion-body">
+                    <div id="futuresReportRoot" class="intraday-report-root">
+                        <details class="intraday-filters-wrap">
+                            <summary class="intraday-filters-summary">
+                                <span class="intraday-filters-summary-label"><i class="fas fa-sliders-h" aria-hidden="true"></i> Filters</span>
+                                <i class="fas fa-chevron-down intraday-filters-chevron" aria-hidden="true"></i>
+                            </summary>
+                            <div class="intraday-filters">
+                                <div class="intraday-filter-row">
+                                    <div class="intraday-filter-group">
+                                        <label for="futures_startDate">Start Date</label>
+                                        <input type="date" id="futures_startDate" />
+                                    </div>
+                                    <div class="intraday-filter-group">
+                                        <label for="futures_endDate">End Date</label>
+                                        <input type="date" id="futures_endDate" />
+                                    </div>
+                                    <div class="intraday-filter-group">
+                                        <label for="futures_source">Source</label>
+                                        <select id="futures_source">
+                                            <option value="all">All (Daily + Smart)</option>
+                                            <option value="daily">Daily Futures only</option>
+                                            <option value="smart">Smart Futures only</option>
+                                        </select>
+                                    </div>
+                                    <div class="intraday-filter-actions">
+                                        <button type="button" class="intraday-btn intraday-btn-primary" onclick="futuresLoadReport()">
+                                            <i class="fas fa-search"></i> Filter
+                                        </button>
+                                        <button type="button" class="intraday-btn intraday-btn-secondary" onclick="futuresClearFilters()">
+                                            <i class="fas fa-redo"></i> Clear
+                                        </button>
+                                        <button type="button" class="intraday-btn intraday-btn-success" onclick="futuresDownloadReport()">
+                                            <i class="fas fa-download"></i> Download CSV
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </details>
+                        <div class="intraday-content">
+                            <div id="futures_summaryCards" class="intraday-summary-cards" style="display: none;"></div>
+                            <div id="futures_loading" class="intraday-loading">
+                                <div class="intraday-loading-spinner"></div>
+                                <p>Loading futures trading report...</p>
+                            </div>
+                            <div id="futures_noData" class="intraday-no-data" style="display: none;">
+                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                                <h3>No futures trading data found</h3>
+                                <p>Try adjusting your date range or filters</p>
+                            </div>
+                            <div id="futures_reportTable" class="intraday-table-wrap" style="display: none;"></div>
+                        </div>
+                    </div>
+                </div>
+            </details>
+
+            <!-- Section 3: My Arbitrage Report -->
             <details class="reports-accordion">
                 <summary class="reports-accordion-summary">
                     <span class="reports-accordion-title"><i class="fas fa-balance-scale"></i> My Arbitrage Report</span>
@@ -138,7 +203,7 @@
                 </div>
             </details>
 
-            <!-- Section 3: Crypto Trading Report -->
+            <!-- Section 4: Crypto Trading Report -->
             <details class="reports-accordion">
                 <summary class="reports-accordion-summary">
                     <span class="reports-accordion-title"><i class="fas fa-coins"></i> Crypto Trading Report</span>
@@ -281,6 +346,7 @@
     <!-- Scripts -->
     <script src="left-menu.js?v=3.19"></script>
     <script src="reports-intraday.js?v=1.4"></script>
+    <script src="reports-futures.js?v=1.0"></script>
     <script src="reports-arbitrage-closed.js?v=1.0"></script>
     <script src="reports.js?v=1.3"></script>
     <script src="version.js?v=1.0"></script>
