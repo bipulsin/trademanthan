@@ -241,11 +241,12 @@ async function checkTokenHealth() {
         
         const result = await response.json();
         
-        // If token is not authenticated, show warning banner
-        if (result.status === 'success' && !result.authenticated) {
+        // Show expired banner only for explicit token-expired responses.
+        const isTokenExpired = result && result.error_type === 'token_expired';
+        if (result.status === 'success' && !result.authenticated && isTokenExpired) {
             console.warn('⚠️ Upstox token is not valid:', result.message);
             showTokenExpiredMessage();
-        } else if (result.authenticated) {
+        } else if (result.authenticated || !isTokenExpired) {
             console.log('✅ Upstox token is valid');
             hideTokenExpiredMessage();
         }

@@ -9,6 +9,7 @@ from starlette.requests import ClientDisconnect
 import json
 import os
 import sys
+import time
 import requests
 from urllib.parse import urlencode, parse_qs
 import secrets
@@ -6536,6 +6537,7 @@ async def update_upstox_token(request: Request):
 
 # OAuth state storage (in production, use Redis or database)
 oauth_states = {}
+_upstox_status_cache = {"ts": None, "payload": None}
 
 @router.get("/upstox/login")
 async def upstox_oauth_login():
@@ -6763,58 +6765,98 @@ async def upstox_oauth_status():
     Tests both user profile and market data endpoints to ensure token works for all operations
     """
     try:
-        # Check if upstox_service has a valid token
-        if hasattr(vwap_service, 'access_token') and vwap_service.access_token:
-            # Test 1: User profile endpoint (basic auth check)
-            test_url_profile = "https://api.upstox.com/v2/user/profile"
-            headers = {
-                "Accept": "application/json",
-                "Authorization": f"Bearer {vwap_service.access_token}"
+        now_ts = time.time()
+        cached_ts = _upstox_status_cache.get("ts")
+        cached_payload = _upstox_status_cache.get("payload")
+        # Cache status for 3 minutes to avoid excessive probe calls.
+        if cached_ts and cached_payload and (now_ts - float(cached_ts)) < 180.0:
+            return JSONResponse(status_code=200, content=cached_payload)
+
+        def _ok_payload(msg: str):
+            return {"status": "success", "authenticated": True, "message": msg}
+
+        def _expired_payload(msg: str):
+            return {
+                "status": "success",
+                "authenticated": False,
+                "message": msg,
+                "error_type": "token_expired",
             }
-            
+
+        def _soft_unavailable_payload(msg: str):
+            # Not token-expired; frontend should not show token-expired banner.
+            return {
+                "status": "success",
+                "authenticated": True,
+                "degraded": True,
+                "message": msg,
+            }
+
+        has_token = bool(getattr(vwap_service, "access_token", None))
+        if not has_token and hasattr(vwap_service, "reload_token_from_storage"):
+            try:
+                has_token = bool(vwap_service.reload_token_from_storage())
+            except Exception:
+                has_token = False
+
+        if not has_token:
+            payload = _expired_payload("No Upstox token configured")
+            _upstox_status_cache["ts"] = now_ts
+            _upstox_status_cache["payload"] = payload
+            return JSONResponse(status_code=200, content=payload)
+
+        headers = {
+            "Accept": "application/json",
+            "Authorization": f"Bearer {vwap_service.access_token}",
+        }
+
+        test_url_profile = "https://api.upstox.com/v2/user/profile"
+        test_url_market = "https://api.upstox.com/v2/market-quote/quotes"
+        market_params = {"instrument_key": "NSE_INDEX|Nifty 50"}
+
+        try:
             profile_response = requests.get(test_url_profile, headers=headers, timeout=5)
-            
-            # Test 2: Market data endpoint (critical for trading operations)
-            # Use NIFTY 50 index quote as it's always available
-            test_url_market = "https://api.upstox.com/v2/market-quote/quotes"
-            market_params = {"instrument_key": "NSE_INDEX|Nifty 50"}
             market_response = requests.get(test_url_market, headers=headers, params=market_params, timeout=5)
-            
-            # Token is valid only if BOTH endpoints work
-            # Market data endpoint is more critical - if it fails, token is effectively expired
-            if profile_response.status_code == 200 and market_response.status_code == 200:
-                return JSONResponse(
-                    status_code=200,
-                    content={
-                        "status": "success",
-                        "authenticated": True,
-                        "message": "Upstox token is valid"
-                    }
-                )
-            else:
-                # Check if it's a 401 (Unauthorized) which indicates token expiration
-                if market_response.status_code == 401 or profile_response.status_code == 401:
-                    logger.warning("⚠️ Upstox token expired (401 Unauthorized)")
-                return JSONResponse(
-                    status_code=200,
-                    content={
-                        "status": "success",
-                        "authenticated": False,
-                        "message": "Upstox token is expired or invalid",
-                        "error_type": "token_expired"
-                    }
-                )
+        except Exception as net_err:
+            payload = _soft_unavailable_payload(f"Upstox status probe unavailable: {net_err}")
+            _upstox_status_cache["ts"] = now_ts
+            _upstox_status_cache["payload"] = payload
+            return JSONResponse(status_code=200, content=payload)
+
+        # Only 401 should trigger token-expired UX.
+        if profile_response.status_code == 401 or market_response.status_code == 401:
+            # Try one reload + one retry before declaring expired.
+            reloaded = False
+            if hasattr(vwap_service, "reload_token_from_storage"):
+                try:
+                    reloaded = bool(vwap_service.reload_token_from_storage())
+                except Exception:
+                    reloaded = False
+            if reloaded:
+                headers["Authorization"] = f"Bearer {vwap_service.access_token}"
+                try:
+                    profile_response = requests.get(test_url_profile, headers=headers, timeout=5)
+                    market_response = requests.get(test_url_market, headers=headers, params=market_params, timeout=5)
+                except Exception:
+                    pass
+            if profile_response.status_code == 401 or market_response.status_code == 401:
+                logger.warning("⚠️ Upstox token expired (401 Unauthorized)")
+                payload = _expired_payload("Upstox token is expired or invalid")
+                _upstox_status_cache["ts"] = now_ts
+                _upstox_status_cache["payload"] = payload
+                return JSONResponse(status_code=200, content=payload)
+
+        # Any other probe failure should not be treated as token expiry.
+        if profile_response.status_code == 200 and market_response.status_code == 200:
+            payload = _ok_payload("Upstox token is valid")
         else:
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "status": "success",
-                    "authenticated": False,
-                    "message": "No Upstox token configured",
-                    "error_type": "token_expired"
-                }
+            payload = _soft_unavailable_payload(
+                f"Upstox probe partial failure (profile={profile_response.status_code}, market={market_response.status_code})"
             )
-            
+        _upstox_status_cache["ts"] = now_ts
+        _upstox_status_cache["payload"] = payload
+        return JSONResponse(status_code=200, content=payload)
+
     except Exception as e:
         logger.error(f"❌ Error checking Upstox token status: {str(e)}")
         return JSONResponse(
