@@ -303,6 +303,52 @@
     el.innerHTML = '<table class="df-table">' + th + '<tbody>' + body + '</tbody></table>';
   }
 
+  function rowProjectedPnlRupees(r) {
+    const ltp = Number(r.ltp);
+    const ep = Number(r.entry_price);
+    const qty = Number(r.lot_size);
+    if (!Number.isFinite(ltp) || !Number.isFinite(ep) || !Number.isFinite(qty)) return null;
+    return (ltp - ep) * qty;
+  }
+
+  function renderWhatIfContinuing(rows) {
+    const el = document.getElementById('dfWhatIfTable');
+    if (!el) return;
+    const sold = (rows || []).filter(function (r) {
+      return r && r.screening_id != null;
+    });
+    if (!sold.length) {
+      el.innerHTML = '<p style="color:var(--theme-muted);">No sold trades yet.</p>';
+      return;
+    }
+    const th =
+      '<thead><tr><th>Future</th><th class="num">Qty</th><th>Entry time</th><th class="num">Entry ₹</th><th class="num">Current LTP</th><th class="num">Projected PnL</th></tr></thead>';
+    const body = sold
+      .map(function (r) {
+        const pnl = rowProjectedPnlRupees(r);
+        const pnlCls = pnl > 0 ? 'df-pnl-pos' : pnl < 0 ? 'df-pnl-neg' : '';
+        return (
+          '<tr><td><strong>' +
+          esc(r.future_symbol || r.underlying) +
+          '</strong></td><td class="num">' +
+          esc(r.lot_size) +
+          '</td><td>' +
+          esc(r.entry_time) +
+          '</td><td class="num">' +
+          fmtNum(r.entry_price, 2) +
+          '</td><td class="num">' +
+          fmtNum(r.ltp, 2) +
+          '</td><td class="num ' +
+          pnlCls +
+          '">' +
+          fmtMoney(pnl) +
+          '</td></tr>'
+        );
+      })
+      .join('');
+    el.innerHTML = '<table class="df-table">' + th + '<tbody>' + body + '</tbody></table>';
+  }
+
   function esc(s) {
     if (s == null) return '';
     return String(s)
@@ -446,6 +492,7 @@
       renderPicks(data.picks || []);
       renderRunning(data.running || []);
       renderClosed(data.closed || [], data.summary);
+      renderWhatIfContinuing(data.closed || []);
     } catch (e) {
       if (b) b.textContent = 'Could not load workspace: ' + (e && e.message ? e.message : e);
     }

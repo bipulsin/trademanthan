@@ -378,12 +378,13 @@ def _fetch_screening_dicts(conn: Any, trade_date: date) -> List[Dict[str, Any]]:
 def _apply_live_ltps_to_picks_and_running(
     picks: List[Dict[str, Any]],
     running: List[Dict[str, Any]],
+    closed: Optional[List[Dict[str, Any]]] = None,
 ) -> None:
     """
     Refresh LTP from Upstox for every row (batch + per-key fallback), update dicts in place,
     and persist ltp on daily_futures_screening so 15-min webhook runs and page loads stay aligned.
     """
-    combined: List[Dict[str, Any]] = list(picks) + list(running)
+    combined: List[Dict[str, Any]] = list(picks) + list(running) + list(closed or [])
     uniq_keys: List[str] = []
     seen: Set[str] = set()
     for r in combined:
@@ -563,7 +564,7 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
     win_rate = round(100.0 * wins / denom, 1) if denom else None
 
     try:
-        _apply_live_ltps_to_picks_and_running(picks, running)
+        _apply_live_ltps_to_picks_and_running(picks, running, closed)
     except Exception as e:
         logger.warning("daily_futures: live LTP refresh failed: %s", e, exc_info=True)
 
