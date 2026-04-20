@@ -118,18 +118,11 @@
     const total = totals.realized + totals.unrealized;
     return (
       '<article class="pnl-day-item">' +
-      "<h4>" +
+      "<h4><span>" +
       label +
-      "</h4>" +
-      "<p>Realized " +
-      chipHtml(totals.realized) +
-      "</p>" +
-      "<p>Unrealized " +
-      chipHtml(totals.unrealized) +
-      "</p>" +
-      "<p>Total " +
+      "</span>" +
       chipHtml(total) +
-      "</p>" +
+      "</h4>" +
       "</article>"
     );
   }

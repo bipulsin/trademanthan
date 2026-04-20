@@ -1451,9 +1451,13 @@ body[data-theme="dark"] .pnl-day-item {
 }
 
 .pnl-day-item h4 {
-    margin: 0 0 0.5rem;
+    margin: 0;
     font-size: 0.93rem;
     color: #0f172a;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
 }
 
 body[data-theme="dark"] .pnl-day-item h4 {
