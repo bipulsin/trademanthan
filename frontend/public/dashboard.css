@@ -1423,13 +1423,21 @@ body[data-theme="dark"] .market-trivia-track span {
 }
 
 .pnl-day-total {
-    font-size: 0.85rem;
+    font-size: 0.92rem;
     color: #64748b;
     font-weight: 600;
 }
 
 body[data-theme="dark"] .pnl-day-total {
     color: #94a3b8;
+}
+
+.pnl-day-total .pnl-chip {
+    font-size: 0.94rem;
+    padding: 0.28rem 0.72rem;
+    background: #22c55e;
+    color: #052e16;
+    border: 1px solid #16a34a;
 }
 
 .pnl-day-grid {
