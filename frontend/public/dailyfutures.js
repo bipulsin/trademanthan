@@ -42,6 +42,35 @@
     return String(iso);
   }
 
+  /** IST time only (HH:MM, 24h) for ISO timestamps — used in Running order 1st/Last scan. */
+  function fmtIsoTimeIst(iso) {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      if (!Number.isNaN(d.getTime())) {
+        return d.toLocaleTimeString('en-GB', {
+          timeZone: 'Asia/Kolkata',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        });
+      }
+    } catch (e) {}
+    return String(iso);
+  }
+
+  function unrealizedPnlCell(r) {
+    const ltp = Number(r.ltp);
+    const ep = Number(r.entry_price);
+    const qty = Number(r.lot_size);
+    if (!Number.isFinite(ltp) || !Number.isFinite(ep) || !Number.isFinite(qty)) {
+      return '<td class="num">—</td>';
+    }
+    const pnl = (ltp - ep) * qty;
+    const cls = pnl > 0 ? 'df-pnl-pos' : pnl < 0 ? 'df-pnl-neg' : '';
+    return '<td class="num ' + cls + '">' + fmtMoney(pnl) + '</td>';
+  }
+
   function fmtNum(v, d) {
     if (v == null || v === '') return '—';
     const n = Number(v);
@@ -137,7 +166,7 @@
       return;
     }
     const th =
-      '<thead><tr><th>Future</th><th>Qty</th><th>Scan #</th><th>1st scan</th><th>Last scan</th><th>Conviction</th><th class="num">LTP</th><th>Entry time</th><th class="num">Entry ₹</th><th></th></tr></thead>';
+      '<thead><tr><th>Future</th><th>Qty</th><th>Scan #</th><th>1st scan</th><th>Last scan</th><th>Conviction</th><th class="num">LTP</th><th>Entry time</th><th class="num">Entry ₹</th><th class="num">Unrealized PnL</th><th></th></tr></thead>';
     const body = rows
       .map(function (r) {
         const warn = r.warn_two_misses
@@ -152,9 +181,9 @@
           esc(r.scan_count) +
           warn +
           '</td><td>' +
-          fmtIso(r.first_hit_at) +
+          fmtIsoTimeIst(r.first_hit_at) +
           '</td><td>' +
-          fmtIso(r.last_hit_at) +
+          fmtIsoTimeIst(r.last_hit_at) +
           '</td><td class="num">' +
           fmtNum(r.conviction_score, 1) +
           '</td><td class="num">' +
@@ -163,7 +192,9 @@
           esc(r.entry_time) +
           '</td><td class="num">' +
           fmtNum(r.entry_price, 2) +
-          '</td><td><button type="button" class="df-btn df-btn-sell" data-tid="' +
+          '</td>' +
+          unrealizedPnlCell(r) +
+          '<td><button type="button" class="df-btn df-btn-sell" data-tid="' +
           r.trade_id +
           '">Sell</button></td></tr>'
         );
