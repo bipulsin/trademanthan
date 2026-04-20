@@ -106,7 +106,13 @@ def _parse_iso_ist(ts: Optional[str]) -> Optional[datetime]:
     if not ts:
         return None
     try:
-        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        raw = str(ts).strip()
+        if raw.isdigit():
+            v = float(raw)
+            if v > 1_000_000_000_000:
+                v /= 1000.0
+            return datetime.fromtimestamp(v, tz=IST)
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
         if dt.tzinfo is None:
             return IST.localize(dt)
         return dt.astimezone(IST)
