@@ -375,6 +375,87 @@ def _fetch_screening_dicts(conn: Any, trade_date: date) -> List[Dict[str, Any]]:
     return out
 
 
+def _apply_live_ltps_to_picks_and_running(
+    picks: List[Dict[str, Any]],
+    running: List[Dict[str, Any]],
+) -> None:
+    """
+    Refresh LTP from Upstox for every row (batch + per-key fallback), update dicts in place,
+    and persist ltp on daily_futures_screening so 15-min webhook runs and page loads stay aligned.
+    """
+    combined: List[Dict[str, Any]] = list(picks) + list(running)
+    uniq_keys: List[str] = []
+    seen: Set[str] = set()
+    for r in combined:
+        ik = (r.get("instrument_key") or "").strip()
+        if ik and ik not in seen:
+            seen.add(ik)
+            uniq_keys.append(ik)
+    if not uniq_keys:
+        return
+
+    upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+    batch: Dict[str, float] = {}
+    try:
+        batch = upstox.get_market_quotes_batch_by_keys(uniq_keys)
+    except Exception as e:
+        logger.warning("daily_futures: batch LTP failed: %s", e)
+
+    def _norm(k: str) -> str:
+        return k.replace(":", "|").replace(" ", "").upper()
+
+    def _resolve_ltp(ik: str) -> Optional[float]:
+        if not ik:
+            return None
+        if ik in batch:
+            lp = batch[ik]
+            if lp and float(lp) > 0:
+                return float(lp)
+        nk = _norm(ik)
+        for bk, lp in batch.items():
+            if _norm(bk) == nk and lp and float(lp) > 0:
+                return float(lp)
+        try:
+            q = upstox.get_market_quote_by_key(ik)
+            if q and q.get("last_price"):
+                v = float(q["last_price"])
+                return v if v > 0 else None
+        except Exception as ex:
+            logger.debug("daily_futures: single-quote LTP failed for %s: %s", ik, ex)
+        return None
+
+    by_screening: Dict[int, float] = {}
+    for r in combined:
+        ik = (r.get("instrument_key") or "").strip()
+        lp = _resolve_ltp(ik)
+        if lp is None:
+            continue
+        lp_r = round(lp, 4)
+        r["ltp"] = lp_r
+        sid = r.get("screening_id")
+        if sid is not None:
+            by_screening[int(sid)] = lp_r
+
+    if not by_screening:
+        return
+    try:
+        with engine.begin() as conn:
+            for sid, ltp in by_screening.items():
+                conn.execute(
+                    text(
+                        """
+                        UPDATE daily_futures_screening SET
+                          ltp = :ltp,
+                          updated_at = CURRENT_TIMESTAMP
+                        WHERE id = :id
+                        """
+                    ),
+                    {"ltp": ltp, "id": sid},
+                )
+    except Exception as e:
+        logger.warning("daily_futures: persist LTP to screening failed: %s", e)
+
+
 def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
     ensure_daily_futures_tables()
     td = ist_today()
@@ -480,6 +561,11 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
 
     denom = wins + losses
     win_rate = round(100.0 * wins / denom, 1) if denom else None
+
+    try:
+        _apply_live_ltps_to_picks_and_running(picks, running)
+    except Exception as e:
+        logger.warning("daily_futures: live LTP refresh failed: %s", e, exc_info=True)
 
     return {
         "trade_date": str(td),
