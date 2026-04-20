@@ -20,9 +20,14 @@
             padding: 16px 18px;
             margin-bottom: 18px;
         }
-        .df-card h2 { margin: 0 0 10px; font-size: 1.12rem; display: flex; align-items: center; gap: 8px; }
-        .df-summary { display: flex; flex-wrap: wrap; gap: 16px; font-size: 0.9rem; color: var(--theme-muted, #64748b); margin: 8px 0 12px; }
+        .df-card h2 { margin: 0; font-size: 1.12rem; display: flex; align-items: center; gap: 8px; }
+        .df-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+        .df-summary { display: flex; flex-wrap: wrap; gap: 16px; font-size: 0.9rem; color: var(--theme-muted, #64748b); margin: 0; justify-content: flex-end; }
         .df-summary strong { color: var(--theme-text, #0f172a); }
+        @media (max-width: 768px) {
+            .df-head { flex-direction: column; align-items: flex-start; }
+            .df-summary { justify-content: flex-start; margin-top: 2px; }
+        }
         .df-table-wrap { overflow-x: auto; }
         table.df-table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
         table.df-table th, table.df-table td {
@@ -86,13 +91,18 @@
                 </div>
 
                 <div class="df-card">
-                    <h2><i class="fas fa-check-double"></i> Today&apos;s trade</h2>
-                    <div class="df-summary" id="dfClosedSummary"></div>
+                    <div class="df-head">
+                        <h2><i class="fas fa-check-double"></i> Today&apos;s trade</h2>
+                        <div class="df-summary" id="dfClosedSummary"></div>
+                    </div>
                     <div id="dfClosedTable"></div>
                 </div>
 
                 <div class="df-card">
-                    <h2><i class="fas fa-chart-line"></i> What If continuing</h2>
+                    <div class="df-head">
+                        <h2><i class="fas fa-chart-line"></i> What If continuing</h2>
+                        <div class="df-summary" id="dfWhatIfSummary"></div>
+                    </div>
                     <div id="dfWhatIfTable"></div>
                 </div>
             </div>
@@ -134,6 +144,6 @@
     </div>
 
     <script src="left-menu.js?v=3.20"></script>
-    <script src="dailyfutures.js?v=5"></script>
+    <script src="dailyfutures.js?v=6"></script>
 </body>
 </html>

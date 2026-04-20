@@ -312,11 +312,38 @@
   }
 
   function renderWhatIfContinuing(rows) {
+    const sumEl = document.getElementById('dfWhatIfSummary');
     const el = document.getElementById('dfWhatIfTable');
     if (!el) return;
     const sold = (rows || []).filter(function (r) {
       return r && r.screening_id != null;
     });
+    var sumProj = 0;
+    var wins = 0;
+    var losses = 0;
+    var n = 0;
+    sold.forEach(function (r) {
+      var p = rowProjectedPnlRupees(r);
+      if (p == null) return;
+      sumProj += p;
+      n += 1;
+      if (p > 0) wins += 1;
+      else if (p < 0) losses += 1;
+    });
+    var denom = wins + losses;
+    var wr = denom ? (100.0 * wins / denom).toFixed(1) : null;
+    if (sumEl) {
+      sumEl.innerHTML =
+        '<span><strong>Cumulative PnL:</strong> ' +
+        (n ? fmtMoney(sumProj) : '—') +
+        '</span><span><strong>Wins / Losses:</strong> ' +
+        wins +
+        ' / ' +
+        losses +
+        '</span><span><strong>Win rate:</strong> ' +
+        (wr != null ? wr + '%' : '—') +
+        '</span>';
+    }
     if (!sold.length) {
       el.innerHTML = '<p style="color:var(--theme-muted);">No sold trades yet.</p>';
       return;
