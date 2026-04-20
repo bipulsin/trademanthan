@@ -59,16 +59,32 @@
     return String(iso);
   }
 
-  function unrealizedPnlCell(r) {
+  function rowUnrealizedPnlRupees(r) {
     const ltp = Number(r.ltp);
     const ep = Number(r.entry_price);
     const qty = Number(r.lot_size);
-    if (!Number.isFinite(ltp) || !Number.isFinite(ep) || !Number.isFinite(qty)) {
-      return '<td class="num">—</td>';
-    }
-    const pnl = (ltp - ep) * qty;
+    if (!Number.isFinite(ltp) || !Number.isFinite(ep) || !Number.isFinite(qty)) return null;
+    return (ltp - ep) * qty;
+  }
+
+  function unrealizedPnlCell(r) {
+    const pnl = rowUnrealizedPnlRupees(r);
+    if (pnl == null) return '<td class="num">—</td>';
     const cls = pnl > 0 ? 'df-pnl-pos' : pnl < 0 ? 'df-pnl-neg' : '';
     return '<td class="num ' + cls + '">' + fmtMoney(pnl) + '</td>';
+  }
+
+  function sumRunningUnrealized(rows) {
+    var sum = 0;
+    var n = 0;
+    rows.forEach(function (r) {
+      var v = rowUnrealizedPnlRupees(r);
+      if (v != null) {
+        sum += v;
+        n += 1;
+      }
+    });
+    return { sum: sum, n: n };
   }
 
   function fmtNum(v, d) {
@@ -167,6 +183,18 @@
     }
     const th =
       '<thead><tr><th>Future</th><th>Qty</th><th>Scan #</th><th>1st scan</th><th>Last scan</th><th>Conviction</th><th class="num">LTP</th><th>Entry time</th><th class="num">Entry ₹</th><th class="num">Unrealized PnL</th><th></th></tr></thead>';
+    const tot = sumRunningUnrealized(rows);
+    const totalLine =
+      '<p class="df-meta" style="margin:0 0 10px;font-size:0.9rem;">' +
+      '<strong>Total unrealized PnL:</strong> ' +
+      (tot.n > 0
+        ? '<span class="' +
+          (tot.sum > 0 ? 'df-pnl-pos' : tot.sum < 0 ? 'df-pnl-neg' : '') +
+          '">' +
+          fmtMoney(tot.sum) +
+          '</span>'
+        : '—') +
+      '</p>';
     const body = rows
       .map(function (r) {
         const warn = r.warn_two_misses
@@ -200,7 +228,7 @@
         );
       })
       .join('');
-    el.innerHTML = '<table class="df-table">' + th + '<tbody>' + body + '</tbody></table>';
+    el.innerHTML = totalLine + '<table class="df-table">' + th + '<tbody>' + body + '</tbody></table>';
     el.querySelectorAll('button[data-tid]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         const tid = parseInt(btn.getAttribute('data-tid'), 10);

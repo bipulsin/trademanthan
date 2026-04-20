@@ -194,6 +194,32 @@
         return '<span class="' + cls + '">₹' + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</span>';
     }
 
+    /** Contract units: lots × instrument lot size (matches realized PnL in smart_futures_stub). */
+    function openPositionContractUnits(r) {
+        const lots = Number(r && r.calculated_lots);
+        const ls = Number(r && r.instrument_lot_size);
+        if (!Number.isFinite(lots) || lots < 1) return NaN;
+        if (Number.isFinite(ls) && ls > 0) return lots * ls;
+        return lots;
+    }
+
+    /** Unrealized INR: LONG (LTP−entry)×units; SHORT (entry−LTP)×units. */
+    function openUnrealizedPnlRupees(r) {
+        const ltp = Number(r && r.current_ltp);
+        const entry = Number(r && r.buy_price);
+        const units = openPositionContractUnits(r);
+        if (!Number.isFinite(ltp) || !Number.isFinite(entry) || !Number.isFinite(units)) return null;
+        const side = String((r && r.side) || '').trim().toUpperCase();
+        const pts = side === 'SHORT' ? entry - ltp : ltp - entry;
+        return pts * units;
+    }
+
+    function fmtOpenUnrealizedCell(r) {
+        const pnl = openUnrealizedPnlRupees(r);
+        if (pnl == null) return '—';
+        return fmtPnlCell(pnl);
+    }
+
     function fmtLotsCell(r) {
         const v = r && r.calculated_lots;
         if (v == null || v === '') return '—';
@@ -920,6 +946,9 @@
             exitReason +
             '</td>' +
             '<td>' +
+            fmtOpenUnrealizedCell(r) +
+            '</td>' +
+            '<td>' +
             fmtOpenActionCell(r) +
             '</td>' +
             '</tr>'
@@ -1156,7 +1185,7 @@
 
         if (!bought.length) {
             host.innerHTML =
-                '<div class="sf-table-wrap"><table class="sf-table"><tbody><tr><td colspan="15" style="padding:14px;">No open positions</td></tr></tbody></table></div>';
+                '<div class="sf-table-wrap"><table class="sf-table"><tbody><tr><td colspan="16" style="padding:14px;">No open positions</td></tr></tbody></table></div>';
             return;
         }
 
@@ -1164,14 +1193,42 @@
             '<thead><tr>' +
             '<th>Symbol</th><th>Side</th><th>Tier</th><th>OI</th><th>Stop</th><th>Lots</th><th>CMS</th>' +
             '<th>Entry</th><th title="Displayed target rebased from buy_price">Target</th><th>LTP</th><th>15m VWAP</th>' +
-            '<th>Active SL</th><th>Trail SL</th><th>Exit Reason</th><th>Action</th>' +
+            '<th>Active SL</th><th>Trail SL</th><th>Exit Reason</th>' +
+            '<th title="Approx. (LTP − Entry) × lot size × lots; SHORT uses (Entry − LTP)">Unrealized PnL</th><th>Action</th>' +
             '</tr></thead>';
         let body = '';
+        let sumUn = 0;
+        let nUn = 0;
         bought.forEach(function (r) {
             body += openTableRowHtml(r);
+            const p = openUnrealizedPnlRupees(r);
+            if (p != null) {
+                sumUn += p;
+                nUn += 1;
+            }
         });
+        const totalUnStr =
+            nUn > 0
+                ? '<span class="' +
+                  (sumUn > 0 ? 'sf-pnl-pos' : sumUn < 0 ? 'sf-pnl-neg' : 'sf-pnl-flat') +
+                  '"><strong>₹' +
+                  sumUn.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) +
+                  '</strong></span>'
+                : '—';
+        const foot =
+            '<tfoot><tr class="sf-open-footer-row">' +
+            '<td colspan="14"><strong>Total unrealized PnL</strong></td>' +
+            '<td>' +
+            totalUnStr +
+            '</td><td></td></tr></tfoot>';
         host.innerHTML =
-            '<div class="sf-table-wrap"><table class="sf-table">' + thead + '<tbody>' + body + '</tbody></table></div>';
+            '<div class="sf-table-wrap"><table class="sf-table">' +
+            thead +
+            '<tbody>' +
+            body +
+            '</tbody>' +
+            foot +
+            '</table></div>';
 
         host.onclick = function (ev) {
             const sb = ev.target && ev.target.closest ? ev.target.closest('.sf-btn-sell[data-open-sell]') : null;
