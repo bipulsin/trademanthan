@@ -6,7 +6,8 @@ from __future__ import annotations
 import logging
 import os
 import re
-from datetime import date, datetime
+import time
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pytz
@@ -29,6 +30,7 @@ logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
 
 _INSTRUMENT_CACHE: Optional[Tuple[Any, Any]] = None
+_DF_INTRADAY_1M_CACHE: Dict[Tuple[str, str], Dict[str, Any]] = {}
 
 
 def _instruments_index():
@@ -98,6 +100,148 @@ def ensure_daily_futures_tables() -> None:
 
 def ist_today() -> date:
     return datetime.now(IST).date()
+
+
+def _parse_iso_ist(ts: Optional[str]) -> Optional[datetime]:
+    if not ts:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            return IST.localize(dt)
+        return dt.astimezone(IST)
+    except Exception:
+        return None
+
+
+def _fmt_hm(dt: Optional[datetime]) -> str:
+    return dt.strftime("%H:%M") if dt else "—"
+
+
+def _fetch_intraday_1m_cached(upstox: UpstoxService, instrument_key: str, trade_date: date) -> List[Dict[str, Any]]:
+    if not instrument_key:
+        return []
+    ck = (instrument_key.strip(), str(trade_date))
+    now = time.time()
+    hit = _DF_INTRADAY_1M_CACHE.get(ck)
+    if hit and (now - float(hit.get("ts") or 0)) < 180.0:
+        return list(hit.get("candles") or [])
+    try:
+        candles = upstox.get_historical_candles_by_instrument_key(
+            instrument_key,
+            interval="minutes/1",
+            days_back=2,
+            range_end_date=trade_date,
+        ) or []
+    except Exception:
+        candles = []
+    _DF_INTRADAY_1M_CACHE[ck] = {"ts": now, "candles": candles}
+    return list(candles)
+
+
+def _ltp_asof_ist(candles: List[Dict[str, Any]], target_dt_ist: datetime) -> Optional[float]:
+    best_ts: Optional[datetime] = None
+    best_close: Optional[float] = None
+    for c in candles or []:
+        ts = c.get("timestamp")
+        dt = None
+        try:
+            if isinstance(ts, (int, float)):
+                v = float(ts)
+                if v > 1_000_000_000_000:
+                    v /= 1000.0
+                dt = datetime.fromtimestamp(v, tz=IST)
+            else:
+                dt = _parse_iso_ist(str(ts))
+        except Exception:
+            dt = None
+        if not dt:
+            continue
+        if dt > target_dt_ist:
+            continue
+        close_px = c.get("close")
+        try:
+            cp = float(close_px)
+        except (TypeError, ValueError):
+            continue
+        if cp <= 0:
+            continue
+        if best_ts is None or dt > best_ts:
+            best_ts = dt
+            best_close = cp
+    return round(float(best_close), 4) if best_close is not None else None
+
+
+def _build_trade_if_could_rows(
+    picks: List[Dict[str, Any]],
+    closed: List[Dict[str, Any]],
+    trade_date: date,
+) -> List[Dict[str, Any]]:
+    closed_sids = {
+        int(r.get("screening_id"))
+        for r in (closed or [])
+        if r.get("screening_id") is not None
+    }
+    candidates = [
+        p for p in (picks or [])
+        if p.get("screening_id") is not None and int(p.get("screening_id")) not in closed_sids
+    ]
+    if not candidates:
+        return []
+
+    upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+    out: List[Dict[str, Any]] = []
+    noon_1245 = IST.localize(datetime.combine(trade_date, datetime.min.time()).replace(hour=12, minute=45))
+    close_1515 = IST.localize(datetime.combine(trade_date, datetime.min.time()).replace(hour=15, minute=15))
+    cutoff_1230 = IST.localize(datetime.combine(trade_date, datetime.min.time()).replace(hour=12, minute=30))
+
+    for p in candidates:
+        first_hit = _parse_iso_ist(p.get("first_hit_at"))
+        if not first_hit:
+            continue
+        entry_dt = first_hit + timedelta(minutes=5)
+        ikey = (p.get("instrument_key") or "").strip()
+        candles = _fetch_intraday_1m_cached(upstox, ikey, trade_date)
+        entry_ltp = _ltp_asof_ist(candles, entry_dt)
+        qty = p.get("lot_size")
+        try:
+            qty_num = float(qty) if qty is not None else None
+        except Exception:
+            qty_num = None
+
+        row: Dict[str, Any] = {
+            "screening_id": p.get("screening_id"),
+            "underlying": p.get("underlying"),
+            "future_symbol": p.get("future_symbol"),
+            "instrument_key": ikey,
+            "qty": int(qty_num) if qty_num is not None else None,
+            "first_scan_time": _fmt_hm(first_hit),
+            "entry_time": _fmt_hm(entry_dt),
+            "entry_ltp": entry_ltp,
+            "exit_1245_time": "12:45",
+            "exit_1245_ltp": None,
+            "pnl_1245_rupees": None,
+            "exit_1515_time": "15:15",
+            "exit_1515_ltp": None,
+            "pnl_1515_rupees": None,
+            "after_1230_only_1515": first_hit > cutoff_1230,
+        }
+
+        if not row["after_1230_only_1515"]:
+            ltp_1245 = _ltp_asof_ist(candles, noon_1245)
+            row["exit_1245_ltp"] = ltp_1245
+            if entry_ltp is not None and ltp_1245 is not None and qty_num is not None:
+                row["pnl_1245_rupees"] = round((ltp_1245 - entry_ltp) * qty_num, 2)
+
+        ltp_1515 = _ltp_asof_ist(candles, close_1515)
+        row["exit_1515_ltp"] = ltp_1515
+        if entry_ltp is not None and ltp_1515 is not None and qty_num is not None:
+            row["pnl_1515_rupees"] = round((ltp_1515 - entry_ltp) * qty_num, 2)
+
+        out.append(row)
+
+    out.sort(key=lambda r: (r.get("future_symbol") or r.get("underlying") or ""))
+    return out
 
 
 def normalize_symbols_from_payload(payload: Any) -> List[str]:
@@ -573,6 +717,7 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
         "picks": picks,
         "running": running,
         "closed": closed,
+        "trade_if_could_have_done": _build_trade_if_could_rows(picks, closed, td),
         "summary": {
             "cumulative_pnl_rupees": round(total_pnl, 2),
             "wins": wins,
