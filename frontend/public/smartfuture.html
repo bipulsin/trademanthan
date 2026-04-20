@@ -326,9 +326,10 @@
         .sf-velocity-chip--strong{background:#bbf7d0;color:#14532d;}
         .sf-velocity-chip--weak{background:#fef08a;color:#713f12;}
         .sf-velocity-chip--retreat{background:#fecaca;color:#7f1d1d;}
-        .sf-countdown{display:inline-flex;align-items:center;gap:6px;padding:2px 7px;border-radius:6px;font-size:0.72rem;font-weight:600;color:#065f46;background:#d1fae5;white-space:nowrap;}
-        .sf-countdown--passed{color:#991b1b;background:#fee2e2;}
-        .sf-countdown--stale{color:#78350f;background:#fde68a;}
+        /* Must beat theme.css `body.theme-page span { color: inherit }` or chip text inherits --theme-text on pale bg */
+        body.theme-page .sf-countdown{display:inline-flex;align-items:center;gap:6px;padding:2px 7px;border-radius:6px;font-size:0.72rem;font-weight:600;color:#065f46 !important;background:#d1fae5;white-space:nowrap;}
+        body.theme-page .sf-countdown--passed{color:#7f1d1d !important;background:#fecaca !important;}
+        body.theme-page .sf-countdown--stale{color:#78350f !important;background:#fde68a !important;}
 
         /* Early-exit override modal */
         .sf-modal-panel.sf-modal-panel--wide{max-width:420px;}
