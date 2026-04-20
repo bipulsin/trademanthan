@@ -1446,6 +1446,10 @@ body[data-theme="dark"] .pnl-day-total {
     gap: 0.9rem;
 }
 
+.pnl-day-card .card-content {
+    min-height: 0;
+}
+
 .pnl-day-item {
     border: 1px solid rgba(148, 163, 184, 0.32);
     border-radius: 12px;
