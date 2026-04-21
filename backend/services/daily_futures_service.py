@@ -399,6 +399,20 @@ def _recompute_conviction_all_today(upstox: UpstoxService, trade_date: date) -> 
         if ik not in cand_cache:
             cand_cache[ik] = fetch_intraday_1m_candles(upstox, ik, trade_date) or {}
         buckets = _bucket_candles_by_hhmm(cand_cache[ik])
+        # Fallback: if today's 1m candles are unavailable, use previous trading day candles
+        # from broker API so conviction can still be computed.
+        if not buckets:
+            try:
+                prev_dt = upstox.get_last_trading_date(datetime.combine(trade_date, dt_time(12, 0)))
+                prev_date = prev_dt.date() if prev_dt else None
+                if prev_date and prev_date != trade_date:
+                    if ik not in cand_cache:
+                        cand_cache[ik] = fetch_intraday_1m_candles(upstox, ik, prev_date) or {}
+                    else:
+                        cand_cache[ik] = fetch_intraday_1m_candles(upstox, ik, prev_date) or cand_cache[ik]
+                    buckets = _bucket_candles_by_hhmm(cand_cache[ik])
+            except Exception:
+                pass
         row_ids.append(int(rid))
         if not buckets:
             finals.append(
@@ -409,6 +423,8 @@ def _recompute_conviction_all_today(upstox: UpstoxService, trade_date: date) -> 
                     "instrument_key": ik,
                     "conviction_oi_change_pct": None,
                     "conviction_price_vs_vwap_pct": None,
+                    "conviction_score": 50.0,
+                    "conviction_score_breakdown": {"oi": 25.0, "vwap": 25.0},
                     "_rid": rid,
                 }
             )
@@ -429,6 +445,8 @@ def _recompute_conviction_all_today(upstox: UpstoxService, trade_date: date) -> 
         for d in finals:
             rid = int(d["_rid"])
             cs = d.get("conviction_score")
+            if cs is None:
+                cs = 50.0
             ik = str(d.get("instrument_key") or "").strip()
             q = upstox.get_market_quote_by_key(ik) if ik else {}
             lp = (q or {}).get("last_price") or (q or {}).get("close")
@@ -447,6 +465,14 @@ def _recompute_conviction_all_today(upstox: UpstoxService, trade_date: date) -> 
                     """
                 ),
                 {"cs": cs, "ltp": ltp, "id": rid},
+            )
+            br = d.get("conviction_score_breakdown") or {}
+            logger.info(
+                "daily_futures conviction: symbol=%s score=%s oi=%s vwap=%s",
+                d.get("underlying") or d.get("symbol"),
+                cs,
+                br.get("oi"),
+                br.get("vwap"),
             )
 
 
@@ -599,7 +625,7 @@ def _fetch_screening_dicts(conn: Any, trade_date: date) -> List[Dict[str, Any]]:
                 "scan_count": int(row[5] or 0),
                 "first_hit_at": row[6].isoformat() if row[6] else None,
                 "last_hit_at": row[7].isoformat() if row[7] else None,
-                "conviction_score": float(row[8]) if row[8] is not None else None,
+                "conviction_score": float(row[8]) if row[8] is not None else 50.0,
                 "ltp": float(row[9]) if row[9] is not None else None,
             }
         )
@@ -748,7 +774,7 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
                 "scan_count": int(row[9] or 0),
                 "first_hit_at": row[10].isoformat() if row[10] else None,
                 "last_hit_at": row[11].isoformat() if row[11] else None,
-                "conviction_score": float(row[12]) if row[12] is not None else None,
+                "conviction_score": float(row[12]) if row[12] is not None else 50.0,
                 "ltp": float(row[13]) if row[13] is not None else None,
                 "warn_two_misses": miss >= 2,
             }
