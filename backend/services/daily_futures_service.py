@@ -17,7 +17,12 @@ from sqlalchemy.orm import Session
 
 from backend.config import settings
 from backend.database import engine
-from backend.services.fno_bullish_backtest import TradeRow, _fill_conviction_raw_metrics, finalize_conviction_scores
+from backend.services.fno_bullish_backtest import (
+    TradeRow,
+    _fill_conviction_raw_metrics,
+    _vwap_proximity_score_0_50,
+    finalize_conviction_scores,
+)
 from backend.services.nks_intraday_backtest import (
     _bucket_candles_by_hhmm,
     _index_instruments,
@@ -32,6 +37,8 @@ IST = pytz.timezone("Asia/Kolkata")
 
 _INSTRUMENT_CACHE: Optional[Tuple[Any, Any]] = None
 _DF_INTRADAY_1M_CACHE: Dict[Tuple[str, str], Dict[str, Any]] = {}
+_DF_PREV_CLOSE_CACHE: Dict[str, Any] = {"trade_date": None, "stock": {}, "nifty": None}
+NIFTY50_INDEX_KEY = "NSE_INDEX|Nifty 50"
 
 
 def _instruments_index():
@@ -67,8 +74,24 @@ def ensure_daily_futures_tables() -> None:
         scan_count INTEGER NOT NULL DEFAULT 1,
         first_hit_at TIMESTAMPTZ,
         last_hit_at TIMESTAMPTZ,
-        conviction_score NUMERIC(8,2),
+        conviction_score NUMERIC(8,2) NOT NULL DEFAULT 0,
+        conviction_oi_leg NUMERIC(8,2),
+        conviction_vwap_leg NUMERIC(8,2),
         ltp NUMERIC(18,4),
+        session_vwap NUMERIC(18,4),
+        total_oi BIGINT,
+        oi_change_pct NUMERIC(18,6),
+        nifty_ltp NUMERIC(18,4),
+        nifty_session_vwap NUMERIC(18,4),
+        stock_prev_close NUMERIC(18,4),
+        nifty_prev_close NUMERIC(18,4),
+        stock_change_pct NUMERIC(18,6),
+        nifty_change_pct NUMERIC(18,6),
+        snapshotted_at TIMESTAMPTZ,
+        second_scan_time TIMESTAMPTZ,
+        second_scan_conviction_score NUMERIC(8,2),
+        second_scan_stock_change_pct NUMERIC(18,6),
+        second_scan_nifty_change_pct NUMERIC(18,6),
         updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
         UNIQUE (trade_date, underlying)
     );
@@ -97,6 +120,84 @@ def ensure_daily_futures_tables() -> None:
     """
     with engine.begin() as conn:
         conn.execute(text(ddl))
+        # Safe additive migrations for existing databases.
+        conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS conviction_oi_leg NUMERIC(8,2)"))
+        conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS conviction_vwap_leg NUMERIC(8,2)"))
+        conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS session_vwap NUMERIC(18,4)"))
+        conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS total_oi BIGINT"))
+        conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS oi_change_pct NUMERIC(18,6)"))
+        conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS nifty_ltp NUMERIC(18,4)"))
+        conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS nifty_session_vwap NUMERIC(18,4)"))
+        conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS stock_prev_close NUMERIC(18,4)"))
+        conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS nifty_prev_close NUMERIC(18,4)"))
+        conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS stock_change_pct NUMERIC(18,6)"))
+        conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS nifty_change_pct NUMERIC(18,6)"))
+        conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS snapshotted_at TIMESTAMPTZ"))
+        conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_time TIMESTAMPTZ"))
+        conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_conviction_score NUMERIC(8,2)"))
+        conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_stock_change_pct NUMERIC(18,6)"))
+        conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_nifty_change_pct NUMERIC(18,6)"))
+        conn.execute(text("UPDATE daily_futures_screening SET conviction_score = 0 WHERE conviction_score IS NULL"))
+        conn.execute(text("ALTER TABLE daily_futures_screening ALTER COLUMN conviction_score SET DEFAULT 0"))
+        conn.execute(text("ALTER TABLE daily_futures_screening ALTER COLUMN conviction_score SET NOT NULL"))
+
+
+def _safe_float(v: Any) -> Optional[float]:
+    try:
+        if v is None or v == "":
+            return None
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _quote_session_vwap(snapshot: Dict[str, Any]) -> Optional[float]:
+    if not isinstance(snapshot, dict):
+        return None
+    for k in ("vwap", "session_vwap", "average_price", "avg_price"):
+        fv = _safe_float(snapshot.get(k))
+        if fv is not None and fv > 0:
+            return fv
+    ohlc = snapshot.get("ohlc") if isinstance(snapshot.get("ohlc"), dict) else {}
+    for k in ("vwap", "average_price", "avg_price"):
+        fv = _safe_float(ohlc.get(k))
+        if fv is not None and fv > 0:
+            return fv
+    return None
+
+
+def _prev_close_from_snapshot(snapshot: Dict[str, Any]) -> Optional[float]:
+    if not isinstance(snapshot, dict):
+        return None
+    ohlc = snapshot.get("ohlc") if isinstance(snapshot.get("ohlc"), dict) else {}
+    pc = _safe_float(ohlc.get("close"))
+    if pc is not None and pc > 0:
+        return pc
+    return None
+
+
+def _get_or_init_prev_close_cache(
+    trade_date: date,
+    upstox: UpstoxService,
+    symbol_to_key: Dict[str, str],
+) -> Dict[str, Any]:
+    td = str(trade_date)
+    global _DF_PREV_CLOSE_CACHE
+    if _DF_PREV_CLOSE_CACHE.get("trade_date") == td:
+        return _DF_PREV_CLOSE_CACHE
+    keys = [k for k in symbol_to_key.values() if k]
+    req = list(dict.fromkeys(keys + [NIFTY50_INDEX_KEY]))
+    snap = {}
+    try:
+        snap = upstox.get_market_quote_snapshots_batch(req)
+    except Exception as e:
+        logger.warning("daily_futures: prev-close batch fetch failed: %s", e)
+    stock_pc: Dict[str, Optional[float]] = {}
+    for sym, ik in symbol_to_key.items():
+        stock_pc[sym] = _prev_close_from_snapshot(snap.get(ik) or {})
+    nifty_pc = _prev_close_from_snapshot(snap.get(NIFTY50_INDEX_KEY) or {})
+    _DF_PREV_CLOSE_CACHE = {"trade_date": td, "stock": stock_pc, "nifty": nifty_pc}
+    return _DF_PREV_CLOSE_CACHE
 
 
 def ist_today() -> date:
@@ -485,27 +586,132 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
     summary: Dict[str, Any] = {"trade_date": str(trade_date), "processed": 0, "skipped": []}
 
     touched_ids: List[int] = []
+    symbol_rows: Dict[str, Dict[str, Any]] = {}
+    for u in sorted(sym_set):
+        with engine.connect() as conn:
+            row = load_arbitrage_future_row(conn, u)
+        if row:
+            symbol_rows[u] = row
+        else:
+            summary["skipped"].append({"underlying": u, "reason": "not_in_arbitrage_master"})
+
+    # Batch snapshot fetch for all futures + Nifty benchmark.
+    symbol_to_key = {u: str(r["instrument_key"]).strip() for u, r in symbol_rows.items()}
+    quote_keys = list(dict.fromkeys([k for k in symbol_to_key.values() if k] + [NIFTY50_INDEX_KEY]))
+    batch_quotes: Dict[str, Dict[str, Any]] = {}
+    try:
+        batch_quotes = upstox.get_market_quote_snapshots_batch(quote_keys)
+    except Exception as e:
+        logger.warning("daily_futures: ingestion batch quote fetch failed: %s", e)
+    prev_close_cache = _get_or_init_prev_close_cache(trade_date, upstox, symbol_to_key)
+    nifty_quote = batch_quotes.get(NIFTY50_INDEX_KEY) or {}
+    nifty_ltp = _safe_float(nifty_quote.get("last_price"))
+    nifty_vwap = _quote_session_vwap(nifty_quote)
+    nifty_prev_close = _safe_float((prev_close_cache.get("nifty")))
+    nifty_change_pct = (
+        round(((nifty_ltp - nifty_prev_close) / nifty_prev_close) * 100.0, 6)
+        if nifty_ltp is not None and nifty_prev_close and nifty_prev_close > 0
+        else None
+    )
+
+    ingest_now = datetime.now(IST)
+    scan_inputs: List[Dict[str, Any]] = []
 
     with engine.begin() as conn:
-        for u in sorted(sym_set):
-            row = load_arbitrage_future_row(conn, u)
-            if not row:
-                summary["skipped"].append({"underlying": u, "reason": "not_in_arbitrage_master"})
-                continue
+        for u, row in sorted(symbol_rows.items(), key=lambda x: x[0]):
             ik = row["instrument_key"]
             lot = fut_lot_for_key(ik)
-            now_ist = datetime.now(IST)
+            q = batch_quotes.get(ik) or {}
+            ltp = _safe_float(q.get("last_price"))
+            session_vwap = _quote_session_vwap(q)
+            total_oi = _safe_float(q.get("oi"))
+            prev_close = _safe_float((prev_close_cache.get("stock") or {}).get(u))
+            stock_change_pct = (
+                round(((ltp - prev_close) / prev_close) * 100.0, 6)
+                if ltp is not None and prev_close and prev_close > 0
+                else None
+            )
+            if not q:
+                logger.warning("daily_futures: quote snapshot missing for %s (%s)", u, ik)
             ex = conn.execute(
                 text(
                     """
-                    SELECT id FROM daily_futures_screening
+                    SELECT id, scan_count, total_oi, second_scan_time,
+                           second_scan_conviction_score, second_scan_stock_change_pct, second_scan_nifty_change_pct
+                    FROM daily_futures_screening
                     WHERE trade_date = CAST(:d AS DATE) AND UPPER(TRIM(underlying)) = :u
                     """
                 ),
                 {"d": str(trade_date), "u": u},
             ).fetchone()
+            prev_oi = _safe_float(ex[2]) if ex else None
+            oi_change_pct = (
+                round(((total_oi - prev_oi) / prev_oi) * 100.0, 6)
+                if total_oi is not None and prev_oi is not None and prev_oi > 0
+                else None
+            )
+            scan_inputs.append(
+                {
+                    "underlying": u,
+                    "instrument_key": ik,
+                    "ltp": ltp,
+                    "session_vwap": session_vwap,
+                    "total_oi": int(total_oi) if total_oi is not None else None,
+                    "oi_change_pct": oi_change_pct,
+                    "nifty_ltp": nifty_ltp,
+                    "nifty_session_vwap": nifty_vwap,
+                    "stock_prev_close": prev_close,
+                    "nifty_prev_close": nifty_prev_close,
+                    "stock_change_pct": stock_change_pct,
+                    "nifty_change_pct": nifty_change_pct,
+                    "lot_size": lot,
+                    "future_symbol": row["future_symbol"],
+                    "existing": ex,
+                }
+            )
+        # OI-leg ranking within this batch.
+        ranked = [x for x in scan_inputs if isinstance(x.get("oi_change_pct"), (int, float))]
+        ranked.sort(key=lambda x: float(x["oi_change_pct"]), reverse=True)
+        rank_map = {id(x): idx for idx, x in enumerate(ranked)}
+        n_rank = len(ranked)
+
+        for x in scan_inputs:
+            vw = _vwap_proximity_score_0_50(
+                (
+                    ((x["ltp"] - x["session_vwap"]) / x["session_vwap"] * 100.0)
+                    if x.get("ltp") is not None and x.get("session_vwap") not in (None, 0)
+                    else None
+                )
+            )
+            if id(x) in rank_map and n_rank > 1:
+                oi_leg = (n_rank - 1 - rank_map[id(x)]) / (n_rank - 1) * 50.0
+            elif id(x) in rank_map and n_rank == 1:
+                oi_leg = 50.0
+            else:
+                oi_leg = 25.0
+            conviction = round(max(0.0, min(100.0, oi_leg + vw)), 1)
+            x["conviction_oi_leg"] = round(oi_leg, 1)
+            x["conviction_vwap_leg"] = round(vw, 1)
+            x["conviction_score"] = conviction
+
+        for x in scan_inputs:
+            u = x["underlying"]
+            ex = x["existing"]
             if ex:
                 sid = int(ex[0])
+                prior_scan_count = int(ex[1] or 0)
+                second_scan_time = ex[3]
+                second_scan_conv = ex[4]
+                second_scan_stock = ex[5]
+                second_scan_nifty = ex[6]
+                next_scan_count = prior_scan_count + 1
+                if prior_scan_count < 1:
+                    next_scan_count = 1
+                if next_scan_count >= 2 and second_scan_time is None:
+                    second_scan_time = ingest_now
+                    second_scan_conv = x["conviction_score"]
+                    second_scan_stock = x["stock_change_pct"]
+                    second_scan_nifty = x["nifty_change_pct"]
                 conn.execute(
                     text(
                         """
@@ -515,16 +721,52 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
                           lot_size = COALESCE(:lot, lot_size),
                           future_symbol = :fs,
                           instrument_key = :ik,
+                          conviction_score = :cs,
+                          conviction_oi_leg = :oi_leg,
+                          conviction_vwap_leg = :vw_leg,
+                          ltp = :ltp,
+                          session_vwap = :svwap,
+                          total_oi = :toi,
+                          oi_change_pct = :oi_chg,
+                          nifty_ltp = :nltp,
+                          nifty_session_vwap = :nsvwap,
+                          stock_prev_close = :spc,
+                          nifty_prev_close = :npc,
+                          stock_change_pct = :scp,
+                          nifty_change_pct = :ncp,
+                          snapshotted_at = :snap,
+                          second_scan_time = :sst,
+                          second_scan_conviction_score = :ssc,
+                          second_scan_stock_change_pct = :ss_stock,
+                          second_scan_nifty_change_pct = :ss_nifty,
                           updated_at = CURRENT_TIMESTAMP
                         WHERE id = :id
                         """
                     ),
                     {
                         "id": sid,
-                        "lh": now_ist,
-                        "lot": lot,
-                        "fs": row["future_symbol"],
-                        "ik": ik,
+                        "lh": ingest_now,
+                        "lot": x["lot_size"],
+                        "fs": x["future_symbol"],
+                        "ik": x["instrument_key"],
+                        "cs": x["conviction_score"],
+                        "oi_leg": x["conviction_oi_leg"],
+                        "vw_leg": x["conviction_vwap_leg"],
+                        "ltp": x["ltp"],
+                        "svwap": x["session_vwap"],
+                        "toi": x["total_oi"],
+                        "oi_chg": x["oi_change_pct"],
+                        "nltp": x["nifty_ltp"],
+                        "nsvwap": x["nifty_session_vwap"],
+                        "spc": x["stock_prev_close"],
+                        "npc": x["nifty_prev_close"],
+                        "scp": x["stock_change_pct"],
+                        "ncp": x["nifty_change_pct"],
+                        "snap": ingest_now,
+                        "sst": second_scan_time,
+                        "ssc": second_scan_conv,
+                        "ss_stock": second_scan_stock,
+                        "ss_nifty": second_scan_nifty,
                     },
                 )
                 touched_ids.append(sid)
@@ -534,9 +776,14 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
                         """
                         INSERT INTO daily_futures_screening (
                           trade_date, underlying, future_symbol, instrument_key, lot_size,
-                          scan_count, first_hit_at, last_hit_at
+                          scan_count, first_hit_at, last_hit_at, conviction_score,
+                          conviction_oi_leg, conviction_vwap_leg, ltp, session_vwap, total_oi, oi_change_pct,
+                          nifty_ltp, nifty_session_vwap, stock_prev_close, nifty_prev_close,
+                          stock_change_pct, nifty_change_pct, snapshotted_at
                         ) VALUES (
-                          CAST(:d AS DATE), :u, :fs, :ik, :lot, 1, :fh, :lh
+                          CAST(:d AS DATE), :u, :fs, :ik, :lot, 1, :fh, :lh, :cs,
+                          :oi_leg, :vw_leg, :ltp, :svwap, :toi, :oi_chg,
+                          :nltp, :nsvwap, :spc, :npc, :scp, :ncp, :snap
                         )
                         RETURNING id
                         """
@@ -544,11 +791,25 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
                     {
                         "d": str(trade_date),
                         "u": u,
-                        "fs": row["future_symbol"],
-                        "ik": ik,
-                        "lot": lot,
-                        "fh": now_ist,
-                        "lh": now_ist,
+                        "fs": x["future_symbol"],
+                        "ik": x["instrument_key"],
+                        "lot": x["lot_size"],
+                        "fh": ingest_now,
+                        "lh": ingest_now,
+                        "cs": x["conviction_score"],
+                        "oi_leg": x["conviction_oi_leg"],
+                        "vw_leg": x["conviction_vwap_leg"],
+                        "ltp": x["ltp"],
+                        "svwap": x["session_vwap"],
+                        "toi": x["total_oi"],
+                        "oi_chg": x["oi_change_pct"],
+                        "nltp": x["nifty_ltp"],
+                        "nsvwap": x["nifty_session_vwap"],
+                        "spc": x["stock_prev_close"],
+                        "npc": x["nifty_prev_close"],
+                        "scp": x["stock_change_pct"],
+                        "ncp": x["nifty_change_pct"],
+                        "snap": ingest_now,
                     },
                 ).fetchone()
                 touched_ids.append(int(r[0]))
@@ -591,11 +852,6 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
                     {"id": mid},
                 )
 
-    try:
-        _recompute_conviction_all_today(upstox, trade_date)
-    except Exception as e:
-        logger.warning("daily_futures: conviction recompute failed: %s", e, exc_info=True)
-
     summary["touched_screening_ids"] = touched_ids
     return summary
 
@@ -605,7 +861,9 @@ def _fetch_screening_dicts(conn: Any, trade_date: date) -> List[Dict[str, Any]]:
         text(
             """
             SELECT id, underlying, future_symbol, instrument_key, lot_size,
-                   scan_count, first_hit_at, last_hit_at, conviction_score, ltp
+                   scan_count, first_hit_at, last_hit_at, conviction_score, ltp,
+                   second_scan_time, second_scan_conviction_score, second_scan_stock_change_pct, second_scan_nifty_change_pct,
+                   stock_change_pct, nifty_change_pct
             FROM daily_futures_screening
             WHERE trade_date = CAST(:d AS DATE)
             ORDER BY conviction_score DESC NULLS LAST, underlying
@@ -625,8 +883,14 @@ def _fetch_screening_dicts(conn: Any, trade_date: date) -> List[Dict[str, Any]]:
                 "scan_count": int(row[5] or 0),
                 "first_hit_at": row[6].isoformat() if row[6] else None,
                 "last_hit_at": row[7].isoformat() if row[7] else None,
-                "conviction_score": float(row[8]) if row[8] is not None else 50.0,
+                "conviction_score": float(row[8]) if row[8] is not None else None,
                 "ltp": float(row[9]) if row[9] is not None else None,
+                "second_scan_time": row[10].isoformat() if row[10] else None,
+                "second_scan_conviction_score": float(row[11]) if row[11] is not None else None,
+                "second_scan_stock_change_pct": float(row[12]) if row[12] is not None else None,
+                "second_scan_nifty_change_pct": float(row[13]) if row[13] is not None else None,
+                "stock_change_pct": float(row[14]) if row[14] is not None else None,
+                "nifty_change_pct": float(row[15]) if row[15] is not None else None,
             }
         )
     return out
@@ -774,7 +1038,7 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
                 "scan_count": int(row[9] or 0),
                 "first_hit_at": row[10].isoformat() if row[10] else None,
                 "last_hit_at": row[11].isoformat() if row[11] else None,
-                "conviction_score": float(row[12]) if row[12] is not None else 50.0,
+                "conviction_score": float(row[12]) if row[12] is not None else None,
                 "ltp": float(row[13]) if row[13] is not None else None,
                 "warn_two_misses": miss >= 2,
             }
@@ -836,10 +1100,29 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
     denom = wins + losses
     win_rate = round(100.0 * wins / denom, 1) if denom else None
 
-    try:
-        _apply_live_ltps_to_picks_and_running(picks, running, closed)
-    except Exception as e:
-        logger.warning("daily_futures: live LTP refresh failed: %s", e, exc_info=True)
+    now_ist = datetime.now(IST)
+    for p in picks:
+        reasons: List[str] = []
+        if int(p.get("scan_count") or 0) < 2:
+            reasons.append("Needs at least 2 consecutive scans")
+        sst = _parse_iso_ist(p.get("second_scan_time"))
+        if not sst:
+            reasons.append("Second scan snapshot unavailable")
+        elif now_ist < sst:
+            reasons.append(f"Entry window opens at {sst.strftime('%H:%M')}")
+        c2 = p.get("second_scan_conviction_score")
+        if c2 is None:
+            reasons.append("Conviction unavailable due to snapshot failure")
+        elif float(c2) < 60.0:
+            reasons.append(f"Conviction {round(float(c2),1)} - below threshold")
+        sc = p.get("second_scan_stock_change_pct")
+        nc = p.get("second_scan_nifty_change_pct")
+        if sc is None or nc is None:
+            reasons.append("Relative strength unavailable")
+        elif float(sc) < float(nc):
+            reasons.append(f"Relative weakness: stock {round(float(sc),2)}% vs Nifty {round(float(nc),2)}%")
+        p["order_eligible"] = len(reasons) == 0
+        p["order_block_reason"] = reasons[0] if reasons else None
 
     return {
         "trade_date": str(td),
@@ -865,7 +1148,9 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
     row = db.execute(
         text(
             """
-            SELECT id, underlying, future_symbol, instrument_key, lot_size
+            SELECT id, underlying, future_symbol, instrument_key, lot_size,
+                   scan_count, second_scan_time, second_scan_conviction_score,
+                   second_scan_stock_change_pct, second_scan_nifty_change_pct
             FROM daily_futures_screening WHERE id = :sid AND trade_date = CAST(:d AS DATE)
             """
         ),
@@ -873,6 +1158,22 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
     ).fetchone()
     if not row:
         raise ValueError("Screening row not found for today")
+    now_ist = datetime.now(IST)
+    if int(row[5] or 0) < 2:
+        raise ValueError("Needs at least 2 consecutive scans before order")
+    sst = row[6]
+    if not sst or now_ist < sst.astimezone(IST):
+        gate_t = sst.astimezone(IST).strftime("%H:%M") if sst else "next scan"
+        raise ValueError(f"Entry window opens at {gate_t}")
+    c2 = float(row[7]) if row[7] is not None else None
+    if c2 is None or c2 < 60.0:
+        raise ValueError(f"Conviction {round(c2 or 0.0,1)} - below threshold")
+    sc = float(row[8]) if row[8] is not None else None
+    nc = float(row[9]) if row[9] is not None else None
+    if sc is None or nc is None or sc < nc:
+        raise ValueError(
+            f"Relative weakness: stock {round(sc or 0.0,2)}% vs Nifty {round(nc or 0.0,2)}%"
+        )
 
     exists = db.execute(
         text(

@@ -141,6 +141,9 @@
       '<thead><tr><th>Future</th><th>Qty (1 lot)</th><th>Scan #</th><th>1st scan</th><th>Last scan</th><th>Conviction</th><th class="num">LTP</th><th></th></tr></thead>';
     const body = picks
       .map(function (r) {
+        const eligible = !!r.order_eligible;
+        const reason = r.order_block_reason || 'Not eligible yet';
+        const convTxt = (r.conviction_score == null ? '—' : fmtNum(r.conviction_score, 1));
         return (
           '<tr><td><strong>' +
           esc(r.future_symbol || r.underlying) +
@@ -155,18 +158,19 @@
           '</td><td>' +
           fmtIso(r.last_hit_at) +
           '</td><td class="num">' +
-          fmtNum(r.conviction_score, 1) +
+          convTxt +
           '</td><td class="num">' +
           fmtNum(r.ltp, 2) +
           '</td><td><button type="button" class="df-btn df-btn-order" data-sid="' +
           r.screening_id +
-          '">Order</button></td></tr>'
+          '"' + (eligible ? '' : ' disabled title="' + esc(reason) + '"') + '>Order</button></td></tr>'
         );
       })
       .join('');
     el.innerHTML = '<table class="df-table">' + th + '<tbody>' + body + '</tbody></table>';
     el.querySelectorAll('button[data-sid]').forEach(function (btn) {
       btn.addEventListener('click', function () {
+        if (btn.disabled) return;
         const sid = parseInt(btn.getAttribute('data-sid'), 10);
         const row = picks.find(function (p) { return p.screening_id === sid; });
         openBuyModal(sid, row);
