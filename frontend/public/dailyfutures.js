@@ -561,10 +561,19 @@
       const data = await fetchWorkspace();
       state.workspace = data;
       if (b) {
-        b.textContent =
-          'Session date (IST): ' +
-          (data.trade_date || '—') +
-          ' · Auto-refresh ~12s';
+        if (data.session_before_open) {
+          b.textContent =
+            (data.session_message ||
+              'Daily Futures shows the current IST session from 09:00 onward.') +
+            ' Session date: ' +
+            (data.trade_date || '—') +
+            ' · Auto-refresh ~12s';
+        } else {
+          b.textContent =
+            'Session date (IST): ' +
+            (data.trade_date || '—') +
+            ' · Data for this IST session only · Auto-refresh ~12s';
+        }
       }
       renderPicks(data.picks || []);
       renderRunning(data.running || []);

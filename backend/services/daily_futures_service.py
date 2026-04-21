@@ -7,7 +7,7 @@ import logging
 import os
 import re
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time as dt_time, timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import quote
 
@@ -101,6 +101,41 @@ def ensure_daily_futures_tables() -> None:
 
 def ist_today() -> date:
     return datetime.now(IST).date()
+
+
+def is_daily_futures_session_open_ist(now: Optional[datetime] = None) -> bool:
+    """
+    Workspace shows only the current IST calendar session from 09:00 onward.
+    Before 09:00 IST all sections are empty (clean slate until the day session starts).
+    """
+    dt = now or datetime.now(IST)
+    if dt.tzinfo is None:
+        dt = IST.localize(dt)
+    else:
+        dt = dt.astimezone(IST)
+    return dt.time() >= dt_time(9, 0)
+
+
+def _empty_daily_futures_workspace(trade_date: date, *, session_before_open: bool) -> Dict[str, Any]:
+    msg = (
+        "Daily Futures shows only the current IST session from 09:00 onward. "
+        "Sections stay empty before 09:00 IST."
+    )
+    return {
+        "trade_date": str(trade_date),
+        "session_before_open": session_before_open,
+        "session_message": msg if session_before_open else None,
+        "picks": [],
+        "running": [],
+        "closed": [],
+        "trade_if_could_have_done": [],
+        "summary": {
+            "cumulative_pnl_rupees": 0.0,
+            "wins": 0,
+            "losses": 0,
+            "win_rate_pct": None,
+        },
+    }
 
 
 def _parse_iso_ist(ts: Optional[str]) -> Optional[datetime]:
@@ -623,13 +658,24 @@ def _apply_live_ltps_to_picks_and_running(
 def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
     ensure_daily_futures_tables()
     td = ist_today()
+    if not is_daily_futures_session_open_ist():
+        return _empty_daily_futures_workspace(td, session_before_open=True)
 
     with engine.connect() as conn:
         screenings = _fetch_screening_dicts(conn, td)
 
     br = db.execute(
-        text("SELECT screening_id FROM daily_futures_user_trade WHERE user_id = :u AND order_status = 'bought'"),
-        {"u": user_id},
+        text(
+            """
+            SELECT t.screening_id
+            FROM daily_futures_user_trade t
+            JOIN daily_futures_screening s ON s.id = t.screening_id
+            WHERE t.user_id = :u
+              AND t.order_status = 'bought'
+              AND s.trade_date = CAST(:td AS DATE)
+            """
+        ),
+        {"u": user_id, "td": str(td)},
     ).fetchall()
     bought_sids = {int(r[0]) for r in br}
 
@@ -643,11 +689,13 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
                    s.scan_count, s.first_hit_at, s.last_hit_at, s.conviction_score, s.ltp
             FROM daily_futures_user_trade t
             JOIN daily_futures_screening s ON s.id = t.screening_id
-            WHERE t.user_id = :u AND t.order_status = 'bought'
+            WHERE t.user_id = :u
+              AND t.order_status = 'bought'
+              AND s.trade_date = CAST(:td AS DATE)
             ORDER BY t.updated_at DESC
             """
         ),
-        {"u": user_id},
+        {"u": user_id, "td": str(td)},
     ).fetchall()
 
     running = []
@@ -676,15 +724,18 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
     closed_rows = db.execute(
         text(
             """
-            SELECT id, screening_id, underlying, future_symbol, instrument_key, lot_size,
-                   entry_time, entry_price, exit_time, exit_price, pnl_points, pnl_rupees
-            FROM daily_futures_user_trade
-            WHERE user_id = :u AND order_status = 'sold'
-            ORDER BY updated_at DESC
+            SELECT t.id, t.screening_id, t.underlying, t.future_symbol, t.instrument_key, t.lot_size,
+                   t.entry_time, t.entry_price, t.exit_time, t.exit_price, t.pnl_points, t.pnl_rupees
+            FROM daily_futures_user_trade t
+            JOIN daily_futures_screening s ON s.id = t.screening_id
+            WHERE t.user_id = :u
+              AND t.order_status = 'sold'
+              AND s.trade_date = CAST(:td AS DATE)
+            ORDER BY t.updated_at DESC
             LIMIT 200
             """
         ),
-        {"u": user_id},
+        {"u": user_id, "td": str(td)},
     ).fetchall()
 
     closed = []
@@ -733,6 +784,8 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
 
     return {
         "trade_date": str(td),
+        "session_before_open": False,
+        "session_message": None,
         "picks": picks,
         "running": running,
         "closed": closed,
@@ -748,6 +801,8 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
 
 def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, entry_price: float) -> Dict[str, Any]:
     ensure_daily_futures_tables()
+    if not is_daily_futures_session_open_ist():
+        raise ValueError("Daily Futures session opens at 09:00 IST. Orders are not accepted before that.")
     row = db.execute(
         text(
             """
