@@ -245,18 +245,28 @@ def _build_trade_if_could_rows(
 
     upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
     out: List[Dict[str, Any]] = []
-    noon_1245 = IST.localize(datetime.combine(trade_date, datetime.min.time()).replace(hour=12, minute=45))
     close_1515 = IST.localize(datetime.combine(trade_date, datetime.min.time()).replace(hour=15, minute=15))
-    cutoff_1230 = IST.localize(datetime.combine(trade_date, datetime.min.time()).replace(hour=12, minute=30))
 
     for p in candidates:
         first_hit = _parse_iso_ist(p.get("first_hit_at"))
         if not first_hit:
             continue
+        last_hit = _parse_iso_ist(p.get("last_hit_at")) or first_hit
         entry_dt = first_hit + timedelta(minutes=5)
         ikey = (p.get("instrument_key") or "").strip()
         candles = _fetch_intraday_1m_cached(upstox, ikey, trade_date)
         entry_ltp = _ltp_asof_ist(candles, entry_dt)
+        scan_ltp = None
+        try:
+            pv = p.get("ltp")
+            if pv is not None:
+                x = float(pv)
+                if x > 0:
+                    scan_ltp = round(x, 4)
+        except Exception:
+            scan_ltp = None
+        if scan_ltp is None:
+            scan_ltp = _ltp_asof_ist(candles, last_hit)
         qty = p.get("lot_size")
         try:
             qty_num = float(qty) if qty is not None else None
@@ -272,20 +282,16 @@ def _build_trade_if_could_rows(
             "first_scan_time": _fmt_hm(first_hit),
             "entry_time": _fmt_hm(entry_dt),
             "entry_ltp": entry_ltp,
-            "exit_1245_time": "12:45",
-            "exit_1245_ltp": None,
-            "pnl_1245_rupees": None,
+            "exit_scan_time": _fmt_hm(last_hit),
+            "exit_scan_ltp": scan_ltp,
+            "pnl_scan_rupees": None,
             "exit_1515_time": "15:15",
             "exit_1515_ltp": None,
             "pnl_1515_rupees": None,
-            "after_1230_only_1515": first_hit > cutoff_1230,
         }
 
-        if not row["after_1230_only_1515"]:
-            ltp_1245 = _ltp_asof_ist(candles, noon_1245)
-            row["exit_1245_ltp"] = ltp_1245
-            if entry_ltp is not None and ltp_1245 is not None and qty_num is not None:
-                row["pnl_1245_rupees"] = round((ltp_1245 - entry_ltp) * qty_num, 2)
+        if entry_ltp is not None and scan_ltp is not None and qty_num is not None:
+            row["pnl_scan_rupees"] = round((scan_ltp - entry_ltp) * qty_num, 2)
 
         ltp_1515 = _ltp_asof_ist(candles, close_1515)
         row["exit_1515_ltp"] = ltp_1515

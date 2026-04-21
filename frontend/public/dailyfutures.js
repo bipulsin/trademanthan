@@ -384,14 +384,13 @@
       return;
     }
     const th =
-      '<thead><tr><th>Future</th><th class="num">Qty</th><th>1st scan</th><th>Entry time (+5m)</th><th class="num">Entry LTP</th><th>Exit 12:45</th><th class="num">LTP 12:45</th><th class="num">PnL 12:45</th><th>Exit 15:15</th><th class="num">LTP 15:15</th><th class="num">PnL 15:15</th></tr></thead>';
+      '<thead><tr><th>Future</th><th class="num">Qty</th><th>1st scan</th><th>Entry time (+5m)</th><th class="num">Entry LTP</th><th>Exit (scan time)</th><th class="num">LTP (scan time)</th><th class="num">PnL (scan time)</th><th>Exit 15:15</th><th class="num">LTP 15:15</th><th class="num">PnL 15:15</th></tr></thead>';
     const body = rows
       .map(function (r) {
-        const p1245 = Number(r.pnl_1245_rupees);
+        const pScan = Number(r.pnl_scan_rupees);
         const p1515 = Number(r.pnl_1515_rupees);
-        const c1245 = Number.isFinite(p1245) ? (p1245 > 0 ? 'df-pnl-pos' : p1245 < 0 ? 'df-pnl-neg' : '') : '';
+        const cScan = Number.isFinite(pScan) ? (pScan > 0 ? 'df-pnl-pos' : pScan < 0 ? 'df-pnl-neg' : '') : '';
         const c1515 = Number.isFinite(p1515) ? (p1515 > 0 ? 'df-pnl-pos' : p1515 < 0 ? 'df-pnl-neg' : '') : '';
-        const skip1245 = !!r.after_1230_only_1515;
         return (
           '<tr><td><strong>' +
           esc(r.future_symbol || r.underlying) +
@@ -404,13 +403,13 @@
           '</td><td class="num">' +
           fmtNum(r.entry_ltp, 2) +
           '</td><td>' +
-          (skip1245 ? '—' : esc(r.exit_1245_time)) +
+          esc(r.exit_scan_time) +
           '</td><td class="num">' +
-          (skip1245 ? '—' : fmtNum(r.exit_1245_ltp, 2)) +
+          fmtNum(r.exit_scan_ltp, 2) +
           '</td><td class="num ' +
-          c1245 +
+          cScan +
           '">' +
-          (skip1245 ? '—' : fmtMoney(r.pnl_1245_rupees)) +
+          fmtMoney(r.pnl_scan_rupees) +
           '</td><td>' +
           esc(r.exit_1515_time) +
           '</td><td class="num">' +
