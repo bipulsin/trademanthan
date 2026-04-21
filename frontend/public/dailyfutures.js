@@ -384,7 +384,7 @@
       return;
     }
     const th =
-      '<thead><tr><th>Future</th><th class="num">Qty</th><th>1st scan</th><th>Entry time (+5m)</th><th class="num">Entry LTP</th><th>Exit (scan time)</th><th class="num">LTP (scan time)</th><th class="num">PnL (scan time)</th><th>Exit 15:15</th><th class="num">LTP 15:15</th><th class="num">PnL 15:15</th></tr></thead>';
+      '<thead><tr><th>Future</th><th class="num">Qty</th><th>1st scan</th><th>Entry time (+5m)</th><th class="num">Entry LTP</th><th>Exit (time of scan)</th><th class="num">LTP (time of scan)</th><th class="num">PnL (time of scan)</th><th>Exit 15:15</th><th class="num">LTP 15:15</th><th class="num">PnL 15:15</th></tr></thead>';
     const body = rows
       .map(function (r) {
         const pScan = Number(r.pnl_scan_rupees);
@@ -566,12 +566,12 @@
               'Daily Futures shows the current IST session from 09:00 onward.') +
             ' Session date: ' +
             (data.trade_date || '—') +
-            ' · Auto-refresh ~12s';
+            ' · Auto-refresh every 15 min';
         } else {
           b.textContent =
             'Session date (IST): ' +
             (data.trade_date || '—') +
-            ' · Data for this IST session only · Auto-refresh ~12s';
+            ' · Data for this IST session only · Auto-refresh every 15 min';
         }
       }
       renderPicks(data.picks || []);
@@ -596,6 +596,6 @@
   document.addEventListener('DOMContentLoaded', function () {
     bindModals();
     refresh();
-    setInterval(refresh, 12000);
+    setInterval(refresh, 15 * 60 * 1000);
   });
 })();
