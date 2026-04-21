@@ -160,6 +160,16 @@ def _fmt_hm(dt: Optional[datetime]) -> str:
     return dt.strftime("%H:%M") if dt else "—"
 
 
+def _floor_to_15m_ist(dt: datetime) -> datetime:
+    """Normalize to scan slot boundary: 11:00, 11:15, 11:30, 11:45, ..."""
+    if dt.tzinfo is None:
+        dt = IST.localize(dt)
+    else:
+        dt = dt.astimezone(IST)
+    mm = (dt.minute // 15) * 15
+    return dt.replace(minute=mm, second=0, microsecond=0)
+
+
 def _fetch_intraday_1m_cached(upstox: UpstoxService, instrument_key: str, trade_date: date) -> List[Dict[str, Any]]:
     if not instrument_key:
         return []
@@ -252,21 +262,21 @@ def _build_trade_if_could_rows(
         if not first_hit:
             continue
         last_hit = _parse_iso_ist(p.get("last_hit_at")) or first_hit
+        last_hit_slot = _floor_to_15m_ist(last_hit)
         entry_dt = first_hit + timedelta(minutes=5)
         ikey = (p.get("instrument_key") or "").strip()
         candles = _fetch_intraday_1m_cached(upstox, ikey, trade_date)
         entry_ltp = _ltp_asof_ist(candles, entry_dt)
-        scan_ltp = None
-        try:
-            pv = p.get("ltp")
-            if pv is not None:
-                x = float(pv)
-                if x > 0:
-                    scan_ltp = round(x, 4)
-        except Exception:
-            scan_ltp = None
+        scan_ltp = _ltp_asof_ist(candles, last_hit_slot)
         if scan_ltp is None:
-            scan_ltp = _ltp_asof_ist(candles, last_hit)
+            try:
+                pv = p.get("ltp")
+                if pv is not None:
+                    x = float(pv)
+                    if x > 0:
+                        scan_ltp = round(x, 4)
+            except Exception:
+                scan_ltp = None
         qty = p.get("lot_size")
         try:
             qty_num = float(qty) if qty is not None else None
@@ -282,7 +292,7 @@ def _build_trade_if_could_rows(
             "first_scan_time": _fmt_hm(first_hit),
             "entry_time": _fmt_hm(entry_dt),
             "entry_ltp": entry_ltp,
-            "exit_scan_time": _fmt_hm(last_hit),
+            "exit_scan_time": _fmt_hm(last_hit_slot),
             "exit_scan_ltp": scan_ltp,
             "pnl_scan_rupees": None,
             "exit_1515_time": "15:15",
