@@ -256,6 +256,7 @@ def _build_trade_if_could_rows(
     upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
     out: List[Dict[str, Any]] = []
     close_1515 = IST.localize(datetime.combine(trade_date, datetime.min.time()).replace(hour=15, minute=15))
+    now_ist = datetime.now(IST)
 
     for p in candidates:
         first_hit = _parse_iso_ist(p.get("first_hit_at"))
@@ -317,6 +318,9 @@ def _build_trade_if_could_rows(
             row["pnl_scan_rupees"] = round((float(pnl_ref_ltp) - entry_ltp) * qty_num, 2)
 
         ltp_1515 = _ltp_asof_ist(candles, close_1515)
+        if ltp_1515 is None and now_ist >= close_1515:
+            # Some symbols may not return a clean 15:15 candle; avoid blank post-15:15.
+            ltp_1515 = row.get("current_ltp") if row.get("current_ltp") is not None else scan_ltp
         row["exit_1515_ltp"] = ltp_1515
         if entry_ltp is not None and ltp_1515 is not None and qty_num is not None:
             row["pnl_1515_rupees"] = round((ltp_1515 - entry_ltp) * qty_num, 2)
