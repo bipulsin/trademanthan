@@ -310,8 +310,11 @@ def _build_trade_if_could_rows(
         except Exception:
             row["current_ltp"] = None
 
-        if entry_ltp is not None and scan_ltp is not None and qty_num is not None:
-            row["pnl_scan_rupees"] = round((scan_ltp - entry_ltp) * qty_num, 2)
+        pnl_ref_ltp = row.get("current_ltp")
+        if pnl_ref_ltp is None:
+            pnl_ref_ltp = scan_ltp
+        if entry_ltp is not None and pnl_ref_ltp is not None and qty_num is not None:
+            row["pnl_scan_rupees"] = round((float(pnl_ref_ltp) - entry_ltp) * qty_num, 2)
 
         ltp_1515 = _ltp_asof_ist(candles, close_1515)
         row["exit_1515_ltp"] = ltp_1515
