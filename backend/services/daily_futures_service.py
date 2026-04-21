@@ -294,11 +294,21 @@ def _build_trade_if_could_rows(
             "entry_ltp": entry_ltp,
             "exit_scan_time": _fmt_hm(last_hit_slot),
             "exit_scan_ltp": scan_ltp,
+            "current_ltp": None,
             "pnl_scan_rupees": None,
             "exit_1515_time": "15:15",
             "exit_1515_ltp": None,
             "pnl_1515_rupees": None,
         }
+
+        try:
+            pv = p.get("ltp")
+            if pv is not None:
+                cur = float(pv)
+                if cur > 0:
+                    row["current_ltp"] = round(cur, 4)
+        except Exception:
+            row["current_ltp"] = None
 
         if entry_ltp is not None and scan_ltp is not None and qty_num is not None:
             row["pnl_scan_rupees"] = round((scan_ltp - entry_ltp) * qty_num, 2)
