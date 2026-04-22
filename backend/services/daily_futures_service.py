@@ -1123,14 +1123,22 @@ def _apply_live_rel_strength_to_picks_and_running(
             continue
         stock_prev = _safe_float((prev_cache.get("stock") or {}).get(u))
         stock_ltp = _safe_float(r.get("ltp"))
+        if stock_ltp is None:
+            ik = str(r.get("instrument_key") or "").strip()
+            stock_ltp = _ltp_for_instrument(ik)
         stock_change_pct: Optional[float] = None
         if stock_ltp is not None and stock_prev and stock_prev > 0:
             stock_change_pct = round(((stock_ltp - stock_prev) / stock_prev) * 100.0, 6)
-        r["stock_change_pct"] = stock_change_pct
-        r["nifty_change_pct"] = nifty_change_pct
+        # Never blank out existing values in-memory when live recompute is unavailable.
+        if stock_change_pct is not None:
+            r["stock_change_pct"] = stock_change_pct
+        if nifty_change_pct is not None:
+            r["nifty_change_pct"] = nifty_change_pct
+        sc_use = _safe_float(r.get("stock_change_pct"))
+        nc_use = _safe_float(r.get("nifty_change_pct"))
         r["relative_strength_vs_nifty"] = (
-            round(float(stock_change_pct) - float(nifty_change_pct), 6)
-            if stock_change_pct is not None and nifty_change_pct is not None
+            round(float(sc_use) - float(nc_use), 6)
+            if sc_use is not None and nc_use is not None
             else None
         )
         sid = r.get("screening_id")
