@@ -1016,6 +1016,110 @@ def _apply_live_ltps_to_picks_and_running(
         logger.warning("daily_futures: persist LTP to screening failed: %s", e)
 
 
+def _apply_live_rel_strength_to_picks_and_running(
+    picks: List[Dict[str, Any]],
+    running: List[Dict[str, Any]],
+    trade_date: date,
+) -> None:
+    """
+    Refresh stock_change_pct and nifty_change_pct for the Rel. str. column (FUT % vs Nifty 50 %).
+    The webhook path already writes these; workspace polls must recompute or the UI stays em dash.
+    """
+    combined = list(picks) + list(running)
+    if not combined:
+        return
+    symbol_to_key: Dict[str, str] = {}
+    for r in combined:
+        u = str(r.get("underlying") or "").strip().upper()
+        ik = str(r.get("instrument_key") or "").strip()
+        if u and ik and u not in symbol_to_key:
+            symbol_to_key[u] = ik
+    if not symbol_to_key:
+        return
+    try:
+        upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+    except Exception as e:
+        logger.warning("daily_futures: rel-strength Upstox init failed: %s", e)
+        return
+    try:
+        prev_cache = _get_or_init_prev_close_cache(trade_date, upstox, symbol_to_key)
+    except Exception as e:
+        logger.warning("daily_futures: rel-strength prev-close cache failed: %s", e)
+        return
+
+    all_keys: List[str] = list(dict.fromkeys(list(symbol_to_key.values()) + [NIFTY50_INDEX_KEY]))
+    ltp_by_key: Dict[str, float] = {}
+    try:
+        ltp_by_key = upstox.get_market_quotes_batch_by_keys(all_keys) or {}
+    except Exception as e:
+        logger.warning("daily_futures: rel-strength batch LTP failed: %s", e)
+
+    def _ltp_for_instrument(ik: str) -> Optional[float]:
+        if not ik or not ltp_by_key:
+            return None
+        if ik in ltp_by_key:
+            v = ltp_by_key[ik]
+            if v and float(v) > 0:
+                return float(v)
+        nk = ik.replace(":", "|").replace(" ", "").upper()
+        for bk, lp in ltp_by_key.items():
+            if not bk or not lp:
+                continue
+            if bk.replace(":", "|").replace(" ", "").upper() == nk and float(lp) > 0:
+                return float(lp)
+        return None
+
+    nifty_ltp = _ltp_for_instrument(NIFTY50_INDEX_KEY)
+    if nifty_ltp is None:
+        try:
+            q = upstox.get_market_quote_by_key(NIFTY50_INDEX_KEY) or {}
+            lp = _safe_float(q.get("last_price"))
+            if lp and lp > 0:
+                nifty_ltp = lp
+        except Exception as e:
+            logger.debug("daily_futures: rel-strength Nifty single quote failed: %s", e)
+
+    nifty_prev = _safe_float(prev_cache.get("nifty"))
+    nifty_change_pct: Optional[float] = None
+    if nifty_ltp is not None and nifty_prev and nifty_prev > 0:
+        nifty_change_pct = round(((nifty_ltp - nifty_prev) / nifty_prev) * 100.0, 6)
+
+    by_screening: Dict[int, Tuple[Optional[float], Optional[float]]] = {}
+    for r in combined:
+        u = str(r.get("underlying") or "").strip().upper()
+        if not u:
+            continue
+        stock_prev = _safe_float((prev_cache.get("stock") or {}).get(u))
+        stock_ltp = _safe_float(r.get("ltp"))
+        stock_change_pct: Optional[float] = None
+        if stock_ltp is not None and stock_prev and stock_prev > 0:
+            stock_change_pct = round(((stock_ltp - stock_prev) / stock_prev) * 100.0, 6)
+        r["stock_change_pct"] = stock_change_pct
+        r["nifty_change_pct"] = nifty_change_pct
+        sid = r.get("screening_id")
+        if sid is not None and (stock_change_pct is not None or nifty_change_pct is not None):
+            by_screening[int(sid)] = (stock_change_pct, nifty_change_pct)
+    if not by_screening:
+        return
+    try:
+        with engine.begin() as conn:
+            for sid, (scp, ncp) in by_screening.items():
+                conn.execute(
+                    text(
+                        """
+                        UPDATE daily_futures_screening SET
+                          stock_change_pct = COALESCE(CAST(:scp AS NUMERIC), stock_change_pct),
+                          nifty_change_pct = COALESCE(CAST(:ncp AS NUMERIC), nifty_change_pct),
+                          updated_at = CURRENT_TIMESTAMP
+                        WHERE id = :id
+                        """
+                    ),
+                    {"id": sid, "scp": scp, "ncp": ncp},
+                )
+    except Exception as e:
+        logger.warning("daily_futures: persist rel-strength to screening failed: %s", e)
+
+
 def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
     ensure_daily_futures_tables()
     td = ist_today()
@@ -1145,6 +1249,11 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
         _apply_live_ltps_to_picks_and_running(picks, running, closed)
     except Exception as e:
         logger.warning("daily_futures: live LTP refresh failed: %s", e, exc_info=True)
+
+    try:
+        _apply_live_rel_strength_to_picks_and_running(picks, running, td)
+    except Exception as e:
+        logger.warning("daily_futures: rel-strength refresh failed: %s", e, exc_info=True)
 
     for p in picks:
         reasons: List[str] = []
