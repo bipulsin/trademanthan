@@ -206,19 +206,40 @@ def _get_or_init_prev_close_cache(
 ) -> Dict[str, Any]:
     td = str(trade_date)
     global _DF_PREV_CLOSE_CACHE
-    if _DF_PREV_CLOSE_CACHE.get("trade_date") == td:
+    cache_same_day = _DF_PREV_CLOSE_CACHE.get("trade_date") == td
+    cached_stock = dict(_DF_PREV_CLOSE_CACHE.get("stock") or {}) if cache_same_day else {}
+    cached_nifty = _DF_PREV_CLOSE_CACHE.get("nifty") if cache_same_day else None
+
+    # Refresh only missing symbols for the current day cache.
+    missing_symbols: Dict[str, str] = {}
+    for sym, ik in symbol_to_key.items():
+        s = str(sym or "").strip().upper()
+        k = str(ik or "").strip()
+        if not s or not k:
+            continue
+        if s not in cached_stock:
+            missing_symbols[s] = k
+
+    need_nifty = (cached_nifty is None)
+    if cache_same_day and not missing_symbols and not need_nifty:
         return _DF_PREV_CLOSE_CACHE
-    keys = [k for k in symbol_to_key.values() if k]
-    req = list(dict.fromkeys(keys + [NIFTY50_INDEX_KEY]))
+
+    keys = [k for k in missing_symbols.values() if k]
+    req = list(dict.fromkeys(keys + ([NIFTY50_INDEX_KEY] if need_nifty else [])))
+    if not req:
+        _DF_PREV_CLOSE_CACHE = {"trade_date": td, "stock": cached_stock, "nifty": cached_nifty}
+        return _DF_PREV_CLOSE_CACHE
     snap = {}
     try:
         snap = upstox.get_market_quote_snapshots_batch(req)
     except Exception as e:
         logger.warning("daily_futures: prev-close batch fetch failed: %s", e)
-    stock_pc: Dict[str, Optional[float]] = {}
-    for sym, ik in symbol_to_key.items():
+    stock_pc: Dict[str, Optional[float]] = dict(cached_stock)
+    for sym, ik in missing_symbols.items():
         stock_pc[sym] = _prev_close_from_snapshot(snap.get(ik) or {})
-    nifty_pc = _prev_close_from_snapshot(snap.get(NIFTY50_INDEX_KEY) or {})
+    nifty_pc = (
+        _prev_close_from_snapshot(snap.get(NIFTY50_INDEX_KEY) or {}) if need_nifty else cached_nifty
+    )
     _DF_PREV_CLOSE_CACHE = {"trade_date": td, "stock": stock_pc, "nifty": nifty_pc}
     return _DF_PREV_CLOSE_CACHE
 
