@@ -101,7 +101,10 @@
     return '₹' + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
-  /** Stock (future) vs Nifty 50 % change from last scan — order gate uses S ≥ N. */
+  /**
+   * Relative strength: day % (future) vs Nifty 50, plus FUT−Nify spread.
+   * Backend sets stock_change_pct, nifty_change_pct, relative_strength_vs_nifty on each workspace load.
+   */
   function fmtRelStrength(r) {
     const s = r.stock_change_pct;
     const n = r.nifty_change_pct;
@@ -113,17 +116,29 @@
     if (!Number.isFinite(fs) || !Number.isFinite(fn)) {
       return '<span class="df-rs">—</span>';
     }
+    const spread = r.relative_strength_vs_nifty != null && r.relative_strength_vs_nifty !== ''
+      ? Number(r.relative_strength_vs_nifty)
+      : fs - fn;
+    if (!Number.isFinite(spread)) {
+      return '<span class="df-rs">—</span>';
+    }
     const strong = fs >= fn;
     const a = (fs >= 0 ? '+' : '') + fs.toFixed(2) + '%';
     const b = (fn >= 0 ? '+' : '') + fn.toFixed(2) + '%';
+    const sp = (spread >= 0 ? '+' : '') + spread.toFixed(2) + '%';
     return (
       '<span class="df-rs ' + (strong ? 'df-rs-strong' : 'df-rs-weak') + '" ' +
-      'title="Future % vs Nifty 50 % (day change, last scan). Green when future ≥ Nifty.">' +
-      'S ' +
+      'title="Relative strength: future day % minus Nifty 50 day % = ' +
+      esc(sp) +
+      '. S = stock future, N = Nifty. Green when FUT ≥ Nifty.">' +
+      '<span class="df-rs-spread" style="font-weight:600;">' +
+      esc(sp) +
+      '</span> ' +
+      '<span style="opacity:0.7;font-size:0.8em;">(S ' +
       esc(a) +
-      ' <span style="opacity:0.55">·</span> N ' +
+      ' · N ' +
       esc(b) +
-      '</span>'
+      ')</span></span>'
     );
   }
 
@@ -165,7 +180,7 @@
     }
     const th =
       '<thead><tr><th>Future</th><th>Qty (1 lot)</th><th>Scan #</th><th>1st scan</th><th>Last scan</th><th class="num">Conviction</th>' +
-      '<th class="df-th-rs" title="Future vs Nifty day % (last scan)">Rel. str.</th>' +
+      '<th class="df-th-rs" title="(FUT day % − Nifty day %); line shows spread + S and N %">Rel. str.</th>' +
       '<th class="num">LTP</th><th></th></tr></thead>';
     const body = picks
       .map(function (r) {
@@ -216,7 +231,7 @@
       return;
     }
     const th =
-      '<thead><tr><th>Future</th><th>Qty</th><th>Scan #</th><th>1st scan</th><th>Last scan</th><th>Conviction</th><th class="df-th-rs" title="Future % vs Nifty 50 % (day change)">Rel. str.</th><th class="num">LTP</th><th>Entry time</th><th class="num">Entry ₹</th><th class="num">Unrealized PnL</th><th></th></tr></thead>';
+      '<thead><tr><th>Future</th><th>Qty</th><th>Scan #</th><th>1st scan</th><th>Last scan</th><th>Conviction</th><th class="df-th-rs" title="(FUT day % − Nifty %); S and N in parentheses">Rel. str.</th><th class="num">LTP</th><th>Entry time</th><th class="num">Entry ₹</th><th class="num">Unrealized PnL</th><th></th></tr></thead>';
     const tot = sumRunningUnrealized(rows);
     const totalLine =
       '<p class="df-meta" style="margin:0 0 10px;font-size:0.9rem;">' +

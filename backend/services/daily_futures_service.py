@@ -1096,6 +1096,11 @@ def _apply_live_rel_strength_to_picks_and_running(
             stock_change_pct = round(((stock_ltp - stock_prev) / stock_prev) * 100.0, 6)
         r["stock_change_pct"] = stock_change_pct
         r["nifty_change_pct"] = nifty_change_pct
+        r["relative_strength_vs_nifty"] = (
+            round(float(stock_change_pct) - float(nifty_change_pct), 6)
+            if stock_change_pct is not None and nifty_change_pct is not None
+            else None
+        )
         sid = r.get("screening_id")
         if sid is not None and (stock_change_pct is not None or nifty_change_pct is not None):
             by_screening[int(sid)] = (stock_change_pct, nifty_change_pct)
