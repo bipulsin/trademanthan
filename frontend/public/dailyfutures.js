@@ -164,7 +164,9 @@
       return;
     }
     const th =
-      '<thead><tr><th>Future</th><th>Qty (1 lot)</th><th>Scan #</th><th>1st scan</th><th>Last scan</th><th>Conviction</th><th class="num">LTP</th><th></th></tr></thead>';
+      '<thead><tr><th>Future</th><th>Qty (1 lot)</th><th>Scan #</th><th>1st scan</th><th>Last scan</th><th class="num">Conviction</th>' +
+      '<th class="df-th-rs" title="Future vs Nifty day % (last scan)">Rel. str.</th>' +
+      '<th class="num">LTP</th><th></th></tr></thead>';
     const body = picks
       .map(function (r) {
         const eligible = !!r.order_eligible;

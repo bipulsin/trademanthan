@@ -1141,29 +1141,16 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
     denom = wins + losses
     win_rate = round(100.0 * wins / denom, 1) if denom else None
 
-    now_ist = datetime.now(IST)
     for p in picks:
         reasons: List[str] = []
+        # Simplified order gate: scan_count >= 2 and conviction > 60 (see confirm_buy).
         if int(p.get("scan_count") or 0) < 2:
-            reasons.append("Needs at least 2 consecutive scans")
-        sst = _parse_iso_ist(p.get("second_scan_time"))
-        if not sst:
-            reasons.append("Second scan snapshot unavailable")
-        elif now_ist < sst:
-            reasons.append(f"Entry window opens at {sst.strftime('%H:%M')}")
-        # Use latest stored conviction (same as the Conviction column), not 2nd-scan-only,
-        # so a score that rises above 60 on a later scan can qualify.
+            reasons.append("Needs at least 2 scans")
         c2 = p.get("conviction_score")
         if c2 is None:
-            reasons.append("Conviction unavailable due to snapshot failure")
-        elif float(c2) < 60.0:
-            reasons.append(f"Conviction {round(float(c2),1)} - below threshold")
-        sc = p.get("stock_change_pct")
-        nc = p.get("nifty_change_pct")
-        if sc is None or nc is None:
-            reasons.append("Relative strength unavailable")
-        elif float(sc) < float(nc):
-            reasons.append(f"Relative weakness: stock {round(float(sc),2)}% vs Nifty {round(float(nc),2)}%")
+            reasons.append("Conviction unavailable")
+        elif float(c2) <= 60.0:
+            reasons.append(f"Conviction {round(float(c2),1)} is not above 60")
         p["order_eligible"] = len(reasons) == 0
         p["order_block_reason"] = reasons[0] if reasons else None
 
@@ -1191,9 +1178,7 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
     row = db.execute(
         text(
             """
-            SELECT id, underlying, future_symbol, instrument_key, lot_size,
-                   scan_count, second_scan_time, conviction_score,
-                   stock_change_pct, nifty_change_pct
+            SELECT id, underlying, future_symbol, instrument_key, lot_size, scan_count, conviction_score
             FROM daily_futures_screening WHERE id = :sid AND trade_date = CAST(:d AS DATE)
             """
         ),
@@ -1201,21 +1186,12 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
     ).fetchone()
     if not row:
         raise ValueError("Screening row not found for today")
-    now_ist = datetime.now(IST)
     if int(row[5] or 0) < 2:
         raise ValueError("Needs at least 2 consecutive scans before order")
-    sst = row[6]
-    if not sst or now_ist < sst.astimezone(IST):
-        gate_t = sst.astimezone(IST).strftime("%H:%M") if sst else "next scan"
-        raise ValueError(f"Entry window opens at {gate_t}")
-    c2 = float(row[7]) if row[7] is not None else None
-    if c2 is None or c2 < 60.0:
-        raise ValueError(f"Conviction {round(c2 or 0.0,1)} - below threshold")
-    sc = float(row[8]) if row[8] is not None else None
-    nc = float(row[9]) if row[9] is not None else None
-    if sc is None or nc is None or sc < nc:
+    c2 = float(row[6]) if row[6] is not None else None
+    if c2 is None or c2 <= 60.0:
         raise ValueError(
-            f"Relative weakness: stock {round(sc or 0.0,2)}% vs Nifty {round(nc or 0.0,2)}%"
+            f"Conviction must be above 60 (current: {round(c2 or 0.0, 1)})"
         )
 
     exists = db.execute(
