@@ -152,8 +152,14 @@
     const paths = ['/api/daily-futures/workspace', '/daily-futures/workspace'];
     let lastErr = null;
     for (let i = 0; i < paths.length; i++) {
+      const ac = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const timer = ac ? window.setTimeout(function () { ac.abort(); }, 20000) : null;
       try {
-        const res = await fetch(API_BASE + paths[i], { headers: authHeaders(), cache: 'no-store' });
+        const res = await fetch(API_BASE + paths[i], {
+          headers: authHeaders(),
+          cache: 'no-store',
+          signal: ac ? ac.signal : undefined,
+        });
         if (res.status === 401) {
           window.location.replace('index.html');
           return null;
@@ -165,7 +171,13 @@
         }
         return await res.json();
       } catch (e) {
+        if (e && e.name === 'AbortError') {
+          lastErr = new Error('Workspace request timed out');
+          continue;
+        }
         lastErr = e;
+      } finally {
+        if (timer) window.clearTimeout(timer);
       }
     }
     throw lastErr || new Error('workspace');

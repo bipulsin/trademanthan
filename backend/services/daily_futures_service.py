@@ -964,7 +964,13 @@ def _apply_live_ltps_to_picks_and_running(
     def _norm(k: str) -> str:
         return k.replace(":", "|").replace(" ", "").upper()
 
+    # Keep workspace responsive when broker quote API is degraded.
+    # Batch is preferred; single-key fallback is capped.
+    single_fallback_budget = 3
+    single_fallback_used = 0
+
     def _resolve_ltp(ik: str) -> Optional[float]:
+        nonlocal single_fallback_used
         if not ik:
             return None
         if ik in batch:
@@ -975,7 +981,10 @@ def _apply_live_ltps_to_picks_and_running(
         for bk, lp in batch.items():
             if _norm(bk) == nk and lp and float(lp) > 0:
                 return float(lp)
+        if single_fallback_used >= single_fallback_budget:
+            return None
         try:
+            single_fallback_used += 1
             q = upstox.get_market_quote_by_key(ik)
             if q and q.get("last_price"):
                 v = float(q["last_price"])
