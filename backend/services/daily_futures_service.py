@@ -1148,13 +1148,15 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
             reasons.append("Second scan snapshot unavailable")
         elif now_ist < sst:
             reasons.append(f"Entry window opens at {sst.strftime('%H:%M')}")
-        c2 = p.get("second_scan_conviction_score")
+        # Use latest stored conviction (same as the Conviction column), not 2nd-scan-only,
+        # so a score that rises above 60 on a later scan can qualify.
+        c2 = p.get("conviction_score")
         if c2 is None:
             reasons.append("Conviction unavailable due to snapshot failure")
         elif float(c2) < 60.0:
             reasons.append(f"Conviction {round(float(c2),1)} - below threshold")
-        sc = p.get("second_scan_stock_change_pct")
-        nc = p.get("second_scan_nifty_change_pct")
+        sc = p.get("stock_change_pct")
+        nc = p.get("nifty_change_pct")
         if sc is None or nc is None:
             reasons.append("Relative strength unavailable")
         elif float(sc) < float(nc):
@@ -1187,8 +1189,8 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
         text(
             """
             SELECT id, underlying, future_symbol, instrument_key, lot_size,
-                   scan_count, second_scan_time, second_scan_conviction_score,
-                   second_scan_stock_change_pct, second_scan_nifty_change_pct
+                   scan_count, second_scan_time, conviction_score,
+                   stock_change_pct, nifty_change_pct
             FROM daily_futures_screening WHERE id = :sid AND trade_date = CAST(:d AS DATE)
             """
         ),
