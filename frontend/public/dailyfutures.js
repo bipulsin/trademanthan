@@ -60,6 +60,9 @@
   }
 
   function rowUnrealizedPnlRupees(r) {
+    if (!r || r.ltp == null || r.ltp === '' || r.entry_price == null || r.entry_price === '' || r.lot_size == null || r.lot_size === '') {
+      return null;
+    }
     const ltp = Number(r.ltp);
     const ep = Number(r.entry_price);
     const qty = Number(r.lot_size);
@@ -367,6 +370,9 @@
   }
 
   function rowProjectedPnlRupees(r) {
+    if (!r || r.ltp == null || r.ltp === '' || r.entry_price == null || r.entry_price === '' || r.lot_size == null || r.lot_size === '') {
+      return null;
+    }
     const ltp = Number(r.ltp);
     const ep = Number(r.entry_price);
     const qty = Number(r.lot_size);

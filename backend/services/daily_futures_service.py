@@ -943,7 +943,9 @@ def _apply_live_ltps_to_picks_and_running(
     Refresh LTP from Upstox for every row (batch + per-key fallback), update dicts in place,
     and persist ltp on daily_futures_screening so 15-min webhook runs and page loads stay aligned.
     """
-    combined: List[Dict[str, Any]] = list(picks) + list(running) + list(closed or [])
+    # Prioritize running rows first so LTP for open positions is refreshed even
+    # when fallback budget is exhausted.
+    combined: List[Dict[str, Any]] = list(running) + list(picks) + list(closed or [])
     uniq_keys: List[str] = []
     seen: Set[str] = set()
     for r in combined:
@@ -966,7 +968,7 @@ def _apply_live_ltps_to_picks_and_running(
 
     # Keep workspace responsive when broker quote API is degraded.
     # Batch is preferred; single-key fallback is capped.
-    single_fallback_budget = 3
+    single_fallback_budget = max(8, min(30, len(running) * 3))
     single_fallback_used = 0
 
     def _resolve_ltp(ik: str) -> Optional[float]:
