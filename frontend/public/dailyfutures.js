@@ -101,6 +101,32 @@
     return '₹' + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
+  /** Stock (future) vs Nifty 50 % change from last scan — order gate uses S ≥ N. */
+  function fmtRelStrength(r) {
+    const s = r.stock_change_pct;
+    const n = r.nifty_change_pct;
+    if (s == null || n == null) {
+      return '<span class="df-rs">—</span>';
+    }
+    const fs = Number(s);
+    const fn = Number(n);
+    if (!Number.isFinite(fs) || !Number.isFinite(fn)) {
+      return '<span class="df-rs">—</span>';
+    }
+    const strong = fs >= fn;
+    const a = (fs >= 0 ? '+' : '') + fs.toFixed(2) + '%';
+    const b = (fn >= 0 ? '+' : '') + fn.toFixed(2) + '%';
+    return (
+      '<span class="df-rs ' + (strong ? 'df-rs-strong' : 'df-rs-weak') + '" ' +
+      'title="Future % vs Nifty 50 % (day change, last scan). Green when future ≥ Nifty.">' +
+      'S ' +
+      esc(a) +
+      ' <span style="opacity:0.55">·</span> N ' +
+      esc(b) +
+      '</span>'
+    );
+  }
+
   const state = {
     workspace: null,
     pickScreeningId: null,
@@ -159,6 +185,8 @@
           fmtIso(r.last_hit_at) +
           '</td><td class="num">' +
           convTxt +
+          '</td><td class="df-rs-cell">' +
+          fmtRelStrength(r) +
           '</td><td class="num">' +
           fmtNum(r.ltp, 2) +
           '</td><td><button type="button" class="df-btn df-btn-order" data-sid="' +
@@ -186,7 +214,7 @@
       return;
     }
     const th =
-      '<thead><tr><th>Future</th><th>Qty</th><th>Scan #</th><th>1st scan</th><th>Last scan</th><th>Conviction</th><th class="num">LTP</th><th>Entry time</th><th class="num">Entry ₹</th><th class="num">Unrealized PnL</th><th></th></tr></thead>';
+      '<thead><tr><th>Future</th><th>Qty</th><th>Scan #</th><th>1st scan</th><th>Last scan</th><th>Conviction</th><th class="df-th-rs" title="Future % vs Nifty 50 % (day change)">Rel. str.</th><th class="num">LTP</th><th>Entry time</th><th class="num">Entry ₹</th><th class="num">Unrealized PnL</th><th></th></tr></thead>';
     const tot = sumRunningUnrealized(rows);
     const totalLine =
       '<p class="df-meta" style="margin:0 0 10px;font-size:0.9rem;">' +
@@ -218,6 +246,8 @@
           fmtIsoTimeIst(r.last_hit_at) +
           '</td><td class="num">' +
           fmtNum(r.conviction_score, 1) +
+          '</td><td class="df-rs-cell">' +
+          fmtRelStrength(r) +
           '</td><td class="num">' +
           fmtNum(r.ltp, 2) +
           '</td><td>' +

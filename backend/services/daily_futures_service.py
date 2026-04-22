@@ -1047,7 +1047,8 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
             """
             SELECT t.id, t.screening_id, t.underlying, t.future_symbol, t.instrument_key,
                    t.lot_size, t.entry_time, t.entry_price, t.consecutive_webhook_misses,
-                   s.scan_count, s.first_hit_at, s.last_hit_at, s.conviction_score, s.ltp
+                   s.scan_count, s.first_hit_at, s.last_hit_at, s.conviction_score, s.ltp,
+                   s.stock_change_pct, s.nifty_change_pct
             FROM daily_futures_user_trade t
             JOIN daily_futures_screening s ON s.id = t.screening_id
             WHERE t.user_id = :u
@@ -1078,6 +1079,8 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
                 "last_hit_at": row[11].isoformat() if row[11] else None,
                 "conviction_score": float(row[12]) if row[12] is not None else None,
                 "ltp": float(row[13]) if row[13] is not None else None,
+                "stock_change_pct": float(row[14]) if row[14] is not None else None,
+                "nifty_change_pct": float(row[15]) if row[15] is not None else None,
                 "warn_two_misses": miss >= 2,
             }
         )
