@@ -6481,6 +6481,40 @@ async def update_upstox_token(request: Request):
                 content={"status": "error", "message": "Access token is required"}
             )
         
+        # Persist to token file (primary source for UpstoxService + /upstox/status reload).
+        try:
+            from backend.services.token_manager import save_upstox_token
+
+            exp_ts = None
+            try:
+                import base64
+                import json as _json
+
+                parts = new_token.split(".")
+                if len(parts) >= 2:
+                    payload = parts[1]
+                    padding = len(payload) % 4
+                    if padding:
+                        payload += "=" * (4 - padding)
+                    decoded = base64.urlsafe_b64decode(payload)
+                    jwt_data = _json.loads(decoded)
+                    exp_ts = jwt_data.get("exp")
+            except Exception:
+                exp_ts = None
+            if save_upstox_token(new_token, exp_ts):
+                logger.info("✅ Upstox token saved to token manager (manual update)")
+        except Exception as e:
+            logger.warning("⚠️ Could not save token to token manager: %s", e)
+
+        if hasattr(vwap_service, "access_token"):
+            vwap_service.access_token = new_token
+        if hasattr(vwap_service, "reload_token_from_storage"):
+            try:
+                vwap_service.reload_token_from_storage()
+            except Exception:
+                pass
+        _bust_upstox_status_cache()
+        
         # Update the token in upstox_service.py file
         import re
         from pathlib import Path
@@ -6537,7 +6571,21 @@ async def update_upstox_token(request: Request):
 
 # OAuth state storage (in production, use Redis or database)
 oauth_states = {}
-_upstox_status_cache = {"ts": None, "payload": None}
+_upstox_status_cache = {"ts": None, "payload": None, "token_fp": None}
+
+
+def _bust_upstox_status_cache() -> None:
+    """Clear cached /scan/upstox/status so a new token is probed immediately."""
+    global _upstox_status_cache
+    _upstox_status_cache = {"ts": None, "payload": None, "token_fp": None}
+
+
+def _upstox_token_fingerprint(token: Optional[str]) -> str:
+    if not token:
+        return ""
+    import hashlib
+
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:20]
 
 @router.get("/upstox/login")
 async def upstox_oauth_login():
@@ -6742,6 +6790,7 @@ async def upstox_oauth_callback(code: str = None, state: str = None, error: str 
                 pass
         if hasattr(vwap_service, 'upstox'):
             vwap_service.upstox.set_access_token(access_token)
+        _bust_upstox_status_cache()
         
         # Redirect to scan page with success message
         return RedirectResponse(
@@ -6765,12 +6814,14 @@ async def upstox_oauth_status():
     Tests both user profile and market data endpoints to ensure token works for all operations
     """
     try:
+        # Always reload from disk first so a token updated via OAuth, manual POST, or file edit is picked up.
+        if hasattr(vwap_service, "reload_token_from_storage"):
+            try:
+                vwap_service.reload_token_from_storage()
+            except Exception:
+                pass
+
         now_ts = time.time()
-        cached_ts = _upstox_status_cache.get("ts")
-        cached_payload = _upstox_status_cache.get("payload")
-        # Cache status for 3 minutes to avoid excessive probe calls.
-        if cached_ts and cached_payload and (now_ts - float(cached_ts)) < 180.0:
-            return JSONResponse(status_code=200, content=cached_payload)
 
         def _ok_payload(msg: str):
             return {"status": "success", "authenticated": True, "message": msg}
@@ -6798,11 +6849,25 @@ async def upstox_oauth_status():
                 has_token = bool(vwap_service.reload_token_from_storage())
             except Exception:
                 has_token = False
+        cur_fp = _upstox_token_fingerprint(getattr(vwap_service, "access_token", None))
+
+        cached_ts = _upstox_status_cache.get("ts")
+        cached_payload = _upstox_status_cache.get("payload")
+        cached_fp = _upstox_status_cache.get("token_fp")
+        # Cache for 3 minutes per access token (avoid stale "expired" right after refresh).
+        if (
+            cached_ts
+            and cached_payload
+            and cached_fp == cur_fp
+            and (now_ts - float(cached_ts)) < 180.0
+        ):
+            return JSONResponse(status_code=200, content=cached_payload)
 
         if not has_token:
             payload = _expired_payload("No Upstox token configured")
             _upstox_status_cache["ts"] = now_ts
             _upstox_status_cache["payload"] = payload
+            _upstox_status_cache["token_fp"] = cur_fp
             return JSONResponse(status_code=200, content=payload)
 
         headers = {
@@ -6821,6 +6886,7 @@ async def upstox_oauth_status():
             payload = _soft_unavailable_payload(f"Upstox status probe unavailable: {net_err}")
             _upstox_status_cache["ts"] = now_ts
             _upstox_status_cache["payload"] = payload
+            _upstox_status_cache["token_fp"] = cur_fp
             return JSONResponse(status_code=200, content=payload)
 
         # Only 401 should trigger token-expired UX.
@@ -6834,6 +6900,7 @@ async def upstox_oauth_status():
                     reloaded = False
             if reloaded:
                 headers["Authorization"] = f"Bearer {vwap_service.access_token}"
+                cur_fp = _upstox_token_fingerprint(getattr(vwap_service, "access_token", None))
                 try:
                     profile_response = requests.get(test_url_profile, headers=headers, timeout=5)
                     market_response = requests.get(test_url_market, headers=headers, params=market_params, timeout=5)
@@ -6844,6 +6911,9 @@ async def upstox_oauth_status():
                 payload = _expired_payload("Upstox token is expired or invalid")
                 _upstox_status_cache["ts"] = now_ts
                 _upstox_status_cache["payload"] = payload
+                _upstox_status_cache["token_fp"] = _upstox_token_fingerprint(
+                    getattr(vwap_service, "access_token", None)
+                )
                 return JSONResponse(status_code=200, content=payload)
 
         # Any other probe failure should not be treated as token expiry.
@@ -6855,6 +6925,7 @@ async def upstox_oauth_status():
             )
         _upstox_status_cache["ts"] = now_ts
         _upstox_status_cache["payload"] = payload
+        _upstox_status_cache["token_fp"] = cur_fp
         return JSONResponse(status_code=200, content=payload)
 
     except Exception as e:
@@ -6864,8 +6935,9 @@ async def upstox_oauth_status():
             content={
                 "status": "error",
                 "authenticated": False,
+                "degraded": True,
                 "message": f"Failed to check status: {str(e)}",
-                "error_type": "token_expired"
+                "error_type": "status_check_error",
             }
         )
 

@@ -102,19 +102,30 @@ def load_upstox_token() -> Optional[str]:
                     except Exception as jwt_error:
                         logger.warning(f"⚠️ Could not decode JWT expiration: {jwt_error}")
                 
-                # Check if token is expired
+                # Check if token is expired (JWT / stored exp)
                 if expires_at:
                     now_timestamp = datetime.now().timestamp()
                     if now_timestamp >= expires_at:
-                        logger.warning(f"⚠️ Upstox token expired at {datetime.fromtimestamp(expires_at).strftime('%Y-%m-%d %H:%M:%S')}, current time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                        return None
+                        logger.warning(
+                            f"⚠️ Token file access token expired at "
+                            f"{datetime.fromtimestamp(expires_at).strftime('%Y-%m-%d %H:%M:%S')} — "
+                            "falling back to env / embedded token if available"
+                        )
+                        # Do not return yet: allow UPSTOX_ACCESS_TOKEN or refreshed file on next save.
                     else:
                         time_until_expiry = (expires_at - now_timestamp) / 3600
-                        logger.info(f"✅ Loaded Upstox token from file (updated: {updated_at}, expires in {time_until_expiry:.1f} hours)")
+                        logger.info(
+                            f"✅ Loaded Upstox token from file (updated: {updated_at}, "
+                            f"expires in {time_until_expiry:.1f} hours)"
+                        )
+                        return access_token
                 else:
-                    logger.info(f"✅ Loaded Upstox token from file (updated: {updated_at}, expiration unknown)")
-                
-                return access_token
+                    logger.info(
+                        f"✅ Loaded Upstox token from file (updated: {updated_at}, expiration unknown)"
+                    )
+                    return access_token
+
+                # Expired per file — try environment next (may be newer than stale file).
         
         # Fallback to environment variable
         env_token = os.getenv("UPSTOX_ACCESS_TOKEN")
