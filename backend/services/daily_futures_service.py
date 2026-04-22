@@ -189,6 +189,59 @@ def _session_vwap_for_conviction(quote: Dict[str, Any]) -> Optional[float]:
     return v
 
 
+def _floor_ist_to_15m(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        dt = IST.localize(dt)
+    else:
+        dt = dt.astimezone(IST)
+    mm = (dt.minute // 15) * 15
+    return dt.replace(minute=mm, second=0, microsecond=0)
+
+
+def _prev_15m_close_for_instrument(
+    upstox: UpstoxService,
+    instrument_key: str,
+    ref_dt_ist: datetime,
+    cache: Dict[str, Optional[float]],
+) -> Optional[float]:
+    ik = str(instrument_key or "").strip()
+    if not ik:
+        return None
+    if ik in cache:
+        return cache[ik]
+    try:
+        raw = upstox.get_historical_candles_by_instrument_key(
+            ik,
+            interval="minutes/15",
+            days_back=2,
+            range_end_date=ref_dt_ist.date(),
+        ) or []
+    except Exception as e:
+        logger.debug("daily_futures: prev15 fetch failed for %s: %s", ik, e)
+        cache[ik] = None
+        return None
+
+    cutoff = _floor_ist_to_15m(ref_dt_ist)
+    candles: List[Tuple[datetime, float]] = []
+    for c in raw:
+        ts = _parse_iso_ist(c.get("timestamp"))
+        if ts is None:
+            continue
+        cl = _safe_float(c.get("close"))
+        if cl is None or cl <= 0:
+            continue
+        candles.append((ts, float(cl)))
+    candles.sort(key=lambda x: x[0])
+    if not candles:
+        cache[ik] = None
+        return None
+
+    prev_candidates = [cl for ts, cl in candles if ts < cutoff]
+    val = prev_candidates[-1] if prev_candidates else candles[-1][1]
+    cache[ik] = float(val) if val and val > 0 else None
+    return cache[ik]
+
+
 def _prev_close_from_snapshot(snapshot: Dict[str, Any]) -> Optional[float]:
     if not isinstance(snapshot, dict):
         return None
@@ -1088,11 +1141,8 @@ def _apply_live_rel_strength_to_picks_and_running(
     except Exception as e:
         logger.warning("daily_futures: rel-strength Upstox init failed: %s", e)
         return
-    try:
-        prev_cache = _get_or_init_prev_close_cache(trade_date, upstox, symbol_to_key)
-    except Exception as e:
-        logger.warning("daily_futures: rel-strength prev-close cache failed: %s", e)
-        return
+    now_ist = datetime.now(IST)
+    prev15_cache: Dict[str, Optional[float]] = {}
 
     all_keys: List[str] = list(dict.fromkeys(list(symbol_to_key.values()) + [NIFTY50_INDEX_KEY]))
     ltp_by_key: Dict[str, float] = {}
@@ -1126,7 +1176,7 @@ def _apply_live_rel_strength_to_picks_and_running(
         except Exception as e:
             logger.debug("daily_futures: rel-strength Nifty single quote failed: %s", e)
 
-    nifty_prev = _safe_float(prev_cache.get("nifty"))
+    nifty_prev = _prev_15m_close_for_instrument(upstox, NIFTY50_INDEX_KEY, now_ist, prev15_cache)
     nifty_change_pct: Optional[float] = None
     if nifty_ltp is not None and nifty_prev and nifty_prev > 0:
         nifty_change_pct = round(((nifty_ltp - nifty_prev) / nifty_prev) * 100.0, 6)
@@ -1136,10 +1186,10 @@ def _apply_live_rel_strength_to_picks_and_running(
         u = str(r.get("underlying") or "").strip().upper()
         if not u:
             continue
-        stock_prev = _safe_float((prev_cache.get("stock") or {}).get(u))
+        ik = str(r.get("instrument_key") or "").strip()
+        stock_prev = _prev_15m_close_for_instrument(upstox, ik, now_ist, prev15_cache)
         stock_ltp = _safe_float(r.get("ltp"))
         if stock_ltp is None:
-            ik = str(r.get("instrument_key") or "").strip()
             stock_ltp = _ltp_for_instrument(ik)
         stock_change_pct: Optional[float] = None
         if stock_ltp is not None and stock_prev and stock_prev > 0:
