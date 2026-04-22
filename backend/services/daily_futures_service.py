@@ -154,16 +154,39 @@ def _safe_float(v: Any) -> Optional[float]:
 def _quote_session_vwap(snapshot: Dict[str, Any]) -> Optional[float]:
     if not isinstance(snapshot, dict):
         return None
-    for k in ("vwap", "session_vwap", "average_price", "avg_price"):
+    for k in ("vwap", "session_vwap", "average_price", "avg_price", "average_traded_price", "atp"):
         fv = _safe_float(snapshot.get(k))
         if fv is not None and fv > 0:
             return fv
     ohlc = snapshot.get("ohlc") if isinstance(snapshot.get("ohlc"), dict) else {}
-    for k in ("vwap", "average_price", "avg_price"):
+    for k in ("vwap", "average_price", "avg_price", "average_traded_price", "atp"):
         fv = _safe_float(ohlc.get(k))
         if fv is not None and fv > 0:
             return fv
     return None
+
+
+def _typical_price_ohlc_fallback(snapshot: Dict[str, Any]) -> Optional[float]:
+    """
+    When Upstox does not return session VWAP/ATP, approximate fair value from OHLC
+    so the VWAP leg is not stuck at a neutral 25 for every symbol.
+    """
+    if not isinstance(snapshot, dict):
+        return None
+    ohlc = snapshot.get("ohlc") if isinstance(snapshot.get("ohlc"), dict) else {}
+    h = _safe_float(ohlc.get("high"))
+    low = _safe_float(ohlc.get("low"))
+    c = _safe_float(ohlc.get("close"))
+    lp = _safe_float(snapshot.get("last_price"))
+    close = c if c is not None and c > 0 else (lp if lp is not None and lp > 0 else None)
+    if h and low and close and h > 0 and low > 0 and close > 0:
+        return (h + low + close) / 3.0
+    return None
+
+
+def _session_vwap_for_conviction(quote: Dict[str, Any]) -> Optional[float]:
+    v = _quote_session_vwap(quote) or _typical_price_ohlc_fallback(quote)
+    return v
 
 
 def _prev_close_from_snapshot(snapshot: Dict[str, Any]) -> Optional[float]:
@@ -606,7 +629,7 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
     prev_close_cache = _get_or_init_prev_close_cache(trade_date, upstox, symbol_to_key)
     nifty_quote = batch_quotes.get(NIFTY50_INDEX_KEY) or {}
     nifty_ltp = _safe_float(nifty_quote.get("last_price"))
-    nifty_vwap = _quote_session_vwap(nifty_quote)
+    nifty_vwap = _session_vwap_for_conviction(nifty_quote)
     nifty_prev_close = _safe_float((prev_close_cache.get("nifty")))
     nifty_change_pct = (
         round(((nifty_ltp - nifty_prev_close) / nifty_prev_close) * 100.0, 6)
@@ -623,7 +646,7 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
             lot = fut_lot_for_key(ik)
             q = batch_quotes.get(ik) or {}
             ltp = _safe_float(q.get("last_price"))
-            session_vwap = _quote_session_vwap(q)
+            session_vwap = _session_vwap_for_conviction(q)
             total_oi = _safe_float(q.get("oi"))
             prev_close = _safe_float((prev_close_cache.get("stock") or {}).get(u))
             stock_change_pct = (
@@ -645,11 +668,14 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
                 {"d": str(trade_date), "u": u},
             ).fetchone()
             prev_oi = _safe_float(ex[2]) if ex else None
-            oi_change_pct = (
-                round(((total_oi - prev_oi) / prev_oi) * 100.0, 6)
-                if total_oi is not None and prev_oi is not None and prev_oi > 0
-                else None
-            )
+            oi_change_pct: Optional[float] = None
+            if total_oi is not None and prev_oi is not None:
+                if prev_oi > 0:
+                    oi_change_pct = round(((total_oi - prev_oi) / prev_oi) * 100.0, 6)
+                elif float(total_oi) > 0 and float(prev_oi) == 0:
+                    oi_change_pct = 100.0
+                else:
+                    oi_change_pct = 0.0
             scan_inputs.append(
                 {
                     "underlying": u,
@@ -657,6 +683,7 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
                     "ltp": ltp,
                     "session_vwap": session_vwap,
                     "total_oi": int(total_oi) if total_oi is not None else None,
+                    "change_in_oi": (int(q["change_in_oi"]) if q.get("change_in_oi", None) is not None else None),
                     "oi_change_pct": oi_change_pct,
                     "nifty_ltp": nifty_ltp,
                     "nifty_session_vwap": nifty_vwap,
@@ -669,9 +696,20 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
                     "existing": ex,
                 }
             )
-        # OI-leg ranking within this batch.
-        ranked = [x for x in scan_inputs if isinstance(x.get("oi_change_pct"), (int, float))]
-        ranked.sort(key=lambda x: float(x["oi_change_pct"]), reverse=True)
+        # OI-leg ranking within this batch: prefer % vs previous scan, else Upstox change_in_oi, else total_oi.
+        def _oi_rank_value(x: Dict[str, Any]) -> float:
+            p = x.get("oi_change_pct")
+            if isinstance(p, (int, float)):
+                return float(p)
+            c = x.get("change_in_oi")
+            if isinstance(c, (int, float)):
+                return float(c)
+            toi = x.get("total_oi")
+            if isinstance(toi, int) and toi > 0:
+                return float(toi) / 1_000_000.0
+            return -1.0e18
+
+        ranked = sorted(scan_inputs, key=_oi_rank_value, reverse=True)
         rank_map = {id(x): idx for idx, x in enumerate(ranked)}
         n_rank = len(ranked)
 

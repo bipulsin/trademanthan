@@ -2299,6 +2299,31 @@ class UpstoxService:
                 except (TypeError, ValueError):
                     net_chg = 0.0
                 ohlc = qd.get("ohlc") if isinstance(qd.get("ohlc"), dict) else {}
+
+                def _pick_fp(q: Dict[str, Any], *names: str) -> float:
+                    for n in names:
+                        v = q.get(n)
+                        if v is not None and v != "":
+                            try:
+                                f = float(v)
+                                if f > 0:
+                                    return f
+                            except (TypeError, ValueError):
+                                continue
+                    return 0.0
+
+                # Intraday average traded price / VWAP (used by Daily Futures conviction)
+                atp = _pick_fp(
+                    qd,
+                    "average_price",
+                    "atp",
+                    "average_traded_price",
+                    "vwap",
+                    "session_vwap",
+                )
+                if not atp and isinstance(ohlc, dict):
+                    atp = _pick_fp(ohlc, "average_price", "atp", "vwap", "ap")
+
                 out[req_key] = {
                     "last_price": lp,
                     "volume": vol,
@@ -2306,6 +2331,7 @@ class UpstoxService:
                     "change_in_oi": oi_chg,
                     "net_change": net_chg,
                     "ohlc": ohlc,
+                    "average_price": atp or None,
                 }
         except Exception as e:
             logger.error(f"❌ Error fetching batch quote snapshots: {str(e)}")
