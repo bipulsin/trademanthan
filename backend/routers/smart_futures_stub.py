@@ -485,6 +485,24 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
                 bars = []
             m5_session_cache[ikey] = bars
             return bars
+
+        # Prime LTP in one request (get_market_quote_by_key per row is slow and can fail spuriously).
+        uniq_ikeys = sorted(
+            {
+                str(r.get("fut_instrument_key") or "").strip()
+                for r in serialized
+                if str(r.get("fut_instrument_key") or "").strip()
+            }
+        )
+        if uniq_ikeys:
+            try:
+                batch_ltp = us_exit.get_market_quotes_batch_by_keys(uniq_ikeys) or {}
+                for k, lp in batch_ltp.items():
+                    if lp and float(lp) > 0:
+                        ltp_cache[k] = round(float(lp), 2)
+            except Exception as e:
+                logger.warning("smart_futures /daily batch LTP: %s", e)
+
         for r in serialized:
             ikey = str(r.get("fut_instrument_key") or "").strip()
             if not ikey:

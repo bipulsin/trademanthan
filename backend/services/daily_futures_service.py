@@ -1141,6 +1141,11 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
     denom = wins + losses
     win_rate = round(100.0 * wins / denom, 1) if denom else None
 
+    try:
+        _apply_live_ltps_to_picks_and_running(picks, running, closed)
+    except Exception as e:
+        logger.warning("daily_futures: live LTP refresh failed: %s", e, exc_info=True)
+
     for p in picks:
         reasons: List[str] = []
         # Simplified order gate: scan_count >= 2 and conviction > 60 (see confirm_buy).
