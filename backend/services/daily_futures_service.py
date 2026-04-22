@@ -193,9 +193,24 @@ def _prev_close_from_snapshot(snapshot: Dict[str, Any]) -> Optional[float]:
     if not isinstance(snapshot, dict):
         return None
     ohlc = snapshot.get("ohlc") if isinstance(snapshot.get("ohlc"), dict) else {}
+    # Preferred: broker previous close from OHLC payload.
     pc = _safe_float(ohlc.get("close"))
     if pc is not None and pc > 0:
         return pc
+
+    # Some quote payloads expose close directly (without nested OHLC close).
+    pc2 = _safe_float(snapshot.get("close_price")) or _safe_float(snapshot.get("close"))
+    if pc2 is not None and pc2 > 0:
+        return pc2
+
+    # Last-resort derivation: previous close ~= last_price - net_change.
+    # Upstox net_change is vs previous close for the session.
+    lp = _safe_float(snapshot.get("last_price"))
+    nc = _safe_float(snapshot.get("net_change"))
+    if lp is not None and nc is not None:
+        d = lp - nc
+        if d > 0:
+            return d
     return None
 
 
