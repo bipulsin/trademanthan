@@ -117,6 +117,11 @@ def ensure_daily_futures_tables() -> None:
         pnl_points NUMERIC(18,4),
         pnl_rupees NUMERIC(18,4),
         consecutive_webhook_misses INTEGER NOT NULL DEFAULT 0,
+        position_atr NUMERIC(18,4),
+        profit_trail_armed BOOLEAN NOT NULL DEFAULT FALSE,
+        nifty_structure_weakening BOOLEAN NOT NULL DEFAULT FALSE,
+        trail_stop_hit BOOLEAN NOT NULL DEFAULT FALSE,
+        momentum_exhausting BOOLEAN NOT NULL DEFAULT FALSE,
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
     );
@@ -148,6 +153,27 @@ def ensure_daily_futures_tables() -> None:
         conn.execute(text("UPDATE daily_futures_screening SET conviction_score = 0 WHERE conviction_score IS NULL"))
         conn.execute(text("ALTER TABLE daily_futures_screening ALTER COLUMN conviction_score SET DEFAULT 0"))
         conn.execute(text("ALTER TABLE daily_futures_screening ALTER COLUMN conviction_score SET NOT NULL"))
+        conn.execute(
+            text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS position_atr NUMERIC(18,4)")
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS profit_trail_armed BOOLEAN NOT NULL DEFAULT FALSE"
+            )
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS nifty_structure_weakening BOOLEAN NOT NULL DEFAULT FALSE"
+            )
+        )
+        conn.execute(
+            text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS trail_stop_hit BOOLEAN NOT NULL DEFAULT FALSE")
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS momentum_exhausting BOOLEAN NOT NULL DEFAULT FALSE"
+            )
+        )
 
 
 def _safe_float(v: Any) -> Optional[float]:
@@ -322,6 +348,216 @@ def _last_completed_15m_candles_for_instrument(
         out.append({"timestamp": ts, "open": op, "high": hi, "low": lo, "close": cl})
     out.sort(key=lambda x: x["timestamp"])
     return out[-5:]
+
+
+def _entry_datetime_ist(trade_d: date, entry_time: Optional[str]) -> Optional[datetime]:
+    if not entry_time or not str(entry_time).strip():
+        return None
+    parts = str(entry_time).strip().split(":")
+    if len(parts) < 2:
+        return None
+    try:
+        h = int(parts[0].strip())
+        m = int(parts[1].strip()[:2])
+    except (TypeError, ValueError):
+        return None
+    return IST.localize(datetime.combine(trade_d, dt_time(h, m)))
+
+
+def _compute_position_atr_15m_5d(
+    upstox: UpstoxService,
+    instrument_key: str,
+    as_of: date,
+) -> Optional[float]:
+    """
+    Mean of (15m high − low) across all 15m bars in the last five distinct
+    session dates present in the returned history.
+    """
+    ik = str(instrument_key or "").strip()
+    if not ik:
+        return None
+    try:
+        raw = upstox.get_historical_candles_by_instrument_key(
+            ik, interval="minutes/15", days_back=20, range_end_date=as_of
+        ) or []
+    except Exception as e:
+        logger.debug("daily_futures: ATR 15m fetch failed for %s: %s", ik, e)
+        return None
+    bars: List[Tuple[date, float]] = []
+    for c in raw:
+        ts = _parse_iso_ist(c.get("timestamp"))
+        if ts is None:
+            continue
+        d = ts.astimezone(IST).date()
+        hi = _safe_float(c.get("high"))
+        lo = _safe_float(c.get("low"))
+        if hi is None or lo is None:
+            continue
+        rng = float(hi) - float(lo)
+        if rng < 0:
+            continue
+        bars.append((d, rng))
+    if not bars:
+        return None
+    uniq = sorted({d for d, _ in bars})
+    use_dates: Set[date] = set(uniq[-5:]) if len(uniq) >= 5 else set(uniq)
+    rs = [r for d, r in bars if d in use_dates]
+    if not rs:
+        return None
+    return float(sum(rs)) / float(len(rs))
+
+
+def _momentum_exhausting_last_two(cands: List[Dict[str, Any]]) -> bool:
+    """
+    For the last two completed 15m candles (prev, last): body shrinks and weak close
+    in the latest bar. close_pct = (close-low)/(high-low), skip if range is zero.
+    """
+    if len(cands) < 2:
+        return False
+    a, b = cands[-2], cands[-1]
+    try:
+        body_a = abs(float(a.get("close")) - float(a.get("open")))
+        body_b = abs(float(b.get("close")) - float(b.get("open")))
+        hi = float(b.get("high"))
+        lo = float(b.get("low"))
+        cl = float(b.get("close"))
+    except (TypeError, ValueError):
+        return False
+    rng = hi - lo
+    if rng <= 0:
+        return False
+    close_pct = (cl - lo) / rng
+    return bool(body_b < body_a and close_pct < 0.30)
+
+
+def _apply_exit_alerts_to_running(
+    db: Session,
+    running: List[Dict[str, Any]],
+    trade_date: date,
+) -> None:
+    if not running:
+        return
+    now_ist = datetime.now(IST)
+    try:
+        upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+    except Exception as e:
+        logger.warning("daily_futures: exit alerts Upstox init failed: %s", e)
+        for r in running:
+            r["nifty_structure_weakening"] = bool(r.get("nifty_structure_weakening"))
+            r["trail_stop_hit"] = bool(r.get("trail_stop_hit"))
+            r["momentum_exhausting"] = bool(r.get("momentum_exhausting"))
+            r["exit_review"] = bool(r.get("trail_stop_hit")) or (
+                bool(r.get("nifty_structure_weakening")) and bool(r.get("momentum_exhausting"))
+            )
+        return
+
+    nifty_cands: List[Dict[str, Any]] = []
+    try:
+        nifty_cands = _last_completed_15m_candles_for_instrument(
+            upstox, NIFTY50_INDEX_KEY, trade_date, now_ist
+        )
+    except Exception as e:
+        logger.debug("daily_futures: exit alerts nifty 15m: %s", e)
+
+    nifty_ok = (
+        len(nifty_cands) >= 2
+        and float(nifty_cands[-1]["low"]) < float(nifty_cands[-2]["low"])
+    )
+    stock_candle_cache: Dict[str, List[Dict[str, Any]]] = {}
+
+    for r in running:
+        tid = int(r["trade_id"])
+        ikey = str(r.get("instrument_key") or "").strip()
+        ep = _safe_float(r.get("entry_price"))
+        ltp = _safe_float(r.get("ltp"))
+        entry_dt = _entry_datetime_ist(trade_date, r.get("entry_time"))
+        pos_age_s = (now_ist - entry_dt).total_seconds() if entry_dt else 0.0
+        pos_age_ok = pos_age_s > 45.0 * 60.0
+
+        atr_v = r.get("position_atr")
+        atr: Optional[float] = float(atr_v) if atr_v is not None else None
+        if ikey and atr is None:
+            atr = _compute_position_atr_15m_5d(upstox, ikey, trade_date)
+            if atr is not None and atr > 0:
+                r["position_atr"] = round(float(atr), 4)
+
+        old_n = bool(r.get("nifty_structure_weakening"))
+        new_n = bool(nifty_ok and pos_age_ok and entry_dt is not None)
+        merged_n = old_n or new_n
+
+        if ikey and ikey not in stock_candle_cache:
+            try:
+                stock_candle_cache[ikey] = _last_completed_15m_candles_for_instrument(
+                    upstox, ikey, trade_date, now_ist
+                )
+            except Exception as e:
+                logger.debug("daily_futures: exit alerts stock 15m %s: %s", ikey, e)
+                stock_candle_cache[ikey] = []
+        stk = stock_candle_cache.get(ikey) or []
+        old_m = bool(r.get("momentum_exhausting"))
+        new_m = _momentum_exhausting_last_two(stk)
+        merged_m = old_m or new_m
+
+        old_armed = bool(r.get("profit_trail_armed"))
+        new_armed = bool(
+            atr is not None
+            and atr > 0
+            and ep is not None
+            and ltp is not None
+            and (ltp - ep) >= 1.5 * float(atr)
+        )
+        merged_armed = old_armed or new_armed
+        old_hit = bool(r.get("trail_stop_hit"))
+        new_hit = bool(
+            merged_armed
+            and ep is not None
+            and ltp is not None
+            and atr is not None
+            and atr > 0
+            and ltp < ep + 0.8 * float(atr)
+        )
+        merged_hit = old_hit or new_hit
+
+        exit_review = bool(merged_hit or (merged_n and merged_m))
+
+        try:
+            db.execute(
+                text(
+                    """
+                    UPDATE daily_futures_user_trade SET
+                      position_atr = COALESCE(CAST(:atr AS NUMERIC), position_atr),
+                      profit_trail_armed = CAST(:ar AS BOOLEAN),
+                      nifty_structure_weakening = CAST(:ns AS BOOLEAN),
+                      trail_stop_hit = CAST(:th AS BOOLEAN),
+                      momentum_exhausting = CAST(:me AS BOOLEAN),
+                      updated_at = CURRENT_TIMESTAMP
+                    WHERE id = :id
+                    """
+                ),
+                {
+                    "atr": float(atr) if atr is not None else None,
+                    "ar": merged_armed,
+                    "ns": merged_n,
+                    "th": merged_hit,
+                    "me": merged_m,
+                    "id": tid,
+                },
+            )
+        except Exception as e:
+            logger.warning("daily_futures: exit alert persist failed trade_id=%s: %s", tid, e)
+
+        r["nifty_structure_weakening"] = merged_n
+        r["momentum_exhausting"] = merged_m
+        r["trail_stop_hit"] = merged_hit
+        r["profit_trail_armed"] = merged_armed
+        r["exit_review"] = exit_review
+        r["position_atr"] = round(float(atr), 4) if atr is not None else r.get("position_atr")
+
+    try:
+        db.commit()
+    except Exception as e:
+        logger.warning("daily_futures: exit alerts commit: %s", e)
+        db.rollback()
 
 
 def _prev_close_from_snapshot(snapshot: Dict[str, Any]) -> Optional[float]:
@@ -1417,6 +1653,8 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
             """
             SELECT t.id, t.screening_id, t.underlying, t.future_symbol, t.instrument_key,
                    t.lot_size, t.entry_time, t.entry_price, t.consecutive_webhook_misses,
+                   t.position_atr, t.profit_trail_armed, t.nifty_structure_weakening,
+                   t.trail_stop_hit, t.momentum_exhausting,
                    s.scan_count, s.first_hit_at, s.last_hit_at, s.conviction_score, s.ltp,
                    s.stock_change_pct, s.nifty_change_pct
             FROM daily_futures_user_trade t
@@ -1433,6 +1671,7 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
     running = []
     for row in running_rows:
         miss = int(row[8] or 0)
+        pos_atr = float(row[9]) if row[9] is not None else None
         running.append(
             {
                 "trade_id": row[0],
@@ -1444,13 +1683,18 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
                 "entry_time": row[6],
                 "entry_price": float(row[7]) if row[7] is not None else None,
                 "consecutive_webhook_misses": miss,
-                "scan_count": int(row[9] or 0),
-                "first_hit_at": row[10].isoformat() if row[10] else None,
-                "last_hit_at": row[11].isoformat() if row[11] else None,
-                "conviction_score": float(row[12]) if row[12] is not None else None,
-                "ltp": float(row[13]) if row[13] is not None else None,
-                "stock_change_pct": float(row[14]) if row[14] is not None else None,
-                "nifty_change_pct": float(row[15]) if row[15] is not None else None,
+                "position_atr": pos_atr,
+                "profit_trail_armed": bool(row[10]) if row[10] is not None else False,
+                "nifty_structure_weakening": bool(row[11]) if row[11] is not None else False,
+                "trail_stop_hit": bool(row[12]) if row[12] is not None else False,
+                "momentum_exhausting": bool(row[13]) if row[13] is not None else False,
+                "scan_count": int(row[14] or 0),
+                "first_hit_at": row[15].isoformat() if row[15] else None,
+                "last_hit_at": row[16].isoformat() if row[16] else None,
+                "conviction_score": float(row[17]) if row[17] is not None else None,
+                "ltp": float(row[18]) if row[18] is not None else None,
+                "stock_change_pct": float(row[19]) if row[19] is not None else None,
+                "nifty_change_pct": float(row[20]) if row[20] is not None else None,
                 "warn_two_misses": miss >= 2,
             }
         )
@@ -1568,6 +1812,18 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
     except Exception as e:
         logger.warning("daily_futures: rel-strength refresh failed: %s", e, exc_info=True)
 
+    try:
+        _apply_exit_alerts_to_running(db, running, td)
+    except Exception as e:
+        logger.warning("daily_futures: exit alerts failed: %s", e, exc_info=True)
+        for r in running:
+            r["nifty_structure_weakening"] = bool(r.get("nifty_structure_weakening"))
+            r["trail_stop_hit"] = bool(r.get("trail_stop_hit"))
+            r["momentum_exhausting"] = bool(r.get("momentum_exhausting"))
+            r["exit_review"] = bool(r.get("trail_stop_hit")) or (
+                bool(r.get("nifty_structure_weakening")) and bool(r.get("momentum_exhausting"))
+            )
+
     for p in picks:
         reasons: List[str] = []
         # Simplified order gate: scan_count >= 2 and conviction > 60 (see confirm_buy).
@@ -1637,7 +1893,7 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
     if exists:
         raise ValueError("Already bought this pick")
 
-    db.execute(
+    ins = db.execute(
         text(
             """
             INSERT INTO daily_futures_user_trade (
@@ -1645,7 +1901,7 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
               order_status, entry_time, entry_price, consecutive_webhook_misses
             ) VALUES (
               :u, :sid, :und, :fs, :ik, :lot, 'bought', :et, :ep, 0
-            )
+            ) RETURNING id
             """
         ),
         {
@@ -1658,7 +1914,26 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
             "et": entry_time.strip(),
             "ep": entry_price,
         },
-    )
+    ).fetchone()
+    trade_id = int(ins[0]) if ins and ins[0] is not None else None
+    ikey = str(row[3] or "").strip()
+    if trade_id and ikey:
+        try:
+            uxs = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+            atr0 = _compute_position_atr_15m_5d(uxs, ikey, ist_today())
+            if atr0 is not None and atr0 > 0:
+                db.execute(
+                    text(
+                        """
+                        UPDATE daily_futures_user_trade SET
+                          position_atr = CAST(:a AS NUMERIC), updated_at = CURRENT_TIMESTAMP
+                        WHERE id = :id
+                        """
+                    ),
+                    {"a": float(atr0), "id": trade_id},
+                )
+        except Exception as e:
+            logger.warning("daily_futures: position ATR at entry (non-fatal): %s", e)
     db.commit()
     return {"success": True}
 

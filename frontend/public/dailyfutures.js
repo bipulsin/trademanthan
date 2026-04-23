@@ -143,7 +143,67 @@
     workspace: null,
     pickScreeningId: null,
     sellTradeId: null,
+    /** @type {Record<number, number>} trade_id -> bit mask of active exit alerts (1=nifty,2=trail,4=momo) */
+    prevRunAlertBits: {},
   };
+
+  function playExitAlertBeep() {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = new Ctx();
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.connect(g);
+      g.connect(ctx.destination);
+      o.frequency.value = 880;
+      o.type = 'sine';
+      g.gain.setValueAtTime(0.1, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.22);
+      o.start();
+      o.stop(ctx.currentTime + 0.22);
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  function updateRunningExitAlertAudio(rows) {
+    if (!rows || !rows.length) return;
+    var anyNew = false;
+    rows.forEach(function (r) {
+      var tid = r.trade_id;
+      if (tid == null) return;
+      var bits =
+        (r.nifty_structure_weakening ? 1 : 0) +
+        (r.trail_stop_hit ? 2 : 0) +
+        (r.momentum_exhausting ? 4 : 0);
+      var prev = state.prevRunAlertBits[tid] != null ? state.prevRunAlertBits[tid] : 0;
+      if (bits > prev) anyNew = true;
+      state.prevRunAlertBits[tid] = bits;
+    });
+    if (anyNew) playExitAlertBeep();
+  }
+
+  function runningExitBadges(r) {
+    var parts = [];
+    if (r.nifty_structure_weakening) {
+      parts.push(
+        '<span class="df-exit-badge df-exit-nifty" title="Nifty 15m: current bar low &lt; previous bar low; position &gt; 45 min">⚠ Index Weakening</span>',
+      );
+    }
+    if (r.trail_stop_hit) {
+      parts.push(
+        '<span class="df-exit-badge df-exit-trail" title="Price fell below entry + 0.8×ATR after profit trail was armed">🔴 Lock Profit</span>',
+      );
+    }
+    if (r.momentum_exhausting) {
+      parts.push(
+        '<span class="df-exit-badge df-exit-momo" title="Weaker body and weak close in latest 15m">📉 Momentum Fading</span>',
+      );
+    }
+    if (!parts.length) return '—';
+    return '<div class="df-exit-badges">' + parts.join(' ') + '</div>';
+  }
 
   async function fetchWorkspace() {
     const paths = ['/api/daily-futures/workspace', '/daily-futures/workspace'];
@@ -266,7 +326,7 @@
       return;
     }
     const th =
-      '<thead><tr><th>Future</th><th>Qty</th><th>Scan #</th><th>1st scan</th><th>Last scan</th><th>Conviction</th><th class="df-th-rs" title="(FUT day % − Nifty %); S and N in parentheses">Rel. str.</th><th class="num">LTP</th><th>Entry time</th><th class="num">Entry ₹</th><th class="num">Unrealized PnL</th><th></th></tr></thead>';
+      '<thead><tr><th>Future</th><th>Qty</th><th>Scan #</th><th>1st scan</th><th>Last scan</th><th>Conviction</th><th class="df-th-rs" title="(FUT day % − Nifty %); S and N in parentheses">Rel. str.</th><th class="num">LTP</th><th>Entry time</th><th class="num">Entry ₹</th><th class="num">Unrealized PnL</th><th>Alerts</th><th>Action</th></tr></thead>';
     const tot = sumRunningUnrealized(rows);
     const totalLine =
       '<p class="df-meta" style="margin:0 0 10px;font-size:0.9rem;">' +
@@ -284,6 +344,10 @@
         const warn = r.warn_two_misses
           ? '<span class="df-blink" title="Not seen in the last two consecutive webhooks">↓</span>'
           : '';
+        const review =
+          r.exit_review === true
+            ? '<button type="button" class="df-btn df-btn-review" data-tid="' + r.trade_id + '">REVIEW EXIT</button>'
+            : '';
         return (
           '<tr><td><strong>' +
           esc(r.future_symbol || r.underlying) +
@@ -308,9 +372,13 @@
           fmtNum(r.entry_price, 2) +
           '</td>' +
           unrealizedPnlCell(r) +
-          '<td><button type="button" class="df-btn df-btn-sell" data-tid="' +
+          '<td class="df-alerts-cell">' +
+          runningExitBadges(r) +
+          '</td><td class="df-run-actions"><div class="df-run-action-btns">' +
+          review +
+          '<button type="button" class="df-btn df-btn-sell" data-tid="' +
           r.trade_id +
-          '">Sell</button></td></tr>'
+          '">Sell</button></div></td></tr>'
         );
       })
       .join('');
@@ -322,6 +390,7 @@
         openSellModal(tid, row);
       });
     });
+    updateRunningExitAlertAudio(rows);
   }
 
   function renderClosed(rows, summary) {
