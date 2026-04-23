@@ -214,9 +214,17 @@
       '<th class="num">LTP</th><th></th></tr></thead>';
     const body = picks
       .map(function (r) {
-        const eligible = !!r.order_eligible;
-        const reason = r.order_block_reason || 'Not eligible yet';
-        const convTxt = (r.conviction_score == null ? '—' : fmtNum(r.conviction_score, 1));
+        const gateScore = r.second_scan_conviction_score != null ? Number(r.second_scan_conviction_score) : Number(r.conviction_score);
+        const eligible = Number(r.scan_count || 0) >= 2 && Number.isFinite(gateScore) && gateScore > 60;
+        const reason = Number(r.scan_count || 0) < 2
+          ? 'Needs at least 2 scans'
+          : (!Number.isFinite(gateScore) ? 'Conviction unavailable' : ('Conviction ' + gateScore.toFixed(1) + ' is not above 60'));
+        let convTxt = (r.conviction_score == null ? '—' : fmtNum(r.conviction_score, 1));
+        const secondConv = (r.second_scan_conviction_score == null ? null : Number(r.second_scan_conviction_score));
+        const liveConv = (r.conviction_score == null ? null : Number(r.conviction_score));
+        if (Number.isFinite(secondConv) && Number.isFinite(liveConv) && Math.abs(secondConv - liveConv) > 1e-9) {
+          convTxt = fmtNum(liveConv, 1) + ' (live) | ' + fmtNum(secondConv, 1) + ' (entry)';
+        }
         return (
           '<tr><td><strong>' +
           esc(r.future_symbol || r.underlying) +

@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import time
+import json
 from datetime import date, datetime, time as dt_time, timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import quote
@@ -20,7 +21,6 @@ from backend.database import engine
 from backend.services.fno_bullish_backtest import (
     TradeRow,
     _fill_conviction_raw_metrics,
-    _vwap_proximity_score_0_50,
     finalize_conviction_scores,
 )
 from backend.services.nks_intraday_backtest import (
@@ -92,6 +92,10 @@ def ensure_daily_futures_tables() -> None:
         second_scan_conviction_score NUMERIC(8,2),
         second_scan_stock_change_pct NUMERIC(18,6),
         second_scan_nifty_change_pct NUMERIC(18,6),
+        candle_is_green BOOLEAN,
+        candle_higher_high BOOLEAN,
+        candle_higher_low BOOLEAN,
+        conviction_breakdown_json JSONB,
         updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
         UNIQUE (trade_date, underlying)
     );
@@ -137,6 +141,10 @@ def ensure_daily_futures_tables() -> None:
         conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_conviction_score NUMERIC(8,2)"))
         conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_stock_change_pct NUMERIC(18,6)"))
         conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_nifty_change_pct NUMERIC(18,6)"))
+        conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS candle_is_green BOOLEAN"))
+        conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS candle_higher_high BOOLEAN"))
+        conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS candle_higher_low BOOLEAN"))
+        conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS conviction_breakdown_json JSONB"))
         conn.execute(text("UPDATE daily_futures_screening SET conviction_score = 0 WHERE conviction_score IS NULL"))
         conn.execute(text("ALTER TABLE daily_futures_screening ALTER COLUMN conviction_score SET DEFAULT 0"))
         conn.execute(text("ALTER TABLE daily_futures_screening ALTER COLUMN conviction_score SET NOT NULL"))
@@ -149,6 +157,46 @@ def _safe_float(v: Any) -> Optional[float]:
         return float(v)
     except (TypeError, ValueError):
         return None
+
+
+def _vwap_leg_score_reason(
+    price_vs_vwap_pct: Optional[float],
+    candle_is_green: bool = False,
+    candle_higher_high: bool = False,
+    candle_higher_low: bool = False,
+) -> Tuple[float, str]:
+    p = _safe_float(price_vs_vwap_pct)
+    if p is None:
+        return 12.0, "no_price_vs_vwap"
+    if p < -0.5:
+        return 5.0, "below_vwap_gt_0.5pct"
+    if p < 0:
+        return 15.0, "below_vwap_lt_0.5pct"
+    if 0 <= p <= 0.8:
+        return 30.0 + (p / 0.8) * 20.0, "sweet_spot_0_to_0.8"
+    trend_score = int(bool(candle_is_green)) + int(bool(candle_higher_high)) + int(bool(candle_higher_low))
+    if trend_score == 3:
+        return max(50.0 - min(p - 0.8, 3.0) * 2.0, 42.0), "above_0.8_all_three_trend"
+    if trend_score == 2:
+        return 35.0, "above_0.8_two_trend"
+    if trend_score == 1:
+        return 22.0, "above_0.8_one_trend"
+    return 12.0, "above_0.8_no_trend"
+
+
+def _vwap_proximity_score_0_50(
+    price_vs_vwap_pct: Optional[float],
+    candle_is_green: bool = False,
+    candle_higher_high: bool = False,
+    candle_higher_low: bool = False,
+) -> float:
+    score, _reason = _vwap_leg_score_reason(
+        price_vs_vwap_pct,
+        candle_is_green=candle_is_green,
+        candle_higher_high=candle_higher_high,
+        candle_higher_low=candle_higher_low,
+    )
+    return float(score)
 
 
 def _quote_session_vwap(snapshot: Dict[str, Any]) -> Optional[float]:
@@ -240,6 +288,40 @@ def _prev_15m_close_for_instrument(
     val = prev_candidates[-1] if prev_candidates else candles[-1][1]
     cache[ik] = float(val) if val and val > 0 else None
     return cache[ik]
+
+
+def _last_completed_15m_candles_for_instrument(
+    upstox: UpstoxService,
+    instrument_key: str,
+    session_date: date,
+    now_ist: datetime,
+) -> List[Dict[str, Any]]:
+    ik = str(instrument_key or "").strip()
+    if not ik:
+        return []
+    try:
+        raw = upstox.get_historical_candles_by_instrument_key(
+            ik, interval="minutes/15", days_back=3, range_end_date=session_date
+        ) or []
+    except Exception as e:
+        logger.debug("daily_futures: 15m candle fetch failed for %s: %s", ik, e)
+        return []
+
+    cutoff = _floor_ist_to_15m(now_ist)
+    out: List[Dict[str, Any]] = []
+    for c in raw:
+        ts = _parse_iso_ist(c.get("timestamp"))
+        if ts is None or ts.date() != session_date or ts >= cutoff:
+            continue
+        op = _safe_float(c.get("open"))
+        hi = _safe_float(c.get("high"))
+        lo = _safe_float(c.get("low"))
+        cl = _safe_float(c.get("close"))
+        if op is None or hi is None or lo is None or cl is None:
+            continue
+        out.append({"timestamp": ts, "open": op, "high": hi, "low": lo, "close": cl})
+    out.sort(key=lambda x: x["timestamp"])
+    return out[-5:]
 
 
 def _prev_close_from_snapshot(snapshot: Dict[str, Any]) -> Optional[float]:
@@ -766,11 +848,22 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
             )
             if not q:
                 logger.warning("daily_futures: quote snapshot missing for %s (%s)", u, ik)
+            last5_15m = _last_completed_15m_candles_for_instrument(upstox, ik, trade_date, ingest_now)
+            candle_is_green = False
+            candle_higher_high = False
+            candle_higher_low = False
+            if len(last5_15m) >= 2:
+                c_prev = last5_15m[-2]
+                c_last = last5_15m[-1]
+                candle_is_green = bool(float(c_last["close"]) > float(c_last["open"]))
+                candle_higher_high = bool(float(c_last["high"]) > float(c_prev["high"]))
+                candle_higher_low = bool(float(c_last["low"]) > float(c_prev["low"]))
             ex = conn.execute(
                 text(
                     """
                     SELECT id, scan_count, total_oi, second_scan_time,
-                           second_scan_conviction_score, second_scan_stock_change_pct, second_scan_nifty_change_pct
+                           second_scan_conviction_score, second_scan_stock_change_pct, second_scan_nifty_change_pct,
+                           candle_is_green, candle_higher_high, candle_higher_low
                     FROM daily_futures_screening
                     WHERE trade_date = CAST(:d AS DATE) AND UPPER(TRIM(underlying)) = :u
                     """
@@ -801,6 +894,9 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
                     "nifty_prev_close": nifty_prev_close,
                     "stock_change_pct": stock_change_pct,
                     "nifty_change_pct": nifty_change_pct,
+                    "candle_is_green": candle_is_green,
+                    "candle_higher_high": candle_higher_high,
+                    "candle_higher_low": candle_higher_low,
                     "lot_size": lot,
                     "future_symbol": row["future_symbol"],
                     "existing": ex,
@@ -824,12 +920,16 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
         n_rank = len(ranked)
 
         for x in scan_inputs:
-            vw = _vwap_proximity_score_0_50(
-                (
-                    ((x["ltp"] - x["session_vwap"]) / x["session_vwap"] * 100.0)
-                    if x.get("ltp") is not None and x.get("session_vwap") not in (None, 0)
-                    else None
-                )
+            pvp = (
+                ((x["ltp"] - x["session_vwap"]) / x["session_vwap"] * 100.0)
+                if x.get("ltp") is not None and x.get("session_vwap") not in (None, 0)
+                else None
+            )
+            vw, vw_reason = _vwap_leg_score_reason(
+                pvp,
+                candle_is_green=bool(x.get("candle_is_green")),
+                candle_higher_high=bool(x.get("candle_higher_high")),
+                candle_higher_low=bool(x.get("candle_higher_low")),
             )
             if id(x) in rank_map and n_rank > 1:
                 oi_leg = (n_rank - 1 - rank_map[id(x)]) / (n_rank - 1) * 50.0
@@ -841,6 +941,18 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
             x["conviction_oi_leg"] = round(oi_leg, 1)
             x["conviction_vwap_leg"] = round(vw, 1)
             x["conviction_score"] = conviction
+            x["conviction_breakdown_json"] = {
+                "oi_leg": round(oi_leg, 1),
+                "vwap_leg": round(vw, 1),
+                "vwap_leg_reason": vw_reason,
+                "price_vs_vwap_pct": round(float(pvp), 6) if pvp is not None else None,
+                "candle_is_green": bool(x.get("candle_is_green")),
+                "candle_higher_high": bool(x.get("candle_higher_high")),
+                "candle_higher_low": bool(x.get("candle_higher_low")),
+                "ltp": float(x["ltp"]) if x.get("ltp") is not None else None,
+                "session_vwap": float(x["session_vwap"]) if x.get("session_vwap") is not None else None,
+                "timestamp": ingest_now.isoformat(),
+            }
 
         for x in scan_inputs:
             u = x["underlying"]
@@ -852,6 +964,9 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
                 second_scan_conv = ex[4]
                 second_scan_stock = ex[5]
                 second_scan_nifty = ex[6]
+                row_candle_is_green = bool(ex[7]) if ex[7] is not None else bool(x.get("candle_is_green"))
+                row_candle_higher_high = bool(ex[8]) if ex[8] is not None else bool(x.get("candle_higher_high"))
+                row_candle_higher_low = bool(ex[9]) if ex[9] is not None else bool(x.get("candle_higher_low"))
                 next_scan_count = prior_scan_count + 1
                 if prior_scan_count < 1:
                     next_scan_count = 1
@@ -887,6 +1002,10 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
                           second_scan_conviction_score = :ssc,
                           second_scan_stock_change_pct = :ss_stock,
                           second_scan_nifty_change_pct = :ss_nifty,
+                          candle_is_green = :cig,
+                          candle_higher_high = :chh,
+                          candle_higher_low = :chl,
+                          conviction_breakdown_json = CAST(:cbj AS JSONB),
                           updated_at = CURRENT_TIMESTAMP
                         WHERE id = :id
                         """
@@ -915,6 +1034,10 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
                         "ssc": second_scan_conv,
                         "ss_stock": second_scan_stock,
                         "ss_nifty": second_scan_nifty,
+                        "cig": row_candle_is_green,
+                        "chh": row_candle_higher_high,
+                        "chl": row_candle_higher_low,
+                        "cbj": json.dumps(x.get("conviction_breakdown_json") or {}),
                     },
                 )
                 touched_ids.append(sid)
@@ -927,11 +1050,13 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
                           scan_count, first_hit_at, last_hit_at, conviction_score,
                           conviction_oi_leg, conviction_vwap_leg, ltp, session_vwap, total_oi, oi_change_pct,
                           nifty_ltp, nifty_session_vwap, stock_prev_close, nifty_prev_close,
-                          stock_change_pct, nifty_change_pct, snapshotted_at
+                          stock_change_pct, nifty_change_pct, snapshotted_at,
+                          candle_is_green, candle_higher_high, candle_higher_low, conviction_breakdown_json
                         ) VALUES (
                           CAST(:d AS DATE), :u, :fs, :ik, :lot, 1, :fh, :lh, :cs,
                           :oi_leg, :vw_leg, :ltp, :svwap, :toi, :oi_chg,
-                          :nltp, :nsvwap, :spc, :npc, :scp, :ncp, :snap
+                          :nltp, :nsvwap, :spc, :npc, :scp, :ncp, :snap,
+                          :cig, :chh, :chl, CAST(:cbj AS JSONB)
                         )
                         RETURNING id
                         """
@@ -958,6 +1083,10 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
                         "scp": x["stock_change_pct"],
                         "ncp": x["nifty_change_pct"],
                         "snap": ingest_now,
+                        "cig": bool(x.get("candle_is_green")),
+                        "chh": bool(x.get("candle_higher_high")),
+                        "chl": bool(x.get("candle_higher_low")),
+                        "cbj": json.dumps(x.get("conviction_breakdown_json") or {}),
                     },
                 ).fetchone()
                 touched_ids.append(int(r[0]))
@@ -1011,7 +1140,8 @@ def _fetch_screening_dicts(conn: Any, trade_date: date) -> List[Dict[str, Any]]:
             SELECT id, underlying, future_symbol, instrument_key, lot_size,
                    scan_count, first_hit_at, last_hit_at, conviction_score, ltp,
                    second_scan_time, second_scan_conviction_score, second_scan_stock_change_pct, second_scan_nifty_change_pct,
-                   stock_change_pct, nifty_change_pct
+                   stock_change_pct, nifty_change_pct,
+                   candle_is_green, candle_higher_high, candle_higher_low, conviction_breakdown_json
             FROM daily_futures_screening
             WHERE trade_date = CAST(:d AS DATE)
             ORDER BY conviction_score DESC NULLS LAST, underlying
@@ -1039,6 +1169,10 @@ def _fetch_screening_dicts(conn: Any, trade_date: date) -> List[Dict[str, Any]]:
                 "second_scan_nifty_change_pct": float(row[13]) if row[13] is not None else None,
                 "stock_change_pct": float(row[14]) if row[14] is not None else None,
                 "nifty_change_pct": float(row[15]) if row[15] is not None else None,
+                "candle_is_green": bool(row[16]) if row[16] is not None else None,
+                "candle_higher_high": bool(row[17]) if row[17] is not None else None,
+                "candle_higher_low": bool(row[18]) if row[18] is not None else None,
+                "conviction_breakdown_json": row[19] if row[19] is not None else None,
             }
         )
     return out
@@ -1413,7 +1547,9 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
         # Simplified order gate: scan_count >= 2 and conviction > 60 (see confirm_buy).
         if int(p.get("scan_count") or 0) < 2:
             reasons.append("Needs at least 2 scans")
-        c2 = p.get("conviction_score")
+        c2 = p.get("second_scan_conviction_score")
+        if c2 is None:
+            c2 = p.get("conviction_score")
         if c2 is None:
             reasons.append("Conviction unavailable")
         elif float(c2) <= 60.0:
@@ -1445,7 +1581,8 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
     row = db.execute(
         text(
             """
-            SELECT id, underlying, future_symbol, instrument_key, lot_size, scan_count, conviction_score
+            SELECT id, underlying, future_symbol, instrument_key, lot_size, scan_count,
+                   conviction_score, second_scan_conviction_score
             FROM daily_futures_screening WHERE id = :sid AND trade_date = CAST(:d AS DATE)
             """
         ),
@@ -1455,7 +1592,8 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
         raise ValueError("Screening row not found for today")
     if int(row[5] or 0) < 2:
         raise ValueError("Needs at least 2 consecutive scans before order")
-    c2 = float(row[6]) if row[6] is not None else None
+    gate_score = row[7] if row[7] is not None else row[6]
+    c2 = float(gate_score) if gate_score is not None else None
     if c2 is None or c2 <= 60.0:
         raise ValueError(
             f"Conviction must be above 60 (current: {round(c2 or 0.0, 1)})"
