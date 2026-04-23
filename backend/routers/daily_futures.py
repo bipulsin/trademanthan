@@ -16,6 +16,7 @@ from backend.routers.auth import get_user_from_token, oauth2_scheme
 from backend.services.daily_futures_service import (
     confirm_buy,
     confirm_sell,
+    get_conviction_breakdown_debug,
     get_workspace,
     normalize_symbols_from_payload,
     process_chartink_webhook,
@@ -74,6 +75,23 @@ def daily_futures_sell(
         return confirm_sell(db, user.id, body.trade_id, body.exit_time, body.exit_price)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/debug/conviction-breakdown")
+def daily_futures_conviction_breakdown(
+    future_symbol: str,
+    trade_date: Optional[str] = None,
+    _user: User = Depends(_auth_user),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Debug helper: fetch latest conviction/candle breakdown row for one future symbol on a date.
+    Defaults to today's IST date when trade_date is omitted.
+    """
+    try:
+        return get_conviction_breakdown_debug(db, future_symbol=future_symbol, trade_date=trade_date)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.post("/webhook/chartink")

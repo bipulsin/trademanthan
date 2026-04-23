@@ -1687,6 +1687,45 @@ def confirm_sell(db: Session, user_id: int, trade_id: int, exit_time: str, exit_
     return {"success": True, "pnl_points": pts, "pnl_rupees": pnl_rs}
 
 
+def get_conviction_breakdown_debug(
+    db: Session,
+    future_symbol: str,
+    trade_date: Optional[str] = None,
+) -> Dict[str, Any]:
+    ensure_daily_futures_tables()
+    td = trade_date or str(ist_today())
+    row = db.execute(
+        text(
+            """
+            SELECT id, trade_date, underlying, future_symbol, instrument_key,
+                   conviction_score, second_scan_conviction_score,
+                   conviction_oi_leg, conviction_vwap_leg,
+                   candle_is_green, candle_higher_high, candle_higher_low,
+                   conviction_breakdown_json, updated_at
+            FROM daily_futures_screening
+            WHERE trade_date = CAST(:td AS DATE)
+              AND UPPER(TRIM(future_symbol)) = :fs
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ),
+        {"td": td, "fs": str(future_symbol or "").strip().upper()},
+    ).mappings().first()
+    if not row:
+        raise ValueError(f"No screening row found for {future_symbol!r} on {td}")
+
+    out = dict(row)
+    for k in ("trade_date", "updated_at"):
+        v = out.get(k)
+        if v is not None and hasattr(v, "isoformat"):
+            out[k] = v.isoformat()
+    for k in ("conviction_score", "second_scan_conviction_score", "conviction_oi_leg", "conviction_vwap_leg"):
+        v = out.get(k)
+        if v is not None:
+            out[k] = float(v)
+    return out
+
+
 def webhook_secret_ok(provided: Optional[str]) -> bool:
     default_secret = "tradewithctodailyfuture"
     expected = (os.getenv("CHARTINK_DAILY_FUTURES_SECRET") or default_secret).strip()
