@@ -634,8 +634,8 @@ def _build_trade_if_could_rows(
             row["pnl_scan_rupees"] = round((float(pnl_ref_ltp) - entry_ltp) * qty_num, 2)
 
         ltp_1515 = _ltp_asof_ist(candles, close_1515)
-        if ltp_1515 is None and now_ist >= close_1515:
-            # Some symbols may not return a clean 15:15 candle; avoid blank post-15:15.
+        if ltp_1515 is None:
+            # Avoid blank 15:15 projection when historical candle fetch is incomplete.
             ltp_1515 = row.get("current_ltp") if row.get("current_ltp") is not None else scan_ltp
         row["exit_1515_ltp"] = ltp_1515
         if entry_ltp is not None and ltp_1515 is not None and qty_num is not None:
@@ -1458,7 +1458,8 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
         text(
             """
             SELECT t.id, t.screening_id, t.underlying, t.future_symbol, t.instrument_key, t.lot_size,
-                   t.entry_time, t.entry_price, t.exit_time, t.exit_price, t.pnl_points, t.pnl_rupees
+                   t.entry_time, t.entry_price, t.exit_time, t.exit_price, t.pnl_points, t.pnl_rupees,
+                   s.ltp
             FROM daily_futures_user_trade t
             JOIN daily_futures_screening s ON s.id = t.screening_id
             WHERE t.user_id = :u
@@ -1503,6 +1504,7 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
                 "exit_price": float(row[9]) if row[9] is not None else None,
                 "pnl_points": pnl_pts,
                 "pnl_rupees": pnl_rs,
+                "ltp": float(row[12]) if row[12] is not None else None,
                 "win_loss": wl,
             }
         )
