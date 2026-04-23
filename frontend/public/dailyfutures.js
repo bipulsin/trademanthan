@@ -468,7 +468,7 @@
       return;
     }
     const th =
-      '<thead><tr><th>Future</th><th class="num">Qty</th><th>1st scan</th><th>Entry time (+5m)</th><th class="num">Entry LTP</th><th>Exit (time of scan)</th><th class="num">Current LTP</th><th class="num">PnL Currnt</th><th>Exit 15:15</th><th class="num">LTP 15:15</th><th class="num">PnL 15:15</th></tr></thead>';
+      '<thead><tr><th>Future</th><th class="num">Qty</th><th>1st scan</th><th>2nd scan</th><th>Entry (2nd+5m)</th><th class="num">Entry LTP</th><th>Exit (time of scan)</th><th class="num">Current LTP</th><th class="num">PnL Currnt</th><th>Exit 15:15</th><th class="num">LTP 15:15</th><th class="num">PnL 15:15</th></tr></thead>';
     const body = rows
       .map(function (r) {
         const pScan = Number(r.pnl_scan_rupees);
@@ -482,6 +482,8 @@
           esc(r.qty) +
           '</td><td>' +
           esc(r.first_scan_time) +
+          '</td><td>' +
+          (r.second_scan_hm != null && r.second_scan_hm !== '' ? esc(r.second_scan_hm) : '—') +
           '</td><td>' +
           esc(r.entry_time) +
           '</td><td class="num">' +

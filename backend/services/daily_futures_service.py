@@ -477,7 +477,12 @@ def _build_trade_if_could_rows(
             continue
         last_hit = _parse_iso_ist(p.get("last_hit_at")) or first_hit
         last_hit_slot = _floor_to_15m_ist(last_hit)
-        entry_dt = first_hit + timedelta(minutes=5)
+        second_hit = _parse_iso_ist(p.get("second_scan_time"))
+        # Per product spec: entry = second scan time + 5 minutes (not first scan + 5m).
+        if second_hit:
+            entry_dt = second_hit + timedelta(minutes=5)
+        else:
+            entry_dt = first_hit + timedelta(minutes=5)
         ikey = (p.get("instrument_key") or "").strip()
         candles = _fetch_intraday_1m_cached(upstox, ikey, trade_date)
         entry_ltp = _ltp_asof_ist(candles, entry_dt)
@@ -504,6 +509,7 @@ def _build_trade_if_could_rows(
             "instrument_key": ikey,
             "qty": int(qty_num) if qty_num is not None else None,
             "first_scan_time": _fmt_hm(first_hit),
+            "second_scan_hm": _fmt_hm(second_hit) if second_hit else None,
             "entry_time": _fmt_hm(entry_dt),
             "entry_ltp": entry_ltp,
             "exit_scan_time": _fmt_hm(last_hit_slot),
