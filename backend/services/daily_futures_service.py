@@ -1460,6 +1460,7 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
             """
             SELECT t.id, t.screening_id, t.underlying, t.future_symbol, t.instrument_key, t.lot_size,
                    t.entry_time, t.entry_price, t.exit_time, t.exit_price, t.pnl_points, t.pnl_rupees,
+                   s.first_hit_at,
                    s.ltp
             FROM daily_futures_user_trade t
             JOIN daily_futures_screening s ON s.id = t.screening_id
@@ -1505,7 +1506,8 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
                 "exit_price": float(row[9]) if row[9] is not None else None,
                 "pnl_points": pnl_pts,
                 "pnl_rupees": pnl_rs,
-                "ltp": float(row[12]) if row[12] is not None else None,
+                "first_scan_time": row[12].isoformat() if row[12] is not None and hasattr(row[12], "isoformat") else None,
+                "ltp": float(row[13]) if row[13] is not None else None,
                 "win_loss": wl,
             }
         )

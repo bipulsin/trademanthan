@@ -346,7 +346,7 @@
       return;
     }
     const th =
-      '<thead><tr><th>Future</th><th>Qty</th><th>Entry</th><th class="num">Entry ₹</th><th>Exit</th><th class="num">Exit ₹</th><th class="num">PnL ₹</th><th>Win/Loss</th></tr></thead>';
+      '<thead><tr><th>Future</th><th>Qty</th><th>1st scan</th><th>Entry</th><th class="num">Entry ₹</th><th>Exit</th><th class="num">Exit ₹</th><th class="num">PnL ₹</th><th>Win/Loss</th></tr></thead>';
     const body = rows
       .map(function (r) {
         const wl = r.win_loss || '—';
@@ -366,6 +366,8 @@
           esc(r.future_symbol || r.underlying) +
           '</strong></td><td class="num">' +
           esc(r.lot_size) +
+          '</td><td>' +
+          fmtIsoTimeIst(r.first_scan_time) +
           '</td><td>' +
           esc(r.entry_time) +
           '</td><td class="num">' +
