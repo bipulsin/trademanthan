@@ -127,22 +127,15 @@
       return '<span class="df-rs">—</span>';
     }
     const strong = fs >= fn;
-    const a = (fs >= 0 ? '+' : '') + fs.toFixed(2) + '%';
-    const b = (fn >= 0 ? '+' : '') + fn.toFixed(2) + '%';
     const sp = (spread >= 0 ? '+' : '') + spread.toFixed(2) + '%';
     return (
       '<span class="df-rs ' + (strong ? 'df-rs-strong' : 'df-rs-weak') + '" ' +
       'title="Relative strength: future day % minus Nifty 50 day % = ' +
       esc(sp) +
-      '. S = stock future, N = Nifty. Green when FUT ≥ Nifty.">' +
+      '. Green when FUT ≥ Nifty.">' +
       '<span class="df-rs-spread" style="font-weight:600;">' +
       esc(sp) +
-      '</span> ' +
-      '<span style="opacity:0.7;font-size:0.8em;">(S ' +
-      esc(a) +
-      ' · N ' +
-      esc(b) +
-      ')</span></span>'
+      '</span></span>'
     );
   }
 
@@ -219,11 +212,15 @@
         const reason = Number(r.scan_count || 0) < 2
           ? 'Needs at least 2 scans'
           : (!Number.isFinite(gateScore) ? 'Conviction unavailable' : ('Conviction ' + gateScore.toFixed(1) + ' is not above 60'));
-        let convTxt = (r.conviction_score == null ? '—' : fmtNum(r.conviction_score, 1));
+        let convTxt = (r.conviction_score == null ? '—' : '<span class="df-score-live">' + fmtNum(r.conviction_score, 1) + ' (L)</span>');
         const secondConv = (r.second_scan_conviction_score == null ? null : Number(r.second_scan_conviction_score));
         const liveConv = (r.conviction_score == null ? null : Number(r.conviction_score));
-        if (Number.isFinite(secondConv) && Number.isFinite(liveConv) && Math.abs(secondConv - liveConv) > 1e-9) {
-          convTxt = fmtNum(liveConv, 1) + ' (live) | ' + fmtNum(secondConv, 1) + ' (entry)';
+        if (Number.isFinite(secondConv)) {
+          if (Number.isFinite(liveConv)) {
+            convTxt = '<span class="df-score-entry">' + fmtNum(secondConv, 1) + ' (E)</span> | <span class="df-score-live">' + fmtNum(liveConv, 1) + ' (L)</span>';
+          } else {
+            convTxt = '<span class="df-score-entry">' + fmtNum(secondConv, 1) + ' (E)</span>';
+          }
         }
         return (
           '<tr><td><strong>' +
@@ -235,9 +232,9 @@
           '</td><td class="num">' +
           esc(r.scan_count) +
           '</td><td>' +
-          fmtIso(r.first_hit_at) +
+          fmtIsoTimeIst(r.first_hit_at) +
           '</td><td>' +
-          fmtIso(r.last_hit_at) +
+          fmtIsoTimeIst(r.last_hit_at) +
           '</td><td class="num">' +
           convTxt +
           '</td><td class="df-rs-cell">' +

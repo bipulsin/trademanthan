@@ -48,6 +48,13 @@
         .df-rs { font-size: 0.78rem; line-height: 1.35; font-weight: 600; white-space: nowrap; }
         .df-rs-strong { color: #15803d; }
         .df-rs-weak { color: #b45309; }
+        .df-score-entry { color: #fde047; font-weight: 700; }
+        .df-score-live { color: var(--theme-text, #0f172a); font-weight: 600; }
+        body.light-theme .df-score-entry,
+        body.theme-light .df-score-entry,
+        html.light-theme .df-score-entry {
+            color: #1d4ed8;
+        }
         table.df-table th.df-th-rs, table.df-table td.df-rs-cell { text-align: right; min-width: 7.5rem; }
         .df-wl-win { color: #16a34a; font-weight: 700; }
         .df-wl-loss { color: #b91c1c; font-weight: 700; }
@@ -153,6 +160,6 @@
     </div>
 
     <script src="left-menu.js?v=3.20"></script>
-    <script src="dailyfutures.js?v=17"></script>
+    <script src="dailyfutures.js?v=18"></script>
 </body>
 </html>
