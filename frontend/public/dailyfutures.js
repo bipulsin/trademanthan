@@ -12,6 +12,7 @@
     return {
       Authorization: 'Bearer ' + t,
       'Content-Type': 'application/json',
+      Accept: 'application/json',
     };
   }
 
@@ -163,16 +164,30 @@
           cache: 'no-store',
           signal: ac ? ac.signal : undefined,
         });
+        const raw = await res.text();
+        const ct = (res.headers.get('content-type') || '').toLowerCase();
+        const looksJson =
+          ct.includes('application/json') || /^\s*[\[{]/.test(raw.slice(0, 30));
         if (res.status === 401) {
           window.location.replace('index.html');
           return null;
         }
         if (!res.ok) {
-          const t = await res.text();
-          lastErr = new Error(t.slice(0, 200) || res.status);
+          lastErr = new Error(raw.slice(0, 200) || res.status);
           continue;
         }
-        return await res.json();
+        if (!looksJson) {
+          lastErr = new Error(
+            'Server returned a web page instead of JSON. The API may be mis-routed. Try signing in again or use /api path.'
+          );
+          continue;
+        }
+        try {
+          return JSON.parse(raw);
+        } catch (pe) {
+          lastErr = new Error('Invalid JSON from workspace: ' + (pe.message || pe));
+          continue;
+        }
       } catch (e) {
         if (e && e.name === 'AbortError') {
           lastErr = new Error('Workspace request timed out');
