@@ -449,6 +449,12 @@ def _apply_exit_alerts_to_running(
             r["exit_review"] = bool(r.get("trail_stop_hit")) or (
                 bool(r.get("nifty_structure_weakening")) and bool(r.get("momentum_exhausting"))
             )
+            r["alert_strip"] = {
+                "l1": "nifty_ok",
+                "l2": "building",
+                "l3": "strong",
+                "decision": "hold",
+            }
         return
 
     nifty_cands: List[Dict[str, Any]] = []
@@ -519,6 +525,33 @@ def _apply_exit_alerts_to_running(
         merged_hit = old_hit or new_hit
 
         exit_review = bool(merged_hit or (merged_n and merged_m))
+
+        # 15-min alert strip (live L1/L3 from same Nifty + stock 15m data; L2 from trail state)
+        l1_amber = bool(
+            len(nifty_cands) >= 2
+            and float(nifty_cands[-1]["low"]) < float(nifty_cands[-2]["low"])
+        )
+        l3_fading = bool(new_m)
+        if merged_hit:
+            l2k = "hit"
+        elif merged_armed:
+            l2k = "active"
+        else:
+            l2k = "building"
+        if merged_hit:
+            as_dec = "lock_profit"
+        elif l1_amber and l3_fading:
+            as_dec = "dual_exit"
+        elif l1_amber or l3_fading:
+            as_dec = "watch"
+        else:
+            as_dec = "hold"
+        r["alert_strip"] = {
+            "l1": "nifty_lower_low" if l1_amber else "nifty_ok",
+            "l2": l2k,
+            "l3": "fading" if l3_fading else "strong",
+            "decision": as_dec,
+        }
 
         try:
             db.execute(
@@ -1823,6 +1856,12 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
             r["exit_review"] = bool(r.get("trail_stop_hit")) or (
                 bool(r.get("nifty_structure_weakening")) and bool(r.get("momentum_exhausting"))
             )
+            r["alert_strip"] = {
+                "l1": "nifty_ok",
+                "l2": "building",
+                "l3": "strong",
+                "decision": "hold",
+            }
 
     for p in picks:
         reasons: List[str] = []

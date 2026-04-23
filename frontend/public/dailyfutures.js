@@ -145,7 +145,114 @@
     sellTradeId: null,
     /** @type {Record<number, number>} trade_id -> bit mask of active exit alerts (1=nifty,2=trail,4=momo) */
     prevRunAlertBits: {},
+    /** @type {Record<number, string>} trade_id -> last 15m strip decision (lock_profit, dual_exit, watch, hold) */
+    prevStripDecisionByTid: {},
   };
+
+  /** @param {string} kind  'lock_profit' | 'dual_exit' */
+  function playStrip15mBeep(kind) {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = new Ctx();
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.connect(g);
+      g.connect(ctx.destination);
+      o.frequency.value = kind === 'dual_exit' ? 520 : 1100;
+      o.type = 'sine';
+      g.gain.setValueAtTime(0.12, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.18);
+      o.start();
+      o.stop(ctx.currentTime + 0.18);
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  function updateStrip15mDecisionAudio(rows) {
+    if (!rows || !rows.length) return;
+    rows.forEach(function (r) {
+      var tid = r.trade_id;
+      if (tid == null) return;
+      var s = (r.alert_strip && r.alert_strip.decision) || 'hold';
+      var prev = state.prevStripDecisionByTid[tid];
+      if (
+        prev !== undefined &&
+        prev !== s &&
+        (s === 'lock_profit' || s === 'dual_exit')
+      ) {
+        playStrip15mBeep(s);
+      }
+      state.prevStripDecisionByTid[tid] = s;
+    });
+  }
+
+  function stripL1Cell(st) {
+    if (st && st.l1 === 'nifty_lower_low') {
+      return '<span class="df-s-cell df-s-amb">Nifty lower-low</span>';
+    }
+    return '<span class="df-s-cell df-s-ok">Nifty OK</span>';
+  }
+
+  function stripL2Cell(st) {
+    var k = (st && st.l2) || 'building';
+    if (k === 'hit') return '<span class="df-s-cell df-s-neg">Trail hit</span>';
+    if (k === 'active') return '<span class="df-s-cell df-s-teal">Trail active</span>';
+    return '<span class="df-s-cell df-s-muted">Building</span>';
+  }
+
+  function stripL3Cell(st) {
+    if (st && st.l3 === 'fading') {
+      return '<span class="df-s-cell df-s-amb">Fading</span>';
+    }
+    return '<span class="df-s-cell df-s-ok">Strong</span>';
+  }
+
+  function stripDecisionCell(st) {
+    var d = (st && st.decision) || 'hold';
+    if (d === 'lock_profit') {
+      return '<span class="df-s-cell df-s-neg df-s-decis">LOCK PROFIT — EXIT</span>';
+    }
+    if (d === 'dual_exit') {
+      return '<span class="df-s-cell df-s-neg df-s-decis">REVIEW EXIT — dual confirm</span>';
+    }
+    if (d === 'watch') {
+      return '<span class="df-s-cell df-s-amb df-s-decis">WATCH</span>';
+    }
+    return '<span class="df-s-cell df-s-ok df-s-decis">HOLD</span>';
+  }
+
+  function render15mAlertStrip(rows) {
+    const el = document.getElementById('dfAlertStrip15m');
+    if (!el) return;
+    if (!rows || !rows.length) {
+      el.innerHTML = '<p class="df-s-empty">No open positions.</p>';
+      return;
+    }
+    const th =
+      '<thead><tr><th>Position</th><th class="df-s-c">L1 Nifty</th><th class="df-s-c">L2 Trail</th><th class="df-s-c">L3 Mom</th><th class="df-s-c">Decision</th></tr></thead>';
+    const body = rows
+      .map(function (r) {
+        const st = r.alert_strip || {};
+        return (
+          '<tr class="df-s-tr"><td class="df-s-sym"><strong>' +
+          esc(r.future_symbol || r.underlying) +
+          '</strong></td><td class="df-s-c">' +
+          stripL1Cell(st) +
+          '</td><td class="df-s-c">' +
+          stripL2Cell(st) +
+          '</td><td class="df-s-c">' +
+          stripL3Cell(st) +
+          '</td><td class="df-s-c">' +
+          stripDecisionCell(st) +
+          '</td></tr>'
+        );
+      })
+      .join('');
+    el.innerHTML = '<table class="df-s-table" role="presentation">' + th + '<tbody>' + body + '</tbody></table>';
+    updateStrip15mDecisionAudio(rows);
+  }
 
   function playExitAlertBeep() {
     try {
@@ -728,15 +835,16 @@
               'Daily Futures shows the current IST session from 09:00 onward.') +
             ' Session date: ' +
             (data.trade_date || '—') +
-            ' · Auto-refresh every 15 min';
+            ' · Auto-refresh every 120 s';
         } else {
           b.textContent =
             'Session date (IST): ' +
             (data.trade_date || '—') +
-            ' · Data for this IST session only · Auto-refresh every 15 min';
+            ' · Data for this IST session only · Auto-refresh every 120 s';
         }
       }
       renderPicks(data.picks || []);
+      render15mAlertStrip(data.running || []);
       renderRunning(data.running || []);
       renderClosed(data.closed || [], data.summary);
       renderWhatIfContinuing(data.closed || []);
@@ -758,6 +866,6 @@
   document.addEventListener('DOMContentLoaded', function () {
     bindModals();
     refresh();
-    setInterval(refresh, 15 * 60 * 1000);
+    setInterval(refresh, 120 * 1000);
   });
 })();

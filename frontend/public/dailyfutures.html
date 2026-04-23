@@ -77,6 +77,22 @@
         .df-btn-review:hover { filter: brightness(1.05); }
         .df-run-action-btns { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; }
         table.df-table th.df-alerts-cell, table.df-table td.df-alerts-cell { min-width: 9rem; vertical-align: top; }
+        .df-strip-meta { margin: 0 0 8px; font-size: 0.78rem; color: var(--theme-muted, #64748b); }
+        .df-strip-body { overflow-x: auto; }
+        table.df-s-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+        table.df-s-table th, table.df-s-table td { border-bottom: 1px solid var(--theme-border, #e2e8f0); padding: 5px 4px; text-align: left; vertical-align: middle; }
+        table.df-s-table th { color: var(--theme-muted, #64748b); font-weight: 600; }
+        table.df-s-table th.df-s-c, table.df-s-table td.df-s-c { text-align: center; white-space: nowrap; }
+        .df-s-sym { min-width: 6rem; }
+        .df-s-cell { display: inline-block; font-weight: 600; padding: 1px 5px; border-radius: 4px; }
+        .df-s-ok { color: #15803d; background: rgba(22, 163, 74, 0.12); }
+        .df-s-amb { color: #a16207; background: rgba(250, 204, 21, 0.2); }
+        .df-s-neg { color: #b91c1c; background: rgba(248, 113, 113, 0.18); }
+        .df-s-teal { color: #0f766e; background: rgba(45, 212, 191, 0.2); }
+        .df-s-muted { color: var(--theme-muted, #64748b); background: var(--theme-border, #e2e8f0); }
+        .df-s-decis { font-size: 0.76rem; letter-spacing: 0.01em; }
+        .df-s-tr:last-child td { border-bottom: none; }
+        .df-s-empty { margin: 0; font-size: 0.82rem; color: var(--theme-muted, #64748b); }
     </style>
 </head>
 <body class="theme-page">
@@ -103,6 +119,12 @@
                 <div class="df-card">
                     <h2><i class="fas fa-star"></i> Today&apos;s pick</h2>
                     <div id="dfPicksTable"></div>
+                </div>
+
+                <div class="df-card df-strip-card">
+                    <h2><i class="fas fa-bell"></i> 15-min Alert Strip</h2>
+                    <p class="df-strip-meta">Updates with workspace poll (120s). Nifty &amp; stock 15m logic from server.</p>
+                    <div id="dfAlertStrip15m" class="df-strip-body"></div>
                 </div>
 
                 <div class="df-card">
@@ -169,6 +191,6 @@
     </div>
 
     <script src="left-menu.js?v=3.20"></script>
-    <script src="dailyfutures.js?v=20"></script>
+    <script src="dailyfutures.js?v=21"></script>
 </body>
 </html>
