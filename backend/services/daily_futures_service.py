@@ -1388,6 +1388,7 @@ def _apply_live_rel_strength_to_picks_and_running(
 def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
     ensure_daily_futures_tables()
     td = ist_today()
+    now_ist = datetime.now(IST)
     if not is_daily_futures_session_open_ist():
         return _empty_daily_futures_workspace(td, session_before_open=True)
 
@@ -1538,6 +1539,27 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
         _apply_live_ltps_to_picks_and_running(picks, running, closed)
     except Exception as e:
         logger.warning("daily_futures: live LTP refresh failed: %s", e, exc_info=True)
+
+    # For What-If continuing: after session close, treat current LTP as 15:15 close.
+    if closed and now_ist.time() >= dt_time(15, 15):
+        close_1515 = IST.localize(datetime.combine(td, datetime.min.time()).replace(hour=15, minute=15))
+        candles_cache: Dict[str, List[Dict[str, Any]]] = {}
+        try:
+            upstox_1515 = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+        except Exception as e:
+            logger.warning("daily_futures: 15:15 LTP override init failed: %s", e)
+            upstox_1515 = None
+        if upstox_1515 is not None:
+            for r in closed:
+                ik = str(r.get("instrument_key") or "").strip()
+                if not ik:
+                    continue
+                if ik not in candles_cache:
+                    candles_cache[ik] = _fetch_intraday_1m_cached(upstox_1515, ik, td)
+                cset = candles_cache.get(ik) or []
+                ltp_1515 = _ltp_asof_ist(cset, close_1515)
+                if ltp_1515 is not None:
+                    r["ltp"] = ltp_1515
 
     try:
         _apply_live_rel_strength_to_picks_and_running(picks, running, td)
