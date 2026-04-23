@@ -449,6 +449,20 @@ def _ltp_asof_ist(candles: List[Dict[str, Any]], target_dt_ist: datetime) -> Opt
     return round(float(best_close), 4) if best_close is not None else None
 
 
+def _second_scan_consecutive_15m_ist(first_hit: datetime, second_hit: datetime) -> bool:
+    """
+    True if the 2nd screening webhook lands on the next ~15m run after the 1st
+    (one cadence, not a later catch-up after a miss).
+    """
+    a = first_hit.astimezone(IST) if first_hit.tzinfo else IST.localize(first_hit)
+    b = second_hit.astimezone(IST) if second_hit.tzinfo else IST.localize(second_hit)
+    delta = (b - a).total_seconds()
+    if delta <= 0:
+        return False
+    # One ~15m ChartInk step: 8–32 min slack; wider gaps imply a missed intermediate run
+    return 8 * 60 <= delta <= 32 * 60
+
+
 def _build_trade_if_could_rows(
     picks: List[Dict[str, Any]],
     closed: List[Dict[str, Any]],
@@ -478,11 +492,12 @@ def _build_trade_if_could_rows(
         last_hit = _parse_iso_ist(p.get("last_hit_at")) or first_hit
         last_hit_slot = _floor_to_15m_ist(last_hit)
         second_hit = _parse_iso_ist(p.get("second_scan_time"))
-        # Per product spec: entry = second scan time + 5 minutes (not first scan + 5m).
-        if second_hit:
-            entry_dt = second_hit + timedelta(minutes=5)
-        else:
-            entry_dt = first_hit + timedelta(minutes=5)
+        # Only symbols with a 2nd scan on the immediate next ~15m run (see webhook cadence).
+        if not second_hit:
+            continue
+        if not _second_scan_consecutive_15m_ist(first_hit, second_hit):
+            continue
+        entry_dt = second_hit + timedelta(minutes=5)
         ikey = (p.get("instrument_key") or "").strip()
         candles = _fetch_intraday_1m_cached(upstox, ikey, trade_date)
         entry_ltp = _ltp_asof_ist(candles, entry_dt)
