@@ -1902,6 +1902,13 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
         [s for s in screenings if int(s.get("screening_id") or 0) in bought_sids]
     )
     picks = [s for s in screenings if s["screening_id"] not in bought_sids]
+    # Today's pick should surface only symbols with sufficient LIVE conviction.
+    # A symbol appears automatically once live conviction reaches the threshold.
+    picks = [
+        s
+        for s in picks
+        if s.get("conviction_score") is not None and float(s.get("conviction_score")) >= 50.0
+    ]
     picks_before_closed_filter = list(picks)
 
     running_rows = db.execute(
