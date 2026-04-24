@@ -61,13 +61,24 @@
   }
 
   function rowUnrealizedPnlRupees(r) {
-    if (!r || r.ltp == null || r.ltp === '' || r.entry_price == null || r.entry_price === '' || r.lot_size == null || r.lot_size === '') {
+    if (!r || r.ltp == null || r.lot_size == null || r.lot_size === '') {
       return null;
     }
     const ltp = Number(r.ltp);
-    const ep = Number(r.entry_price);
     const qty = Number(r.lot_size);
-    if (!Number.isFinite(ltp) || !Number.isFinite(ep) || !Number.isFinite(qty)) return null;
+    if (!Number.isFinite(ltp) || !Number.isFinite(qty)) return null;
+    const isShort = String(r.direction_type || '').toUpperCase() === 'SHORT';
+    if (isShort) {
+      if (r.sell_price == null || r.sell_price === '') return null;
+      const sp = Number(r.sell_price);
+      if (!Number.isFinite(sp)) return null;
+      return (sp - ltp) * qty;
+    }
+    if (r.entry_price == null || r.entry_price === '') {
+      return null;
+    }
+    const ep = Number(r.entry_price);
+    if (!Number.isFinite(ep)) return null;
     return (ltp - ep) * qty;
   }
 
@@ -365,25 +376,34 @@
   }
 
   function runningExitBadges(r) {
+    var isShort = String(r.direction_type || '').toUpperCase() === 'SHORT';
     var parts = [];
     if (r.drawdown_15atr_breach) {
       parts.push(
-        '<span class="df-exit-badge df-exit-dd" title="LTP is below entry by at least 1.5× 15m ATR; profit trail was never in play for this.">⛔ Drawdown (≥1.5×ATR)</span>',
+        isShort
+          ? '<span class="df-exit-badge df-exit-dd" title="Short: LTP is above your sell (entry) by at least 1.5× 15m ATR; profit trail was never in play.">⛔ Drawdown (≥1.5×ATR)</span>'
+          : '<span class="df-exit-badge df-exit-dd" title="LTP is below entry by at least 1.5× 15m ATR; profit trail was never in play for this.">⛔ Drawdown (≥1.5×ATR)</span>',
       );
     }
     if (r.nifty_structure_weakening) {
       parts.push(
-        '<span class="df-exit-badge df-exit-nifty" title="Nifty 15m: current bar low &lt; previous bar low; position &gt; 45 min">⚠ Index Weakening</span>',
+        isShort
+          ? '<span class="df-exit-badge df-exit-nifty" title="Short: Nifty 15m close-to-close moved against the short (e.g. strong up leg); position &gt; 45 min">⚠ Index vs short</span>'
+          : '<span class="df-exit-badge df-exit-nifty" title="Nifty 15m: current bar low &lt; previous bar low; position &gt; 45 min">⚠ Index Weakening</span>',
       );
     }
     if (r.trail_stop_hit) {
       parts.push(
-        '<span class="df-exit-badge df-exit-trail" title="Price fell below entry + 0.8×ATR after profit trail was armed">🔴 Lock Profit</span>',
+        isShort
+          ? '<span class="df-exit-badge df-exit-trail" title="Short: price rose to within 0.8×ATR of your sell after trail was armed">🔴 Lock Profit</span>'
+          : '<span class="df-exit-badge df-exit-trail" title="Price fell below entry + 0.8×ATR after profit trail was armed">🔴 Lock Profit</span>',
       );
     }
     if (r.momentum_exhausting) {
       parts.push(
-        '<span class="df-exit-badge df-exit-momo" title="Weaker body and weak close in latest 15m">📉 Momentum Fading</span>',
+        isShort
+          ? '<span class="df-exit-badge df-exit-momo" title="Short: 15m bounce / fade pattern in stock">📈 Momentum vs short</span>'
+          : '<span class="df-exit-badge df-exit-momo" title="Weaker body and weak close in latest 15m">📉 Momentum Fading</span>',
       );
     }
     if (!parts.length) return '—';
@@ -478,7 +498,8 @@
   }
 
   function renderAll(data) {
-    renderPicks(data);
+    renderPicksBullish(data);
+    renderPicksBearish(data);
     render15mAlertStrip(data.running || []);
     renderRunning(data.running || []);
     renderClosed(data.closed || [], data.summary);
@@ -486,7 +507,7 @@
     renderTradeIfCouldHaveDone(data.trade_if_could_have_done || []);
   }
 
-  function renderPicks(data) {
+  function renderPicksBullish(data) {
     const el = document.getElementById('dfPicksTable');
     if (!el) return;
     const picks = (data && data.picks) || [];
@@ -519,7 +540,7 @@
           scn +
           '</strong> symbol' +
           (scn === 1 ? '' : 's') +
-          ' for today, but <strong>Today&rsquo;s pick</strong> is empty: ' +
+          ' for today, but <strong>Today&rsquo;s pick (Bullish)</strong> is empty: ' +
           parts.join(' and ') +
           '.</p>';
         return;
@@ -533,11 +554,8 @@
       '<th class="num">LTP</th><th></th></tr></thead>';
     const body = picks
       .map(function (r) {
-        const gateScore = r.second_scan_conviction_score != null ? Number(r.second_scan_conviction_score) : Number(r.conviction_score);
-        const eligible = Number(r.scan_count || 0) >= 2 && Number.isFinite(gateScore) && gateScore > 60;
-        const reason = Number(r.scan_count || 0) < 2
-          ? 'Needs at least 2 scans'
-          : (!Number.isFinite(gateScore) ? 'Conviction unavailable' : ('Conviction ' + gateScore.toFixed(1) + ' is not above 60'));
+        const eligible = r.order_eligible === true;
+        const reason = r.order_block_reason || 'Not eligible to enter';
         const convTxt = formatConvictionEntryLive(r);
         return (
           '<tr><td><strong>' +
@@ -570,7 +588,80 @@
         if (btn.disabled) return;
         const sid = parseInt(btn.getAttribute('data-sid'), 10);
         const row = picks.find(function (p) { return p.screening_id === sid; });
-        openBuyModal(sid, row);
+        openBuyModal(sid, row, false);
+      });
+    });
+  }
+
+  function renderPicksBearish(data) {
+    const el = document.getElementById('dfPicksBearTable');
+    const hint = document.getElementById('dfBearishGateLine');
+    if (!el) return;
+    const gate = (data && data.index_bearish_gate) || {};
+    if (hint) {
+      if (gate && gate.ok === false) {
+        hint.innerHTML =
+          'Bearish list is shown only when <strong>NIFTY</strong> and <strong>BANKNIFTY</strong> are both below the day open. ' +
+          'Nifty: ' +
+          (gate.nifty_ok === true ? 'OK' : gate.nifty_ok === false ? 'not below open' : '—') +
+          ' · Bank: ' +
+          (gate.banknifty_ok === true ? 'OK' : gate.banknifty_ok === false ? 'not below open' : '—') +
+          '.';
+      } else {
+        hint.textContent = '';
+      }
+    }
+    const picks = (data && data.picks_bearish) || [];
+    if (!picks || !picks.length) {
+      if (data && data.session_before_open) {
+        el.innerHTML = '<p class="df-meta">Session starts at <strong>09:00 IST</strong>.</p>';
+        return;
+      }
+      el.innerHTML =
+        '<p class="df-meta">No bearish candidates (need conviction ≥ 50, ChartInk bearish screener, and index gate for this section).</p>';
+      return;
+    }
+    const th =
+      '<thead><tr><th>Future</th><th>Qty (1 lot)</th><th>Scan #</th><th>1st scan</th><th>Last scan</th><th class="num">Conviction</th>' +
+      '<th class="df-th-rs" title="(FUT day % − Nifty day %); line shows spread + S and N %">Rel. str.</th>' +
+      '<th class="num">LTP</th><th></th></tr></thead>';
+    const body = picks
+      .map(function (r) {
+        const eligible = r.order_eligible === true;
+        const reason = r.order_block_reason || 'Not eligible to enter';
+        const convTxt = formatConvictionEntryLive(r);
+        return (
+          '<tr><td><strong>' +
+          symbolWithDirectionHtml(r) +
+          '</strong><div style="font-size:0.75rem;color:var(--theme-muted);">' +
+          esc(r.underlying) +
+          '</div></td><td class="num">' +
+          esc(r.lot_size) +
+          '</td><td class="num">' +
+          esc(r.scan_count) +
+          '</td><td>' +
+          fmtIsoTimeIst(r.first_hit_at) +
+          '</td><td>' +
+          fmtIsoTimeIst(r.last_hit_at) +
+          '</td><td class="num">' +
+          convTxt +
+          '</td><td class="df-rs-cell">' +
+          fmtRelStrength(r) +
+          '</td><td class="num">' +
+          fmtNum(r.ltp, 2) +
+          '</td><td><button type="button" class="df-btn df-btn-order" data-bear="1" data-sid="' +
+          r.screening_id +
+          '"' + (eligible ? '' : ' disabled title="' + esc(reason) + '"') + '>Enter</button></td></tr>'
+        );
+      })
+      .join('');
+    el.innerHTML = '<table class="df-table">' + th + '<tbody>' + body + '</tbody></table>';
+    el.querySelectorAll('button[data-sid]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        if (btn.disabled) return;
+        const sid = parseInt(btn.getAttribute('data-sid'), 10);
+        const row = picks.find(function (p) { return p.screening_id === sid; });
+        openBuyModal(sid, row, true);
       });
     });
   }
@@ -583,7 +674,7 @@
       return;
     }
     const th =
-      '<thead><tr><th>Future</th><th>Qty</th><th>Scan #</th><th>1st scan</th><th>Last scan</th><th class="num">Conviction</th><th class="df-th-rs" title="(FUT day % − Nifty %); S and N in parentheses">Rel. str.</th><th class="num">LTP</th><th>Entry time</th><th class="num">Entry ₹</th><th class="num">Unrealized PnL</th><th>Alerts</th><th>Action</th></tr></thead>';
+      '<thead><tr><th>Future</th><th>Qty</th><th>Scan #</th><th>1st scan</th><th>Last scan</th><th class="num">Conviction</th><th class="df-th-rs" title="(FUT day % − Nifty %); S and N in parentheses">Rel. str.</th><th class="num">LTP</th><th>Entry time</th><th class="num" title="Long: buy; Short: sell">Entry/Sell ₹</th><th class="num">Unrealized PnL</th><th>Alerts</th><th>Action</th></tr></thead>';
     const tot = sumRunningUnrealized(rows);
     const totalLine =
       '<p class="df-meta" style="margin:0 0 10px;font-size:0.9rem;">' +
@@ -605,6 +696,8 @@
           r.exit_review === true
             ? '<button type="button" class="df-btn df-btn-review" data-tid="' + r.trade_id + '">REVIEW EXIT</button>'
             : '';
+        const refPx =
+          String(r.direction_type || "").toUpperCase() === "SHORT" ? r.sell_price : r.entry_price;
         return (
           '<tr><td><strong>' +
           symbolWithDirectionHtml(r) +
@@ -626,7 +719,7 @@
           '</td><td>' +
           esc(r.entry_time) +
           '</td><td class="num">' +
-          fmtNum(r.entry_price, 2) +
+          fmtNum(refPx, 2) +
           '</td>' +
           unrealizedPnlCell(r) +
           '<td class="df-alerts-cell">' +
@@ -672,7 +765,7 @@
       return;
     }
     const th =
-      '<thead><tr><th>Future</th><th>Qty</th><th>1st scan</th><th>Entry</th><th class="num">Entry ₹</th><th>Exit</th><th class="num">Exit ₹</th><th class="num">PnL ₹</th><th>Win/Loss</th></tr></thead>';
+      '<thead><tr><th>Future</th><th>Qty</th><th>1st scan</th><th title="Long: buy time; Short: sell time">Entry</th><th class="num" title="Long: buy ₹; Short: sell ₹">Entry ₹</th><th title="Long: sell time; Short: cover time">Exit</th><th class="num" title="Long: sell ₹; Short: cover ₹">Exit ₹</th><th class="num">PnL ₹</th><th>Win/Loss</th></tr></thead>';
     const body = rows
       .map(function (r) {
         const wl = r.win_loss || '—';
@@ -718,13 +811,24 @@
   }
 
   function rowProjectedPnlRupees(r) {
-    if (!r || r.ltp == null || r.ltp === '' || r.entry_price == null || r.entry_price === '' || r.lot_size == null || r.lot_size === '') {
+    if (!r || r.ltp == null || r.lot_size == null || r.lot_size === '') {
       return null;
     }
     const ltp = Number(r.ltp);
-    const ep = Number(r.entry_price);
     const qty = Number(r.lot_size);
-    if (!Number.isFinite(ltp) || !Number.isFinite(ep) || !Number.isFinite(qty)) return null;
+    if (!Number.isFinite(ltp) || !Number.isFinite(qty)) return null;
+    const isShort = String(r.direction_type || '').toUpperCase() === 'SHORT';
+    if (isShort) {
+      if (r.entry_price == null || r.entry_price === '') return null;
+      const sp = Number(r.entry_price);
+      if (!Number.isFinite(sp)) return null;
+      return (sp - ltp) * qty;
+    }
+    if (r.entry_price == null || r.entry_price === '') {
+      return null;
+    }
+    const ep = Number(r.entry_price);
+    if (!Number.isFinite(ep)) return null;
     return (ltp - ep) * qty;
   }
 
@@ -869,9 +973,16 @@
     return base + ' <span class="df-dir-pill ' + cls + '">' + esc(dir) + '</span>';
   }
 
-  function openBuyModal(screeningId, row) {
+  function openBuyModal(screeningId, row, isBearish) {
     state.pickScreeningId = screeningId;
     const m = document.getElementById('dfBuyModal');
+    const isShort = isBearish === true || (row && String(row.direction_type || '').toUpperCase() === 'SHORT');
+    const tEl = document.getElementById('dfBuyTitle');
+    const tl = document.getElementById('dfBuyTimeLabel');
+    const pl = document.getElementById('dfBuyPriceLabel');
+    if (tEl) tEl.textContent = isShort ? 'Confirm short (sell to open)' : 'Confirm buy';
+    if (tl) tl.textContent = isShort ? 'Sell time (IST, HH:MM)' : 'Entry time (IST, HH:MM)';
+    if (pl) pl.textContent = isShort ? 'Sell price (₹)' : 'Entry price (₹)';
     document.getElementById('dfBuySym').innerHTML = row
       ? symbolWithDirectionHtml(row) + ' · ' + esc(row.underlying)
       : '';

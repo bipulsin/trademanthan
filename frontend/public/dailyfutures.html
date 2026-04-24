@@ -189,6 +189,8 @@
         .df-dir-long { background: #22c55e; color: #000000 !important; }
         .df-dir-short { background: #fee2e2; color: #991b1b; }
         .df-dir-neutral { background: #e2e8f0; color: #334155; }
+        /* Section icons (work even if a Font Awesome glyph fails to load) */
+        .df-pick-sec-ico { display: inline-block; margin-right: 6px; font-size: 1.2rem; line-height: 1; vertical-align: -0.1em; }
     </style>
 </head>
 <body class="theme-page">
@@ -212,9 +214,22 @@
             <div class="settings-content df-wrap">
                 <p id="dfBanner">Loading workspace…</p>
 
-                <div class="df-card">
-                    <h2><i class="fas fa-star"></i> Today&apos;s pick</h2>
+                <div class="df-card" id="dfBullPicksCard">
+                    <h2>
+                        <span class="df-pick-sec-ico" title="Bullish" aria-hidden="true">🐂</span>
+                        <i class="fas fa-arrow-trend-up" style="color:#b45309" aria-hidden="true"></i>
+                        <span> Today&apos;s pick — Bullish</span>
+                    </h2>
                     <div id="dfPicksTable"></div>
+                </div>
+                <div class="df-card" id="dfBearPicksCard">
+                    <h2>
+                        <span class="df-pick-sec-ico" title="Bearish" aria-hidden="true">🐻</span>
+                        <i class="fas fa-arrow-trend-down" style="color:#b91c1c" aria-hidden="true"></i>
+                        <span> Today&apos;s pick — Bearish</span>
+                    </h2>
+                    <p class="df-meta" id="dfBearishGateLine" style="margin:0 0 8px;font-size:0.85rem;color:var(--theme-muted);"></p>
+                    <div id="dfPicksBearTable"></div>
                 </div>
 
                 <div class="df-card df-strip-card">
@@ -270,11 +285,11 @@
     <div id="dfBuyModal" class="df-modal" aria-hidden="true" role="dialog">
         <div class="df-modal-backdrop" id="dfBuyBackdrop"></div>
         <div class="df-modal-panel">
-            <h3 style="margin:0 0 8px;">Confirm buy</h3>
+            <h3 id="dfBuyTitle" style="margin:0 0 8px;">Confirm buy</h3>
             <p id="dfBuySym" style="margin:0;font-size:0.88rem;color:var(--theme-muted);"></p>
-            <label>Entry time (IST, HH:MM)</label>
+            <label id="dfBuyTimeLabel">Entry time (IST, HH:MM)</label>
             <input type="text" id="dfBuyTime" autocomplete="off" placeholder="09:45" />
-            <label>Entry price (₹)</label>
+            <label id="dfBuyPriceLabel">Entry price (₹)</label>
             <input type="number" id="dfBuyPrice" step="any" min="0" />
             <p id="dfBuyErr" style="color:#b91c1c;min-height:1.2em;font-size:0.85rem;"></p>
             <div class="df-modal-actions">
@@ -302,6 +317,6 @@
     </div>
 
     <script src="left-menu.js?v=3.20"></script>
-    <script src="dailyfutures.js?v=28"></script>
+    <script src="dailyfutures.js?v=29"></script>
 </body>
 </html>
