@@ -95,12 +95,7 @@ def _fetch_merged_sold_rows(
                 d.buy_price::numeric AS entry_price,
                 COALESCE(TO_CHAR((d.sell_time AT TIME ZONE 'Asia/Kolkata'), 'HH24:MI'), '')::text AS exit_time,
                 d.sell_price::numeric AS exit_price,
-                CASE
-                    WHEN d.buy_price IS NULL OR d.sell_price IS NULL THEN NULL
-                    WHEN UPPER(COALESCE(d.side, '')) = 'SHORT'
-                        THEN (d.buy_price - d.sell_price) * COALESCE(NULLIF(d.calculated_lots, 0), 1)
-                    ELSE (d.sell_price - d.buy_price) * COALESCE(NULLIF(d.calculated_lots, 0), 1)
-                END::numeric AS pnl
+                NULL::numeric AS pnl
             FROM smart_futures_daily d
             WHERE LOWER(TRIM(COALESCE(d.order_status, ''))) = 'sold'
               AND (:sd IS NULL OR d.session_date >= :sd)
@@ -123,18 +118,25 @@ def _fetch_merged_sold_rows(
             else:
                 ls = 0
             qty_units = lots * ls if ls > 0 else lots
+            entry_price = float(r["entry_price"]) if r["entry_price"] is not None else None
+            exit_price = float(r["exit_price"]) if r["exit_price"] is not None else None
+            side = str(r.get("side") or "LONG").strip().upper()
+            pnl = None
+            if entry_price is not None and exit_price is not None:
+                points = (entry_price - exit_price) if side == "SHORT" else (exit_price - entry_price)
+                pnl = float(points) * float(qty_units)
             out.append(
                 {
                     "date": str(r["trade_date"]),
                     "source": "Smart Futures",
                     "symbol": r["symbol"],
-                    "direction_type": str(r.get("side") or "LONG").strip().upper(),
+                    "direction_type": side,
                     "qty": int(qty_units),
                     "entry_time": r["entry_time"],
-                    "entry_price": float(r["entry_price"]) if r["entry_price"] is not None else None,
+                    "entry_price": entry_price,
                     "exit_time": r["exit_time"],
-                    "exit_price": float(r["exit_price"]) if r["exit_price"] is not None else None,
-                    "pnl": float(r["pnl"]) if r["pnl"] is not None else None,
+                    "exit_price": exit_price,
+                    "pnl": round(pnl, 2) if pnl is not None else None,
                 }
             )
 
