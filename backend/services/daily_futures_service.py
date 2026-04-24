@@ -333,22 +333,44 @@ def _last_completed_15m_candles_for_instrument(
         ) or []
     except Exception as e:
         logger.debug("daily_futures: 15m candle fetch failed for %s: %s", ik, e)
-        return []
+        raw = []
 
     cutoff = _floor_ist_to_15m(now_ist)
-    out: List[Dict[str, Any]] = []
-    for c in raw:
-        ts = _parse_iso_ist(c.get("timestamp"))
-        if ts is None or ts.date() != session_date or ts >= cutoff:
-            continue
-        op = _safe_float(c.get("open"))
-        hi = _safe_float(c.get("high"))
-        lo = _safe_float(c.get("low"))
-        cl = _safe_float(c.get("close"))
-        if op is None or hi is None or lo is None or cl is None:
-            continue
-        out.append({"timestamp": ts, "open": op, "high": hi, "low": lo, "close": cl})
-    out.sort(key=lambda x: x["timestamp"])
+
+    def _rows_to_completed(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        out_local: List[Dict[str, Any]] = []
+        for c in rows or []:
+            ts = _parse_iso_ist(c.get("timestamp"))
+            if ts is None or ts.date() != session_date or ts >= cutoff:
+                continue
+            op = _safe_float(c.get("open"))
+            hi = _safe_float(c.get("high"))
+            lo = _safe_float(c.get("low"))
+            cl = _safe_float(c.get("close"))
+            if op is None or hi is None or lo is None or cl is None:
+                continue
+            out_local.append({"timestamp": ts, "open": op, "high": hi, "low": lo, "close": cl})
+        out_local.sort(key=lambda x: x["timestamp"])
+        return out_local
+
+    out = _rows_to_completed(raw)
+
+    # Upstox historical 15m can return prior session intraday while market is open.
+    # For today's strip (L1/L3), fallback to intraday 15m endpoint to ensure current-session bars.
+    if not out and session_date == ist_today():
+        try:
+            key_enc = quote(ik, safe="")
+            intraday_url = f"{upstox.base_url}/historical-candle/intraday/{key_enc}/minutes/15"
+            raw_i = upstox.make_api_request(intraday_url, method="GET", timeout=15, max_retries=2) or {}
+            if isinstance(raw_i, dict) and raw_i.get("status") == "success":
+                rows_i = ((raw_i.get("data") or {}).get("candles")) or []
+                structured_i = _candles_rows_to_structured(rows_i) or []
+                out = _rows_to_completed(structured_i)
+                if out:
+                    logger.info("daily_futures: 15m fallback intraday used for %s bars=%d", ik, len(out))
+        except Exception as e:
+            logger.debug("daily_futures: 15m intraday fallback failed for %s: %s", ik, e)
+
     return out[-5:]
 
 
