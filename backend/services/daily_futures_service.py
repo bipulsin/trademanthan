@@ -2122,6 +2122,61 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
     }
 
 
+def get_workspace_running_enriched(db: Session, user_id: int) -> Dict[str, Any]:
+    """Running section only: fetch lite base, then apply running enrichments."""
+    base = get_workspace(db, user_id, lite_mode=True)
+    if base.get("session_before_open"):
+        return {
+            "trade_date": base.get("trade_date"),
+            "session_before_open": True,
+            "running": [],
+            "summary": {"strip_debug": {}},
+        }
+    td = ist_today()
+    running = list(base.get("running") or [])
+    try:
+        _apply_live_ltps_to_picks_and_running([], running, [])
+    except Exception as e:
+        logger.warning("daily_futures: running_enriched LTP refresh failed: %s", e, exc_info=True)
+    try:
+        _apply_live_rel_strength_to_picks_and_running([], running, td)
+    except Exception as e:
+        logger.warning("daily_futures: running_enriched rel-strength failed: %s", e, exc_info=True)
+    strip_debug: Dict[str, Any] = {}
+    try:
+        strip_debug = _apply_exit_alerts_to_running(db, running, td) or {}
+    except Exception as e:
+        logger.warning("daily_futures: running_enriched exit alerts failed: %s", e, exc_info=True)
+    return {
+        "trade_date": base.get("trade_date"),
+        "session_before_open": False,
+        "running": running,
+        "summary": {"strip_debug": strip_debug},
+    }
+
+
+def get_workspace_trade_if_could(db: Session, user_id: int) -> Dict[str, Any]:
+    """Heavy Trade-if-could section as an isolated call."""
+    base = get_workspace(db, user_id, lite_mode=True)
+    if base.get("session_before_open"):
+        return {
+            "trade_date": base.get("trade_date"),
+            "session_before_open": True,
+            "trade_if_could_have_done": [],
+        }
+    td = ist_today()
+    rows = _build_trade_if_could_rows(
+        list(base.get("picks") or []),
+        list(base.get("closed") or []),
+        td,
+    )
+    return {
+        "trade_date": base.get("trade_date"),
+        "session_before_open": False,
+        "trade_if_could_have_done": rows,
+    }
+
+
 def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, entry_price: float) -> Dict[str, Any]:
     ensure_daily_futures_tables()
     if not is_daily_futures_session_open_ist():

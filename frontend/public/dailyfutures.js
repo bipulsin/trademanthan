@@ -172,6 +172,7 @@
     prevRunAlertBits: {},
     /** @type {Record<number, string>} trade_id -> last 15m strip decision (lock_profit, dual_exit, watch, hold) */
     prevStripDecisionByTid: {},
+    refreshSeq: 0,
   };
 
   /** @param {string} kind  'lock_profit' | 'dual_exit' */
@@ -434,6 +435,40 @@
       }
     }
     throw lastErr || new Error('workspace');
+  }
+
+  async function fetchWorkspaceSection(paths, timeoutMs) {
+    let lastErr = null;
+    for (let i = 0; i < paths.length; i++) {
+      const ac = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const timer = ac ? window.setTimeout(function () { ac.abort(); }, timeoutMs) : null;
+      try {
+        const res = await fetch(API_BASE + paths[i], {
+          headers: authHeaders(),
+          cache: 'no-store',
+          signal: ac ? ac.signal : undefined,
+        });
+        const raw = await res.text();
+        if (res.status === 401) {
+          window.location.replace('index.html');
+          return null;
+        }
+        if (!res.ok) {
+          lastErr = new Error(raw.slice(0, 200) || res.status);
+          continue;
+        }
+        return JSON.parse(raw);
+      } catch (e) {
+        if (e && e.name === 'AbortError') {
+          lastErr = new Error('Section request timed out');
+          continue;
+        }
+        lastErr = e;
+      } finally {
+        if (timer) window.clearTimeout(timer);
+      }
+    }
+    throw lastErr || new Error('section');
   }
 
   function renderAll(data) {
@@ -934,8 +969,11 @@
 
   async function refresh() {
     const b = document.getElementById('dfBanner');
+    state.refreshSeq += 1;
+    const seq = state.refreshSeq;
     try {
       const liteData = await fetchWorkspace({ lite: true, timeoutMs: 9000 });
+      if (seq !== state.refreshSeq) return;
       state.workspace = liteData;
       if (b) {
         if (liteData.session_before_open) {
@@ -953,24 +991,42 @@
         }
       }
       renderAll(liteData);
+      if (!liteData.session_before_open) {
+        fetchWorkspaceSection(
+          ['/api/daily-futures/workspace/running-enriched', '/daily-futures/workspace/running-enriched'],
+          12000,
+        )
+          .then(function (runData) {
+            if (seq !== state.refreshSeq || !runData) return;
+            render15mAlertStrip(runData.running || []);
+            renderRunning(runData.running || []);
+          })
+          .catch(function () {
+            /* keep lite running view */
+          });
 
-      try {
-        const fullData = await fetchWorkspace({ lite: false, timeoutMs: 25000 });
-        state.workspace = fullData;
-        renderAll(fullData);
-        if (b && !fullData.session_before_open) {
-          b.textContent =
-            'Session date (IST): ' +
-            (fullData.trade_date || '—') +
-            ' · Data for this IST session only · Auto-refresh every 120 s';
-        }
-      } catch (e2) {
-        if (b && !liteData.session_before_open) {
-          b.textContent =
-            'Session date (IST): ' +
-            (liteData.trade_date || '—') +
-            ' · Core sections loaded; advanced sections delayed (will retry next refresh).';
-        }
+        fetchWorkspaceSection(
+          ['/api/daily-futures/workspace/trade-if-could', '/daily-futures/workspace/trade-if-could'],
+          18000,
+        )
+          .then(function (ticData) {
+            if (seq !== state.refreshSeq || !ticData) return;
+            renderTradeIfCouldHaveDone(ticData.trade_if_could_have_done || []);
+            if (b) {
+              b.textContent =
+                'Session date (IST): ' +
+                (liteData.trade_date || '—') +
+                ' · Data for this IST session only · Auto-refresh every 120 s';
+            }
+          })
+          .catch(function () {
+            if (b) {
+              b.textContent =
+                'Session date (IST): ' +
+                (liteData.trade_date || '—') +
+                ' · Core sections loaded; heavy sections delayed (will retry).';
+            }
+          });
       }
     } catch (e) {
       if (b) b.textContent = 'Could not load workspace: ' + (e && e.message ? e.message : e);

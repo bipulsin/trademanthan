@@ -20,6 +20,8 @@ from backend.services.daily_futures_service import (
     confirm_buy,
     confirm_sell,
     get_conviction_breakdown_debug,
+    get_workspace_running_enriched,
+    get_workspace_trade_if_could,
     get_workspace,
     normalize_symbols_from_payload,
     persist_chartink_webhook_raw_body,
@@ -56,6 +58,24 @@ def daily_futures_workspace(
 ) -> Dict[str, Any]:
     """Today's picks, running orders, closed trades + PnL summary for the logged-in user."""
     return get_workspace(db, user.id, lite_mode=bool(lite))
+
+
+@router.get("/workspace/running-enriched")
+def daily_futures_workspace_running_enriched(
+    user: User = Depends(_auth_user),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Running + 15m strip enrichments fetched independently from heavy sections."""
+    return get_workspace_running_enriched(db, user.id)
+
+
+@router.get("/workspace/trade-if-could")
+def daily_futures_workspace_trade_if_could(
+    user: User = Depends(_auth_user),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Trade-if-could rows fetched independently to avoid full workspace timeouts."""
+    return get_workspace_trade_if_could(db, user.id)
 
 
 @router.post("/order/buy")
