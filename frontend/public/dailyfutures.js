@@ -309,7 +309,7 @@
         const st = r.alert_strip || {};
         return (
           '<tr class="df-s-tr"><td class="df-s-sym"><strong>' +
-          esc(r.future_symbol || r.underlying) +
+          esc(symbolWithDirection(r)) +
           '</strong></td><td class="df-s-c">' +
           stripL1Cell(st) +
           '</td><td class="df-s-c">' +
@@ -541,7 +541,7 @@
         const convTxt = formatConvictionEntryLive(r);
         return (
           '<tr><td><strong>' +
-          esc(r.future_symbol || r.underlying) +
+          esc(symbolWithDirection(r)) +
           '</strong><div style="font-size:0.75rem;color:var(--theme-muted);">' +
           esc(r.underlying) +
           '</div></td><td class="num">' +
@@ -607,7 +607,7 @@
             : '';
         return (
           '<tr><td><strong>' +
-          esc(r.future_symbol || r.underlying) +
+          esc(symbolWithDirection(r)) +
           '</strong></td><td class="num">' +
           esc(r.lot_size) +
           '</td><td class="num">' +
@@ -689,7 +689,7 @@
             : '';
         return (
           '<tr><td><strong>' +
-          esc(r.future_symbol || r.underlying) +
+          esc(symbolWithDirection(r)) +
           '</strong></td><td class="num">' +
           esc(r.lot_size) +
           '</td><td>' +
@@ -773,7 +773,7 @@
         const pnlCls = pnl > 0 ? 'df-pnl-pos' : pnl < 0 ? 'df-pnl-neg' : '';
         return (
           '<tr><td><strong>' +
-          esc(r.future_symbol || r.underlying) +
+          esc(symbolWithDirection(r)) +
           '</strong></td><td class="num">' +
           esc(r.lot_size) +
           '</td><td>' +
@@ -810,7 +810,7 @@
         const c1515 = Number.isFinite(p1515) ? (p1515 > 0 ? 'df-pnl-pos' : p1515 < 0 ? 'df-pnl-neg' : '') : '';
         return (
           '<tr><td><strong>' +
-          esc(r.future_symbol || r.underlying) +
+          esc(symbolWithDirection(r)) +
           '</strong></td><td class="num">' +
           esc(r.qty) +
           '</td><td>' +
@@ -853,11 +853,18 @@
       .replace(/"/g, '&quot;');
   }
 
+  function symbolWithDirection(r) {
+    var base = (r && (r.future_symbol || r.underlying)) ? String(r.future_symbol || r.underlying) : '';
+    var dir = r && r.direction_type ? String(r.direction_type).trim().toUpperCase() : '';
+    if (!base) return '';
+    return dir ? (base + ' (' + dir + ')') : base;
+  }
+
   function openBuyModal(screeningId, row) {
     state.pickScreeningId = screeningId;
     const m = document.getElementById('dfBuyModal');
     document.getElementById('dfBuySym').textContent = row
-      ? row.future_symbol + ' · ' + row.underlying
+      ? symbolWithDirection(row) + ' · ' + row.underlying
       : '';
     document.getElementById('dfBuyTime').value = istHmNow();
     document.getElementById('dfBuyPrice').value =
@@ -874,7 +881,7 @@
   function openSellModal(tradeId, row) {
     state.sellTradeId = tradeId;
     document.getElementById('dfSellSym').textContent = row
-      ? row.future_symbol + ' · ' + row.underlying
+      ? symbolWithDirection(row) + ' · ' + row.underlying
       : '';
     document.getElementById('dfSellTime').value = istHmNow();
     document.getElementById('dfSellPrice').value =

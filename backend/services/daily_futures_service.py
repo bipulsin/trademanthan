@@ -79,6 +79,7 @@ def ensure_daily_futures_tables() -> None:
         id SERIAL PRIMARY KEY,
         trade_date DATE NOT NULL,
         underlying VARCHAR(64) NOT NULL,
+        direction_type VARCHAR(16) NOT NULL DEFAULT 'LONG',
         future_symbol TEXT,
         instrument_key TEXT NOT NULL,
         lot_size INTEGER,
@@ -117,6 +118,7 @@ def ensure_daily_futures_tables() -> None:
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         screening_id INTEGER NOT NULL REFERENCES daily_futures_screening(id) ON DELETE CASCADE,
         underlying VARCHAR(64) NOT NULL,
+        direction_type VARCHAR(16) NOT NULL DEFAULT 'LONG',
         future_symbol TEXT,
         instrument_key TEXT,
         lot_size INTEGER,
@@ -161,6 +163,9 @@ def ensure_daily_futures_tables() -> None:
             conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS candle_higher_high BOOLEAN"))
             conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS candle_higher_low BOOLEAN"))
             conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS conviction_breakdown_json JSONB"))
+            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS direction_type VARCHAR(16)"))
+            conn.execute(text("UPDATE daily_futures_screening SET direction_type = 'LONG' WHERE direction_type IS NULL OR TRIM(direction_type) = ''"))
+            conn.execute(text("ALTER TABLE daily_futures_screening ALTER COLUMN direction_type SET DEFAULT 'LONG'"))
             conn.execute(text("UPDATE daily_futures_screening SET conviction_score = 0 WHERE conviction_score IS NULL"))
             conn.execute(text("ALTER TABLE daily_futures_screening ALTER COLUMN conviction_score SET DEFAULT 0"))
             conn.execute(text("ALTER TABLE daily_futures_screening ALTER COLUMN conviction_score SET NOT NULL"))
@@ -185,6 +190,9 @@ def ensure_daily_futures_tables() -> None:
                     "ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS momentum_exhausting BOOLEAN NOT NULL DEFAULT FALSE"
                 )
             )
+            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS direction_type VARCHAR(16)"))
+            conn.execute(text("UPDATE daily_futures_user_trade SET direction_type = 'LONG' WHERE direction_type IS NULL OR TRIM(direction_type) = ''"))
+            conn.execute(text("ALTER TABLE daily_futures_user_trade ALTER COLUMN direction_type SET DEFAULT 'LONG'"))
         _DF_TABLES_READY = True
 
 
@@ -1002,6 +1010,7 @@ def _build_trade_if_could_rows(
         row: Dict[str, Any] = {
             "screening_id": p.get("screening_id"),
             "underlying": p.get("underlying"),
+            "direction_type": str(p.get("direction_type") or "LONG").strip().upper(),
             "future_symbol": p.get("future_symbol"),
             "instrument_key": ikey,
             "qty": int(qty_num) if qty_num is not None else None,
@@ -1154,6 +1163,7 @@ def retarget_daily_futures_to_next_month_for_date(trade_date: date) -> Dict[str,
             text(
                 """
                 UPDATE daily_futures_user_trade t SET
+                  direction_type = s.direction_type,
                   future_symbol = s.future_symbol,
                   instrument_key = s.instrument_key,
                   lot_size = s.lot_size,
@@ -1468,6 +1478,7 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
                         UPDATE daily_futures_screening SET
                           scan_count = scan_count + 1,
                           last_hit_at = :lh,
+                          direction_type = 'LONG',
                           lot_size = COALESCE(:lot, lot_size),
                           future_symbol = :fs,
                           instrument_key = :ik,
@@ -1533,14 +1544,14 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
                     text(
                         """
                         INSERT INTO daily_futures_screening (
-                          trade_date, underlying, future_symbol, instrument_key, lot_size,
+                          trade_date, underlying, direction_type, future_symbol, instrument_key, lot_size,
                           scan_count, first_hit_at, last_hit_at, conviction_score,
                           conviction_oi_leg, conviction_vwap_leg, ltp, session_vwap, total_oi, oi_change_pct,
                           nifty_ltp, nifty_session_vwap, stock_prev_close, nifty_prev_close,
                           stock_change_pct, nifty_change_pct, snapshotted_at,
                           candle_is_green, candle_higher_high, candle_higher_low, conviction_breakdown_json
                         ) VALUES (
-                          CAST(:d AS DATE), :u, :fs, :ik, :lot, 1, :fh, :lh, :cs,
+                          CAST(:d AS DATE), :u, 'LONG', :fs, :ik, :lot, 1, :fh, :lh, :cs,
                           :oi_leg, :vw_leg, :ltp, :svwap, :toi, :oi_chg,
                           :nltp, :nsvwap, :spc, :npc, :scp, :ncp, :snap,
                           :cig, :chh, :chl, CAST(:cbj AS JSONB)
@@ -1624,7 +1635,7 @@ def _fetch_screening_dicts(conn: Any, trade_date: date) -> List[Dict[str, Any]]:
     res = conn.execute(
         text(
             """
-            SELECT id, underlying, future_symbol, instrument_key, lot_size,
+            SELECT id, underlying, direction_type, future_symbol, instrument_key, lot_size,
                    scan_count, first_hit_at, last_hit_at, conviction_score, ltp,
                    second_scan_time, second_scan_conviction_score, second_scan_stock_change_pct, second_scan_nifty_change_pct,
                    stock_change_pct, nifty_change_pct,
@@ -1642,24 +1653,25 @@ def _fetch_screening_dicts(conn: Any, trade_date: date) -> List[Dict[str, Any]]:
             {
                 "screening_id": row[0],
                 "underlying": row[1],
-                "future_symbol": row[2],
-                "instrument_key": row[3],
-                "lot_size": int(row[4]) if row[4] is not None else None,
-                "scan_count": int(row[5] or 0),
-                "first_hit_at": row[6].isoformat() if row[6] else None,
-                "last_hit_at": row[7].isoformat() if row[7] else None,
-                "conviction_score": float(row[8]) if row[8] is not None else None,
-                "ltp": float(row[9]) if row[9] is not None else None,
-                "second_scan_time": row[10].isoformat() if row[10] else None,
-                "second_scan_conviction_score": float(row[11]) if row[11] is not None else None,
-                "second_scan_stock_change_pct": float(row[12]) if row[12] is not None else None,
-                "second_scan_nifty_change_pct": float(row[13]) if row[13] is not None else None,
-                "stock_change_pct": float(row[14]) if row[14] is not None else None,
-                "nifty_change_pct": float(row[15]) if row[15] is not None else None,
-                "candle_is_green": bool(row[16]) if row[16] is not None else None,
-                "candle_higher_high": bool(row[17]) if row[17] is not None else None,
-                "candle_higher_low": bool(row[18]) if row[18] is not None else None,
-                "conviction_breakdown_json": row[19] if row[19] is not None else None,
+                "direction_type": str(row[2] or "LONG").strip().upper(),
+                "future_symbol": row[3],
+                "instrument_key": row[4],
+                "lot_size": int(row[5]) if row[5] is not None else None,
+                "scan_count": int(row[6] or 0),
+                "first_hit_at": row[7].isoformat() if row[7] else None,
+                "last_hit_at": row[8].isoformat() if row[8] else None,
+                "conviction_score": float(row[9]) if row[9] is not None else None,
+                "ltp": float(row[10]) if row[10] is not None else None,
+                "second_scan_time": row[11].isoformat() if row[11] else None,
+                "second_scan_conviction_score": float(row[12]) if row[12] is not None else None,
+                "second_scan_stock_change_pct": float(row[13]) if row[13] is not None else None,
+                "second_scan_nifty_change_pct": float(row[14]) if row[14] is not None else None,
+                "stock_change_pct": float(row[15]) if row[15] is not None else None,
+                "nifty_change_pct": float(row[16]) if row[16] is not None else None,
+                "candle_is_green": bool(row[17]) if row[17] is not None else None,
+                "candle_higher_high": bool(row[18]) if row[18] is not None else None,
+                "candle_higher_low": bool(row[19]) if row[19] is not None else None,
+                "conviction_breakdown_json": row[20] if row[20] is not None else None,
             }
         )
     return out
@@ -1914,7 +1926,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
     running_rows = db.execute(
         text(
             """
-            SELECT t.id, t.screening_id, t.underlying, t.future_symbol, t.instrument_key,
+            SELECT t.id, t.screening_id, t.underlying, COALESCE(t.direction_type, s.direction_type, 'LONG') AS direction_type, t.future_symbol, t.instrument_key,
                    t.lot_size, t.entry_time, t.entry_price, t.consecutive_webhook_misses,
                    t.position_atr, t.profit_trail_armed, t.nifty_structure_weakening,
                    t.trail_stop_hit, t.momentum_exhausting,
@@ -1934,32 +1946,33 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
 
     running = []
     for row in running_rows:
-        miss = int(row[8] or 0)
-        pos_atr = float(row[9]) if row[9] is not None else None
+        miss = int(row[9] or 0)
+        pos_atr = float(row[10]) if row[10] is not None else None
         running.append(
             {
                 "trade_id": row[0],
                 "screening_id": row[1],
                 "underlying": row[2],
-                "future_symbol": row[3],
-                "instrument_key": row[4],
-                "lot_size": int(row[5]) if row[5] is not None else None,
-                "entry_time": row[6],
-                "entry_price": float(row[7]) if row[7] is not None else None,
+                "direction_type": str(row[3] or "LONG").strip().upper(),
+                "future_symbol": row[4],
+                "instrument_key": row[5],
+                "lot_size": int(row[6]) if row[6] is not None else None,
+                "entry_time": row[7],
+                "entry_price": float(row[8]) if row[8] is not None else None,
                 "consecutive_webhook_misses": miss,
                 "position_atr": pos_atr,
-                "profit_trail_armed": bool(row[10]) if row[10] is not None else False,
-                "nifty_structure_weakening": bool(row[11]) if row[11] is not None else False,
-                "trail_stop_hit": bool(row[12]) if row[12] is not None else False,
-                "momentum_exhausting": bool(row[13]) if row[13] is not None else False,
-                "scan_count": int(row[14] or 0),
-                "first_hit_at": row[15].isoformat() if row[15] else None,
-                "last_hit_at": row[16].isoformat() if row[16] else None,
-                "conviction_score": float(row[17]) if row[17] is not None else None,
-                "second_scan_conviction_score": float(row[18]) if row[18] is not None else None,
-                "ltp": float(row[19]) if row[19] is not None else None,
-                "stock_change_pct": float(row[20]) if row[20] is not None else None,
-                "nifty_change_pct": float(row[21]) if row[21] is not None else None,
+                "profit_trail_armed": bool(row[11]) if row[11] is not None else False,
+                "nifty_structure_weakening": bool(row[12]) if row[12] is not None else False,
+                "trail_stop_hit": bool(row[13]) if row[13] is not None else False,
+                "momentum_exhausting": bool(row[14]) if row[14] is not None else False,
+                "scan_count": int(row[15] or 0),
+                "first_hit_at": row[16].isoformat() if row[16] else None,
+                "last_hit_at": row[17].isoformat() if row[17] else None,
+                "conviction_score": float(row[18]) if row[18] is not None else None,
+                "second_scan_conviction_score": float(row[19]) if row[19] is not None else None,
+                "ltp": float(row[20]) if row[20] is not None else None,
+                "stock_change_pct": float(row[21]) if row[21] is not None else None,
+                "nifty_change_pct": float(row[22]) if row[22] is not None else None,
                 "warn_two_misses": miss >= 2,
             }
         )
@@ -1967,7 +1980,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
     closed_rows = db.execute(
         text(
             """
-            SELECT t.id, t.screening_id, t.underlying, t.future_symbol, t.instrument_key, t.lot_size,
+            SELECT t.id, t.screening_id, t.underlying, COALESCE(t.direction_type, s.direction_type, 'LONG') AS direction_type, t.future_symbol, t.instrument_key, t.lot_size,
                    t.entry_time, t.entry_price, t.exit_time, t.exit_price, t.pnl_points, t.pnl_rupees,
                    s.first_hit_at,
                    s.ltp
@@ -1988,8 +2001,8 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
     wins = 0
     losses = 0
     for row in closed_rows:
-        pnl_pts = float(row[10]) if row[10] is not None else None
-        pnl_rs = float(row[11]) if row[11] is not None else None
+        pnl_pts = float(row[11]) if row[11] is not None else None
+        pnl_rs = float(row[12]) if row[12] is not None else None
         wl = None
         if pnl_rs is not None:
             total_pnl += pnl_rs
@@ -2006,17 +2019,18 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                 "trade_id": row[0],
                 "screening_id": row[1],
                 "underlying": row[2],
-                "future_symbol": row[3],
-                "instrument_key": row[4],
-                "lot_size": int(row[5]) if row[5] is not None else None,
-                "entry_time": row[6],
-                "entry_price": float(row[7]) if row[7] is not None else None,
-                "exit_time": row[8],
-                "exit_price": float(row[9]) if row[9] is not None else None,
+                "direction_type": str(row[3] or "LONG").strip().upper(),
+                "future_symbol": row[4],
+                "instrument_key": row[5],
+                "lot_size": int(row[6]) if row[6] is not None else None,
+                "entry_time": row[7],
+                "entry_price": float(row[8]) if row[8] is not None else None,
+                "exit_time": row[9],
+                "exit_price": float(row[10]) if row[10] is not None else None,
                 "pnl_points": pnl_pts,
                 "pnl_rupees": pnl_rs,
-                "first_scan_time": row[12].isoformat() if row[12] is not None and hasattr(row[12], "isoformat") else None,
-                "ltp": float(row[13]) if row[13] is not None else None,
+                "first_scan_time": row[13].isoformat() if row[13] is not None and hasattr(row[13], "isoformat") else None,
+                "ltp": float(row[14]) if row[14] is not None else None,
                 "win_loss": wl,
             }
         )
@@ -2201,7 +2215,7 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
     row = db.execute(
         text(
             """
-            SELECT id, underlying, future_symbol, instrument_key, lot_size, scan_count,
+            SELECT id, underlying, direction_type, future_symbol, instrument_key, lot_size, scan_count,
                    conviction_score, second_scan_conviction_score
             FROM daily_futures_screening WHERE id = :sid AND trade_date = CAST(:d AS DATE)
             """
@@ -2210,9 +2224,9 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
     ).fetchone()
     if not row:
         raise ValueError("Screening row not found for today")
-    if int(row[5] or 0) < 2:
+    if int(row[6] or 0) < 2:
         raise ValueError("Needs at least 2 consecutive scans before order")
-    gate_score = row[7] if row[7] is not None else row[6]
+    gate_score = row[8] if row[8] is not None else row[7]
     c2 = float(gate_score) if gate_score is not None else None
     if c2 is None or c2 <= 60.0:
         raise ValueError(
@@ -2235,10 +2249,10 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
         text(
             """
             INSERT INTO daily_futures_user_trade (
-              user_id, screening_id, underlying, future_symbol, instrument_key, lot_size,
+              user_id, screening_id, underlying, direction_type, future_symbol, instrument_key, lot_size,
               order_status, entry_time, entry_price, consecutive_webhook_misses
             ) VALUES (
-              :u, :sid, :und, :fs, :ik, :lot, 'bought', :et, :ep, 0
+              :u, :sid, :und, :dt, :fs, :ik, :lot, 'bought', :et, :ep, 0
             ) RETURNING id
             """
         ),
@@ -2246,15 +2260,16 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
             "u": user_id,
             "sid": screening_id,
             "und": row[1],
-            "fs": row[2],
-            "ik": row[3],
-            "lot": row[4],
+            "dt": str(row[2] or "LONG").strip().upper(),
+            "fs": row[3],
+            "ik": row[4],
+            "lot": row[5],
             "et": entry_time.strip(),
             "ep": entry_price,
         },
     ).fetchone()
     trade_id = int(ins[0]) if ins and ins[0] is not None else None
-    ikey = str(row[3] or "").strip()
+    ikey = str(row[4] or "").strip()
     if trade_id and ikey:
         try:
             uxs = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
