@@ -47,6 +47,9 @@ dist/
 *.egg-info/
 .eggs/
 
+# ChartInk daily futures raw webhook dumps (on-disk before processing)
+inbox/chartink_daily_futures/
+
 # Data files
 *.csv
 !backend/fno_sector_mapping.csv

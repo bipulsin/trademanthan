@@ -8,7 +8,9 @@ import os
 import re
 import time
 import json
-from datetime import date, datetime, time as dt_time, timedelta
+import uuid
+from datetime import date, datetime, time as dt_time, timedelta, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import quote
 
@@ -2085,6 +2087,34 @@ def get_conviction_breakdown_debug(
         if v is not None:
             out[k] = float(v)
     return out
+
+
+def chartink_webhook_inbox_dir() -> Path:
+    """
+    Where raw ChartInk POST bodies are written before parsing/processing.
+    Override with env CHARTINK_DF_WEBHOOK_INBOX (absolute path on server is fine).
+    """
+    override = (os.getenv("CHARTINK_DF_WEBHOOK_INBOX") or "").strip()
+    if override:
+        return Path(override).expanduser()
+    # backend/services/... -> project root
+    root = Path(__file__).resolve().parents[2]
+    return root / "inbox" / "chartink_daily_futures"
+
+
+def persist_chartink_webhook_raw_body(body: bytes) -> str:
+    """
+    Synchronous write of the exact bytes ChartInk sent. Call before any heavy work
+    so disconnects/499 or worker crashes do not lose the payload (operators can
+    re-run from this file if needed). Returns absolute path. Raises on I/O error.
+    """
+    d = chartink_webhook_inbox_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%fZ")
+    short = uuid.uuid4().hex[:8]
+    p = d / f"{ts}_{short}.raw.json"
+    p.write_bytes(body)
+    return str(p)
 
 
 def webhook_secret_ok(provided: Optional[str]) -> bool:

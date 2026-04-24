@@ -3,12 +3,15 @@ Daily Futures — ChartInk webhook + authenticated workspace (Today's pick / Run
 """
 from __future__ import annotations
 
+import json
 import logging
+from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Body, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from backend.database import get_db
 from backend.models.user import User
@@ -19,6 +22,7 @@ from backend.services.daily_futures_service import (
     get_conviction_breakdown_debug,
     get_workspace,
     normalize_symbols_from_payload,
+    persist_chartink_webhook_raw_body,
     process_chartink_webhook,
     webhook_secret_ok,
 )
@@ -112,9 +116,24 @@ def daily_futures_conviction_breakdown(
         raise HTTPException(status_code=404, detail=str(e))
 
 
+async def _chartink_webhook_background(symbols: list, raw_saved_name: str) -> None:
+    """Upstox + DB ingestion can take 60s+; run off the event loop so ChartInk gets HTTP 200 fast."""
+    try:
+        out = await run_in_threadpool(process_chartink_webhook, symbols)
+        logger.info(
+            "daily_futures chartink background done processed=%s trade_date=%s raw_file=%s",
+            (out or {}).get("processed"),
+            (out or {}).get("trade_date"),
+            raw_saved_name,
+        )
+    except Exception:
+        logger.exception("daily_futures chartink background failed raw_file=%s", raw_saved_name)
+
+
 @router.post("/webhook/chartink")
 async def chartink_webhook(
     request: Request,
+    background_tasks: BackgroundTasks,
     secret: Optional[str] = None,
     x_daily_futures_secret: Optional[str] = Header(None, alias="X-Daily-Futures-Secret"),
 ) -> Dict[str, Any]:
@@ -124,24 +143,40 @@ async def chartink_webhook(
     CHARTINK_DAILY_FUTURES_SECRET is set, it overrides the default secret.
     Body supports the same ChartInk shape used by /scan/chartink-webhook-bullish
     (e.g. stocks, trigger_prices, scan_name, alert_name), plus plain symbol lists.
+
+    Returns **immediately** with HTTP 200; ingestion runs in a background thread so short
+    HTTP client timeouts (e.g. Guzzle) do not cause **499** / aborted processing at 9:15 / 9:30.
     """
     prov = secret or x_daily_futures_secret or ""
     if not webhook_secret_ok(prov):
         raise HTTPException(status_code=401, detail="Invalid or missing webhook secret")
 
+    raw = await request.body()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Empty body")
+
+    try:
+        inbox_path = persist_chartink_webhook_raw_body(raw)
+    except OSError as e:
+        logger.exception("chartink daily_futures raw persist failed: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail="Server could not store webhook body; will not drop data — retry in a few seconds",
+        ) from e
+
+    receipt_name = Path(inbox_path).name
+
     payload: Any = None
     ct = (request.headers.get("content-type") or "").lower()
     try:
         if "application/json" in ct:
-            payload = await request.json()
+            payload = json.loads(raw.decode("utf-8", errors="replace"))
         else:
-            raw = (await request.body()).decode("utf-8", errors="replace").strip()
-            if raw.startswith("{") or raw.startswith("["):
-                import json
-
-                payload = json.loads(raw)
+            s = raw.decode("utf-8", errors="replace").strip()
+            if s.startswith("{") or s.startswith("["):
+                payload = json.loads(s)
             else:
-                payload = raw
+                payload = s
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not parse body: {e}")
 
@@ -149,11 +184,17 @@ async def chartink_webhook(
     if not symbols:
         raise HTTPException(status_code=400, detail="No symbols found in payload")
 
-    logger.info("daily_futures chartink POST received symbol_count=%d", len(symbols))
-    try:
-        summary = process_chartink_webhook(symbols)
-        summary["symbols_received"] = len(symbols)
-        return {"success": True, **summary}
-    except Exception as e:
-        logger.exception("daily_futures webhook failed")
-        raise HTTPException(status_code=500, detail=str(e))
+    logger.info(
+        "daily_futures chartink POST accepted symbol_count=%d raw_receipt=%s (queue background)",
+        len(symbols),
+        receipt_name,
+    )
+    sym_copy = list(symbols)
+    background_tasks.add_task(_chartink_webhook_background, sym_copy, receipt_name)
+    return {
+        "success": True,
+        "symbols_received": len(sym_copy),
+        "queued": True,
+        "inbox_receipt": receipt_name,
+        "message": "Payload stored; ingestion in background. Refresh Daily Futures workspace in ~30–90s.",
+    }
