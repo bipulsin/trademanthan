@@ -618,7 +618,7 @@
         return;
       }
       el.innerHTML =
-        '<p class="df-meta">No bearish candidates (need conviction ≥ 50, ChartInk bearish screener, and index gate for this section).</p>';
+        '<p class="df-meta">No bearish candidates.</p>';
       return;
     }
     const th =
