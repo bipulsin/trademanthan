@@ -216,11 +216,11 @@
   function stripL1Cell(st) {
     if (st && st.l1 === 'nifty_lower_low') {
       return (
-        '<span class="df-s-cell df-s-amb" title="Last 15m Nifty low is below the prior completed 15m low.">Nifty 15m lower low</span>'
+        '<span class="df-s-cell df-s-amb" title="Nifty shows weakening momentum: the latest completed 15m low is below the prior 15m low.">Nifty 15m lower low</span>'
       );
     }
     return (
-      '<span class="df-s-cell df-s-ok" title="Nifty 15m is not making that lower-low (your stock can still sell off).">Nifty: no lower low</span>'
+      '<span class="df-s-cell df-s-ok" title="Nifty is not showing this lower-low weakness pattern right now.">Nifty: no lower low</span>'
     );
   }
 
@@ -244,11 +244,11 @@
   function stripL3Cell(st) {
     if (st && st.l3 === 'fading') {
       return (
-        '<span class="df-s-cell df-s-amb" title="Last two 15m bars: last body smaller + close in the lower 30% of the bar.">15m fade</span>'
+        '<span class="df-s-cell df-s-amb" title="Stock shows weakening momentum: in the last two completed 15m bars, the latest bar has a smaller body and closes in the lower 30% of its range.">15m fade</span>'
       );
     }
     return (
-      '<span class="df-s-cell df-s-ok" title="That fade pattern is not on; can still be a big move down.">No 15m fade</span>'
+      '<span class="df-s-cell df-s-ok" title="This weakening fade pattern is not present right now. This is neutral for this rule, not an automatic up or down call.">No 15m fade</span>'
     );
   }
 
@@ -256,21 +256,21 @@
     var d = (st && st.decision) || 'hold';
     if (d === 'lock_profit') {
       return (
-        '<span class="df-s-cell df-s-neg df-s-decis" title="From trail stop hit.">LOCK PROFIT — EXIT</span>'
+        '<span class="df-s-cell df-s-neg df-s-decis" title="Trail stop is hit; lock gains and exit.">LOCK PROFIT — EXIT</span>'
       );
     }
     if (d === 'dual_exit') {
       return (
-        '<span class="df-s-cell df-s-neg df-s-decis" title="L1: Nifty 15m lower low AND L3: 15m fade, together.">REVIEW EXIT — dual</span>'
+        '<span class="df-s-cell df-s-neg df-s-decis" title="Both momentum warnings are active together: Nifty lower-low plus stock 15m fade.">REVIEW EXIT — dual</span>'
       );
     }
     if (d === 'watch') {
       return (
-        '<span class="df-s-cell df-s-amb df-s-decis" title="L1 or L3 only, not both.">WATCH</span>'
+        '<span class="df-s-cell df-s-amb df-s-decis" title="One momentum warning is active (Nifty or stock), but not both.">WATCH</span>'
       );
     }
     return (
-      '<span class="df-s-cell df-s-ok df-s-decis" title="No lock; not the dual case; and not a single L1 or L3 alert. Full ladder: use the message icon next to 15-min Alert Strip.">No exit signal</span>'
+      '<span class="df-s-cell df-s-ok df-s-decis" title="No active exit signal from this strip: no trail-stop hit and no L1/L3 momentum warning combination.">No exit signal</span>'
     );
   }
 
@@ -282,10 +282,10 @@
       return;
     }
     const th =
-      '<thead><tr><th>Position</th><th class="df-s-c" title="Nifty 50, last two completed 15m bars.">L1 Nifty 15m</th>' +
+      '<thead><tr><th>Position</th><th class="df-s-c" title="Nifty momentum signal from the last two completed 15m bars.">Nifty Momentum</th>' +
       '<th class="df-s-c" title="Profit trail state (arm at +1.5× 15m ATR).">L2 Trail</th>' +
-      '<th class="df-s-c" title="Narrow 15m fade pattern on this future.">L3 15m fade</th>' +
-      '<th class="df-s-c" title="Server combines L1–L3.">Strip</th></tr></thead>';
+      '<th class="df-s-c" title="Stock momentum signal from the latest completed 15m bars.">Stock Momentum</th>' +
+      '<th class="df-s-c" title="Final decision combining trail + momentum signals.">Decision</th></tr></thead>';
     const body = rows
       .map(function (r) {
         const st = r.alert_strip || {};
