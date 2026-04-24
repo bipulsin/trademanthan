@@ -1,5 +1,6 @@
 """
-Daily Futures — ChartInk webhook → arbitrage_master **next-month** (serial) FUT, Upstox LTP + conviction.
+Daily Futures — ChartInk webhook → ``arbitrage_master`` **current** future columns
+(``currmth_future_symbol`` / ``currmth_future_instrument_key``), Upstox LTP + conviction.
 """
 from __future__ import annotations
 
@@ -42,6 +43,7 @@ _INSTRUMENT_CACHE: Optional[Tuple[Any, Any]] = None
 _DF_INTRADAY_1M_CACHE: Dict[Tuple[str, str], Dict[str, Any]] = {}
 _DF_PREV_CLOSE_CACHE: Dict[str, Any] = {"trade_date": None, "stock": {}, "nifty": None}
 NIFTY50_INDEX_KEY = "NSE_INDEX|Nifty 50"
+BANKNIFTY_INDEX_KEY = "NSE_INDEX|Nifty Bank"
 _DF_TABLES_READY = False
 _DF_TABLES_LOCK = threading.Lock()
 
@@ -193,6 +195,26 @@ def ensure_daily_futures_tables() -> None:
             conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS direction_type VARCHAR(16)"))
             conn.execute(text("UPDATE daily_futures_user_trade SET direction_type = 'LONG' WHERE direction_type IS NULL OR TRIM(direction_type) = ''"))
             conn.execute(text("ALTER TABLE daily_futures_user_trade ALTER COLUMN direction_type SET DEFAULT 'LONG'"))
+            # SHORT leg prices (optional; LONG uses entry_ / exit_ as today)
+            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS sell_price NUMERIC(18,4)"))
+            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS sell_time VARCHAR(16)"))
+            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS buy_price NUMERIC(18,4)"))
+            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS buy_time VARCHAR(16)"))
+            # Allow same underlying on one day for LONG vs SHORT parallel screeners
+            try:
+                conn.execute(
+                    text(
+                        "ALTER TABLE daily_futures_screening DROP CONSTRAINT IF EXISTS daily_futures_screening_trade_date_underlying_key"
+                    )
+                )
+            except Exception:
+                pass
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_daily_futures_screening_td_und_dir "
+                    "ON daily_futures_screening (trade_date, (UPPER(TRIM(underlying))), (UPPER(TRIM(direction_type))))"
+                )
+            )
         _DF_TABLES_READY = True
 
 
@@ -228,6 +250,59 @@ def _vwap_leg_score_reason(
     if trend_score == 1:
         return 22.0, "above_0.8_one_trend"
     return 12.0, "above_0.8_no_trend"
+
+
+def _vwap_leg_score_reason_bearish(
+    price_vs_vwap_pct: Optional[float],
+    nifty15_close_below_sv: bool,
+    stock15_close_below_sv: bool,
+    candle_is_red: bool = False,
+    candle_lower_low: bool = False,
+    candle_lower_high: bool = False,
+) -> Tuple[float, str]:
+    """
+    Bearish VWAP leg: reward negative pvp (price below session VWAP), and require
+    Nifty 15m + stock 15m closes below their session VWAPs when data exists.
+    """
+    if not nifty15_close_below_sv or not stock15_close_below_sv:
+        return 8.0, "nifty_or_stock_15m_not_below_session_vwap"
+    p = _safe_float(price_vs_vwap_pct)
+    if p is None:
+        return 10.0, "no_price_vs_vwap_bear"
+    if p > 0.5:
+        return 6.0, "above_vwap_gt_0.5pct_bear"
+    if p > 0:
+        return 14.0, "above_vwap_small_bear"
+    if -0.8 <= p <= 0:
+        return 30.0 + (abs(p) / 0.8) * 20.0, "bear_sweet_spot_0_to_0.8"
+    trend_score = int(bool(candle_is_red)) + int(bool(candle_lower_low)) + int(bool(candle_lower_high))
+    if trend_score == 3:
+        return max(50.0 - min(abs(p) - 0.8, 3.0) * 2.0, 42.0), "deep_below_vwap_three"
+    if trend_score == 2:
+        return 35.0, "deep_below_vwap_two"
+    if trend_score == 1:
+        return 22.0, "deep_below_vwap_one"
+    return 12.0, "deep_below_vwap_none"
+
+
+def _momentum_bounce_fading_for_short(cands: List[Dict[str, Any]]) -> bool:
+    """SHORT position: intraday bounce losing steam (mirror of long momentum fade)."""
+    if len(cands) < 2:
+        return False
+    a, b = cands[-2], cands[-1]
+    try:
+        body_a = abs(float(a.get("close")) - float(a.get("open")))
+        body_b = abs(float(b.get("close")) - float(b.get("open")))
+        hi = float(b.get("high"))
+        lo = float(b.get("low"))
+        cl = float(b.get("close"))
+    except (TypeError, ValueError):
+        return False
+    rng = hi - lo
+    if rng <= 0:
+        return False
+    close_from_top = (hi - cl) / rng
+    return bool(body_b < body_a and close_from_top < 0.30)
 
 
 def _vwap_proximity_score_0_50(
@@ -587,14 +662,21 @@ def _apply_exit_alerts_to_running(
     nifty_thr_pct = _resolve_nifty_momentum_threshold_pct(upstox, trade_date, nifty_cands)
     nifty_l1_state = _nifty_momentum_state_last_two_closes(nifty_cands, nifty_thr_pct)
     nifty_weakening = nifty_l1_state == "nifty_lower_low"
+    nifty_against_short = nifty_l1_state == "nifty_higher_high"
     stock_candle_cache: Dict[str, List[Dict[str, Any]]] = {}
 
     for r in running:
         tid = int(r["trade_id"])
         ikey = str(r.get("instrument_key") or "").strip()
-        ep = _safe_float(r.get("entry_price"))
+        dirt = str(r.get("direction_type") or "LONG").strip().upper()
+        if dirt == "SHORT":
+            ep = _safe_float(r.get("sell_price"))
+            tstr = r.get("sell_time") or r.get("entry_time")
+            entry_dt = _entry_datetime_ist(trade_date, tstr)
+        else:
+            ep = _safe_float(r.get("entry_price"))
+            entry_dt = _entry_datetime_ist(trade_date, r.get("entry_time"))
         ltp = _safe_float(r.get("ltp"))
-        entry_dt = _entry_datetime_ist(trade_date, r.get("entry_time"))
         pos_age_s = (now_ist - entry_dt).total_seconds() if entry_dt else 0.0
         pos_age_ok = pos_age_s > 45.0 * 60.0
 
@@ -606,7 +688,11 @@ def _apply_exit_alerts_to_running(
                 r["position_atr"] = round(float(atr), 4)
 
         old_n = bool(r.get("nifty_structure_weakening"))
-        new_n = bool(nifty_weakening and pos_age_ok and entry_dt is not None)
+        if dirt == "SHORT":
+            n_sig = bool(nifty_against_short and pos_age_ok and entry_dt is not None)
+        else:
+            n_sig = bool(nifty_weakening and pos_age_ok and entry_dt is not None)
+        new_n = n_sig
         merged_n = old_n or new_n
 
         if ikey and ikey not in stock_candle_cache:
@@ -619,47 +705,78 @@ def _apply_exit_alerts_to_running(
                 stock_candle_cache[ikey] = []
         stk = stock_candle_cache.get(ikey) or []
         old_m = bool(r.get("momentum_exhausting"))
-        new_m = _momentum_exhausting_last_two(stk)
+        if dirt == "SHORT":
+            new_m = _momentum_bounce_fading_for_short(stk)
+        else:
+            new_m = _momentum_exhausting_last_two(stk)
         merged_m = old_m or new_m
 
         old_armed = bool(r.get("profit_trail_armed"))
-        new_armed = bool(
-            atr is not None
-            and atr > 0
-            and ep is not None
-            and ltp is not None
-            and (ltp - ep) >= 1.5 * float(atr)
-        )
+        if dirt == "SHORT":
+            new_armed = bool(
+                atr is not None
+                and atr > 0
+                and ep is not None
+                and ltp is not None
+                and (float(ep) - float(ltp)) >= 1.5 * float(atr)
+            )
+        else:
+            new_armed = bool(
+                atr is not None
+                and atr > 0
+                and ep is not None
+                and ltp is not None
+                and (ltp - ep) >= 1.5 * float(atr)
+            )
         merged_armed = old_armed or new_armed
         old_hit = bool(r.get("trail_stop_hit"))
-        new_hit = bool(
-            merged_armed
-            and ep is not None
-            and ltp is not None
-            and atr is not None
-            and atr > 0
-            and ltp < ep + 0.8 * float(atr)
-        )
+        if dirt == "SHORT":
+            new_hit = bool(
+                merged_armed
+                and ep is not None
+                and ltp is not None
+                and atr is not None
+                and atr > 0
+                and float(ltp) > float(ep) - 0.8 * float(atr)
+            )
+        else:
+            new_hit = bool(
+                merged_armed
+                and ep is not None
+                and ltp is not None
+                and atr is not None
+                and atr > 0
+                and ltp < ep + 0.8 * float(atr)
+            )
         merged_hit = old_hit or new_hit
 
-        # Long underwater: trail never arms if price never made +1.5*ATR; the profit trail
-        # stop does not apply. Still surface exit review when drawdown from entry is large
-        # vs 15m ATR (same ATR as trail), after min hold time.
-        drawdown_15atr_breach = bool(
-            entry_dt is not None
-            and pos_age_s > 45.0 * 60.0
-            and ep is not None
-            and ltp is not None
-            and atr is not None
-            and float(atr) > 0.0
-            and float(ltp) < float(ep)
-            and (float(ep) - float(ltp)) >= 1.5 * float(atr)
-        )
+        if dirt == "SHORT":
+            drawdown_15atr_breach = bool(
+                entry_dt is not None
+                and pos_age_s > 45.0 * 60.0
+                and ep is not None
+                and ltp is not None
+                and atr is not None
+                and float(atr) > 0.0
+                and float(ltp) > float(ep)
+                and (float(ltp) - float(ep)) >= 1.5 * float(atr)
+            )
+        else:
+            # Long underwater…
+            drawdown_15atr_breach = bool(
+                entry_dt is not None
+                and pos_age_s > 45.0 * 60.0
+                and ep is not None
+                and ltp is not None
+                and atr is not None
+                and float(atr) > 0.0
+                and float(ltp) < float(ep)
+                and (float(ep) - float(ltp)) >= 1.5 * float(atr)
+            )
 
         exit_review = bool(merged_hit or (merged_n and merged_m) or drawdown_15atr_breach)
 
-        # 15-min alert strip (live L1/L3 from same Nifty + stock 15m data; L2 from trail state)
-        l1_amber = bool(nifty_weakening)
+        l1_amber = bool(nifty_weakening) if dirt != "SHORT" else bool(nifty_against_short)
         l3_fading = bool(new_m)
         if merged_hit:
             l2k = "hit"
@@ -824,6 +941,11 @@ def _empty_daily_futures_workspace(trade_date: date, *, session_before_open: boo
         "session_before_open": session_before_open,
         "session_message": msg if session_before_open else None,
         "picks": [],
+        "picks_mixed": [],
+        "picks_bearish": [],
+        "picks_low_conv_bull": [],
+        "picks_low_conv_bear": [],
+        "index_bearish_gate": {"ok": False, "nifty_ok": None, "banknifty_ok": None},
         "picks_diagnostics": {
             "screening_count": 0,
             "hidden_because_bought": 0,
@@ -1039,8 +1161,12 @@ def _build_trade_if_could_rows(
         pnl_ref_ltp = row.get("current_ltp")
         if pnl_ref_ltp is None:
             pnl_ref_ltp = scan_ltp
+        pdir = row.get("direction_type") or "LONG"
         if entry_ltp is not None and pnl_ref_ltp is not None and qty_num is not None:
-            row["pnl_scan_rupees"] = round((float(pnl_ref_ltp) - entry_ltp) * qty_num, 2)
+            if str(pdir).strip().upper() == "SHORT":
+                row["pnl_scan_rupees"] = round((entry_ltp - float(pnl_ref_ltp)) * qty_num, 2)
+            else:
+                row["pnl_scan_rupees"] = round((float(pnl_ref_ltp) - entry_ltp) * qty_num, 2)
 
         ltp_1515 = _ltp_asof_ist(candles, close_1515)
         if ltp_1515 is None:
@@ -1048,7 +1174,10 @@ def _build_trade_if_could_rows(
             ltp_1515 = row.get("current_ltp") if row.get("current_ltp") is not None else scan_ltp
         row["exit_1515_ltp"] = ltp_1515
         if entry_ltp is not None and ltp_1515 is not None and qty_num is not None:
-            row["pnl_1515_rupees"] = round((ltp_1515 - entry_ltp) * qty_num, 2)
+            if str(pdir).strip().upper() == "SHORT":
+                row["pnl_1515_rupees"] = round((entry_ltp - ltp_1515) * qty_num, 2)
+            else:
+                row["pnl_1515_rupees"] = round((ltp_1515 - entry_ltp) * qty_num, 2)
 
         out.append(row)
 
@@ -1078,19 +1207,20 @@ def normalize_symbols_from_payload(payload: Any) -> List[str]:
 
 def load_arbitrage_future_row(conn, underlying: str) -> Optional[Dict[str, Any]]:
     """
-    Resolve the tradeable FUT for Daily Futures. Uses next-month (serial) contract columns on
-    arbitrage_master: nextmth_future_symbol / nextmth_future_instrement_key.
+    Resolve the tradeable FUT for Daily Futures: ``arbitrage_master.currmth_future_*``
+    (serial front contract as maintained by the arbitrage daily setup job; roll window may shift
+    which underlying expiry is stored there).
     """
     row = conn.execute(
         text(
             """
             SELECT stock,
-                   nextmth_future_symbol,
-                   nextmth_future_instrement_key
+                   currmth_future_symbol,
+                   currmth_future_instrument_key
             FROM arbitrage_master
             WHERE UPPER(TRIM(stock)) = :u
-              AND nextmth_future_instrement_key IS NOT NULL
-              AND TRIM(nextmth_future_instrement_key) <> ''
+              AND currmth_future_instrument_key IS NOT NULL
+              AND TRIM(currmth_future_instrument_key) <> ''
             LIMIT 1
             """
         ),
@@ -1107,9 +1237,11 @@ def load_arbitrage_future_row(conn, underlying: str) -> Optional[Dict[str, Any]]
 
 def retarget_daily_futures_to_next_month_for_date(trade_date: date) -> Dict[str, Any]:
     """
-    Re-point today's (or a given day's) screening rows and open user trades to next-month
-    FUT keys/lots from arbitrage_master. Call once after switching Daily Futures to nextmth
-    so existing picks and `order_status = bought` rows track the new contract.
+    Re-point that day's screening rows and open user trades to **current** FUT
+    (``arbitrage_master.currmth_*``) via :func:`load_arbitrage_future_row`.
+
+    Kept for one-off admin sync; name is historical. Does not alter historical report rows
+    by itself—only updates ``daily_futures_*`` for the given ``trade_date`` when run.
     """
     ensure_daily_futures_tables()
     out: Dict[str, Any] = {
@@ -1136,7 +1268,7 @@ def retarget_daily_futures_to_next_month_for_date(trade_date: date) -> Dict[str,
                 continue
             row = load_arbitrage_future_row(conn, u)
             if not row:
-                out["skipped"].append({"underlying": u, "reason": "no_nextmth_in_arbitrage_master"})
+                out["skipped"].append({"underlying": u, "reason": "no_currmth_in_arbitrage_master"})
                 continue
             lot = fut_lot_for_key(str(row["instrument_key"]))
             conn.execute(
@@ -1284,12 +1416,16 @@ def _recompute_conviction_all_today(upstox: UpstoxService, trade_date: date) -> 
             )
 
 
-def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
+def _ingest_df_webhook(symbols: List[str], direction: str) -> Dict[str, Any]:
     ensure_daily_futures_tables()
+    dir_key = str(direction or "LONG").strip().upper()
+    if dir_key not in ("LONG", "SHORT"):
+        dir_key = "LONG"
     trade_date = ist_today()
     sym_set: Set[str] = {s.strip().upper() for s in symbols if s and str(s).strip()}
     logger.info(
-        "daily_futures webhook ingest: unique_symbols=%d trade_date=%s",
+        "daily_futures webhook ingest: direction=%s unique_symbols=%d trade_date=%s",
+        dir_key,
         len(sym_set),
         trade_date,
     )
@@ -1327,6 +1463,16 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
     )
 
     ingest_now = datetime.now(IST)
+    nifty_15m_bars = _last_completed_15m_candles_for_instrument(
+        upstox, NIFTY50_INDEX_KEY, trade_date, ingest_now
+    )
+    nifty15_for_bear = _safe_float((nifty_15m_bars or [])[-1].get("close")) if len(nifty_15m_bars or []) else None
+    nifty15_bear_ok = (
+        (nifty15_for_bear is not None and nifty_vwap is not None and float(nifty15_for_bear) < float(nifty_vwap))
+        if (nifty15_for_bear is not None and nifty_vwap is not None)
+        else (nifty_ltp is not None and nifty_vwap is not None and float(nifty_ltp) < float(nifty_vwap))
+    )
+
     scan_inputs: List[Dict[str, Any]] = []
 
     with engine.begin() as conn:
@@ -1352,9 +1498,27 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
             if len(last5_15m) >= 2:
                 c_prev = last5_15m[-2]
                 c_last = last5_15m[-1]
-                candle_is_green = bool(float(c_last["close"]) > float(c_last["open"]))
-                candle_higher_high = bool(float(c_last["high"]) > float(c_prev["high"]))
-                candle_higher_low = bool(float(c_last["low"]) > float(c_prev["low"]))
+                if dir_key == "LONG":
+                    candle_is_green = bool(float(c_last["close"]) > float(c_last["open"]))
+                    candle_higher_high = bool(float(c_last["high"]) > float(c_prev["high"]))
+                    candle_higher_low = bool(float(c_last["low"]) > float(c_prev["low"]))
+                else:
+                    is_red = bool(float(c_last["close"]) < float(c_last["open"]))
+                    lo = bool(float(c_last["low"]) < float(c_prev["low"]))
+                    hi = bool(float(c_last["high"]) < float(c_prev["high"]))
+                    candle_is_green = not is_red
+                    candle_higher_high = hi
+                    candle_higher_low = lo
+            stock15_close = _safe_float(last5_15m[-1].get("close")) if len(last5_15m) else None
+            stock15_bear_ok = (
+                stock15_close is not None
+                and session_vwap is not None
+                and float(stock15_close) < float(session_vwap)
+            )
+            candle_is_red = False
+            if dir_key == "SHORT" and len(last5_15m) >= 1:
+                cl0 = last5_15m[-1]
+                candle_is_red = bool(float(cl0["close"]) < float(cl0["open"]))
             ex = conn.execute(
                 text(
                     """
@@ -1363,9 +1527,10 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
                            candle_is_green, candle_higher_high, candle_higher_low
                     FROM daily_futures_screening
                     WHERE trade_date = CAST(:d AS DATE) AND UPPER(TRIM(underlying)) = :u
+                      AND UPPER(TRIM(COALESCE(direction_type, 'LONG'))) = :dfdir
                     """
                 ),
-                {"d": str(trade_date), "u": u},
+                {"d": str(trade_date), "u": u, "dfdir": dir_key},
             ).fetchone()
             prev_oi = _safe_float(ex[2]) if ex else None
             oi_change_pct: Optional[float] = None
@@ -1397,6 +1562,10 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
                     "lot_size": lot,
                     "future_symbol": row["future_symbol"],
                     "existing": ex,
+                    "nifty15_bear_ok": bool(nifty15_bear_ok),
+                    "stock15_bear_ok": bool(stock15_bear_ok),
+                    "candle_is_red": bool(candle_is_red),
+                    "dir_key": dir_key,
                 }
             )
         # OI-leg ranking within this batch: prefer % vs previous scan, else Upstox change_in_oi, else total_oi.
@@ -1422,12 +1591,23 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
                 if x.get("ltp") is not None and x.get("session_vwap") not in (None, 0)
                 else None
             )
-            vw, vw_reason = _vwap_leg_score_reason(
-                pvp,
-                candle_is_green=bool(x.get("candle_is_green")),
-                candle_higher_high=bool(x.get("candle_higher_high")),
-                candle_higher_low=bool(x.get("candle_higher_low")),
-            )
+            xdir = str(x.get("dir_key") or "LONG").strip().upper()
+            if xdir == "SHORT":
+                vw, vw_reason = _vwap_leg_score_reason_bearish(
+                    pvp,
+                    bool(x.get("nifty15_bear_ok")),
+                    bool(x.get("stock15_bear_ok")),
+                    candle_is_red=bool(x.get("candle_is_red")),
+                    candle_lower_low=bool(x.get("candle_higher_low")),
+                    candle_lower_high=bool(x.get("candle_higher_high")),
+                )
+            else:
+                vw, vw_reason = _vwap_leg_score_reason(
+                    pvp,
+                    candle_is_green=bool(x.get("candle_is_green")),
+                    candle_higher_high=bool(x.get("candle_higher_high")),
+                    candle_higher_low=bool(x.get("candle_higher_low")),
+                )
             if id(x) in rank_map and n_rank > 1:
                 oi_leg = (n_rank - 1 - rank_map[id(x)]) / (n_rank - 1) * 50.0
             elif id(x) in rank_map and n_rank == 1:
@@ -1438,7 +1618,7 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
             x["conviction_oi_leg"] = round(oi_leg, 1)
             x["conviction_vwap_leg"] = round(vw, 1)
             x["conviction_score"] = conviction
-            x["conviction_breakdown_json"] = {
+            cj: Dict[str, Any] = {
                 "oi_leg": round(oi_leg, 1),
                 "vwap_leg": round(vw, 1),
                 "vwap_leg_reason": vw_reason,
@@ -1449,7 +1629,12 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
                 "ltp": float(x["ltp"]) if x.get("ltp") is not None else None,
                 "session_vwap": float(x["session_vwap"]) if x.get("session_vwap") is not None else None,
                 "timestamp": ingest_now.isoformat(),
+                "direction": xdir,
             }
+            if xdir == "SHORT":
+                cj["nifty15_bear_ok"] = bool(x.get("nifty15_bear_ok"))
+                cj["stock15_bear_ok"] = bool(x.get("stock15_bear_ok"))
+            x["conviction_breakdown_json"] = cj
 
         for x in scan_inputs:
             u = x["underlying"]
@@ -1478,7 +1663,7 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
                         UPDATE daily_futures_screening SET
                           scan_count = scan_count + 1,
                           last_hit_at = :lh,
-                          direction_type = 'LONG',
+                          direction_type = :dtd,
                           lot_size = COALESCE(:lot, lot_size),
                           future_symbol = :fs,
                           instrument_key = :ik,
@@ -1511,6 +1696,7 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
                     {
                         "id": sid,
                         "lh": ingest_now,
+                        "dtd": str(x.get("dir_key") or dir_key),
                         "lot": x["lot_size"],
                         "fs": x["future_symbol"],
                         "ik": x["instrument_key"],
@@ -1551,7 +1737,7 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
                           stock_change_pct, nifty_change_pct, snapshotted_at,
                           candle_is_green, candle_higher_high, candle_higher_low, conviction_breakdown_json
                         ) VALUES (
-                          CAST(:d AS DATE), :u, 'LONG', :fs, :ik, :lot, 1, :fh, :lh, :cs,
+                          CAST(:d AS DATE), :u, :dtd, :fs, :ik, :lot, 1, :fh, :lh, :cs,
                           :oi_leg, :vw_leg, :ltp, :svwap, :toi, :oi_chg,
                           :nltp, :nsvwap, :spc, :npc, :scp, :ncp, :snap,
                           :cig, :chh, :chl, CAST(:cbj AS JSONB)
@@ -1562,6 +1748,7 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
                     {
                         "d": str(trade_date),
                         "u": u,
+                        "dtd": str(x.get("dir_key") or dir_key),
                         "fs": x["future_symbol"],
                         "ik": x["instrument_key"],
                         "lot": x["lot_size"],
@@ -1629,6 +1816,16 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
 
     summary["touched_screening_ids"] = touched_ids
     return summary
+
+
+def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
+    """Bullish ChartInk screener → direction LONG."""
+    return _ingest_df_webhook(symbols, "LONG")
+
+
+def process_chartink_webhook_bearish(symbols: List[str]) -> Dict[str, Any]:
+    """Bearish ChartInk screener → direction SHORT."""
+    return _ingest_df_webhook(symbols, "SHORT")
 
 
 def _fetch_screening_dicts(conn: Any, trade_date: date) -> List[Dict[str, Any]]:
@@ -1884,6 +2081,56 @@ def _apply_live_rel_strength_to_picks_and_running(
         logger.warning("daily_futures: persist rel-strength to screening failed: %s", e)
 
 
+def _quote_session_open_from_snapshot(snapshot: Dict[str, Any]) -> Optional[float]:
+    ohlc = snapshot.get("ohlc") if isinstance(snapshot.get("ohlc"), dict) else {}
+    o = _safe_float(ohlc.get("open"))
+    if o is not None and o > 0:
+        return o
+    return _safe_float(snapshot.get("open"))
+
+
+def index_bearish_gate_from_quotes() -> Dict[str, Any]:
+    """
+    NIFTY & BANKNIFTY both must trade below the session open (downtrend from open).
+    Used for Today’s pick — Bearish visibility and SHORT order entry.
+    """
+    out: Dict[str, Any] = {
+        "ok": False,
+        "nifty_ok": False,
+        "banknifty_ok": False,
+        "nifty_ltp": None,
+        "nifty_open": None,
+        "banknifty_ltp": None,
+        "banknifty_open": None,
+    }
+    try:
+        ux = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+        b = ux.get_market_quote_snapshots_batch([NIFTY50_INDEX_KEY, BANKNIFTY_INDEX_KEY]) or {}
+    except Exception as e:
+        out["error"] = str(e)
+        return out
+    nq = b.get(NIFTY50_INDEX_KEY) or {}
+    bq = b.get(BANKNIFTY_INDEX_KEY) or {}
+    nlp = _safe_float(nq.get("last_price"))
+    blp = _safe_float(bq.get("last_price"))
+    nop = _quote_session_open_from_snapshot(nq)
+    bop = _quote_session_open_from_snapshot(bq)
+    n_ok = nlp is not None and nop is not None and float(nlp) < float(nop)
+    b_ok = blp is not None and bop is not None and float(blp) < float(bop)
+    out.update(
+        {
+            "nifty_ltp": nlp,
+            "nifty_open": nop,
+            "banknifty_ltp": blp,
+            "banknifty_open": bop,
+            "nifty_ok": n_ok,
+            "banknifty_ok": b_ok,
+            "ok": bool(n_ok and b_ok),
+        }
+    )
+    return out
+
+
 def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[str, Any]:
     ensure_daily_futures_tables()
     td = ist_today()
@@ -1913,12 +2160,12 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
     n_hidden_bought = len(
         [s for s in screenings if int(s.get("screening_id") or 0) in bought_sids]
     )
-    picks = [s for s in screenings if s["screening_id"] not in bought_sids]
+    not_bought = [s for s in screenings if s["screening_id"] not in bought_sids]
     # Today's pick should surface only symbols with sufficient LIVE conviction.
     # A symbol appears automatically once live conviction reaches the threshold.
     picks = [
         s
-        for s in picks
+        for s in not_bought
         if s.get("conviction_score") is not None and float(s.get("conviction_score")) >= 50.0
     ]
     picks_before_closed_filter = list(picks)
@@ -1927,7 +2174,8 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
         text(
             """
             SELECT t.id, t.screening_id, t.underlying, COALESCE(t.direction_type, s.direction_type, 'LONG') AS direction_type, t.future_symbol, t.instrument_key,
-                   t.lot_size, t.entry_time, t.entry_price, t.consecutive_webhook_misses,
+                   t.lot_size, t.entry_time, t.entry_price, t.sell_price, t.sell_time, t.buy_price,
+                   t.consecutive_webhook_misses,
                    t.position_atr, t.profit_trail_armed, t.nifty_structure_weakening,
                    t.trail_stop_hit, t.momentum_exhausting,
                    s.scan_count, s.first_hit_at, s.last_hit_at, s.conviction_score,
@@ -1946,33 +2194,37 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
 
     running = []
     for row in running_rows:
-        miss = int(row[9] or 0)
-        pos_atr = float(row[10]) if row[10] is not None else None
+        miss = int(row[12] or 0)
+        pos_atr = float(row[13]) if row[13] is not None else None
+        dtx = str(row[3] or "LONG").strip().upper()
+        stx = str(row[10]).strip() if row[10] is not None else None
         running.append(
             {
                 "trade_id": row[0],
                 "screening_id": row[1],
                 "underlying": row[2],
-                "direction_type": str(row[3] or "LONG").strip().upper(),
+                "direction_type": dtx,
                 "future_symbol": row[4],
                 "instrument_key": row[5],
                 "lot_size": int(row[6]) if row[6] is not None else None,
-                "entry_time": row[7],
-                "entry_price": float(row[8]) if row[8] is not None else None,
+                "entry_time": (row[7] if dtx != "SHORT" else stx),
+                "entry_price": (float(row[8]) if row[8] is not None else None) if dtx != "SHORT" else None,
+                "sell_price": (float(row[9]) if row[9] is not None else None) if dtx == "SHORT" else None,
+                "sell_time": stx if dtx == "SHORT" else None,
                 "consecutive_webhook_misses": miss,
                 "position_atr": pos_atr,
-                "profit_trail_armed": bool(row[11]) if row[11] is not None else False,
-                "nifty_structure_weakening": bool(row[12]) if row[12] is not None else False,
-                "trail_stop_hit": bool(row[13]) if row[13] is not None else False,
-                "momentum_exhausting": bool(row[14]) if row[14] is not None else False,
-                "scan_count": int(row[15] or 0),
-                "first_hit_at": row[16].isoformat() if row[16] else None,
-                "last_hit_at": row[17].isoformat() if row[17] else None,
-                "conviction_score": float(row[18]) if row[18] is not None else None,
-                "second_scan_conviction_score": float(row[19]) if row[19] is not None else None,
-                "ltp": float(row[20]) if row[20] is not None else None,
-                "stock_change_pct": float(row[21]) if row[21] is not None else None,
-                "nifty_change_pct": float(row[22]) if row[22] is not None else None,
+                "profit_trail_armed": bool(row[14]) if row[14] is not None else False,
+                "nifty_structure_weakening": bool(row[15]) if row[15] is not None else False,
+                "trail_stop_hit": bool(row[16]) if row[16] is not None else False,
+                "momentum_exhausting": bool(row[17]) if row[17] is not None else False,
+                "scan_count": int(row[18] or 0),
+                "first_hit_at": row[19].isoformat() if row[19] else None,
+                "last_hit_at": row[20].isoformat() if row[20] else None,
+                "conviction_score": float(row[21]) if row[21] is not None else None,
+                "second_scan_conviction_score": float(row[22]) if row[22] is not None else None,
+                "ltp": float(row[23]) if row[23] is not None else None,
+                "stock_change_pct": float(row[24]) if row[24] is not None else None,
+                "nifty_change_pct": float(row[25]) if row[25] is not None else None,
                 "warn_two_misses": miss >= 2,
             }
         )
@@ -1981,7 +2233,8 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
         text(
             """
             SELECT t.id, t.screening_id, t.underlying, COALESCE(t.direction_type, s.direction_type, 'LONG') AS direction_type, t.future_symbol, t.instrument_key, t.lot_size,
-                   t.entry_time, t.entry_price, t.exit_time, t.exit_price, t.pnl_points, t.pnl_rupees,
+                   t.entry_time, t.entry_price, t.sell_time, t.sell_price, t.exit_time, t.exit_price, t.buy_time, t.buy_price,
+                   t.pnl_points, t.pnl_rupees,
                    s.first_hit_at,
                    s.ltp
             FROM daily_futures_user_trade t
@@ -2001,8 +2254,19 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
     wins = 0
     losses = 0
     for row in closed_rows:
-        pnl_pts = float(row[11]) if row[11] is not None else None
-        pnl_rs = float(row[12]) if row[12] is not None else None
+        dtx = str(row[3] or "LONG").strip().upper()
+        pnl_pts = float(row[15]) if row[15] is not None else None
+        pnl_rs = float(row[16]) if row[16] is not None else None
+        if dtx == "SHORT":
+            et_disp = str(row[9]).strip() if row[9] is not None else None
+            ep_disp = float(row[10]) if row[10] is not None else None
+            xt = str(row[13]).strip() if row[13] is not None else (str(row[11]).strip() if row[11] is not None else None)
+            xp = float(row[14]) if row[14] is not None else (float(row[12]) if row[12] is not None else None)
+        else:
+            et_disp = str(row[7]).strip() if row[7] is not None else None
+            ep_disp = float(row[8]) if row[8] is not None else None
+            xt = str(row[11]).strip() if row[11] is not None else None
+            xp = float(row[12]) if row[12] is not None else None
         wl = None
         if pnl_rs is not None:
             total_pnl += pnl_rs
@@ -2019,18 +2283,18 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                 "trade_id": row[0],
                 "screening_id": row[1],
                 "underlying": row[2],
-                "direction_type": str(row[3] or "LONG").strip().upper(),
+                "direction_type": dtx,
                 "future_symbol": row[4],
                 "instrument_key": row[5],
                 "lot_size": int(row[6]) if row[6] is not None else None,
-                "entry_time": row[7],
-                "entry_price": float(row[8]) if row[8] is not None else None,
-                "exit_time": row[9],
-                "exit_price": float(row[10]) if row[10] is not None else None,
+                "entry_time": et_disp,
+                "entry_price": ep_disp,
+                "exit_time": xt,
+                "exit_price": xp,
                 "pnl_points": pnl_pts,
                 "pnl_rupees": pnl_rs,
-                "first_scan_time": row[13].isoformat() if row[13] is not None and hasattr(row[13], "isoformat") else None,
-                "ltp": float(row[14]) if row[14] is not None else None,
+                "first_scan_time": row[17].isoformat() if row[17] is not None and hasattr(row[17], "isoformat") else None,
+                "ltp": float(row[18]) if row[18] is not None else None,
                 "win_loss": wl,
             }
         )
@@ -2058,12 +2322,60 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
         ]
     n_hidden_closed = max(0, len(picks_before_closed_filter) - len(picks))
 
+    not_bought_open = list(not_bought)
+    if closed_future_symbols or closed_underlyings:
+        not_bought_open = [
+            s
+            for s in not_bought
+            if (
+                str(s.get("future_symbol") or "").strip().upper() not in closed_future_symbols
+                and str(s.get("underlying") or "").strip().upper() not in closed_underlyings
+            )
+        ]
+
+    def _under_fifty(s: Dict[str, Any]) -> bool:
+        cs = s.get("conviction_score")
+        return cs is not None and float(cs) < 50.0
+
+    picks_low_conv_bull: List[Dict[str, Any]] = sorted(
+        [
+            s
+            for s in not_bought_open
+            if str(s.get("direction_type") or "LONG").strip().upper() == "LONG" and _under_fifty(s)
+        ],
+        key=lambda x: (-float(x.get("conviction_score") or 0.0), str(x.get("underlying") or "")),
+    )
+    picks_low_conv_bear: List[Dict[str, Any]] = sorted(
+        [
+            s
+            for s in not_bought_open
+            if str(s.get("direction_type") or "LONG").strip().upper() == "SHORT" and _under_fifty(s)
+        ],
+        key=lambda x: (-float(x.get("conviction_score") or 0.0), str(x.get("underlying") or "")),
+    )
+
+    picks_mixed = list(picks)
+    index_bear = index_bearish_gate_from_quotes()
+    picks_bull = [
+        p
+        for p in picks_mixed
+        if str(p.get("direction_type") or "LONG").strip().upper() != "SHORT"
+    ]
+    picks_bear_all = [
+        p
+        for p in picks_mixed
+        if str(p.get("direction_type") or "LONG").strip().upper() == "SHORT"
+    ]
+    # Bearish table: NIFTY + BANKNIFTY below day open, conviction already ≥50 from filter above
+    picks_bearish: List[Dict[str, Any]] = picks_bear_all if bool(index_bear.get("ok")) else []
+
     denom = wins + losses
     win_rate = round(100.0 * wins / denom, 1) if denom else None
 
+    _low_conv_extras: List[Dict[str, Any]] = list(picks_low_conv_bull) + list(picks_low_conv_bear)
     if not lite_mode:
         try:
-            _apply_live_ltps_to_picks_and_running(picks, running, closed)
+            _apply_live_ltps_to_picks_and_running(list(picks_mixed) + _low_conv_extras, running, closed)
         except Exception as e:
             logger.warning("daily_futures: live LTP refresh failed: %s", e, exc_info=True)
 
@@ -2090,7 +2402,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
 
     if not lite_mode:
         try:
-            _apply_live_rel_strength_to_picks_and_running(picks, running, td)
+            _apply_live_rel_strength_to_picks_and_running(list(picks_mixed) + _low_conv_extras, running, td)
         except Exception as e:
             logger.warning("daily_futures: rel-strength refresh failed: %s", e, exc_info=True)
 
@@ -2114,9 +2426,9 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                     "decision": "hold",
                 }
 
-    for p in picks:
+    for p in picks_mixed:
         reasons: List[str] = []
-        # Simplified order gate: scan_count >= 2 and conviction > 60 (see confirm_buy).
+        dtp = str(p.get("direction_type") or "LONG").strip().upper()
         if int(p.get("scan_count") or 0) < 2:
             reasons.append("Needs at least 2 scans")
         c2 = p.get("second_scan_conviction_score")
@@ -2124,8 +2436,14 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
             c2 = p.get("conviction_score")
         if c2 is None:
             reasons.append("Conviction unavailable")
-        elif float(c2) <= 60.0:
-            reasons.append(f"Conviction {round(float(c2),1)} is not above 60")
+        elif dtp == "SHORT":
+            if float(c2) <= 50.0:
+                reasons.append(f"Conviction {round(float(c2),1)} is not above 50")
+            if not bool(index_bear.get("ok")):
+                reasons.append("NIFTY and BANKNIFTY must both be below the day open (downtrend)")
+        else:
+            if float(c2) <= 60.0:
+                reasons.append(f"Conviction {round(float(c2),1)} is not above 60")
         p["order_eligible"] = len(reasons) == 0
         p["order_block_reason"] = reasons[0] if reasons else None
 
@@ -2133,7 +2451,12 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
         "trade_date": str(td),
         "session_before_open": False,
         "session_message": None,
-        "picks": picks,
+        "picks": picks_bull,
+        "picks_mixed": picks_mixed,
+        "picks_bearish": picks_bearish,
+        "picks_low_conv_bull": picks_low_conv_bull,
+        "picks_low_conv_bear": picks_low_conv_bear,
+        "index_bearish_gate": index_bear,
         "picks_diagnostics": {
             "screening_count": screening_total,
             "hidden_because_bought": n_hidden_bought,
@@ -2141,7 +2464,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
         },
         "running": running,
         "closed": closed,
-        "trade_if_could_have_done": [] if lite_mode else _build_trade_if_could_rows(picks, closed, td),
+        "trade_if_could_have_done": [] if lite_mode else _build_trade_if_could_rows(picks_mixed, closed, td),
         "summary": {
             "cumulative_pnl_rupees": round(total_pnl, 2),
             "wins": wins,
@@ -2196,11 +2519,8 @@ def get_workspace_trade_if_could(db: Session, user_id: int) -> Dict[str, Any]:
             "trade_if_could_have_done": [],
         }
     td = ist_today()
-    rows = _build_trade_if_could_rows(
-        list(base.get("picks") or []),
-        list(base.get("closed") or []),
-        td,
-    )
+    pm = list(base.get("picks_mixed") or base.get("picks") or [])
+    rows = _build_trade_if_could_rows(pm, list(base.get("closed") or []), td)
     return {
         "trade_date": base.get("trade_date"),
         "session_before_open": False,
@@ -2226,12 +2546,20 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
         raise ValueError("Screening row not found for today")
     if int(row[6] or 0) < 2:
         raise ValueError("Needs at least 2 consecutive scans before order")
+    dtp = str(row[2] or "LONG").strip().upper()
     gate_score = row[8] if row[8] is not None else row[7]
     c2 = float(gate_score) if gate_score is not None else None
-    if c2 is None or c2 <= 60.0:
-        raise ValueError(
-            f"Conviction must be above 60 (current: {round(c2 or 0.0, 1)})"
-        )
+    if dtp == "SHORT":
+        if c2 is None or c2 <= 50.0:
+            raise ValueError(f"Conviction must be above 50 for SHORT (current: {round(c2 or 0.0, 1)})")
+        ig = index_bearish_gate_from_quotes()
+        if not bool(ig.get("ok")):
+            raise ValueError("SHORT entry requires NIFTY and BANKNIFTY both below their day open (downtrend).")
+    else:
+        if c2 is None or c2 <= 60.0:
+            raise ValueError(
+                f"Conviction must be above 60 (current: {round(c2 or 0.0, 1)})"
+            )
 
     exists = db.execute(
         text(
@@ -2245,29 +2573,54 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
     if exists:
         raise ValueError("Already bought this pick")
 
-    ins = db.execute(
-        text(
-            """
-            INSERT INTO daily_futures_user_trade (
-              user_id, screening_id, underlying, direction_type, future_symbol, instrument_key, lot_size,
-              order_status, entry_time, entry_price, consecutive_webhook_misses
-            ) VALUES (
-              :u, :sid, :und, :dt, :fs, :ik, :lot, 'bought', :et, :ep, 0
-            ) RETURNING id
-            """
-        ),
-        {
-            "u": user_id,
-            "sid": screening_id,
-            "und": row[1],
-            "dt": str(row[2] or "LONG").strip().upper(),
-            "fs": row[3],
-            "ik": row[4],
-            "lot": row[5],
-            "et": entry_time.strip(),
-            "ep": entry_price,
-        },
-    ).fetchone()
+    if dtp == "SHORT":
+        ins = db.execute(
+            text(
+                """
+                INSERT INTO daily_futures_user_trade (
+                  user_id, screening_id, underlying, direction_type, future_symbol, instrument_key, lot_size,
+                  order_status, sell_time, sell_price, consecutive_webhook_misses
+                ) VALUES (
+                  :u, :sid, :und, :dt, :fs, :ik, :lot, 'bought', :st, :sp, 0
+                ) RETURNING id
+                """
+            ),
+            {
+                "u": user_id,
+                "sid": screening_id,
+                "und": row[1],
+                "dt": dtp,
+                "fs": row[3],
+                "ik": row[4],
+                "lot": row[5],
+                "st": entry_time.strip(),
+                "sp": entry_price,
+            },
+        ).fetchone()
+    else:
+        ins = db.execute(
+            text(
+                """
+                INSERT INTO daily_futures_user_trade (
+                  user_id, screening_id, underlying, direction_type, future_symbol, instrument_key, lot_size,
+                  order_status, entry_time, entry_price, consecutive_webhook_misses
+                ) VALUES (
+                  :u, :sid, :und, :dt, :fs, :ik, :lot, 'bought', :et, :ep, 0
+                ) RETURNING id
+                """
+            ),
+            {
+                "u": user_id,
+                "sid": screening_id,
+                "und": row[1],
+                "dt": dtp,
+                "fs": row[3],
+                "ik": row[4],
+                "lot": row[5],
+                "et": entry_time.strip(),
+                "ep": entry_price,
+            },
+        ).fetchone()
     trade_id = int(ins[0]) if ins and ins[0] is not None else None
     ikey = str(row[4] or "").strip()
     if trade_id and ikey:
@@ -2296,7 +2649,8 @@ def confirm_sell(db: Session, user_id: int, trade_id: int, exit_time: str, exit_
     row = db.execute(
         text(
             """
-            SELECT id, screening_id, underlying, entry_price, lot_size, instrument_key
+            SELECT id, screening_id, underlying, entry_price, sell_price, lot_size, instrument_key,
+                   COALESCE(direction_type, 'LONG') AS direction_type
             FROM daily_futures_user_trade
             WHERE id = :id AND user_id = :u AND order_status = 'bought'
             """
@@ -2306,37 +2660,72 @@ def confirm_sell(db: Session, user_id: int, trade_id: int, exit_time: str, exit_
     if not row:
         raise ValueError("Open trade not found")
 
-    entry_px = float(row[3]) if row[3] is not None else None
-    lot = int(row[4]) if row[4] is not None else None
-    pts = None
-    pnl_rs = None
-    if entry_px is not None:
-        pts = round(float(exit_price) - entry_px, 4)
+    dtx = str(row[7] or "LONG").strip().upper()
+    lot = int(row[5]) if row[5] is not None else None
+    ref_px: Optional[float] = None
+    if dtx == "SHORT":
+        ref_px = float(row[4]) if row[4] is not None else None  # sell_price
+    else:
+        ref_px = float(row[3]) if row[3] is not None else None
+    cover_px = float(exit_price)
+    pts: Optional[float] = None
+    pnl_rs: Optional[float] = None
+    if ref_px is not None:
+        if dtx == "SHORT":
+            pts = round(float(ref_px) - cover_px, 4)
+        else:
+            pts = round(cover_px - float(ref_px), 4)
         if lot:
-            pnl_rs = round(pts * lot, 2)
+            pnl_rs = round(float(pts) * int(lot), 2)
 
-    db.execute(
-        text(
-            """
-            UPDATE daily_futures_user_trade SET
-              order_status = 'sold',
-              exit_time = :xt,
-              exit_price = :xp,
-              pnl_points = :pts,
-              pnl_rupees = :pnl,
-              updated_at = CURRENT_TIMESTAMP
-            WHERE id = :id AND user_id = :u
-            """
-        ),
-        {
-            "xt": exit_time.strip(),
-            "xp": exit_price,
-            "pts": pts,
-            "pnl": pnl_rs,
-            "id": trade_id,
-            "u": user_id,
-        },
-    )
+    if dtx == "SHORT":
+        db.execute(
+            text(
+                """
+                UPDATE daily_futures_user_trade SET
+                  order_status = 'sold',
+                  buy_time = :bt,
+                  buy_price = :bp,
+                  exit_time = :bt,
+                  exit_price = :bp,
+                  pnl_points = :pts,
+                  pnl_rupees = :pnl,
+                  updated_at = CURRENT_TIMESTAMP
+                WHERE id = :id AND user_id = :u
+                """
+            ),
+            {
+                "bt": exit_time.strip(),
+                "bp": cover_px,
+                "pts": pts,
+                "pnl": pnl_rs,
+                "id": trade_id,
+                "u": user_id,
+            },
+        )
+    else:
+        db.execute(
+            text(
+                """
+                UPDATE daily_futures_user_trade SET
+                  order_status = 'sold',
+                  exit_time = :xt,
+                  exit_price = :xp,
+                  pnl_points = :pts,
+                  pnl_rupees = :pnl,
+                  updated_at = CURRENT_TIMESTAMP
+                WHERE id = :id AND user_id = :u
+                """
+            ),
+            {
+                "xt": exit_time.strip(),
+                "xp": cover_px,
+                "pts": pts,
+                "pnl": pnl_rs,
+                "id": trade_id,
+                "u": user_id,
+            },
+        )
     db.commit()
     return {"success": True, "pnl_points": pts, "pnl_rupees": pnl_rs}
 
@@ -2411,4 +2800,28 @@ def persist_chartink_webhook_raw_body(body: bytes) -> str:
 def webhook_secret_ok(provided: Optional[str]) -> bool:
     default_secret = "tradewithctodailyfuture"
     expected = (os.getenv("CHARTINK_DAILY_FUTURES_SECRET") or default_secret).strip()
+    return bool(provided and provided.strip() == expected)
+
+
+def chartink_bearish_webhook_inbox_dir() -> Path:
+    override = (os.getenv("CHARTINK_DF_BEARISH_WEBHOOK_INBOX") or "").strip()
+    if override:
+        return Path(override).expanduser()
+    root = Path(__file__).resolve().parents[2]
+    return root / "inbox" / "chartink_daily_futures_bearish"
+
+
+def persist_chartink_bearish_webhook_raw_body(body: bytes) -> str:
+    d = chartink_bearish_webhook_inbox_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%fZ")
+    short = uuid.uuid4().hex[:8]
+    p = d / f"{ts}_{short}.raw.bear.json"
+    p.write_bytes(body)
+    return str(p)
+
+
+def webhook_bearish_secret_ok(provided: Optional[str]) -> bool:
+    default_secret = "tradewithctodailyfuture_bearish"
+    expected = (os.getenv("CHARTINK_DF_BEARISH_SECRET") or default_secret).strip()
     return bool(provided and provided.strip() == expected)

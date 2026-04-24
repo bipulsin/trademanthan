@@ -497,9 +497,84 @@
     throw lastErr || new Error('section');
   }
 
+  function buildPicksReadonlyTableHtml(rows) {
+    if (!rows || !rows.length) {
+      return '<p class="df-meta" style="margin:0">No rows to show.</p>';
+    }
+    const th =
+      '<thead><tr><th>Future</th><th>Qty (1 lot)</th><th>Scan #</th><th>1st scan</th><th>Last scan</th><th class="num">Conviction</th>' +
+      '<th class="df-th-rs" title="(FUT day % − Nifty day %); line shows spread + S and N %">Rel. str.</th>' +
+      '<th class="num">LTP</th></tr></thead>';
+    const body = rows
+      .map(function (r) {
+        const convTxt = formatConvictionEntryLive(r);
+        return (
+          '<tr><td><strong>' +
+          symbolWithDirectionHtml(r) +
+          '</strong><div style="font-size:0.75rem;color:var(--theme-muted);">' +
+          esc(r.underlying) +
+          '</div></td><td class="num">' +
+          esc(r.lot_size) +
+          '</td><td class="num">' +
+          esc(r.scan_count) +
+          '</td><td>' +
+          fmtIsoTimeIst(r.first_hit_at) +
+          '</td><td>' +
+          fmtIsoTimeIst(r.last_hit_at) +
+          '</td><td class="num">' +
+          convTxt +
+          '</td><td class="df-rs-cell">' +
+          fmtRelStrength(r) +
+          '</td><td class="num">' +
+          fmtNum(r.ltp, 2) +
+          '</td></tr>'
+        );
+      })
+      .join('');
+    return '<table class="df-table df-table-picks-more">' + th + '<tbody>' + body + '</tbody></table>';
+  }
+
+  function openPicksMoreModal(kind) {
+    const d = state.workspace || {};
+    const rows =
+      kind === 'bear' ? d.picks_low_conv_bear || [] : d.picks_low_conv_bull || [];
+    const titleEl = document.getElementById('dfPicksMoreTitle');
+    const wrap = document.getElementById('dfPicksMoreTableWrap');
+    const m = document.getElementById('dfPicksMoreModal');
+    if (titleEl) {
+      titleEl.textContent =
+        kind === 'bear'
+          ? "Today's pick — Bearish · conviction below 50"
+          : "Today's pick — Bullish · conviction below 50";
+    }
+    if (wrap) {
+      wrap.innerHTML = buildPicksReadonlyTableHtml(rows);
+    }
+    if (m) {
+      m.setAttribute('aria-hidden', 'false');
+    }
+  }
+
+  function closePicksMoreModal() {
+    const m = document.getElementById('dfPicksMoreModal');
+    if (m) m.setAttribute('aria-hidden', 'true');
+  }
+
+  function updatePicksMoreControls(data) {
+    const bull = (data && data.picks_low_conv_bull) || [];
+    const bear = (data && data.picks_low_conv_bear) || [];
+    const bullBtn = document.getElementById('dfBullPicksMoreBtn');
+    const bearBtn = document.getElementById('dfBearPicksMoreBtn');
+    const open = data && !data.session_before_open;
+    if (bullBtn) bullBtn.hidden = !(open && bull.length > 0);
+    if (bearBtn) bearBtn.hidden = !(open && bear.length > 0);
+  }
+
   function renderAll(data) {
+    state.workspace = data;
     renderPicksBullish(data);
     renderPicksBearish(data);
+    updatePicksMoreControls(data);
     render15mAlertStrip(data.running || []);
     renderRunning(data.running || []);
     renderClosed(data.closed || [], data.summary);
@@ -1130,7 +1205,6 @@
     try {
       const liteData = await fetchWorkspace({ lite: true, timeoutMs: 9000 });
       if (seq !== state.refreshSeq) return;
-      state.workspace = liteData;
       if (b) {
         if (liteData.session_before_open) {
           b.textContent =
@@ -1196,6 +1270,14 @@
     document.getElementById('dfSellBackdrop').addEventListener('click', closeSellModal);
     document.getElementById('dfSellCancel').addEventListener('click', closeSellModal);
     document.getElementById('dfSellOk').addEventListener('click', submitSell);
+    const pmB = document.getElementById('dfPicksMoreBackdrop');
+    const pmC = document.getElementById('dfPicksMoreClose');
+    if (pmB) pmB.addEventListener('click', closePicksMoreModal);
+    if (pmC) pmC.addEventListener('click', closePicksMoreModal);
+    const bullM = document.getElementById('dfBullPicksMoreBtn');
+    const bearM = document.getElementById('dfBearPicksMoreBtn');
+    if (bullM) bullM.addEventListener('click', function () { openPicksMoreModal('bull'); });
+    if (bearM) bearM.addEventListener('click', function () { openPicksMoreModal('bear'); });
   }
 
   document.addEventListener('DOMContentLoaded', function () {

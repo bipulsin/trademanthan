@@ -191,6 +191,32 @@
         .df-dir-neutral { background: #e2e8f0; color: #334155; }
         /* Section icons (work even if a Font Awesome glyph fails to load) */
         .df-pick-sec-ico { display: inline-block; margin-right: 6px; font-size: 1.2rem; line-height: 1; vertical-align: -0.1em; }
+        .df-pick-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+        .df-pick-card-head h2 { margin: 0; flex: 1 1 auto; min-width: 0; }
+        .df-more-link {
+            flex: 0 0 auto;
+            margin: 0;
+            padding: 2px 0 0;
+            border: none;
+            background: none;
+            color: var(--theme-accent, #2563eb);
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: underline;
+            font-family: inherit;
+        }
+        .df-more-link:hover { filter: brightness(1.08); }
+        .df-more-link:disabled { opacity: 0.4; cursor: default; text-decoration: none; }
+        .df-modal-panel--picks-more {
+            min-width: min(96vw, 880px);
+            max-width: 96vw;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .df-picks-more-scroll { overflow-y: auto; flex: 1 1 auto; min-height: 0; max-height: calc(90vh - 7.5rem); }
     </style>
 </head>
 <body class="theme-page">
@@ -215,19 +241,25 @@
                 <p id="dfBanner">Loading workspace…</p>
 
                 <div class="df-card" id="dfBullPicksCard">
-                    <h2>
-                        <span class="df-pick-sec-ico" title="Bullish" aria-hidden="true">🐂</span>
-                        <i class="fas fa-arrow-trend-up" style="color:#b45309" aria-hidden="true"></i>
-                        <span> Today&apos;s pick — Bullish</span>
-                    </h2>
+                    <div class="df-pick-card-head">
+                        <h2>
+                            <span class="df-pick-sec-ico" title="Bullish" aria-hidden="true">🐂</span>
+                            <i class="fas fa-arrow-trend-up" style="color:#b45309" aria-hidden="true"></i>
+                            <span> Today&apos;s pick — Bullish</span>
+                        </h2>
+                        <button type="button" class="df-more-link" id="dfBullPicksMoreBtn" hidden>more…</button>
+                    </div>
                     <div id="dfPicksTable"></div>
                 </div>
                 <div class="df-card" id="dfBearPicksCard">
-                    <h2>
-                        <span class="df-pick-sec-ico" title="Bearish" aria-hidden="true">🐻</span>
-                        <i class="fas fa-arrow-trend-down" style="color:#b91c1c" aria-hidden="true"></i>
-                        <span> Today&apos;s pick — Bearish</span>
-                    </h2>
+                    <div class="df-pick-card-head">
+                        <h2>
+                            <span class="df-pick-sec-ico" title="Bearish" aria-hidden="true">🐻</span>
+                            <i class="fas fa-arrow-trend-down" style="color:#b91c1c" aria-hidden="true"></i>
+                            <span> Today&apos;s pick — Bearish</span>
+                        </h2>
+                        <button type="button" class="df-more-link" id="dfBearPicksMoreBtn" hidden>more…</button>
+                    </div>
                     <p class="df-meta" id="dfBearishGateLine" style="margin:0 0 8px;font-size:0.85rem;color:var(--theme-muted);"></p>
                     <div id="dfPicksBearTable"></div>
                 </div>
@@ -299,6 +331,20 @@
         </div>
     </div>
 
+    <div id="dfPicksMoreModal" class="df-modal" aria-hidden="true" role="dialog" aria-labelledby="dfPicksMoreTitle">
+        <div class="df-modal-backdrop" id="dfPicksMoreBackdrop"></div>
+        <div class="df-modal-panel df-modal-panel--picks-more">
+            <h3 id="dfPicksMoreTitle" style="margin:0 0 6px;">Additional picks</h3>
+            <p class="df-meta" style="margin:0 0 10px;font-size:0.86rem;">Live conviction under 50 (not shown in the main table). View only — no actions.</p>
+            <div id="dfPicksMoreScroll" class="df-picks-more-scroll">
+                <div id="dfPicksMoreTableWrap"></div>
+            </div>
+            <div class="df-modal-actions" style="margin-top: 12px;">
+                <button type="button" class="df-btn df-btn-order" id="dfPicksMoreClose" style="min-width:7rem;">Close</button>
+            </div>
+        </div>
+    </div>
+
     <div id="dfSellModal" class="df-modal" aria-hidden="true" role="dialog">
         <div class="df-modal-backdrop" id="dfSellBackdrop"></div>
         <div class="df-modal-panel">
@@ -317,6 +363,6 @@
     </div>
 
     <script src="left-menu.js?v=3.20"></script>
-    <script src="dailyfutures.js?v=30"></script>
+    <script src="dailyfutures.js?v=31"></script>
 </body>
 </html>
