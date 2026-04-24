@@ -78,8 +78,31 @@
         .df-run-action-btns { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; }
         table.df-table th.df-alerts-cell, table.df-table td.df-alerts-cell { min-width: 9rem; vertical-align: top; }
         .df-strip-meta { margin: 0 0 8px; font-size: 0.78rem; color: var(--theme-muted, #64748b); }
+        .df-h2-hint {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin: 0 0 2px 0;
+        }
+        .df-h2-hint h2 { margin: 0; }
+        .df-strip-hint-dtl { flex: 0 0 auto; margin: 0; }
+        .df-strip-hint-summary {
+            list-style: none;
+            cursor: pointer;
+            color: var(--theme-muted, #64748b);
+            padding: 2px 6px 2px 8px;
+            border-radius: 8px;
+            font-size: 1.05rem;
+            line-height: 1.2;
+        }
+        .df-strip-hint-summary::-webkit-details-marker { display: none; }
+        .df-strip-hint-dtl[open] .df-strip-hint-summary { color: #2563eb; background: rgba(37, 99, 235, 0.08); }
         .df-strip-help {
-            margin: 0 0 10px;
+            margin: 6px 0 0 0;
+            padding: 0 0 0 0;
+            max-width: 100%;
             font-size: 0.75rem;
             line-height: 1.5;
             color: var(--theme-muted, #64748b);
@@ -128,16 +151,23 @@
                 </div>
 
                 <div class="df-card df-strip-card">
-                    <h2><i class="fas fa-bell"></i> 15-min Alert Strip</h2>
+                    <div class="df-h2-hint">
+                        <h2><i class="fas fa-bell"></i> 15-min Alert Strip</h2>
+                        <details class="df-strip-hint-dtl">
+                            <summary class="df-strip-hint-summary" title="How this strip is built (click to expand)" aria-label="Message: how strip decision is built (click to expand)">
+                                <i class="fas fa-comment-dots" aria-hidden="true"></i>
+                            </summary>
+                            <p class="df-strip-help">
+                                <strong>How the strip &ldquo;decision&rdquo; is built (priority top → bottom):</strong>
+                                (1) <em>Lock profit — exit</em> if the <strong>profit trail stop</strong> is hit. Else (2) <em>Review — dual</em> if
+                                <strong>both</strong> Nifty 15m is in a <strong>lower low</strong> and this future shows the <strong>15m fade</strong> pattern.
+                                Else (3) <em>Watch</em> if <strong>either</strong> of those two is true. Else (4) <em>No exit signal</em> (nothing in 1–3; not &ldquo;all clear on price&rdquo;):
+                                Nifty may still be &ldquo;OK&rdquo; while your stock falls. <strong>L2 &ldquo;Trail not armed&rdquo;</strong> = not yet in +1.5×ATR profit to arm the trail, not a trend call.
+                                <strong>L3 &ldquo;No 15m fade&rdquo;</strong> = our small fade pattern is not detected, not &ldquo;strong rally.&rdquo;
+                            </p>
+                        </details>
+                    </div>
                     <p class="df-strip-meta">Updates with the workspace poll (120s). Same Nifty and stock 15m data the server used for the strip line.</p>
-                    <p class="df-strip-help">
-                        <strong>How the strip &ldquo;decision&rdquo; is built (priority top → bottom):</strong>
-                        (1) <em>Lock profit — exit</em> if the <strong>profit trail stop</strong> is hit. Else (2) <em>Review — dual</em> if
-                        <strong>both</strong> Nifty 15m is in a <strong>lower low</strong> and this future shows the <strong>15m fade</strong> pattern.
-                        Else (3) <em>Watch</em> if <strong>either</strong> of those two is true. Else (4) <em>No exit signal</em> (nothing in 1–3; not &ldquo;all clear on price&rdquo;):
-                        Nifty may still be &ldquo;OK&rdquo; while your stock falls. <strong>L2 &ldquo;Trail not armed&rdquo;</strong> = not yet in +1.5×ATR profit to arm the trail, not a trend call.
-                        <strong>L3 &ldquo;No 15m fade&rdquo;</strong> = our small fade pattern is not detected, not &ldquo;strong rally.&rdquo;
-                    </p>
                     <div id="dfAlertStrip15m" class="df-strip-body"></div>
                 </div>
 
@@ -205,6 +235,6 @@
     </div>
 
     <script src="left-menu.js?v=3.20"></script>
-    <script src="dailyfutures.js?v=24"></script>
+    <script src="dailyfutures.js?v=26"></script>
 </body>
 </html>

@@ -270,7 +270,7 @@
       );
     }
     return (
-      '<span class="df-s-cell df-s-ok df-s-decis" title="No lock; not the dual case; and not a single L1 or L3 alert — see 15m strip help above.">No exit signal</span>'
+      '<span class="df-s-cell df-s-ok df-s-decis" title="No lock; not the dual case; and not a single L1 or L3 alert. Full ladder: use the message icon next to 15-min Alert Strip.">No exit signal</span>'
     );
   }
 
