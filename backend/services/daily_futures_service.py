@@ -526,7 +526,21 @@ def _apply_exit_alerts_to_running(
         )
         merged_hit = old_hit or new_hit
 
-        exit_review = bool(merged_hit or (merged_n and merged_m))
+        # Long underwater: trail never arms if price never made +1.5*ATR; the profit trail
+        # stop does not apply. Still surface exit review when drawdown from entry is large
+        # vs 15m ATR (same ATR as trail), after min hold time.
+        drawdown_15atr_breach = bool(
+            entry_dt is not None
+            and pos_age_s > 45.0 * 60.0
+            and ep is not None
+            and ltp is not None
+            and atr is not None
+            and float(atr) > 0.0
+            and float(ltp) < float(ep)
+            and (float(ep) - float(ltp)) >= 1.5 * float(atr)
+        )
+
+        exit_review = bool(merged_hit or (merged_n and merged_m) or drawdown_15atr_breach)
 
         # 15-min alert strip (live L1/L3 from same Nifty + stock 15m data; L2 from trail state)
         l1_amber = bool(
@@ -586,6 +600,7 @@ def _apply_exit_alerts_to_running(
         r["trail_stop_hit"] = merged_hit
         r["profit_trail_armed"] = merged_armed
         r["exit_review"] = exit_review
+        r["drawdown_15atr_breach"] = drawdown_15atr_breach
         r["position_atr"] = round(float(atr), 4) if atr is not None else r.get("position_atr")
 
     try:

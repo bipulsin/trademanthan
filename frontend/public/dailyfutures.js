@@ -337,7 +337,8 @@
       var bits =
         (r.nifty_structure_weakening ? 1 : 0) +
         (r.trail_stop_hit ? 2 : 0) +
-        (r.momentum_exhausting ? 4 : 0);
+        (r.momentum_exhausting ? 4 : 0) +
+        (r.drawdown_15atr_breach ? 8 : 0);
       var prev = state.prevRunAlertBits[tid] != null ? state.prevRunAlertBits[tid] : 0;
       if (bits > prev) anyNew = true;
       state.prevRunAlertBits[tid] = bits;
@@ -347,6 +348,11 @@
 
   function runningExitBadges(r) {
     var parts = [];
+    if (r.drawdown_15atr_breach) {
+      parts.push(
+        '<span class="df-exit-badge df-exit-dd" title="LTP is below entry by at least 1.5× 15m ATR; profit trail was never in play for this.">⛔ Drawdown (≥1.5×ATR)</span>',
+      );
+    }
     if (r.nifty_structure_weakening) {
       parts.push(
         '<span class="df-exit-badge df-exit-nifty" title="Nifty 15m: current bar low &lt; previous bar low; position &gt; 45 min">⚠ Index Weakening</span>',
