@@ -932,6 +932,7 @@
   }
 
   async function submitSell() {
+    const okBtn = document.getElementById('dfSellOk');
     const tid = state.sellTradeId;
     const xt = document.getElementById('dfSellTime').value.trim();
     const xp = parseFloat(String(document.getElementById('dfSellPrice').value).replace(/,/g, ''));
@@ -942,11 +943,25 @@
       return;
     }
     const paths = ['/api/daily-futures/order/sell', '/daily-futures/order/sell'];
+    const originalBtnText = okBtn ? okBtn.textContent : '';
+    function restoreSellBtn() {
+      if (!okBtn) return;
+      okBtn.disabled = false;
+      okBtn.textContent = originalBtnText || 'Confirm sell';
+    }
+    if (okBtn) {
+      okBtn.disabled = true;
+      okBtn.textContent = 'Submitting...';
+    }
+    let lastErr = null;
     for (let i = 0; i < paths.length; i++) {
+      const ac = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const timer = ac ? window.setTimeout(function () { ac.abort(); }, 12000) : null;
       try {
         const res = await fetch(API_BASE + paths[i], {
           method: 'POST',
           headers: authHeaders(),
+          signal: ac ? ac.signal : undefined,
           body: JSON.stringify({
             trade_id: tid,
             exit_time: xt,
@@ -965,12 +980,20 @@
         } catch (e2) {
           err.textContent = raw.slice(0, 120);
         }
+        restoreSellBtn();
         return;
       } catch (e) {
-        /* try next path */
+        if (e && e.name === 'AbortError') {
+          lastErr = new Error('Sell request timed out. Please try again.');
+        } else {
+          lastErr = e;
+        }
+      } finally {
+        if (timer) window.clearTimeout(timer);
       }
     }
-    err.textContent = 'Request failed';
+    err.textContent = lastErr && lastErr.message ? lastErr.message : 'Request failed';
+    restoreSellBtn();
   }
 
   async function refresh() {
