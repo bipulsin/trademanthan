@@ -215,37 +215,63 @@
 
   function stripL1Cell(st) {
     if (st && st.l1 === 'nifty_lower_low') {
-      return '<span class="df-s-cell df-s-amb">Nifty lower-low</span>';
+      return (
+        '<span class="df-s-cell df-s-amb" title="Last 15m Nifty low is below the prior completed 15m low.">Nifty 15m lower low</span>'
+      );
     }
-    return '<span class="df-s-cell df-s-ok">Nifty OK</span>';
+    return (
+      '<span class="df-s-cell df-s-ok" title="Nifty 15m is not making that lower-low (your stock can still sell off).">Nifty: no lower low</span>'
+    );
   }
 
   function stripL2Cell(st) {
     var k = (st && st.l2) || 'building';
-    if (k === 'hit') return '<span class="df-s-cell df-s-neg">Trail hit</span>';
-    if (k === 'active') return '<span class="df-s-cell df-s-teal">Trail active</span>';
-    return '<span class="df-s-cell df-s-muted">Building</span>';
+    if (k === 'hit') {
+      return (
+        '<span class="df-s-cell df-s-neg" title="Fell to the profit-trail line (lock / exit review), not a trend label.">Trail stop</span>'
+      );
+    }
+    if (k === 'active') {
+      return (
+        '<span class="df-s-cell df-s-teal" title="Price was at least +1.5× 15m ATR above entry; trail is on.">Trail armed</span>'
+      );
+    }
+    return (
+      '<span class="df-s-cell df-s-muted" title="Not yet +1.5× ATR profit from entry, so the trail is not armed. Says nothing about price up vs down.">Trail not armed</span>'
+    );
   }
 
   function stripL3Cell(st) {
     if (st && st.l3 === 'fading') {
-      return '<span class="df-s-cell df-s-amb">Fading</span>';
+      return (
+        '<span class="df-s-cell df-s-amb" title="Last two 15m bars: last body smaller + close in the lower 30% of the bar.">15m fade</span>'
+      );
     }
-    return '<span class="df-s-cell df-s-ok">Strong</span>';
+    return (
+      '<span class="df-s-cell df-s-ok" title="That fade pattern is not on; can still be a big move down.">No 15m fade</span>'
+    );
   }
 
   function stripDecisionCell(st) {
     var d = (st && st.decision) || 'hold';
     if (d === 'lock_profit') {
-      return '<span class="df-s-cell df-s-neg df-s-decis">LOCK PROFIT — EXIT</span>';
+      return (
+        '<span class="df-s-cell df-s-neg df-s-decis" title="From trail stop hit.">LOCK PROFIT — EXIT</span>'
+      );
     }
     if (d === 'dual_exit') {
-      return '<span class="df-s-cell df-s-neg df-s-decis">REVIEW EXIT — dual confirm</span>';
+      return (
+        '<span class="df-s-cell df-s-neg df-s-decis" title="L1: Nifty 15m lower low AND L3: 15m fade, together.">REVIEW EXIT — dual</span>'
+      );
     }
     if (d === 'watch') {
-      return '<span class="df-s-cell df-s-amb df-s-decis">WATCH</span>';
+      return (
+        '<span class="df-s-cell df-s-amb df-s-decis" title="L1 or L3 only, not both.">WATCH</span>'
+      );
     }
-    return '<span class="df-s-cell df-s-ok df-s-decis">HOLD</span>';
+    return (
+      '<span class="df-s-cell df-s-ok df-s-decis" title="No lock; not the dual case; and not a single L1 or L3 alert — see 15m strip help above.">No exit signal</span>'
+    );
   }
 
   function render15mAlertStrip(rows) {
@@ -256,7 +282,10 @@
       return;
     }
     const th =
-      '<thead><tr><th>Position</th><th class="df-s-c">L1 Nifty</th><th class="df-s-c">L2 Trail</th><th class="df-s-c">L3 Mom</th><th class="df-s-c">Decision</th></tr></thead>';
+      '<thead><tr><th>Position</th><th class="df-s-c" title="Nifty 50, last two completed 15m bars.">L1 Nifty 15m</th>' +
+      '<th class="df-s-c" title="Profit trail state (arm at +1.5× 15m ATR).">L2 Trail</th>' +
+      '<th class="df-s-c" title="Narrow 15m fade pattern on this future.">L3 15m fade</th>' +
+      '<th class="df-s-c" title="Server combines L1–L3.">Strip</th></tr></thead>';
     const body = rows
       .map(function (r) {
         const st = r.alert_strip || {};
