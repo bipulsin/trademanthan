@@ -25,7 +25,7 @@
 
 #futuresReportRoot .fut-dir-long {
     background: #22c55e;
-    color: #000000;
+    color: #000000 !important;
 }
 
 #futuresReportRoot .fut-dir-short {
