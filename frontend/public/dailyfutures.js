@@ -560,7 +560,7 @@
           fmtNum(r.ltp, 2) +
           '</td><td><button type="button" class="df-btn df-btn-order" data-sid="' +
           r.screening_id +
-          '"' + (eligible ? '' : ' disabled title="' + esc(reason) + '"') + '>Order</button></td></tr>'
+          '"' + (eligible ? '' : ' disabled title="' + esc(reason) + '"') + '>Enter</button></td></tr>'
         );
       })
       .join('');
@@ -635,7 +635,7 @@
           review +
           '<button type="button" class="df-btn df-btn-sell" data-tid="' +
           r.trade_id +
-          '">Sell</button></div></td></tr>'
+          '">Exit</button></div></td></tr>'
         );
       })
       .join('');
