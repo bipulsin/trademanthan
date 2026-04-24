@@ -502,9 +502,23 @@ def _resolve_nifty_momentum_threshold_pct(
     atr_mult = max(0.0, float(getattr(settings, "DAILY_FUTURES_NIFTY_MOMENTUM_ATR_MULTIPLIER", 0.25)))
     if atr_mult <= 0:
         return fixed_thr_pct
-    atr_abs = _compute_position_atr_15m_5d(upstox, NIFTY50_INDEX_KEY, trade_date)
-    if atr_abs is None or atr_abs <= 0:
+    # Use already-fetched completed 15m Nifty candles for ATR-like range estimate.
+    # This avoids an additional historical API round-trip during workspace polling.
+    if not nifty_cands:
         return fixed_thr_pct
+    ranges: List[float] = []
+    for c in nifty_cands:
+        try:
+            hi = float(c.get("high"))
+            lo = float(c.get("low"))
+        except (TypeError, ValueError):
+            continue
+        rng = hi - lo
+        if rng > 0:
+            ranges.append(rng)
+    if not ranges:
+        return fixed_thr_pct
+    atr_abs = float(sum(ranges)) / float(len(ranges))
     try:
         close_ref = float((nifty_cands[-1] or {}).get("close")) if nifty_cands else 0.0
     except (TypeError, ValueError):
