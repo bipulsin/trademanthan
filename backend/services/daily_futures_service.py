@@ -1,5 +1,5 @@
 """
-Daily Futures — ChartInk webhook → arbitrage_master front-month future, Upstox LTP + conviction.
+Daily Futures — ChartInk webhook → arbitrage_master **next-month** (serial) FUT, Upstox LTP + conviction.
 """
 from __future__ import annotations
 
@@ -944,16 +944,20 @@ def normalize_symbols_from_payload(payload: Any) -> List[str]:
 
 
 def load_arbitrage_future_row(conn, underlying: str) -> Optional[Dict[str, Any]]:
+    """
+    Resolve the tradeable FUT for Daily Futures. Uses next-month (serial) contract columns on
+    arbitrage_master: nextmth_future_symbol / nextmth_future_instrement_key.
+    """
     row = conn.execute(
         text(
             """
             SELECT stock,
-                   currmth_future_symbol,
-                   currmth_future_instrument_key
+                   nextmth_future_symbol,
+                   nextmth_future_instrement_key
             FROM arbitrage_master
             WHERE UPPER(TRIM(stock)) = :u
-              AND currmth_future_instrument_key IS NOT NULL
-              AND TRIM(currmth_future_instrument_key) <> ''
+              AND nextmth_future_instrement_key IS NOT NULL
+              AND TRIM(nextmth_future_instrement_key) <> ''
             LIMIT 1
             """
         ),
@@ -966,6 +970,84 @@ def load_arbitrage_future_row(conn, underlying: str) -> Optional[Dict[str, Any]]
         "future_symbol": row[1],
         "instrument_key": str(row[2]).strip(),
     }
+
+
+def retarget_daily_futures_to_next_month_for_date(trade_date: date) -> Dict[str, Any]:
+    """
+    Re-point today’s (or a given day’s) screening rows and open user trades to next-month
+    FUT keys/lots from arbitrage_master. Call once after switching Daily Futures to nextmth
+    so existing picks and `order_status = bought` rows track the new contract.
+    """
+    ensure_daily_futures_tables()
+    out: Dict[str, Any] = {
+        "trade_date": str(trade_date),
+        "screening_updated": 0,
+        "trades_synced": 0,
+        "skipped": [],
+    }
+    screening_n = 0
+    with engine.begin() as conn:
+        srows = conn.execute(
+            text(
+                """
+                SELECT id, UPPER(TRIM(underlying)) AS u
+                FROM daily_futures_screening
+                WHERE trade_date = CAST(:d AS DATE)
+                """
+            ),
+            {"d": str(trade_date)},
+        ).fetchall()
+        for rid, u in srows:
+            u = str(u or "").strip().upper()
+            if not u:
+                continue
+            row = load_arbitrage_future_row(conn, u)
+            if not row:
+                out["skipped"].append({"underlying": u, "reason": "no_nextmth_in_arbitrage_master"})
+                continue
+            lot = fut_lot_for_key(str(row["instrument_key"]))
+            conn.execute(
+                text(
+                    """
+                    UPDATE daily_futures_screening SET
+                      future_symbol = :fs,
+                      instrument_key = :ik,
+                      lot_size = :ls,
+                      updated_at = CURRENT_TIMESTAMP
+                    WHERE id = :id
+                    """
+                ),
+                {
+                    "id": int(rid),
+                    "fs": row["future_symbol"],
+                    "ik": row["instrument_key"],
+                    "ls": lot,
+                },
+            )
+            screening_n += 1
+
+        r2 = conn.execute(
+            text(
+                """
+                UPDATE daily_futures_user_trade t SET
+                  future_symbol = s.future_symbol,
+                  instrument_key = s.instrument_key,
+                  lot_size = s.lot_size,
+                  updated_at = CURRENT_TIMESTAMP
+                FROM daily_futures_screening s
+                WHERE t.screening_id = s.id
+                  AND s.trade_date = CAST(:d AS DATE)
+                  AND t.order_status = 'bought'
+                """
+            ),
+            {"d": str(trade_date)},
+        )
+        try:
+            out["trades_synced"] = int(r2.rowcount or 0)
+        except (TypeError, ValueError):
+            out["trades_synced"] = 0
+    out["screening_updated"] = screening_n
+    return out
 
 
 def _recompute_conviction_all_today(upstox: UpstoxService, trade_date: date) -> None:
