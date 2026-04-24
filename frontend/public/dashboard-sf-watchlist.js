@@ -5,8 +5,10 @@
  * but still passed the reclaim-score (>= 55) and VWAP entry gates. These are "review
  * tomorrow pre-market" items. Today's fresh watchlist rows are highlighted separately.
  *
- * After 14:30 IST, auto-refresh: every 2 min until at least one row for today's session
- * exists, then every 15 min. Before 14:30, load once on open (plus manual refresh).
+ * Display window (IST): from 14:30 on day D through 14:30 on D+1, show only rows with
+ * trigger_date = D. Before 14:30, show the previous NSE session only (e.g. 24 Apr 09:00
+ * → 23 Apr's list). No date column in the table.
+ * After 14:30, auto-refresh every 2 min until today's list appears, then every 15 min.
  */
 (function () {
     'use strict';
@@ -26,9 +28,9 @@
     const POLL_SLOW_MS = 15 * 60 * 1000;
     const PRE_1430_MS = 5 * 60 * 1000;
 
-    var sfCarryFulfilled = false; // at least one watchlist row for today_session_date
+    var sfCarryFulfilled = false; // after 14:30: at least one row for today's IST date
     var sfPollTimer = null;
-    var sfWlSessionYmd = null; // last seen today_session_date from API (reset carry flag on new day)
+    var sfWlIstYmd = null; // last IST calendar day seen (reset carry flag when IST day changes)
 
     function getToken() {
         try {
@@ -82,21 +84,74 @@
         return t;
     }
 
+    function getIstYmdNow() {
+        return new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Kolkata',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+        }).format(new Date());
+    }
+
+    /**
+     * Most recent NSE cash-session calendar day strictly before `istYmd` (skips Sat/Sun in IST).
+     */
+    function previousNseSessionYmd(istYmd) {
+        var t = new Date(istYmd.slice(0, 10) + 'T12:00:00+05:30');
+        for (var i = 0; i < 10; i++) {
+            t = new Date(t.getTime() - 24 * 60 * 60 * 1000);
+            var wd = new Intl.DateTimeFormat('en', {
+                timeZone: 'Asia/Kolkata',
+                weekday: 'short',
+            }).format(t);
+            if (wd !== 'Sat' && wd !== 'Sun') {
+                return new Intl.DateTimeFormat('en-CA', {
+                    timeZone: 'Asia/Kolkata',
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                }).format(t);
+            }
+        }
+        return normYmd(istYmd);
+    }
+
+    /**
+     * trigger_date to show: today after 14:30 IST, else previous session (e.g. before 14:30 on 24th → 23rd).
+     */
+    function getDisplayTriggerYmd() {
+        var istYmd = getIstYmdNow();
+        if (isAfter1430Ist()) {
+            return istYmd;
+        }
+        return previousNseSessionYmd(istYmd);
+    }
+
+    function filterRowsForWindow(rows) {
+        var y = getDisplayTriggerYmd();
+        var out = [];
+        if (!Array.isArray(rows) || !y) return out;
+        for (var i = 0; i < rows.length; i++) {
+            if (normYmd(rows[i] && rows[i].trigger_date) === y) {
+                out.push(rows[i]);
+            }
+        }
+        return out;
+    }
+
     function updateCarryFulfilledFlag(data) {
-        var today = normYmd((data && data.today_session_date) || '');
-        if (today && sfWlSessionYmd && today !== sfWlSessionYmd) {
+        var istDay = getIstYmdNow();
+        if (sfWlIstYmd && istDay !== sfWlIstYmd) {
             sfCarryFulfilled = false;
         }
-        if (today) {
-            sfWlSessionYmd = today;
-        }
+        sfWlIstYmd = istDay;
         var rows = (data && Array.isArray(data.rows)) ? data.rows : [];
-        if (!today) {
-            sfCarryFulfilled = false;
+        if (!isAfter1430Ist()) {
+            sfCarryFulfilled = true;
             return;
         }
-        for (var i = 0; i < rows.length; i++) {
-            if (normYmd(rows[i] && rows[i].trigger_date) === today) {
+        for (var j = 0; j < rows.length; j++) {
+            if (normYmd(rows[j] && rows[j].trigger_date) === istDay) {
                 sfCarryFulfilled = true;
                 return;
             }
@@ -127,20 +182,6 @@
         } catch (e) { return '—'; }
     }
 
-    function fmtDate(ymd) {
-        if (!ymd) return '—';
-        try {
-            const d = new Date(ymd.length === 10 ? ymd + 'T00:00:00+05:30' : ymd);
-            if (!Number.isFinite(d.getTime())) return escapeHtml(ymd);
-            return new Intl.DateTimeFormat('en-IN', {
-                timeZone: 'Asia/Kolkata',
-                day: '2-digit',
-                month: 'short',
-                year: 'numeric',
-            }).format(d);
-        } catch (e) { return escapeHtml(ymd); }
-    }
-
     function fmtNum(v, d) {
         const n = Number(v);
         if (!Number.isFinite(n)) return '—';
@@ -152,52 +193,54 @@
         if (!msg) return;
         if (isAfter1430Ist()) {
             if (sfCarryFulfilled) {
-                msg.textContent = 'Auto-refresh every 15 min (today’s list is present).';
+                msg.textContent =
+                    'Showing today’s carry-forwards (14:30 IST → next 14:30). Auto-refresh every 15 min.';
             } else {
                 msg.textContent =
-                    'After 14:30 IST: refreshing every 2 min until today’s carry-forward rows appear, then every 15 min.';
+                    'After 14:30 IST: refreshing every 2 min until today’s list appears, then every 15 min.';
             }
         } else {
             msg.textContent =
-                'List loads now; from 14:30 IST the dashboard auto-refreshes for today’s late-session carry-forwards.';
+                'Before 14:30 IST, showing the prior session’s list; after 14:30, today’s list until the next 14:30.';
         }
     }
 
     function render(data) {
         const host = document.getElementById(HOST_ID);
-        const msg = document.getElementById(MSG_ID);
         const updated = document.getElementById(UPDATED_ID);
         if (!host) return;
         updateCarryFulfilledFlag(data);
         if (updated) {
             updated.textContent = 'Updated ' + new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
         }
-        const rows = (data && Array.isArray(data.rows)) ? data.rows : [];
-        const today = String((data && data.today_session_date) || '');
+        const allRows = (data && Array.isArray(data.rows)) ? data.rows : [];
+        const vis = filterRowsForWindow(allRows);
         renderStatusHint();
-        if (!rows.length) {
-            host.innerHTML = '<p class="sf-wl-empty">No carry-forward watchlist items in the last 3 sessions.</p>';
+        if (!allRows.length) {
+            host.innerHTML =
+                '<p class="sf-wl-empty">No carry-forward watchlist data in the last few sessions.</p>';
+            return;
+        }
+        if (!vis.length) {
+            host.innerHTML =
+                '<p class="sf-wl-empty">No items for the current review window (see note above). After 14:30 IST, new rows appear for today.</p>';
             return;
         }
         const thead =
             '<thead><tr>' +
-            '<th>Trigger Date</th><th>Time</th><th>Symbol</th><th>Side</th>' +
+            '<th>Time</th><th>Symbol</th><th>Side</th>' +
             '<th title="Reclaim probability at trigger (0–100)">Score</th>' +
             '<th>Price</th><th>VWAP</th>' +
             '</tr></thead>';
-        const body = rows.map(function (r) {
-            const trig = String(r.trigger_date || '');
-            const isToday = trig === today;
+        const body = vis.map(function (r) {
             const sideU = String(r.side || '').trim().toUpperCase();
             const sidePill = sideU === 'LONG'
                 ? '<span class="sf-side-pill sf-side-long">LONG</span>'
                 : (sideU === 'SHORT'
                     ? '<span class="sf-side-pill sf-side-short">SHORT</span>'
                     : escapeHtml(sideU));
-            const rowCls = isToday ? ' class="sf-wl-row-today"' : '';
             return (
-                '<tr' + rowCls + '>' +
-                '<td>' + escapeHtml(fmtDate(trig)) + '</td>' +
+                '<tr>' +
                 '<td>' + escapeHtml(fmtHhmm(r.trigger_at)) + '</td>' +
                 '<td>' + escapeHtml(String(r.fut_symbol || r.symbol || '—')) + '</td>' +
                 '<td>' + sidePill + '</td>' +
