@@ -1787,7 +1787,8 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
                    t.lot_size, t.entry_time, t.entry_price, t.consecutive_webhook_misses,
                    t.position_atr, t.profit_trail_armed, t.nifty_structure_weakening,
                    t.trail_stop_hit, t.momentum_exhausting,
-                   s.scan_count, s.first_hit_at, s.last_hit_at, s.conviction_score, s.ltp,
+                   s.scan_count, s.first_hit_at, s.last_hit_at, s.conviction_score,
+                   s.second_scan_conviction_score, s.ltp,
                    s.stock_change_pct, s.nifty_change_pct
             FROM daily_futures_user_trade t
             JOIN daily_futures_screening s ON s.id = t.screening_id
@@ -1824,9 +1825,10 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
                 "first_hit_at": row[15].isoformat() if row[15] else None,
                 "last_hit_at": row[16].isoformat() if row[16] else None,
                 "conviction_score": float(row[17]) if row[17] is not None else None,
-                "ltp": float(row[18]) if row[18] is not None else None,
-                "stock_change_pct": float(row[19]) if row[19] is not None else None,
-                "nifty_change_pct": float(row[20]) if row[20] is not None else None,
+                "second_scan_conviction_score": float(row[18]) if row[18] is not None else None,
+                "ltp": float(row[19]) if row[19] is not None else None,
+                "stock_change_pct": float(row[20]) if row[20] is not None else None,
+                "nifty_change_pct": float(row[21]) if row[21] is not None else None,
                 "warn_two_misses": miss >= 2,
             }
         )

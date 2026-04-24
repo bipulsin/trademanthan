@@ -109,6 +109,31 @@
    * Relative strength: day % (future) vs Nifty 50, plus FUT−Nify spread.
    * Backend sets stock_change_pct, nifty_change_pct, relative_strength_vs_nifty on each workspace load.
    */
+  /**
+   * Same pattern as Today's pick: Entry (second scan) and Live conviction from screening.
+   */
+  function formatConvictionEntryLive(r) {
+    let convTxt =
+      r.conviction_score == null
+        ? '—'
+        : '<span class="df-score-live">' + fmtNum(r.conviction_score, 1) + ' (L)</span>';
+    const secondConv = r.second_scan_conviction_score == null ? null : Number(r.second_scan_conviction_score);
+    const liveConv = r.conviction_score == null ? null : Number(r.conviction_score);
+    if (Number.isFinite(secondConv)) {
+      if (Number.isFinite(liveConv)) {
+        convTxt =
+          '<span class="df-score-entry">' +
+          fmtNum(secondConv, 1) +
+          ' (E)</span> | <span class="df-score-live">' +
+          fmtNum(liveConv, 1) +
+          ' (L)</span>';
+      } else {
+        convTxt = '<span class="df-score-entry">' + fmtNum(secondConv, 1) + ' (E)</span>';
+      }
+    }
+    return convTxt;
+  }
+
   function fmtRelStrength(r) {
     const s = r.stock_change_pct;
     const n = r.nifty_change_pct;
@@ -413,16 +438,7 @@
         const reason = Number(r.scan_count || 0) < 2
           ? 'Needs at least 2 scans'
           : (!Number.isFinite(gateScore) ? 'Conviction unavailable' : ('Conviction ' + gateScore.toFixed(1) + ' is not above 60'));
-        let convTxt = (r.conviction_score == null ? '—' : '<span class="df-score-live">' + fmtNum(r.conviction_score, 1) + ' (L)</span>');
-        const secondConv = (r.second_scan_conviction_score == null ? null : Number(r.second_scan_conviction_score));
-        const liveConv = (r.conviction_score == null ? null : Number(r.conviction_score));
-        if (Number.isFinite(secondConv)) {
-          if (Number.isFinite(liveConv)) {
-            convTxt = '<span class="df-score-entry">' + fmtNum(secondConv, 1) + ' (E)</span> | <span class="df-score-live">' + fmtNum(liveConv, 1) + ' (L)</span>';
-          } else {
-            convTxt = '<span class="df-score-entry">' + fmtNum(secondConv, 1) + ' (E)</span>';
-          }
-        }
+        const convTxt = formatConvictionEntryLive(r);
         return (
           '<tr><td><strong>' +
           esc(r.future_symbol || r.underlying) +
@@ -467,7 +483,7 @@
       return;
     }
     const th =
-      '<thead><tr><th>Future</th><th>Qty</th><th>Scan #</th><th>1st scan</th><th>Last scan</th><th>Conviction</th><th class="df-th-rs" title="(FUT day % − Nifty %); S and N in parentheses">Rel. str.</th><th class="num">LTP</th><th>Entry time</th><th class="num">Entry ₹</th><th class="num">Unrealized PnL</th><th>Alerts</th><th>Action</th></tr></thead>';
+      '<thead><tr><th>Future</th><th>Qty</th><th>Scan #</th><th>1st scan</th><th>Last scan</th><th class="num">Conviction</th><th class="df-th-rs" title="(FUT day % − Nifty %); S and N in parentheses">Rel. str.</th><th class="num">LTP</th><th>Entry time</th><th class="num">Entry ₹</th><th class="num">Unrealized PnL</th><th>Alerts</th><th>Action</th></tr></thead>';
     const tot = sumRunningUnrealized(rows);
     const totalLine =
       '<p class="df-meta" style="margin:0 0 10px;font-size:0.9rem;">' +
@@ -502,7 +518,7 @@
           '</td><td>' +
           fmtIsoTimeIst(r.last_hit_at) +
           '</td><td class="num">' +
-          fmtNum(r.conviction_score, 1) +
+          formatConvictionEntryLive(r) +
           '</td><td class="df-rs-cell">' +
           fmtRelStrength(r) +
           '</td><td class="num">' +
