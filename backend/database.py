@@ -7,6 +7,9 @@ from sqlalchemy.orm import sessionmaker
 
 # Database configuration - PostgreSQL production database (configurable via DATABASE_URL env var)
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://trademanthan:trademanthan123@localhost/trademanthan")
+DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "20"))
+DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "40"))
+DB_POOL_TIMEOUT_SEC = int(os.getenv("DB_POOL_TIMEOUT_SEC", "60"))
 
 # Import Base from models.base to ensure all models use the same Base instance
 from backend.models.base import Base
@@ -26,6 +29,9 @@ try:
     # Only add isolation_level for PostgreSQL
     if "postgresql" in DATABASE_URL:
         engine_kwargs["isolation_level"] = "READ_COMMITTED"
+        engine_kwargs["pool_size"] = max(1, DB_POOL_SIZE)
+        engine_kwargs["max_overflow"] = max(0, DB_MAX_OVERFLOW)
+        engine_kwargs["pool_timeout"] = max(1, DB_POOL_TIMEOUT_SEC)
     
     engine = create_engine(DATABASE_URL, **engine_kwargs)
     SessionLocal = sessionmaker(
@@ -69,6 +75,9 @@ def create_tables():
             # Only add isolation_level for PostgreSQL
             if "postgresql" in DATABASE_URL:
                 engine_kwargs["isolation_level"] = "READ_COMMITTED"
+                engine_kwargs["pool_size"] = max(1, DB_POOL_SIZE)
+                engine_kwargs["max_overflow"] = max(0, DB_MAX_OVERFLOW)
+                engine_kwargs["pool_timeout"] = max(1, DB_POOL_TIMEOUT_SEC)
             
             engine = create_engine(DATABASE_URL, **engine_kwargs)
             SessionLocal = sessionmaker(
