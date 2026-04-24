@@ -50,11 +50,12 @@ class SellBody(BaseModel):
 
 @router.get("/workspace")
 def daily_futures_workspace(
+    lite: bool = False,
     user: User = Depends(_auth_user),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Today's picks, running orders, closed trades + PnL summary for the logged-in user."""
-    return get_workspace(db, user.id)
+    return get_workspace(db, user.id, lite_mode=bool(lite))
 
 
 @router.post("/order/buy")

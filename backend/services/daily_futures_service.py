@@ -1862,7 +1862,7 @@ def _apply_live_rel_strength_to_picks_and_running(
         logger.warning("daily_futures: persist rel-strength to screening failed: %s", e)
 
 
-def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
+def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[str, Any]:
     ensure_daily_futures_tables()
     td = ist_today()
     now_ist = datetime.now(IST)
@@ -2030,10 +2030,11 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
     denom = wins + losses
     win_rate = round(100.0 * wins / denom, 1) if denom else None
 
-    try:
-        _apply_live_ltps_to_picks_and_running(picks, running, closed)
-    except Exception as e:
-        logger.warning("daily_futures: live LTP refresh failed: %s", e, exc_info=True)
+    if not lite_mode:
+        try:
+            _apply_live_ltps_to_picks_and_running(picks, running, closed)
+        except Exception as e:
+            logger.warning("daily_futures: live LTP refresh failed: %s", e, exc_info=True)
 
     # For What-If continuing: after session close, treat current LTP as 15:15 close.
     if closed and now_ist.time() >= dt_time(15, 15):
@@ -2056,29 +2057,31 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
                 if ltp_1515 is not None:
                     r["ltp"] = ltp_1515
 
-    try:
-        _apply_live_rel_strength_to_picks_and_running(picks, running, td)
-    except Exception as e:
-        logger.warning("daily_futures: rel-strength refresh failed: %s", e, exc_info=True)
+    if not lite_mode:
+        try:
+            _apply_live_rel_strength_to_picks_and_running(picks, running, td)
+        except Exception as e:
+            logger.warning("daily_futures: rel-strength refresh failed: %s", e, exc_info=True)
 
     strip_debug: Dict[str, Any] = {}
-    try:
-        strip_debug = _apply_exit_alerts_to_running(db, running, td) or {}
-    except Exception as e:
-        logger.warning("daily_futures: exit alerts failed: %s", e, exc_info=True)
-        for r in running:
-            r["nifty_structure_weakening"] = bool(r.get("nifty_structure_weakening"))
-            r["trail_stop_hit"] = bool(r.get("trail_stop_hit"))
-            r["momentum_exhausting"] = bool(r.get("momentum_exhausting"))
-            r["exit_review"] = bool(r.get("trail_stop_hit")) or (
-                bool(r.get("nifty_structure_weakening")) and bool(r.get("momentum_exhausting"))
-            )
-            r["alert_strip"] = {
-                "l1": "nifty_no_higher_high",
-                "l2": "building",
-                "l3": "strong",
-                "decision": "hold",
-            }
+    if not lite_mode:
+        try:
+            strip_debug = _apply_exit_alerts_to_running(db, running, td) or {}
+        except Exception as e:
+            logger.warning("daily_futures: exit alerts failed: %s", e, exc_info=True)
+            for r in running:
+                r["nifty_structure_weakening"] = bool(r.get("nifty_structure_weakening"))
+                r["trail_stop_hit"] = bool(r.get("trail_stop_hit"))
+                r["momentum_exhausting"] = bool(r.get("momentum_exhausting"))
+                r["exit_review"] = bool(r.get("trail_stop_hit")) or (
+                    bool(r.get("nifty_structure_weakening")) and bool(r.get("momentum_exhausting"))
+                )
+                r["alert_strip"] = {
+                    "l1": "nifty_no_higher_high",
+                    "l2": "building",
+                    "l3": "strong",
+                    "decision": "hold",
+                }
 
     for p in picks:
         reasons: List[str] = []
@@ -2107,7 +2110,7 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
         },
         "running": running,
         "closed": closed,
-        "trade_if_could_have_done": _build_trade_if_could_rows(picks, closed, td),
+        "trade_if_could_have_done": [] if lite_mode else _build_trade_if_could_rows(picks, closed, td),
         "summary": {
             "cumulative_pnl_rupees": round(total_pnl, 2),
             "wins": wins,
@@ -2115,6 +2118,7 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
             "win_rate_pct": win_rate,
             "strip_debug": strip_debug,
         },
+        "lite_mode": bool(lite_mode),
     }
 
 

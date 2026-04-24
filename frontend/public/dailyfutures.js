@@ -383,14 +383,18 @@
     return '<div class="df-exit-badges">' + parts.join(' ') + '</div>';
   }
 
-  async function fetchWorkspace() {
+  async function fetchWorkspace(opts) {
+    opts = opts || {};
+    const timeoutMs = Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : 20000;
+    const lite = opts.lite === true;
+    const qs = lite ? '?lite=1' : '';
     const paths = ['/api/daily-futures/workspace', '/daily-futures/workspace'];
     let lastErr = null;
     for (let i = 0; i < paths.length; i++) {
       const ac = typeof AbortController !== 'undefined' ? new AbortController() : null;
-      const timer = ac ? window.setTimeout(function () { ac.abort(); }, 20000) : null;
+      const timer = ac ? window.setTimeout(function () { ac.abort(); }, timeoutMs) : null;
       try {
-        const res = await fetch(API_BASE + paths[i], {
+        const res = await fetch(API_BASE + paths[i] + qs, {
           headers: authHeaders(),
           cache: 'no-store',
           signal: ac ? ac.signal : undefined,
@@ -430,6 +434,15 @@
       }
     }
     throw lastErr || new Error('workspace');
+  }
+
+  function renderAll(data) {
+    renderPicks(data);
+    render15mAlertStrip(data.running || []);
+    renderRunning(data.running || []);
+    renderClosed(data.closed || [], data.summary);
+    renderWhatIfContinuing(data.closed || []);
+    renderTradeIfCouldHaveDone(data.trade_if_could_have_done || []);
   }
 
   function renderPicks(data) {
@@ -922,29 +935,43 @@
   async function refresh() {
     const b = document.getElementById('dfBanner');
     try {
-      const data = await fetchWorkspace();
-      state.workspace = data;
+      const liteData = await fetchWorkspace({ lite: true, timeoutMs: 9000 });
+      state.workspace = liteData;
       if (b) {
-        if (data.session_before_open) {
+        if (liteData.session_before_open) {
           b.textContent =
-            (data.session_message ||
+            (liteData.session_message ||
               'Daily Futures shows the current IST session from 09:00 onward.') +
             ' Session date: ' +
-            (data.trade_date || '—') +
+            (liteData.trade_date || '—') +
             ' · Auto-refresh every 120 s';
         } else {
           b.textContent =
             'Session date (IST): ' +
-            (data.trade_date || '—') +
-            ' · Data for this IST session only · Auto-refresh every 120 s';
+            (liteData.trade_date || '—') +
+            ' · Data for this IST session only · Loading advanced sections…';
         }
       }
-      renderPicks(data);
-      render15mAlertStrip(data.running || []);
-      renderRunning(data.running || []);
-      renderClosed(data.closed || [], data.summary);
-      renderWhatIfContinuing(data.closed || []);
-      renderTradeIfCouldHaveDone(data.trade_if_could_have_done || []);
+      renderAll(liteData);
+
+      try {
+        const fullData = await fetchWorkspace({ lite: false, timeoutMs: 25000 });
+        state.workspace = fullData;
+        renderAll(fullData);
+        if (b && !fullData.session_before_open) {
+          b.textContent =
+            'Session date (IST): ' +
+            (fullData.trade_date || '—') +
+            ' · Data for this IST session only · Auto-refresh every 120 s';
+        }
+      } catch (e2) {
+        if (b && !liteData.session_before_open) {
+          b.textContent =
+            'Session date (IST): ' +
+            (liteData.trade_date || '—') +
+            ' · Core sections loaded; advanced sections delayed (will retry next refresh).';
+        }
+      }
     } catch (e) {
       if (b) b.textContent = 'Could not load workspace: ' + (e && e.message ? e.message : e);
     }
