@@ -166,7 +166,7 @@
                 (t) => `
                 <tr class="intraday-trade-detail-row">
                   <td data-intraday-detail-label="Source">${t.source || "-"}</td>
-                  <td data-intraday-detail-label="Symbol"><strong>${symbolWithDirection(t.symbol, t.direction_type)}</strong></td>
+                  <td data-intraday-detail-label="Symbol"><strong>${symbolWithDirectionHtml(t.symbol, t.direction_type)}</strong></td>
                   <td data-intraday-detail-label="Qty">${t.qty != null ? t.qty : "-"}</td>
                   <td data-intraday-detail-label="Entry">₹${num2(t.entry_price)}</td>
                   <td data-intraday-detail-label="Entry Time">${t.entry_time || "-"}</td>
@@ -200,6 +200,23 @@
     const d = String(dir || "").trim().toUpperCase();
     if (!d) return s;
     return s + " (" + d + ")";
+  }
+
+  function escHtml(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function symbolWithDirectionHtml(sym, dir) {
+    const s = escHtml(String(sym || "-"));
+    const d = String(dir || "").trim().toUpperCase();
+    if (!d) return s;
+    const cls = d === "LONG" ? "fut-dir-long" : d === "SHORT" ? "fut-dir-short" : "fut-dir-neutral";
+    return `${s} <span class="fut-dir-pill ${cls}">${escHtml(d)}</span>`;
   }
 
   function formatDate(dateStr) {
