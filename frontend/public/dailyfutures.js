@@ -361,10 +361,44 @@
     throw lastErr || new Error('workspace');
   }
 
-  function renderPicks(picks) {
+  function renderPicks(data) {
     const el = document.getElementById('dfPicksTable');
     if (!el) return;
+    const picks = (data && data.picks) || [];
+    const d = (data && data.picks_diagnostics) || {};
+    const scn = d.screening_count;
+    const hb = d.hidden_because_bought;
+    const hcl = d.hidden_because_sold_today;
     if (!picks || !picks.length) {
+      if (data && data.session_before_open) {
+        el.innerHTML =
+          '<p class="df-meta">Session starts at <strong>09:00 IST</strong> — today&rsquo;s picks and scans appear after the market day opens. (ChartInk runs on its schedule; rows land in the DB with today&rsquo;s trade date in IST.)</p>';
+        return;
+      }
+      if (scn === 0) {
+        el.innerHTML =
+          '<p class="df-meta">No symbols in <strong>today&rsquo;s</strong> Daily Futures screening yet. ' +
+            'If ChartInk already fired, check that webhooks are reaching the server and the screening row&rsquo;s <code>trade_date</code> is today (IST). After 9:00 IST, refresh in a few minutes.</p>';
+        return;
+      }
+      if (hb > 0 || hcl > 0) {
+        const parts = [];
+        if (hb) parts.push('you have an <strong>open (bought)</strong> order for ' + hb + ' symbol' + (hb === 1 ? '' : 's'));
+        if (hcl) {
+          parts.push(
+            hcl + ' symbol' + (hcl === 1 ? ' is' : 's are') + ' in <strong>Today&rsquo;s trade</strong> (sold) and are hidden here',
+          );
+        }
+        el.innerHTML =
+          '<p class="df-meta">Scanner has <strong>' +
+          scn +
+          '</strong> symbol' +
+          (scn === 1 ? '' : 's') +
+          ' for today, but <strong>Today&rsquo;s pick</strong> is empty: ' +
+          parts.join(' and ') +
+          '.</p>';
+        return;
+      }
       el.innerHTML = '<p class="df-meta">No picks yet.</p>';
       return;
     }
@@ -843,7 +877,7 @@
             ' · Data for this IST session only · Auto-refresh every 120 s';
         }
       }
-      renderPicks(data.picks || []);
+      renderPicks(data);
       render15mAlertStrip(data.running || []);
       renderRunning(data.running || []);
       renderClosed(data.closed || [], data.summary);

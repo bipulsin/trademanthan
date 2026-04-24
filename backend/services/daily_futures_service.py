@@ -690,6 +690,11 @@ def _empty_daily_futures_workspace(trade_date: date, *, session_before_open: boo
         "session_before_open": session_before_open,
         "session_message": msg if session_before_open else None,
         "picks": [],
+        "picks_diagnostics": {
+            "screening_count": 0,
+            "hidden_because_bought": 0,
+            "hidden_because_sold_today": 0,
+        },
         "running": [],
         "closed": [],
         "trade_if_could_have_done": [],
@@ -1679,7 +1684,12 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
     ).fetchall()
     bought_sids = {int(r[0]) for r in br}
 
+    screening_total = len(screenings)
+    n_hidden_bought = len(
+        [s for s in screenings if int(s.get("screening_id") or 0) in bought_sids]
+    )
     picks = [s for s in screenings if s["screening_id"] not in bought_sids]
+    picks_before_closed_filter = list(picks)
 
     running_rows = db.execute(
         text(
@@ -1810,6 +1820,7 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
                 and str(p.get("underlying") or "").strip().upper() not in closed_underlyings
             )
         ]
+    n_hidden_closed = max(0, len(picks_before_closed_filter) - len(picks))
 
     denom = wins + losses
     win_rate = round(100.0 * wins / denom, 1) if denom else None
@@ -1883,6 +1894,11 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
         "session_before_open": False,
         "session_message": None,
         "picks": picks,
+        "picks_diagnostics": {
+            "screening_count": screening_total,
+            "hidden_because_bought": n_hidden_bought,
+            "hidden_because_sold_today": n_hidden_closed,
+        },
         "running": running,
         "closed": closed,
         "trade_if_could_have_done": _build_trade_if_could_rows(picks, closed, td),
