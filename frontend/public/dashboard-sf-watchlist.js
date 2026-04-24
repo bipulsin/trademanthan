@@ -8,7 +8,7 @@
  * Display window (IST): from 14:30 on day D through 14:30 on D+1, show only rows with
  * trigger_date = D. Before 14:30, show the previous NSE session only (e.g. 24 Apr 09:00
  * → 23 Apr's list). No date column in the table.
- * After 14:30, auto-refresh every 2 min until today's list appears, then every 15 min.
+ * Auto-refresh every 300 seconds so LTP/PnL stay updated.
  */
 (function () {
     'use strict';
@@ -24,9 +24,7 @@
     const HOST_ID = 'sfWatchlistHost';
     const MSG_ID = 'sfWatchlistMsg';
     const UPDATED_ID = 'sfWatchlistUpdated';
-    const POLL_FAST_MS = 2 * 60 * 1000;
-    const POLL_SLOW_MS = 15 * 60 * 1000;
-    const PRE_1430_MS = 5 * 60 * 1000;
+    const POLL_LTP_MS = 300 * 1000;
 
     var sfCarryFulfilled = false; // after 14:30: at least one row for today's IST date
     var sfPollTimer = null;
@@ -192,16 +190,11 @@
         const msg = document.getElementById(MSG_ID);
         if (!msg) return;
         if (isAfter1430Ist()) {
-            if (sfCarryFulfilled) {
-                msg.textContent =
-                    'Showing today’s carry-forwards (14:30 IST → next 14:30). Auto-refresh every 15 min.';
-            } else {
-                msg.textContent =
-                    'After 14:30 IST: refreshing every 2 min until today’s list appears, then every 15 min.';
-            }
+            msg.textContent =
+                'Showing today’s carry-forwards (14:30 IST → next 14:30). LTP/PnL refresh every 300 seconds.';
         } else {
             msg.textContent =
-                'Before 14:30 IST, showing the prior session’s list; after 14:30, today’s list until the next 14:30.';
+                'Before 14:30 IST, showing the prior session’s list; LTP/PnL refresh every 300 seconds.';
         }
     }
 
@@ -230,7 +223,7 @@
             '<thead><tr>' +
             '<th>Time</th><th>Symbol</th><th>Side</th>' +
             '<th title="Reclaim probability at trigger (0–100)">Score</th>' +
-            '<th>Price</th><th>VWAP</th>' +
+            '<th>Price</th><th>VWAP</th><th>LTP</th><th>PnL</th>' +
             '</tr></thead>';
         const body = vis.map(function (r) {
             const sideU = String(r.side || '').trim().toUpperCase();
@@ -239,6 +232,13 @@
                 : (sideU === 'SHORT'
                     ? '<span class="sf-side-pill sf-side-short">SHORT</span>'
                     : escapeHtml(sideU));
+            var pnl = Number(r.pnl_points);
+            var pnlTxt = Number.isFinite(pnl)
+                ? ((pnl > 0 ? '+' : '') + pnl.toFixed(2))
+                : '—';
+            var pnlStyle = Number.isFinite(pnl)
+                ? (pnl > 0 ? ' style="color:#15803d;font-weight:600;"' : (pnl < 0 ? ' style="color:#dc2626;font-weight:600;"' : ''))
+                : '';
             return (
                 '<tr>' +
                 '<td>' + escapeHtml(fmtHhmm(r.trigger_at)) + '</td>' +
@@ -247,6 +247,8 @@
                 '<td>' + escapeHtml(fmtNum(r.trigger_score, 0)) + '</td>' +
                 '<td>' + escapeHtml(fmtNum(r.trigger_price, 2)) + '</td>' +
                 '<td>' + escapeHtml(fmtNum(r.vwap_at_trigger, 2)) + '</td>' +
+                '<td>' + escapeHtml(fmtNum(r.ltp, 2)) + '</td>' +
+                '<td' + pnlStyle + '>' + escapeHtml(pnlTxt) + '</td>' +
                 '</tr>'
             );
         }).join('');
@@ -265,10 +267,7 @@
     }
 
     function nextPollDelayMs() {
-        if (!isAfter1430Ist()) {
-            return PRE_1430_MS;
-        }
-        return sfCarryFulfilled ? POLL_SLOW_MS : POLL_FAST_MS;
+        return POLL_LTP_MS;
     }
 
     function scheduleCarryForwardPoll() {

@@ -1260,6 +1260,45 @@ def get_smart_futures_watchlist(
                 except (TypeError, ValueError):
                     d[k] = None
         out.append(d)
+
+    # Live LTP + PnL overlay for dashboard carry-forward table.
+    # PnL is points since trigger_price, signed by side (LONG/SHORT).
+    try:
+        keys: List[str] = []
+        for r in out:
+            ik = str(r.get("fut_instrument_key") or "").strip()
+            if ik:
+                keys.append(ik)
+        uniq_keys = list(dict.fromkeys(keys))
+        if uniq_keys:
+            upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+            ltp_map = upstox.get_market_quotes_batch_by_keys(uniq_keys) or {}
+            for r in out:
+                ik = str(r.get("fut_instrument_key") or "").strip()
+                ltp = None
+                if ik and ik in ltp_map:
+                    try:
+                        lv = float(ltp_map.get(ik))
+                        if lv > 0:
+                            ltp = lv
+                    except (TypeError, ValueError):
+                        ltp = None
+                r["ltp"] = ltp
+                tp = r.get("trigger_price")
+                side = str(r.get("side") or "").strip().upper()
+                pnl_points = None
+                if ltp is not None and tp is not None:
+                    try:
+                        entry = float(tp)
+                        if side == "SHORT":
+                            pnl_points = float(entry) - float(ltp)
+                        else:
+                            pnl_points = float(ltp) - float(entry)
+                    except (TypeError, ValueError):
+                        pnl_points = None
+                r["pnl_points"] = pnl_points
+    except Exception as e:
+        logger.warning("smart_futures /watchlist live LTP overlay failed: %s", e)
     return {
         "today_session_date": sd.isoformat(),
         "entry_score_threshold": RECLAIM_ENTRY_SCORE_THRESHOLD,
