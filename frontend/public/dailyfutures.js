@@ -254,13 +254,19 @@
   }
 
   function stripL3Cell(st) {
-    if (st && st.l3 === 'fading') {
+    var l3 = (st && st.l3) || '';
+    if (l3 === 'fading') {
       return (
-        '<span class="df-s-cell df-s-amb" title="Stock shows weakening momentum: in the last two completed 15m bars, the latest bar has a smaller body and closes in the lower 30% of its range.">15m fade</span>'
+        '<span class="df-s-cell df-s-neg" title="Weak: stock shows fading momentum (latest 15m bar has weaker body and weak close).">Weak</span>'
+      );
+    }
+    if (l3 === 'strong') {
+      return (
+        '<span class="df-s-cell df-s-ok" title="Strong: stock is not showing the 15m fading pattern right now.">Strong</span>'
       );
     }
     return (
-      '<span class="df-s-cell df-s-ok" title="This weakening fade pattern is not present right now. This is neutral for this rule, not an automatic up or down call.">No 15m fade</span>'
+      '<span class="df-s-cell df-s-muted" title="Neutral: no clear stock momentum signal for this strip rule.">Neutral</span>'
     );
   }
 
