@@ -521,9 +521,9 @@ def _apply_exit_alerts_to_running(
     db: Session,
     running: List[Dict[str, Any]],
     trade_date: date,
-) -> None:
+) -> Dict[str, Any]:
     if not running:
-        return
+        return {}
     now_ist = datetime.now(IST)
     try:
         upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
@@ -542,7 +542,7 @@ def _apply_exit_alerts_to_running(
                 "l3": "strong",
                 "decision": "hold",
             }
-        return
+        return {}
 
     nifty_cands: List[Dict[str, Any]] = []
     try:
@@ -689,6 +689,10 @@ def _apply_exit_alerts_to_running(
     except Exception as e:
         logger.warning("daily_futures: exit alerts commit: %s", e)
         db.rollback()
+    return {
+        "nifty_momentum_mode": str(getattr(settings, "DAILY_FUTURES_NIFTY_MOMENTUM_MODE", "fixed")),
+        "nifty_momentum_threshold_pct_effective": round(float(nifty_thr_pct), 6),
+    }
 
 
 def _prev_close_from_snapshot(snapshot: Dict[str, Any]) -> Optional[float]:
@@ -2043,8 +2047,9 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
     except Exception as e:
         logger.warning("daily_futures: rel-strength refresh failed: %s", e, exc_info=True)
 
+    strip_debug: Dict[str, Any] = {}
     try:
-        _apply_exit_alerts_to_running(db, running, td)
+        strip_debug = _apply_exit_alerts_to_running(db, running, td) or {}
     except Exception as e:
         logger.warning("daily_futures: exit alerts failed: %s", e, exc_info=True)
         for r in running:
@@ -2055,7 +2060,7 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
                 bool(r.get("nifty_structure_weakening")) and bool(r.get("momentum_exhausting"))
             )
             r["alert_strip"] = {
-                "l1": "nifty_ok",
+                "l1": "nifty_no_higher_high",
                 "l2": "building",
                 "l3": "strong",
                 "decision": "hold",
@@ -2094,6 +2099,7 @@ def get_workspace(db: Session, user_id: int) -> Dict[str, Any]:
             "wins": wins,
             "losses": losses,
             "win_rate_pct": win_rate,
+            "strip_debug": strip_debug,
         },
     }
 
