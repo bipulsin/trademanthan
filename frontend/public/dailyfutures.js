@@ -214,13 +214,24 @@
   }
 
   function stripL1Cell(st) {
-    if (st && st.l1 === 'nifty_lower_low') {
+    var l1 = (st && st.l1) || 'nifty_no_higher_high';
+    if (l1 === 'nifty_higher_high') {
       return (
-        '<span class="df-s-cell df-s-amb" title="Nifty shows weakening momentum: the latest completed 15m low is below the prior 15m low.">Nifty 15m lower low</span>'
+        '<span class="df-s-cell df-s-ok" title="Strong: latest completed 15m close is above previous 15m close by more than configured threshold.">Strong</span>'
+      );
+    }
+    if (l1 === 'nifty_lower_low') {
+      return (
+        '<span class="df-s-cell df-s-neg" title="Weak: latest completed 15m close is below previous 15m close by more than configured threshold.">Weak</span>'
+      );
+    }
+    if (l1 === 'nifty_no_lower_low') {
+      return (
+        '<span class="df-s-cell df-s-muted" title="Neutral: close is not lower than previous 15m close beyond configured threshold.">Neutral</span>'
       );
     }
     return (
-      '<span class="df-s-cell df-s-ok" title="Nifty is not showing this lower-low weakness pattern right now.">Nifty: no lower low</span>'
+      '<span class="df-s-cell df-s-muted" title="Neutral: close is not higher than previous 15m close beyond configured threshold.">Neutral</span>'
     );
   }
 

@@ -454,6 +454,35 @@ def _momentum_exhausting_last_two(cands: List[Dict[str, Any]]) -> bool:
     return bool(body_b < body_a and close_pct < 0.30)
 
 
+def _nifty_momentum_state_last_two_closes(cands: List[Dict[str, Any]]) -> str:
+    """
+    Return one of:
+      - nifty_higher_high      (close-to-close change > +threshold)
+      - nifty_lower_low        (close-to-close change < -threshold)
+      - nifty_no_higher_high   (0 <= change <= +threshold)
+      - nifty_no_lower_low     (-threshold <= change < 0)
+    """
+    if len(cands) < 2:
+        return "nifty_no_higher_high"
+    try:
+        prev_close = float(cands[-2].get("close"))
+        curr_close = float(cands[-1].get("close"))
+    except (TypeError, ValueError):
+        return "nifty_no_higher_high"
+    if prev_close <= 0:
+        return "nifty_no_higher_high"
+
+    thr_pct = max(0.0, float(settings.DAILY_FUTURES_NIFTY_MOMENTUM_THRESHOLD_PCT))
+    move_pct = ((curr_close - prev_close) / prev_close) * 100.0
+    if move_pct > thr_pct:
+        return "nifty_higher_high"
+    if move_pct < -thr_pct:
+        return "nifty_lower_low"
+    if move_pct >= 0:
+        return "nifty_no_higher_high"
+    return "nifty_no_lower_low"
+
+
 def _apply_exit_alerts_to_running(
     db: Session,
     running: List[Dict[str, Any]],
@@ -474,7 +503,7 @@ def _apply_exit_alerts_to_running(
                 bool(r.get("nifty_structure_weakening")) and bool(r.get("momentum_exhausting"))
             )
             r["alert_strip"] = {
-                "l1": "nifty_ok",
+                "l1": "nifty_no_higher_high",
                 "l2": "building",
                 "l3": "strong",
                 "decision": "hold",
@@ -489,10 +518,8 @@ def _apply_exit_alerts_to_running(
     except Exception as e:
         logger.debug("daily_futures: exit alerts nifty 15m: %s", e)
 
-    nifty_ok = (
-        len(nifty_cands) >= 2
-        and float(nifty_cands[-1]["low"]) < float(nifty_cands[-2]["low"])
-    )
+    nifty_l1_state = _nifty_momentum_state_last_two_closes(nifty_cands)
+    nifty_weakening = nifty_l1_state == "nifty_lower_low"
     stock_candle_cache: Dict[str, List[Dict[str, Any]]] = {}
 
     for r in running:
@@ -512,7 +539,7 @@ def _apply_exit_alerts_to_running(
                 r["position_atr"] = round(float(atr), 4)
 
         old_n = bool(r.get("nifty_structure_weakening"))
-        new_n = bool(nifty_ok and pos_age_ok and entry_dt is not None)
+        new_n = bool(nifty_weakening and pos_age_ok and entry_dt is not None)
         merged_n = old_n or new_n
 
         if ikey and ikey not in stock_candle_cache:
@@ -565,10 +592,7 @@ def _apply_exit_alerts_to_running(
         exit_review = bool(merged_hit or (merged_n and merged_m) or drawdown_15atr_breach)
 
         # 15-min alert strip (live L1/L3 from same Nifty + stock 15m data; L2 from trail state)
-        l1_amber = bool(
-            len(nifty_cands) >= 2
-            and float(nifty_cands[-1]["low"]) < float(nifty_cands[-2]["low"])
-        )
+        l1_amber = bool(nifty_weakening)
         l3_fading = bool(new_m)
         if merged_hit:
             l2k = "hit"
@@ -585,7 +609,7 @@ def _apply_exit_alerts_to_running(
         else:
             as_dec = "hold"
         r["alert_strip"] = {
-            "l1": "nifty_lower_low" if l1_amber else "nifty_ok",
+            "l1": nifty_l1_state,
             "l2": l2k,
             "l3": "fading" if l3_fading else "strong",
             "decision": as_dec,

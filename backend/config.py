@@ -79,5 +79,10 @@ class Settings(BaseSettings):
     TEST_SIMULATION_DATE: str = os.getenv("TEST_SIMULATION_DATE", "2026-04-13")
     TEST_SIMULATION_TIME: str = os.getenv("TEST_SIMULATION_TIME", "09:10:00")
     TEST_SYMBOL_COUNT: int = int(os.getenv("TEST_SYMBOL_COUNT", "200"))
+    # Daily Futures: Nifty 15m momentum threshold (percent) for L1 strip classification.
+    # Example: 0.01 means 0.01%.
+    DAILY_FUTURES_NIFTY_MOMENTUM_THRESHOLD_PCT: float = float(
+        os.getenv("DAILY_FUTURES_NIFTY_MOMENTUM_THRESHOLD_PCT", "0.01")
+    )
 
 settings = Settings()
