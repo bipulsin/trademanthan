@@ -454,7 +454,7 @@ def _momentum_exhausting_last_two(cands: List[Dict[str, Any]]) -> bool:
     return bool(body_b < body_a and close_pct < 0.30)
 
 
-def _nifty_momentum_state_last_two_closes(cands: List[Dict[str, Any]]) -> str:
+def _nifty_momentum_state_last_two_closes(cands: List[Dict[str, Any]], thr_pct: float) -> str:
     """
     Return one of:
       - nifty_higher_high      (close-to-close change > +threshold)
@@ -472,7 +472,7 @@ def _nifty_momentum_state_last_two_closes(cands: List[Dict[str, Any]]) -> str:
     if prev_close <= 0:
         return "nifty_no_higher_high"
 
-    thr_pct = max(0.0, float(settings.DAILY_FUTURES_NIFTY_MOMENTUM_THRESHOLD_PCT))
+    thr_pct = max(0.0, float(thr_pct))
     move_pct = ((curr_close - prev_close) / prev_close) * 100.0
     if move_pct > thr_pct:
         return "nifty_higher_high"
@@ -481,6 +481,40 @@ def _nifty_momentum_state_last_two_closes(cands: List[Dict[str, Any]]) -> str:
     if move_pct >= 0:
         return "nifty_no_higher_high"
     return "nifty_no_lower_low"
+
+
+def _resolve_nifty_momentum_threshold_pct(
+    upstox: UpstoxService,
+    trade_date: date,
+    nifty_cands: List[Dict[str, Any]],
+) -> float:
+    """
+    Resolve threshold pct used for Nifty momentum classification.
+    - fixed mode: direct config pct
+    - atr mode: (ATR multiplier * Nifty 15m ATR(5d)) as percent of latest close
+    Falls back to fixed pct on any missing data.
+    """
+    fixed_thr_pct = max(0.0, float(settings.DAILY_FUTURES_NIFTY_MOMENTUM_THRESHOLD_PCT))
+    mode = str(getattr(settings, "DAILY_FUTURES_NIFTY_MOMENTUM_MODE", "fixed") or "fixed").lower().strip()
+    if mode != "atr":
+        return fixed_thr_pct
+
+    atr_mult = max(0.0, float(getattr(settings, "DAILY_FUTURES_NIFTY_MOMENTUM_ATR_MULTIPLIER", 0.25)))
+    if atr_mult <= 0:
+        return fixed_thr_pct
+    atr_abs = _compute_position_atr_15m_5d(upstox, NIFTY50_INDEX_KEY, trade_date)
+    if atr_abs is None or atr_abs <= 0:
+        return fixed_thr_pct
+    try:
+        close_ref = float((nifty_cands[-1] or {}).get("close")) if nifty_cands else 0.0
+    except (TypeError, ValueError):
+        close_ref = 0.0
+    if close_ref <= 0:
+        return fixed_thr_pct
+    dyn_pct = (atr_mult * float(atr_abs) / float(close_ref)) * 100.0
+    if dyn_pct <= 0:
+        return fixed_thr_pct
+    return float(dyn_pct)
 
 
 def _apply_exit_alerts_to_running(
@@ -518,7 +552,8 @@ def _apply_exit_alerts_to_running(
     except Exception as e:
         logger.debug("daily_futures: exit alerts nifty 15m: %s", e)
 
-    nifty_l1_state = _nifty_momentum_state_last_two_closes(nifty_cands)
+    nifty_thr_pct = _resolve_nifty_momentum_threshold_pct(upstox, trade_date, nifty_cands)
+    nifty_l1_state = _nifty_momentum_state_last_two_closes(nifty_cands, nifty_thr_pct)
     nifty_weakening = nifty_l1_state == "nifty_lower_low"
     stock_candle_cache: Dict[str, List[Dict[str, Any]]] = {}
 

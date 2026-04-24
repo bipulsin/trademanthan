@@ -84,5 +84,14 @@ class Settings(BaseSettings):
     DAILY_FUTURES_NIFTY_MOMENTUM_THRESHOLD_PCT: float = float(
         os.getenv("DAILY_FUTURES_NIFTY_MOMENTUM_THRESHOLD_PCT", "0.01")
     )
+    # Daily Futures: threshold mode for Nifty momentum classification.
+    # fixed => use DAILY_FUTURES_NIFTY_MOMENTUM_THRESHOLD_PCT
+    # atr   => use (ATR multiplier * Nifty ATR(15m,5d)) as percent of close
+    DAILY_FUTURES_NIFTY_MOMENTUM_MODE: str = os.getenv(
+        "DAILY_FUTURES_NIFTY_MOMENTUM_MODE", "atr"
+    ).strip().lower()
+    DAILY_FUTURES_NIFTY_MOMENTUM_ATR_MULTIPLIER: float = float(
+        os.getenv("DAILY_FUTURES_NIFTY_MOMENTUM_ATR_MULTIPLIER", "0.25")
+    )
 
 settings = Settings()
