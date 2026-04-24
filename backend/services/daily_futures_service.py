@@ -1070,6 +1070,11 @@ def process_chartink_webhook(symbols: List[str]) -> Dict[str, Any]:
     ensure_daily_futures_tables()
     trade_date = ist_today()
     sym_set: Set[str] = {s.strip().upper() for s in symbols if s and str(s).strip()}
+    logger.info(
+        "daily_futures webhook ingest: unique_symbols=%d trade_date=%s",
+        len(sym_set),
+        trade_date,
+    )
 
     upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
     summary: Dict[str, Any] = {"trade_date": str(trade_date), "processed": 0, "skipped": []}

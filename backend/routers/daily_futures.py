@@ -77,6 +77,24 @@ def daily_futures_sell(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.get("/webhook/chartink/ping")
+def chartink_webhook_path_ping() -> Dict[str, Any]:
+    """
+    Public health check: confirms Nginx + FastAPI route the Daily Futures webhook.
+    ChartInk must use POST to the *post_paths* below (this GET is only for humans / monitors).
+    """
+    return {
+        "ok": True,
+        "message": "Route is live. ChartInk alerts must use HTTP POST, not GET.",
+        "post_paths": {
+            "option_a_api_prefix": "/api/daily-futures/webhook/chartink",
+            "option_b_no_prefix": "/daily-futures/webhook/chartink",
+        },
+        "base_url_example": "https://www.tradewithcto.com/api/daily-futures/webhook/chartink",
+        "query_or_header": "Add ?secret=YOUR_SECRET or header X-Daily-Futures-Secret (env CHARTINK_DAILY_FUTURES_SECRET on server if set).",
+    }
+
+
 @router.get("/debug/conviction-breakdown")
 def daily_futures_conviction_breakdown(
     future_symbol: str,
@@ -131,6 +149,7 @@ async def chartink_webhook(
     if not symbols:
         raise HTTPException(status_code=400, detail="No symbols found in payload")
 
+    logger.info("daily_futures chartink POST received symbol_count=%d", len(symbols))
     try:
         summary = process_chartink_webhook(symbols)
         summary["symbols_received"] = len(symbols)
