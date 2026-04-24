@@ -974,7 +974,7 @@ def load_arbitrage_future_row(conn, underlying: str) -> Optional[Dict[str, Any]]
 
 def retarget_daily_futures_to_next_month_for_date(trade_date: date) -> Dict[str, Any]:
     """
-    Re-point today’s (or a given day’s) screening rows and open user trades to next-month
+    Re-point today's (or a given day's) screening rows and open user trades to next-month
     FUT keys/lots from arbitrage_master. Call once after switching Daily Futures to nextmth
     so existing picks and `order_status = bought` rows track the new contract.
     """
