@@ -249,7 +249,7 @@ class LeftMenu {
                 <li class="nav-item" data-page="dashboard.html"><i class="fas fa-chart-line"></i><span>Dashboard</span></li>
                 <li class="nav-item" data-page="intraoption.html"><img src="icons/intraday-option.png?v=1" alt="" class="nav-item-icon-img" width="33" height="33" /><span>Intraday Option</span></li>
                 <li class="nav-item" data-page="smartfuture.html"><img src="icons/smart-futures.png?v=3" alt="" class="nav-item-icon-img" width="33" height="33" /><span>Smart Futures</span></li>
-                <li class="nav-item" data-page="dailyfutures.html"><i class="fas fa-calendar-day"></i><span>Daily Futures</span></li>
+                <li class="nav-item" data-page="dailyfutures.html"><i class="fas fa-calendar-day"></i><span>Premium Futures</span></li>
                 <li class="nav-item" data-page="pivot-breakout.html"><i class="fas fa-bullseye"></i><span>Pivot Breakout</span></li>
                 <li class="nav-item" data-page="arbitrage.html"><i class="fas fa-shuffle"></i><span>Arbitrage Selection</span></li>
                 <li class="nav-item" data-page="cargpt.html"><i class="fas fa-chart-area"></i><span>Composite Avg</span></li>
@@ -656,7 +656,7 @@ class LeftMenu {
             dashboard: 'Dashboard',
             intraoption: 'Intraday Stock Options Algo',
             smartfuture: 'Smart Futures',
-            dailyfutures: 'Daily Futures',
+            dailyfutures: 'Premium Futures',
             'pivot-breakout': 'Pivot Breakout',
             arbitrage: 'Arbitrage Selection',
             cargpt: 'Composite Average Reversal',

@@ -138,7 +138,7 @@
     grid.innerHTML =
       cardHtml("Intraday PnL", data.intraday) +
       cardHtml("Smart Futures PnL", data.smart) +
-      cardHtml("Daily Futures PnL", data.daily);
+      cardHtml("Premium Futures PnL", data.daily);
     head.innerHTML = "Total: " + chipHtml(grandTotal);
   }
 

@@ -1,5 +1,5 @@
 /**
- * Daily Futures — workspace polling + buy/sell modals (ChartInk-driven picks).
+ * Premium Futures — workspace polling + buy/sell modals (ChartInk-driven picks).
  */
 (function () {
   const API_BASE =
@@ -628,7 +628,7 @@
       }
       if (scn === 0) {
         el.innerHTML =
-          '<p class="df-meta">No symbols in <strong>today&rsquo;s</strong> Daily Futures screening yet. ' +
+          '<p class="df-meta">No symbols in <strong>today&rsquo;s</strong> Premium Futures screening yet. ' +
             'If ChartInk already fired, check that webhooks are reaching the server and the screening row&rsquo;s <code>trade_date</code> is today (IST). After 9:00 IST, refresh in a few minutes.</p>';
         return;
       }
@@ -1240,7 +1240,7 @@
         if (liteData.session_before_open) {
           b.textContent =
             (liteData.session_message ||
-              'Daily Futures shows the current IST session from 09:00 onward.') +
+              'Premium Futures shows the current IST session from 09:00 onward.') +
             ' Session date: ' +
             (liteData.trade_date || '—') +
             ' · Auto-refresh every 120 s';

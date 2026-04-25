@@ -1,5 +1,5 @@
 /**
- * Futures Trading Report (Daily Futures + Smart Futures sold trades).
+ * Futures Trading Report (Premium Futures + Smart Futures sold trades).
  */
 (function () {
   const API_BASE =
@@ -86,7 +86,7 @@
           <tr>
             <th class="intraday-th-date">Date</th>
             <th>Total Trades</th>
-            <th class="intraday-col-hide-mobile">Daily Futures</th>
+            <th class="intraday-col-hide-mobile">Premium Futures</th>
             <th class="intraday-col-hide-mobile">Smart Futures</th>
             <th class="intraday-th-winrate">Win Rate</th>
             <th class="intraday-th-pnl">P&L</th>
@@ -249,7 +249,7 @@
       alert("No data to download");
       return;
     }
-    const headers = ["Date", "Total Trades", "Daily Futures Trades", "Smart Futures Trades", "Win Rate %", "Total P&L"];
+    const headers = ["Date", "Total Trades", "Premium Futures Trades", "Smart Futures Trades", "Win Rate %", "Total P&L"];
     const rows = reportData.map((d) => [
       d.date,
       d.total_trades,
