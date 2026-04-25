@@ -39,6 +39,10 @@ from backend.services.arbitrage_daily_setup_scheduler import (
     start_arbitrage_daily_setup_scheduler,
     stop_arbitrage_daily_setup_scheduler,
 )
+from backend.services.chartink_df_webhook_inbox_scheduler import (
+    start_chartink_df_webhook_inbox_scheduler,
+    stop_chartink_df_webhook_inbox_scheduler,
+)
 # Configure logging with file handler - MUST be done before any loggers are created
 log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
 os.makedirs(log_dir, exist_ok=True)
@@ -127,14 +131,24 @@ async def lifespan(app: FastAPI):
             logger.error(f"❌ Smart Future Algo Scheduler: CRITICAL ERROR - {e}", exc_info=True)
             logger.warning("⚠️ Backend will continue running but scheduled jobs may not work")
 
-        # Start Arbitrage Daily Setup Scheduler (09:16 IST daily)
+        # Start Arbitrage Daily Setup (09:10 primary, 09:20 backstop, weekdays / non-holiday)
         try:
             logger.info("Starting Arbitrage Daily Setup Scheduler...")
             start_arbitrage_daily_setup_scheduler()
-            logger.info("✅ Arbitrage Daily Setup Scheduler: STARTED (09:16 Asia/Kolkata)")
+            logger.info("✅ Arbitrage Daily Setup Scheduler: STARTED (09:10/09:20 Asia/Kolkata, Mon–Fri, non-holiday)")
         except Exception as e:
             logger.error(f"❌ Arbitrage Daily Setup Scheduler: FAILED - {e}", exc_info=True)
             logger.warning("⚠️ Continuing without arbitrage scheduler")
+
+        try:
+            logger.info("Starting ChartInk Daily Futures webhook inbox cleanup scheduler...")
+            start_chartink_df_webhook_inbox_scheduler()
+            logger.info(
+                "✅ ChartInk DF inbox cleanup: STARTED (08:45 Asia/Kolkata daily; purge per CHARTINK_DF_INBOX_REFRESH_DAYS, default 5)"
+            )
+        except Exception as e:
+            logger.error(f"❌ ChartInk DF inbox cleanup scheduler: FAILED - {e}", exc_info=True)
+            logger.warning("⚠️ Continuing without ChartInk DF inbox cleanup scheduler")
 
         logger.info("=" * 60)
         logger.info("✅ STARTUP COMPLETE - All Services Active")
@@ -187,6 +201,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"⚠️ Error stopping Arbitrage Daily Setup Scheduler: {e}", exc_info=True)
 
+    try:
+        stop_chartink_df_webhook_inbox_scheduler()
+        logger.info("✅ ChartInk DF inbox cleanup scheduler stopped")
+    except Exception as e:
+        logger.error(f"⚠️ Error stopping ChartInk DF inbox cleanup scheduler: {e}", exc_info=True)
+
     logger.info("✅ Shutdown complete")
 
 app = FastAPI(
@@ -238,6 +258,8 @@ app.include_router(fno_bullish.router, prefix="/api/fno-bullish")
 app.include_router(fno_bullish.router, prefix="/fno-bullish")
 app.include_router(daily_futures.router, prefix="/api")
 app.include_router(daily_futures.router, prefix="")
+app.include_router(daily_futures.bearish_router, prefix="/api")
+app.include_router(daily_futures.bearish_router, prefix="")
 app.include_router(futures_reports.router, prefix="/api")
 
 # Create/migrate tables in a daemon thread so import + uvicorn bind is not blocked by long DB locks

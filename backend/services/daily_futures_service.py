@@ -2879,3 +2879,34 @@ def webhook_bearish_secret_ok(provided: Optional[str]) -> bool:
     default_secret = "tradewithctodailyfuture_bearish"
     expected = (os.getenv("CHARTINK_DF_BEARISH_SECRET") or default_secret).strip()
     return bool(provided and provided.strip() == expected)
+
+
+def refresh_chartink_webhook_inbox_dirs() -> Dict[str, Any]:
+    """
+    Remove persisted raw JSON files written before processing ChartInk webhooks
+    (``*.raw.json`` / ``*.raw.bear.json``). Does not remove directories.
+    """
+    out: Dict[str, Any] = {"ok": True, "files_removed": 0, "by_dir": [], "errors": []}
+
+    def _clean_one(label: str, d: Path) -> None:
+        n = 0
+        if not d.exists():
+            out["by_dir"].append({"label": label, "path": str(d), "existed": False, "removed": 0})
+            return
+        for p in list(d.iterdir()):
+            if not p.is_file():
+                continue
+            if not (p.name.endswith(".raw.json") or p.name.endswith(".raw.bear.json")):
+                continue
+            try:
+                p.unlink()
+                n += 1
+            except OSError as e:
+                out["errors"].append(f"{p}: {e}")
+        out["by_dir"].append({"label": label, "path": str(d), "existed": True, "removed": n})
+        out["files_removed"] += n
+
+    _clean_one("long", chartink_webhook_inbox_dir())
+    _clean_one("bear", chartink_bearish_webhook_inbox_dir())
+    out["ok"] = len(out["errors"]) == 0
+    return out
