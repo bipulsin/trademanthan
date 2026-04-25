@@ -217,6 +217,33 @@
             overflow: hidden;
         }
         .df-picks-more-scroll { overflow-y: auto; flex: 1 1 auto; min-height: 0; max-height: calc(90vh - 7.5rem); }
+        .df-header-row {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 14px;
+            flex-wrap: wrap;
+        }
+        .df-snapshot-chip {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 8px 16px;
+            border-radius: 999px;
+            font-size: 1.08rem;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+            line-height: 1;
+            background: #fef3c7;
+            color: #7c2d12;
+            border: 1px solid #f59e0b;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+        @media (max-width: 768px) {
+            .df-header-row { flex-direction: column; align-items: flex-start; }
+            .df-snapshot-chip { font-size: 1rem; }
+        }
     </style>
 </head>
 <body class="theme-page">
@@ -232,9 +259,12 @@
         <div id="left-menu-container"></div>
         <main class="right-panel main-content-area">
             <div class="settings-header">
-                <div class="settings-title-section">
-                    <h1 class="settings-title"><i class="fas fa-calendar-day" style="margin-right:10px;color:#2563eb;"></i> Daily Futures</h1>
-                    <p class="settings-subtitle">FNO stocks Bullish Trend scanner (Moving average + ADX + MACD ) with conviction score &amp; scan score</p>
+                <div class="df-header-row">
+                    <div class="settings-title-section">
+                        <h1 class="settings-title"><i class="fas fa-calendar-day" style="margin-right:10px;color:#2563eb;"></i> Daily Futures</h1>
+                        <p class="settings-subtitle">FNO stocks Bullish Trend scanner (Moving average + ADX + MACD ) with conviction score &amp; scan score</p>
+                    </div>
+                    <span id="dfSnapshotChip" class="df-snapshot-chip" hidden>Snapshot</span>
                 </div>
             </div>
             <div class="settings-content df-wrap">
@@ -363,6 +393,6 @@
     </div>
 
     <script src="left-menu.js?v=3.20"></script>
-    <script src="dailyfutures.js?v=31"></script>
+    <script src="dailyfutures.js?v=32"></script>
 </body>
 </html>

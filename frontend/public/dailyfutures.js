@@ -28,6 +28,36 @@
     return (h ? h.value : '00') + ':' + (m ? m.value : '00');
   }
 
+  function istDateTodayStr() {
+    try {
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Kolkata',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).formatToParts(new Date());
+      const y = (parts.find(function (p) { return p.type === 'year'; }) || {}).value || '0000';
+      const m = (parts.find(function (p) { return p.type === 'month'; }) || {}).value || '00';
+      const d = (parts.find(function (p) { return p.type === 'day'; }) || {}).value || '00';
+      return y + '-' + m + '-' + d;
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function updateSnapshotChip(workspace) {
+    const chip = document.getElementById('dfSnapshotChip');
+    if (!chip) return;
+    const td = String((workspace && workspace.trade_date) || '').trim();
+    const today = istDateTodayStr();
+    const show = !!(td && today && td !== today);
+    chip.hidden = !show;
+    if (show) {
+      chip.textContent = 'Snapshot';
+      chip.title = 'Showing previous trading session data';
+    }
+  }
+
   function fmtIso(iso) {
     if (!iso) return '—';
     try {
@@ -1205,6 +1235,7 @@
     try {
       const liteData = await fetchWorkspace({ lite: true, timeoutMs: 9000 });
       if (seq !== state.refreshSeq) return;
+      updateSnapshotChip(liteData);
       if (b) {
         if (liteData.session_before_open) {
           b.textContent =
@@ -1259,6 +1290,7 @@
           });
       }
     } catch (e) {
+      updateSnapshotChip(null);
       if (b) b.textContent = 'Could not load workspace: ' + (e && e.message ? e.message : e);
     }
   }
