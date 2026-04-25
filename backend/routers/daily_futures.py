@@ -24,8 +24,11 @@ from backend.services.daily_futures_service import (
     get_workspace_trade_if_could,
     get_workspace,
     normalize_symbols_from_payload,
+    persist_chartink_bearish_webhook_raw_body,
     persist_chartink_webhook_raw_body,
     process_chartink_webhook,
+    process_chartink_webhook_bearish,
+    webhook_bearish_secret_ok,
     webhook_secret_ok,
 )
 
@@ -151,6 +154,19 @@ async def _chartink_webhook_background(symbols: list, raw_saved_name: str) -> No
         logger.exception("daily_futures chartink background failed raw_file=%s", raw_saved_name)
 
 
+async def _chartink_bearish_webhook_background(symbols: list, raw_saved_name: str) -> None:
+    try:
+        out = await run_in_threadpool(process_chartink_webhook_bearish, symbols)
+        logger.info(
+            "daily_futures_bearish chartink done processed=%s trade_date=%s raw_file=%s",
+            (out or {}).get("processed"),
+            (out or {}).get("trade_date"),
+            raw_saved_name,
+        )
+    except Exception:
+        logger.exception("daily_futures_bearish chartink failed raw_file=%s", raw_saved_name)
+
+
 @router.post("/webhook/chartink")
 async def chartink_webhook(
     request: Request,
@@ -218,4 +234,55 @@ async def chartink_webhook(
         "queued": True,
         "inbox_receipt": receipt_name,
         "message": "Payload stored; ingestion in background. Refresh Daily Futures workspace in ~30–90s.",
+    }
+
+
+bearish_router = APIRouter(prefix="/daily-futures-bearish", tags=["daily-futures-bearish"])
+
+
+@bearish_router.post("/webhook/chartink")
+async def chartink_bearish_webhook(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    secret: Optional[str] = None,
+    x_df_bearish_secret: Optional[str] = Header(None, alias="X-Daily-Futures-Bearish-Secret"),
+) -> Dict[str, Any]:
+    prov = secret or x_df_bearish_secret or ""
+    if not webhook_bearish_secret_ok(prov):
+        raise HTTPException(status_code=401, detail="Invalid or missing bearish webhook secret")
+    raw = await request.body()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Empty body")
+    try:
+        inbox_path = persist_chartink_bearish_webhook_raw_body(raw)
+    except OSError as e:
+        logger.exception("chartink bearish raw persist failed: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail="Server could not store webhook body; retry shortly",
+        ) from e
+    receipt_name = Path(inbox_path).name
+    ct = (request.headers.get("content-type") or "").lower()
+    try:
+        if "application/json" in ct:
+            payload: Any = json.loads(raw.decode("utf-8", errors="replace"))
+        else:
+            s = raw.decode("utf-8", errors="replace").strip()
+            if s.startswith("{") or s.startswith("["):
+                payload = json.loads(s)
+            else:
+                payload = s
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not parse body: {e}")
+    symbols = normalize_symbols_from_payload(payload)
+    if not symbols:
+        raise HTTPException(status_code=400, detail="No symbols found in payload")
+    sym_copy = list(symbols)
+    background_tasks.add_task(_chartink_bearish_webhook_background, sym_copy, receipt_name)
+    return {
+        "success": True,
+        "direction": "SHORT",
+        "symbols_received": len(sym_copy),
+        "queued": True,
+        "inbox_receipt": receipt_name,
     }
