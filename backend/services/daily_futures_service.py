@@ -918,6 +918,54 @@ def ist_today() -> date:
     return datetime.now(IST).date()
 
 
+def _is_holiday_date(d: date) -> bool:
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT 1 FROM holiday WHERE holiday_date = CAST(:d AS DATE) LIMIT 1"),
+                {"d": str(d)},
+            ).fetchone()
+            return row is not None
+    except Exception:
+        # If holiday table is unavailable, keep weekend checks as the minimum guard.
+        return False
+
+
+def _is_trading_day(d: date) -> bool:
+    if d.weekday() >= 5:
+        return False
+    return not _is_holiday_date(d)
+
+
+def _prev_trading_day(d: date) -> date:
+    x = d - timedelta(days=1)
+    for _ in range(15):
+        if _is_trading_day(x):
+            return x
+        x -= timedelta(days=1)
+    return d - timedelta(days=1)
+
+
+def _workspace_trade_date_ist(now: Optional[datetime] = None) -> date:
+    """
+    Daily Futures display date policy:
+    - Trading day before 09:00 IST: show previous trading day
+    - Trading day from 09:00 IST onward: show current day
+    - Non-trading day (weekend/holiday): show previous trading day
+    """
+    dt = now or datetime.now(IST)
+    if dt.tzinfo is None:
+        dt = IST.localize(dt)
+    else:
+        dt = dt.astimezone(IST)
+    d = dt.date()
+    if not _is_trading_day(d):
+        return _prev_trading_day(d)
+    if dt.time() < dt_time(9, 0):
+        return _prev_trading_day(d)
+    return d
+
+
 def is_daily_futures_session_open_ist(now: Optional[datetime] = None) -> bool:
     """
     Workspace shows only the current IST calendar session from 09:00 onward.
@@ -2133,10 +2181,8 @@ def index_bearish_gate_from_quotes() -> Dict[str, Any]:
 
 def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[str, Any]:
     ensure_daily_futures_tables()
-    td = ist_today()
+    td = _workspace_trade_date_ist()
     now_ist = datetime.now(IST)
-    if not is_daily_futures_session_open_ist():
-        return _empty_daily_futures_workspace(td, session_before_open=True)
 
     with engine.connect() as conn:
         screenings = _fetch_screening_dicts(conn, td)
@@ -2486,7 +2532,11 @@ def get_workspace_running_enriched(db: Session, user_id: int) -> Dict[str, Any]:
             "running": [],
             "summary": {"strip_debug": {}},
         }
-    td = ist_today()
+    td = base.get("trade_date")
+    try:
+        td = date.fromisoformat(str(td))
+    except Exception:
+        td = _workspace_trade_date_ist()
     running = list(base.get("running") or [])
     try:
         _apply_live_ltps_to_picks_and_running([], running, [])
@@ -2518,7 +2568,11 @@ def get_workspace_trade_if_could(db: Session, user_id: int) -> Dict[str, Any]:
             "session_before_open": True,
             "trade_if_could_have_done": [],
         }
-    td = ist_today()
+    td = base.get("trade_date")
+    try:
+        td = date.fromisoformat(str(td))
+    except Exception:
+        td = _workspace_trade_date_ist()
     pm = list(base.get("picks_mixed") or base.get("picks") or [])
     rows = _build_trade_if_could_rows(pm, list(base.get("closed") or []), td)
     return {
