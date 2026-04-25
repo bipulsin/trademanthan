@@ -165,7 +165,7 @@
               .map(
                 (t) => `
                 <tr class="intraday-trade-detail-row">
-                  <td data-intraday-detail-label="Source">${t.source || "-"}</td>
+                  <td data-intraday-detail-label="Source">${sourceLabel(t.source)}</td>
                   <td data-intraday-detail-label="Symbol"><strong>${symbolWithDirectionHtml(t.symbol, t.direction_type)}</strong></td>
                   <td data-intraday-detail-label="Qty">${t.qty != null ? t.qty : "-"}</td>
                   <td data-intraday-detail-label="Entry">₹${num2(t.entry_price)}</td>
@@ -200,6 +200,14 @@
     const d = String(dir || "").trim().toUpperCase();
     if (!d) return s;
     return s + " (" + d + ")";
+  }
+
+  function sourceLabel(v) {
+    const s = String(v || "").trim().toLowerCase();
+    if (!s) return "-";
+    if (s === "daily" || s === "daily futures") return "Prem Futures";
+    if (s === "smart" || s === "smart futures") return "Smart Futures";
+    return String(v);
   }
 
   function escHtml(s) {
