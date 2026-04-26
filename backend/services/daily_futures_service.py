@@ -44,6 +44,16 @@ _DF_INTRADAY_1M_CACHE: Dict[Tuple[str, str], Dict[str, Any]] = {}
 _DF_PREV_CLOSE_CACHE: Dict[str, Any] = {"trade_date": None, "stock": {}, "nifty": None}
 NIFTY50_INDEX_KEY = "NSE_INDEX|Nifty 50"
 BANKNIFTY_INDEX_KEY = "NSE_INDEX|Nifty Bank"
+
+
+def _bearish_index_gate_enabled() -> bool:
+    """
+    When True, bearish pick visibility and SHORT order entry require NIFTY and BANKNIFTY
+    below the session open. Set env DAILY_FUTURES_BEARISH_INDEX_GATE_ENABLED=1 to enable.
+    Default: disabled (index check off).
+    """
+    v = (os.getenv("DAILY_FUTURES_BEARISH_INDEX_GATE_ENABLED") or "").strip().lower()
+    return v in ("1", "true", "yes", "on")
 _DF_TABLES_READY = False
 _DF_TABLES_LOCK = threading.Lock()
 
@@ -2401,7 +2411,15 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
     )
 
     picks_mixed = list(picks)
-    index_bear = index_bearish_gate_from_quotes()
+    if _bearish_index_gate_enabled():
+        index_bear = index_bearish_gate_from_quotes()
+    else:
+        index_bear = {
+            "ok": True,
+            "nifty_ok": None,
+            "banknifty_ok": None,
+            "index_gate_disabled": True,
+        }
     picks_bull = [
         p
         for p in picks_mixed
@@ -2412,8 +2430,11 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
         for p in picks_mixed
         if str(p.get("direction_type") or "LONG").strip().upper() == "SHORT"
     ]
-    # Bearish table: NIFTY + BANKNIFTY below day open, conviction already ≥50 from filter above
-    picks_bearish: List[Dict[str, Any]] = picks_bear_all if bool(index_bear.get("ok")) else []
+    # With index gate: NIFTY + BANKNIFTY below day open. Without gate: show all bearish ≥50.
+    if _bearish_index_gate_enabled():
+        picks_bearish = picks_bear_all if bool(index_bear.get("ok")) else []
+    else:
+        picks_bearish = list(picks_bear_all)
 
     denom = wins + losses
     win_rate = round(100.0 * wins / denom, 1) if denom else None
@@ -2485,7 +2506,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
         elif dtp == "SHORT":
             if float(c2) <= 50.0:
                 reasons.append(f"Conviction {round(float(c2),1)} is not above 50")
-            if not bool(index_bear.get("ok")):
+            if _bearish_index_gate_enabled() and not bool(index_bear.get("ok")):
                 reasons.append("NIFTY and BANKNIFTY must both be below the day open (downtrend)")
         else:
             if float(c2) <= 60.0:
@@ -2606,9 +2627,12 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
     if dtp == "SHORT":
         if c2 is None or c2 <= 50.0:
             raise ValueError(f"Conviction must be above 50 for SHORT (current: {round(c2 or 0.0, 1)})")
-        ig = index_bearish_gate_from_quotes()
-        if not bool(ig.get("ok")):
-            raise ValueError("SHORT entry requires NIFTY and BANKNIFTY both below their day open (downtrend).")
+        if _bearish_index_gate_enabled():
+            ig = index_bearish_gate_from_quotes()
+            if not bool(ig.get("ok")):
+                raise ValueError(
+                    "SHORT entry requires NIFTY and BANKNIFTY both below their day open (downtrend)."
+                )
     else:
         if c2 is None or c2 <= 60.0:
             raise ValueError(

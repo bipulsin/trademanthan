@@ -704,7 +704,10 @@
     if (!el) return;
     const gate = (data && data.index_bearish_gate) || {};
     if (hint) {
-      if (gate && gate.ok === false) {
+      if (gate && gate.index_gate_disabled === true) {
+        hint.innerHTML =
+          '<span class="df-meta">NIFTY / BANKNIFTY day-open filter is <strong>off</strong> (server setting).</span>';
+      } else if (gate && gate.ok === false) {
         hint.innerHTML =
           'Bearish list is shown only when <strong>NIFTY</strong> and <strong>BANKNIFTY</strong> are both below the day open. ' +
           'Nifty: ' +
