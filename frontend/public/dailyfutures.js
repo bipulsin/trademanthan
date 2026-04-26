@@ -706,15 +706,13 @@
     if (hint) {
       if (gate && gate.index_gate_disabled === true) {
         hint.innerHTML =
-          '<span class="df-meta">NIFTY / BANKNIFTY day-open filter is <strong>off</strong> (server setting).</span>';
-      } else if (gate && gate.ok === false) {
+          '<span class="df-meta">NIFTY day-open filter for bearish is <strong>off</strong> (server setting).</span>';
+      } else if (gate && gate.nifty_bullish === true) {
         hint.innerHTML =
-          'Bearish list is shown only when <strong>NIFTY</strong> and <strong>BANKNIFTY</strong> are both below the day open. ' +
-          'Nifty: ' +
-          (gate.nifty_ok === true ? 'OK' : gate.nifty_ok === false ? 'not below open' : '—') +
-          ' · Bank: ' +
-          (gate.banknifty_ok === true ? 'OK' : gate.banknifty_ok === false ? 'not below open' : '—') +
-          '.';
+          '<span class="df-meta">NIFTY is Bullish, so no trade will be displayed in this section.</span>';
+      } else if (gate && (gate.nifty_quote_incomplete || gate.error)) {
+        hint.innerHTML =
+          '<span class="df-meta">NIFTY quote unavailable; bearish list is hidden until the index quote loads.</span>';
       } else {
         hint.textContent = '';
       }
@@ -723,6 +721,16 @@
     if (!picks || !picks.length) {
       if (data && data.session_before_open) {
         el.innerHTML = '<p class="df-meta">Session starts at <strong>09:00 IST</strong>.</p>';
+        return;
+      }
+      if (gate && !gate.index_gate_disabled && gate.nifty_bullish === true) {
+        el.innerHTML =
+          '<p class="df-meta">NIFTY is Bullish, so no trade will be displayed in this section.</p>';
+        return;
+      }
+      if (gate && !gate.index_gate_disabled && (gate.nifty_quote_incomplete || gate.error)) {
+        el.innerHTML =
+          '<p class="df-meta">NIFTY quote unavailable. Bearish picks will show once the index price is available.</p>';
         return;
       }
       el.innerHTML =

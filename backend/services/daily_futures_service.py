@@ -43,17 +43,20 @@ _INSTRUMENT_CACHE: Optional[Tuple[Any, Any]] = None
 _DF_INTRADAY_1M_CACHE: Dict[Tuple[str, str], Dict[str, Any]] = {}
 _DF_PREV_CLOSE_CACHE: Dict[str, Any] = {"trade_date": None, "stock": {}, "nifty": None}
 NIFTY50_INDEX_KEY = "NSE_INDEX|Nifty 50"
-BANKNIFTY_INDEX_KEY = "NSE_INDEX|Nifty Bank"
 
 
 def _bearish_index_gate_enabled() -> bool:
     """
-    When True, bearish pick visibility and SHORT order entry require NIFTY and BANKNIFTY
-    below the session open. Set env DAILY_FUTURES_BEARISH_INDEX_GATE_ENABLED=1 to enable.
-    Default: disabled (index check off).
+    When True (default), bearish pick visibility and SHORT order entry require NIFTY LTP
+    below the NIFTY session day open. Set DAILY_FUTURES_BEARISH_INDEX_GATE_ENABLED=0|off|no|false to disable.
     """
-    v = (os.getenv("DAILY_FUTURES_BEARISH_INDEX_GATE_ENABLED") or "").strip().lower()
-    return v in ("1", "true", "yes", "on")
+    raw = os.getenv("DAILY_FUTURES_BEARISH_INDEX_GATE_ENABLED")
+    if raw is None or (isinstance(raw, str) and raw.strip() == ""):
+        return True
+    v = str(raw).strip().lower()
+    if v in ("0", "false", "no", "off"):
+        return False
+    return True
 _DF_TABLES_READY = False
 _DF_TABLES_LOCK = threading.Lock()
 
@@ -1003,7 +1006,13 @@ def _empty_daily_futures_workspace(trade_date: date, *, session_before_open: boo
         "picks_bearish": [],
         "picks_low_conv_bull": [],
         "picks_low_conv_bear": [],
-        "index_bearish_gate": {"ok": False, "nifty_ok": None, "banknifty_ok": None},
+        "index_bearish_gate": {
+            "ok": False,
+            "nifty_ltp": None,
+            "nifty_open": None,
+            "nifty_bearish": None,
+            "nifty_bullish": None,
+        },
         "picks_diagnostics": {
             "screening_count": 0,
             "hidden_because_bought": 0,
@@ -2149,43 +2158,35 @@ def _quote_session_open_from_snapshot(snapshot: Dict[str, Any]) -> Optional[floa
 
 def index_bearish_gate_from_quotes() -> Dict[str, Any]:
     """
-    NIFTY & BANKNIFTY both must trade below the session open (downtrend from open).
+    NIFTY-only gate for bearish: allow when NIFTY LTP is below the session day open
+    (index down from the open). If LTP is at or above the open, the index is treated as bullish; ok is False.
     Used for Today’s pick — Bearish visibility and SHORT order entry.
     """
     out: Dict[str, Any] = {
         "ok": False,
-        "nifty_ok": False,
-        "banknifty_ok": False,
         "nifty_ltp": None,
         "nifty_open": None,
-        "banknifty_ltp": None,
-        "banknifty_open": None,
+        "nifty_bearish": False,
+        "nifty_bullish": False,
     }
     try:
         ux = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
-        b = ux.get_market_quote_snapshots_batch([NIFTY50_INDEX_KEY, BANKNIFTY_INDEX_KEY]) or {}
+        b = ux.get_market_quote_snapshots_batch([NIFTY50_INDEX_KEY]) or {}
     except Exception as e:
         out["error"] = str(e)
         return out
     nq = b.get(NIFTY50_INDEX_KEY) or {}
-    bq = b.get(BANKNIFTY_INDEX_KEY) or {}
     nlp = _safe_float(nq.get("last_price"))
-    blp = _safe_float(bq.get("last_price"))
     nop = _quote_session_open_from_snapshot(nq)
-    bop = _quote_session_open_from_snapshot(bq)
-    n_ok = nlp is not None and nop is not None and float(nlp) < float(nop)
-    b_ok = blp is not None and bop is not None and float(blp) < float(bop)
-    out.update(
-        {
-            "nifty_ltp": nlp,
-            "nifty_open": nop,
-            "banknifty_ltp": blp,
-            "banknifty_open": bop,
-            "nifty_ok": n_ok,
-            "banknifty_ok": b_ok,
-            "ok": bool(n_ok and b_ok),
-        }
-    )
+    out["nifty_ltp"] = nlp
+    out["nifty_open"] = nop
+    if nlp is None or nop is None or float(nop) <= 0:
+        out["nifty_quote_incomplete"] = True
+        return out
+    bearish = float(nlp) < float(nop)
+    out["nifty_bearish"] = bool(bearish)
+    out["nifty_bullish"] = not bearish
+    out["ok"] = bool(bearish)
     return out
 
 
@@ -2416,8 +2417,10 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
     else:
         index_bear = {
             "ok": True,
-            "nifty_ok": None,
-            "banknifty_ok": None,
+            "nifty_ltp": None,
+            "nifty_open": None,
+            "nifty_bearish": None,
+            "nifty_bullish": None,
             "index_gate_disabled": True,
         }
     picks_bull = [
@@ -2430,7 +2433,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
         for p in picks_mixed
         if str(p.get("direction_type") or "LONG").strip().upper() == "SHORT"
     ]
-    # With index gate: NIFTY + BANKNIFTY below day open. Without gate: show all bearish ≥50.
+    # With index gate: NIFTY LTP below day open. Without gate: show all bearish ≥50.
     if _bearish_index_gate_enabled():
         picks_bearish = picks_bear_all if bool(index_bear.get("ok")) else []
     else:
@@ -2507,7 +2510,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
             if float(c2) <= 50.0:
                 reasons.append(f"Conviction {round(float(c2),1)} is not above 50")
             if _bearish_index_gate_enabled() and not bool(index_bear.get("ok")):
-                reasons.append("NIFTY and BANKNIFTY must both be below the day open (downtrend)")
+                reasons.append("NIFTY is not below the day open (no SHORT from this list)")
         else:
             if float(c2) <= 60.0:
                 reasons.append(f"Conviction {round(float(c2),1)} is not above 60")
@@ -2631,7 +2634,7 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
             ig = index_bearish_gate_from_quotes()
             if not bool(ig.get("ok")):
                 raise ValueError(
-                    "SHORT entry requires NIFTY and BANKNIFTY both below their day open (downtrend)."
+                    "SHORT is allowed only when NIFTY is below the day open. NIFTY is not bearish vs open right now."
                 )
     else:
         if c2 is None or c2 <= 60.0:
