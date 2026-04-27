@@ -385,25 +385,11 @@
           : '<span class="df-exit-badge df-exit-dd" title="LTP is below entry by at least 1.5× 15m ATR; profit trail was never in play for this.">⛔ Drawdown (≥1.5×ATR)</span>',
       );
     }
-    if (r.nifty_structure_weakening) {
-      parts.push(
-        isShort
-          ? '<span class="df-exit-badge df-exit-nifty" title="Short: Nifty 15m close-to-close moved against the short (e.g. strong up leg); position &gt; 45 min">⚠ Index vs short</span>'
-          : '<span class="df-exit-badge df-exit-nifty" title="Nifty 15m: current bar low &lt; previous bar low; position &gt; 45 min">⚠ Index Weakening</span>',
-      );
-    }
     if (r.trail_stop_hit) {
       parts.push(
         isShort
           ? '<span class="df-exit-badge df-exit-trail" title="Short: price rose to within 0.8×ATR of your sell after trail was armed">🔴 Lock Profit</span>'
           : '<span class="df-exit-badge df-exit-trail" title="Price fell below entry + 0.8×ATR after profit trail was armed">🔴 Lock Profit</span>',
-      );
-    }
-    if (r.momentum_exhausting) {
-      parts.push(
-        isShort
-          ? '<span class="df-exit-badge df-exit-momo" title="Short: 15m bounce / fade pattern in stock">📈 Momentum vs short</span>'
-          : '<span class="df-exit-badge df-exit-momo" title="Weaker body and weak close in latest 15m">📉 Momentum Fading</span>',
       );
     }
     if (!parts.length) return '—';
