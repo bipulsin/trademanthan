@@ -2104,10 +2104,15 @@ def _apply_live_rel_strength_to_picks_and_running(
 
     all_keys: List[str] = list(dict.fromkeys(list(symbol_to_key.values()) + [NIFTY50_INDEX_KEY]))
     ltp_by_key: Dict[str, float] = {}
+    snap_by_key: Dict[str, Dict[str, Any]] = {}
     try:
         ltp_by_key = upstox.get_market_quotes_batch_by_keys(all_keys) or {}
     except Exception as e:
         logger.warning("daily_futures: rel-strength batch LTP failed: %s", e)
+    try:
+        snap_by_key = upstox.get_market_quote_snapshots_batch(all_keys) or {}
+    except Exception as e:
+        logger.warning("daily_futures: rel-strength batch snapshots failed: %s", e)
 
     def _ltp_for_instrument(ik: str) -> Optional[float]:
         if not ik or not ltp_by_key:
@@ -2135,6 +2140,8 @@ def _apply_live_rel_strength_to_picks_and_running(
             logger.debug("daily_futures: rel-strength Nifty single quote failed: %s", e)
 
     nifty_prev = _prev_15m_close_for_instrument(upstox, NIFTY50_INDEX_KEY, now_ist, prev15_cache)
+    if nifty_prev is None:
+        nifty_prev = _prev_close_from_snapshot(snap_by_key.get(NIFTY50_INDEX_KEY) or {})
     nifty_change_pct: Optional[float] = None
     if nifty_ltp is not None and nifty_prev and nifty_prev > 0:
         nifty_change_pct = round(((nifty_ltp - nifty_prev) / nifty_prev) * 100.0, 6)
@@ -2146,6 +2153,8 @@ def _apply_live_rel_strength_to_picks_and_running(
             continue
         ik = str(r.get("instrument_key") or "").strip()
         stock_prev = _prev_15m_close_for_instrument(upstox, ik, now_ist, prev15_cache)
+        if stock_prev is None:
+            stock_prev = _prev_close_from_snapshot(snap_by_key.get(ik) or {})
         stock_ltp = _safe_float(r.get("ltp"))
         if stock_ltp is None:
             stock_ltp = _ltp_for_instrument(ik)
