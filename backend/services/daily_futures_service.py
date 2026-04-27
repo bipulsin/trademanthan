@@ -1558,8 +1558,30 @@ def _ingest_df_webhook(symbols: List[str], direction: str) -> Dict[str, Any]:
         batch_quotes = upstox.get_market_quote_snapshots_batch(quote_keys)
     except Exception as e:
         logger.warning("daily_futures: ingestion batch quote fetch failed: %s", e)
+
+    def _norm_key(k: str) -> str:
+        return str(k or "").replace(":", "|").replace(" ", "").upper()
+
+    def _resolve_quote_snapshot(req_key: str) -> Dict[str, Any]:
+        """
+        Resolve market-quote snapshot robustly for a requested instrument key.
+        Batch snapshot can miss some NSE_FO keys; fallback to single quote by key.
+        """
+        if req_key in batch_quotes and isinstance(batch_quotes.get(req_key), dict):
+            return batch_quotes.get(req_key) or {}
+        nk = _norm_key(req_key)
+        for bk, qd in (batch_quotes or {}).items():
+            if isinstance(qd, dict) and _norm_key(bk) == nk:
+                return qd
+        try:
+            sq = upstox.get_market_quote_by_key(req_key) or {}
+            return sq if isinstance(sq, dict) else {}
+        except Exception as qe:
+            logger.debug("daily_futures: single quote fallback failed for %s: %s", req_key, qe)
+            return {}
+
     prev_close_cache = _get_or_init_prev_close_cache(trade_date, upstox, symbol_to_key)
-    nifty_quote = batch_quotes.get(NIFTY50_INDEX_KEY) or {}
+    nifty_quote = _resolve_quote_snapshot(NIFTY50_INDEX_KEY)
     nifty_ltp = _safe_float(nifty_quote.get("last_price"))
     nifty_vwap = _session_vwap_for_conviction(nifty_quote)
     nifty_prev_close = _safe_float((prev_close_cache.get("nifty")))
@@ -1586,7 +1608,7 @@ def _ingest_df_webhook(symbols: List[str], direction: str) -> Dict[str, Any]:
         for u, row in sorted(symbol_rows.items(), key=lambda x: x[0]):
             ik = row["instrument_key"]
             lot = fut_lot_for_key(ik)
-            q = batch_quotes.get(ik) or {}
+            q = _resolve_quote_snapshot(ik)
             ltp = _safe_float(q.get("last_price"))
             session_vwap = _session_vwap_for_conviction(q)
             total_oi = _safe_float(q.get("oi"))
