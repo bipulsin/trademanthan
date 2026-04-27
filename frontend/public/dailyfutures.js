@@ -766,10 +766,6 @@
         const warn = r.warn_two_misses
           ? '<span class="df-blink" title="Not seen in the last two consecutive webhooks">↓</span>'
           : '';
-        const review =
-          r.exit_review === true
-            ? '<button type="button" class="df-btn df-btn-review" data-tid="' + r.trade_id + '">REVIEW EXIT</button>'
-            : '';
         const refPx =
           String(r.direction_type || "").toUpperCase() === "SHORT" ? r.sell_price : r.entry_price;
         return (
@@ -799,7 +795,6 @@
           '<td class="df-alerts-cell">' +
           runningExitBadges(r) +
           '</td><td class="df-run-actions"><div class="df-run-action-btns">' +
-          review +
           '<button type="button" class="df-btn df-btn-sell" data-tid="' +
           r.trade_id +
           '">Exit</button></div></td></tr>'
