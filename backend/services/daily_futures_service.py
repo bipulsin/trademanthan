@@ -2396,39 +2396,10 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
             }
         )
 
-    # Do not show symbols in Today's pick when they already appear in Today's trade.
-    # Match by future symbol (fallback: underlying) to handle distinct screening ids for same contract.
-    closed_future_symbols = {
-        str(r.get("future_symbol") or "").strip().upper()
-        for r in closed
-        if str(r.get("future_symbol") or "").strip()
-    }
-    closed_underlyings = {
-        str(r.get("underlying") or "").strip().upper()
-        for r in closed
-        if str(r.get("underlying") or "").strip()
-    }
-    if closed_future_symbols or closed_underlyings:
-        picks = [
-            p
-            for p in picks
-            if (
-                str(p.get("future_symbol") or "").strip().upper() not in closed_future_symbols
-                and str(p.get("underlying") or "").strip().upper() not in closed_underlyings
-            )
-        ]
-    n_hidden_closed = max(0, len(picks_before_closed_filter) - len(picks))
-
+    # Re-entry policy: if a symbol was sold earlier today but shows fresh conviction again,
+    # keep it visible in Today's pick so users can re-enter.
+    n_hidden_closed = 0
     not_bought_open = list(not_bought)
-    if closed_future_symbols or closed_underlyings:
-        not_bought_open = [
-            s
-            for s in not_bought
-            if (
-                str(s.get("future_symbol") or "").strip().upper() not in closed_future_symbols
-                and str(s.get("underlying") or "").strip().upper() not in closed_underlyings
-            )
-        ]
 
     def _under_fifty(s: Dict[str, Any]) -> bool:
         cs = s.get("conviction_score")
