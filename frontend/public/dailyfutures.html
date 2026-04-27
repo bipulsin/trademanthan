@@ -50,6 +50,15 @@
         .df-rs-weak { color: #b45309; }
         .df-score-entry { color: #fde047; font-weight: 700; }
         .df-score-live { color: var(--theme-text, #0f172a); font-weight: 600; }
+        button.df-conv-link {
+            border: none;
+            background: transparent;
+            padding: 0;
+            margin: 0;
+            cursor: pointer;
+            text-decoration: underline;
+            font: inherit;
+        }
         body.light-theme .df-score-entry,
         body.theme-light .df-score-entry,
         html.light-theme .df-score-entry {
@@ -374,7 +383,21 @@
         </div>
     </div>
 
+    <div id="dfConvModal" class="df-modal" aria-hidden="true" role="dialog">
+        <div class="df-modal-backdrop" id="dfConvBackdrop"></div>
+        <div class="df-modal-panel">
+            <h3 id="dfConvTitle" style="margin:0 0 8px;">Manual conviction VWAP</h3>
+            <label>Session VWAP (₹)</label>
+            <input type="number" id="dfConvVwap" step="any" min="0" />
+            <p id="dfConvErr" style="color:#b91c1c;min-height:1.2em;font-size:0.85rem;"></p>
+            <div class="df-modal-actions">
+                <button type="button" class="df-modal-cancel" id="dfConvCancel">Cancel</button>
+                <button type="button" class="df-btn df-btn-order" id="dfConvOk">Save</button>
+            </div>
+        </div>
+    </div>
+
     <script src="left-menu.js?v=3.21"></script>
-    <script src="dailyfutures.js?v=39"></script>
+    <script src="dailyfutures.js?v=40"></script>
 </body>
 </html>

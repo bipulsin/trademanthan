@@ -124,25 +124,58 @@
    * Same pattern as Today's pick: Entry (second scan) and Live conviction from screening.
    */
   function formatConvictionEntryLive(r) {
-    let convTxt =
-      r.conviction_score == null
-        ? '—'
-        : '<span class="df-score-live">' + fmtNum(r.conviction_score, 1) + ' (L)</span>';
+    function liveMissing() {
+      const br = r && r.conviction_breakdown_json && typeof r.conviction_breakdown_json === 'object'
+        ? r.conviction_breakdown_json
+        : {};
+      const reason = String(br.vwap_leg_reason || '').trim().toLowerCase();
+      const sv = br.session_vwap;
+      const leg = r ? r.conviction_vwap_leg : null;
+      return reason === 'no_price_vs_vwap' || sv == null || !Number.isFinite(Number(leg));
+    }
+    function entryMissing() {
+      const hasEntry = r && r.second_scan_conviction_score != null && Number.isFinite(Number(r.second_scan_conviction_score));
+      if (!hasEntry) return false;
+      const leg = r ? r.second_scan_vwap_leg : null;
+      return !Number.isFinite(Number(leg));
+    }
+    const sid = r && r.screening_id != null ? Number(r.screening_id) : null;
+    function livePart() {
+      if (r.conviction_score == null) return '—';
+      const txt = fmtNum(r.conviction_score, 1) + ' (L)';
+      if (sid == null || !liveMissing()) return '<span class="df-score-live">' + txt + '</span>';
+      return '<button type="button" class="df-conv-link df-score-live" data-csid="' + sid + '" data-cmode="live" title="VWAP missing for live score. Click to enter manual VWAP and recalculate.">' + txt + '</button>';
+    }
+    function entryPart() {
+      if (r.second_scan_conviction_score == null) return '';
+      const txt = fmtNum(r.second_scan_conviction_score, 1) + ' (E)';
+      if (sid == null || !entryMissing()) return '<span class="df-score-entry">' + txt + '</span>';
+      return '<button type="button" class="df-conv-link df-score-entry" data-csid="' + sid + '" data-cmode="entry" title="VWAP missing for entry score. Click to enter manual VWAP and recalculate.">' + txt + '</button>';
+    }
+    let convTxt = livePart();
     const secondConv = r.second_scan_conviction_score == null ? null : Number(r.second_scan_conviction_score);
     const liveConv = r.conviction_score == null ? null : Number(r.conviction_score);
     if (Number.isFinite(secondConv)) {
       if (Number.isFinite(liveConv)) {
         convTxt =
-          '<span class="df-score-entry">' +
-          fmtNum(secondConv, 1) +
-          ' (E)</span> | <span class="df-score-live">' +
-          fmtNum(liveConv, 1) +
-          ' (L)</span>';
+          entryPart() + ' | ' + livePart();
       } else {
-        convTxt = '<span class="df-score-entry">' + fmtNum(secondConv, 1) + ' (E)</span>';
+        convTxt = entryPart();
       }
     }
     return convTxt;
+  }
+
+  function bindConvictionLinks(scopeEl) {
+    if (!scopeEl) return;
+    scopeEl.querySelectorAll('button.df-conv-link[data-csid][data-cmode]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const sid = parseInt(btn.getAttribute('data-csid'), 10);
+        const mode = String(btn.getAttribute('data-cmode') || '').toLowerCase();
+        if (!Number.isFinite(sid) || (mode !== 'live' && mode !== 'entry')) return;
+        openConvictionModal(sid, mode);
+      });
+    });
   }
 
   function fmtRelStrength(r) {
@@ -181,6 +214,8 @@
     workspace: null,
     pickScreeningId: null,
     sellTradeId: null,
+    convictionEditScreeningId: null,
+    convictionEditMode: null,
     /** @type {Record<number, number>} trade_id -> bit mask of active exit alerts (1=nifty,2=trail,4=momo) */
     prevRunAlertBits: {},
     /** @type {Record<number, string>} trade_id -> last 15m strip decision (lock_profit, dual_exit, watch, hold) */
@@ -646,6 +681,7 @@
       })
       .join('');
     el.innerHTML = '<table class="df-table">' + th + '<tbody>' + body + '</tbody></table>';
+    bindConvictionLinks(el);
     el.querySelectorAll('button[data-sid]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         if (btn.disabled) return;
@@ -730,6 +766,7 @@
       })
       .join('');
     el.innerHTML = '<table class="df-table">' + th + '<tbody>' + body + '</tbody></table>';
+    bindConvictionLinks(el);
     el.querySelectorAll('button[data-sid]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         if (btn.disabled) return;
@@ -1084,6 +1121,84 @@
     state.sellTradeId = null;
   }
 
+  function openConvictionModal(screeningId, mode) {
+    state.convictionEditScreeningId = screeningId;
+    state.convictionEditMode = mode;
+    const m = document.getElementById('dfConvModal');
+    const tEl = document.getElementById('dfConvTitle');
+    const iEl = document.getElementById('dfConvVwap');
+    const eEl = document.getElementById('dfConvErr');
+    if (tEl) {
+      tEl.textContent = mode === 'entry'
+        ? 'Manual VWAP for Entry conviction (E)'
+        : 'Manual VWAP for Live conviction (L)';
+    }
+    if (iEl) iEl.value = '';
+    if (eEl) eEl.textContent = '';
+    if (m) m.setAttribute('aria-hidden', 'false');
+  }
+
+  function closeConvictionModal() {
+    const m = document.getElementById('dfConvModal');
+    if (m) m.setAttribute('aria-hidden', 'true');
+    state.convictionEditScreeningId = null;
+    state.convictionEditMode = null;
+  }
+
+  async function submitConvictionVwap() {
+    const sid = state.convictionEditScreeningId;
+    const mode = state.convictionEditMode;
+    const inp = document.getElementById('dfConvVwap');
+    const err = document.getElementById('dfConvErr');
+    const okBtn = document.getElementById('dfConvOk');
+    if (!sid || (mode !== 'live' && mode !== 'entry')) return;
+    const vwap = parseFloat(String((inp && inp.value) || '').replace(/,/g, ''));
+    if (!Number.isFinite(vwap) || vwap <= 0) {
+      if (err) err.textContent = 'Enter valid VWAP greater than 0.';
+      return;
+    }
+    if (err) err.textContent = '';
+    const original = okBtn ? okBtn.textContent : 'Save';
+    if (okBtn) {
+      okBtn.disabled = true;
+      okBtn.textContent = 'Saving...';
+    }
+    const paths = ['/api/daily-futures/conviction/manual-vwap', '/daily-futures/conviction/manual-vwap'];
+    let lastErr = null;
+    for (let i = 0; i < paths.length; i++) {
+      try {
+        const res = await fetch(API_BASE + paths[i], {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({
+            screening_id: sid,
+            mode: mode,
+            session_vwap: vwap,
+          }),
+        });
+        const raw = await res.text();
+        if (res.ok) {
+          closeConvictionModal();
+          await refresh();
+          return;
+        }
+        try {
+          const j = JSON.parse(raw);
+          lastErr = new Error(j.detail || raw.slice(0, 140));
+        } catch (_e) {
+          lastErr = new Error(raw.slice(0, 140));
+        }
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    if (err) err.textContent = lastErr && lastErr.message ? lastErr.message : 'Request failed';
+    if (okBtn) {
+      okBtn.disabled = false;
+      okBtn.textContent = original;
+    }
+  }
+
   async function submitBuy() {
     const sid = state.pickScreeningId;
     const et = document.getElementById('dfBuyTime').value.trim();
@@ -1264,6 +1379,12 @@
     document.getElementById('dfSellBackdrop').addEventListener('click', closeSellModal);
     document.getElementById('dfSellCancel').addEventListener('click', closeSellModal);
     document.getElementById('dfSellOk').addEventListener('click', submitSell);
+    const cvB = document.getElementById('dfConvBackdrop');
+    const cvC = document.getElementById('dfConvCancel');
+    const cvO = document.getElementById('dfConvOk');
+    if (cvB) cvB.addEventListener('click', closeConvictionModal);
+    if (cvC) cvC.addEventListener('click', closeConvictionModal);
+    if (cvO) cvO.addEventListener('click', submitConvictionVwap);
     const pmB = document.getElementById('dfPicksMoreBackdrop');
     const pmC = document.getElementById('dfPicksMoreClose');
     if (pmB) pmB.addEventListener('click', closePicksMoreModal);

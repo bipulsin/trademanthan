@@ -13,7 +13,7 @@ import uuid
 import threading
 from datetime import date, datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 from urllib.parse import quote
 
 import pytz
@@ -1975,7 +1975,7 @@ def _fetch_screening_dicts(conn: Any, trade_date: date) -> List[Dict[str, Any]]:
         text(
             """
             SELECT id, underlying, direction_type, future_symbol, instrument_key, lot_size,
-                   scan_count, first_hit_at, last_hit_at, conviction_score, ltp,
+                   scan_count, first_hit_at, last_hit_at, conviction_score, conviction_oi_leg, conviction_vwap_leg, ltp,
                    second_scan_time, second_scan_conviction_score, second_scan_oi_leg, second_scan_vwap_leg,
                    second_scan_stock_change_pct, second_scan_nifty_change_pct,
                    stock_change_pct, nifty_change_pct,
@@ -2001,19 +2001,21 @@ def _fetch_screening_dicts(conn: Any, trade_date: date) -> List[Dict[str, Any]]:
                 "first_hit_at": row[7].isoformat() if row[7] else None,
                 "last_hit_at": row[8].isoformat() if row[8] else None,
                 "conviction_score": float(row[9]) if row[9] is not None else None,
-                "ltp": float(row[10]) if row[10] is not None else None,
-                "second_scan_time": row[11].isoformat() if row[11] else None,
-                "second_scan_conviction_score": float(row[12]) if row[12] is not None else None,
-                "second_scan_oi_leg": float(row[13]) if row[13] is not None else None,
-                "second_scan_vwap_leg": float(row[14]) if row[14] is not None else None,
-                "second_scan_stock_change_pct": float(row[15]) if row[15] is not None else None,
-                "second_scan_nifty_change_pct": float(row[16]) if row[16] is not None else None,
-                "stock_change_pct": float(row[17]) if row[17] is not None else None,
-                "nifty_change_pct": float(row[18]) if row[18] is not None else None,
-                "candle_is_green": bool(row[19]) if row[19] is not None else None,
-                "candle_higher_high": bool(row[20]) if row[20] is not None else None,
-                "candle_higher_low": bool(row[21]) if row[21] is not None else None,
-                "conviction_breakdown_json": row[22] if row[22] is not None else None,
+                "conviction_oi_leg": float(row[10]) if row[10] is not None else None,
+                "conviction_vwap_leg": float(row[11]) if row[11] is not None else None,
+                "ltp": float(row[12]) if row[12] is not None else None,
+                "second_scan_time": row[13].isoformat() if row[13] else None,
+                "second_scan_conviction_score": float(row[14]) if row[14] is not None else None,
+                "second_scan_oi_leg": float(row[15]) if row[15] is not None else None,
+                "second_scan_vwap_leg": float(row[16]) if row[16] is not None else None,
+                "second_scan_stock_change_pct": float(row[17]) if row[17] is not None else None,
+                "second_scan_nifty_change_pct": float(row[18]) if row[18] is not None else None,
+                "stock_change_pct": float(row[19]) if row[19] is not None else None,
+                "nifty_change_pct": float(row[20]) if row[20] is not None else None,
+                "candle_is_green": bool(row[21]) if row[21] is not None else None,
+                "candle_higher_high": bool(row[22]) if row[22] is not None else None,
+                "candle_higher_low": bool(row[23]) if row[23] is not None else None,
+                "conviction_breakdown_json": row[24] if row[24] is not None else None,
             }
         )
     return out
@@ -2945,6 +2947,163 @@ def confirm_sell(db: Session, user_id: int, trade_id: int, exit_time: str, exit_
         )
     db.commit()
     return {"success": True, "pnl_points": pts, "pnl_rupees": pnl_rs}
+
+
+def manual_update_conviction_vwap(
+    db: Session,
+    user_id: int,
+    screening_id: int,
+    mode: Literal["live", "entry"],
+    session_vwap: float,
+) -> Dict[str, Any]:
+    """
+    Manual override for missing VWAP input in conviction computation.
+    mode=live  -> updates session_vwap + live VWAP leg + live conviction score.
+    mode=entry -> updates second_scan_vwap_leg (+ second_scan_oi_leg fallback) + entry score.
+    """
+    ensure_daily_futures_tables()
+    if session_vwap <= 0:
+        raise ValueError("Session VWAP must be greater than 0")
+    row = db.execute(
+        text(
+            """
+            SELECT id, trade_date, underlying, direction_type, instrument_key,
+                   ltp, conviction_score, conviction_oi_leg, conviction_vwap_leg,
+                   second_scan_conviction_score, second_scan_oi_leg, second_scan_vwap_leg,
+                   candle_is_green, candle_higher_high, candle_higher_low,
+                   conviction_breakdown_json
+            FROM daily_futures_screening
+            WHERE id = :sid
+              AND trade_date = CAST(:d AS DATE)
+            LIMIT 1
+            """
+        ),
+        {"sid": screening_id, "d": str(ist_today())},
+    ).mappings().first()
+    if not row:
+        raise ValueError("Screening row not found for today")
+
+    dir_key = str(row.get("direction_type") or "LONG").strip().upper()
+    ltp = _safe_float(row.get("ltp"))
+    if ltp is None:
+        ik = str(row.get("instrument_key") or "").strip()
+        if ik:
+            try:
+                up = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+                q = up.get_market_quote_by_key(ik) or {}
+                ltp = _safe_float(q.get("last_price")) or _safe_float(q.get("close"))
+            except Exception:
+                ltp = None
+    if ltp is None:
+        raise ValueError("LTP unavailable; cannot recalculate conviction")
+
+    pvp = ((float(ltp) - float(session_vwap)) / float(session_vwap)) * 100.0
+    if dir_key == "SHORT":
+        vw_leg, vw_reason = _vwap_leg_score_reason_bearish(
+            pvp,
+            nifty15_close_below_sv=True,
+            stock15_close_below_sv=True,
+            candle_is_red=not bool(row.get("candle_is_green")),
+            candle_lower_low=bool(row.get("candle_higher_low")),
+            candle_lower_high=bool(row.get("candle_higher_high")),
+        )
+    else:
+        vw_leg, vw_reason = _vwap_leg_score_reason(
+            pvp,
+            candle_is_green=bool(row.get("candle_is_green")),
+            candle_higher_high=bool(row.get("candle_higher_high")),
+            candle_higher_low=bool(row.get("candle_higher_low")),
+        )
+
+    cbj = row.get("conviction_breakdown_json")
+    if not isinstance(cbj, dict):
+        cbj = {}
+    cbj["manual_vwap_override_by_user_id"] = int(user_id)
+    cbj["manual_vwap_override_at"] = datetime.now(IST).isoformat()
+
+    if mode == "live":
+        oi_leg = _safe_float(row.get("conviction_oi_leg"))
+        if oi_leg is None:
+            oi_leg = 25.0
+        live_score = round(max(0.0, min(100.0, float(oi_leg) + float(vw_leg))), 1)
+        cbj["vwap_leg_reason"] = vw_reason
+        cbj["price_vs_vwap_pct"] = round(float(pvp), 6)
+        cbj["session_vwap"] = round(float(session_vwap), 6)
+        cbj["ltp"] = round(float(ltp), 6)
+        db.execute(
+            text(
+                """
+                UPDATE daily_futures_screening
+                SET session_vwap = :sv,
+                    conviction_vwap_leg = :vw,
+                    conviction_score = :cs,
+                    conviction_breakdown_json = CAST(:cbj AS JSONB),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = :sid
+                """
+            ),
+            {
+                "sid": screening_id,
+                "sv": float(session_vwap),
+                "vw": round(float(vw_leg), 1),
+                "cs": live_score,
+                "cbj": json.dumps(cbj),
+            },
+        )
+        db.commit()
+        return {
+            "success": True,
+            "mode": "live",
+            "screening_id": screening_id,
+            "session_vwap": round(float(session_vwap), 6),
+            "price_vs_vwap_pct": round(float(pvp), 6),
+            "conviction_vwap_leg": round(float(vw_leg), 1),
+            "conviction_score": live_score,
+            "vwap_leg_reason": vw_reason,
+        }
+
+    # mode == entry
+    entry_oi_leg = _safe_float(row.get("second_scan_oi_leg"))
+    if entry_oi_leg is None:
+        entry_oi_leg = _safe_float(row.get("conviction_oi_leg"))
+    if entry_oi_leg is None:
+        entry_oi_leg = 25.0
+    entry_score = round(max(0.0, min(100.0, float(entry_oi_leg) + float(vw_leg))), 1)
+    cbj["entry_vwap_leg_reason"] = vw_reason
+    cbj["entry_price_vs_vwap_pct"] = round(float(pvp), 6)
+    cbj["entry_manual_session_vwap"] = round(float(session_vwap), 6)
+    db.execute(
+        text(
+            """
+            UPDATE daily_futures_screening
+            SET second_scan_oi_leg = COALESCE(second_scan_oi_leg, :oi_leg),
+                second_scan_vwap_leg = :vw,
+                second_scan_conviction_score = :cs,
+                conviction_breakdown_json = CAST(:cbj AS JSONB),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :sid
+            """
+        ),
+        {
+            "sid": screening_id,
+            "oi_leg": round(float(entry_oi_leg), 1),
+            "vw": round(float(vw_leg), 1),
+            "cs": entry_score,
+            "cbj": json.dumps(cbj),
+        },
+    )
+    db.commit()
+    return {
+        "success": True,
+        "mode": "entry",
+        "screening_id": screening_id,
+        "manual_session_vwap": round(float(session_vwap), 6),
+        "entry_price_vs_vwap_pct": round(float(pvp), 6),
+        "second_scan_vwap_leg": round(float(vw_leg), 1),
+        "second_scan_oi_leg": round(float(entry_oi_leg), 1),
+        "second_scan_conviction_score": entry_score,
+        "vwap_leg_reason": vw_reason,
+    }
 
 
 def get_conviction_breakdown_debug(

@@ -23,6 +23,7 @@ from backend.services.daily_futures_service import (
     get_workspace_running_enriched,
     get_workspace_trade_if_could,
     get_workspace,
+    manual_update_conviction_vwap,
     normalize_symbols_from_payload,
     persist_chartink_bearish_webhook_raw_body,
     persist_chartink_webhook_raw_body,
@@ -51,6 +52,12 @@ class SellBody(BaseModel):
     trade_id: int = Field(..., ge=1)
     exit_time: str = Field(..., min_length=3, max_length=16)
     exit_price: float = Field(..., gt=0)
+
+
+class ManualConvictionVwapBody(BaseModel):
+    screening_id: int = Field(..., ge=1)
+    mode: str = Field(..., description="live or entry")
+    session_vwap: float = Field(..., gt=0)
 
 
 @router.get("/workspace")
@@ -101,6 +108,27 @@ def daily_futures_sell(
 ) -> Dict[str, Any]:
     try:
         return confirm_sell(db, user.id, body.trade_id, body.exit_time, body.exit_price)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/conviction/manual-vwap")
+def daily_futures_manual_conviction_vwap(
+    body: ManualConvictionVwapBody,
+    user: User = Depends(_auth_user),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    mode = str(body.mode or "").strip().lower()
+    if mode not in ("live", "entry"):
+        raise HTTPException(status_code=400, detail="mode must be 'live' or 'entry'")
+    try:
+        return manual_update_conviction_vwap(
+            db=db,
+            user_id=user.id,
+            screening_id=body.screening_id,
+            mode=mode,  # type: ignore[arg-type]
+            session_vwap=body.session_vwap,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
