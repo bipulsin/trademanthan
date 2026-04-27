@@ -839,6 +839,7 @@
       })
       .join('');
     el.innerHTML = totalLine + '<table class="df-table">' + th + '<tbody>' + body + '</tbody></table>';
+    bindConvictionLinks(el);
     el.querySelectorAll('button[data-tid]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         const tid = parseInt(btn.getAttribute('data-tid'), 10);
