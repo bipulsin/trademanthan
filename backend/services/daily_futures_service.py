@@ -2443,11 +2443,16 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
     win_rate = round(100.0 * wins / denom, 1) if denom else None
 
     _low_conv_extras: List[Dict[str, Any]] = list(picks_low_conv_bull) + list(picks_low_conv_bear)
-    if not lite_mode:
-        try:
-            _apply_live_ltps_to_picks_and_running(list(picks_mixed) + _low_conv_extras, running, closed)
-        except Exception as e:
-            logger.warning("daily_futures: live LTP refresh failed: %s", e, exc_info=True)
+    _picks_for_quotes: List[Dict[str, Any]] = list(picks_mixed) + _low_conv_extras
+    # Main page always loads with lite=1 for speed. Still refresh live LTP (and rel. str. below) for
+    # Today's pick rows; otherwise the UI shows em dashes. Full mode also updates running/closed.
+    try:
+        if lite_mode:
+            _apply_live_ltps_to_picks_and_running(_picks_for_quotes, [], [])
+        else:
+            _apply_live_ltps_to_picks_and_running(_picks_for_quotes, running, closed)
+    except Exception as e:
+        logger.warning("daily_futures: live LTP refresh failed: %s", e, exc_info=True)
 
     # For What-If continuing: after session close, treat current LTP as 15:15 close.
     if closed and now_ist.time() >= dt_time(15, 15):
@@ -2470,11 +2475,13 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                 if ltp_1515 is not None:
                     r["ltp"] = ltp_1515
 
-    if not lite_mode:
-        try:
-            _apply_live_rel_strength_to_picks_and_running(list(picks_mixed) + _low_conv_extras, running, td)
-        except Exception as e:
-            logger.warning("daily_futures: rel-strength refresh failed: %s", e, exc_info=True)
+    try:
+        if lite_mode:
+            _apply_live_rel_strength_to_picks_and_running(_picks_for_quotes, [], td)
+        else:
+            _apply_live_rel_strength_to_picks_and_running(_picks_for_quotes, running, td)
+    except Exception as e:
+        logger.warning("daily_futures: rel-strength refresh failed: %s", e, exc_info=True)
 
     strip_debug: Dict[str, Any] = {}
     if not lite_mode:
