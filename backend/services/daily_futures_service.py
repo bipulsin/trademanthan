@@ -2512,8 +2512,8 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
             if _bearish_index_gate_enabled() and not bool(index_bear.get("ok")):
                 reasons.append("NIFTY is not below the day open (no SHORT from this list)")
         else:
-            if float(c2) <= 60.0:
-                reasons.append(f"Conviction {round(float(c2),1)} is not above 60")
+            if float(c2) < 60.0:
+                reasons.append(f"Conviction {round(float(c2),1)} is below 60")
         p["order_eligible"] = len(reasons) == 0
         p["order_block_reason"] = reasons[0] if reasons else None
 
@@ -2637,9 +2637,9 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
                     "SHORT is allowed only when NIFTY is below the day open. NIFTY is not bearish vs open right now."
                 )
     else:
-        if c2 is None or c2 <= 60.0:
+        if c2 is None or c2 < 60.0:
             raise ValueError(
-                f"Conviction must be above 60 (current: {round(c2 or 0.0, 1)})"
+                f"Conviction must be at least 60 (current: {round(c2 or 0.0, 1)})"
             )
 
     exists = db.execute(
