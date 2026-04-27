@@ -1,22 +1,29 @@
 """
 Arbitrage Daily Setup Scheduler
 
-Runs every 15 minutes on trading days (Asia/Kolkata):
-- 09:15, 09:30, 09:45
-- 10:00 through 15:45 (every 15 minutes)
+Scheduled (Asia/Kolkata, Mon–Fri, not NSE holidays / weekends):
+- 09:10 — primary daily run. Updates instruments + LTPs.
+- 09:20 — only if 09:10 did not complete successfully the same day (safety backstop).
+
+On-demand: POST /scan/arbitrage/daily-setup/run (and helper scripts) — does not
+set the 09:10 success flag, so 09:20 logic is unchanged.
 
 Tasks:
 1) Updates instrument/symbol fields in arbitrage_master from instruments JSON.
-2) Updates LTP columns using Upstox API by instrument key.
-
-Also supports on-demand execution via API.
+2) After IST calendar day > 21 and until the front contract's expiry in that month,
+   currmth_* / nextmth_* use the 2nd and 3rd upcoming expiries (roll window);
+   otherwise the 1st and 2nd. Missing contracts leave those columns NULL.
+3) Updates LTP columns using Upstox API by instrument key.
 """
 
 import json
 import logging
+import os
+import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Literal, Optional, Tuple
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -30,9 +37,82 @@ from backend.services.sector_movers import (
     normalize_sector_instrument_key,
 )
 from backend.services.upstox_service import UpstoxService
-from backend.services.market_holiday import should_skip_scheduled_market_jobs_ist
+from backend.services.market_holiday import IST, should_skip_scheduled_market_jobs_ist
 
 logger = logging.getLogger(__name__)
+
+# Persist whether 09:10 succeeded today so 09:20 can be skipped.
+_PROJ_LOGS = Path(__file__).resolve().parents[2] / "logs"
+MORNING_STATE_FILE = _PROJ_LOGS / "arbitrage_daily_setup_morning_state.json"
+
+_Execution = Optional[Literal["morning_910", "morning_920"]]
+
+
+def _morning_state_path() -> Path:
+    return MORNING_STATE_FILE
+
+
+def _read_morning_state() -> Optional[Dict]:
+    path = _morning_state_path()
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("arbitrage daily setup: could not read morning state: %s", e)
+        return None
+
+
+def _write_morning_state(data: Dict) -> None:
+    path = _morning_state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(data, ensure_ascii=True, sort_keys=True)
+    fd, tmp = tempfile.mkstemp(
+        dir=str(path.parent), prefix="arbitrage_morning_", suffix=".json.tmp", text=True
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(payload)
+        os.replace(tmp, path)
+    except OSError as e:
+        logger.warning("arbitrage daily setup: could not write morning state: %s", e)
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+def _today_ist_str() -> str:
+    return datetime.now(IST).strftime("%Y-%m-%d")
+
+
+def _morning_910_flag(st: Optional[Dict]) -> Optional[bool]:
+    if not st:
+        return None
+    for key in ("morning_910_ok", "daily_setup_ok", "slot_910_ok"):
+        if key in st:
+            return st.get(key) is True
+    return None
+
+
+def _morning_910_succeeded_today_ist() -> bool:
+    """True only if today's 09:10 scheduled run completed successfully (IST date)."""
+    st = _read_morning_state()
+    if not st:
+        return False
+    if st.get("trading_date_ist") != _today_ist_str():
+        return False
+    return _morning_910_flag(st) is True
+
+
+def _set_morning_910_state(ok: bool) -> None:
+    _write_morning_state(
+        {
+            "trading_date_ist": _today_ist_str(),
+            "morning_910_ok": ok,
+            "recorded_at_ist": datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S"),
+        }
+    )
 
 
 class ArbitrageDailySetupScheduler:
@@ -46,26 +126,28 @@ class ArbitrageDailySetupScheduler:
             return
 
         self.scheduler.add_job(
-            self.run_job,
-            trigger=CronTrigger(day_of_week="mon-fri", hour=9, minute="15,30,45", timezone="Asia/Kolkata"),
-            id="arbitrage_dailySetup",
-            name="Arbitrage Daily Setup",
+            self._run_morning_910,
+            trigger=CronTrigger(day_of_week="mon-fri", hour=9, minute=10, timezone="Asia/Kolkata"),
+            id="arbitrage_dailySetup_910",
+            name="Arbitrage Daily Setup 09:10",
             replace_existing=True,
             max_instances=1,
             coalesce=True,
         )
         self.scheduler.add_job(
-            self.run_job,
-            trigger=CronTrigger(day_of_week="mon-fri", hour="10-15", minute="0,15,30,45", timezone="Asia/Kolkata"),
-            id="arbitrage_dailySetup_intraday",
-            name="Arbitrage Daily Setup Intraday",
+            self._run_morning_920,
+            trigger=CronTrigger(day_of_week="mon-fri", hour=9, minute=20, timezone="Asia/Kolkata"),
+            id="arbitrage_dailySetup_920",
+            name="Arbitrage Daily Setup 09:20",
             replace_existing=True,
             max_instances=1,
             coalesce=True,
         )
         self.scheduler.start()
         self.is_running = True
-        logger.info("Arbitrage daily setup scheduler started (every 15 min, 09:15-15:45 Asia/Kolkata, Mon-Fri)")
+        logger.info(
+            "Arbitrage daily setup scheduler started (09:10 primary, 09:20 backstop, Asia/Kolkata, Mon–Fri)"
+        )
 
     def stop(self) -> None:
         if not self.is_running:
@@ -77,17 +159,39 @@ class ArbitrageDailySetupScheduler:
             logger.info("Arbitrage daily setup scheduler stopped")
 
     def run_now(self) -> Dict:
-        return run_arbitrage_daily_setup()
+        return run_arbitrage_daily_setup(execution=None)
 
-    def run_job(self) -> None:
+    def _run_morning_910(self) -> None:
+        if should_skip_scheduled_market_jobs_ist():
+            logger.debug("IST non-trading day — skip arbitrage daily setup 09:10")
+            return
         try:
-            if should_skip_scheduled_market_jobs_ist():
-                logger.debug("IST non-trading day (weekend or holiday) — skip arbitrage daily setup")
-                return
-            result = run_arbitrage_daily_setup()
-            logger.info(f"arbitrage_dailySetup completed: {result}")
+            out = run_arbitrage_daily_setup(execution="morning_910")
+            if out.get("success"):
+                _set_morning_910_state(True)
+                logger.info("arbitrage daily setup 09:10 completed: %s", out)
+            else:
+                _set_morning_910_state(False)
+                logger.error("arbitrage daily setup 09:10 reported failure: %s", out)
         except Exception as exc:
-            logger.error(f"arbitrage_dailySetup failed: {exc}", exc_info=True)
+            _set_morning_910_state(False)
+            logger.error("arbitrage daily setup 09:10 failed: %s", exc, exc_info=True)
+
+    def _run_morning_920(self) -> None:
+        if should_skip_scheduled_market_jobs_ist():
+            logger.debug("IST non-trading day — skip arbitrage daily setup 09:20")
+            return
+        if _morning_910_succeeded_today_ist():
+            logger.info("arbitrage daily setup 09:20 skipped (09:10 already succeeded today)")
+            return
+        try:
+            out = run_arbitrage_daily_setup(execution="morning_920")
+            if out.get("success"):
+                logger.info("arbitrage daily setup 09:20 completed: %s", out)
+            else:
+                logger.error("arbitrage daily setup 09:20 reported failure: %s", out)
+        except Exception as exc:
+            logger.error("arbitrage daily setup 09:20 failed: %s", exc, exc_info=True)
 
     def get_status(self) -> Dict:
         jobs = self.scheduler.get_jobs() if self.is_running else []
@@ -178,17 +282,63 @@ def _build_mappings(instruments: List[Dict]) -> Tuple[Dict[str, str], Dict[str, 
     return eq_map, fut_map
 
 
-def _pick_current_next_futures(contracts: List[Dict]) -> Tuple[Optional[Dict], Optional[Dict]]:
+def _futures_roll_window_ist(ist_now: datetime, first_upcoming: Optional[Dict]) -> bool:
+    """
+    After the 21st (IST) through the end of the front contract's listing month, and before
+    that contract expires, use the 2nd/3rd serial expiries (skip the about-to-expire month).
+    """
+    if not first_upcoming:
+        return False
+    exp_ms = int(first_upcoming.get("expiry") or 0)
+    if exp_ms <= 0:
+        return False
+    if ist_now.tzinfo is None:
+        ist_now = IST.localize(ist_now)
+    else:
+        ist_now = ist_now.astimezone(IST)
+    first_exp_ist = datetime.fromtimestamp(exp_ms / 1000.0, tz=IST)
+    if ist_now.day <= 21:
+        return False
+    if (ist_now.year, ist_now.month) != (first_exp_ist.year, first_exp_ist.month):
+        return False
+    return ist_now < first_exp_ist
+
+
+def _pick_current_next_futures(
+    contracts: List[Dict], *, apply_roll_window: bool = True
+) -> Tuple[Optional[Dict], Optional[Dict]]:
+    """
+    Select currmth / nextmth from not-yet-expired FUTs only. No fallback to fully expired
+    chains — leave blank (None) if nothing qualifies.
+    In the roll window (day > 21 IST, same month as front expiry, before expiry), cur/nm are
+    the 2nd and 3rd upcoming; otherwise the 1st and 2nd.
+    """
     if not contracts:
         return None, None
 
-    now_ms = int(datetime.utcnow().timestamp() * 1000)
-    upcoming = [c for c in contracts if (c.get("expiry") or 0) >= now_ms]
-    source = upcoming if len(upcoming) >= 2 else contracts
+    now_ms = int(time.time() * 1000)
+    sorted_c = sorted(contracts, key=lambda x: (x.get("expiry") or 0))
+    upcoming = [c for c in sorted_c if (c.get("expiry") or 0) >= now_ms]
+    if not upcoming:
+        return None, None
 
-    first = source[0] if len(source) >= 1 else None
-    second = source[1] if len(source) >= 2 else None
-    return first, second
+    ist_now = datetime.now(IST)
+    if ist_now.tzinfo is None:
+        ist_now = IST.localize(ist_now)
+    else:
+        ist_now = ist_now.astimezone(IST)
+
+    first = upcoming[0]
+    if apply_roll_window and _futures_roll_window_ist(ist_now, first):
+        if len(upcoming) < 2:
+            return None, None
+        cur = upcoming[1]
+        nxt = upcoming[2] if len(upcoming) >= 3 else None
+        return cur, nxt
+
+    cur = upcoming[0]
+    nxt = upcoming[1] if len(upcoming) >= 2 else None
+    return cur, nxt
 
 
 def _get_close_price(upstox: UpstoxService, instrument_key: Optional[str], cache: Dict[str, Optional[float]]) -> Optional[float]:
@@ -221,7 +371,24 @@ def _get_close_price(upstox: UpstoxService, instrument_key: Optional[str], cache
     return close_price
 
 
-def run_arbitrage_daily_setup() -> Dict:
+def run_arbitrage_daily_setup(execution: _Execution = None) -> Dict:
+    """
+    execution: None = on-demand / script; no morning state side effects here (state is set by scheduler).
+    """
+    try:
+        return _run_arbitrage_daily_setup_impl(execution=execution)
+    except Exception as e:
+        logger.error("run_arbitrage_daily_setup failed: %s", e, exc_info=True)
+        return {
+            "success": False,
+            "job_name": "arbitrage_dailySetup",
+            "error": str(e),
+            "execution": execution,
+            "updated_at_ist": datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+
+def _run_arbitrage_daily_setup_impl(execution: _Execution = None) -> Dict:
     _ensure_arbitrage_table()
     _ensure_arbitrage_sector_index_column()
 
@@ -247,7 +414,12 @@ def run_arbitrage_daily_setup() -> Dict:
         metadata_updates: List[Dict] = []
         for stock in stocks:
             stock_key = eq_map.get(stock)
-            current_fut, next_fut = _pick_current_next_futures(fut_map.get(stock, []))
+            # Rollover (skip-front after 21st until expiry) is intentionally morning-flow only.
+            apply_roll_window = execution in ("morning_910", "morning_920")
+            current_fut, next_fut = _pick_current_next_futures(
+                fut_map.get(stock, []),
+                apply_roll_window=apply_roll_window,
+            )
             sym_u = str(stock or "").strip().upper()
             sector_idx = normalize_sector_instrument_key(
                 fno_sector_map.get(sym_u) or equity_sector_index_instrument_key(stock)
@@ -351,7 +523,8 @@ def run_arbitrage_daily_setup() -> Dict:
     return {
         "success": True,
         "job_name": "arbitrage_dailySetup",
-        "updated_at_ist": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "execution": execution,
+        "updated_at_ist": datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S"),
         "total_rows": int(total_rows),
         "populated": {
             "Stock_Instrument_key": int(populated_stock_key),
@@ -362,6 +535,16 @@ def run_arbitrage_daily_setup() -> Dict:
             "NextMth_Future_LTP": int(populated_next_ltp),
             "Sector_Index": int(populated_sector_index),
         },
+    }
+
+
+def get_morning_state_summary() -> Dict:
+    st = _read_morning_state()
+    return {
+        "state_file": str(_morning_state_path()),
+        "trading_date_ist": st.get("trading_date_ist") if st else None,
+        "morning_910_ok_today": _morning_910_succeeded_today_ist(),
+        "recorded_at_ist": st.get("recorded_at_ist") if st else None,
     }
 
 
@@ -377,5 +560,6 @@ def stop_arbitrage_daily_setup_scheduler() -> None:
 
 
 def run_arbitrage_daily_setup_now() -> Dict:
-    return arbitrage_daily_setup_scheduler.run_now()
+    """On-demand run; does not participate in morning-state success tracking."""
+    return run_arbitrage_daily_setup(execution=None)
 

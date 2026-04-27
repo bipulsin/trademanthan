@@ -17,6 +17,7 @@ from backend.config import settings
 
 from backend.services.arbitrage_daily_setup_scheduler import (
     arbitrage_daily_setup_scheduler,
+    get_morning_state_summary,
     run_arbitrage_daily_setup_now,
 )
 
@@ -170,7 +171,12 @@ async def get_daily_setup_status():
     try:
         status = arbitrage_daily_setup_scheduler.get_status()
         status["job_name"] = "arbitrage_dailySetup"
-        status["schedule"] = "Every 15 minutes, 09:15-15:45 Asia/Kolkata (Mon-Fri)"
+        status["schedule"] = (
+            "09:10 IST (primary) and 09:20 IST (only if 09:10 did not complete successfully that day), "
+            "Mon–Fri, excluding NSE holidays. "
+            "Other runs: on-demand POST /scan/arbitrage/daily-setup/run"
+        )
+        status["morning_state"] = get_morning_state_summary()
         return status
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to get scheduler status: {exc}")
