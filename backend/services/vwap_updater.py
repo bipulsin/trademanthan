@@ -7,9 +7,9 @@ import logging
 import sys
 import os
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import time
-from typing import List
+from typing import List, Optional
 import pytz
 from backend.services import live_trading
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -25,6 +25,12 @@ logger = logging.getLogger(__name__)
 _UPDATE_VWAP_LOCK = threading.Lock()
 _UPDATE_VWAP_LAST_START_TS = 0.0
 _UPDATE_VWAP_DEBOUNCE_SEC = 20.0
+_IST = pytz.timezone("Asia/Kolkata")
+
+# One-day algo-exit guard (user override):
+# Do NOT auto square-off this exact contract for today's trade via scan algo.
+_TODAY_EXIT_BLOCK_OPTION_CONTRACT = "VEDL 800 CE 26 MAY 26"
+_TODAY_EXIT_BLOCK_DATE = date(2026, 4, 27)
 
 def _ensure_ist(dt_value: datetime, ist_tz) -> datetime:
     """Normalize a datetime to IST and ensure timezone-awareness."""
@@ -36,12 +42,45 @@ def _ensure_ist(dt_value: datetime, ist_tz) -> datetime:
         return dt_value.astimezone(ist_tz)
     return dt_value
 
+
+def _norm_contract(s: Optional[str]) -> str:
+    return " ".join(str(s or "").strip().upper().split())
+
+
+def _should_block_algo_exit_today(position, option_contract: Optional[str]) -> bool:
+    """
+    Temporary one-day override: prevent algo exits for a specific contract on a specific date.
+    This only blocks automated exits in this updater; manual exits remain available.
+    """
+    contract = _norm_contract(option_contract or getattr(position, "option_contract", ""))
+    if contract != _norm_contract(_TODAY_EXIT_BLOCK_OPTION_CONTRACT):
+        return False
+
+    trade_date = getattr(position, "trade_date", None)
+    if isinstance(trade_date, datetime):
+        trade_date = trade_date.date()
+    if isinstance(trade_date, date):
+        return trade_date == _TODAY_EXIT_BLOCK_DATE
+
+    # Fallback when trade_date is unavailable: enforce only on the configured IST date.
+    return datetime.now(_IST).date() == _TODAY_EXIT_BLOCK_DATE
+
 def _try_live_exit(position, reason: str, option_contract: str):
     """
     Attempt live exit; return (ok, order_id, exit_manually).
     exit_manually=True: broker response missing/ambiguous — caller should set exit_reason to
     'Exit Manually' and keep status bought (no duplicate SELL retries).
     """
+    if _should_block_algo_exit_today(position, option_contract):
+        logger.warning(
+            "🛡️ Algo exit blocked by override for %s (%s) contract=%s trade_date=%s",
+            getattr(position, "stock_name", "?"),
+            reason,
+            option_contract or getattr(position, "option_contract", "?"),
+            getattr(position, "trade_date", None),
+        )
+        return False, None, False
+
     buy_order_id = getattr(position, "buy_order_id", None)
     existing_sell = getattr(position, "sell_order_id", None)
     result = live_trading.place_live_upstox_exit(
