@@ -1302,33 +1302,53 @@ def load_arbitrage_future_row(conn, underlying: str) -> Optional[Dict[str, Any]]
     }
 
 
-def retarget_daily_futures_to_next_month_for_date(trade_date: date) -> Dict[str, Any]:
+def retarget_daily_futures_to_next_month_for_date(
+    trade_date: date, underlying: Optional[str] = None
+) -> Dict[str, Any]:
     """
     Re-point that day's screening rows and open user trades to **current** FUT
     (``arbitrage_master.currmth_*``) via :func:`load_arbitrage_future_row`.
 
     Kept for one-off admin sync; name is historical. Does not alter historical report rows
     by itself—only updates ``daily_futures_*`` for the given ``trade_date`` when run.
+
+    If ``underlying`` is set (e.g. ``ADANIPORTS``), only that symbol's screening row and its
+    open bought trades are updated—useful when one pick was on the wrong FUT (e.g. nxtmth).
     """
     ensure_daily_futures_tables()
+    und_filter: Optional[str] = str(underlying).strip().upper() if (underlying and str(underlying).strip()) else None
     out: Dict[str, Any] = {
         "trade_date": str(trade_date),
+        "underlying": und_filter,
         "screening_updated": 0,
         "trades_synced": 0,
         "skipped": [],
     }
     screening_n = 0
     with engine.begin() as conn:
-        srows = conn.execute(
-            text(
+        if und_filter:
+            srows = conn.execute(
+                text(
+                    """
+                SELECT id, UPPER(TRIM(underlying)) AS u
+                FROM daily_futures_screening
+                WHERE trade_date = CAST(:d AS DATE)
+                  AND UPPER(TRIM(underlying)) = :u
                 """
+                ),
+                {"d": str(trade_date), "u": und_filter},
+            ).fetchall()
+        else:
+            srows = conn.execute(
+                text(
+                    """
                 SELECT id, UPPER(TRIM(underlying)) AS u
                 FROM daily_futures_screening
                 WHERE trade_date = CAST(:d AS DATE)
                 """
-            ),
-            {"d": str(trade_date)},
-        ).fetchall()
+                ),
+                {"d": str(trade_date)},
+            ).fetchall()
         for rid, u in srows:
             u = str(u or "").strip().upper()
             if not u:
@@ -1358,9 +1378,29 @@ def retarget_daily_futures_to_next_month_for_date(trade_date: date) -> Dict[str,
             )
             screening_n += 1
 
-        r2 = conn.execute(
-            text(
+        if und_filter:
+            r2 = conn.execute(
+                text(
+                    """
+                UPDATE daily_futures_user_trade t SET
+                  direction_type = s.direction_type,
+                  future_symbol = s.future_symbol,
+                  instrument_key = s.instrument_key,
+                  lot_size = s.lot_size,
+                  updated_at = CURRENT_TIMESTAMP
+                FROM daily_futures_screening s
+                WHERE t.screening_id = s.id
+                  AND s.trade_date = CAST(:d AS DATE)
+                  AND t.order_status = 'bought'
+                  AND UPPER(TRIM(s.underlying)) = :u
                 """
+                ),
+                {"d": str(trade_date), "u": und_filter},
+            )
+        else:
+            r2 = conn.execute(
+                text(
+                    """
                 UPDATE daily_futures_user_trade t SET
                   direction_type = s.direction_type,
                   future_symbol = s.future_symbol,
@@ -1372,9 +1412,9 @@ def retarget_daily_futures_to_next_month_for_date(trade_date: date) -> Dict[str,
                   AND s.trade_date = CAST(:d AS DATE)
                   AND t.order_status = 'bought'
                 """
-            ),
-            {"d": str(trade_date)},
-        )
+                ),
+                {"d": str(trade_date)},
+            )
         try:
             out["trades_synced"] = int(r2.rowcount or 0)
         except (TypeError, ValueError):

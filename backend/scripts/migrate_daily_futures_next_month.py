@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-One-time: Re-point daily_futures_screening and open trades (bought) to next-month FUT
-from arbitrage_master for a given trade_date. Run after code switches Daily Futures
-to use nextmth columns.
+One-time / admin: Re-point daily_futures_screening and open trades (bought) to the
+**current** FUT from ``arbitrage_master`` (``currmth_*``) for a given trade_date.
+Calls ``retarget_daily_futures_to_next_month_for_date`` (name is legacy; behavior is currmth).
 
   cd /path/to/trademanthan && source venv/bin/activate
   python3 backend/scripts/migrate_daily_futures_next_month.py
   python3 backend/scripts/migrate_daily_futures_next_month.py --date 2026-04-24
+  python3 backend/scripts/migrate_daily_futures_next_month.py --date 2026-04-27 --underlying ADANIPORTS
 """
 from __future__ import annotations
 
@@ -29,6 +30,11 @@ def main() -> int:
         metavar="YYYY-MM-DD",
         help="IST trade date (default: today in Asia/Kolkata)",
     )
+    p.add_argument(
+        "--underlying",
+        metavar="SYMBOL",
+        help="If set, only re-point this stock (e.g. ADANIPORTS) to currmth from arbitrage_master",
+    )
     args = p.parse_args()
     if args.date:
         y, m, d = (int(x) for x in args.date.split("-"))
@@ -40,7 +46,7 @@ def main() -> int:
 
     from backend.services.daily_futures_service import retarget_daily_futures_to_next_month_for_date
 
-    out = retarget_daily_futures_to_next_month_for_date(td)
+    out = retarget_daily_futures_to_next_month_for_date(td, underlying=args.underlying)
     print(json.dumps(out, indent=2))
     return 0
 
