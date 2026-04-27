@@ -2114,6 +2114,9 @@ def _apply_live_rel_strength_to_picks_and_running(
     except Exception as e:
         logger.warning("daily_futures: rel-strength batch snapshots failed: %s", e)
 
+    def _norm_key(k: str) -> str:
+        return str(k or "").replace(":", "|").replace(" ", "").upper()
+
     def _ltp_for_instrument(ik: str) -> Optional[float]:
         if not ik or not ltp_by_key:
             return None
@@ -2121,13 +2124,29 @@ def _apply_live_rel_strength_to_picks_and_running(
             v = ltp_by_key[ik]
             if v and float(v) > 0:
                 return float(v)
-        nk = ik.replace(":", "|").replace(" ", "").upper()
+        nk = _norm_key(ik)
         for bk, lp in ltp_by_key.items():
             if not bk or not lp:
                 continue
-            if bk.replace(":", "|").replace(" ", "").upper() == nk and float(lp) > 0:
+            if _norm_key(bk) == nk and float(lp) > 0:
                 return float(lp)
         return None
+
+    def _snapshot_for_instrument(ik: str) -> Dict[str, Any]:
+        if not ik:
+            return {}
+        if ik in snap_by_key and isinstance(snap_by_key.get(ik), dict):
+            return snap_by_key.get(ik) or {}
+        nk = _norm_key(ik)
+        for bk, sv in snap_by_key.items():
+            if isinstance(sv, dict) and _norm_key(bk) == nk:
+                return sv
+        # Batch snapshot can miss NSE_FO|id keys; single quote by key reliably returns OHLC/open/net_change.
+        try:
+            sq = upstox.get_market_quote_by_key(ik) or {}
+            return sq if isinstance(sq, dict) else {}
+        except Exception:
+            return {}
 
     nifty_ltp = _ltp_for_instrument(NIFTY50_INDEX_KEY)
     if nifty_ltp is None:
@@ -2140,11 +2159,12 @@ def _apply_live_rel_strength_to_picks_and_running(
             logger.debug("daily_futures: rel-strength Nifty single quote failed: %s", e)
 
     nifty_prev = _prev_15m_close_for_instrument(upstox, NIFTY50_INDEX_KEY, now_ist, prev15_cache)
+    nifty_snap = _snapshot_for_instrument(NIFTY50_INDEX_KEY)
     if nifty_prev is None:
-        nifty_prev = _prev_close_from_snapshot(snap_by_key.get(NIFTY50_INDEX_KEY) or {})
+        nifty_prev = _prev_close_from_snapshot(nifty_snap)
     if nifty_prev is None:
         # Final fallback: use session open so rel-strength is still available intraday.
-        nifty_prev = _quote_session_open_from_snapshot(snap_by_key.get(NIFTY50_INDEX_KEY) or {})
+        nifty_prev = _quote_session_open_from_snapshot(nifty_snap)
     nifty_change_pct: Optional[float] = None
     if nifty_ltp is not None and nifty_prev and nifty_prev > 0:
         nifty_change_pct = round(((nifty_ltp - nifty_prev) / nifty_prev) * 100.0, 6)
@@ -2156,11 +2176,12 @@ def _apply_live_rel_strength_to_picks_and_running(
             continue
         ik = str(r.get("instrument_key") or "").strip()
         stock_prev = _prev_15m_close_for_instrument(upstox, ik, now_ist, prev15_cache)
+        stock_snap = _snapshot_for_instrument(ik)
         if stock_prev is None:
-            stock_prev = _prev_close_from_snapshot(snap_by_key.get(ik) or {})
+            stock_prev = _prev_close_from_snapshot(stock_snap)
         if stock_prev is None:
             # Final fallback: use session open when previous close is unavailable.
-            stock_prev = _quote_session_open_from_snapshot(snap_by_key.get(ik) or {})
+            stock_prev = _quote_session_open_from_snapshot(stock_snap)
         stock_ltp = _safe_float(r.get("ltp"))
         if stock_ltp is None:
             stock_ltp = _ltp_for_instrument(ik)
