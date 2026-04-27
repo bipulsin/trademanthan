@@ -2549,9 +2549,9 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                 reasons.append("Re-entry unlocks after next scan post-exit")
         if int(p.get("scan_count") or 0) < 2:
             reasons.append("Needs at least 2 scans")
-        c2 = p.get("second_scan_conviction_score")
-        if c2 is None:
-            c2 = p.get("conviction_score")
+        entry_conv = p.get("second_scan_conviction_score")
+        live_conv = p.get("conviction_score")
+        c2 = entry_conv if entry_conv is not None else live_conv
         if c2 is None:
             reasons.append("Conviction unavailable")
         elif dtp == "SHORT":
@@ -2560,8 +2560,14 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
             if _bearish_index_gate_enabled() and not bool(index_bear.get("ok")):
                 reasons.append("NIFTY is not below the day open (no SHORT from this list)")
         else:
-            if float(c2) < 60.0:
-                reasons.append(f"Conviction {round(float(c2),1)} is below 60")
+            if entry_conv is None:
+                reasons.append("Entry conviction unavailable")
+            elif float(entry_conv) < 60.0:
+                reasons.append(f"Entry conviction {round(float(entry_conv),1)} is below 60")
+            if live_conv is None:
+                reasons.append("Live conviction unavailable")
+            elif float(live_conv) < 60.0:
+                reasons.append(f"Live conviction {round(float(live_conv),1)} is below 60")
         p["order_eligible"] = len(reasons) == 0
         p["order_block_reason"] = reasons[0] if reasons else None
 
@@ -2673,6 +2679,8 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
     if int(row[6] or 0) < 2:
         raise ValueError("Needs at least 2 consecutive scans before order")
     dtp = str(row[2] or "LONG").strip().upper()
+    entry_score = float(row[8]) if row[8] is not None else None
+    live_score = float(row[7]) if row[7] is not None else None
     gate_score = row[8] if row[8] is not None else row[7]
     c2 = float(gate_score) if gate_score is not None else None
     if dtp == "SHORT":
@@ -2685,9 +2693,13 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
                     "SHORT is allowed only when NIFTY is below the day open. NIFTY is not bearish vs open right now."
                 )
     else:
-        if c2 is None or c2 < 60.0:
+        if entry_score is None or entry_score < 60.0:
             raise ValueError(
-                f"Conviction must be at least 60 (current: {round(c2 or 0.0, 1)})"
+                f"Entry conviction must be at least 60 (current: {round(entry_score or 0.0, 1)})"
+            )
+        if live_score is None or live_score < 60.0:
+            raise ValueError(
+                f"Live conviction must be at least 60 (current: {round(live_score or 0.0, 1)})"
             )
 
     exists = db.execute(
