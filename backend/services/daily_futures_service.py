@@ -2142,6 +2142,9 @@ def _apply_live_rel_strength_to_picks_and_running(
     nifty_prev = _prev_15m_close_for_instrument(upstox, NIFTY50_INDEX_KEY, now_ist, prev15_cache)
     if nifty_prev is None:
         nifty_prev = _prev_close_from_snapshot(snap_by_key.get(NIFTY50_INDEX_KEY) or {})
+    if nifty_prev is None:
+        # Final fallback: use session open so rel-strength is still available intraday.
+        nifty_prev = _quote_session_open_from_snapshot(snap_by_key.get(NIFTY50_INDEX_KEY) or {})
     nifty_change_pct: Optional[float] = None
     if nifty_ltp is not None and nifty_prev and nifty_prev > 0:
         nifty_change_pct = round(((nifty_ltp - nifty_prev) / nifty_prev) * 100.0, 6)
@@ -2155,6 +2158,9 @@ def _apply_live_rel_strength_to_picks_and_running(
         stock_prev = _prev_15m_close_for_instrument(upstox, ik, now_ist, prev15_cache)
         if stock_prev is None:
             stock_prev = _prev_close_from_snapshot(snap_by_key.get(ik) or {})
+        if stock_prev is None:
+            # Final fallback: use session open when previous close is unavailable.
+            stock_prev = _quote_session_open_from_snapshot(snap_by_key.get(ik) or {})
         stock_ltp = _safe_float(r.get("ltp"))
         if stock_ltp is None:
             stock_ltp = _ltp_for_instrument(ik)
