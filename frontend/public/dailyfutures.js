@@ -1197,7 +1197,7 @@
     state.refreshSeq += 1;
     const seq = state.refreshSeq;
     try {
-      const liteData = await fetchWorkspace({ lite: true, timeoutMs: 18000 });
+      const liteData = await fetchWorkspace({ lite: true, timeoutMs: 30000 });
       if (seq !== state.refreshSeq) return;
       if (b) {
         if (liteData.session_before_open) {

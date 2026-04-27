@@ -2154,7 +2154,14 @@ def _apply_live_rel_strength_to_picks_and_running(
                 return float(lp)
         return None
 
+    # Keep workspace responsive if batch snapshot misses many keys.
+    # Single-quote fallback is cached and budgeted.
+    snapshot_fallback_cache: Dict[str, Dict[str, Any]] = {}
+    snapshot_fallback_budget = max(6, min(14, len(combined) // 2))
+    snapshot_fallback_used = 0
+
     def _snapshot_for_instrument(ik: str) -> Dict[str, Any]:
+        nonlocal snapshot_fallback_used
         if not ik:
             return {}
         if ik in snap_by_key and isinstance(snap_by_key.get(ik), dict):
@@ -2163,11 +2170,19 @@ def _apply_live_rel_strength_to_picks_and_running(
         for bk, sv in snap_by_key.items():
             if isinstance(sv, dict) and _norm_key(bk) == nk:
                 return sv
+        if ik in snapshot_fallback_cache:
+            return snapshot_fallback_cache.get(ik) or {}
+        if snapshot_fallback_used >= snapshot_fallback_budget:
+            return {}
         # Batch snapshot can miss NSE_FO|id keys; single quote by key reliably returns OHLC/open/net_change.
         try:
+            snapshot_fallback_used += 1
             sq = upstox.get_market_quote_by_key(ik) or {}
-            return sq if isinstance(sq, dict) else {}
+            out = sq if isinstance(sq, dict) else {}
+            snapshot_fallback_cache[ik] = out
+            return out
         except Exception:
+            snapshot_fallback_cache[ik] = {}
             return {}
 
     nifty_ltp = _ltp_for_instrument(NIFTY50_INDEX_KEY)
