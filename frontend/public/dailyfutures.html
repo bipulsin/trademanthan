@@ -224,30 +224,8 @@
             gap: 14px;
             flex-wrap: wrap;
         }
-        .df-snapshot-chip {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            padding: 8px 16px;
-            border-radius: 999px;
-            font-size: 1.08rem;
-            font-weight: 800;
-            letter-spacing: 0.04em;
-            line-height: 1;
-            background: #fef3c7;
-            color: #000000 !important;
-            border: 1px solid #f59e0b;
-            text-transform: uppercase;
-            white-space: nowrap;
-        }
-        body.theme-page .df-wrap .df-snapshot-chip,
-        body.theme-light .df-wrap .df-snapshot-chip,
-        html.light-theme .df-wrap .df-snapshot-chip {
-            color: #000000 !important;
-        }
         @media (max-width: 768px) {
             .df-header-row { flex-direction: column; align-items: flex-start; }
-            .df-snapshot-chip { font-size: 1rem; }
         }
     </style>
 </head>
@@ -269,7 +247,6 @@
                         <h1 class="settings-title"><i class="fas fa-calendar-day" style="margin-right:10px;color:#2563eb;"></i> Premium Futures</h1>
                         <p class="settings-subtitle">FNO stocks Bullish Trend scanner (Moving average + ADX + MACD ) with conviction score &amp; scan score</p>
                     </div>
-                    <span id="dfSnapshotChip" class="df-snapshot-chip" hidden>Snapshot</span>
                 </div>
             </div>
             <div class="settings-content df-wrap">
@@ -398,6 +375,6 @@
     </div>
 
     <script src="left-menu.js?v=3.21"></script>
-    <script src="dailyfutures.js?v=33"></script>
+    <script src="dailyfutures.js?v=34"></script>
 </body>
 </html>
