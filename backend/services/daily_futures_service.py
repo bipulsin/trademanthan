@@ -117,6 +117,8 @@ def ensure_daily_futures_tables() -> None:
         snapshotted_at TIMESTAMPTZ,
         second_scan_time TIMESTAMPTZ,
         second_scan_conviction_score NUMERIC(8,2),
+        second_scan_oi_leg NUMERIC(8,2),
+        second_scan_vwap_leg NUMERIC(8,2),
         second_scan_stock_change_pct NUMERIC(18,6),
         second_scan_nifty_change_pct NUMERIC(18,6),
         candle_is_green BOOLEAN,
@@ -172,6 +174,8 @@ def ensure_daily_futures_tables() -> None:
             conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS snapshotted_at TIMESTAMPTZ"))
             conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_time TIMESTAMPTZ"))
             conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_conviction_score NUMERIC(8,2)"))
+            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_oi_leg NUMERIC(8,2)"))
+            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_vwap_leg NUMERIC(8,2)"))
             conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_stock_change_pct NUMERIC(18,6)"))
             conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_nifty_change_pct NUMERIC(18,6)"))
             conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS candle_is_green BOOLEAN"))
@@ -1652,7 +1656,8 @@ def _ingest_df_webhook(symbols: List[str], direction: str) -> Dict[str, Any]:
                 text(
                     """
                     SELECT id, scan_count, total_oi, second_scan_time,
-                           second_scan_conviction_score, second_scan_stock_change_pct, second_scan_nifty_change_pct,
+                           second_scan_conviction_score, second_scan_oi_leg, second_scan_vwap_leg,
+                           second_scan_stock_change_pct, second_scan_nifty_change_pct,
                            candle_is_green, candle_higher_high, candle_higher_low
                     FROM daily_futures_screening
                     WHERE trade_date = CAST(:d AS DATE) AND UPPER(TRIM(underlying)) = :u
@@ -1773,17 +1778,21 @@ def _ingest_df_webhook(symbols: List[str], direction: str) -> Dict[str, Any]:
                 prior_scan_count = int(ex[1] or 0)
                 second_scan_time = ex[3]
                 second_scan_conv = ex[4]
-                second_scan_stock = ex[5]
-                second_scan_nifty = ex[6]
-                row_candle_is_green = bool(ex[7]) if ex[7] is not None else bool(x.get("candle_is_green"))
-                row_candle_higher_high = bool(ex[8]) if ex[8] is not None else bool(x.get("candle_higher_high"))
-                row_candle_higher_low = bool(ex[9]) if ex[9] is not None else bool(x.get("candle_higher_low"))
+                second_scan_oi_leg = ex[5]
+                second_scan_vwap_leg = ex[6]
+                second_scan_stock = ex[7]
+                second_scan_nifty = ex[8]
+                row_candle_is_green = bool(ex[9]) if ex[9] is not None else bool(x.get("candle_is_green"))
+                row_candle_higher_high = bool(ex[10]) if ex[10] is not None else bool(x.get("candle_higher_high"))
+                row_candle_higher_low = bool(ex[11]) if ex[11] is not None else bool(x.get("candle_higher_low"))
                 next_scan_count = prior_scan_count + 1
                 if prior_scan_count < 1:
                     next_scan_count = 1
                 if next_scan_count >= 2 and second_scan_time is None:
                     second_scan_time = ingest_now
                     second_scan_conv = x["conviction_score"]
+                    second_scan_oi_leg = x["conviction_oi_leg"]
+                    second_scan_vwap_leg = x["conviction_vwap_leg"]
                     second_scan_stock = x["stock_change_pct"]
                     second_scan_nifty = x["nifty_change_pct"]
                 conn.execute(
@@ -1812,6 +1821,8 @@ def _ingest_df_webhook(symbols: List[str], direction: str) -> Dict[str, Any]:
                           snapshotted_at = :snap,
                           second_scan_time = :sst,
                           second_scan_conviction_score = :ssc,
+                          second_scan_oi_leg = COALESCE(:ss_oi_leg, second_scan_oi_leg),
+                          second_scan_vwap_leg = COALESCE(:ss_vwap_leg, second_scan_vwap_leg),
                           second_scan_stock_change_pct = :ss_stock,
                           second_scan_nifty_change_pct = :ss_nifty,
                           candle_is_green = :cig,
@@ -1845,6 +1856,8 @@ def _ingest_df_webhook(symbols: List[str], direction: str) -> Dict[str, Any]:
                         "snap": ingest_now,
                         "sst": second_scan_time,
                         "ssc": second_scan_conv,
+                        "ss_oi_leg": second_scan_oi_leg if second_scan_oi_leg is not None else x["conviction_oi_leg"],
+                        "ss_vwap_leg": second_scan_vwap_leg if second_scan_vwap_leg is not None else x["conviction_vwap_leg"],
                         "ss_stock": second_scan_stock,
                         "ss_nifty": second_scan_nifty,
                         "cig": row_candle_is_green,
@@ -1963,7 +1976,8 @@ def _fetch_screening_dicts(conn: Any, trade_date: date) -> List[Dict[str, Any]]:
             """
             SELECT id, underlying, direction_type, future_symbol, instrument_key, lot_size,
                    scan_count, first_hit_at, last_hit_at, conviction_score, ltp,
-                   second_scan_time, second_scan_conviction_score, second_scan_stock_change_pct, second_scan_nifty_change_pct,
+                   second_scan_time, second_scan_conviction_score, second_scan_oi_leg, second_scan_vwap_leg,
+                   second_scan_stock_change_pct, second_scan_nifty_change_pct,
                    stock_change_pct, nifty_change_pct,
                    candle_is_green, candle_higher_high, candle_higher_low, conviction_breakdown_json
             FROM daily_futures_screening
@@ -1990,14 +2004,16 @@ def _fetch_screening_dicts(conn: Any, trade_date: date) -> List[Dict[str, Any]]:
                 "ltp": float(row[10]) if row[10] is not None else None,
                 "second_scan_time": row[11].isoformat() if row[11] else None,
                 "second_scan_conviction_score": float(row[12]) if row[12] is not None else None,
-                "second_scan_stock_change_pct": float(row[13]) if row[13] is not None else None,
-                "second_scan_nifty_change_pct": float(row[14]) if row[14] is not None else None,
-                "stock_change_pct": float(row[15]) if row[15] is not None else None,
-                "nifty_change_pct": float(row[16]) if row[16] is not None else None,
-                "candle_is_green": bool(row[17]) if row[17] is not None else None,
-                "candle_higher_high": bool(row[18]) if row[18] is not None else None,
-                "candle_higher_low": bool(row[19]) if row[19] is not None else None,
-                "conviction_breakdown_json": row[20] if row[20] is not None else None,
+                "second_scan_oi_leg": float(row[13]) if row[13] is not None else None,
+                "second_scan_vwap_leg": float(row[14]) if row[14] is not None else None,
+                "second_scan_stock_change_pct": float(row[15]) if row[15] is not None else None,
+                "second_scan_nifty_change_pct": float(row[16]) if row[16] is not None else None,
+                "stock_change_pct": float(row[17]) if row[17] is not None else None,
+                "nifty_change_pct": float(row[18]) if row[18] is not None else None,
+                "candle_is_green": bool(row[19]) if row[19] is not None else None,
+                "candle_higher_high": bool(row[20]) if row[20] is not None else None,
+                "candle_higher_low": bool(row[21]) if row[21] is not None else None,
+                "conviction_breakdown_json": row[22] if row[22] is not None else None,
             }
         )
     return out
