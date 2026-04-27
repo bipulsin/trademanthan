@@ -146,8 +146,10 @@
   }
 
   function fmtRelStrength(r) {
-    const s = r.stock_change_pct;
-    const n = r.nifty_change_pct;
+    // Prefer live rel-strength fields; fall back to second-scan snapshot so
+    // Today's pick doesn't render blank when live enrichment is temporarily missing.
+    const s = r.stock_change_pct != null ? r.stock_change_pct : r.second_scan_stock_change_pct;
+    const n = r.nifty_change_pct != null ? r.nifty_change_pct : r.second_scan_nifty_change_pct;
     if (s == null || n == null) {
       return '<span class="df-rs">—</span>';
     }
