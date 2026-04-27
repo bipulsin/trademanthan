@@ -2368,7 +2368,8 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                    t.trail_stop_hit, t.momentum_exhausting,
                    s.scan_count, s.first_hit_at, s.last_hit_at, s.conviction_score,
                    s.second_scan_conviction_score, s.second_scan_oi_leg, s.second_scan_vwap_leg, s.ltp,
-                   s.stock_change_pct, s.nifty_change_pct
+                   s.stock_change_pct, s.nifty_change_pct,
+                   s.conviction_oi_leg, s.conviction_vwap_leg, s.session_vwap, s.conviction_breakdown_json
             FROM daily_futures_user_trade t
             JOIN daily_futures_screening s ON s.id = t.screening_id
             WHERE t.user_id = :u
@@ -2415,6 +2416,10 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                 "ltp": float(row[25]) if row[25] is not None else None,
                 "stock_change_pct": float(row[26]) if row[26] is not None else None,
                 "nifty_change_pct": float(row[27]) if row[27] is not None else None,
+                "conviction_oi_leg": float(row[28]) if row[28] is not None else None,
+                "conviction_vwap_leg": float(row[29]) if row[29] is not None else None,
+                "session_vwap": float(row[30]) if row[30] is not None else None,
+                "conviction_breakdown_json": row[31] if len(row) > 31 and row[31] is not None else None,
                 "warn_two_misses": miss >= 2,
             }
         )
@@ -2957,6 +2962,7 @@ def manual_update_conviction_vwap(
     screening_id: int,
     mode: Literal["live", "entry"],
     session_vwap: float,
+    vwap_leg_reason: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Manual override for missing VWAP input in conviction computation.
@@ -3016,6 +3022,9 @@ def manual_update_conviction_vwap(
             candle_higher_high=bool(row.get("candle_higher_high")),
             candle_higher_low=bool(row.get("candle_higher_low")),
         )
+
+    if vwap_leg_reason is not None and str(vwap_leg_reason).strip():
+        vw_reason = str(vwap_leg_reason).strip()[:500]
 
     cbj = row.get("conviction_breakdown_json")
     if not isinstance(cbj, dict):

@@ -73,7 +73,9 @@
         .df-modal-panel { position: relative; z-index: 1; background: var(--theme-card, #fff); color: var(--theme-text, #0f172a);
             border: 1px solid var(--theme-border, #e2e8f0); border-radius: 12px; padding: 18px; min-width: 300px; max-width: 96vw; }
         .df-modal-panel label { display: block; margin-top: 10px; font-size: 0.88rem; }
-        .df-modal-panel input { width: 100%; box-sizing: border-box; margin-top: 4px; padding: 8px; border-radius: 8px; border: 1px solid var(--theme-border, #cbd5e1); }
+        .df-modal-panel input, .df-modal-panel textarea { width: 100%; box-sizing: border-box; margin-top: 4px; padding: 8px; border-radius: 8px; border: 1px solid var(--theme-border, #cbd5e1); }
+        .df-modal-panel textarea { min-height: 4.5rem; resize: vertical; font-family: inherit; font-size: 0.88rem; }
+        .df-modal-panel .df-conv-readonly { background: var(--theme-input-readonly, rgba(0,0,0,0.04)); color: var(--theme-muted, #64748b); }
         .df-modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
         .df-modal-cancel { padding: 8px 14px; border-radius: 8px; cursor: pointer; border: 1px solid var(--theme-border); background: transparent; }
         #dfBanner { font-size: 0.88rem; color: var(--theme-muted); margin-bottom: 12px; }
@@ -385,19 +387,24 @@
 
     <div id="dfConvModal" class="df-modal" aria-hidden="true" role="dialog">
         <div class="df-modal-backdrop" id="dfConvBackdrop"></div>
-        <div class="df-modal-panel">
-            <h3 id="dfConvTitle" style="margin:0 0 8px;">Manual conviction VWAP</h3>
+        <div class="df-modal-panel" style="max-width: 420px;">
+            <h3 id="dfConvTitle" style="margin:0 0 8px;">Conviction components</h3>
+            <p id="dfConvSub" style="margin:0 0 10px;font-size:0.82rem;color:var(--theme-muted);"></p>
+            <label>OI leg (points)</label>
+            <input type="text" id="dfConvOi" class="df-conv-readonly" readonly tabindex="-1" />
             <label>Session VWAP (₹)</label>
             <input type="number" id="dfConvVwap" step="any" min="0" />
+            <label>VWAP leg reason</label>
+            <textarea id="dfConvReason" rows="3" placeholder="Auto from model, or override"></textarea>
             <p id="dfConvErr" style="color:#b91c1c;min-height:1.2em;font-size:0.85rem;"></p>
             <div class="df-modal-actions">
                 <button type="button" class="df-modal-cancel" id="dfConvCancel">Cancel</button>
-                <button type="button" class="df-btn df-btn-order" id="dfConvOk">Save</button>
+                <button type="button" class="df-btn df-btn-order" id="dfConvOk">Save &amp; refresh</button>
             </div>
         </div>
     </div>
 
     <script src="left-menu.js?v=3.21"></script>
-    <script src="dailyfutures.js?v=41"></script>
+    <script src="dailyfutures.js?v=42"></script>
 </body>
 </html>

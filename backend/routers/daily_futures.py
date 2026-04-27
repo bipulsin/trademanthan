@@ -58,6 +58,11 @@ class ManualConvictionVwapBody(BaseModel):
     screening_id: int = Field(..., ge=1)
     mode: str = Field(..., description="live or entry")
     session_vwap: float = Field(..., gt=0)
+    vwap_leg_reason: str | None = Field(
+        default=None,
+        max_length=500,
+        description="Optional; if set, stored as the VWAP leg reason instead of the auto text.",
+    )
 
 
 @router.get("/workspace")
@@ -128,6 +133,7 @@ def daily_futures_manual_conviction_vwap(
             screening_id=body.screening_id,
             mode=mode,  # type: ignore[arg-type]
             session_vwap=body.session_vwap,
+            vwap_leg_reason=body.vwap_leg_reason,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

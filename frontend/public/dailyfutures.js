@@ -122,35 +122,33 @@
    */
   /**
    * Same pattern as Today's pick: Entry (second scan) and Live conviction from screening.
+   * Scores are always clickable (when screening_id is present) to open OI / VWAP / reason modal.
    */
   function formatConvictionEntryLive(r) {
-    function liveMissing() {
-      const br = r && r.conviction_breakdown_json && typeof r.conviction_breakdown_json === 'object'
-        ? r.conviction_breakdown_json
-        : {};
-      const reason = String(br.vwap_leg_reason || '').trim().toLowerCase();
-      const sv = br.session_vwap;
-      const leg = r ? r.conviction_vwap_leg : null;
-      return reason === 'no_price_vs_vwap' || sv == null || !Number.isFinite(Number(leg));
-    }
-    function entryMissing() {
-      const hasEntry = r && r.second_scan_conviction_score != null && Number.isFinite(Number(r.second_scan_conviction_score));
-      if (!hasEntry) return false;
-      const leg = r ? r.second_scan_vwap_leg : null;
-      return !Number.isFinite(Number(leg));
-    }
     const sid = r && r.screening_id != null ? Number(r.screening_id) : null;
     function livePart() {
       if (r.conviction_score == null) return '—';
       const txt = fmtNum(r.conviction_score, 1) + ' (L)';
-      if (sid == null || !liveMissing()) return '<span class="df-score-live">' + txt + '</span>';
-      return '<button type="button" class="df-conv-link df-score-live" data-csid="' + sid + '" data-cmode="live" title="VWAP missing for live score. Click to enter manual VWAP and recalculate.">' + txt + '</button>';
+      if (sid == null) return '<span class="df-score-live">' + txt + '</span>';
+      return (
+        '<button type="button" class="df-conv-link df-score-live" data-csid="' +
+        sid +
+        '" data-cmode="live" title="OI leg, session VWAP, and VWAP reason — click to view or edit">' +
+        txt +
+        '</button>'
+      );
     }
     function entryPart() {
       if (r.second_scan_conviction_score == null) return '';
       const txt = fmtNum(r.second_scan_conviction_score, 1) + ' (E)';
-      if (sid == null || !entryMissing()) return '<span class="df-score-entry">' + txt + '</span>';
-      return '<button type="button" class="df-conv-link df-score-entry" data-csid="' + sid + '" data-cmode="entry" title="VWAP missing for entry score. Click to enter manual VWAP and recalculate.">' + txt + '</button>';
+      if (sid == null) return '<span class="df-score-entry">' + txt + '</span>';
+      return (
+        '<button type="button" class="df-conv-link df-score-entry" data-csid="' +
+        sid +
+        '" data-cmode="entry" title="Entry OI / VWAP legs — click to view or edit">' +
+        txt +
+        '</button>'
+      );
     }
     let convTxt = livePart();
     const secondConv = r.second_scan_conviction_score == null ? null : Number(r.second_scan_conviction_score);
@@ -1122,19 +1120,98 @@
     state.sellTradeId = null;
   }
 
+  function _parseBreakdownJson(r) {
+    const b = r && r.conviction_breakdown_json;
+    if (b && typeof b === 'object' && !Array.isArray(b)) {
+      return b;
+    }
+    if (typeof b === 'string') {
+      try {
+        return JSON.parse(b);
+      } catch (_e) {
+        return {};
+      }
+    }
+    return {};
+  }
+
+  function _findScreeningRow(screeningId) {
+    const w = state.workspace;
+    if (!w || screeningId == null) return null;
+    const id = Number(screeningId);
+    function first(arr) {
+      if (!arr || !arr.length) return null;
+      for (let i = 0; i < arr.length; i++) {
+        if (Number(arr[i].screening_id) === id) return arr[i];
+      }
+      return null;
+    }
+    return (
+      first(w.picks_mixed) ||
+      first(w.picks) ||
+      first(w.picks_bearish) ||
+      first(w.picks_low_conv_bull) ||
+      first(w.picks_low_conv_bear) ||
+      first(w.running)
+    );
+  }
+
   function openConvictionModal(screeningId, mode) {
     state.convictionEditScreeningId = screeningId;
     state.convictionEditMode = mode;
     const m = document.getElementById('dfConvModal');
     const tEl = document.getElementById('dfConvTitle');
+    const subEl = document.getElementById('dfConvSub');
+    const oiEl = document.getElementById('dfConvOi');
     const iEl = document.getElementById('dfConvVwap');
+    const reasonEl = document.getElementById('dfConvReason');
     const eEl = document.getElementById('dfConvErr');
+    const r = _findScreeningRow(screeningId);
+    const br = _parseBreakdownJson(r || {});
+
     if (tEl) {
-      tEl.textContent = mode === 'entry'
-        ? 'Manual VWAP for Entry conviction (E)'
-        : 'Manual VWAP for Live conviction (L)';
+      tEl.textContent = mode === 'entry' ? 'Entry conviction (E)' : 'Live conviction (L)';
     }
-    if (iEl) iEl.value = '';
+    const und = r && r.underlying ? r.underlying : '—';
+    const fs = r && r.future_symbol ? r.future_symbol : '';
+    if (subEl) {
+      subEl.textContent = fs && und && fs !== und ? fs + ' · ' + und : fs || und;
+    }
+
+    if (mode === 'entry') {
+      const oiE =
+        r && r.second_scan_oi_leg != null
+          ? r.second_scan_oi_leg
+          : r && r.conviction_oi_leg != null
+            ? r.conviction_oi_leg
+            : null;
+      if (oiEl) {
+        oiEl.value =
+          oiE != null && Number.isFinite(Number(oiE)) ? Number(oiE).toFixed(1) : '—';
+      }
+      const vwE = br.entry_manual_session_vwap;
+      if (iEl) {
+        iEl.value =
+          vwE != null && Number.isFinite(Number(vwE)) ? String(vwE) : '';
+      }
+      if (reasonEl) {
+        reasonEl.value = br.entry_vwap_leg_reason != null ? String(br.entry_vwap_leg_reason) : '';
+      }
+    } else {
+      const oiL = r && r.conviction_oi_leg;
+      if (oiEl) {
+        oiEl.value =
+          oiL != null && Number.isFinite(Number(oiL)) ? Number(oiL).toFixed(1) : '—';
+      }
+      const sv =
+        r && r.session_vwap != null ? r.session_vwap : br.session_vwap != null ? br.session_vwap : null;
+      if (iEl) {
+        iEl.value = sv != null && Number.isFinite(Number(sv)) ? String(sv) : '';
+      }
+      if (reasonEl) {
+        reasonEl.value = br.vwap_leg_reason != null ? String(br.vwap_leg_reason) : '';
+      }
+    }
     if (eEl) eEl.textContent = '';
     if (m) m.setAttribute('aria-hidden', 'false');
   }
@@ -1150,6 +1227,7 @@
     const sid = state.convictionEditScreeningId;
     const mode = state.convictionEditMode;
     const inp = document.getElementById('dfConvVwap');
+    const reasonInp = document.getElementById('dfConvReason');
     const err = document.getElementById('dfConvErr');
     const okBtn = document.getElementById('dfConvOk');
     if (!sid || (mode !== 'live' && mode !== 'entry')) return;
@@ -1158,8 +1236,9 @@
       if (err) err.textContent = 'Enter valid VWAP greater than 0.';
       return;
     }
+    const reasonTrim = reasonInp && String(reasonInp.value).trim() ? String(reasonInp.value).trim() : '';
     if (err) err.textContent = '';
-    const original = okBtn ? okBtn.textContent : 'Save';
+    const original = okBtn ? okBtn.textContent : 'Save & refresh';
     if (okBtn) {
       okBtn.disabled = true;
       okBtn.textContent = 'Saving...';
@@ -1175,6 +1254,7 @@
             screening_id: sid,
             mode: mode,
             session_vwap: vwap,
+            vwap_leg_reason: reasonTrim.length ? reasonTrim : null,
           }),
         });
         const raw = await res.text();
@@ -1196,7 +1276,7 @@
     if (err) err.textContent = lastErr && lastErr.message ? lastErr.message : 'Request failed';
     if (okBtn) {
       okBtn.disabled = false;
-      okBtn.textContent = original;
+      okBtn.textContent = original || 'Save & refresh';
     }
   }
 
@@ -1338,6 +1418,9 @@
         )
           .then(function (runData) {
             if (seq !== state.refreshSeq || !runData) return;
+            if (state.workspace && runData.running) {
+              state.workspace.running = runData.running;
+            }
             render15mAlertStrip(runData.running || []);
             renderRunning(runData.running || []);
           })
