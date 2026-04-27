@@ -2396,6 +2396,30 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
             }
         )
 
+    # Re-entry cooldown: after a same-day sell for an underlying, keep Enter disabled until
+    # at least one fresh scan arrives after the latest sold timestamp.
+    sold_latest_by_underlying: Dict[str, datetime] = {}
+    sold_latest_rows = db.execute(
+        text(
+            """
+            SELECT UPPER(TRIM(s.underlying)) AS u, MAX(COALESCE(t.updated_at, t.created_at)) AS sold_ts
+            FROM daily_futures_user_trade t
+            JOIN daily_futures_screening s ON s.id = t.screening_id
+            WHERE t.user_id = :u
+              AND t.order_status = 'sold'
+              AND s.trade_date = CAST(:td AS DATE)
+            GROUP BY UPPER(TRIM(s.underlying))
+            """
+        ),
+        {"u": user_id, "td": str(td)},
+    ).fetchall()
+    for u_raw, ts in sold_latest_rows:
+        u = str(u_raw or "").strip().upper()
+        if not u or ts is None:
+            continue
+        if isinstance(ts, datetime):
+            sold_latest_by_underlying[u] = ts.astimezone(IST) if ts.tzinfo else IST.localize(ts)
+
     # Re-entry policy: if a symbol was sold earlier today but shows fresh conviction again,
     # keep it visible in Today's pick so users can re-enter.
     n_hidden_closed = 0
@@ -2517,6 +2541,12 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
     for p in picks_mixed:
         reasons: List[str] = []
         dtp = str(p.get("direction_type") or "LONG").strip().upper()
+        und_u = str(p.get("underlying") or "").strip().upper()
+        sold_ts = sold_latest_by_underlying.get(und_u)
+        if sold_ts is not None:
+            last_hit_dt = _parse_iso_ist(p.get("last_hit_at"))
+            if last_hit_dt is None or last_hit_dt <= sold_ts:
+                reasons.append("Re-entry unlocks after next scan post-exit")
         if int(p.get("scan_count") or 0) < 2:
             reasons.append("Needs at least 2 scans")
         c2 = p.get("second_scan_conviction_score")
