@@ -454,7 +454,10 @@
     if (decision === 'dual_exit') {
       return '<span class="df-playbook df-playbook-confirm" title="Two caution signals are active together. Tighten risk and confirm quickly.">Confirm Exit</span>';
     }
-    return '<span class="df-playbook df-playbook-monitor" title="No strict exit yet. Keep monitoring next 15m updates.">Monitor</span>';
+    if (decision === 'watch') {
+      return '<span class="df-playbook df-playbook-monitor" title="Single caution signal. Keep monitoring next 15m updates.">Monitor</span>';
+    }
+    return '';
   }
 
   async function fetchWorkspace(opts) {
@@ -827,6 +830,7 @@
         const warn = r.warn_two_misses
           ? '<span class="df-blink" title="Not seen in the last two consecutive webhooks">↓</span>'
           : '';
+        const playbookHtml = runningActionPlaybook(r);
         const refPx =
           String(r.direction_type || "").toUpperCase() === "SHORT" ? r.sell_price : r.entry_price;
         return (
@@ -855,7 +859,7 @@
           unrealizedPnlCell(r) +
           '<td class="df-alerts-cell">' +
           runningExitBadges(r) +
-          '<div style="margin-top:4px;">' + runningActionPlaybook(r) + '</div>' +
+          (playbookHtml ? ('<div style="margin-top:4px;">' + playbookHtml + '</div>') : '') +
           '</td><td class="df-run-actions"><div class="df-run-action-btns">' +
           '<button type="button" class="df-btn df-btn-sell" data-tid="' +
           r.trade_id +
