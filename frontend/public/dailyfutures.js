@@ -282,16 +282,32 @@
     );
   }
 
-  function stripL2Cell(st) {
+  function _trailStopPrice(r) {
+    if (!r) return null;
+    var atr = Number(r.position_atr);
+    if (!Number.isFinite(atr) || atr <= 0) return null;
+    var isShort = String(r.direction_type || '').toUpperCase() === 'SHORT';
+    var ref = isShort ? Number(r.sell_price) : Number(r.entry_price);
+    if (!Number.isFinite(ref)) return null;
+    // Backend hit condition uses:
+    // long  -> ltp < entry + 0.8*ATR
+    // short -> ltp > sell  - 0.8*ATR
+    var sl = isShort ? (ref - 0.8 * atr) : (ref + 0.8 * atr);
+    return Number.isFinite(sl) ? sl : null;
+  }
+
+  function stripL2Cell(st, r) {
     var k = (st && st.l2) || 'building';
+    var sl = _trailStopPrice(r);
+    var slTxt = sl != null ? (' @ ₹' + fmtNum(sl, 2)) : '';
     if (k === 'hit') {
       return (
-        '<span class="df-s-cell df-s-neg" title="Fell to the profit-trail line (lock / exit review), not a trend label.">Trail stop</span>'
+        '<span class="df-s-cell df-s-neg" title="Fell to the profit-trail line (lock / exit review), not a trend label.">Trail stop' + slTxt + '</span>'
       );
     }
     if (k === 'active') {
       return (
-        '<span class="df-s-cell df-s-teal" title="Price was at least +1.5× 15m ATR above entry; trail is on.">Trail armed</span>'
+        '<span class="df-s-cell df-s-teal" title="Price was at least +1.5× 15m ATR in favor; trail is on. Place stop near this level.">Trail armed' + slTxt + '</span>'
       );
     }
     return (
@@ -359,7 +375,7 @@
           '</strong></td><td class="df-s-c">' +
           stripL1Cell(st) +
           '</td><td class="df-s-c">' +
-          stripL2Cell(st) +
+          stripL2Cell(st, r) +
           '</td><td class="df-s-c">' +
           stripL3Cell(st) +
           '</td><td class="df-s-c">' +
