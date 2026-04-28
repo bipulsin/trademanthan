@@ -92,7 +92,9 @@
           }
           const data = await res.json();
           const p = data.profile || {};
-          meta.textContent = "Generated at IST: " + (data.generated_at_ist || "—") + " | Trade date: " + (data.trade_date || "—") + " | Profile: " + (p.name || "default");
+          meta.textContent = "Generated at IST: " + (data.generated_at_ist || "—") +
+            " | Trade dates: " + (data.trade_date_start || "—") + " to " + (data.trade_date_end || "—") +
+            " | Profile: " + (p.name || "default");
 
           const rows = Array.isArray(data.projected_exits) ? data.projected_exits : [];
           if (!rows.length) {
@@ -110,7 +112,7 @@
 
           const table = [
             "<table><thead><tr>",
-            "<th>Underlying</th><th>Future</th><th>Entry</th>",
+            "<th>Date</th><th>Underlying</th><th>Future</th><th>Entry</th>",
             "<th>Projected Exit</th><th>Actual Exit</th>",
             "<th class='num'>Projected PnL ₹</th><th class='num'>Actual PnL ₹</th><th class='num'>Delta ₹</th>",
             "<th>Projected Exit Trigger</th>",
@@ -121,6 +123,7 @@
             const cls = Number.isFinite(d) ? (d > 0 ? "ok" : (d < 0 ? "bad" : "muted")) : "muted";
             table.push(
               "<tr>" +
+              "<td>" + (r.trade_date || "—") + "</td>" +
               "<td><strong>" + (r.underlying || "—") + "</strong></td>" +
               "<td>" + (r.future_symbol || "—") + "</td>" +
               "<td>" + (r.entry_time || "—") + " @ ₹" + n(r.entry_price, 2) + "</td>" +

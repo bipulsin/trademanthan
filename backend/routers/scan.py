@@ -8745,7 +8745,8 @@ async def daily_futures_playbook_data(
 @router.get("/daily-futures-playbook-sim")
 async def daily_futures_playbook_sim(
     symbols: str = Query("", description="Optional comma-separated underlyings."),
-    trade_date: Optional[date] = Query(None, description="IST trade date (default: today)."),
+    trade_date: Optional[date] = Query(None, description="IST end date (default: today)."),
+    include_prev_day: bool = Query(True, description="Include previous trade day as well."),
     db: Session = Depends(get_db),
 ):
     """
@@ -8762,6 +8763,7 @@ async def daily_futures_playbook_sim(
 
     ist = pytz.timezone("Asia/Kolkata")
     session_date = trade_date or datetime.now(ist).date()
+    start_date = session_date - timedelta(days=1) if include_prev_day else session_date
     symbol_list = [str(x).strip().upper() for x in str(symbols or "").split(",") if str(x).strip()]
     symbol_list = symbol_list[:30]
 
@@ -8774,13 +8776,13 @@ async def daily_futures_playbook_sim(
         except Exception:
             return None
 
-    def _parse_hhmm(hhmm: Any) -> Optional[datetime]:
+    def _parse_hhmm(hhmm: Any, base_date: date) -> Optional[datetime]:
         s = str(hhmm or "").strip()
         if len(s) < 4 or ":" not in s:
             return None
         try:
             hh, mm = s.split(":", 1)
-            return ist.localize(datetime(session_date.year, session_date.month, session_date.day, int(hh), int(mm), 0))
+            return ist.localize(datetime(base_date.year, base_date.month, base_date.day, int(hh), int(mm), 0))
         except Exception:
             return None
 
@@ -8860,14 +8862,14 @@ async def daily_futures_playbook_sim(
                 s.trade_date
             FROM daily_futures_user_trade t
             JOIN daily_futures_screening s ON s.id = t.screening_id
-            WHERE s.trade_date = :td
+            WHERE s.trade_date BETWEEN :sd AND :ed
               AND t.order_status = 'sold'
               AND t.entry_time IS NOT NULL
               AND UPPER(TRIM(t.underlying)) = ANY(:syms)
-            ORDER BY t.id
+            ORDER BY s.trade_date, t.id
             """
         )
-        trade_rows = db.execute(sql, {"td": session_date, "syms": symbol_list}).mappings().all()
+        trade_rows = db.execute(sql, {"sd": start_date, "ed": session_date, "syms": symbol_list}).mappings().all()
     else:
         sql = text(
             """
@@ -8890,13 +8892,13 @@ async def daily_futures_playbook_sim(
                 s.trade_date
             FROM daily_futures_user_trade t
             JOIN daily_futures_screening s ON s.id = t.screening_id
-            WHERE s.trade_date = :td
+            WHERE s.trade_date BETWEEN :sd AND :ed
               AND t.order_status = 'sold'
               AND t.entry_time IS NOT NULL
-            ORDER BY t.id
+            ORDER BY s.trade_date, t.id
             """
         )
-        trade_rows = db.execute(sql, {"td": session_date}).mappings().all()
+        trade_rows = db.execute(sql, {"sd": start_date, "ed": session_date}).mappings().all()
 
     # Playbook-only test profile (algo unchanged until user confirms).
     profile_name = "safer_test_v2"
@@ -8914,12 +8916,13 @@ async def daily_futures_playbook_sim(
 
     projections: List[Dict[str, Any]] = []
     for tr in trade_rows:
+        trade_d = tr.get("trade_date") or session_date
         direction = str(tr.get("direction_type") or "LONG").strip().upper()
         is_short = direction == "SHORT"
-        entry_dt = _parse_hhmm(tr.get("sell_time") if is_short else tr.get("entry_time"))
-        exit_dt = _parse_hhmm(tr.get("buy_time") if is_short else tr.get("exit_time"))
+        entry_dt = _parse_hhmm(tr.get("sell_time") if is_short else tr.get("entry_time"), trade_d)
+        exit_dt = _parse_hhmm(tr.get("buy_time") if is_short else tr.get("exit_time"), trade_d)
         if exit_dt is None:
-            exit_dt = _parse_hhmm(tr.get("exit_time"))
+            exit_dt = _parse_hhmm(tr.get("exit_time"), trade_d)
         entry_px = _safe_num(tr.get("sell_price") if is_short else tr.get("entry_price"))
         if entry_dt is None or exit_dt is None or entry_px is None:
             continue
@@ -8934,7 +8937,7 @@ async def daily_futures_playbook_sim(
         candles: List[Dict[str, Any]] = []
         def _append_candle(ts_raw: Any, op_raw: Any, hi_raw: Any, lo_raw: Any, cl_raw: Any) -> None:
             ts = _parse_ist_ts(ts_raw)
-            if ts is None or ts.date() != session_date:
+            if ts is None or ts.date() != trade_d:
                 return
             op = _safe_num(op_raw)
             hi = _safe_num(hi_raw)
@@ -8948,7 +8951,7 @@ async def daily_futures_playbook_sim(
                 ikey,
                 interval="minutes/15",
                 days_back=3,
-                range_end_date=session_date,
+                range_end_date=trade_d,
             ) or []
             for c in raw:
                 if isinstance(c, dict):
@@ -9060,7 +9063,7 @@ async def daily_futures_playbook_sim(
                 projected_exit_price = cur_px
                 projected_exit_pnl = cur_pnl
                 if drawdown_15atr_breach:
-                    projected_reason = "drawdown_1.5x_atr"
+                    projected_reason = "drawdown_atr_breach"
                 elif lock_floor_breach:
                     projected_reason = "lock_floor_breach"
                 elif trail_armed and trail_hit:
@@ -9081,6 +9084,7 @@ async def daily_futures_playbook_sim(
         projections.append(
             {
                 "trade_id": int(tr["trade_id"]),
+                "trade_date": str(trade_d),
                 "underlying": str(tr.get("underlying") or ""),
                 "future_symbol": str(tr.get("future_symbol") or ""),
                 "direction_type": direction,
@@ -9102,7 +9106,9 @@ async def daily_futures_playbook_sim(
     return {
         "success": True,
         "generated_at_ist": datetime.now(ist).isoformat(),
-        "trade_date": str(session_date),
+        "trade_date_start": str(start_date),
+        "trade_date_end": str(session_date),
+        "include_prev_day": bool(include_prev_day),
         "symbols": symbol_list,
         "profile": {
             "name": profile_name,
