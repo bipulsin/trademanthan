@@ -55,6 +55,7 @@
 
     <div class="card">
       <h2>Projected Exit (New Tiered Logic) vs Actual Exit</h2>
+      <div id="totalsHost" class="meta" style="margin-bottom:8px;">Loading totals...</div>
       <div id="simHost" class="muted">Loading...</div>
     </div>
   </div>
@@ -81,6 +82,7 @@
       async function load() {
         const meta = document.getElementById("metaLine");
         const simHost = document.getElementById("simHost");
+        const totalsHost = document.getElementById("totalsHost");
         try {
           const url = API_BASE + "/scan/daily-futures-playbook-sim" + (SYMS.length ? ("?symbols=" + encodeURIComponent(SYMS.join(","))) : "");
           const res = await fetch(url, { cache: "no-store" });
@@ -95,8 +97,16 @@
           const rows = Array.isArray(data.projected_exits) ? data.projected_exits : [];
           if (!rows.length) {
             simHost.innerHTML = '<span class="warn">No bought-and-sold futures found for selected date.</span>';
+            totalsHost.textContent = "Totals: —";
             return;
           }
+          const totalProjected = rows.reduce((a, r) => a + (Number(r.projected_exit_pnl_rupees) || 0), 0);
+          const totalActual = rows.reduce((a, r) => a + (Number(r.actual_exit_pnl_rupees) || 0), 0);
+          const totalDelta = totalProjected - totalActual;
+          const dCls = totalDelta > 0 ? "ok" : (totalDelta < 0 ? "bad" : "muted");
+          totalsHost.innerHTML = "Total Projected PnL: <strong>₹" + n(totalProjected, 0) + "</strong> | " +
+            "Total Actual PnL: <strong>₹" + n(totalActual, 0) + "</strong> | " +
+            "Total Delta: <strong class='" + dCls + "'>₹" + n(totalDelta, 0) + "</strong>";
 
           const table = [
             "<table><thead><tr>",

@@ -8899,7 +8899,7 @@ async def daily_futures_playbook_sim(
         trade_rows = db.execute(sql, {"td": session_date}).mappings().all()
 
     # Playbook-only test profile (algo unchanged until user confirms).
-    profile_name = "safer_test_v1"
+    profile_name = "safer_test_v2"
     hard_exit_confirm_bars = 3
     early_peak_soft_zone = 10000.0
     lock_floor_pct = 0.25
@@ -8908,6 +8908,9 @@ async def daily_futures_playbook_sim(
     giveback_pct = 0.30
     giveback_abs_floor = 2000.0
     giveback_min_peak = 8000.0
+    drawdown_atr_mult = 2.4
+    drawdown_min_age_min = 75.0
+    drawdown_grace_peak_rupees = 5000.0
 
     projections: List[Dict[str, Any]] = []
     for tr in trade_rows:
@@ -9016,7 +9019,14 @@ async def daily_futures_playbook_sim(
             trail_stop = (entry_px + trail_mult * atr) if not is_short else (entry_px - trail_mult * atr)
             trail_armed = favorable_pts >= trail_arm_pts
             trail_hit = (cur_px < trail_stop) if not is_short else (cur_px > trail_stop)
-            drawdown_15atr_breach = (cur_px < entry_px - 1.5 * atr) if not is_short else (cur_px > entry_px + 1.5 * atr)
+            dd_breach_raw = (cur_px < entry_px - drawdown_atr_mult * atr) if not is_short else (cur_px > entry_px + drawdown_atr_mult * atr)
+            age_min = max(0.0, (tmark - entry_dt).total_seconds() / 60.0)
+            drawdown_15atr_breach = bool(
+                dd_breach_raw
+                and age_min >= drawdown_min_age_min
+                and cur_pnl < 0
+                and peak_pnl < drawdown_grace_peak_rupees
+            )
             giveback = (peak_pnl - cur_pnl) if peak_pnl != float("-inf") else 0.0
             giveback_breach = bool(
                 peak_pnl >= giveback_min_peak and giveback >= max(giveback_abs_floor, peak_pnl * giveback_pct)
@@ -9104,6 +9114,9 @@ async def daily_futures_playbook_sim(
             "giveback_exit_pct": giveback_pct,
             "giveback_exit_floor_rupees": giveback_abs_floor,
             "giveback_min_peak_rupees": giveback_min_peak,
+            "drawdown_atr_mult": drawdown_atr_mult,
+            "drawdown_min_age_min": drawdown_min_age_min,
+            "drawdown_grace_peak_rupees": drawdown_grace_peak_rupees,
         },
         "projected_exits": projections,
         "notes": [
