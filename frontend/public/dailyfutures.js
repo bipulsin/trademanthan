@@ -402,7 +402,8 @@
         (r.nifty_structure_weakening ? 1 : 0) +
         (r.trail_stop_hit ? 2 : 0) +
         (r.momentum_exhausting ? 4 : 0) +
-        (r.drawdown_15atr_breach ? 8 : 0);
+        (r.drawdown_15atr_breach ? 8 : 0) +
+        (r.profit_giveback_breach ? 16 : 0);
       var prev = state.prevRunAlertBits[tid] != null ? state.prevRunAlertBits[tid] : 0;
       if (bits > prev) anyNew = true;
       state.prevRunAlertBits[tid] = bits;
@@ -427,13 +428,26 @@
           : '<span class="df-exit-badge df-exit-trail" title="Price fell below entry + 0.8×ATR after profit trail was armed">🔴 Lock Profit</span>',
       );
     }
+    if (r.profit_giveback_breach) {
+      var pk = Number(r.peak_unrealized_pnl_rupees);
+      var pkTxt = Number.isFinite(pk) ? (' peak ₹' + pk.toLocaleString('en-IN', { maximumFractionDigits: 0 })) : '';
+      parts.push(
+        '<span class="df-exit-badge df-exit-gb" title="Open-profit giveback breached configured guardrail' + pkTxt + '.">⚠ Profit giveback breach</span>'
+      );
+    }
     if (!parts.length) return '—';
     return '<div class="df-exit-badges">' + parts.join(' ') + '</div>';
   }
 
   function runningActionPlaybook(r) {
     var decision = String(((r && r.alert_strip) ? r.alert_strip.decision : '') || '').toLowerCase();
-    var hard = Boolean(r && (r.trail_stop_hit || r.drawdown_15atr_breach || decision === 'lock_profit'));
+    var hard = Boolean(r && (
+      r.trail_stop_hit ||
+      r.drawdown_15atr_breach ||
+      r.profit_giveback_breach ||
+      decision === 'lock_profit' ||
+      decision === 'giveback_exit'
+    ));
     if (hard) {
       return '<span class="df-playbook df-playbook-hard" title="Strict action: exit now (lock profit hit or deep ATR drawdown).">Hard Exit</span>';
     }

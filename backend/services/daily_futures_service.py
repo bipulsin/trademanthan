@@ -152,6 +152,8 @@ def ensure_daily_futures_tables() -> None:
         nifty_structure_weakening BOOLEAN NOT NULL DEFAULT FALSE,
         trail_stop_hit BOOLEAN NOT NULL DEFAULT FALSE,
         momentum_exhausting BOOLEAN NOT NULL DEFAULT FALSE,
+        peak_unrealized_pnl_rupees NUMERIC(18,4),
+        profit_giveback_breach BOOLEAN NOT NULL DEFAULT FALSE,
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
     );
@@ -207,6 +209,14 @@ def ensure_daily_futures_tables() -> None:
             conn.execute(
                 text(
                     "ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS momentum_exhausting BOOLEAN NOT NULL DEFAULT FALSE"
+                )
+            )
+            conn.execute(
+                text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS peak_unrealized_pnl_rupees NUMERIC(18,4)")
+            )
+            conn.execute(
+                text(
+                    "ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS profit_giveback_breach BOOLEAN NOT NULL DEFAULT FALSE"
                 )
             )
             conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS direction_type VARCHAR(16)"))
@@ -680,6 +690,10 @@ def _apply_exit_alerts_to_running(
     nifty_l1_state = _nifty_momentum_state_last_two_closes(nifty_cands, nifty_thr_pct)
     nifty_weakening = nifty_l1_state == "nifty_lower_low"
     nifty_against_short = nifty_l1_state == "nifty_higher_high"
+    # Giveback hard-exit: once peak open PnL is meaningful, breach if giveback exceeds threshold.
+    giveback_pct = float(getattr(settings, "DAILY_FUTURES_GIVEBACK_EXIT_PCT", 0.30) or 0.30)
+    giveback_abs_floor = float(getattr(settings, "DAILY_FUTURES_GIVEBACK_EXIT_RUPEES_FLOOR", 2000.0) or 2000.0)
+    giveback_min_peak = float(getattr(settings, "DAILY_FUTURES_GIVEBACK_MIN_PEAK_RUPEES", 3000.0) or 3000.0)
     stock_candle_cache: Dict[str, List[Dict[str, Any]]] = {}
 
     for r in running:
@@ -766,6 +780,31 @@ def _apply_exit_alerts_to_running(
                 and ltp < ep + 0.8 * float(atr)
             )
         merged_hit = old_hit or new_hit
+        lot = _safe_float(r.get("lot_size"))
+        current_unrealized_rs: Optional[float] = None
+        if lot is not None and lot > 0 and ep is not None and ltp is not None:
+            if dirt == "SHORT":
+                current_unrealized_rs = (float(ep) - float(ltp)) * float(lot)
+            else:
+                current_unrealized_rs = (float(ltp) - float(ep)) * float(lot)
+        old_peak = _safe_float(r.get("peak_unrealized_pnl_rupees"))
+        new_peak = old_peak
+        if current_unrealized_rs is not None:
+            if new_peak is None:
+                new_peak = float(current_unrealized_rs)
+            else:
+                new_peak = max(float(new_peak), float(current_unrealized_rs))
+        old_giveback = bool(r.get("profit_giveback_breach"))
+        new_giveback = False
+        if (
+            new_peak is not None
+            and current_unrealized_rs is not None
+            and float(new_peak) >= max(0.0, giveback_min_peak)
+        ):
+            giveback = float(new_peak) - float(current_unrealized_rs)
+            giveback_thr = max(float(giveback_abs_floor), float(new_peak) * float(giveback_pct))
+            new_giveback = giveback >= giveback_thr
+        merged_giveback = old_giveback or new_giveback
 
         if dirt == "SHORT":
             drawdown_15atr_breach = bool(
@@ -791,7 +830,7 @@ def _apply_exit_alerts_to_running(
                 and (float(ep) - float(ltp)) >= 1.5 * float(atr)
             )
 
-        exit_review = bool(merged_hit or (merged_n and merged_m) or drawdown_15atr_breach)
+        exit_review = bool(merged_hit or (merged_n and merged_m) or drawdown_15atr_breach or merged_giveback)
 
         l1_amber = bool(nifty_weakening) if dirt != "SHORT" else bool(nifty_against_short)
         l3_fading = bool(new_m)
@@ -803,6 +842,8 @@ def _apply_exit_alerts_to_running(
             l2k = "building"
         if merged_hit:
             as_dec = "lock_profit"
+        elif merged_giveback:
+            as_dec = "giveback_exit"
         elif l1_amber and l3_fading:
             as_dec = "dual_exit"
         elif l1_amber or l3_fading:
@@ -826,6 +867,8 @@ def _apply_exit_alerts_to_running(
                       nifty_structure_weakening = CAST(:ns AS BOOLEAN),
                       trail_stop_hit = CAST(:th AS BOOLEAN),
                       momentum_exhausting = CAST(:me AS BOOLEAN),
+                      peak_unrealized_pnl_rupees = COALESCE(CAST(:peak_rs AS NUMERIC), peak_unrealized_pnl_rupees),
+                      profit_giveback_breach = CAST(:pgb AS BOOLEAN),
                       updated_at = CURRENT_TIMESTAMP
                     WHERE id = :id
                     """
@@ -836,6 +879,8 @@ def _apply_exit_alerts_to_running(
                     "ns": merged_n,
                     "th": merged_hit,
                     "me": merged_m,
+                    "peak_rs": float(new_peak) if new_peak is not None else None,
+                    "pgb": merged_giveback,
                     "id": tid,
                 },
             )
@@ -848,6 +893,8 @@ def _apply_exit_alerts_to_running(
         r["profit_trail_armed"] = merged_armed
         r["exit_review"] = exit_review
         r["drawdown_15atr_breach"] = drawdown_15atr_breach
+        r["peak_unrealized_pnl_rupees"] = round(float(new_peak), 2) if new_peak is not None else None
+        r["profit_giveback_breach"] = merged_giveback
         r["position_atr"] = round(float(atr), 4) if atr is not None else r.get("position_atr")
 
     try:
@@ -2380,7 +2427,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                    t.lot_size, t.entry_time, t.entry_price, t.sell_price, t.sell_time, t.buy_price,
                    t.consecutive_webhook_misses,
                    t.position_atr, t.profit_trail_armed, t.nifty_structure_weakening,
-                   t.trail_stop_hit, t.momentum_exhausting,
+                   t.trail_stop_hit, t.momentum_exhausting, t.peak_unrealized_pnl_rupees, t.profit_giveback_breach,
                    s.scan_count, s.first_hit_at, s.last_hit_at, s.conviction_score,
                    s.second_scan_conviction_score, s.second_scan_oi_leg, s.second_scan_vwap_leg, s.ltp,
                    s.stock_change_pct, s.nifty_change_pct,
@@ -2421,20 +2468,22 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                 "nifty_structure_weakening": bool(row[15]) if row[15] is not None else False,
                 "trail_stop_hit": bool(row[16]) if row[16] is not None else False,
                 "momentum_exhausting": bool(row[17]) if row[17] is not None else False,
-                "scan_count": int(row[18] or 0),
-                "first_hit_at": row[19].isoformat() if row[19] else None,
-                "last_hit_at": row[20].isoformat() if row[20] else None,
-                "conviction_score": float(row[21]) if row[21] is not None else None,
-                "second_scan_conviction_score": float(row[22]) if row[22] is not None else None,
-                "second_scan_oi_leg": float(row[23]) if row[23] is not None else None,
-                "second_scan_vwap_leg": float(row[24]) if row[24] is not None else None,
-                "ltp": float(row[25]) if row[25] is not None else None,
-                "stock_change_pct": float(row[26]) if row[26] is not None else None,
-                "nifty_change_pct": float(row[27]) if row[27] is not None else None,
-                "conviction_oi_leg": float(row[28]) if row[28] is not None else None,
-                "conviction_vwap_leg": float(row[29]) if row[29] is not None else None,
-                "session_vwap": float(row[30]) if row[30] is not None else None,
-                "conviction_breakdown_json": row[31] if len(row) > 31 and row[31] is not None else None,
+                "peak_unrealized_pnl_rupees": float(row[18]) if row[18] is not None else None,
+                "profit_giveback_breach": bool(row[19]) if row[19] is not None else False,
+                "scan_count": int(row[20] or 0),
+                "first_hit_at": row[21].isoformat() if row[21] else None,
+                "last_hit_at": row[22].isoformat() if row[22] else None,
+                "conviction_score": float(row[23]) if row[23] is not None else None,
+                "second_scan_conviction_score": float(row[24]) if row[24] is not None else None,
+                "second_scan_oi_leg": float(row[25]) if row[25] is not None else None,
+                "second_scan_vwap_leg": float(row[26]) if row[26] is not None else None,
+                "ltp": float(row[27]) if row[27] is not None else None,
+                "stock_change_pct": float(row[28]) if row[28] is not None else None,
+                "nifty_change_pct": float(row[29]) if row[29] is not None else None,
+                "conviction_oi_leg": float(row[30]) if row[30] is not None else None,
+                "conviction_vwap_leg": float(row[31]) if row[31] is not None else None,
+                "session_vwap": float(row[32]) if row[32] is not None else None,
+                "conviction_breakdown_json": row[33] if len(row) > 33 and row[33] is not None else None,
                 "warn_two_misses": miss >= 2,
             }
         )
