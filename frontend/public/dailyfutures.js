@@ -1127,6 +1127,11 @@
 
   function openSellModal(tradeId, row) {
     state.sellTradeId = tradeId;
+    const okBtn = document.getElementById('dfSellOk');
+    if (okBtn) {
+      okBtn.disabled = false;
+      okBtn.textContent = 'Confirm sell';
+    }
     document.getElementById('dfSellSym').innerHTML = row
       ? symbolWithDirectionHtml(row) + ' · ' + esc(row.underlying)
       : '';
@@ -1139,6 +1144,11 @@
 
   function closeSellModal() {
     document.getElementById('dfSellModal').setAttribute('aria-hidden', 'true');
+    const okBtn = document.getElementById('dfSellOk');
+    if (okBtn) {
+      okBtn.disabled = false;
+      okBtn.textContent = 'Confirm sell';
+    }
     state.sellTradeId = null;
   }
 
@@ -1385,7 +1395,8 @@
         const raw = await res.text();
         if (res.ok) {
           closeSellModal();
-          await refresh();
+          // Do not block the modal flow on a full refresh; this can be slow.
+          refresh().catch(function () { /* non-blocking */ });
           return;
         }
         try {
