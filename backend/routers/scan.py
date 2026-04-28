@@ -8740,3 +8740,281 @@ async def daily_futures_playbook_data(
             "Only completed 15m candles for the current IST session are included.",
         ],
     }
+
+
+@router.get("/daily-futures-playbook-sim")
+async def daily_futures_playbook_sim(
+    symbols: str = Query(
+        "MANAPPURAM,EXIDEIND,RECLTD",
+        description="Comma-separated underlyings to simulate.",
+    ),
+    trade_date: Optional[date] = Query(None, description="IST trade date (default: today)."),
+    db: Session = Depends(get_db),
+):
+    """
+    Simulate 15-min playbook timeline for actual Daily Futures trades.
+
+    For each matching sold trade (today by default), this endpoint computes at every
+    full 15-min checkpoint between entry and exit:
+    - effective SL price + source
+    - peak/current PnL + giveback amount/%
+    - time since last peak
+    - response state (Hold / Monitor / Wait for Confirmation / Hard Exit)
+    """
+    import pytz
+
+    ist = pytz.timezone("Asia/Kolkata")
+    session_date = trade_date or datetime.now(ist).date()
+    symbol_list = [str(x).strip().upper() for x in str(symbols or "").split(",") if str(x).strip()]
+    if not symbol_list:
+        symbol_list = ["MANAPPURAM", "EXIDEIND", "RECLTD"]
+    symbol_list = symbol_list[:20]
+
+    def _safe_num(x: Any) -> Optional[float]:
+        try:
+            if x is None:
+                return None
+            v = float(x)
+            return v if v == v else None
+        except Exception:
+            return None
+
+    def _parse_hhmm(hhmm: Any) -> Optional[datetime]:
+        s = str(hhmm or "").strip()
+        if len(s) < 4 or ":" not in s:
+            return None
+        try:
+            hh, mm = s.split(":", 1)
+            return ist.localize(datetime(session_date.year, session_date.month, session_date.day, int(hh), int(mm), 0))
+        except Exception:
+            return None
+
+    def _ceil_15(dt_ist: datetime) -> datetime:
+        m = dt_ist.minute
+        add = (15 - (m % 15)) % 15
+        out = dt_ist.replace(second=0, microsecond=0) + timedelta(minutes=add)
+        if add == 0 and (dt_ist.second > 0 or dt_ist.microsecond > 0):
+            out = out + timedelta(minutes=15)
+        return out
+
+    def _floor_15(dt_ist: datetime) -> datetime:
+        return dt_ist.replace(minute=(dt_ist.minute // 15) * 15, second=0, microsecond=0)
+
+    def _parse_ist_ts(v: Any) -> Optional[datetime]:
+        if v is None:
+            return None
+        if isinstance(v, datetime):
+            dtv = v
+        else:
+            s = str(v).strip()
+            if not s:
+                return None
+            if s.endswith("Z"):
+                s = s[:-1] + "+00:00"
+            try:
+                dtv = datetime.fromisoformat(s)
+            except Exception:
+                return None
+        if dtv.tzinfo is None:
+            return ist.localize(dtv)
+        return dtv.astimezone(ist)
+
+    sql = text(
+        """
+        SELECT
+            t.id AS trade_id,
+            t.underlying,
+            COALESCE(t.direction_type, s.direction_type, 'LONG') AS direction_type,
+            t.future_symbol,
+            t.instrument_key,
+            t.order_status,
+            t.entry_time,
+            t.entry_price,
+            t.sell_time,
+            t.sell_price,
+            t.buy_time,
+            t.exit_time,
+            t.exit_price,
+            t.lot_size,
+            t.position_atr,
+            s.trade_date
+        FROM daily_futures_user_trade t
+        JOIN daily_futures_screening s ON s.id = t.screening_id
+        WHERE s.trade_date = :td
+          AND t.order_status = 'sold'
+          AND UPPER(TRIM(t.underlying)) = ANY(:syms)
+        ORDER BY t.id
+        """
+    )
+    trade_rows = db.execute(sql, {"td": session_date, "syms": symbol_list}).mappings().all()
+
+    simulations: List[Dict[str, Any]] = []
+    for tr in trade_rows:
+        direction = str(tr.get("direction_type") or "LONG").strip().upper()
+        is_short = direction == "SHORT"
+        entry_dt = _parse_hhmm(tr.get("sell_time") if is_short else tr.get("entry_time"))
+        exit_dt = _parse_hhmm(tr.get("buy_time") if is_short else tr.get("exit_time"))
+        if exit_dt is None:
+            exit_dt = _parse_hhmm(tr.get("exit_time"))
+        entry_px = _safe_num(tr.get("sell_price") if is_short else tr.get("entry_price"))
+        if entry_dt is None or exit_dt is None or entry_px is None:
+            continue
+        if exit_dt <= entry_dt:
+            continue
+        ikey = str(tr.get("instrument_key") or "").strip()
+        lot = _safe_num(tr.get("lot_size")) or 1.0
+        atr = _safe_num(tr.get("position_atr"))
+        if atr is None or atr <= 0:
+            atr = max(0.0025 * entry_px, 0.1)
+
+        candles: List[Dict[str, Any]] = []
+        try:
+            raw = vwap_service.get_historical_candles_by_instrument_key(
+                ikey,
+                interval="minutes/15",
+                days_back=3,
+                range_end_date=session_date,
+            ) or []
+            for c in raw:
+                ts = _parse_ist_ts((c or {}).get("timestamp"))
+                if ts is None or ts.date() != session_date:
+                    continue
+                op = _safe_num((c or {}).get("open"))
+                hi = _safe_num((c or {}).get("high"))
+                lo = _safe_num((c or {}).get("low"))
+                cl = _safe_num((c or {}).get("close"))
+                if None in (op, hi, lo, cl):
+                    continue
+                candles.append({"timestamp": ts, "open": op, "high": hi, "low": lo, "close": cl})
+            candles.sort(key=lambda x: x["timestamp"])
+        except Exception as e:
+            logger.warning("playbook-sim candles failed %s: %s", ikey, e)
+
+        if not candles:
+            continue
+        by_ts = {c["timestamp"]: c for c in candles}
+
+        start_cp = _ceil_15(entry_dt)
+        end_cp = _floor_15(exit_dt)
+        checkpoints: List[datetime] = []
+        cp = start_cp
+        while cp <= end_cp:
+            checkpoints.append(cp)
+            cp = cp + timedelta(minutes=15)
+        if not checkpoints:
+            continue
+
+        initial_sl = entry_px - max(1.1 * atr, 0.0055 * entry_px) if not is_short else entry_px + max(1.1 * atr, 0.0055 * entry_px)
+        risk_rupees = abs(entry_px - initial_sl) * lot
+        be_trigger = 0.8 * risk_rupees
+        trail_arm_pts = 1.5 * atr
+        trail_sl = (entry_px + 0.8 * atr) if not is_short else (entry_px - 0.8 * atr)
+
+        peak_pnl = float("-inf")
+        peak_at: Optional[datetime] = None
+        prev_close: Optional[float] = None
+        timeline: List[Dict[str, Any]] = []
+
+        for tmark in checkpoints:
+            c = by_ts.get(tmark)
+            if c is None:
+                # fallback: latest completed candle <= checkpoint
+                prev = [x for x in candles if x["timestamp"] <= tmark]
+                if not prev:
+                    continue
+                c = prev[-1]
+            cur_px = float(c["close"])
+            cur_pnl = ((cur_px - entry_px) * lot) if not is_short else ((entry_px - cur_px) * lot)
+            if cur_pnl > peak_pnl:
+                peak_pnl = cur_pnl
+                peak_at = tmark
+            giveback = (peak_pnl - cur_pnl) if peak_pnl != float("-inf") else 0.0
+            giveback_pct = (giveback / peak_pnl * 100.0) if peak_pnl and peak_pnl > 0 else 0.0
+            since_peak_min = int((tmark - peak_at).total_seconds() // 60) if peak_at else None
+
+            sl_price = initial_sl
+            sl_source = "Initial"
+            if cur_pnl >= be_trigger:
+                be_sl = entry_px + 0.0008 * entry_px if not is_short else entry_px - 0.0008 * entry_px
+                if (not is_short and be_sl > sl_price) or (is_short and be_sl < sl_price):
+                    sl_price = be_sl
+                    sl_source = "BreakEven"
+            favorable_pts = (cur_px - entry_px) if not is_short else (entry_px - cur_px)
+            if favorable_pts >= trail_arm_pts:
+                if (not is_short and trail_sl > sl_price) or (is_short and trail_sl < sl_price):
+                    sl_price = trail_sl
+                    sl_source = "Trail"
+            if peak_pnl >= 3000:
+                gb_thr = max(2000.0, 0.25 * peak_pnl)
+                if giveback >= gb_thr:
+                    sl_source = "Giveback"
+
+            hard_exit = False
+            if peak_pnl >= 3000 and giveback >= max(2000.0, 0.25 * peak_pnl):
+                hard_exit = True
+            if (not is_short and cur_px <= trail_sl and favorable_pts >= trail_arm_pts) or (is_short and cur_px >= trail_sl and favorable_pts >= trail_arm_pts):
+                hard_exit = True
+            if (not is_short and cur_px <= entry_px - 1.5 * atr) or (is_short and cur_px >= entry_px + 1.5 * atr):
+                hard_exit = True
+
+            warning_one = False
+            warning_two = False
+            if prev_close is not None:
+                red_bar = c["close"] < c["open"] if not is_short else c["close"] > c["open"]
+                trend_weaker = c["close"] < prev_close if not is_short else c["close"] > prev_close
+                warning_one = bool(red_bar or trend_weaker)
+                warning_two = bool(red_bar and trend_weaker)
+            prev_close = c["close"]
+
+            response = "Hold"
+            if hard_exit:
+                response = "Hard Exit"
+            elif warning_two:
+                response = "Wait for Confirmation"
+            elif warning_one:
+                response = "Monitor"
+
+            timeline.append(
+                {
+                    "time_ist": tmark.strftime("%H:%M"),
+                    "entry_price": round(entry_px, 4),
+                    "current_price": round(cur_px, 4),
+                    "effective_sl_price": round(sl_price, 4),
+                    "sl_source": sl_source,
+                    "peak_pnl_rupees": round(peak_pnl, 2) if peak_pnl != float("-inf") else None,
+                    "current_pnl_rupees": round(cur_pnl, 2),
+                    "giveback_rupees": round(giveback, 2),
+                    "giveback_pct": round(giveback_pct, 2),
+                    "time_since_last_peak_min": since_peak_min,
+                    "response": response,
+                }
+            )
+
+        simulations.append(
+            {
+                "trade_id": int(tr["trade_id"]),
+                "underlying": str(tr.get("underlying") or ""),
+                "future_symbol": str(tr.get("future_symbol") or ""),
+                "direction_type": direction,
+                "entry_time": entry_dt.strftime("%H:%M"),
+                "exit_time": exit_dt.strftime("%H:%M"),
+                "entry_price": round(entry_px, 4),
+                "exit_price": round(_safe_num(tr.get("exit_price")) or 0.0, 4),
+                "lot_size": int(lot),
+                "position_atr": round(float(atr), 4),
+                "timeline": timeline,
+            }
+        )
+
+    return {
+        "success": True,
+        "generated_at_ist": datetime.now(ist).isoformat(),
+        "trade_date": str(session_date),
+        "symbols": symbol_list,
+        "simulations": simulations,
+        "notes": [
+            "Timeline points are full 15-minute checkpoints from first checkpoint after entry to checkpoint before/at exit.",
+            "Current price at checkpoint uses the close of the latest available completed 15m candle at/upto that checkpoint.",
+            "Responses are derived from simulated hard/monitor/confirmation rules for what-if analysis.",
+        ],
+    }

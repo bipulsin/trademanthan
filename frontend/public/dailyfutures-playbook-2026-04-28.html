@@ -54,13 +54,8 @@
     </div>
 
     <div class="card">
-      <h2>Live Inputs (Upstox + arbitrage_master currmth)</h2>
-      <div id="liveHost" class="muted">Loading...</div>
-    </div>
-
-    <div class="card">
-      <h2>Symbol Playbook (What-if from latest completed 15m OHLC)</h2>
-      <div id="playbookHost" class="muted">Loading...</div>
+      <h2>Trade Timeline Simulation (15-min checkpoints)</h2>
+      <div id="simHost" class="muted">Loading...</div>
     </div>
   </div>
 
@@ -75,105 +70,76 @@
         return x.toFixed(d == null ? 2 : d);
       }
 
-      function pct(a, b) {
-        const x = Number(a), y = Number(b);
-        if (!Number.isFinite(x) || !Number.isFinite(y) || y === 0) return null;
-        return ((x - y) / y) * 100.0;
-      }
-
-      function pickState(row) {
-        const l = row.latest_completed_15m || {};
-        const p = row.previous_completed_15m || {};
-        const lClose = Number(l.close), lOpen = Number(l.open);
-        const pClose = Number(p.close);
-        if (!Number.isFinite(lClose) || !Number.isFinite(lOpen)) return { state: "monitor", reason: "insufficient 15m OHLC" };
-        const barRet = pct(lClose, lOpen);
-        const momWeak = Number.isFinite(barRet) ? barRet < -0.25 : false;
-        const trendWeak = Number.isFinite(pClose) ? lClose < pClose : false;
-        if (momWeak && trendWeak) return { state: "confirm", reason: "latest 15m weak close + lower close vs previous bar" };
-        if (momWeak || trendWeak) return { state: "monitor", reason: "one warning active on latest completed 15m bar" };
-        return { state: "monitor", reason: "no hard warning from latest completed 15m bars" };
-      }
-
-      function badge(state) {
-        if (state === "hard") return '<span class="chip hard">Hard Exit</span>';
-        if (state === "confirm") return '<span class="chip confirm">Confirm Exit</span>';
-        return '<span class="chip monitor">Monitor</span>';
+      function responseChip(resp) {
+        const r = String(resp || "").toLowerCase();
+        if (r === "hard exit") return '<span class="chip hard">Hard Exit</span>';
+        if (r === "wait for confirmation") return '<span class="chip confirm">Wait for Confirmation</span>';
+        if (r === "monitor") return '<span class="chip monitor">Monitor</span>';
+        return '<span class="chip monitor">Hold</span>';
       }
 
       async function load() {
         const meta = document.getElementById("metaLine");
-        const liveHost = document.getElementById("liveHost");
-        const playHost = document.getElementById("playbookHost");
+        const simHost = document.getElementById("simHost");
         try {
-          const url = API_BASE + "/scan/daily-futures-playbook-data?symbols=" + encodeURIComponent(SYMS.join(","));
+          const url = API_BASE + "/scan/daily-futures-playbook-sim?symbols=" + encodeURIComponent(SYMS.join(","));
           const res = await fetch(url, { cache: "no-store" });
           if (!res.ok) {
-            liveHost.innerHTML = '<span class="bad">Failed to load playbook data (' + res.status + ')</span>';
-            playHost.innerHTML = "";
+            simHost.innerHTML = '<span class="bad">Failed to load playbook simulation (' + res.status + ')</span>';
             return;
           }
           const data = await res.json();
-          meta.textContent = "Generated at IST: " + (data.generated_at_ist || "—") + " | Symbols: " + SYMS.join(", ");
+          meta.textContent = "Generated at IST: " + (data.generated_at_ist || "—") + " | Trade date: " + (data.trade_date || "—");
 
-          const rows = Array.isArray(data.rows) ? data.rows : [];
-          if (!rows.length) {
-            liveHost.innerHTML = '<span class="warn">No rows found for selected symbols.</span>';
-            playHost.innerHTML = "";
+          const sims = Array.isArray(data.simulations) ? data.simulations : [];
+          if (!sims.length) {
+            simHost.innerHTML = '<span class="warn">No sold trades found for selected symbols/date.</span>';
             return;
           }
 
-          const liveTable = [
-            "<table><thead><tr>",
-            "<th>Underlying</th><th>CurrMth FUT</th><th class='mono'>Instrument Key</th>",
-            "<th class='num'>Quote LTP</th><th class='num'>Quote Open</th><th class='num'>Session VWAP</th>",
-            "<th class='num'>Latest 15m O/H/L/C</th>",
-            "</tr></thead><tbody>"
-          ];
-
-          const playTable = [
-            "<table><thead><tr>",
-            "<th>Underlying</th><th>Playbook State</th><th>Why (from latest completed 15m)</th><th>Suggested action</th>",
-            "</tr></thead><tbody>"
-          ];
-
-          rows.forEach(function (r) {
-            const q = r.quote || {};
-            const l = r.latest_completed_15m || {};
-            liveTable.push(
-              "<tr>" +
-                "<td><strong>" + (r.underlying || "—") + "</strong></td>" +
-                "<td>" + (r.currmth_future_symbol || "—") + "</td>" +
-                "<td class='mono'>" + (r.currmth_future_instrument_key || "—") + "</td>" +
-                "<td class='num'>" + n(q.ltp, 2) + "</td>" +
-                "<td class='num'>" + n(q.open, 2) + "</td>" +
-                "<td class='num'>" + n(q.session_vwap, 2) + "</td>" +
-                "<td class='num'>" + [n(l.open,2), n(l.high,2), n(l.low,2), n(l.close,2)].join(" / ") + "</td>" +
-              "</tr>"
-            );
-
-            const st = pickState(r);
-            let action = "Hold with recalculated SL";
-            if (st.state === "hard") action = "Exit full lot now";
-            if (st.state === "confirm") action = "If repeated on next completed 15m bar, exit full lot";
-            playTable.push(
-              "<tr>" +
-                "<td><strong>" + (r.underlying || "—") + "</strong></td>" +
-                "<td>" + badge(st.state) + "</td>" +
-                "<td>" + st.reason + "</td>" +
-                "<td>" + action + "</td>" +
-              "</tr>"
-            );
+          const sections = [];
+          sims.forEach(function (tr) {
+            const tRows = Array.isArray(tr.timeline) ? tr.timeline : [];
+            const title = (tr.future_symbol || tr.underlying || "—") +
+              " | Entry " + (tr.entry_time || "—") +
+              " @ ₹" + n(tr.entry_price, 2) +
+              " | Exit " + (tr.exit_time || "—") +
+              " @ ₹" + n(tr.exit_price, 2) +
+              " | ATR " + n(tr.position_atr, 4);
+            const t = [
+              "<div style='margin:0 0 8px;font-weight:700;'>" + title + "</div>",
+              "<table><thead><tr>",
+              "<th>Time</th><th class='num'>Entry ₹</th><th class='num'>Current ₹</th>",
+              "<th class='num'>Effective SL ₹</th><th>SL Source</th>",
+              "<th class='num'>Peak PnL ₹</th><th class='num'>Current PnL ₹</th>",
+              "<th class='num'>Giveback ₹</th><th class='num'>Giveback %</th>",
+              "<th class='num'>Since Peak (min)</th><th>Response</th>",
+              "</tr></thead><tbody>"
+            ];
+            tRows.forEach(function (r) {
+              t.push(
+                "<tr>" +
+                "<td>" + (r.time_ist || "—") + "</td>" +
+                "<td class='num'>" + n(r.entry_price, 2) + "</td>" +
+                "<td class='num'>" + n(r.current_price, 2) + "</td>" +
+                "<td class='num'>" + n(r.effective_sl_price, 2) + "</td>" +
+                "<td>" + (r.sl_source || "—") + "</td>" +
+                "<td class='num'>" + n(r.peak_pnl_rupees, 0) + "</td>" +
+                "<td class='num'>" + n(r.current_pnl_rupees, 0) + "</td>" +
+                "<td class='num'>" + n(r.giveback_rupees, 0) + "</td>" +
+                "<td class='num'>" + n(r.giveback_pct, 1) + "%</td>" +
+                "<td class='num'>" + (r.time_since_last_peak_min != null ? r.time_since_last_peak_min : "—") + "</td>" +
+                "<td>" + responseChip(r.response) + "</td>" +
+                "</tr>"
+              );
+            });
+            t.push("</tbody></table>");
+            sections.push("<div class='card'>" + t.join("") + "</div>");
           });
-
-          liveTable.push("</tbody></table>");
-          playTable.push("</tbody></table>");
-          liveHost.innerHTML = liveTable.join("");
-          playHost.innerHTML = playTable.join("");
+          simHost.innerHTML = sections.join("");
         } catch (e) {
-          meta.textContent = "Failed to load playbook data";
-          liveHost.innerHTML = "<span class='bad'>" + (e && e.message ? e.message : String(e)) + "</span>";
-          playHost.innerHTML = "";
+          meta.textContent = "Failed to load playbook simulation";
+          simHost.innerHTML = "<span class='bad'>" + (e && e.message ? e.message : String(e)) + "</span>";
         }
       }
 
