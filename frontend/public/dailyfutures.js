@@ -431,6 +431,18 @@
     return '<div class="df-exit-badges">' + parts.join(' ') + '</div>';
   }
 
+  function runningActionPlaybook(r) {
+    var decision = String(((r && r.alert_strip) ? r.alert_strip.decision : '') || '').toLowerCase();
+    var hard = Boolean(r && (r.trail_stop_hit || r.drawdown_15atr_breach || decision === 'lock_profit'));
+    if (hard) {
+      return '<span class="df-playbook df-playbook-hard" title="Strict action: exit now (lock profit hit or deep ATR drawdown).">Hard Exit</span>';
+    }
+    if (decision === 'dual_exit') {
+      return '<span class="df-playbook df-playbook-confirm" title="Two caution signals are active together. Tighten risk and confirm quickly.">Confirm Exit</span>';
+    }
+    return '<span class="df-playbook df-playbook-monitor" title="No strict exit yet. Keep monitoring next 15m updates.">Monitor</span>';
+  }
+
   async function fetchWorkspace(opts) {
     opts = opts || {};
     const timeoutMs = Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : 20000;
@@ -829,6 +841,7 @@
           unrealizedPnlCell(r) +
           '<td class="df-alerts-cell">' +
           runningExitBadges(r) +
+          '<div style="margin-top:4px;">' + runningActionPlaybook(r) + '</div>' +
           '</td><td class="df-run-actions"><div class="df-run-action-btns">' +
           '<button type="button" class="df-btn df-btn-sell" data-tid="' +
           r.trade_id +
