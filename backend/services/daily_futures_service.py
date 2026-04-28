@@ -2025,10 +2025,12 @@ def _apply_live_ltps_to_picks_and_running(
     picks: List[Dict[str, Any]],
     running: List[Dict[str, Any]],
     closed: Optional[List[Dict[str, Any]]] = None,
+    *,
+    persist_screening: bool = True,
 ) -> None:
     """
-    Refresh LTP from Upstox for every row (batch + per-key fallback), update dicts in place,
-    and persist ltp on daily_futures_screening so 15-min webhook runs and page loads stay aligned.
+    Refresh LTP from Upstox for every row (batch + per-key fallback), update dicts in place.
+    Optionally persist ltp on daily_futures_screening (skipped for lite workspace to save many UPDATEs).
     """
     # Prioritize running rows first so LTP for open positions is refreshed even
     # when fallback budget is exhausted.
@@ -2094,7 +2096,7 @@ def _apply_live_ltps_to_picks_and_running(
         if sid is not None:
             by_screening[int(sid)] = lp_r
 
-    if not by_screening:
+    if not by_screening or not persist_screening:
         return
     try:
         with engine.begin() as conn:
@@ -2118,6 +2120,9 @@ def _apply_live_rel_strength_to_picks_and_running(
     picks: List[Dict[str, Any]],
     running: List[Dict[str, Any]],
     trade_date: date,
+    *,
+    persist_screening: bool = True,
+    snapshot_baselines_only: bool = False,
 ) -> None:
     """
     Refresh stock_change_pct and nifty_change_pct for the Rel. str. column (FUT % vs Nifty 50 %).
@@ -2213,13 +2218,19 @@ def _apply_live_rel_strength_to_picks_and_running(
         except Exception as e:
             logger.debug("daily_futures: rel-strength Nifty single quote failed: %s", e)
 
-    nifty_prev = _prev_15m_close_for_instrument(upstox, NIFTY50_INDEX_KEY, now_ist, prev15_cache)
     nifty_snap = _snapshot_for_instrument(NIFTY50_INDEX_KEY)
-    if nifty_prev is None:
-        # Prefer session open for intraday day-% baseline.
+    # Lite workspace (snapshot_baselines_only): avoid one historical-candles HTTP call per
+    # underlying — this was dominating load time (>30s) with many Today's pick symbols.
+    if snapshot_baselines_only:
         nifty_prev = _quote_session_open_from_snapshot(nifty_snap)
-    if nifty_prev is None:
-        nifty_prev = _prev_close_from_snapshot(nifty_snap)
+        if nifty_prev is None:
+            nifty_prev = _prev_close_from_snapshot(nifty_snap)
+    else:
+        nifty_prev = _prev_15m_close_for_instrument(upstox, NIFTY50_INDEX_KEY, now_ist, prev15_cache)
+        if nifty_prev is None:
+            nifty_prev = _quote_session_open_from_snapshot(nifty_snap)
+        if nifty_prev is None:
+            nifty_prev = _prev_close_from_snapshot(nifty_snap)
     nifty_change_pct: Optional[float] = None
     if nifty_ltp is not None and nifty_prev and nifty_prev > 0:
         nifty_change_pct = round(((nifty_ltp - nifty_prev) / nifty_prev) * 100.0, 6)
@@ -2230,13 +2241,17 @@ def _apply_live_rel_strength_to_picks_and_running(
         if not u:
             continue
         ik = str(r.get("instrument_key") or "").strip()
-        stock_prev = _prev_15m_close_for_instrument(upstox, ik, now_ist, prev15_cache)
         stock_snap = _snapshot_for_instrument(ik)
-        if stock_prev is None:
-            # Prefer session open for intraday day-% baseline.
+        if snapshot_baselines_only:
             stock_prev = _quote_session_open_from_snapshot(stock_snap)
-        if stock_prev is None:
-            stock_prev = _prev_close_from_snapshot(stock_snap)
+            if stock_prev is None:
+                stock_prev = _prev_close_from_snapshot(stock_snap)
+        else:
+            stock_prev = _prev_15m_close_for_instrument(upstox, ik, now_ist, prev15_cache)
+            if stock_prev is None:
+                stock_prev = _quote_session_open_from_snapshot(stock_snap)
+            if stock_prev is None:
+                stock_prev = _prev_close_from_snapshot(stock_snap)
         stock_ltp = _safe_float(r.get("ltp"))
         if stock_ltp is None:
             stock_ltp = _ltp_for_instrument(ik)
@@ -2258,7 +2273,7 @@ def _apply_live_rel_strength_to_picks_and_running(
         sid = r.get("screening_id")
         if sid is not None and (stock_change_pct is not None or nifty_change_pct is not None):
             by_screening[int(sid)] = (stock_change_pct, nifty_change_pct)
-    if not by_screening:
+    if not by_screening or not persist_screening:
         return
     try:
         with engine.begin() as conn:
@@ -2581,9 +2596,9 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
     # Today's pick rows; otherwise the UI shows em dashes. Full mode also updates running/closed.
     try:
         if lite_mode:
-            _apply_live_ltps_to_picks_and_running(_picks_for_quotes, [], [])
+            _apply_live_ltps_to_picks_and_running(_picks_for_quotes, [], [], persist_screening=False)
         else:
-            _apply_live_ltps_to_picks_and_running(_picks_for_quotes, running, closed)
+            _apply_live_ltps_to_picks_and_running(_picks_for_quotes, running, closed, persist_screening=True)
     except Exception as e:
         logger.warning("daily_futures: live LTP refresh failed: %s", e, exc_info=True)
 
@@ -2610,9 +2625,21 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
 
     try:
         if lite_mode:
-            _apply_live_rel_strength_to_picks_and_running(_picks_for_quotes, [], td)
+            _apply_live_rel_strength_to_picks_and_running(
+                _picks_for_quotes,
+                [],
+                td,
+                persist_screening=False,
+                snapshot_baselines_only=True,
+            )
         else:
-            _apply_live_rel_strength_to_picks_and_running(_picks_for_quotes, running, td)
+            _apply_live_rel_strength_to_picks_and_running(
+                _picks_for_quotes,
+                running,
+                td,
+                persist_screening=True,
+                snapshot_baselines_only=False,
+            )
     except Exception as e:
         logger.warning("daily_futures: rel-strength refresh failed: %s", e, exc_info=True)
 
