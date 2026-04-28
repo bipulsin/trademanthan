@@ -412,31 +412,8 @@
   }
 
   function runningExitBadges(r) {
-    var isShort = String(r.direction_type || '').toUpperCase() === 'SHORT';
-    var parts = [];
-    if (r.drawdown_15atr_breach) {
-      parts.push(
-        isShort
-          ? '<span class="df-exit-badge df-exit-dd" title="Short: LTP is above your sell (entry) by at least 1.5× 15m ATR; profit trail was never in play.">⛔ Drawdown (≥1.5×ATR)</span>'
-          : '<span class="df-exit-badge df-exit-dd" title="LTP is below entry by at least 1.5× 15m ATR; profit trail was never in play for this.">⛔ Drawdown (≥1.5×ATR)</span>',
-      );
-    }
-    if (r.trail_stop_hit) {
-      parts.push(
-        isShort
-          ? '<span class="df-exit-badge df-exit-trail" title="Short: price rose to within 0.8×ATR of your sell after trail was armed">🔴 Lock Profit</span>'
-          : '<span class="df-exit-badge df-exit-trail" title="Price fell below entry + 0.8×ATR after profit trail was armed">🔴 Lock Profit</span>',
-      );
-    }
-    if (r.profit_giveback_breach) {
-      var pk = Number(r.peak_unrealized_pnl_rupees);
-      var pkTxt = Number.isFinite(pk) ? (' peak ₹' + pk.toLocaleString('en-IN', { maximumFractionDigits: 0 })) : '';
-      parts.push(
-        '<span class="df-exit-badge df-exit-gb" title="Open-profit giveback breached configured guardrail' + pkTxt + '.">⚠ Profit giveback breach</span>'
-      );
-    }
-    if (!parts.length) return '—';
-    return '<div class="df-exit-badges">' + parts.join(' ') + '</div>';
+    // Exit/caution signals are intentionally displayed only in the 15m strip section.
+    return '—';
   }
 
   function runningActionPlaybook(r) {
@@ -830,7 +807,6 @@
         const warn = r.warn_two_misses
           ? '<span class="df-blink" title="Not seen in the last two consecutive webhooks">↓</span>'
           : '';
-        const playbookHtml = runningActionPlaybook(r);
         const refPx =
           String(r.direction_type || "").toUpperCase() === "SHORT" ? r.sell_price : r.entry_price;
         return (
@@ -859,7 +835,6 @@
           unrealizedPnlCell(r) +
           '<td class="df-alerts-cell">' +
           runningExitBadges(r) +
-          (playbookHtml ? ('<div style="margin-top:4px;">' + playbookHtml + '</div>') : '') +
           '</td><td class="df-run-actions"><div class="df-run-action-btns">' +
           '<button type="button" class="df-btn df-btn-sell" data-tid="' +
           r.trade_id +
