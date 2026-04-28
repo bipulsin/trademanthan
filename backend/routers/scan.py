@@ -8573,3 +8573,170 @@ async def insert_jan6_index_prices_330pm(db: Session = Depends(get_db)):
             "success": False,
             "error": str(e)
         }
+
+
+@router.get("/daily-futures-playbook-data")
+async def daily_futures_playbook_data(
+    symbols: str = Query(
+        "MANAPPURAM,EXIDEIND,RECLTD",
+        description="Comma-separated underlyings (e.g. MANAPPURAM,EXIDEIND,RECLTD)",
+    ),
+    db: Session = Depends(get_db),
+):
+    """
+    Public data API for the Daily Futures what-if playbook page.
+
+    Source of truth:
+    - ``arbitrage_master`` for current-month FUT mapping
+    - Upstox quote API for live quote
+    - Upstox historical API for 15-min OHLC (current IST session)
+    """
+    import pytz
+
+    ist = pytz.timezone("Asia/Kolkata")
+    now_ist = datetime.now(ist)
+    symbol_list = [str(x).strip().upper() for x in str(symbols or "").split(",") if str(x).strip()]
+    if not symbol_list:
+        symbol_list = ["MANAPPURAM", "EXIDEIND", "RECLTD"]
+    # Keep endpoint lightweight and predictable for public page.
+    symbol_list = symbol_list[:10]
+
+    q = text(
+        """
+        SELECT stock,
+               currmth_future_symbol,
+               currmth_future_instrument_key,
+               currmth_future_ltp
+        FROM arbitrage_master
+        WHERE UPPER(TRIM(stock)) = ANY(:syms)
+        ORDER BY stock
+        """
+    )
+    rows = db.execute(q, {"syms": symbol_list}).mappings().all()
+    by_stock = {str(r.get("stock") or "").strip().upper(): dict(r) for r in rows}
+
+    def _parse_ist_ts(v: Any) -> Optional[datetime]:
+        if v is None:
+            return None
+        if isinstance(v, datetime):
+            dtv = v
+        else:
+            s = str(v).strip()
+            if not s:
+                return None
+            if s.endswith("Z"):
+                s = s[:-1] + "+00:00"
+            try:
+                dtv = datetime.fromisoformat(s)
+            except Exception:
+                return None
+        if dtv.tzinfo is None:
+            return ist.localize(dtv)
+        return dtv.astimezone(ist)
+
+    def _safe_num(x: Any) -> Optional[float]:
+        try:
+            if x is None:
+                return None
+            f = float(x)
+            return f if f == f else None
+        except Exception:
+            return None
+
+    out_rows: List[Dict[str, Any]] = []
+    for sym in symbol_list:
+        ar = by_stock.get(sym) or {}
+        fut_sym = ar.get("currmth_future_symbol")
+        ikey = ar.get("currmth_future_instrument_key")
+        master_ltp = _safe_num(ar.get("currmth_future_ltp"))
+
+        quote_ltp = None
+        quote_open = None
+        quote_close = None
+        quote_vwap = None
+        candles_15m_today: List[Dict[str, Any]] = []
+        latest_completed_15m = None
+        previous_completed_15m = None
+
+        if ikey:
+            try:
+                qd = vwap_service.get_market_quote_by_key(ikey) or {}
+                quote_ltp = _safe_num(qd.get("last_price"))
+                qohlc = qd.get("ohlc") if isinstance(qd.get("ohlc"), dict) else {}
+                quote_open = _safe_num(qohlc.get("open")) or _safe_num(qd.get("open"))
+                quote_close = _safe_num(qohlc.get("close")) or _safe_num(qd.get("close"))
+                quote_vwap = (
+                    _safe_num(qd.get("vwap"))
+                    or _safe_num(qd.get("session_vwap"))
+                    or _safe_num(qd.get("average_price"))
+                    or _safe_num(qd.get("avg_price"))
+                    or _safe_num(qd.get("average_traded_price"))
+                    or _safe_num(qd.get("atp"))
+                )
+            except Exception as e:
+                logger.warning("playbook-data quote failed %s: %s", ikey, e)
+
+            try:
+                raw = vwap_service.get_historical_candles_by_instrument_key(
+                    ikey,
+                    interval="minutes/15",
+                    days_back=3,
+                    range_end_date=now_ist.date(),
+                ) or []
+                cutoff = now_ist.replace(minute=(now_ist.minute // 15) * 15, second=0, microsecond=0)
+                for c in raw:
+                    ts = _parse_ist_ts((c or {}).get("timestamp"))
+                    if ts is None or ts.date() != now_ist.date() or ts >= cutoff:
+                        continue
+                    op = _safe_num((c or {}).get("open"))
+                    hi = _safe_num((c or {}).get("high"))
+                    lo = _safe_num((c or {}).get("low"))
+                    cl = _safe_num((c or {}).get("close"))
+                    if None in (op, hi, lo, cl):
+                        continue
+                    candles_15m_today.append(
+                        {
+                            "timestamp": ts.isoformat(),
+                            "open": op,
+                            "high": hi,
+                            "low": lo,
+                            "close": cl,
+                        }
+                    )
+                candles_15m_today.sort(key=lambda x: x.get("timestamp") or "")
+                if candles_15m_today:
+                    latest_completed_15m = candles_15m_today[-1]
+                if len(candles_15m_today) >= 2:
+                    previous_completed_15m = candles_15m_today[-2]
+            except Exception as e:
+                logger.warning("playbook-data 15m candles failed %s: %s", ikey, e)
+
+        out_rows.append(
+            {
+                "underlying": sym,
+                "currmth_future_symbol": fut_sym,
+                "currmth_future_instrument_key": ikey,
+                "currmth_future_ltp_master": master_ltp,
+                "quote": {
+                    "ltp": quote_ltp,
+                    "open": quote_open,
+                    "close": quote_close,
+                    "session_vwap": quote_vwap,
+                },
+                "latest_completed_15m": latest_completed_15m,
+                "previous_completed_15m": previous_completed_15m,
+                "candles_15m_today": candles_15m_today,
+            }
+        )
+
+    return {
+        "success": True,
+        "generated_at_ist": now_ist.isoformat(),
+        "symbols": symbol_list,
+        "rows": out_rows,
+        "notes": [
+            "Current-month mapping comes from arbitrage_master.",
+            "Quote and 15m OHLC come from Upstox API at request time.",
+            "Only completed 15m candles for the current IST session are included.",
+        ],
+    }
