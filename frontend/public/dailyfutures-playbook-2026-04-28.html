@@ -89,7 +89,8 @@
             return;
           }
           const data = await res.json();
-          meta.textContent = "Generated at IST: " + (data.generated_at_ist || "—") + " | Trade date: " + (data.trade_date || "—");
+          const p = data.profile || {};
+          meta.textContent = "Generated at IST: " + (data.generated_at_ist || "—") + " | Trade date: " + (data.trade_date || "—") + " | Profile: " + (p.name || "default");
 
           const rows = Array.isArray(data.projected_exits) ? data.projected_exits : [];
           if (!rows.length) {

@@ -8898,15 +8898,16 @@ async def daily_futures_playbook_sim(
         )
         trade_rows = db.execute(sql, {"td": session_date}).mappings().all()
 
-    # Must match daily_futures_service tiered logic defaults.
-    hard_exit_confirm_bars = 2
-    early_peak_soft_zone = 6000.0
-    lock_floor_pct = 0.35
-    tight_trail_atr = 0.5
-    tight_trail_min_peak = 10000.0
+    # Playbook-only test profile (algo unchanged until user confirms).
+    profile_name = "safer_test_v1"
+    hard_exit_confirm_bars = 3
+    early_peak_soft_zone = 10000.0
+    lock_floor_pct = 0.25
+    tight_trail_atr = 0.65
+    tight_trail_min_peak = 15000.0
     giveback_pct = 0.30
     giveback_abs_floor = 2000.0
-    giveback_min_peak = 3000.0
+    giveback_min_peak = 8000.0
 
     projections: List[Dict[str, Any]] = []
     for tr in trade_rows:
@@ -9093,9 +9094,20 @@ async def daily_futures_playbook_sim(
         "generated_at_ist": datetime.now(ist).isoformat(),
         "trade_date": str(session_date),
         "symbols": symbol_list,
+        "profile": {
+            "name": profile_name,
+            "hard_exit_confirm_bars": hard_exit_confirm_bars,
+            "early_peak_soft_zone": early_peak_soft_zone,
+            "lock_floor_pct": lock_floor_pct,
+            "tight_trail_atr": tight_trail_atr,
+            "tight_trail_min_peak_rupees": tight_trail_min_peak,
+            "giveback_exit_pct": giveback_pct,
+            "giveback_exit_floor_rupees": giveback_abs_floor,
+            "giveback_min_peak_rupees": giveback_min_peak,
+        },
         "projected_exits": projections,
         "notes": [
-            "Projected exit uses tiered Daily Futures logic (early soft-zone confirmation + dynamic lock floor + tightened trail).",
+            "Projected exit uses tiered Daily Futures logic with playbook-only safer test profile.",
             "Projection scans full 15m checkpoints from first checkpoint after entry to checkpoint before/at actual exit.",
             "PnL delta = projected_exit_pnl - actual_exit_pnl.",
         ],
