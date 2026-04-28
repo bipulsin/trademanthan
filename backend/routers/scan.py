@@ -11,7 +11,7 @@ import os
 import sys
 import time
 import requests
-from urllib.parse import urlencode, parse_qs
+from urllib.parse import urlencode, parse_qs, quote
 import secrets
 import logging
 import asyncio
@@ -8868,6 +8868,17 @@ async def daily_futures_playbook_sim(
             atr = max(0.0025 * entry_px, 0.1)
 
         candles: List[Dict[str, Any]] = []
+        def _append_candle(ts_raw: Any, op_raw: Any, hi_raw: Any, lo_raw: Any, cl_raw: Any) -> None:
+            ts = _parse_ist_ts(ts_raw)
+            if ts is None or ts.date() != session_date:
+                return
+            op = _safe_num(op_raw)
+            hi = _safe_num(hi_raw)
+            lo = _safe_num(lo_raw)
+            cl = _safe_num(cl_raw)
+            if None in (op, hi, lo, cl):
+                return
+            candles.append({"timestamp": ts, "open": op, "high": hi, "low": lo, "close": cl})
         try:
             raw = vwap_service.get_historical_candles_by_instrument_key(
                 ikey,
@@ -8876,17 +8887,25 @@ async def daily_futures_playbook_sim(
                 range_end_date=session_date,
             ) or []
             for c in raw:
-                ts = _parse_ist_ts((c or {}).get("timestamp"))
-                if ts is None or ts.date() != session_date:
-                    continue
-                op = _safe_num((c or {}).get("open"))
-                hi = _safe_num((c or {}).get("high"))
-                lo = _safe_num((c or {}).get("low"))
-                cl = _safe_num((c or {}).get("close"))
-                if None in (op, hi, lo, cl):
-                    continue
-                candles.append({"timestamp": ts, "open": op, "high": hi, "low": lo, "close": cl})
+                if isinstance(c, dict):
+                    _append_candle(c.get("timestamp"), c.get("open"), c.get("high"), c.get("low"), c.get("close"))
             candles.sort(key=lambda x: x["timestamp"])
+            if not candles:
+                try:
+                    key_enc = quote(ikey, safe="")
+                    intraday_url = f"{vwap_service.base_url}/historical-candle/intraday/{key_enc}/minutes/15"
+                    raw_i = vwap_service.make_api_request(intraday_url, method="GET", timeout=15, max_retries=2) or {}
+                    rows_i = []
+                    if isinstance(raw_i, dict) and raw_i.get("status") == "success":
+                        rows_i = ((raw_i.get("data") or {}).get("candles")) or []
+                    for row in rows_i:
+                        if isinstance(row, dict):
+                            _append_candle(row.get("timestamp"), row.get("open"), row.get("high"), row.get("low"), row.get("close"))
+                        elif isinstance(row, (list, tuple)) and len(row) >= 5:
+                            _append_candle(row[0], row[1], row[2], row[3], row[4])
+                    candles.sort(key=lambda x: x["timestamp"])
+                except Exception as e:
+                    logger.warning("playbook-sim intraday fallback failed %s: %s", ikey, e)
         except Exception as e:
             logger.warning("playbook-sim candles failed %s: %s", ikey, e)
 
