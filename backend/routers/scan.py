@@ -8900,19 +8900,19 @@ async def daily_futures_playbook_sim(
         )
         trade_rows = db.execute(sql, {"sd": start_date, "ed": session_date}).mappings().all()
 
-    # Playbook-only test profile (algo unchanged until user confirms).
-    profile_name = "safer_test_v2"
-    hard_exit_confirm_bars = 3
-    early_peak_soft_zone = 10000.0
-    lock_floor_pct = 0.25
-    tight_trail_atr = 0.65
-    tight_trail_min_peak = 15000.0
-    giveback_pct = 0.30
-    giveback_abs_floor = 2000.0
-    giveback_min_peak = 8000.0
-    drawdown_atr_mult = 2.4
-    drawdown_min_age_min = 75.0
-    drawdown_grace_peak_rupees = 5000.0
+    # Playbook-only lock-ladder profile (algo unchanged until user confirms).
+    profile_name = "profit_lock_ladder_v1"
+
+    def _lock_floor_from_peak(peak_pnl: float) -> float:
+        p = float(peak_pnl or 0.0)
+        if p < 5000.0:
+            return 0.0
+        if p < 8000.0:
+            return 2000.0
+        if p < 10000.0:
+            return 5000.0
+        extra_steps = int(max(0.0, p - 10000.0) // 1500.0)
+        return 7000.0 + (extra_steps * 1000.0)
 
     projections: List[Dict[str, Any]] = []
     for tr in trade_rows:
@@ -8990,18 +8990,12 @@ async def daily_futures_playbook_sim(
         if not checkpoints:
             continue
 
-        initial_sl = entry_px - max(1.1 * atr, 0.0055 * entry_px) if not is_short else entry_px + max(1.1 * atr, 0.0055 * entry_px)
-        risk_rupees = abs(entry_px - initial_sl) * lot
-        be_trigger = 0.8 * risk_rupees
-        trail_arm_pts = 1.5 * atr
-        trail_sl = (entry_px + 0.8 * atr) if not is_short else (entry_px - 0.8 * atr)
-
         peak_pnl = float("-inf")
-        bars_seen: List[Dict[str, Any]] = []
+        lock_floor = 0.0
         projected_exit_time: Optional[str] = None
         projected_exit_price: Optional[float] = None
         projected_exit_pnl: Optional[float] = None
-        projected_reason = "no_hard_exit_before_actual"
+        projected_reason = "no_lock_trigger_before_actual"
 
         for tmark in checkpoints:
             c = by_ts.get(tmark)
@@ -9011,67 +9005,18 @@ async def daily_futures_playbook_sim(
                 if not prev:
                     continue
                 c = prev[-1]
-            bars_seen.append(c)
             cur_px = float(c["close"])
             cur_pnl = ((cur_px - entry_px) * lot) if not is_short else ((entry_px - cur_px) * lot)
             if cur_pnl > peak_pnl:
                 peak_pnl = cur_pnl
-            favorable_pts = (cur_px - entry_px) if not is_short else (entry_px - cur_px)
+            if peak_pnl > 0:
+                lock_floor = max(lock_floor, _lock_floor_from_peak(peak_pnl))
 
-            trail_mult = tight_trail_atr if peak_pnl >= tight_trail_min_peak else 0.8
-            trail_stop = (entry_px + trail_mult * atr) if not is_short else (entry_px - trail_mult * atr)
-            trail_armed = favorable_pts >= trail_arm_pts
-            trail_hit = (cur_px < trail_stop) if not is_short else (cur_px > trail_stop)
-            dd_breach_raw = (cur_px < entry_px - drawdown_atr_mult * atr) if not is_short else (cur_px > entry_px + drawdown_atr_mult * atr)
-            age_min = max(0.0, (tmark - entry_dt).total_seconds() / 60.0)
-            drawdown_15atr_breach = bool(
-                dd_breach_raw
-                and age_min >= drawdown_min_age_min
-                and cur_pnl < 0
-                and peak_pnl < drawdown_grace_peak_rupees
-            )
-            giveback = (peak_pnl - cur_pnl) if peak_pnl != float("-inf") else 0.0
-            giveback_breach = bool(
-                peak_pnl >= giveback_min_peak and giveback >= max(giveback_abs_floor, peak_pnl * giveback_pct)
-            )
-            lock_floor_breach = bool(
-                peak_pnl >= tight_trail_min_peak and cur_pnl <= (peak_pnl * lock_floor_pct)
-            )
-            dual_now = False
-            if len(bars_seen) >= 2:
-                a, b = bars_seen[-2], bars_seen[-1]
-                try:
-                    body_a = abs(float(a.get("close")) - float(a.get("open")))
-                    body_b = abs(float(b.get("close")) - float(b.get("open")))
-                    hi = float(b.get("high"))
-                    lo = float(b.get("low"))
-                    cl = float(b.get("close"))
-                    rng = hi - lo
-                    close_pct = ((cl - lo) / rng) if rng > 0 else 1.0
-                    momentum_fading = bool(body_b < body_a and close_pct < 0.30)
-                    nifty_weaken = bool(cl < float(a.get("close")))
-                    dual_now = bool(momentum_fading and nifty_weaken)
-                except Exception:
-                    dual_now = False
-            hard_candidate = bool((trail_armed and trail_hit) or giveback_breach or dual_now)
-            in_soft_zone = peak_pnl < early_peak_soft_zone
-            confirm_bars_met = _exit_confirmation_bars_met(bars_seen, direction, hard_exit_confirm_bars)
-            hard_confirmed = bool(drawdown_15atr_breach or lock_floor_breach or (hard_candidate and (not in_soft_zone or confirm_bars_met)))
-
-            if hard_confirmed:
+            if lock_floor > 0 and cur_pnl <= lock_floor:
                 projected_exit_time = tmark.strftime("%H:%M")
                 projected_exit_price = cur_px
                 projected_exit_pnl = cur_pnl
-                if drawdown_15atr_breach:
-                    projected_reason = "drawdown_atr_breach"
-                elif lock_floor_breach:
-                    projected_reason = "lock_floor_breach"
-                elif trail_armed and trail_hit:
-                    projected_reason = "trail_stop_hit"
-                elif giveback_breach:
-                    projected_reason = "profit_giveback_breach"
-                else:
-                    projected_reason = "dual_confirmation"
+                projected_reason = "profit_lock_floor_breach"
                 break
 
         actual_exit_px = _safe_num(tr.get("exit_price")) or 0.0
@@ -9112,21 +9057,16 @@ async def daily_futures_playbook_sim(
         "symbols": symbol_list,
         "profile": {
             "name": profile_name,
-            "hard_exit_confirm_bars": hard_exit_confirm_bars,
-            "early_peak_soft_zone": early_peak_soft_zone,
-            "lock_floor_pct": lock_floor_pct,
-            "tight_trail_atr": tight_trail_atr,
-            "tight_trail_min_peak_rupees": tight_trail_min_peak,
-            "giveback_exit_pct": giveback_pct,
-            "giveback_exit_floor_rupees": giveback_abs_floor,
-            "giveback_min_peak_rupees": giveback_min_peak,
-            "drawdown_atr_mult": drawdown_atr_mult,
-            "drawdown_min_age_min": drawdown_min_age_min,
-            "drawdown_grace_peak_rupees": drawdown_grace_peak_rupees,
+            "ladder": [
+                {"peak_at_least": 5000, "lock_minimum": 2000},
+                {"peak_at_least": 8000, "lock_minimum": 5000},
+                {"peak_at_least": 10000, "lock_minimum": 7000},
+                {"for_each_peak_increase": 1500, "lock_increase": 1000, "after_peak": 10000},
+            ],
         },
         "projected_exits": projections,
         "notes": [
-            "Projected exit uses tiered Daily Futures logic with playbook-only safer test profile.",
+            "Projected exit uses profit-lock ladder only (playbook test; algo unchanged).",
             "Projection scans full 15m checkpoints from first checkpoint after entry to checkpoint before/at actual exit.",
             "PnL delta = projected_exit_pnl - actual_exit_pnl.",
         ],
