@@ -1221,12 +1221,18 @@ def get_smart_futures_watchlist(
             db.execute(
                 text(
                     """
-                    SELECT id, trigger_date, daily_id, symbol, fut_symbol, fut_instrument_key,
-                           side, trigger_score, trigger_price, vwap_at_trigger, trigger_at,
-                           added_at, cleared_at
-                    FROM smart_futures_watchlist
-                    WHERE trigger_date >= :from_date
-                    ORDER BY trigger_date DESC, trigger_at DESC, id DESC
+                    SELECT w.id, w.trigger_date, w.daily_id, w.symbol, w.fut_symbol, w.fut_instrument_key,
+                           w.side, w.trigger_score, w.trigger_price, w.vwap_at_trigger, w.trigger_at,
+                           w.added_at, w.cleared_at,
+                           a.currmth_future_symbol AS master_currmth_future_symbol,
+                           a.currmth_future_instrument_key AS master_currmth_future_inst_key,
+                           a.currmth_future_ltp AS master_currmth_future_ltp
+                    FROM smart_futures_watchlist w
+                    LEFT JOIN arbitrage_master a
+                      ON UPPER(TRIM(a.stock))
+                         = UPPER(TRIM(SPLIT_PART(COALESCE(w.symbol, ''), ' ', 1)))
+                    WHERE w.trigger_date >= :from_date
+                    ORDER BY w.trigger_date DESC, w.trigger_at DESC, w.id DESC
                     """
                 ),
                 {"from_date": sd - timedelta(days=lookback)},
@@ -1252,7 +1258,7 @@ def get_smart_futures_watchlist(
             v = d.get(k)
             if v is not None and hasattr(v, "isoformat"):
                 d[k] = v.isoformat()
-        for k in ("trigger_score", "trigger_price", "vwap_at_trigger"):
+        for k in ("trigger_score", "trigger_price", "vwap_at_trigger", "master_currmth_future_ltp"):
             v = d.get(k)
             if v is not None:
                 try:

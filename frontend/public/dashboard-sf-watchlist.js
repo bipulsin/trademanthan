@@ -224,6 +224,9 @@
             '<th>Time</th><th>Symbol</th><th>Side</th>' +
             '<th title="Reclaim probability at trigger (0–100)">Score</th>' +
             '<th>Price</th><th>VWAP</th><th>LTP</th><th>PnL</th>' +
+            '<th title="Serial current-month future from arbitrage_master (underlying = first segment of Symbol)">' +
+            'Cur.mth FUT</th>' +
+            '<th title="arbitrage_master.currmth_future_ltp" class="num">Cur.mth LTP</th>' +
             '</tr></thead>';
         const body = vis.map(function (r) {
             const sideU = String(r.side || '').trim().toUpperCase();
@@ -239,6 +242,17 @@
             var pnlStyle = Number.isFinite(pnl)
                 ? (pnl > 0 ? ' style="color:#15803d;font-weight:600;"' : (pnl < 0 ? ' style="color:#dc2626;font-weight:600;"' : ''))
                 : '';
+            var mSym = String(r.master_currmth_future_symbol || '').trim();
+            var mKey = String(r.master_currmth_future_inst_key || '').trim();
+            var masterTit = (mSym || mKey) ? escapeHtml(mSym + (mKey ? ' · ' + mKey : '')) : '';
+            var masterFutCell =
+                '<td style="font-size:0.82rem;line-height:1.25;max-width:12rem"' +
+                (masterTit ? (' title="' + masterTit + '"') : '') +
+                '>' +
+                (mSym ? escapeHtml(mSym) : '—') +
+                '</td>';
+            var ml = Number(r.master_currmth_future_ltp);
+            var masterLtpTxt = Number.isFinite(ml) ? ml.toFixed(2) : '—';
             return (
                 '<tr>' +
                 '<td>' + escapeHtml(fmtHhmm(r.trigger_at)) + '</td>' +
@@ -249,6 +263,8 @@
                 '<td>' + escapeHtml(fmtNum(r.vwap_at_trigger, 2)) + '</td>' +
                 '<td>' + escapeHtml(fmtNum(r.ltp, 2)) + '</td>' +
                 '<td' + pnlStyle + '>' + escapeHtml(pnlTxt) + '</td>' +
+                masterFutCell +
+                '<td class="num">' + escapeHtml(masterLtpTxt) + '</td>' +
                 '</tr>'
             );
         }).join('');
