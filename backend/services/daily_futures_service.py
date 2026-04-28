@@ -574,40 +574,6 @@ def _momentum_exhausting_last_two(cands: List[Dict[str, Any]]) -> bool:
     return bool(body_b < body_a and close_pct < 0.30)
 
 
-def _exit_confirmation_bars_met(
-    cands: List[Dict[str, Any]],
-    direction: str,
-    bars_required: int,
-) -> bool:
-    """
-    Confirmation gate for exits in low-profit zone.
-    LONG: each bar closes red and below previous close.
-    SHORT: each bar closes green and above previous close.
-    """
-    need = max(1, int(bars_required))
-    if len(cands) < need + 1:
-        return False
-    direction = str(direction or "LONG").strip().upper()
-    seq = cands[-(need + 1):]
-    for i in range(1, len(seq)):
-        prev = seq[i - 1]
-        cur = seq[i]
-        try:
-            po = float(prev.get("open"))
-            pc = float(prev.get("close"))
-            co = float(cur.get("open"))
-            cc = float(cur.get("close"))
-        except (TypeError, ValueError):
-            return False
-        if direction == "SHORT":
-            if not (cc > co and cc > pc):
-                return False
-        else:
-            if not (cc < co and cc < pc):
-                return False
-    return True
-
-
 def _nifty_momentum_state_last_two_closes(cands: List[Dict[str, Any]], thr_pct: float) -> str:
     """
     Return one of:
@@ -724,17 +690,10 @@ def _apply_exit_alerts_to_running(
     nifty_l1_state = _nifty_momentum_state_last_two_closes(nifty_cands, nifty_thr_pct)
     nifty_weakening = nifty_l1_state == "nifty_lower_low"
     nifty_against_short = nifty_l1_state == "nifty_higher_high"
-    # Giveback / exit protection controls.
+    # Giveback hard-exit: once peak open PnL is meaningful, breach if giveback exceeds threshold.
     giveback_pct = float(getattr(settings, "DAILY_FUTURES_GIVEBACK_EXIT_PCT", 0.30) or 0.30)
     giveback_abs_floor = float(getattr(settings, "DAILY_FUTURES_GIVEBACK_EXIT_RUPEES_FLOOR", 2000.0) or 2000.0)
     giveback_min_peak = float(getattr(settings, "DAILY_FUTURES_GIVEBACK_MIN_PEAK_RUPEES", 3000.0) or 3000.0)
-    hard_exit_confirm_bars = int(getattr(settings, "DAILY_FUTURES_HARD_EXIT_CONFIRM_BARS", 2) or 2)
-    early_peak_soft_zone = float(getattr(settings, "DAILY_FUTURES_EARLY_PEAK_SOFT_ZONE", 6000.0) or 6000.0)
-    lock_floor_pct = float(getattr(settings, "DAILY_FUTURES_LOCK_FLOOR_PCT", 0.35) or 0.35)
-    lock_floor_pct = min(max(lock_floor_pct, 0.0), 0.95)
-    tight_trail_atr = float(getattr(settings, "DAILY_FUTURES_TIGHT_TRAIL_ATR", 0.5) or 0.5)
-    tight_trail_atr = max(0.1, tight_trail_atr)
-    tight_trail_min_peak = float(getattr(settings, "DAILY_FUTURES_TIGHT_TRAIL_MIN_PEAK_RUPEES", 10000.0) or 10000.0)
     stock_candle_cache: Dict[str, List[Dict[str, Any]]] = {}
 
     for r in running:
@@ -783,23 +742,6 @@ def _apply_exit_alerts_to_running(
             new_m = _momentum_exhausting_last_two(stk)
         merged_m = old_m or new_m
 
-        lot = _safe_float(r.get("lot_size"))
-        current_unrealized_rs: Optional[float] = None
-        if lot is not None and lot > 0 and ep is not None and ltp is not None:
-            if dirt == "SHORT":
-                current_unrealized_rs = (float(ep) - float(ltp)) * float(lot)
-            else:
-                current_unrealized_rs = (float(ltp) - float(ep)) * float(lot)
-        old_peak = _safe_float(r.get("peak_unrealized_pnl_rupees"))
-        new_peak = old_peak
-        if current_unrealized_rs is not None:
-            if new_peak is None:
-                new_peak = float(current_unrealized_rs)
-            else:
-                new_peak = max(float(new_peak), float(current_unrealized_rs))
-        trail_mult = 0.8
-        if new_peak is not None and float(new_peak) >= max(0.0, tight_trail_min_peak):
-            trail_mult = float(tight_trail_atr)
         old_armed = bool(r.get("profit_trail_armed"))
         if dirt == "SHORT":
             new_armed = bool(
@@ -818,6 +760,7 @@ def _apply_exit_alerts_to_running(
                 and (ltp - ep) >= 1.5 * float(atr)
             )
         merged_armed = old_armed or new_armed
+        old_hit = bool(r.get("trail_stop_hit"))
         if dirt == "SHORT":
             new_hit = bool(
                 merged_armed
@@ -825,7 +768,7 @@ def _apply_exit_alerts_to_running(
                 and ltp is not None
                 and atr is not None
                 and atr > 0
-                and float(ltp) > float(ep) - float(trail_mult) * float(atr)
+                and float(ltp) > float(ep) - 0.8 * float(atr)
             )
         else:
             new_hit = bool(
@@ -834,10 +777,24 @@ def _apply_exit_alerts_to_running(
                 and ltp is not None
                 and atr is not None
                 and atr > 0
-                and ltp < ep + float(trail_mult) * float(atr)
+                and ltp < ep + 0.8 * float(atr)
             )
-        # Keep hit non-sticky to avoid stale hard-exit state during reversals.
-        merged_hit = bool(new_hit)
+        merged_hit = old_hit or new_hit
+        lot = _safe_float(r.get("lot_size"))
+        current_unrealized_rs: Optional[float] = None
+        if lot is not None and lot > 0 and ep is not None and ltp is not None:
+            if dirt == "SHORT":
+                current_unrealized_rs = (float(ep) - float(ltp)) * float(lot)
+            else:
+                current_unrealized_rs = (float(ltp) - float(ep)) * float(lot)
+        old_peak = _safe_float(r.get("peak_unrealized_pnl_rupees"))
+        new_peak = old_peak
+        if current_unrealized_rs is not None:
+            if new_peak is None:
+                new_peak = float(current_unrealized_rs)
+            else:
+                new_peak = max(float(new_peak), float(current_unrealized_rs))
+        old_giveback = bool(r.get("profit_giveback_breach"))
         new_giveback = False
         if (
             new_peak is not None
@@ -847,14 +804,7 @@ def _apply_exit_alerts_to_running(
             giveback = float(new_peak) - float(current_unrealized_rs)
             giveback_thr = max(float(giveback_abs_floor), float(new_peak) * float(giveback_pct))
             new_giveback = giveback >= giveback_thr
-        # Keep giveback non-sticky so decision reflects current bar state.
-        merged_giveback = bool(new_giveback)
-        lock_floor_breach = bool(
-            new_peak is not None
-            and current_unrealized_rs is not None
-            and float(new_peak) >= max(0.0, tight_trail_min_peak)
-            and float(current_unrealized_rs) <= (float(new_peak) * float(lock_floor_pct))
-        )
+        merged_giveback = old_giveback or new_giveback
 
         if dirt == "SHORT":
             drawdown_15atr_breach = bool(
@@ -880,34 +830,22 @@ def _apply_exit_alerts_to_running(
                 and (float(ep) - float(ltp)) >= 1.5 * float(atr)
             )
 
-        in_soft_zone = bool(new_peak is None or float(new_peak) < max(0.0, early_peak_soft_zone))
-        confirm_bars_met = _exit_confirmation_bars_met(stk, dirt, hard_exit_confirm_bars)
-        dual_now = bool(new_n and new_m)
-        hard_candidate = bool(merged_hit or merged_giveback or dual_now)
-        hard_confirmed = bool(drawdown_15atr_breach or lock_floor_breach or (hard_candidate and (not in_soft_zone or confirm_bars_met)))
-        wait_confirm = bool(hard_candidate and in_soft_zone and not confirm_bars_met and not drawdown_15atr_breach and not lock_floor_breach)
-
-        exit_review = bool(hard_confirmed or wait_confirm)
+        exit_review = bool(merged_hit or (merged_n and merged_m) or drawdown_15atr_breach or merged_giveback)
 
         l1_amber = bool(nifty_weakening) if dirt != "SHORT" else bool(nifty_against_short)
         l3_fading = bool(new_m)
-        if hard_confirmed and merged_hit:
+        if merged_hit:
             l2k = "hit"
         elif merged_armed:
             l2k = "active"
         else:
             l2k = "building"
-        if hard_confirmed and merged_hit:
+        if merged_hit:
             as_dec = "lock_profit"
-        elif hard_confirmed and (merged_giveback or lock_floor_breach):
+        elif merged_giveback:
             as_dec = "giveback_exit"
-        elif hard_confirmed and dual_now:
+        elif l1_amber and l3_fading:
             as_dec = "dual_exit"
-        elif wait_confirm:
-            as_dec = "watch"
-            l3_fading = True
-            if l2k == "building":
-                l2k = "active"
         elif l1_amber or l3_fading:
             as_dec = "watch"
         else:
@@ -957,7 +895,6 @@ def _apply_exit_alerts_to_running(
         r["drawdown_15atr_breach"] = drawdown_15atr_breach
         r["peak_unrealized_pnl_rupees"] = round(float(new_peak), 2) if new_peak is not None else None
         r["profit_giveback_breach"] = merged_giveback
-        r["exit_wait_confirmation"] = wait_confirm
         r["position_atr"] = round(float(atr), 4) if atr is not None else r.get("position_atr")
 
     try:
