@@ -54,7 +54,7 @@
     </div>
 
     <div class="card">
-      <h2>Trade Timeline Simulation (15-min checkpoints)</h2>
+      <h2>Projected Exit (New Tiered Logic) vs Actual Exit</h2>
       <div id="simHost" class="muted">Loading...</div>
     </div>
   </div>
@@ -62,7 +62,7 @@
   <script>
     (function () {
       const API_BASE = window.location.origin;
-      const SYMS = ["MANAPPURAM", "EXIDEIND", "RECLTD"];
+      const SYMS = [];
 
       function n(v, d) {
         const x = Number(v);
@@ -82,7 +82,7 @@
         const meta = document.getElementById("metaLine");
         const simHost = document.getElementById("simHost");
         try {
-          const url = API_BASE + "/scan/daily-futures-playbook-sim?symbols=" + encodeURIComponent(SYMS.join(","));
+          const url = API_BASE + "/scan/daily-futures-playbook-sim" + (SYMS.length ? ("?symbols=" + encodeURIComponent(SYMS.join(","))) : "");
           const res = await fetch(url, { cache: "no-store" });
           if (!res.ok) {
             simHost.innerHTML = '<span class="bad">Failed to load playbook simulation (' + res.status + ')</span>';
@@ -91,52 +91,39 @@
           const data = await res.json();
           meta.textContent = "Generated at IST: " + (data.generated_at_ist || "—") + " | Trade date: " + (data.trade_date || "—");
 
-          const sims = Array.isArray(data.simulations) ? data.simulations : [];
-          if (!sims.length) {
-            simHost.innerHTML = '<span class="warn">No sold trades found for selected symbols/date.</span>';
+          const rows = Array.isArray(data.projected_exits) ? data.projected_exits : [];
+          if (!rows.length) {
+            simHost.innerHTML = '<span class="warn">No bought-and-sold futures found for selected date.</span>';
             return;
           }
 
-          const sections = [];
-          sims.forEach(function (tr) {
-            const tRows = Array.isArray(tr.timeline) ? tr.timeline : [];
-            const title = (tr.future_symbol || tr.underlying || "—") +
-              " | Entry " + (tr.entry_time || "—") +
-              " @ ₹" + n(tr.entry_price, 2) +
-              " | Exit " + (tr.exit_time || "—") +
-              " @ ₹" + n(tr.exit_price, 2) +
-              " | ATR " + n(tr.position_atr, 4);
-            const t = [
-              "<div style='margin:0 0 8px;font-weight:700;'>" + title + "</div>",
-              "<table><thead><tr>",
-              "<th>Time</th><th class='num'>Entry ₹</th><th class='num'>Current ₹</th>",
-              "<th class='num'>Effective SL ₹</th><th>SL Source</th>",
-              "<th class='num'>Peak PnL ₹</th><th class='num'>Current PnL ₹</th>",
-              "<th class='num'>Giveback ₹</th><th class='num'>Giveback %</th>",
-              "<th class='num'>Since Peak (min)</th><th>Response</th>",
-              "</tr></thead><tbody>"
-            ];
-            tRows.forEach(function (r) {
-              t.push(
-                "<tr>" +
-                "<td>" + (r.time_ist || "—") + "</td>" +
-                "<td class='num'>" + n(r.entry_price, 2) + "</td>" +
-                "<td class='num'>" + n(r.current_price, 2) + "</td>" +
-                "<td class='num'>" + n(r.effective_sl_price, 2) + "</td>" +
-                "<td>" + (r.sl_source || "—") + "</td>" +
-                "<td class='num'>" + n(r.peak_pnl_rupees, 0) + "</td>" +
-                "<td class='num'>" + n(r.current_pnl_rupees, 0) + "</td>" +
-                "<td class='num'>" + n(r.giveback_rupees, 0) + "</td>" +
-                "<td class='num'>" + n(r.giveback_pct, 1) + "%</td>" +
-                "<td class='num'>" + (r.time_since_last_peak_min != null ? r.time_since_last_peak_min : "—") + "</td>" +
-                "<td>" + responseChip(r.response) + "</td>" +
-                "</tr>"
-              );
-            });
-            t.push("</tbody></table>");
-            sections.push("<div class='card'>" + t.join("") + "</div>");
+          const table = [
+            "<table><thead><tr>",
+            "<th>Underlying</th><th>Future</th><th>Entry</th>",
+            "<th>Projected Exit</th><th>Actual Exit</th>",
+            "<th class='num'>Projected PnL ₹</th><th class='num'>Actual PnL ₹</th><th class='num'>Delta ₹</th>",
+            "<th>Projected Exit Trigger</th>",
+            "</tr></thead><tbody>"
+          ];
+          rows.forEach(function (r) {
+            const d = Number(r.pnl_delta_rupees);
+            const cls = Number.isFinite(d) ? (d > 0 ? "ok" : (d < 0 ? "bad" : "muted")) : "muted";
+            table.push(
+              "<tr>" +
+              "<td><strong>" + (r.underlying || "—") + "</strong></td>" +
+              "<td>" + (r.future_symbol || "—") + "</td>" +
+              "<td>" + (r.entry_time || "—") + " @ ₹" + n(r.entry_price, 2) + "</td>" +
+              "<td>" + (r.projected_exit_time || "—") + " @ ₹" + n(r.projected_exit_price, 2) + "</td>" +
+              "<td>" + (r.actual_exit_time || "—") + " @ ₹" + n(r.actual_exit_price, 2) + "</td>" +
+              "<td class='num'>" + n(r.projected_exit_pnl_rupees, 0) + "</td>" +
+              "<td class='num'>" + n(r.actual_exit_pnl_rupees, 0) + "</td>" +
+              "<td class='num " + cls + "'>" + n(r.pnl_delta_rupees, 0) + "</td>" +
+              "<td>" + (r.projected_reason || "—") + "</td>" +
+              "</tr>"
+            );
           });
-          simHost.innerHTML = sections.join("");
+          table.push("</tbody></table>");
+          simHost.innerHTML = table.join("");
         } catch (e) {
           meta.textContent = "Failed to load playbook simulation";
           simHost.innerHTML = "<span class='bad'>" + (e && e.message ? e.message : String(e)) + "</span>";
