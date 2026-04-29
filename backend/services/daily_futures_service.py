@@ -121,6 +121,9 @@ def ensure_daily_futures_tables() -> None:
         second_scan_vwap_leg NUMERIC(8,2),
         second_scan_stock_change_pct NUMERIC(18,6),
         second_scan_nifty_change_pct NUMERIC(18,6),
+        effective_conviction NUMERIC(5,1),
+        last_5m_momentum_pass BOOLEAN,
+        last_5m_evaluated_at TIMESTAMPTZ,
         candle_is_green BOOLEAN,
         candle_higher_high BOOLEAN,
         candle_higher_low BOOLEAN,
@@ -180,6 +183,9 @@ def ensure_daily_futures_tables() -> None:
             conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_vwap_leg NUMERIC(8,2)"))
             conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_stock_change_pct NUMERIC(18,6)"))
             conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_nifty_change_pct NUMERIC(18,6)"))
+            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS effective_conviction NUMERIC(5,1)"))
+            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS last_5m_momentum_pass BOOLEAN"))
+            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS last_5m_evaluated_at TIMESTAMPTZ"))
             conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS candle_is_green BOOLEAN"))
             conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS candle_higher_high BOOLEAN"))
             conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS candle_higher_low BOOLEAN"))
@@ -492,6 +498,171 @@ def _last_completed_15m_candles_for_instrument(
             logger.debug("daily_futures: 15m intraday fallback failed for %s: %s", ik, e)
 
     return out[-5:]
+
+
+def _last_completed_5m_candles_for_instrument(
+    upstox: UpstoxService,
+    instrument_key: str,
+    session_date: date,
+    now_ist: datetime,
+    limit: int = 20,
+) -> List[Dict[str, Any]]:
+    ik = str(instrument_key or "").strip()
+    if not ik:
+        return []
+    try:
+        raw = upstox.get_historical_candles_by_instrument_key(
+            ik, interval="minutes/5", days_back=3, range_end_date=session_date
+        ) or []
+    except Exception:
+        raw = []
+    cutoff = now_ist.replace(minute=(now_ist.minute // 5) * 5, second=0, microsecond=0)
+
+    def _rows_to_completed(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        out_local: List[Dict[str, Any]] = []
+        for c in rows or []:
+            ts = _parse_iso_ist((c or {}).get("timestamp"))
+            if ts is None or ts.date() != session_date or ts >= cutoff:
+                continue
+            op = _safe_float((c or {}).get("open"))
+            cl = _safe_float((c or {}).get("close"))
+            vol = _safe_float((c or {}).get("volume"))
+            if op is None or cl is None or vol is None:
+                continue
+            out_local.append({"timestamp": ts, "open": op, "close": cl, "volume": vol})
+        out_local.sort(key=lambda x: x["timestamp"])
+        return out_local
+
+    out = _rows_to_completed(raw)
+    if not out and session_date == ist_today():
+        try:
+            key_enc = quote(ik, safe="")
+            intraday_url = f"{upstox.base_url}/historical-candle/intraday/{key_enc}/minutes/5"
+            raw_i = upstox.make_api_request(intraday_url, method="GET", timeout=15, max_retries=2) or {}
+            if isinstance(raw_i, dict) and raw_i.get("status") == "success":
+                rows_i = ((raw_i.get("data") or {}).get("candles")) or []
+                structured_i = _candles_rows_to_structured(rows_i) or []
+                out = _rows_to_completed(structured_i)
+        except Exception:
+            pass
+    return out[-max(2, int(limit)):]
+
+
+def _compute_effective_conviction_and_5m_momentum(
+    screenings: List[Dict[str, Any]],
+    now_ist: datetime,
+) -> None:
+    if not screenings:
+        return
+    decay_raw = os.getenv(
+        "DAILY_FUTURES_CONVICTION_DECAY_PER_SCAN",
+        str(getattr(settings, "DAILY_FUTURES_CONVICTION_DECAY_PER_SCAN", 0.08) or 0.08),
+    )
+    decay_per_scan = float(decay_raw or 0.08)
+    decay_per_scan = max(0.0, min(0.5, decay_per_scan))
+    td = _workspace_trade_date_ist(now_ist)
+    try:
+        upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+    except Exception:
+        upstox = None
+    mcache: Dict[str, bool] = {}
+    for s in screenings:
+        raw_conv = _safe_float(s.get("conviction_score"))
+        scan_count = int(s.get("scan_count") or 0)
+        decay_factor = max(0.5, 1.0 - max(0, scan_count - 1) * decay_per_scan)
+        eff = round(float(raw_conv) * float(decay_factor), 1) if raw_conv is not None else None
+        s["effective_conviction"] = eff
+        s["conviction_decay_factor"] = round(float(decay_factor), 4)
+        ik = str(s.get("instrument_key") or "").strip()
+        mp: Optional[bool] = None
+        if upstox is not None and ik:
+            if ik in mcache:
+                mp = mcache[ik]
+            else:
+                c5 = _last_completed_5m_candles_for_instrument(upstox, ik, td, now_ist, limit=20)
+                if len(c5) >= 2:
+                    latest = c5[-1]
+                    vols = [float(x.get("volume") or 0.0) for x in c5]
+                    avg20 = (sum(vols) / len(vols)) if vols else 0.0
+                    mp = bool(
+                        float(latest.get("close") or 0.0) > float(latest.get("open") or 0.0)
+                        and avg20 > 0.0
+                        and float(latest.get("volume") or 0.0) >= 1.2 * avg20
+                    )
+                else:
+                    mp = False
+                mcache[ik] = mp
+        s["last_5m_momentum_pass"] = mp
+        s["last_5m_evaluated_at"] = now_ist.isoformat()
+
+    # Persist live-computed values on workspace read (required).
+    try:
+        with engine.begin() as conn:
+            for s in screenings:
+                conn.execute(
+                    text(
+                        """
+                        UPDATE daily_futures_screening
+                        SET effective_conviction = :ec,
+                            last_5m_momentum_pass = :mp,
+                            last_5m_evaluated_at = CAST(:ev AS TIMESTAMPTZ),
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = :id
+                        """
+                    ),
+                    {
+                        "ec": float(s["effective_conviction"]) if s.get("effective_conviction") is not None else None,
+                        "mp": s.get("last_5m_momentum_pass"),
+                        "ev": s.get("last_5m_evaluated_at"),
+                        "id": int(s.get("screening_id") or 0),
+                    },
+                )
+    except Exception as e:
+        logger.warning("daily_futures: persist effective conviction/5m momentum failed: %s", e)
+
+
+def _apply_running_sl_ladder(rows: List[Dict[str, Any]]) -> None:
+    """
+    Running SL policy:
+    - Initial SL: entry +/- 1.8 * ATR(15m ATR(5d) proxy)
+    - If unrealized >= 5k, lock 2k
+    - If unrealized >= 8k, lock 5k; then +1k lock for every +1k unrealized above 8k
+    """
+    if not rows:
+        return
+    for r in rows:
+        d = str(r.get("direction_type") or "LONG").strip().upper()
+        lot = _safe_float(r.get("lot_size")) or 0.0
+        atr = _safe_float(r.get("position_atr")) or 0.0
+        ep = _safe_float(r.get("sell_price") if d == "SHORT" else r.get("entry_price"))
+        ltp = _safe_float(r.get("ltp"))
+        if lot <= 0 or ep is None or atr <= 0:
+            r["running_sl_price"] = None
+            r["running_sl_source"] = None
+            continue
+        init_sl = (ep + 1.8 * atr) if d == "SHORT" else (ep - 1.8 * atr)
+        pnl = None
+        if ltp is not None:
+            pnl = (ep - ltp) * lot if d == "SHORT" else (ltp - ep) * lot
+        lock_rs = 0.0
+        if pnl is not None and pnl >= 8000.0:
+            lock_rs = 5000.0 + (int((pnl - 8000.0) // 1000.0) * 1000.0)
+        elif pnl is not None and pnl >= 5000.0:
+            lock_rs = 2000.0
+        if lock_rs > 0:
+            lock_pts = lock_rs / lot
+            lock_sl = (ep - lock_pts) if d == "SHORT" else (ep + lock_pts)
+            if d == "SHORT":
+                sl = min(init_sl, lock_sl)
+            else:
+                sl = max(init_sl, lock_sl)
+            r["running_sl_source"] = "Profit Lock"
+            r["running_sl_locked_rupees"] = round(lock_rs, 2)
+        else:
+            sl = init_sl
+            r["running_sl_source"] = "Initial (1.8x ATR)"
+            r["running_sl_locked_rupees"] = 0.0
+        r["running_sl_price"] = round(float(sl), 4)
 
 
 def _entry_datetime_ist(trade_d: date, entry_time: Optional[str]) -> Optional[datetime]:
@@ -2054,7 +2225,7 @@ def _fetch_screening_dicts(conn: Any, trade_date: date) -> List[Dict[str, Any]]:
                    scan_count, first_hit_at, last_hit_at, conviction_score, conviction_oi_leg, conviction_vwap_leg, ltp,
                    second_scan_time, second_scan_conviction_score, second_scan_oi_leg, second_scan_vwap_leg,
                    second_scan_stock_change_pct, second_scan_nifty_change_pct,
-                   stock_change_pct, nifty_change_pct,
+                   stock_change_pct, nifty_change_pct, effective_conviction, last_5m_momentum_pass, last_5m_evaluated_at,
                    candle_is_green, candle_higher_high, candle_higher_low, conviction_breakdown_json
             FROM daily_futures_screening
             WHERE trade_date = CAST(:d AS DATE)
@@ -2088,10 +2259,13 @@ def _fetch_screening_dicts(conn: Any, trade_date: date) -> List[Dict[str, Any]]:
                 "second_scan_nifty_change_pct": float(row[18]) if row[18] is not None else None,
                 "stock_change_pct": float(row[19]) if row[19] is not None else None,
                 "nifty_change_pct": float(row[20]) if row[20] is not None else None,
-                "candle_is_green": bool(row[21]) if row[21] is not None else None,
-                "candle_higher_high": bool(row[22]) if row[22] is not None else None,
-                "candle_higher_low": bool(row[23]) if row[23] is not None else None,
-                "conviction_breakdown_json": row[24] if row[24] is not None else None,
+                "effective_conviction": float(row[21]) if row[21] is not None else None,
+                "last_5m_momentum_pass": bool(row[22]) if row[22] is not None else None,
+                "last_5m_evaluated_at": row[23].isoformat() if row[23] else None,
+                "candle_is_green": bool(row[24]) if row[24] is not None else None,
+                "candle_higher_high": bool(row[25]) if row[25] is not None else None,
+                "candle_higher_low": bool(row[26]) if row[26] is not None else None,
+                "conviction_breakdown_json": row[27] if row[27] is not None else None,
             }
         )
     return out
@@ -2468,6 +2642,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
 
     with engine.connect() as conn:
         screenings = _fetch_screening_dicts(conn, td)
+    _compute_effective_conviction_and_5m_momentum(screenings, now_ist)
 
     br = db.execute(
         text(
@@ -2509,6 +2684,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                    s.second_scan_conviction_score, s.second_scan_oi_leg, s.second_scan_vwap_leg, s.ltp,
                    s.stock_change_pct, s.nifty_change_pct,
                    s.conviction_oi_leg, s.conviction_vwap_leg, s.session_vwap, s.conviction_breakdown_json,
+                   s.effective_conviction,
                    s.trade_date
             FROM daily_futures_user_trade t
             JOIN daily_futures_screening s ON s.id = t.screening_id
@@ -2561,7 +2737,8 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                 "conviction_vwap_leg": float(row[31]) if row[31] is not None else None,
                 "session_vwap": float(row[32]) if row[32] is not None else None,
                 "conviction_breakdown_json": row[33] if len(row) > 33 and row[33] is not None else None,
-                "trade_date": str(row[34]) if len(row) > 34 and row[34] is not None else str(td),
+                "effective_conviction": float(row[34]) if len(row) > 34 and row[34] is not None else None,
+                "trade_date": str(row[35]) if len(row) > 35 and row[35] is not None else str(td),
                 "warn_two_misses": miss >= 2,
             }
         )
@@ -2770,6 +2947,8 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
     except Exception as e:
         logger.warning("daily_futures: rel-strength refresh failed: %s", e, exc_info=True)
 
+    _apply_running_sl_ladder(running)
+
     strip_debug: Dict[str, Any] = {}
     if not lite_mode:
         try:
@@ -2801,18 +2980,26 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                 reasons.append("Re-entry unlocks after next scan post-exit")
         if int(p.get("scan_count") or 0) < 2:
             reasons.append("Needs at least 2 scans")
-        live_conv = p.get("conviction_score")
+        second_scan_dt = _parse_iso_ist(p.get("second_scan_time"))
+        if second_scan_dt is None:
+            reasons.append("Second scan time unavailable")
+        else:
+            if now_ist < (second_scan_dt + timedelta(minutes=5)):
+                reasons.append("Wait 5 minutes after second scan")
+        live_conv = p.get("effective_conviction")
         c2 = live_conv
         if c2 is None:
-            reasons.append("Live conviction unavailable")
+            reasons.append("Effective conviction unavailable")
         elif dtp == "SHORT":
             if float(c2) <= 50.0:
-                reasons.append(f"Live conviction {round(float(c2),1)} is not above 50")
+                reasons.append(f"Effective conviction {round(float(c2),1)} is not above 50")
             if _bearish_index_gate_enabled() and not bool(index_bear.get("ok")):
                 reasons.append("NIFTY 5m bearish structure is not confirmed (no SHORT from this list)")
         else:
             if float(live_conv) < 60.0:
-                reasons.append(f"Live conviction {round(float(live_conv),1)} is below 60")
+                reasons.append(f"Effective conviction {round(float(live_conv),1)} is below 60")
+        if p.get("last_5m_momentum_pass") is not True:
+            reasons.append("5-min momentum weak — wait for next candle")
         p["order_eligible"] = len(reasons) == 0
         p["order_block_reason"] = reasons[0] if reasons else None
 
@@ -2920,7 +3107,8 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
         text(
             """
             SELECT id, underlying, direction_type, future_symbol, instrument_key, lot_size, scan_count,
-                   conviction_score, second_scan_conviction_score
+                   conviction_score, second_scan_conviction_score, second_scan_time,
+                   effective_conviction, last_5m_momentum_pass
             FROM daily_futures_screening WHERE id = :sid AND trade_date = CAST(:d AS DATE)
             """
         ),
@@ -2930,12 +3118,21 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
         raise ValueError("Screening row not found for today")
     if int(row[6] or 0) < 2:
         raise ValueError("Needs at least 2 consecutive scans before order")
+    second_scan_time = row[9]
+    if second_scan_time is None:
+        raise ValueError("Second scan time unavailable")
+    ss_dt = second_scan_time.astimezone(IST) if getattr(second_scan_time, "tzinfo", None) else IST.localize(second_scan_time)
+    if datetime.now(IST) < (ss_dt + timedelta(minutes=5)):
+        raise ValueError("Wait 5 minutes after second scan")
     dtp = str(row[2] or "LONG").strip().upper()
-    live_score = float(row[7]) if row[7] is not None else None
+    live_score = float(row[10]) if row[10] is not None else None
+    momentum_pass = bool(row[11]) if row[11] is not None else False
+    if not momentum_pass:
+        raise ValueError("5-min momentum weak — wait for next candle")
     c2 = live_score
     if dtp == "SHORT":
         if c2 is None or c2 <= 50.0:
-            raise ValueError(f"Conviction must be above 50 for SHORT (current: {round(c2 or 0.0, 1)})")
+            raise ValueError(f"Effective conviction must be above 50 for SHORT (current: {round(c2 or 0.0, 1)})")
         if _bearish_index_gate_enabled():
             ig = index_bearish_gate_from_quotes()
             if not bool(ig.get("ok")):
@@ -2945,7 +3142,7 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
     else:
         if live_score is None or live_score < 60.0:
             raise ValueError(
-                f"Live conviction must be at least 60 (current: {round(live_score or 0.0, 1)})"
+                f"Effective conviction must be at least 60 (current: {round(live_score or 0.0, 1)})"
             )
 
     exists = db.execute(

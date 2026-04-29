@@ -127,13 +127,19 @@
   function formatConvictionEntryLive(r) {
     const sid = r && r.screening_id != null ? Number(r.screening_id) : null;
     function livePart() {
-      if (r.conviction_score == null) return '—';
-      const txt = fmtNum(r.conviction_score, 1) + ' (L)';
+      const eff = r.effective_conviction == null ? null : Number(r.effective_conviction);
+      const raw = r.conviction_score == null ? null : Number(r.conviction_score);
+      if (!Number.isFinite(eff) && !Number.isFinite(raw)) return '—';
+      const shown = Number.isFinite(eff) ? eff : raw;
+      const txt = fmtNum(shown, 1) + ' (L)';
+      const tip = Number.isFinite(raw)
+        ? ('Effective conviction (live): ' + fmtNum(shown, 1) + ' | Raw conviction: ' + fmtNum(raw, 1))
+        : ('Effective conviction (live): ' + fmtNum(shown, 1));
       if (sid == null) return '<span class="df-score-live">' + txt + '</span>';
       return (
         '<button type="button" class="df-conv-link df-score-live" data-csid="' +
         sid +
-        '" data-cmode="live" title="OI leg, session VWAP, and VWAP reason — click to view or edit">' +
+        '" data-cmode="live" title="' + esc(tip) + '. Click to view/edit OI-VWAP details.">' +
         txt +
         '</button>'
       );
@@ -707,6 +713,13 @@
         const eligible = r.order_eligible === true;
         const reason = r.order_block_reason || 'Not eligible to enter';
         const convTxt = formatConvictionEntryLive(r);
+        const enterBtn =
+          '<button type="button" class="df-btn df-btn-order" data-sid="' +
+          r.screening_id +
+          '"' + (eligible ? '' : ' disabled') + '>Enter</button>';
+        const enterCell = eligible
+          ? enterBtn
+          : ('<span class="df-disabled-tip" title="' + esc(reason) + '">' + enterBtn + '</span>');
         return (
           '<tr><td><strong>' +
           symbolWithDirectionHtml(r) +
@@ -727,9 +740,7 @@
           fmtRelStrength(r) +
           '</td><td class="num">' +
           fmtNum(r.ltp, 2) +
-          '</td><td><button type="button" class="df-btn df-btn-order" data-sid="' +
-          r.screening_id +
-          '"' + (eligible ? '' : ' disabled title="' + esc(reason) + '"') + '>Enter</button></td></tr>'
+          '</td><td>' + enterCell + '</td></tr>'
         );
       })
       .join('');
@@ -793,6 +804,13 @@
         const eligible = r.order_eligible === true;
         const reason = r.order_block_reason || 'Not eligible to enter';
         const convTxt = formatConvictionEntryLive(r);
+        const enterBtn =
+          '<button type="button" class="df-btn df-btn-order" data-bear="1" data-sid="' +
+          r.screening_id +
+          '"' + (eligible ? '' : ' disabled') + '>Enter</button>';
+        const enterCell = eligible
+          ? enterBtn
+          : ('<span class="df-disabled-tip" title="' + esc(reason) + '">' + enterBtn + '</span>');
         return (
           '<tr><td><strong>' +
           symbolWithDirectionHtml(r) +
@@ -813,9 +831,7 @@
           fmtRelStrength(r) +
           '</td><td class="num">' +
           fmtNum(r.ltp, 2) +
-          '</td><td><button type="button" class="df-btn df-btn-order" data-bear="1" data-sid="' +
-          r.screening_id +
-          '"' + (eligible ? '' : ' disabled title="' + esc(reason) + '"') + '>Enter</button></td></tr>'
+          '</td><td>' + enterCell + '</td></tr>'
         );
       })
       .join('');
@@ -839,7 +855,7 @@
       return;
     }
     const th =
-      '<thead><tr><th>Future</th><th>Trade date</th><th>Qty</th><th>Scan #</th><th>Last scan</th><th class="num">Conviction</th><th class="df-th-rs" title="(FUT day % − Nifty %); S and N in parentheses">Rel. str.</th><th class="num">LTP</th><th>Entry time</th><th class="num" title="Long: buy; Short: sell">Entry/Sell ₹</th><th class="num">Unrealized PnL</th><th>Alerts</th><th>Action</th></tr></thead>';
+      '<thead><tr><th>Future</th><th>Trade date</th><th>Qty</th><th class="num">Conviction</th><th class="num">LTP</th><th>Entry time</th><th class="num" title="Long: buy; Short: sell">Entry/Sell ₹</th><th class="num">SL ₹</th><th class="num">Unrealized PnL</th><th>Alerts</th><th>Action</th></tr></thead>';
     const tot = sumRunningUnrealized(rows);
     const totalLine =
       '<p class="df-meta" style="margin:0 0 10px;font-size:0.9rem;">' +
@@ -854,12 +870,11 @@
       '</p>';
     const body = rows
       .map(function (r) {
-        const warn = r.warn_two_misses
-          ? '<span class="df-blink" title="Not seen in the last two consecutive webhooks">↓</span>'
-          : '';
         const refPx =
           String(r.direction_type || "").toUpperCase() === "SHORT" ? r.sell_price : r.entry_price;
         const carry = isCarryForwardTrade(r) ? ' <span class="df-carry-badge">Carry-forward</span>' : '';
+        const slTxt = r.running_sl_price != null ? fmtNum(r.running_sl_price, 2) : '—';
+        const slTitle = r.running_sl_source ? (' title="' + esc(r.running_sl_source) + '"') : '';
         return (
           '<tr><td><strong>' +
           symbolWithDirectionHtml(r) +
@@ -869,20 +884,15 @@
           '</td><td class="num">' +
           esc(r.lot_size) +
           '</td><td class="num">' +
-          esc(r.scan_count) +
-          warn +
-          '</td><td>' +
-          fmtIsoTimeIst(r.last_hit_at) +
-          '</td><td class="num">' +
           formatConvictionEntryLive(r) +
-          '</td><td class="df-rs-cell">' +
-          fmtRelStrength(r) +
           '</td><td class="num">' +
           fmtNum(r.ltp, 2) +
           '</td><td>' +
           esc(r.entry_time) +
           '</td><td class="num">' +
           fmtNum(refPx, 2) +
+          '</td><td class="num"' + slTitle + '>' +
+          slTxt +
           '</td>' +
           unrealizedPnlCell(r) +
           '<td class="df-alerts-cell">' +
