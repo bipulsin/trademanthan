@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request, HTTPException, Depends, Query, BackgroundTasks
 from fastapi.responses import JSONResponse, RedirectResponse, PlainTextResponse
 from datetime import date, datetime, timedelta, time as dt_time
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func, desc, text, or_
