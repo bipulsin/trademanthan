@@ -2380,9 +2380,11 @@ def _quote_session_open_from_snapshot(snapshot: Dict[str, Any]) -> Optional[floa
 
 def index_bearish_gate_from_quotes() -> Dict[str, Any]:
     """
-    NIFTY-only gate for bearish: allow when NIFTY LTP is below the session day open
-    (index down from the open). If LTP is at or above the open, the index is treated as bullish; ok is False.
-    Used for Today’s pick — Bearish visibility and SHORT order entry.
+    NIFTY-only gate for bearish (5m structure):
+    - last two completed 5-minute candles must be red (close < open)
+    - closes of last three completed 5-minute candles must be strictly descending
+      (c[-3].close > c[-2].close > c[-1].close)
+    Used for Today's pick — Bearish visibility and SHORT order entry.
     """
     out: Dict[str, Any] = {
         "ok": False,
@@ -2390,25 +2392,72 @@ def index_bearish_gate_from_quotes() -> Dict[str, Any]:
         "nifty_open": None,
         "nifty_bearish": False,
         "nifty_bullish": False,
+        "last_two_red_5m": False,
+        "last_three_closes_desc_5m": False,
     }
     try:
         ux = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
-        b = ux.get_market_quote_snapshots_batch([NIFTY50_INDEX_KEY]) or {}
     except Exception as e:
         out["error"] = str(e)
         return out
-    nq = b.get(NIFTY50_INDEX_KEY) or {}
-    nlp = _safe_float(nq.get("last_price"))
-    nop = _quote_session_open_from_snapshot(nq)
-    out["nifty_ltp"] = nlp
-    out["nifty_open"] = nop
-    if nlp is None or nop is None or float(nop) <= 0:
+
+    # Keep quote fields for UI metadata, but gating is driven by 5m candle structure.
+    try:
+        b = ux.get_market_quote_snapshots_batch([NIFTY50_INDEX_KEY]) or {}
+        nq = b.get(NIFTY50_INDEX_KEY) or {}
+        out["nifty_ltp"] = _safe_float(nq.get("last_price"))
+        out["nifty_open"] = _quote_session_open_from_snapshot(nq)
+    except Exception:
+        pass
+
+    td = _workspace_trade_date_ist()
+    now_ist = datetime.now(IST)
+    cutoff = now_ist.replace(minute=(now_ist.minute // 5) * 5, second=0, microsecond=0)
+    try:
+        raw = ux.get_historical_candles_by_instrument_key(
+            NIFTY50_INDEX_KEY,
+            interval="minutes/5",
+            days_back=3,
+            range_end_date=td,
+        ) or []
+    except Exception:
+        raw = []
+
+    rows = list(raw or [])
+    if not rows and td == ist_today():
+        try:
+            key_enc = quote(NIFTY50_INDEX_KEY, safe="")
+            intraday_url = f"{ux.base_url}/historical-candle/intraday/{key_enc}/minutes/5"
+            raw_i = ux.make_api_request(intraday_url, method="GET", timeout=15, max_retries=2) or {}
+            if isinstance(raw_i, dict) and raw_i.get("status") == "success":
+                rows = _candles_rows_to_structured(((raw_i.get("data") or {}).get("candles")) or []) or []
+        except Exception:
+            rows = []
+
+    cands: List[Dict[str, Any]] = []
+    for c in rows:
+        ts = _parse_iso_ist((c or {}).get("timestamp"))
+        if ts is None or ts.date() != td or ts >= cutoff:
+            continue
+        op = _safe_float((c or {}).get("open"))
+        cl = _safe_float((c or {}).get("close"))
+        if op is None or cl is None:
+            continue
+        cands.append({"timestamp": ts, "open": op, "close": cl})
+    cands.sort(key=lambda x: x["timestamp"])
+    if len(cands) < 3:
         out["nifty_quote_incomplete"] = True
         return out
-    bearish = float(nlp) < float(nop)
-    out["nifty_bearish"] = bool(bearish)
+
+    c3, c2, c1 = cands[-3], cands[-2], cands[-1]
+    last_two_red = bool(float(c2["close"]) < float(c2["open"]) and float(c1["close"]) < float(c1["open"]))
+    last_three_desc = bool(float(c3["close"]) > float(c2["close"]) > float(c1["close"]))
+    bearish = bool(last_two_red and last_three_desc)
+    out["last_two_red_5m"] = last_two_red
+    out["last_three_closes_desc_5m"] = last_three_desc
+    out["nifty_bearish"] = bearish
     out["nifty_bullish"] = not bearish
-    out["ok"] = bool(bearish)
+    out["ok"] = bearish
     return out
 
 
@@ -2659,7 +2708,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
         for p in picks_mixed
         if str(p.get("direction_type") or "LONG").strip().upper() == "SHORT"
     ]
-    # With index gate: NIFTY LTP below day open. Without gate: show all bearish ≥50.
+    # With index gate: NIFTY 5m bearish structure gate. Without gate: show all bearish ≥50.
     if _bearish_index_gate_enabled():
         picks_bearish = picks_bear_all if bool(index_bear.get("ok")) else []
     else:
@@ -2760,7 +2809,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
             if float(c2) <= 50.0:
                 reasons.append(f"Live conviction {round(float(c2),1)} is not above 50")
             if _bearish_index_gate_enabled() and not bool(index_bear.get("ok")):
-                reasons.append("NIFTY is not below the day open (no SHORT from this list)")
+                reasons.append("NIFTY 5m bearish structure is not confirmed (no SHORT from this list)")
         else:
             if float(live_conv) < 60.0:
                 reasons.append(f"Live conviction {round(float(live_conv),1)} is below 60")
@@ -2891,7 +2940,7 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
             ig = index_bearish_gate_from_quotes()
             if not bool(ig.get("ok")):
                 raise ValueError(
-                    "SHORT is allowed only when NIFTY is below the day open. NIFTY is not bearish vs open right now."
+                    "SHORT is allowed only when NIFTY 5m bearish structure is confirmed (last 2 red + last 3 closes descending)."
                 )
     else:
         if live_score is None or live_score < 60.0:

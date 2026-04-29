@@ -755,7 +755,7 @@
           '<span class="df-meta">NIFTY is Bullish, so no trade will be displayed in this section.</span>';
       } else if (gate && (gate.nifty_quote_incomplete || gate.error)) {
         hint.innerHTML =
-          '<span class="df-meta">NIFTY quote unavailable; bearish list is hidden until the index quote loads.</span>';
+          '<span class="df-meta">NIFTY 5m data unavailable; bearish list is hidden until index candles load.</span>';
       } else {
         hint.textContent = '';
       }
@@ -773,7 +773,7 @@
       }
       if (gate && !gate.index_gate_disabled && (gate.nifty_quote_incomplete || gate.error)) {
         el.innerHTML =
-          '<p class="df-meta">NIFTY quote unavailable. Bearish picks will show once the index price is available.</p>';
+          '<p class="df-meta">NIFTY 5m data unavailable. Bearish picks will show once index candles are available.</p>';
         return;
       }
       el.innerHTML =
