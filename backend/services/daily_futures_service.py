@@ -162,6 +162,8 @@ def ensure_daily_futures_tables() -> None:
         bearish_signal_count INTEGER NOT NULL DEFAULT 0,
         bearish_conditions_active TEXT,
         last_bearish_evaluated_at TIMESTAMPTZ,
+        indicator_decision TEXT,
+        last_indicator_candle_ts TIMESTAMPTZ,
         first_amber_alert_at TIMESTAMPTZ,
         first_hard_exit_alert_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
@@ -235,6 +237,8 @@ def ensure_daily_futures_tables() -> None:
             conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS bearish_signal_count INTEGER NOT NULL DEFAULT 0"))
             conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS bearish_conditions_active TEXT"))
             conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS last_bearish_evaluated_at TIMESTAMPTZ"))
+            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS indicator_decision TEXT"))
+            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS last_indicator_candle_ts TIMESTAMPTZ"))
             conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS first_amber_alert_at TIMESTAMPTZ"))
             conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS first_hard_exit_alert_at TIMESTAMPTZ"))
             conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS direction_type VARCHAR(16)"))
@@ -1132,6 +1136,23 @@ def _apply_exit_alerts_to_running(
     giveback_abs_floor = float(getattr(settings, "DAILY_FUTURES_GIVEBACK_EXIT_RUPEES_FLOOR", 2000.0) or 2000.0)
     giveback_min_peak = float(getattr(settings, "DAILY_FUTURES_GIVEBACK_MIN_PEAK_RUPEES", 3000.0) or 3000.0)
     stock_candle_cache: Dict[str, List[Dict[str, Any]]] = {}
+    prev_state: Dict[int, Dict[str, Any]] = {}
+    try:
+        tids = [int(r.get("trade_id") or 0) for r in running if int(r.get("trade_id") or 0) > 0]
+        if tids:
+            rs = db.execute(
+                text(
+                    """
+                    SELECT id, bearish_signal_count, bearish_conditions_active, indicator_decision, last_indicator_candle_ts
+                    FROM daily_futures_user_trade
+                    WHERE id = ANY(:ids)
+                    """
+                ),
+                {"ids": tids},
+            ).mappings().all()
+            prev_state = {int(x["id"]): dict(x) for x in rs}
+    except Exception as e:
+        logger.debug("daily_futures: previous indicator state load failed: %s", e)
 
     for r in running:
         tid = int(r["trade_id"])
@@ -1297,11 +1318,11 @@ def _apply_exit_alerts_to_running(
                 ind = _evaluate_indicator_exit_signal(ikey, dirt, candles_15)
             except Exception as e:
                 logger.debug("daily_futures: indicator eval failed %s: %s", ikey, e)
-        ind_count = int(ind.get("count") or 0)
-        ind_bull = int(ind.get("bullish_count") or 0)
-        ind_bear = int(ind.get("bearish_count") or 0)
-        ind_conds = list(ind.get("conditions") or [])
-        ind_text = list(ind.get("conditions_text") or [])
+        ind_count_new = int(ind.get("count") or 0)
+        ind_bull_new = int(ind.get("bullish_count") or 0)
+        ind_bear_new = int(ind.get("bearish_count") or 0)
+        ind_conds_new = list(ind.get("conditions") or [])
+        ind_text_new = list(ind.get("conditions_text") or [])
         ind_latest_ts = ind.get("latest_candle_ts")
         exit_now_thr = int(
             os.getenv(
@@ -1317,12 +1338,38 @@ def _apply_exit_alerts_to_running(
         )
         exit_now_thr = max(1, exit_now_thr)
         hard_exit_thr = max(exit_now_thr, hard_exit_thr)
-        if ind_count >= hard_exit_thr:
-            as_dec = "hard_exit"
-        elif ind_count >= exit_now_thr:
-            as_dec = "exit_now"
+        prev = prev_state.get(tid) or {}
+        prev_count = int(prev.get("bearish_signal_count") or 0)
+        prev_codes = [x.strip() for x in str(prev.get("bearish_conditions_active") or "").split(",") if x and str(x).strip()]
+        prev_dec = str(prev.get("indicator_decision") or "hold").strip().lower()
+        prev_candle_dt = prev.get("last_indicator_candle_ts")
+        new_candle_dt = _parse_iso_ist(ind_latest_ts) if ind_latest_ts else None
+        same_or_older_candle = bool(
+            new_candle_dt is None
+            or (prev_candle_dt is not None and isinstance(prev_candle_dt, datetime) and new_candle_dt <= prev_candle_dt)
+        )
+        if same_or_older_candle:
+            ind_count = prev_count
+            ind_bull = prev_count if dirt != "SHORT" else 0
+            ind_bear = prev_count if dirt == "SHORT" else 0
+            ind_conds = prev_codes
+            txt_long = {"C1": "MACD bearish", "C2": "DI- crossed above DI+", "C3": "Hilega-Milega flipped", "C4": "OBV broke SMA10"}
+            txt_short = {"C1": "MACD bullish", "C2": "DI+ crossed above DI-", "C3": "Hilega-Milega flipped bullish", "C4": "OBV crossed above SMA10"}
+            label_map = txt_short if dirt == "SHORT" else txt_long
+            ind_text = [label_map[c] for c in ind_conds if c in label_map]
+            as_dec = prev_dec if prev_dec in {"hold", "exit_now", "hard_exit"} else "hold"
         else:
-            as_dec = "hold"
+            ind_count = ind_count_new
+            ind_bull = ind_bull_new
+            ind_bear = ind_bear_new
+            ind_conds = ind_conds_new
+            ind_text = ind_text_new
+            if ind_count >= hard_exit_thr:
+                as_dec = "hard_exit"
+            elif ind_count >= exit_now_thr:
+                as_dec = "exit_now"
+            else:
+                as_dec = "hold"
 
         r["alert_strip"] = {
             "l1": nifty_l1_state,
@@ -1354,6 +1401,8 @@ def _apply_exit_alerts_to_running(
                       bearish_signal_count = CAST(:bcount AS INTEGER),
                       bearish_conditions_active = :bconds,
                       last_bearish_evaluated_at = CAST(:beval AS TIMESTAMPTZ),
+                      indicator_decision = :idec,
+                      last_indicator_candle_ts = COALESCE(CAST(:icts AS TIMESTAMPTZ), last_indicator_candle_ts),
                       first_amber_alert_at = CASE
                         WHEN CAST(:bcount AS INTEGER) >= CAST(:exit_now_thr AS INTEGER) AND first_amber_alert_at IS NULL THEN CURRENT_TIMESTAMP
                         ELSE first_amber_alert_at
@@ -1377,6 +1426,8 @@ def _apply_exit_alerts_to_running(
                     "bcount": ind_count,
                     "bconds": ",".join(ind_conds) if ind_conds else None,
                     "beval": now_ist.isoformat(),
+                    "idec": as_dec,
+                    "icts": ind_latest_ts,
                     "exit_now_thr": exit_now_thr,
                     "hard_exit_thr": hard_exit_thr,
                     "id": tid,
