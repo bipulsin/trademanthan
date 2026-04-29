@@ -236,6 +236,27 @@
         }
         .df-dir-long { background: #22c55e; color: #000000 !important; }
         .df-dir-short { background: #7f1d1d !important; color: #ffffff !important; }
+        /* Dashboard Top Gainers/Losers: sector rank next to future name */
+        .df-sector-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 1.75em;
+            height: 1.75em;
+            padding: 0 5px;
+            border-radius: 50%;
+            margin-left: 6px;
+            vertical-align: middle;
+            line-height: 1;
+            flex-shrink: 0;
+            font-size: 0.65rem;
+            font-weight: 800;
+        }
+        .df-sector-badge-inner { position: relative; top: 0.5px; }
+        .df-sector-badge--bull { background: #15803d !important; color: #ffffff !important; }
+        .df-sector-badge--bear { background: #b91c1c !important; color: #ffffff !important; }
+        body[data-theme="dark"] .df-sector-badge--bull { background: #166534 !important; }
+        body[data-theme="dark"] .df-sector-badge--bear { background: #991b1b !important; }
         .df-dir-neutral { background: #e2e8f0; color: #334155; }
         /* Section icons (work even if a Font Awesome glyph fails to load) */
         .df-pick-sec-ico { display: inline-block; margin-right: 6px; font-size: 1.2rem; line-height: 1; vertical-align: -0.1em; }
@@ -442,6 +463,6 @@
     </div>
 
     <script src="left-menu.js?v=3.21"></script>
-    <script src="dailyfutures.js?v=48"></script>
+    <script src="dailyfutures.js?v=49"></script>
 </body>
 </html>

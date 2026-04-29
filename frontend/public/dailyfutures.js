@@ -540,10 +540,38 @@
     throw lastErr || new Error('section');
   }
 
-  function buildPicksReadonlyTableHtml(rows) {
+  function sectorMoverBadgeHtml(r, bullOrBear) {
+    var n;
+    var letter;
+    var cls;
+    if (bullOrBear === 'bear') {
+      n = r && r.sector_in_top_losers_rank;
+      letter = 'L';
+      cls = 'df-sector-badge df-sector-badge--bear';
+    } else {
+      n = r && r.sector_in_top_gainers_rank;
+      letter = 'S';
+      cls = 'df-sector-badge df-sector-badge--bull';
+    }
+    if (n !== 1 && n !== 2 && n !== 3) return '';
+    var title = r && r.nifty_sector_label ? 'Nifty sector: ' + esc(r.nifty_sector_label) : '';
+    return (
+      ' <span class="' +
+      cls +
+      '"' +
+      (title ? ' title="' + title + '"' : '') +
+      '><span class="df-sector-badge-inner">' +
+      letter +
+      String(n) +
+      '</span></span>'
+    );
+  }
+
+  function buildPicksReadonlyTableHtml(rows, modalKind) {
     if (!rows || !rows.length) {
       return '<p class="df-meta" style="margin:0">No rows to show.</p>';
     }
+    var badgeKind = modalKind === 'bear' ? 'bear' : 'bull';
     const th =
       '<thead><tr><th>Future</th><th>Qty (1 lot)</th><th>Scan #</th><th>1st scan</th><th>Last scan</th><th class="num">Conviction</th>' +
       '<th class="df-th-rs" title="(FUT day % − Nifty day %); line shows spread + S and N %">Rel. str.</th>' +
@@ -554,6 +582,7 @@
         return (
           '<tr><td><strong>' +
           symbolWithDirectionHtml(r) +
+          sectorMoverBadgeHtml(r, badgeKind) +
           '</strong><div style="font-size:0.75rem;color:var(--theme-muted);">' +
           esc(r.underlying) +
           '</div></td><td class="num">' +
@@ -591,7 +620,7 @@
           : "Today's pick — Bullish · conviction below 50";
     }
     if (wrap) {
-      wrap.innerHTML = buildPicksReadonlyTableHtml(rows);
+      wrap.innerHTML = buildPicksReadonlyTableHtml(rows, kind);
     }
     if (m) {
       m.setAttribute('aria-hidden', 'false');
@@ -678,6 +707,7 @@
         return (
           '<tr><td><strong>' +
           symbolWithDirectionHtml(r) +
+          sectorMoverBadgeHtml(r, 'bull') +
           '</strong><div style="font-size:0.75rem;color:var(--theme-muted);">' +
           esc(r.underlying) +
           '</div></td><td class="num">' +
@@ -763,6 +793,7 @@
         return (
           '<tr><td><strong>' +
           symbolWithDirectionHtml(r) +
+          sectorMoverBadgeHtml(r, 'bear') +
           '</strong><div style="font-size:0.75rem;color:var(--theme-muted);">' +
           esc(r.underlying) +
           '</div></td><td class="num">' +
@@ -1111,7 +1142,10 @@
     if (tl) tl.textContent = isShort ? 'Sell time (IST, HH:MM)' : 'Entry time (IST, HH:MM)';
     if (pl) pl.textContent = isShort ? 'Sell price (₹)' : 'Entry price (₹)';
     document.getElementById('dfBuySym').innerHTML = row
-      ? symbolWithDirectionHtml(row) + ' · ' + esc(row.underlying)
+      ? symbolWithDirectionHtml(row) +
+          sectorMoverBadgeHtml(row, isShort ? 'bear' : 'bull') +
+          ' · ' +
+          esc(row.underlying)
       : '';
     document.getElementById('dfBuyTime').value = istHmNow();
     document.getElementById('dfBuyPrice').value =

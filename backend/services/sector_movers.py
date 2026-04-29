@@ -278,6 +278,45 @@ for _sect_lbl, _yahoo_syms in SECTOR_STOCK_UNIVERSE.items():
             _EQ_SYMBOL_TO_SECTOR_LABEL[_base] = _sect_lbl
 
 
+@lru_cache(maxsize=1)
+def _index_key_to_sector_label() -> Dict[str, str]:
+    """Map sector_index / instrument_key string variants → Nifty sector label."""
+    m: Dict[str, str] = {}
+    for label, ikey in UPSTOX_SECTOR_INDEX_KEYS.items():
+        m[str(ikey).strip()] = label
+        m[normalize_sector_instrument_key(ikey)] = label
+    for alias, canon in SECTOR_INDEX_INSTRUMENT_ALIASES.items():
+        lbl = m.get(str(canon).strip()) or m.get(normalize_sector_instrument_key(canon))
+        if lbl:
+            m[str(alias).strip()] = lbl
+            m[normalize_sector_instrument_key(alias)] = lbl
+    return m
+
+
+def nifty_sector_label_for_nse_equity(nse_equity_symbol: Optional[str]) -> Optional[str]:
+    """
+    Nifty sector display label used by dashboard movers (``build_sector_movers``),
+    from static constituent map and optionally ``fno_sector_mapping.csv``.
+    """
+    sym = str(nse_equity_symbol or "").strip().upper()
+    if not sym:
+        return None
+    static = _EQ_SYMBOL_TO_SECTOR_LABEL.get(sym)
+    if static:
+        return static
+    try:
+        from backend.services.fno_sector_mapping_csv import load_fno_sector_index_map
+
+        raw = load_fno_sector_index_map().get(sym)
+        if not raw:
+            return None
+        mp = _index_key_to_sector_label()
+        rk = str(raw).strip()
+        return mp.get(rk) or mp.get(normalize_sector_instrument_key(rk))
+    except Exception:
+        return None
+
+
 def equity_sector_index_instrument_key(nse_equity_symbol: str) -> Optional[str]:
     """
     Upstox instrument_key for the Nifty sector index (CNX / Nifty family) that best matches

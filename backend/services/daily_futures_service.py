@@ -1010,6 +1010,35 @@ def _prev_trading_day(d: date) -> date:
     return d - timedelta(days=1)
 
 
+def _apply_sector_mover_badges(rows: List[Dict[str, Any]]) -> None:
+    """
+    Annotate picks with Dashboard Top Gainers/Losers sector ranks (same source as dashboard.html).
+    - sector_in_top_gainers_rank: 1–3 when underlying's Nifty sector is in top 3 movers.
+    - sector_in_top_losers_rank: 1–3 when in bottom 3 movers.
+    """
+    if not rows:
+        return
+    try:
+        from backend.services.sector_movers import build_sector_movers, nifty_sector_label_for_nse_equity
+    except Exception:
+        return
+    try:
+        mv = build_sector_movers(top_n=3)
+        gsectors = [r.get("sector") for r in (mv.get("gainers") or []) if r.get("sector")]
+        lsectors = [r.get("sector") for r in (mv.get("losers") or []) if r.get("sector")]
+        gmap = {lbl: idx + 1 for idx, lbl in enumerate(gsectors[:3])}
+        lmap = {lbl: idx + 1 for idx, lbl in enumerate(lsectors[:3])}
+    except Exception as e:
+        logger.debug("daily_futures: build_sector_movers for badges failed: %s", e)
+        return
+    for p in rows:
+        u = str(p.get("underlying") or "").strip().upper()
+        lbl = nifty_sector_label_for_nse_equity(u)
+        p["nifty_sector_label"] = lbl
+        p["sector_in_top_gainers_rank"] = gmap.get(lbl) if lbl else None
+        p["sector_in_top_losers_rank"] = lmap.get(lbl) if lbl else None
+
+
 def _workspace_trade_date_ist(now: Optional[datetime] = None) -> date:
     """
     Daily Futures display date policy:
@@ -2737,6 +2766,13 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                 reasons.append(f"Live conviction {round(float(live_conv),1)} is below 60")
         p["order_eligible"] = len(reasons) == 0
         p["order_block_reason"] = reasons[0] if reasons else None
+
+    try:
+        _apply_sector_mover_badges(
+            list(picks_mixed) + list(picks_low_conv_bull) + list(picks_low_conv_bear)
+        )
+    except Exception as e:
+        logger.debug("daily_futures: sector mover badges skipped: %s", e)
 
     return {
         "trade_date": str(td),
