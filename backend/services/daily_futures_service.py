@@ -59,6 +59,8 @@ def _bearish_index_gate_enabled() -> bool:
     return True
 _DF_TABLES_READY = False
 _DF_TABLES_LOCK = threading.Lock()
+_INDICATOR_CANDLE_CACHE: Dict[Tuple[str, date, datetime], List[Dict[str, Any]]] = {}
+_INDICATOR_EVAL_CACHE: Dict[Tuple[str, str], Dict[str, Any]] = {}
 
 
 def _instruments_index():
@@ -157,6 +159,11 @@ def ensure_daily_futures_tables() -> None:
         momentum_exhausting BOOLEAN NOT NULL DEFAULT FALSE,
         peak_unrealized_pnl_rupees NUMERIC(18,4),
         profit_giveback_breach BOOLEAN NOT NULL DEFAULT FALSE,
+        bearish_signal_count INTEGER NOT NULL DEFAULT 0,
+        bearish_conditions_active TEXT,
+        last_bearish_evaluated_at TIMESTAMPTZ,
+        first_amber_alert_at TIMESTAMPTZ,
+        first_hard_exit_alert_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
     );
@@ -225,6 +232,11 @@ def ensure_daily_futures_tables() -> None:
                     "ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS profit_giveback_breach BOOLEAN NOT NULL DEFAULT FALSE"
                 )
             )
+            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS bearish_signal_count INTEGER NOT NULL DEFAULT 0"))
+            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS bearish_conditions_active TEXT"))
+            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS last_bearish_evaluated_at TIMESTAMPTZ"))
+            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS first_amber_alert_at TIMESTAMPTZ"))
+            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS first_hard_exit_alert_at TIMESTAMPTZ"))
             conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS direction_type VARCHAR(16)"))
             conn.execute(text("UPDATE daily_futures_user_trade SET direction_type = 'LONG' WHERE direction_type IS NULL OR TRIM(direction_type) = ''"))
             conn.execute(text("ALTER TABLE daily_futures_user_trade ALTER COLUMN direction_type SET DEFAULT 'LONG'"))
@@ -498,6 +510,252 @@ def _last_completed_15m_candles_for_instrument(
             logger.debug("daily_futures: 15m intraday fallback failed for %s: %s", ik, e)
 
     return out[-5:]
+
+
+def _last_completed_15m_candles_for_indicator(
+    upstox: UpstoxService,
+    instrument_key: str,
+    session_date: date,
+    now_ist: datetime,
+    limit: int = 30,
+) -> List[Dict[str, Any]]:
+    ik = str(instrument_key or "").strip()
+    if not ik:
+        return []
+    cutoff = _floor_ist_to_15m(now_ist)
+    ck = (ik, session_date, cutoff)
+    cached = _INDICATOR_CANDLE_CACHE.get(ck)
+    if cached:
+        return cached[-max(30, int(limit)) :]
+
+    rows_all: List[Dict[str, Any]] = []
+    try:
+        raw = upstox.get_historical_candles_by_instrument_key(
+            ik, interval="minutes/15", days_back=15, range_end_date=session_date
+        ) or []
+        rows_all.extend(raw)
+    except Exception as e:
+        logger.debug("daily_futures: indicator 15m historical failed for %s: %s", ik, e)
+    if session_date == ist_today():
+        try:
+            key_enc = quote(ik, safe="")
+            intraday_url = f"{upstox.base_url}/historical-candle/intraday/{key_enc}/minutes/15"
+            raw_i = upstox.make_api_request(intraday_url, method="GET", timeout=15, max_retries=2) or {}
+            if isinstance(raw_i, dict) and raw_i.get("status") == "success":
+                rows_i = ((raw_i.get("data") or {}).get("candles")) or []
+                rows_all.extend(_candles_rows_to_structured(rows_i) or [])
+        except Exception as e:
+            logger.debug("daily_futures: indicator 15m intraday failed for %s: %s", ik, e)
+
+    merged: Dict[str, Dict[str, Any]] = {}
+    for c in rows_all:
+        ts = _parse_iso_ist((c or {}).get("timestamp"))
+        if ts is None or ts >= cutoff:
+            continue
+        op = _safe_float((c or {}).get("open"))
+        hi = _safe_float((c or {}).get("high"))
+        lo = _safe_float((c or {}).get("low"))
+        cl = _safe_float((c or {}).get("close"))
+        vol = _safe_float((c or {}).get("volume"))
+        if op is None or hi is None or lo is None or cl is None or vol is None:
+            continue
+        k = ts.isoformat()
+        merged[k] = {"timestamp": ts, "open": op, "high": hi, "low": lo, "close": cl, "volume": vol}
+    out = sorted(merged.values(), key=lambda x: x["timestamp"])
+    _INDICATOR_CANDLE_CACHE[ck] = out
+    return out[-max(30, int(limit)) :]
+
+
+def _ema(values: List[float], period: int) -> List[float]:
+    if not values:
+        return []
+    p = max(1, int(period))
+    k = 2.0 / (p + 1.0)
+    out: List[float] = []
+    ema_v = float(values[0])
+    for v in values:
+        ema_v = (float(v) * k) + (ema_v * (1.0 - k))
+        out.append(float(ema_v))
+    return out
+
+
+def _wma(values: List[float], period: int) -> List[Optional[float]]:
+    p = max(1, int(period))
+    if not values:
+        return []
+    weights = list(range(1, p + 1))
+    den = float(sum(weights))
+    out: List[Optional[float]] = [None] * len(values)
+    for i in range(p - 1, len(values)):
+        window = values[i - p + 1 : i + 1]
+        num = 0.0
+        for j, v in enumerate(window):
+            num += float(v) * float(weights[j])
+        out[i] = num / den if den > 0 else None
+    return out
+
+
+def _rma(values: List[float], period: int) -> List[Optional[float]]:
+    p = max(1, int(period))
+    out: List[Optional[float]] = [None] * len(values)
+    if len(values) < p:
+        return out
+    seed = sum(float(x) for x in values[:p]) / float(p)
+    out[p - 1] = seed
+    prev = seed
+    for i in range(p, len(values)):
+        prev = ((prev * (p - 1)) + float(values[i])) / float(p)
+        out[i] = prev
+    return out
+
+
+def _rsi_wilder(closes: List[float], period: int = 9) -> List[Optional[float]]:
+    if len(closes) < 2:
+        return [None] * len(closes)
+    gains: List[float] = [0.0]
+    losses: List[float] = [0.0]
+    for i in range(1, len(closes)):
+        d = float(closes[i]) - float(closes[i - 1])
+        gains.append(max(0.0, d))
+        losses.append(max(0.0, -d))
+    rg = _rma(gains, period)
+    rl = _rma(losses, period)
+    out: List[Optional[float]] = [None] * len(closes)
+    for i in range(len(closes)):
+        ag = rg[i]
+        al = rl[i]
+        if ag is None or al is None:
+            continue
+        if al == 0:
+            out[i] = 100.0
+        else:
+            rs = float(ag) / float(al)
+            out[i] = 100.0 - (100.0 / (1.0 + rs))
+    return out
+
+
+def _obv(closes: List[float], volumes: List[float]) -> List[float]:
+    if not closes or not volumes or len(closes) != len(volumes):
+        return []
+    out: List[float] = [0.0]
+    for i in range(1, len(closes)):
+        if closes[i] > closes[i - 1]:
+            out.append(out[-1] + float(volumes[i]))
+        elif closes[i] < closes[i - 1]:
+            out.append(out[-1] - float(volumes[i]))
+        else:
+            out.append(out[-1])
+    return out
+
+
+def _sma(values: List[float], period: int) -> List[Optional[float]]:
+    p = max(1, int(period))
+    out: List[Optional[float]] = [None] * len(values)
+    if len(values) < p:
+        return out
+    run = sum(float(x) for x in values[:p])
+    out[p - 1] = run / float(p)
+    for i in range(p, len(values)):
+        run += float(values[i]) - float(values[i - p])
+        out[i] = run / float(p)
+    return out
+
+
+def _adx_di_wilder(highs: List[float], lows: List[float], closes: List[float], period: int = 14) -> Tuple[List[Optional[float]], List[Optional[float]]]:
+    n = len(closes)
+    plus_dm = [0.0] * n
+    minus_dm = [0.0] * n
+    tr = [0.0] * n
+    for i in range(1, n):
+        up_move = float(highs[i]) - float(highs[i - 1])
+        down_move = float(lows[i - 1]) - float(lows[i])
+        plus_dm[i] = up_move if (up_move > down_move and up_move > 0) else 0.0
+        minus_dm[i] = down_move if (down_move > up_move and down_move > 0) else 0.0
+        tr[i] = max(
+            float(highs[i]) - float(lows[i]),
+            abs(float(highs[i]) - float(closes[i - 1])),
+            abs(float(lows[i]) - float(closes[i - 1])),
+        )
+    tr_rma = _rma(tr, period)
+    plus_rma = _rma(plus_dm, period)
+    minus_rma = _rma(minus_dm, period)
+    di_plus: List[Optional[float]] = [None] * n
+    di_minus: List[Optional[float]] = [None] * n
+    for i in range(n):
+        trv = tr_rma[i]
+        pv = plus_rma[i]
+        mv = minus_rma[i]
+        if trv is None or pv is None or mv is None or float(trv) <= 0:
+            continue
+        di_plus[i] = (float(pv) / float(trv)) * 100.0
+        di_minus[i] = (float(mv) / float(trv)) * 100.0
+    return di_plus, di_minus
+
+
+def _evaluate_indicator_exit_signal(
+    instrument_key: str,
+    direction_type: str,
+    candles: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    if len(candles) < 30:
+        return {"count": 0, "conditions": [], "latest_candle_ts": None}
+    latest_ts = (candles[-1].get("timestamp") or datetime.now(IST)).isoformat()
+    cache_key = (f"{str(instrument_key or '')}:{str(direction_type or 'LONG').upper()}", str(latest_ts))
+    cached = _INDICATOR_EVAL_CACHE.get(cache_key)
+    if cached:
+        return cached
+
+    closes = [float(c["close"]) for c in candles]
+    highs = [float(c["high"]) for c in candles]
+    lows = [float(c["low"]) for c in candles]
+    vols = [float(c["volume"]) for c in candles]
+    macd_line = []
+    e12 = _ema(closes, 12)
+    e26 = _ema(closes, 26)
+    for i in range(len(closes)):
+        macd_line.append(float(e12[i]) - float(e26[i]))
+    macd_sig = _ema(macd_line, 9)
+    di_plus, di_minus = _adx_di_wilder(highs, lows, closes, 14)
+    wma21 = _wma(closes, 21)
+    rsi9 = _rsi_wilder(closes, 9)
+    ema3 = _ema(closes, 3)
+    obv = _obv(closes, vols)
+    obv_sma10 = _sma(obv, 10)
+    i = len(candles) - 1
+
+    is_short = str(direction_type or "LONG").strip().upper() == "SHORT"
+    c1 = macd_line[i] > macd_sig[i] if is_short else macd_line[i] < macd_sig[i]
+    c2 = (di_minus[i] or 0) < (di_plus[i] or 0) if is_short else (di_minus[i] or 0) > (di_plus[i] or 0)
+    if is_short:
+        c3 = bool((wma21[i] is not None and rsi9[i] is not None and ema3[i] is not None) and (wma21[i] < rsi9[i] and wma21[i] < ema3[i]))
+        c4 = bool(obv_sma10[i] is not None and obv[i] > float(obv_sma10[i]))
+    else:
+        c3 = bool((wma21[i] is not None and rsi9[i] is not None and ema3[i] is not None) and (wma21[i] > rsi9[i] and wma21[i] > ema3[i]))
+        c4 = bool(obv_sma10[i] is not None and obv[i] < float(obv_sma10[i]))
+    cond_map = {"C1": bool(c1), "C2": bool(c2), "C3": bool(c3), "C4": bool(c4)}
+    active = [k for k, v in cond_map.items() if v]
+    count = len(active)
+    txt_long = {
+        "C1": "MACD bearish",
+        "C2": "DI- crossed above DI+",
+        "C3": "Hilega-Milega flipped",
+        "C4": "OBV broke SMA10",
+    }
+    txt_short = {
+        "C1": "MACD bullish",
+        "C2": "DI+ crossed above DI-",
+        "C3": "Hilega-Milega flipped bullish",
+        "C4": "OBV crossed above SMA10",
+    }
+    label_map = txt_short if is_short else txt_long
+    out = {
+        "count": count,
+        "conditions": active,
+        "conditions_text": [label_map[c] for c in active],
+        "latest_candle_ts": latest_ts,
+    }
+    _INDICATOR_EVAL_CACHE[cache_key] = out
+    return out
 
 
 def _last_completed_5m_candles_for_instrument(
@@ -1021,11 +1279,36 @@ def _apply_exit_alerts_to_running(
             as_dec = "watch"
         else:
             as_dec = "hold"
+
+        ind = {"count": 0, "conditions": [], "conditions_text": [], "latest_candle_ts": None}
+        if ikey:
+            try:
+                candles_15 = _last_completed_15m_candles_for_indicator(
+                    upstox, ikey, trade_date, now_ist, limit=30
+                )
+                ind = _evaluate_indicator_exit_signal(ikey, dirt, candles_15)
+            except Exception as e:
+                logger.debug("daily_futures: indicator eval failed %s: %s", ikey, e)
+        ind_count = int(ind.get("count") or 0)
+        ind_conds = list(ind.get("conditions") or [])
+        ind_text = list(ind.get("conditions_text") or [])
+        ind_latest_ts = ind.get("latest_candle_ts")
+        if ind_count >= 3:
+            as_dec = "hard_exit"
+        elif ind_count == 2:
+            as_dec = "exit_now"
+        else:
+            as_dec = "hold"
+
         r["alert_strip"] = {
             "l1": nifty_l1_state,
             "l2": l2k,
             "l3": "fading" if l3_fading else "strong",
             "decision": as_dec,
+            "indicator_count": ind_count,
+            "indicator_conditions": ind_conds,
+            "indicator_conditions_text": ind_text,
+            "indicator_latest_candle_ts": ind_latest_ts,
         }
 
         try:
@@ -1040,6 +1323,17 @@ def _apply_exit_alerts_to_running(
                       momentum_exhausting = CAST(:me AS BOOLEAN),
                       peak_unrealized_pnl_rupees = COALESCE(CAST(:peak_rs AS NUMERIC), peak_unrealized_pnl_rupees),
                       profit_giveback_breach = CAST(:pgb AS BOOLEAN),
+                      bearish_signal_count = CAST(:bcount AS INTEGER),
+                      bearish_conditions_active = :bconds,
+                      last_bearish_evaluated_at = CAST(:beval AS TIMESTAMPTZ),
+                      first_amber_alert_at = CASE
+                        WHEN CAST(:bcount AS INTEGER) >= 2 AND first_amber_alert_at IS NULL THEN CURRENT_TIMESTAMP
+                        ELSE first_amber_alert_at
+                      END,
+                      first_hard_exit_alert_at = CASE
+                        WHEN CAST(:bcount AS INTEGER) >= 3 AND first_hard_exit_alert_at IS NULL THEN CURRENT_TIMESTAMP
+                        ELSE first_hard_exit_alert_at
+                      END,
                       updated_at = CURRENT_TIMESTAMP
                     WHERE id = :id
                     """
@@ -1052,6 +1346,9 @@ def _apply_exit_alerts_to_running(
                     "me": merged_m,
                     "peak_rs": float(new_peak) if new_peak is not None else None,
                     "pgb": merged_giveback,
+                    "bcount": ind_count,
+                    "bconds": ",".join(ind_conds) if ind_conds else None,
+                    "beval": now_ist.isoformat(),
                     "id": tid,
                 },
             )
