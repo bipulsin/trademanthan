@@ -9460,12 +9460,15 @@ async def daily_futures_indicator_playbook(
             # but emit checkpoints only inside today's hold window.
             upto = [x for x in candles_all if x["timestamp"] <= c["timestamp"]]
             bull_count, bear_count, labels = _count_for_slice(upto, direction)
-            if bull_count >= 2 or bear_count >= 2:
+            is_short_dir = str(direction or "LONG").upper() == "SHORT"
+            relevant_count = bear_count if is_short_dir else bull_count
+            if relevant_count >= 2:
                 timeline.append(
                     {
                         "timestamp_ist": c["timestamp"].strftime("%H:%M"),
                         "bullish_exit_count": bull_count,
                         "bearish_exit_count": bear_count,
+                        "relevant_exit_count": relevant_count,
                         "active_conditions": labels,
                     }
                 )
