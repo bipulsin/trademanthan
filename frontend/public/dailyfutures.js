@@ -222,47 +222,27 @@
     convictionEditMode: null,
     /** @type {Record<number, number>} trade_id -> bit mask of active exit alerts (1=nifty,2=trail,4=momo) */
     prevRunAlertBits: {},
-    /** @type {Record<string, boolean>} dedupe key: trade|candle|count */
-    prevIndicatorAlertKeys: {},
+    /** @type {Record<number, string>} trade_id -> last 15m strip decision (lock_profit, dual_exit, watch, hold) */
+    prevStripDecisionByTid: {},
     refreshSeq: 0,
   };
 
-  /** @param {'amber' | 'hard'} kind */
+  /** @param {string} kind  'lock_profit' | 'dual_exit' */
   function playStrip15mBeep(kind) {
     try {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (!Ctx) return;
       const ctx = new Ctx();
-      const tones = kind === 'hard' ? [1240, 980] : [760];
-      tones.forEach(function (freq, idx) {
-        const o = ctx.createOscillator();
-        const g = ctx.createGain();
-        o.connect(g);
-        g.connect(ctx.destination);
-        o.frequency.value = freq;
-        o.type = 'square';
-        const t0 = ctx.currentTime + idx * 0.14;
-        g.gain.setValueAtTime(0.0001, t0);
-        g.gain.exponentialRampToValueAtTime(0.14, t0 + 0.01);
-        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.11);
-        o.start(t0);
-        o.stop(t0 + 0.12);
-      });
-    } catch (e) {
-      /* ignore */
-    }
-  }
-
-  function fireDecisionNotification(title, body) {
-    try {
-      if (!('Notification' in window)) return;
-      if (Notification.permission === 'granted') {
-        new Notification(title, { body: body || '' });
-      } else if (Notification.permission !== 'denied') {
-        Notification.requestPermission().then(function (perm) {
-          if (perm === 'granted') new Notification(title, { body: body || '' });
-        });
-      }
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.connect(g);
+      g.connect(ctx.destination);
+      o.frequency.value = kind === 'dual_exit' ? 520 : 1100;
+      o.type = 'sine';
+      g.gain.setValueAtTime(0.12, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.18);
+      o.start();
+      o.stop(ctx.currentTime + 0.18);
     } catch (e) {
       /* ignore */
     }
@@ -273,21 +253,16 @@
     rows.forEach(function (r) {
       var tid = r.trade_id;
       if (tid == null) return;
-      var st = r.alert_strip || {};
-      var count = Number(st.indicator_count || 0);
-      var candleTs = String(st.indicator_latest_candle_ts || '');
-      var dedupeKey = String(tid) + '|' + candleTs + '|' + String(count);
-      if (count >= 2 && candleTs && !state.prevIndicatorAlertKeys[dedupeKey]) {
-        var symbol = String(r.future_symbol || r.underlying || 'Position');
-        if (count >= 3) {
-          playStrip15mBeep('hard');
-          fireDecisionNotification('HARD EXIT: ' + symbol, (st.indicator_conditions_text || []).join(' · '));
-        } else {
-          playStrip15mBeep('amber');
-          fireDecisionNotification('Exit Warning: ' + symbol, (st.indicator_conditions_text || []).join(' · '));
-        }
-        state.prevIndicatorAlertKeys[dedupeKey] = true;
+      var s = (r.alert_strip && r.alert_strip.decision) || 'hold';
+      var prev = state.prevStripDecisionByTid[tid];
+      if (
+        prev !== undefined &&
+        prev !== s &&
+        (s === 'lock_profit' || s === 'dual_exit')
+      ) {
+        playStrip15mBeep(s);
       }
+      state.prevStripDecisionByTid[tid] = s;
     });
   }
 
@@ -365,21 +340,23 @@
 
   function stripDecisionCell(st) {
     var d = (st && st.decision) || 'hold';
-    var conds = (st && st.indicator_conditions_text && st.indicator_conditions_text.length)
-      ? st.indicator_conditions_text.join(' · ')
-      : 'No flipped indicator conditions on latest closed 15m candle.';
-    if (d === 'hard_exit') {
+    if (d === 'lock_profit') {
       return (
-        '<span class="df-s-cell df-s-neg df-s-decis df-s-pulse" style="font-size:14px;font-weight:800;" title="' + esc(conds) + '. Trend reversed.">HARD EXIT</span>'
+        '<span class="df-s-cell df-s-neg df-s-decis" title="Trail stop is hit; lock gains and exit.">LOCK PROFIT — EXIT</span>'
       );
     }
-    if (d === 'exit_now') {
+    if (d === 'dual_exit') {
       return (
-        '<span class="df-s-cell df-s-amb df-s-decis" style="font-weight:700;" title="' + esc(conds) + '. Action: exit on this candle close.">EXIT NOW</span>'
+        '<span class="df-s-cell df-s-neg df-s-decis" title="Both momentum warnings are active together: Nifty lower-low plus stock 15m fade.">REVIEW EXIT — dual</span>'
+      );
+    }
+    if (d === 'watch') {
+      return (
+        '<span class="df-s-cell df-s-amb df-s-decis" title="One momentum warning is active (Nifty or stock), but not both.">WATCH</span>'
       );
     }
     return (
-      '<span class="df-s-cell df-s-ok df-s-decis" title="No exit signal">No exit signal</span>'
+      '<span class="df-s-cell df-s-ok df-s-decis" title="No active exit signal from this strip: no trail-stop hit and no L1/L3 momentum warning combination.">No exit signal</span>'
     );
   }
 
