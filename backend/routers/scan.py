@@ -9373,9 +9373,10 @@ async def daily_futures_indicator_playbook(
             except Exception:
                 pass
         candles.sort(key=lambda x: x["timestamp"])
+        candles_all = list(candles)
         # Historical endpoint can return only prior-session bars for the same-day request.
         # Restrict to trade-date candles before building hold-window timeline.
-        candles_td = [c for c in candles if c["timestamp"].date() == trade_d]
+        candles_td = [c for c in candles_all if c["timestamp"].date() == trade_d]
         if (not candles_td) and trade_d == now_ist.date():
             try:
                 key_enc = quote(ikey, safe="")
@@ -9410,6 +9411,11 @@ async def daily_futures_indicator_playbook(
                 td_rows.sort(key=lambda x: x["timestamp"])
                 if td_rows:
                     candles_td = td_rows
+                    # Merge intraday same-day bars with historical warmup bars.
+                    by_ts = {c["timestamp"]: c for c in candles_all}
+                    for c in td_rows:
+                        by_ts[c["timestamp"]] = c
+                    candles_all = sorted(by_ts.values(), key=lambda x: x["timestamp"])
             except Exception:
                 pass
 
@@ -9450,7 +9456,9 @@ async def daily_futures_indicator_playbook(
             continue
         timeline: List[Dict[str, Any]] = []
         for c in hold:
-            upto = [x for x in candles_td if x["timestamp"] <= c["timestamp"]]
+            # Keep prior-session warmup bars for MACD/DI/Hilega/OBV history,
+            # but emit checkpoints only inside today's hold window.
+            upto = [x for x in candles_all if x["timestamp"] <= c["timestamp"]]
             bull_count, bear_count, labels = _count_for_slice(upto, direction)
             if bull_count >= 2 or bear_count >= 2:
                 timeline.append(
