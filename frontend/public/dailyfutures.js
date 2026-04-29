@@ -372,7 +372,9 @@
         return (
           '<tr class="df-s-tr"><td class="df-s-sym"><strong>' +
           symbolWithDirectionHtml(r) +
-          '</strong></td><td class="df-s-c">' +
+          '</strong><div style="font-size:0.74rem;color:var(--theme-muted);">Trade date: ' +
+          esc(r.trade_date || '—') +
+          '</div></td><td class="df-s-c">' +
           stripL1Cell(st) +
           '</td><td class="df-s-c">' +
           stripL2Cell(st, r) +
@@ -835,7 +837,7 @@
       return;
     }
     const th =
-      '<thead><tr><th>Future</th><th>Qty</th><th>Scan #</th><th>Last scan</th><th class="num">Conviction</th><th class="df-th-rs" title="(FUT day % − Nifty %); S and N in parentheses">Rel. str.</th><th class="num">LTP</th><th>Entry time</th><th class="num" title="Long: buy; Short: sell">Entry/Sell ₹</th><th class="num">Unrealized PnL</th><th>Alerts</th><th>Action</th></tr></thead>';
+      '<thead><tr><th>Future</th><th>Trade date</th><th>Qty</th><th>Scan #</th><th>Last scan</th><th class="num">Conviction</th><th class="df-th-rs" title="(FUT day % − Nifty %); S and N in parentheses">Rel. str.</th><th class="num">LTP</th><th>Entry time</th><th class="num" title="Long: buy; Short: sell">Entry/Sell ₹</th><th class="num">Unrealized PnL</th><th>Alerts</th><th>Action</th></tr></thead>';
     const tot = sumRunningUnrealized(rows);
     const totalLine =
       '<p class="df-meta" style="margin:0 0 10px;font-size:0.9rem;">' +
@@ -858,7 +860,9 @@
         return (
           '<tr><td><strong>' +
           symbolWithDirectionHtml(r) +
-          '</strong></td><td class="num">' +
+          '</strong></td><td>' +
+          esc(r.trade_date || '—') +
+          '</td><td class="num">' +
           esc(r.lot_size) +
           '</td><td class="num">' +
           esc(r.scan_count) +

@@ -2477,10 +2477,9 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
             JOIN daily_futures_screening s ON s.id = t.screening_id
             WHERE t.user_id = :u
               AND t.order_status = 'bought'
-              AND s.trade_date = CAST(:td AS DATE)
             """
         ),
-        {"u": user_id, "td": str(td)},
+        {"u": user_id},
     ).fetchall()
     bought_sids = {int(r[0]) for r in br}
 
@@ -2509,16 +2508,16 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                    s.scan_count, s.first_hit_at, s.last_hit_at, s.conviction_score,
                    s.second_scan_conviction_score, s.second_scan_oi_leg, s.second_scan_vwap_leg, s.ltp,
                    s.stock_change_pct, s.nifty_change_pct,
-                   s.conviction_oi_leg, s.conviction_vwap_leg, s.session_vwap, s.conviction_breakdown_json
+                   s.conviction_oi_leg, s.conviction_vwap_leg, s.session_vwap, s.conviction_breakdown_json,
+                   s.trade_date
             FROM daily_futures_user_trade t
             JOIN daily_futures_screening s ON s.id = t.screening_id
             WHERE t.user_id = :u
               AND t.order_status = 'bought'
-              AND s.trade_date = CAST(:td AS DATE)
             ORDER BY t.updated_at DESC
             """
         ),
-        {"u": user_id, "td": str(td)},
+        {"u": user_id},
     ).fetchall()
 
     running = []
@@ -2562,6 +2561,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                 "conviction_vwap_leg": float(row[31]) if row[31] is not None else None,
                 "session_vwap": float(row[32]) if row[32] is not None else None,
                 "conviction_breakdown_json": row[33] if len(row) > 33 and row[33] is not None else None,
+                "trade_date": str(row[34]) if len(row) > 34 and row[34] is not None else str(td),
                 "warn_two_misses": miss >= 2,
             }
         )
