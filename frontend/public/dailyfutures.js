@@ -670,8 +670,7 @@
       }
       if (scn === 0) {
         el.innerHTML =
-          '<p class="df-meta">No symbols in <strong>today&rsquo;s</strong> Premium Futures screening yet. ' +
-            'If ChartInk already fired, check that webhooks are reaching the server and the screening row&rsquo;s <code>trade_date</code> is today (IST). After 9:00 IST, refresh in a few minutes.</p>';
+          '<p class="df-meta df-wait-premium-msg" style="font-size:0.78rem;">Waiting for Premium Futures in this section, Algo is in work!</p>';
         return;
       }
       if (hb > 0 || hcl > 0) {
