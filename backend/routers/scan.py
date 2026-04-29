@@ -9341,11 +9341,72 @@ async def daily_futures_indicator_playbook(
             if None in (op, hi, lo, cl, vol):
                 continue
             candles.append({"timestamp": ts, "open": op, "high": hi, "low": lo, "close": cl, "volume": vol})
+        # Historical endpoint can miss current-session bars while market/day is active; fallback to intraday 15m.
+        if not candles and trade_d == now_ist.date():
+            try:
+                key_enc = quote(ikey, safe="")
+                intraday_url = f"{vwap_service.base_url}/historical-candle/intraday/{key_enc}/minutes/15"
+                raw_i = vwap_service.make_api_request(intraday_url, method="GET", timeout=15, max_retries=2) or {}
+                rows_i = []
+                if isinstance(raw_i, dict) and raw_i.get("status") == "success":
+                    rows_i = ((raw_i.get("data") or {}).get("candles")) or []
+                for row in rows_i:
+                    if isinstance(row, dict):
+                        ts = _parse_ist_ts(row.get("timestamp"))
+                        op = _safe_num(row.get("open"))
+                        hi = _safe_num(row.get("high"))
+                        lo = _safe_num(row.get("low"))
+                        cl = _safe_num(row.get("close"))
+                        vol = _safe_num(row.get("volume"))
+                    elif isinstance(row, (list, tuple)) and len(row) >= 6:
+                        ts = _parse_ist_ts(row[0])
+                        op = _safe_num(row[1])
+                        hi = _safe_num(row[2])
+                        lo = _safe_num(row[3])
+                        cl = _safe_num(row[4])
+                        vol = _safe_num(row[5])
+                    else:
+                        continue
+                    if ts is None or None in (op, hi, lo, cl, vol):
+                        continue
+                    candles.append({"timestamp": ts, "open": op, "high": hi, "low": lo, "close": cl, "volume": vol})
+            except Exception:
+                pass
         candles.sort(key=lambda x: x["timestamp"])
         if not candles:
+            out.append(
+                {
+                    "trade_id": int(tr["trade_id"]),
+                    "trade_date": str(trade_d),
+                    "underlying": str(tr.get("underlying") or ""),
+                    "future_symbol": str(tr.get("future_symbol") or ""),
+                    "direction_type": direction,
+                    "order_status": str(tr.get("order_status") or ""),
+                    "entry_time": entry_dt.strftime("%H:%M"),
+                    "exit_time": exit_dt.strftime("%H:%M"),
+                    "first_count_ge2_at": None,
+                    "count_ge2_timeline": [],
+                    "no_candle_data": True,
+                }
+            )
             continue
         hold = [c for c in candles if c["timestamp"] >= entry_dt and c["timestamp"] <= exit_dt]
         if not hold:
+            out.append(
+                {
+                    "trade_id": int(tr["trade_id"]),
+                    "trade_date": str(trade_d),
+                    "underlying": str(tr.get("underlying") or ""),
+                    "future_symbol": str(tr.get("future_symbol") or ""),
+                    "direction_type": direction,
+                    "order_status": str(tr.get("order_status") or ""),
+                    "entry_time": entry_dt.strftime("%H:%M"),
+                    "exit_time": exit_dt.strftime("%H:%M"),
+                    "first_count_ge2_at": None,
+                    "count_ge2_timeline": [],
+                    "no_hold_candles": True,
+                }
+            )
             continue
         timeline: List[Dict[str, Any]] = []
         for c in hold:
