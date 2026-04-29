@@ -49,8 +49,9 @@
         .df-rs { font-size: 0.78rem; line-height: 1.35; font-weight: 600; white-space: nowrap; }
         .df-rs-strong { color: #15803d; }
         .df-rs-weak { color: #b45309; }
-        .df-score-entry { color: #fde047; font-weight: 700; }
-        .df-score-live { color: var(--theme-text, #0f172a); font-weight: 600; }
+        .df-score-entry { color: #ffffff !important; font-weight: 700; }
+        .df-score-live { color: #ffffff !important; font-weight: 700; }
+        .df-sl-val { color: #fde047 !important; font-weight: 700; }
         button.df-conv-link {
             border: none;
             background: transparent;
@@ -387,7 +388,10 @@
                 </div>
 
                 <div class="df-card">
-                    <h2><i class="fas fa-play"></i> Running order</h2>
+                    <div class="df-head">
+                        <h2><i class="fas fa-play"></i> Running order</h2>
+                        <div class="df-summary" id="dfRunningSummary"></div>
+                    </div>
                     <div id="dfRunningTable"></div>
                 </div>
 
@@ -483,6 +487,6 @@
     </div>
 
     <script src="left-menu.js?v=3.21"></script>
-    <script src="dailyfutures.js?v=57"></script>
+    <script src="dailyfutures.js?v=58"></script>
 </body>
 </html>

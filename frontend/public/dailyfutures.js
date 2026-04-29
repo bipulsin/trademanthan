@@ -877,26 +877,25 @@
   }
 
   function renderRunning(rows) {
+    const sumEl = document.getElementById('dfRunningSummary');
     const el = document.getElementById('dfRunningTable');
+    if (sumEl) sumEl.innerHTML = '';
     if (!el) return;
     if (!rows || !rows.length) {
       el.innerHTML = '<p style="color:var(--theme-muted);">No open positions.</p>';
       return;
     }
     const th =
-      '<thead><tr><th>Future</th><th>Trade date</th><th>Qty</th><th class="num">Conviction</th><th class="num">LTP</th><th>Entry time</th><th class="num" title="Long: buy; Short: sell">Entry/Sell ₹</th><th class="num">SL ₹</th><th class="num">Unrealized PnL</th><th>Alerts</th><th>Action</th></tr></thead>';
+      '<thead><tr><th>Future</th><th>Trade date</th><th>Qty</th><th class="num">Conviction</th><th>Entry time</th><th class="num" title="Long: buy; Short: sell">Entry/Sell ₹</th><th class="num">SL ₹</th><th class="num">LTP</th><th class="num">Unrealized PnL</th><th>Alerts</th><th>Action</th></tr></thead>';
     const tot = sumRunningUnrealized(rows);
-    const totalLine =
-      '<p class="df-meta" style="margin:0 0 10px;font-size:0.9rem;">' +
-      '<strong>Total unrealized PnL:</strong> ' +
-      (tot.n > 0
-        ? '<span class="' +
-          (tot.sum > 0 ? 'df-pnl-pos' : tot.sum < 0 ? 'df-pnl-neg' : '') +
-          '">' +
-          fmtMoney(tot.sum) +
-          '</span>'
-        : '—') +
-      '</p>';
+    if (sumEl) {
+      sumEl.innerHTML =
+        '<span><strong>Tot Unrealzd PnL:</strong> ' +
+        (tot.n > 0
+          ? '<span class="' + (tot.sum > 0 ? 'df-pnl-pos' : tot.sum < 0 ? 'df-pnl-neg' : '') + '">' + fmtMoney(tot.sum) + '</span>'
+          : '—') +
+        '</span>';
+    }
     const body = rows
       .map(function (r) {
         const refPx =
@@ -914,14 +913,14 @@
           esc(r.lot_size) +
           '</td><td class="num">' +
           formatConvictionEntryLive(r) +
-          '</td><td class="num">' +
-          fmtNum(r.ltp, 2) +
           '</td><td>' +
           esc(r.entry_time) +
           '</td><td class="num">' +
           fmtNum(refPx, 2) +
-          '</td><td class="num"' + slTitle + '>' +
+          '</td><td class="num df-sl-val"' + slTitle + '>' +
           slTxt +
+          '</td><td class="num">' +
+          fmtNum(r.ltp, 2) +
           '</td>' +
           unrealizedPnlCell(r) +
           '<td class="df-alerts-cell">' +
@@ -933,7 +932,7 @@
         );
       })
       .join('');
-    el.innerHTML = totalLine + '<table class="df-table">' + th + '<tbody>' + body + '</tbody></table>';
+    el.innerHTML = '<table class="df-table">' + th + '<tbody>' + body + '</tbody></table>';
     bindConvictionLinks(el);
     el.querySelectorAll('button[data-tid]').forEach(function (btn) {
       btn.addEventListener('click', function () {
