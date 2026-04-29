@@ -835,7 +835,7 @@
       return;
     }
     const th =
-      '<thead><tr><th>Future</th><th>Qty</th><th>Scan #</th><th>1st scan</th><th>Last scan</th><th class="num">Conviction</th><th class="df-th-rs" title="(FUT day % − Nifty %); S and N in parentheses">Rel. str.</th><th class="num">LTP</th><th>Entry time</th><th class="num" title="Long: buy; Short: sell">Entry/Sell ₹</th><th class="num">Unrealized PnL</th><th>Alerts</th><th>Action</th></tr></thead>';
+      '<thead><tr><th>Future</th><th>Qty</th><th>Scan #</th><th>Last scan</th><th class="num">Conviction</th><th class="df-th-rs" title="(FUT day % − Nifty %); S and N in parentheses">Rel. str.</th><th class="num">LTP</th><th>Entry time</th><th class="num" title="Long: buy; Short: sell">Entry/Sell ₹</th><th class="num">Unrealized PnL</th><th>Alerts</th><th>Action</th></tr></thead>';
     const tot = sumRunningUnrealized(rows);
     const totalLine =
       '<p class="df-meta" style="margin:0 0 10px;font-size:0.9rem;">' +
@@ -863,8 +863,6 @@
           '</td><td class="num">' +
           esc(r.scan_count) +
           warn +
-          '</td><td>' +
-          fmtIsoTimeIst(r.first_hit_at) +
           '</td><td>' +
           fmtIsoTimeIst(r.last_hit_at) +
           '</td><td class="num">' +
