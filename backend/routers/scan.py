@@ -75,7 +75,7 @@ except ImportError:
         health_monitor = None  # Graceful degradation if not available
 from backend.services.upstox_service import upstox_service as vwap_service
 from backend.services.market_sentiment_dials import build_dial_rows, utc_iso
-from backend.services.sector_movers import build_sector_movers, build_sector_stock_detail
+from backend.services.sector_movers import build_sector_stock_detail, get_sector_movers_cached
 from backend.services.premarket_watchlist_job import (
     fetch_premarket_watchlist_for_date,
     run_premarket_watchlist_job_with_lock,
@@ -6121,7 +6121,7 @@ async def dashboard_sector_movers():
     Upstox quote first, then Yahoo; close-to-close fallbacks when needed.
     """
     try:
-        data = build_sector_movers(top_n=3)
+        data = get_sector_movers_cached(top_n=3)
         return JSONResponse(status_code=200, content=data)
     except Exception as e:
         logger.exception("dashboard_sector_movers: %s", e)

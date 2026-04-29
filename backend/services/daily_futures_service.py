@@ -1019,17 +1019,17 @@ def _apply_sector_mover_badges(rows: List[Dict[str, Any]]) -> None:
     if not rows:
         return
     try:
-        from backend.services.sector_movers import build_sector_movers, nifty_sector_label_for_nse_equity
+        from backend.services.sector_movers import get_sector_movers_cached, nifty_sector_label_for_nse_equity
     except Exception:
         return
     try:
-        mv = build_sector_movers(top_n=3)
+        mv = get_sector_movers_cached(top_n=3)
         gsectors = [r.get("sector") for r in (mv.get("gainers") or []) if r.get("sector")]
         lsectors = [r.get("sector") for r in (mv.get("losers") or []) if r.get("sector")]
         gmap = {lbl: idx + 1 for idx, lbl in enumerate(gsectors[:3])}
         lmap = {lbl: idx + 1 for idx, lbl in enumerate(lsectors[:3])}
     except Exception as e:
-        logger.debug("daily_futures: build_sector_movers for badges failed: %s", e)
+        logger.debug("daily_futures: sector_movers_cached for badges failed: %s", e)
         return
     for p in rows:
         u = str(p.get("underlying") or "").strip().upper()

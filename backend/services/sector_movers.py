@@ -5,6 +5,8 @@ with close-to-close fallbacks. Used by dashboard Top Gainers & Losers (sectors).
 from __future__ import annotations
 
 import logging
+import os
+import time
 from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -481,6 +483,31 @@ def build_sector_movers(top_n: int = 3) -> Dict[str, Any]:
         "source": "mixed",
         "universe_size": len(rows),
     }
+
+
+# Short TTL reuse: fetching all sector indices each time is costly (many HTTP calls).
+_SECTOR_MOVERS_TTL_CACHE: Dict[int, Tuple[float, Dict[str, Any]]] = {}
+_DEFAULT_SECTOR_MOVERS_TTL_SEC = 45.0
+
+
+def get_sector_movers_cached(top_n: int = 3) -> Dict[str, Any]:
+    """
+    Same payload as ``build_sector_movers`` but cached briefly to avoid hammering brokers
+    on every dashboard / Daily Futures poll. Env: ``SECTOR_MOVERS_CACHE_TTL_SEC`` (default 45).
+    """
+    try:
+        ttl = float(os.getenv("SECTOR_MOVERS_CACHE_TTL_SEC", "") or _DEFAULT_SECTOR_MOVERS_TTL_SEC)
+    except (TypeError, ValueError):
+        ttl = _DEFAULT_SECTOR_MOVERS_TTL_SEC
+    ttl = max(5.0, min(ttl, 300.0))
+    tn = max(1, int(top_n))
+    now_m = time.monotonic()
+    ent = _SECTOR_MOVERS_TTL_CACHE.get(tn)
+    if ent is not None and (now_m - ent[0]) < ttl:
+        return ent[1]
+    data = build_sector_movers(top_n=tn)
+    _SECTOR_MOVERS_TTL_CACHE[tn] = (now_m, data)
+    return data
 
 
 def _yahoo_display_symbol(yahoo_sym: str) -> str:
