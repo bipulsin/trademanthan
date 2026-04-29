@@ -9373,7 +9373,47 @@ async def daily_futures_indicator_playbook(
             except Exception:
                 pass
         candles.sort(key=lambda x: x["timestamp"])
-        if not candles:
+        # Historical endpoint can return only prior-session bars for the same-day request.
+        # Restrict to trade-date candles before building hold-window timeline.
+        candles_td = [c for c in candles if c["timestamp"].date() == trade_d]
+        if (not candles_td) and trade_d == now_ist.date():
+            try:
+                key_enc = quote(ikey, safe="")
+                intraday_url = f"{vwap_service.base_url}/historical-candle/intraday/{key_enc}/minutes/15"
+                raw_i = vwap_service.make_api_request(intraday_url, method="GET", timeout=15, max_retries=2) or {}
+                rows_i = []
+                if isinstance(raw_i, dict) and raw_i.get("status") == "success":
+                    rows_i = ((raw_i.get("data") or {}).get("candles")) or []
+                td_rows: List[Dict[str, Any]] = []
+                for row in rows_i:
+                    if isinstance(row, dict):
+                        ts = _parse_ist_ts(row.get("timestamp"))
+                        op = _safe_num(row.get("open"))
+                        hi = _safe_num(row.get("high"))
+                        lo = _safe_num(row.get("low"))
+                        cl = _safe_num(row.get("close"))
+                        vol = _safe_num(row.get("volume"))
+                    elif isinstance(row, (list, tuple)) and len(row) >= 6:
+                        ts = _parse_ist_ts(row[0])
+                        op = _safe_num(row[1])
+                        hi = _safe_num(row[2])
+                        lo = _safe_num(row[3])
+                        cl = _safe_num(row[4])
+                        vol = _safe_num(row[5])
+                    else:
+                        continue
+                    if ts is None or None in (op, hi, lo, cl, vol):
+                        continue
+                    if ts.date() != trade_d:
+                        continue
+                    td_rows.append({"timestamp": ts, "open": op, "high": hi, "low": lo, "close": cl, "volume": vol})
+                td_rows.sort(key=lambda x: x["timestamp"])
+                if td_rows:
+                    candles_td = td_rows
+            except Exception:
+                pass
+
+        if not candles_td:
             out.append(
                 {
                     "trade_id": int(tr["trade_id"]),
@@ -9390,7 +9430,7 @@ async def daily_futures_indicator_playbook(
                 }
             )
             continue
-        hold = [c for c in candles if c["timestamp"] >= entry_dt and c["timestamp"] <= exit_dt]
+        hold = [c for c in candles_td if c["timestamp"] >= entry_dt and c["timestamp"] <= exit_dt]
         if not hold:
             out.append(
                 {
@@ -9410,7 +9450,7 @@ async def daily_futures_indicator_playbook(
             continue
         timeline: List[Dict[str, Any]] = []
         for c in hold:
-            upto = [x for x in candles if x["timestamp"] <= c["timestamp"]]
+            upto = [x for x in candles_td if x["timestamp"] <= c["timestamp"]]
             bull_count, bear_count, labels = _count_for_slice(upto, direction)
             if bull_count >= 2 or bear_count >= 2:
                 timeline.append(
