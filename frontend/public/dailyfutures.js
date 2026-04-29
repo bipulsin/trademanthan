@@ -222,7 +222,7 @@
     convictionEditMode: null,
     /** @type {Record<number, number>} trade_id -> bit mask of active exit alerts (1=nifty,2=trail,4=momo) */
     prevRunAlertBits: {},
-    /** @type {Record<string, boolean>} dedupe key: trade|candle|count */
+    /** @type {Record<string, boolean>} dedupe key: trade|candle|decision */
     prevIndicatorAlertKeys: {},
     refreshSeq: 0,
   };
@@ -275,11 +275,12 @@
       if (tid == null) return;
       var st = r.alert_strip || {};
       var count = Number(st.indicator_count || 0);
+      var decision = String(st.decision || 'hold');
       var candleTs = String(st.indicator_latest_candle_ts || '');
-      var dedupeKey = String(tid) + '|' + candleTs + '|' + String(count);
-      if (count >= 2 && candleTs && !state.prevIndicatorAlertKeys[dedupeKey]) {
+      var dedupeKey = String(tid) + '|' + candleTs + '|' + decision;
+      if ((decision === 'exit_now' || decision === 'hard_exit') && candleTs && !state.prevIndicatorAlertKeys[dedupeKey]) {
         var symbol = String(r.future_symbol || r.underlying || 'Position');
-        if (count >= 3) {
+        if (decision === 'hard_exit') {
           playStrip15mBeep('hard');
           fireDecisionNotification('HARD EXIT: ' + symbol, (st.indicator_conditions_text || []).join(' · '));
         } else {
@@ -365,17 +366,22 @@
 
   function stripDecisionCell(st) {
     var d = (st && st.decision) || 'hold';
+    var b = Number((st && st.indicator_bullish_count) || 0);
+    var s = Number((st && st.indicator_bearish_count) || 0);
+    var c = Number((st && st.indicator_count) || 0);
+    var en = Number((st && st.indicator_exit_now_threshold) || 3);
+    var hx = Number((st && st.indicator_hard_exit_threshold) || 4);
     var conds = (st && st.indicator_conditions_text && st.indicator_conditions_text.length)
       ? st.indicator_conditions_text.join(' · ')
       : 'No flipped indicator conditions on latest closed 15m candle.';
     if (d === 'hard_exit') {
       return (
-        '<span class="df-s-cell df-s-neg df-s-decis df-s-pulse" style="font-size:14px;font-weight:800;" title="' + esc(conds) + '. Trend reversed.">HARD EXIT</span>'
+        '<span class="df-s-cell df-s-neg df-s-decis df-s-pulse" style="font-size:14px;font-weight:800;" title="' + esc(conds) + '. Count=' + esc(c) + ' (Bull=' + esc(b) + ', Bear=' + esc(s) + '), HARD at ≥' + esc(hx) + '.">HARD EXIT</span>'
       );
     }
     if (d === 'exit_now') {
       return (
-        '<span class="df-s-cell df-s-amb df-s-decis" style="font-weight:700;" title="' + esc(conds) + '. Action: exit on this candle close.">EXIT NOW</span>'
+        '<span class="df-s-cell df-s-amb df-s-decis" style="font-weight:700;" title="' + esc(conds) + '. Count=' + esc(c) + ' (Bull=' + esc(b) + ', Bear=' + esc(s) + '), EXIT NOW at ≥' + esc(en) + '.">EXIT NOW</span>'
       );
     }
     return (

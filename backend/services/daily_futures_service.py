@@ -698,7 +698,7 @@ def _evaluate_indicator_exit_signal(
     candles: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     if len(candles) < 30:
-        return {"count": 0, "conditions": [], "latest_candle_ts": None}
+        return {"count": 0, "bullish_count": 0, "bearish_count": 0, "conditions": [], "latest_candle_ts": None}
     latest_ts = (candles[-1].get("timestamp") or datetime.now(IST)).isoformat()
     cache_key = (f"{str(instrument_key or '')}:{str(direction_type or 'LONG').upper()}", str(latest_ts))
     cached = _INDICATOR_EVAL_CACHE.get(cache_key)
@@ -724,17 +724,23 @@ def _evaluate_indicator_exit_signal(
     i = len(candles) - 1
 
     is_short = str(direction_type or "LONG").strip().upper() == "SHORT"
-    c1 = macd_line[i] > macd_sig[i] if is_short else macd_line[i] < macd_sig[i]
-    c2 = (di_minus[i] or 0) < (di_plus[i] or 0) if is_short else (di_minus[i] or 0) > (di_plus[i] or 0)
-    if is_short:
-        c3 = bool((wma21[i] is not None and rsi9[i] is not None and ema3[i] is not None) and (wma21[i] < rsi9[i] and wma21[i] < ema3[i]))
-        c4 = bool(obv_sma10[i] is not None and obv[i] > float(obv_sma10[i]))
-    else:
-        c3 = bool((wma21[i] is not None and rsi9[i] is not None and ema3[i] is not None) and (wma21[i] > rsi9[i] and wma21[i] > ema3[i]))
-        c4 = bool(obv_sma10[i] is not None and obv[i] < float(obv_sma10[i]))
-    cond_map = {"C1": bool(c1), "C2": bool(c2), "C3": bool(c3), "C4": bool(c4)}
+    bull_map = {
+        "C1": bool(macd_line[i] < macd_sig[i]),
+        "C2": bool((di_minus[i] or 0) > (di_plus[i] or 0)),
+        "C3": bool((wma21[i] is not None and rsi9[i] is not None and ema3[i] is not None) and (wma21[i] > rsi9[i] and wma21[i] > ema3[i])),
+        "C4": bool(obv_sma10[i] is not None and obv[i] < float(obv_sma10[i])),
+    }
+    bear_map = {
+        "C1": bool(macd_line[i] > macd_sig[i]),
+        "C2": bool((di_minus[i] or 0) < (di_plus[i] or 0)),
+        "C3": bool((wma21[i] is not None and rsi9[i] is not None and ema3[i] is not None) and (wma21[i] < rsi9[i] and wma21[i] < ema3[i])),
+        "C4": bool(obv_sma10[i] is not None and obv[i] > float(obv_sma10[i])),
+    }
+    bullish_count = len([k for k, v in bull_map.items() if v])
+    bearish_count = len([k for k, v in bear_map.items() if v])
+    cond_map = bear_map if is_short else bull_map
     active = [k for k, v in cond_map.items() if v]
-    count = len(active)
+    count = bearish_count if is_short else bullish_count
     txt_long = {
         "C1": "MACD bearish",
         "C2": "DI- crossed above DI+",
@@ -750,6 +756,8 @@ def _evaluate_indicator_exit_signal(
     label_map = txt_short if is_short else txt_long
     out = {
         "count": count,
+        "bullish_count": bullish_count,
+        "bearish_count": bearish_count,
         "conditions": active,
         "conditions_text": [label_map[c] for c in active],
         "latest_candle_ts": latest_ts,
@@ -1290,12 +1298,28 @@ def _apply_exit_alerts_to_running(
             except Exception as e:
                 logger.debug("daily_futures: indicator eval failed %s: %s", ikey, e)
         ind_count = int(ind.get("count") or 0)
+        ind_bull = int(ind.get("bullish_count") or 0)
+        ind_bear = int(ind.get("bearish_count") or 0)
         ind_conds = list(ind.get("conditions") or [])
         ind_text = list(ind.get("conditions_text") or [])
         ind_latest_ts = ind.get("latest_candle_ts")
-        if ind_count >= 3:
+        exit_now_thr = int(
+            os.getenv(
+                "DAILY_FUTURES_EXIT_NOW_COUNT_THRESHOLD",
+                str(getattr(settings, "DAILY_FUTURES_EXIT_NOW_COUNT_THRESHOLD", 3) or 3),
+            )
+        )
+        hard_exit_thr = int(
+            os.getenv(
+                "DAILY_FUTURES_HARD_EXIT_COUNT_THRESHOLD",
+                str(getattr(settings, "DAILY_FUTURES_HARD_EXIT_COUNT_THRESHOLD", 4) or 4),
+            )
+        )
+        exit_now_thr = max(1, exit_now_thr)
+        hard_exit_thr = max(exit_now_thr, hard_exit_thr)
+        if ind_count >= hard_exit_thr:
             as_dec = "hard_exit"
-        elif ind_count == 2:
+        elif ind_count >= exit_now_thr:
             as_dec = "exit_now"
         else:
             as_dec = "hold"
@@ -1306,9 +1330,13 @@ def _apply_exit_alerts_to_running(
             "l3": "fading" if l3_fading else "strong",
             "decision": as_dec,
             "indicator_count": ind_count,
+            "indicator_bullish_count": ind_bull,
+            "indicator_bearish_count": ind_bear,
             "indicator_conditions": ind_conds,
             "indicator_conditions_text": ind_text,
             "indicator_latest_candle_ts": ind_latest_ts,
+            "indicator_exit_now_threshold": exit_now_thr,
+            "indicator_hard_exit_threshold": hard_exit_thr,
         }
 
         try:
@@ -1327,11 +1355,11 @@ def _apply_exit_alerts_to_running(
                       bearish_conditions_active = :bconds,
                       last_bearish_evaluated_at = CAST(:beval AS TIMESTAMPTZ),
                       first_amber_alert_at = CASE
-                        WHEN CAST(:bcount AS INTEGER) >= 2 AND first_amber_alert_at IS NULL THEN CURRENT_TIMESTAMP
+                        WHEN CAST(:bcount AS INTEGER) >= CAST(:exit_now_thr AS INTEGER) AND first_amber_alert_at IS NULL THEN CURRENT_TIMESTAMP
                         ELSE first_amber_alert_at
                       END,
                       first_hard_exit_alert_at = CASE
-                        WHEN CAST(:bcount AS INTEGER) >= 3 AND first_hard_exit_alert_at IS NULL THEN CURRENT_TIMESTAMP
+                        WHEN CAST(:bcount AS INTEGER) >= CAST(:hard_exit_thr AS INTEGER) AND first_hard_exit_alert_at IS NULL THEN CURRENT_TIMESTAMP
                         ELSE first_hard_exit_alert_at
                       END,
                       updated_at = CURRENT_TIMESTAMP
@@ -1349,6 +1377,8 @@ def _apply_exit_alerts_to_running(
                     "bcount": ind_count,
                     "bconds": ",".join(ind_conds) if ind_conds else None,
                     "beval": now_ist.isoformat(),
+                    "exit_now_thr": exit_now_thr,
+                    "hard_exit_thr": hard_exit_thr,
                     "id": tid,
                 },
             )
