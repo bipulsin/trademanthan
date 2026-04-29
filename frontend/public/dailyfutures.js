@@ -369,9 +369,11 @@
     const body = rows
       .map(function (r) {
         const st = r.alert_strip || {};
+        const carry = isCarryForwardTrade(r) ? ' <span class="df-carry-badge">Carry-forward</span>' : '';
         return (
           '<tr class="df-s-tr"><td class="df-s-sym"><strong>' +
           symbolWithDirectionHtml(r) +
+          carry +
           '</strong><div style="font-size:0.74rem;color:var(--theme-muted);">Trade date: ' +
           esc(r.trade_date || '—') +
           '</div></td><td class="df-s-c">' +
@@ -857,9 +859,11 @@
           : '';
         const refPx =
           String(r.direction_type || "").toUpperCase() === "SHORT" ? r.sell_price : r.entry_price;
+        const carry = isCarryForwardTrade(r) ? ' <span class="df-carry-badge">Carry-forward</span>' : '';
         return (
           '<tr><td><strong>' +
           symbolWithDirectionHtml(r) +
+          carry +
           '</strong></td><td>' +
           esc(r.trade_date || '—') +
           '</td><td class="num">' +
@@ -1114,6 +1118,13 @@
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
+  }
+
+  function isCarryForwardTrade(r) {
+    if (!r || !r.trade_date) return false;
+    var today = state && state.workspace ? state.workspace.trade_date : null;
+    if (!today) return false;
+    return String(r.trade_date) < String(today);
   }
 
   function symbolWithDirection(r) {
