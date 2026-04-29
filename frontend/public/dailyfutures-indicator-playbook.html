@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Daily Futures Indicator Exit Playbook</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 16px; background: #f8fafc; color: #0f172a; }
+    h1 { margin: 0 0 10px 0; font-size: 1.25rem; }
+    .meta { margin: 0 0 14px 0; font-size: 0.86rem; color: #475569; }
+    .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; margin: 0 0 12px 0; }
+    .sym { font-size: 1rem; font-weight: 700; }
+    .sub { margin-top: 2px; font-size: 0.82rem; color: #64748b; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.72rem; font-weight: 700; }
+    .ok { background: #dcfce7; color: #166534; }
+    .warn { background: #fef3c7; color: #92400e; }
+    .tbl { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.82rem; }
+    .tbl th, .tbl td { border-bottom: 1px solid #e2e8f0; padding: 6px 5px; text-align: left; }
+    .tbl th { color: #475569; font-weight: 700; }
+    .empty { color: #64748b; font-size: 0.86rem; margin: 6px 0; }
+  </style>
+</head>
+<body>
+  <h1>Daily Futures Indicator Exit Playbook</h1>
+  <p class="meta" id="meta">Loading...</p>
+  <div id="host"></div>
+
+  <script>
+    (function () {
+      const API_BASE = window.location.origin;
+      const host = document.getElementById('host');
+      const meta = document.getElementById('meta');
+
+      function esc(v) {
+        return String(v == null ? '' : v)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }
+
+      async function run() {
+        try {
+          const url = API_BASE + '/scan/daily-futures-indicator-playbook';
+          const res = await fetch(url, { cache: 'no-store' });
+          if (!res.ok) {
+            meta.textContent = 'Failed to load playbook: HTTP ' + res.status;
+            return;
+          }
+          const j = await res.json();
+          const rows = Array.isArray(j.rows) ? j.rows : [];
+          meta.textContent = 'Trade date: ' + esc(j.trade_date || '—') + ' | Generated: ' + esc(j.generated_at_ist || '—');
+          if (!rows.length) {
+            host.innerHTML = '<p class="empty">No trades found for today.</p>';
+            return;
+          }
+          host.innerHTML = rows.map(function (r) {
+            const timeline = Array.isArray(r.count_ge2_timeline) ? r.count_ge2_timeline : [];
+            const firstTxt = r.first_count_ge2_at ? ('First >=2 at ' + esc(r.first_count_ge2_at)) : 'Never reached >=2';
+            const badgeCls = r.first_count_ge2_at ? 'warn' : 'ok';
+            const badgeTxt = r.first_count_ge2_at ? 'Triggered' : 'Not Triggered';
+            const table = timeline.length
+              ? ('<table class="tbl"><thead><tr><th>Time</th><th>Bullish Exit Count</th><th>Bearish Exit Count</th><th>Active Conditions</th></tr></thead><tbody>' +
+                 timeline.map(function (t) {
+                   return '<tr><td>' + esc(t.timestamp_ist) + '</td><td>' + esc(t.bullish_exit_count) + '</td><td>' + esc(t.bearish_exit_count) + '</td><td>' + esc((t.active_conditions || []).join(',')) + '</td></tr>';
+                 }).join('') +
+                 '</tbody></table>')
+              : '<p class="empty">No 15m candle in hold window crossed count >= 2.</p>';
+            return (
+              '<div class="card">' +
+              '<div class="sym">' + esc(r.future_symbol || r.underlying) + '</div>' +
+              '<div class="sub">Direction: ' + esc(r.direction_type) + ' | Entry: ' + esc(r.entry_time) + ' | Exit: ' + esc(r.exit_time) + ' | Status: ' + esc(r.order_status) + '</div>' +
+              '<div class="sub"><span class="badge ' + badgeCls + '">' + badgeTxt + '</span> ' + esc(firstTxt) + '</div>' +
+              table +
+              '</div>'
+            );
+          }).join('');
+        } catch (e) {
+          meta.textContent = 'Failed to load playbook.';
+          host.innerHTML = '<p class="empty">Error: ' + esc(e && e.message ? e.message : e) + '</p>';
+        }
+      }
+
+      run();
+    })();
+  </script>
+</body>
+</html>

@@ -9071,3 +9071,320 @@ async def daily_futures_playbook_sim(
             "PnL delta = projected_exit_pnl - actual_exit_pnl.",
         ],
     }
+
+
+@router.get("/daily-futures-indicator-playbook")
+async def daily_futures_indicator_playbook(
+    trade_date: Optional[date] = Query(None, description="IST trade date (default: today)."),
+    symbols: str = Query("", description="Optional comma-separated underlyings."),
+    db: Session = Depends(get_db),
+):
+    """
+    Public API: indicator-alert playbook for today's Daily Futures trades.
+    Shows when per-trade indicator exit-count reached >= 2 in the hold window.
+    """
+    import pytz
+
+    ist = pytz.timezone("Asia/Kolkata")
+    td = trade_date or datetime.now(ist).date()
+    syms = [str(x).strip().upper() for x in str(symbols or "").split(",") if str(x).strip()]
+    syms = syms[:40]
+
+    def _safe_num(x: Any) -> Optional[float]:
+        try:
+            if x is None:
+                return None
+            v = float(x)
+            return v if v == v else None
+        except Exception:
+            return None
+
+    def _parse_hhmm(hhmm: Any, base_date: date) -> Optional[datetime]:
+        s = str(hhmm or "").strip()
+        if len(s) < 4 or ":" not in s:
+            return None
+        try:
+            hh, mm = s.split(":", 1)
+            return ist.localize(datetime(base_date.year, base_date.month, base_date.day, int(hh), int(mm), 0))
+        except Exception:
+            return None
+
+    def _parse_ist_ts(v: Any) -> Optional[datetime]:
+        if v is None:
+            return None
+        if isinstance(v, datetime):
+            dtv = v
+        else:
+            s = str(v).strip()
+            if not s:
+                return None
+            if s.endswith("Z"):
+                s = s[:-1] + "+00:00"
+            try:
+                dtv = datetime.fromisoformat(s)
+            except Exception:
+                return None
+        if dtv.tzinfo is None:
+            return ist.localize(dtv)
+        return dtv.astimezone(ist)
+
+    def _ema(values: List[float], period: int) -> List[float]:
+        if not values:
+            return []
+        p = max(1, int(period))
+        k = 2.0 / (p + 1.0)
+        out: List[float] = []
+        cur = float(values[0])
+        for v in values:
+            cur = (float(v) * k) + (cur * (1.0 - k))
+            out.append(float(cur))
+        return out
+
+    def _rma(values: List[float], period: int) -> List[Optional[float]]:
+        p = max(1, int(period))
+        out: List[Optional[float]] = [None] * len(values)
+        if len(values) < p:
+            return out
+        seed = sum(float(x) for x in values[:p]) / float(p)
+        out[p - 1] = seed
+        prev = seed
+        for i in range(p, len(values)):
+            prev = ((prev * (p - 1)) + float(values[i])) / float(p)
+            out[i] = prev
+        return out
+
+    def _wma(values: List[float], period: int) -> List[Optional[float]]:
+        p = max(1, int(period))
+        out: List[Optional[float]] = [None] * len(values)
+        if len(values) < p:
+            return out
+        ws = list(range(1, p + 1))
+        den = float(sum(ws))
+        for i in range(p - 1, len(values)):
+            win = values[i - p + 1 : i + 1]
+            num = 0.0
+            for j, v in enumerate(win):
+                num += float(v) * float(ws[j])
+            out[i] = num / den if den > 0 else None
+        return out
+
+    def _rsi9(closes: List[float]) -> List[Optional[float]]:
+        if len(closes) < 2:
+            return [None] * len(closes)
+        gains = [0.0]
+        losses = [0.0]
+        for i in range(1, len(closes)):
+            d = float(closes[i]) - float(closes[i - 1])
+            gains.append(max(0.0, d))
+            losses.append(max(0.0, -d))
+        rg = _rma(gains, 9)
+        rl = _rma(losses, 9)
+        out: List[Optional[float]] = [None] * len(closes)
+        for i in range(len(closes)):
+            if rg[i] is None or rl[i] is None:
+                continue
+            if float(rl[i]) <= 0:
+                out[i] = 100.0
+            else:
+                rs = float(rg[i]) / float(rl[i])
+                out[i] = 100.0 - (100.0 / (1.0 + rs))
+        return out
+
+    def _obv(closes: List[float], vols: List[float]) -> List[float]:
+        if not closes or len(closes) != len(vols):
+            return []
+        out = [0.0]
+        for i in range(1, len(closes)):
+            if closes[i] > closes[i - 1]:
+                out.append(out[-1] + float(vols[i]))
+            elif closes[i] < closes[i - 1]:
+                out.append(out[-1] - float(vols[i]))
+            else:
+                out.append(out[-1])
+        return out
+
+    def _sma(values: List[float], period: int) -> List[Optional[float]]:
+        p = max(1, int(period))
+        out: List[Optional[float]] = [None] * len(values)
+        if len(values) < p:
+            return out
+        run = sum(float(x) for x in values[:p])
+        out[p - 1] = run / float(p)
+        for i in range(p, len(values)):
+            run += float(values[i]) - float(values[i - p])
+            out[i] = run / float(p)
+        return out
+
+    def _di(highs: List[float], lows: List[float], closes: List[float]) -> Tuple[List[Optional[float]], List[Optional[float]]]:
+        n = len(closes)
+        pdm = [0.0] * n
+        mdm = [0.0] * n
+        tr = [0.0] * n
+        for i in range(1, n):
+            up = float(highs[i]) - float(highs[i - 1])
+            dn = float(lows[i - 1]) - float(lows[i])
+            pdm[i] = up if (up > dn and up > 0) else 0.0
+            mdm[i] = dn if (dn > up and dn > 0) else 0.0
+            tr[i] = max(
+                float(highs[i]) - float(lows[i]),
+                abs(float(highs[i]) - float(closes[i - 1])),
+                abs(float(lows[i]) - float(closes[i - 1])),
+            )
+        trr = _rma(tr, 14)
+        pdr = _rma(pdm, 14)
+        mdr = _rma(mdm, 14)
+        dip: List[Optional[float]] = [None] * n
+        dim: List[Optional[float]] = [None] * n
+        for i in range(n):
+            if trr[i] is None or pdr[i] is None or mdr[i] is None or float(trr[i]) <= 0:
+                continue
+            dip[i] = (float(pdr[i]) / float(trr[i])) * 100.0
+            dim[i] = (float(mdr[i]) / float(trr[i])) * 100.0
+        return dip, dim
+
+    def _count_for_slice(cands: List[Dict[str, Any]], direction: str) -> Tuple[int, int, List[str]]:
+        if len(cands) < 30:
+            return 0, 0, []
+        closes = [float(c["close"]) for c in cands]
+        highs = [float(c["high"]) for c in cands]
+        lows = [float(c["low"]) for c in cands]
+        vols = [float(c["volume"]) for c in cands]
+        e12 = _ema(closes, 12)
+        e26 = _ema(closes, 26)
+        macd = [float(e12[i]) - float(e26[i]) for i in range(len(closes))]
+        macd_sig = _ema(macd, 9)
+        di_plus, di_minus = _di(highs, lows, closes)
+        wma21 = _wma(closes, 21)
+        rsi9 = _rsi9(closes)
+        ema3 = _ema(closes, 3)
+        obv = _obv(closes, vols)
+        obv_sma10 = _sma(obv, 10)
+        i = len(cands) - 1
+        c1_bull = macd[i] < macd_sig[i]
+        c2_bull = (di_minus[i] or 0.0) > (di_plus[i] or 0.0)
+        c3_bull = bool((wma21[i] is not None and rsi9[i] is not None and wma21[i] > rsi9[i] and wma21[i] > ema3[i]))
+        c4_bull = bool(obv_sma10[i] is not None and obv[i] < float(obv_sma10[i]))
+        c1_bear = macd[i] > macd_sig[i]
+        c2_bear = (di_minus[i] or 0.0) < (di_plus[i] or 0.0)
+        c3_bear = bool((wma21[i] is not None and rsi9[i] is not None and wma21[i] < rsi9[i] and wma21[i] < ema3[i]))
+        c4_bear = bool(obv_sma10[i] is not None and obv[i] > float(obv_sma10[i]))
+        bull_map = {"C1": c1_bull, "C2": c2_bull, "C3": c3_bull, "C4": c4_bull}
+        bear_map = {"C1": c1_bear, "C2": c2_bear, "C3": c3_bear, "C4": c4_bear}
+        bull_count = len([k for k, v in bull_map.items() if v])
+        bear_count = len([k for k, v in bear_map.items() if v])
+        if str(direction or "LONG").upper() == "SHORT":
+            labels = [k for k, v in bear_map.items() if v]
+        else:
+            labels = [k for k, v in bull_map.items() if v]
+        return bull_count, bear_count, labels
+
+    if syms:
+        q = text(
+            """
+            SELECT t.id AS trade_id, s.trade_date, t.underlying, COALESCE(t.direction_type, s.direction_type, 'LONG') AS direction_type,
+                   t.future_symbol, t.instrument_key, t.order_status, t.entry_time, t.exit_time, t.sell_time, t.buy_time
+            FROM daily_futures_user_trade t
+            JOIN daily_futures_screening s ON s.id = t.screening_id
+            WHERE s.trade_date = :td
+              AND t.entry_time IS NOT NULL
+              AND UPPER(TRIM(t.underlying)) = ANY(:syms)
+            ORDER BY t.id
+            """
+        )
+        trades = db.execute(q, {"td": td, "syms": syms}).mappings().all()
+    else:
+        q = text(
+            """
+            SELECT t.id AS trade_id, s.trade_date, t.underlying, COALESCE(t.direction_type, s.direction_type, 'LONG') AS direction_type,
+                   t.future_symbol, t.instrument_key, t.order_status, t.entry_time, t.exit_time, t.sell_time, t.buy_time
+            FROM daily_futures_user_trade t
+            JOIN daily_futures_screening s ON s.id = t.screening_id
+            WHERE s.trade_date = :td
+              AND t.entry_time IS NOT NULL
+            ORDER BY t.id
+            """
+        )
+        trades = db.execute(q, {"td": td}).mappings().all()
+
+    now_ist = datetime.now(ist)
+    out: List[Dict[str, Any]] = []
+    for tr in trades:
+        direction = str(tr.get("direction_type") or "LONG").strip().upper()
+        is_short = direction == "SHORT"
+        trade_d = tr.get("trade_date") or td
+        entry_dt = _parse_hhmm(tr.get("sell_time") if is_short else tr.get("entry_time"), trade_d)
+        if str(tr.get("order_status") or "").strip().lower() == "sold":
+            exit_dt = _parse_hhmm(tr.get("buy_time") if is_short else tr.get("exit_time"), trade_d)
+            if exit_dt is None:
+                exit_dt = _parse_hhmm(tr.get("exit_time"), trade_d)
+        else:
+            exit_dt = now_ist
+        ikey = str(tr.get("instrument_key") or "").strip()
+        if not ikey or entry_dt is None:
+            continue
+        try:
+            raw = vwap_service.get_historical_candles_by_instrument_key(
+                ikey, interval="minutes/15", days_back=15, range_end_date=trade_d
+            ) or []
+        except Exception:
+            raw = []
+        candles: List[Dict[str, Any]] = []
+        for c in raw:
+            ts = _parse_ist_ts((c or {}).get("timestamp"))
+            if ts is None:
+                continue
+            op = _safe_num((c or {}).get("open"))
+            hi = _safe_num((c or {}).get("high"))
+            lo = _safe_num((c or {}).get("low"))
+            cl = _safe_num((c or {}).get("close"))
+            vol = _safe_num((c or {}).get("volume"))
+            if None in (op, hi, lo, cl, vol):
+                continue
+            candles.append({"timestamp": ts, "open": op, "high": hi, "low": lo, "close": cl, "volume": vol})
+        candles.sort(key=lambda x: x["timestamp"])
+        if not candles:
+            continue
+        hold = [c for c in candles if c["timestamp"] >= entry_dt and c["timestamp"] <= exit_dt]
+        if not hold:
+            continue
+        timeline: List[Dict[str, Any]] = []
+        for c in hold:
+            upto = [x for x in candles if x["timestamp"] <= c["timestamp"]]
+            bull_count, bear_count, labels = _count_for_slice(upto, direction)
+            if bull_count >= 2 or bear_count >= 2:
+                timeline.append(
+                    {
+                        "timestamp_ist": c["timestamp"].strftime("%H:%M"),
+                        "bullish_exit_count": bull_count,
+                        "bearish_exit_count": bear_count,
+                        "active_conditions": labels,
+                    }
+                )
+        first_ge2 = timeline[0]["timestamp_ist"] if timeline else None
+        out.append(
+            {
+                "trade_id": int(tr["trade_id"]),
+                "trade_date": str(trade_d),
+                "underlying": str(tr.get("underlying") or ""),
+                "future_symbol": str(tr.get("future_symbol") or ""),
+                "direction_type": direction,
+                "order_status": str(tr.get("order_status") or ""),
+                "entry_time": entry_dt.strftime("%H:%M"),
+                "exit_time": exit_dt.strftime("%H:%M"),
+                "first_count_ge2_at": first_ge2,
+                "count_ge2_timeline": timeline,
+            }
+        )
+
+    return {
+        "success": True,
+        "trade_date": str(td),
+        "generated_at_ist": now_ist.isoformat(),
+        "symbols": syms,
+        "rows": out,
+        "notes": [
+            "Counts are computed on each completed 15m candle in the trade hold window.",
+            "A row is listed when bullish_exit_count >= 2 or bearish_exit_count >= 2.",
+            "For LONG positions, bullish_exit_count is the decision-side count; for SHORT positions, bearish_exit_count is the decision-side count.",
+        ],
+    }
