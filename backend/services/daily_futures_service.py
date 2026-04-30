@@ -780,12 +780,8 @@ def _last_completed_5m_candles_for_instrument(
     ik = str(instrument_key or "").strip()
     if not ik:
         return []
-    try:
-        raw = upstox.get_historical_candles_by_instrument_key(
-            ik, interval="minutes/5", days_back=3, range_end_date=session_date
-        ) or []
-    except Exception:
-        raw = []
+    raw = _upstox_fetch_5m_structured_rows(upstox, ik, session_date, log_label="5m_last_completed")
+
     cutoff = now_ist.replace(minute=(now_ist.minute // 5) * 5, second=0, microsecond=0)
 
     def _rows_to_completed(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -804,17 +800,6 @@ def _last_completed_5m_candles_for_instrument(
         return out_local
 
     out = _rows_to_completed(raw)
-    if not out and session_date == ist_today():
-        try:
-            key_enc = quote(ik, safe="")
-            intraday_url = f"{upstox.base_url}/historical-candle/intraday/{key_enc}/minutes/5"
-            raw_i = upstox.make_api_request(intraday_url, method="GET", timeout=15, max_retries=2) or {}
-            if isinstance(raw_i, dict) and raw_i.get("status") == "success":
-                rows_i = ((raw_i.get("data") or {}).get("candles")) or []
-                structured_i = _candles_rows_to_structured(rows_i) or []
-                out = _rows_to_completed(structured_i)
-        except Exception:
-            pass
     return out[-max(2, int(limit)):]
 
 
@@ -2930,6 +2915,67 @@ def _quote_session_open_from_snapshot(snapshot: Dict[str, Any]) -> Optional[floa
     return _safe_float(snapshot.get("open"))
 
 
+def _upstox_fetch_5m_structured_rows(
+    ux: UpstoxService,
+    instrument_key: str,
+    td: date,
+    *,
+    log_label: str = "",
+) -> List[Dict[str, Any]]:
+    """
+    Today's session: prefer V3 intraday (reliable spot/index 5m) over V2 1m→5m aggregation.
+    Other dates: historical only (intraday applies to current calendar session on vendor side).
+    """
+    ik = str(instrument_key or "").strip()
+    if not ik:
+        return []
+
+    rows: List[Dict[str, Any]] = []
+    prefix = log_label.strip() + ": " if log_label else ""
+
+    if td == ist_today():
+        try:
+            key_enc = quote(ik, safe="")
+            intraday_url = f"{ux.base_url}/historical-candle/intraday/{key_enc}/minutes/5"
+            raw_i = ux.make_api_request(intraday_url, method="GET", timeout=20, max_retries=2) or {}
+            if isinstance(raw_i, dict) and raw_i.get("status") == "success":
+                rows = _candles_rows_to_structured(((raw_i.get("data") or {}).get("candles")) or []) or []
+            elif isinstance(raw_i, dict):
+                logger.warning(
+                    "%sdaily_futures: intraday 5m HTTP ok but status!=success ik=%s body=%s",
+                    prefix,
+                    ik,
+                    (raw_i.get("message") or raw_i.get("error") or str(raw_i))[:300],
+                )
+        except Exception as e:
+            logger.debug("%sdaily_futures: intraday 5m fetch failed ik=%s: %s", prefix, ik, e)
+
+    if not rows:
+        try:
+            rows = ux.get_historical_candles_by_instrument_key(
+                ik, interval="minutes/5", days_back=3, range_end_date=td
+            ) or []
+        except Exception as e:
+            logger.debug("%sdaily_futures: historical 5m fetch failed ik=%s: %s", prefix, ik, e)
+            rows = []
+
+    return list(rows or [])
+
+
+def _bearish_gate_warming_window_ist(now_ist: datetime, td: date) -> bool:
+    """
+    Fewer than three completed 5m bars is expected before spot regular session settles
+    (NSE cash ~09:15; third completed 5m bar ends ~09:30 IST).
+    """
+    if not _is_trading_day(now_ist.date()) or td != now_ist.date():
+        return False
+    hm = now_ist.hour * 60 + now_ist.minute
+    if hm < 9 * 60 + 15:
+        return True
+    # Small buffer past 09:30 for API lag
+    return hm < 9 * 60 + 35
+
+
 def index_bearish_gate_from_quotes() -> Dict[str, Any]:
     """
     NIFTY-only gate for bearish (5m structure):
@@ -2965,26 +3011,13 @@ def index_bearish_gate_from_quotes() -> Dict[str, Any]:
     td = _workspace_trade_date_ist()
     now_ist = datetime.now(IST)
     cutoff = now_ist.replace(minute=(now_ist.minute // 5) * 5, second=0, microsecond=0)
-    try:
-        raw = ux.get_historical_candles_by_instrument_key(
-            NIFTY50_INDEX_KEY,
-            interval="minutes/5",
-            days_back=3,
-            range_end_date=td,
-        ) or []
-    except Exception:
-        raw = []
 
-    rows = list(raw or [])
-    if not rows and td == ist_today():
-        try:
-            key_enc = quote(NIFTY50_INDEX_KEY, safe="")
-            intraday_url = f"{ux.base_url}/historical-candle/intraday/{key_enc}/minutes/5"
-            raw_i = ux.make_api_request(intraday_url, method="GET", timeout=15, max_retries=2) or {}
-            if isinstance(raw_i, dict) and raw_i.get("status") == "success":
-                rows = _candles_rows_to_structured(((raw_i.get("data") or {}).get("candles")) or []) or []
-        except Exception:
-            rows = []
+    rows = _upstox_fetch_5m_structured_rows(
+        ux,
+        NIFTY50_INDEX_KEY,
+        td,
+        log_label="index_bearish_gate",
+    )
 
     cands: List[Dict[str, Any]] = []
     for c in rows:
@@ -2997,8 +3030,35 @@ def index_bearish_gate_from_quotes() -> Dict[str, Any]:
             continue
         cands.append({"timestamp": ts, "open": op, "close": cl})
     cands.sort(key=lambda x: x["timestamp"])
+    out["five_m_completed_count_for_gate"] = len(cands)
+
     if len(cands) < 3:
         out["nifty_quote_incomplete"] = True
+        out["warming_up"] = bool(_bearish_gate_warming_window_ist(now_ist, td))
+        if (
+            out["warming_up"]
+            and td == ist_today()
+            and isinstance(rows, list)
+            and len(rows) > 0
+            and len(cands) == 0
+        ):
+            hm_now = now_ist.hour * 60 + now_ist.minute
+            if hm_now >= 9 * 60 + 35:
+                out["warming_up"] = False
+                logger.warning(
+                    "daily_futures: NIFTY gate raw 5m rows=%s but zero session-completed candles after warmup window "
+                    "(td=%s now=%s IST)",
+                    len(rows),
+                    td,
+                    now_ist.strftime("%H:%M"),
+                )
+        if not out["warming_up"] and len(cands) < 3 and not out.get("error"):
+            logger.warning(
+                "daily_futures: NIFTY gate incomplete after warmup window — completed_5m=%s td=%s (check Upstox 5m for %s)",
+                len(cands),
+                td,
+                NIFTY50_INDEX_KEY,
+            )
         return out
 
     c3, c2, c1 = cands[-3], cands[-2], cands[-1]

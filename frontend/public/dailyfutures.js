@@ -797,6 +797,9 @@
       } else if (gate && gate.nifty_bullish === true) {
         hint.innerHTML =
           '<span class="df-meta">NIFTY is Bullish, so no trade will be displayed in this section.</span>';
+      } else if (gate && gate.warming_up === true) {
+        hint.innerHTML =
+          '<span class="df-meta">Bearish gate needs three completed NIFTY spot 5m candles (shows after ~09:30 IST). List appears once bars are ready.</span>';
       } else if (gate && (gate.nifty_quote_incomplete || gate.error)) {
         hint.innerHTML =
           '<span class="df-meta">NIFTY 5m data unavailable; bearish list is hidden until index candles load.</span>';
@@ -815,9 +818,14 @@
           '<p class="df-meta">NIFTY is Bullish, so no trade will be displayed in this section.</p>';
         return;
       }
+      if (gate && !gate.index_gate_disabled && gate.warming_up === true) {
+        el.innerHTML =
+          '<p class="df-meta">Bearish gate needs three completed NIFTY spot 5m candles (typically after ~09:30 IST). Picks will show here once bars are ready.</p>';
+        return;
+      }
       if (gate && !gate.index_gate_disabled && (gate.nifty_quote_incomplete || gate.error)) {
         el.innerHTML =
-          '<p class="df-meta">NIFTY 5m data unavailable. Bearish picks will show once index candles are available.</p>';
+          '<p class="df-meta">NIFTY 5m data unavailable. Bearish picks will show once index candles load from the broker feed.</p>';
         return;
       }
       el.innerHTML =
