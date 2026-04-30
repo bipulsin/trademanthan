@@ -822,7 +822,7 @@ def _compute_effective_conviction_and_5m_momentum(
         upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
     except Exception:
         upstox = None
-    mcache: Dict[str, bool] = {}
+    mcache: Dict[Tuple[str, str], bool] = {}
     for s in screenings:
         raw_conv = _safe_float(s.get("conviction_score"))
         scan_count = int(s.get("scan_count") or 0)
@@ -831,24 +831,30 @@ def _compute_effective_conviction_and_5m_momentum(
         s["effective_conviction"] = eff
         s["conviction_decay_factor"] = round(float(decay_factor), 4)
         ik = str(s.get("instrument_key") or "").strip()
+        drow = str(s.get("direction_type") or "LONG").strip().upper()
         mp: Optional[bool] = None
         if upstox is not None and ik:
-            if ik in mcache:
-                mp = mcache[ik]
+            mkey = (ik, drow)
+            if mkey in mcache:
+                mp = mcache[mkey]
             else:
                 c5 = _last_completed_5m_candles_for_instrument(upstox, ik, td, now_ist, limit=20)
                 if len(c5) >= 2:
                     latest = c5[-1]
                     vols = [float(x.get("volume") or 0.0) for x in c5]
                     avg20 = (sum(vols) / len(vols)) if vols else 0.0
+                    cl = float(latest.get("close") or 0.0)
+                    op = float(latest.get("open") or 0.0)
+                    # LONG: bullish 5m + volume confirmation; SHORT: bearish 5m + volume (same vol rule).
+                    candle_ok = (cl < op) if drow == "SHORT" else (cl > op)
                     mp = bool(
-                        float(latest.get("close") or 0.0) > float(latest.get("open") or 0.0)
+                        candle_ok
                         and avg20 > 0.0
                         and float(latest.get("volume") or 0.0) >= 1.2 * avg20
                     )
                 else:
                     mp = False
-                mcache[ik] = mp
+                mcache[mkey] = mp
         s["last_5m_momentum_pass"] = mp
         s["last_5m_evaluated_at"] = now_ist.isoformat()
 
