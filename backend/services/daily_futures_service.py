@@ -1265,13 +1265,13 @@ def _apply_exit_alerts_to_running(
         exit_now_thr = int(
             os.getenv(
                 "DAILY_FUTURES_EXIT_NOW_COUNT_THRESHOLD",
-                str(getattr(settings, "DAILY_FUTURES_EXIT_NOW_COUNT_THRESHOLD", 3) or 3),
+                str(getattr(settings, "DAILY_FUTURES_EXIT_NOW_COUNT_THRESHOLD", 2) or 2),
             )
         )
         hard_exit_thr = int(
             os.getenv(
                 "DAILY_FUTURES_HARD_EXIT_COUNT_THRESHOLD",
-                str(getattr(settings, "DAILY_FUTURES_HARD_EXIT_COUNT_THRESHOLD", 4) or 4),
+                str(getattr(settings, "DAILY_FUTURES_HARD_EXIT_COUNT_THRESHOLD", 3) or 3),
             )
         )
         exit_now_thr = max(1, exit_now_thr)
