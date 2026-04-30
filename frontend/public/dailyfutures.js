@@ -364,18 +364,46 @@
     );
   }
 
-  function stripDecisionCell(st) {
+  function stripDecisionCell(st, row) {
     var d = (st && st.decision) || 'hold';
     var b = Number((st && st.indicator_bullish_count) || 0);
     var s = Number((st && st.indicator_bearish_count) || 0);
     var c = Number((st && st.indicator_count) || 0);
     var en = Number((st && st.indicator_exit_now_threshold) || 3);
     var hx = Number((st && st.indicator_hard_exit_threshold) || 4);
+    var isShort = String((row && row.direction_type) || '').toUpperCase() === 'SHORT';
+    var active = (st && st.indicator_conditions && st.indicator_conditions.length)
+      ? st.indicator_conditions
+      : [];
+    var activeMap = {};
+    active.forEach(function (code) {
+      activeMap[String(code || '').toUpperCase()] = true;
+    });
+    var formulaLines = isShort
+      ? [
+          'C1: MACD line > Signal',
+          'C2: DI+ > DI-',
+          'C3: EMA3 > WMA21 and RSI9 > WMA21',
+          'C4: OBV > SMA10(OBV)',
+        ]
+      : [
+          'C1: MACD line < Signal',
+          'C2: DI- > DI+',
+          'C3: EMA3 < WMA21 and RSI9 < WMA21',
+          'C4: OBV < SMA10(OBV)',
+        ];
+    var statusLines = [
+      formulaLines[0] + ' => ' + (activeMap.C1 ? 'True' : 'False'),
+      formulaLines[1] + ' => ' + (activeMap.C2 ? 'True' : 'False'),
+      formulaLines[2] + ' => ' + (activeMap.C3 ? 'True' : 'False'),
+      formulaLines[3] + ' => ' + (activeMap.C4 ? 'True' : 'False'),
+    ];
+    var codesTooltip = 'Decision-side indicator breakdown\n' + statusLines.join('\n');
     var condCodes = (st && st.indicator_conditions && st.indicator_conditions.length)
       ? st.indicator_conditions.join(', ')
       : 'None';
     var condCodesLine =
-      '<div class="df-s-decis-codes" title="Triggered indicator codes on latest closed 15m candle.">Codes: ' +
+      '<div class="df-s-decis-codes" title="' + esc(codesTooltip) + '">Codes: ' +
       esc(condCodes) +
       '</div>';
     var countLine =
@@ -438,7 +466,7 @@
           '</td><td class="df-s-c">' +
           stripL3Cell(st) +
           '</td><td class="df-s-c">' +
-          stripDecisionCell(st) +
+          stripDecisionCell(st, r) +
           '</td></tr>'
         );
       })
