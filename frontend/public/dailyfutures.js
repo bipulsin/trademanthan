@@ -953,11 +953,18 @@
     }
     const body = rows
       .map(function (r) {
+        const isShort = String(r.direction_type || "").toUpperCase() === "SHORT";
         const refPx =
-          String(r.direction_type || "").toUpperCase() === "SHORT" ? r.sell_price : r.entry_price;
+          isShort ? r.sell_price : r.entry_price;
         const carry = isCarryForwardTrade(r) ? ' <span class="df-carry-badge">Carry-forward</span>' : '';
+        const slNum = Number(r.running_sl_price);
+        const ltpNum = Number(r.ltp);
+        const slValid = Number.isFinite(slNum);
+        const ltpValid = Number.isFinite(ltpNum);
+        const shouldBlinkSl = slValid && ltpValid && (isShort ? slNum > ltpNum : slNum < ltpNum);
         const slTxt = r.running_sl_price != null ? fmtNum(r.running_sl_price, 2) : '—';
         const slTitle = r.running_sl_source ? (' title="' + esc(r.running_sl_source) + '"') : '';
+        const slClass = 'num df-sl-val' + (shouldBlinkSl ? ' df-sl-blink' : '');
         return (
           '<tr><td><strong>' +
           symbolWithDirectionHtml(r) +
@@ -972,7 +979,7 @@
           esc(r.entry_time) +
           '</td><td class="num">' +
           fmtNum(refPx, 2) +
-          '</td><td class="num df-sl-val"' + slTitle + '>' +
+          '</td><td class="' + slClass + '"' + slTitle + '>' +
           slTxt +
           '</td><td class="num">' +
           fmtNum(r.ltp, 2) +
