@@ -961,7 +961,7 @@
         const ltpNum = Number(r.ltp);
         const slValid = Number.isFinite(slNum);
         const ltpValid = Number.isFinite(ltpNum);
-        const shouldBlinkSl = slValid && ltpValid && (isShort ? slNum > ltpNum : slNum < ltpNum);
+        const shouldBlinkSl = slValid && ltpValid && (isShort ? ltpNum > slNum : ltpNum < slNum);
         const slTxt = r.running_sl_price != null ? fmtNum(r.running_sl_price, 2) : '—';
         const slTitle = r.running_sl_source ? (' title="' + esc(r.running_sl_source) + '"') : '';
         const slClass = 'num df-sl-val' + (shouldBlinkSl ? ' df-sl-blink' : '');
