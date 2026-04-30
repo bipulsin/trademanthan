@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -19,6 +19,11 @@ from backend.routers.auth import get_user_from_token, oauth2_scheme
 from backend.services.daily_futures_service import (
     confirm_buy,
     confirm_sell,
+    df_chartink_accum_finalize_payload,
+    df_chartink_accum_extend_from_starlette_form,
+    df_chartink_accum_init_from_query,
+    df_chartink_audit_json_bytes,
+    df_chartink_ingest_parsed_into_accum,
     get_conviction_breakdown_debug,
     get_workspace_running_enriched,
     get_workspace_trade_if_could,
@@ -144,17 +149,19 @@ def daily_futures_manual_conviction_vwap(
 def chartink_webhook_path_ping() -> Dict[str, Any]:
     """
     Public health check: confirms Nginx + FastAPI route the Daily Futures webhook.
-    ChartInk must use POST to the *post_paths* below (this GET is only for humans / monitors).
+    The main webhook also accepts GET (query-only fallback) and multipart/form-data besides JSON.
     """
     return {
         "ok": True,
-        "message": "Route is live. ChartInk alerts must use HTTP POST, not GET.",
-        "post_paths": {
+        "message": "Webhook route live. Prefer POST JSON or form; GET with ?stocks=...&secret=... if POST fails.",
+        "methods": ["GET", "POST", "PUT", "PATCH"],
+        "urls": {
             "option_a_api_prefix": "/api/daily-futures/webhook/chartink",
             "option_b_no_prefix": "/daily-futures/webhook/chartink",
         },
         "base_url_example": "https://www.tradewithcto.com/api/daily-futures/webhook/chartink",
-        "query_or_header": "Add ?secret=YOUR_SECRET or header X-Daily-Futures-Secret (env CHARTINK_DAILY_FUTURES_SECRET on server if set).",
+        "query_or_header": "secret via ?secret= or X-Daily-Futures-Secret (bearish: X-Daily-Futures-Bearish-Secret).",
+        "multipart": "multipart/form-data text fields merged like URL-encoded (file parts ignored).",
     }
 
 
@@ -202,7 +209,102 @@ async def _chartink_bearish_webhook_background(symbols: list, raw_saved_name: st
         logger.exception("daily_futures_bearish chartink failed raw_file=%s", raw_saved_name)
 
 
-@router.post("/webhook/chartink")
+async def _resolve_daily_futures_chartink_symbols(
+    request: Request,
+    *,
+    persist_body: Callable[[bytes], str],
+) -> Tuple[List[str], str]:
+    """
+    Collect symbols from query string + body (JSON, urlencoded, multipart text fields, or GET-only).
+    Persists either raw POST bytes or a JSON audit record (GET / multipart).
+    """
+    qp_items = list(request.query_params.multi_items())
+    acc = df_chartink_accum_init_from_query(qp_items)
+    method = (request.method or "GET").upper()
+    ct = (request.headers.get("content-type") or "").lower()
+
+    if method == "GET":
+        audit = df_chartink_audit_json_bytes(
+            method=method,
+            content_type=ct,
+            query_multi_items=qp_items,
+            raw_body_note="GET — symbols from query only",
+        )
+        try:
+            inbox_path = persist_body(audit)
+        except OSError as e:
+            logger.exception("chartink daily_futures audit persist failed: %s", e)
+            raise HTTPException(
+                status_code=503,
+                detail="Server could not store webhook receipt; retry shortly",
+            ) from e
+        symbols = normalize_symbols_from_payload(df_chartink_accum_finalize_payload(acc))
+        return symbols, Path(inbox_path).name
+
+    if "multipart/form-data" in ct:
+        form = await request.form()
+        mf_summary = df_chartink_accum_extend_from_starlette_form(acc, form)
+        audit = df_chartink_audit_json_bytes(
+            method=method,
+            content_type=ct,
+            query_multi_items=qp_items,
+            multipart_field_summary=mf_summary,
+        )
+        try:
+            inbox_path = persist_body(audit)
+        except OSError as e:
+            logger.exception("chartink daily_futures multipart audit persist failed: %s", e)
+            raise HTTPException(
+                status_code=503,
+                detail="Server could not store webhook receipt; retry shortly",
+            ) from e
+        symbols = normalize_symbols_from_payload(df_chartink_accum_finalize_payload(acc))
+        return symbols, Path(inbox_path).name
+
+    raw = await request.body()
+    if not raw.strip():
+        audit = df_chartink_audit_json_bytes(
+            method=method,
+            content_type=ct,
+            query_multi_items=qp_items,
+            raw_body_note="empty_body — symbols from query only",
+        )
+        try:
+            inbox_path = persist_body(audit)
+        except OSError as e:
+            logger.exception("chartink daily_futures audit persist failed: %s", e)
+            raise HTTPException(
+                status_code=503,
+                detail="Server could not store webhook receipt; retry shortly",
+            ) from e
+        symbols = normalize_symbols_from_payload(df_chartink_accum_finalize_payload(acc))
+        if not symbols:
+            raise HTTPException(
+                status_code=400,
+                detail="Empty body and no symbols in query string (use ?stocks=... or POST a body)",
+            )
+        return symbols, Path(inbox_path).name
+
+    try:
+        inbox_path = persist_body(raw)
+    except OSError as e:
+        logger.exception("chartink daily_futures raw persist failed: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail="Server could not store webhook body; will not drop data — retry in a few seconds",
+        ) from e
+
+    try:
+        inner = parse_daily_futures_chartink_webhook_body(raw, ct)
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=f"Could not parse body: {e}") from e
+
+    df_chartink_ingest_parsed_into_accum(acc, inner)
+    symbols = normalize_symbols_from_payload(df_chartink_accum_finalize_payload(acc))
+    return symbols, Path(inbox_path).name
+
+
+@router.api_route("/webhook/chartink", methods=["GET", "POST", "PUT", "PATCH"])
 async def chartink_webhook(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -211,45 +313,29 @@ async def chartink_webhook(
 ) -> Dict[str, Any]:
     """
     ChartInk (or any caller) sends symbols every ~15 minutes.
-    Query: ?secret=tradewithctodailyfuture (or header X-Daily-Futures-Secret). If env
-    CHARTINK_DAILY_FUTURES_SECRET is set, it overrides the default secret.
-    Body supports the same ChartInk shape used by /scan/chartink-webhook-bullish
-    (e.g. stocks, trigger_prices, scan_name, alert_name), plus plain symbol lists.
+    Query: ?secret=... (or header X-Daily-Futures-Secret). Supports GET (query-only fallback),
+    POST JSON, application/x-www-form-urlencoded, and multipart/form-data (text fields; file parts ignored).
 
     Returns **immediately** with HTTP 200; ingestion runs in a background thread so short
     HTTP client timeouts (e.g. Guzzle) do not cause **499** / aborted processing at 9:15 / 9:30.
     """
-    prov = secret or x_daily_futures_secret or ""
+    prov = (
+        (secret or "").strip()
+        or (x_daily_futures_secret or "").strip()
+        or (request.query_params.get("secret") or "").strip()
+    )
     if not webhook_secret_ok(prov):
         raise HTTPException(status_code=401, detail="Invalid or missing webhook secret")
 
-    raw = await request.body()
-    if not raw:
-        raise HTTPException(status_code=400, detail="Empty body")
-
-    try:
-        inbox_path = persist_chartink_webhook_raw_body(raw)
-    except OSError as e:
-        logger.exception("chartink daily_futures raw persist failed: %s", e)
-        raise HTTPException(
-            status_code=503,
-            detail="Server could not store webhook body; will not drop data — retry in a few seconds",
-        ) from e
-
-    receipt_name = Path(inbox_path).name
-
-    ct = (request.headers.get("content-type") or "").lower()
-    try:
-        payload = parse_daily_futures_chartink_webhook_body(raw, ct)
-    except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as e:
-        raise HTTPException(status_code=400, detail=f"Could not parse body: {e}") from e
-
-    symbols = normalize_symbols_from_payload(payload)
+    symbols, receipt_name = await _resolve_daily_futures_chartink_symbols(
+        request, persist_body=persist_chartink_webhook_raw_body
+    )
     if not symbols:
         raise HTTPException(status_code=400, detail="No symbols found in payload")
 
     logger.info(
-        "daily_futures chartink POST accepted symbol_count=%d raw_receipt=%s (queue background)",
+        "daily_futures chartink %s accepted symbol_count=%d raw_receipt=%s (queue background)",
+        (request.method or "?").upper(),
         len(symbols),
         receipt_name,
     )
@@ -267,34 +353,24 @@ async def chartink_webhook(
 bearish_router = APIRouter(prefix="/daily-futures-bearish", tags=["daily-futures-bearish"])
 
 
-@bearish_router.post("/webhook/chartink")
+@bearish_router.api_route("/webhook/chartink", methods=["GET", "POST", "PUT", "PATCH"])
 async def chartink_bearish_webhook(
     request: Request,
     background_tasks: BackgroundTasks,
     secret: Optional[str] = None,
     x_df_bearish_secret: Optional[str] = Header(None, alias="X-Daily-Futures-Bearish-Secret"),
 ) -> Dict[str, Any]:
-    prov = secret or x_df_bearish_secret or ""
+    prov = (
+        (secret or "").strip()
+        or (x_df_bearish_secret or "").strip()
+        or (request.query_params.get("secret") or "").strip()
+    )
     if not webhook_bearish_secret_ok(prov):
         raise HTTPException(status_code=401, detail="Invalid or missing bearish webhook secret")
-    raw = await request.body()
-    if not raw:
-        raise HTTPException(status_code=400, detail="Empty body")
-    try:
-        inbox_path = persist_chartink_bearish_webhook_raw_body(raw)
-    except OSError as e:
-        logger.exception("chartink bearish raw persist failed: %s", e)
-        raise HTTPException(
-            status_code=503,
-            detail="Server could not store webhook body; retry shortly",
-        ) from e
-    receipt_name = Path(inbox_path).name
-    ct = (request.headers.get("content-type") or "").lower()
-    try:
-        payload: Any = parse_daily_futures_chartink_webhook_body(raw, ct)
-    except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as e:
-        raise HTTPException(status_code=400, detail=f"Could not parse body: {e}") from e
-    symbols = normalize_symbols_from_payload(payload)
+
+    symbols, receipt_name = await _resolve_daily_futures_chartink_symbols(
+        request, persist_body=persist_chartink_bearish_webhook_raw_body
+    )
     if not symbols:
         raise HTTPException(status_code=400, detail="No symbols found in payload")
     sym_copy = list(symbols)

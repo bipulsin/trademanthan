@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 from urllib.parse import quote, parse_qs
 
 import pytz
+from starlette.datastructures import UploadFile
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -1908,6 +1909,8 @@ def parse_daily_futures_chartink_webhook_body(
 
     Previously only JSON was decoded; URL-encoded POSTs stayed as ``stocks=X&…`` strings and
     ``normalize_symbols_from_payload`` produced zero symbols → 400 and nothing ingested.
+
+    Note: multipart/form-data is parsed in the router via ``request.form()`` (do not ``body()`` first).
     """
     ct = (content_type or "").lower().strip()
     if not raw or not raw.strip():
@@ -1929,11 +1932,126 @@ def parse_daily_futures_chartink_webhook_body(
             else:
                 flat[ck] = part
         return _normalize_chartink_like_dict_df(flat)
+    if "multipart/form-data" in ct:
+        raise ValueError("multipart body must be parsed with request.form() in the webhook handler")
     # Content-Type missing or exotic: attempt JSON literal, then raw string (comma/split fallback)
     s = raw.decode("utf-8", errors="replace").strip()
     if s.startswith("{") or s.startswith("["):
         return json.loads(s)
     return s
+
+
+def df_chartink_accum_init_from_query(multi_items: Any) -> Dict[str, List[str]]:
+    """Collect repeat query keys into lists (stocks merges). ``multi_items`` from ``request.query_params.multi_items()``."""
+    acc: Dict[str, List[str]] = {}
+    for rk, rv in multi_items or ():
+        if not isinstance(rk, str):
+            continue
+        v = str(rv).strip()
+        if not v:
+            continue
+        ck = _canonical_chartink_key_df(rk)
+        acc.setdefault(ck, []).append(v)
+    return acc
+
+
+def df_chartink_ingest_parsed_into_accum(acc: Dict[str, List[str]], obj: Any) -> None:
+    """Merge body parse result into accum (dict JSON, list, CSV string)."""
+    if obj is None:
+        return
+    if isinstance(obj, dict):
+        for rk, rv in obj.items():
+            if not isinstance(rk, str):
+                continue
+            if isinstance(rv, list):
+                for x in rv:
+                    v = str(x).strip()
+                    if v:
+                        ck = _canonical_chartink_key_df(rk)
+                        acc.setdefault(ck, []).append(v)
+            elif rv is not None:
+                v = str(rv).strip()
+                if v:
+                    ck = _canonical_chartink_key_df(rk)
+                    acc.setdefault(ck, []).append(v)
+        return
+    if isinstance(obj, list):
+        for x in obj:
+            v = str(x).strip()
+            if v:
+                acc.setdefault("stocks", []).append(v)
+        return
+    if isinstance(obj, str):
+        for part in re.split(r"[\s,;\n]+", obj.strip()):
+            if part.strip():
+                acc.setdefault("stocks", []).append(part.strip())
+
+
+def df_chartink_accum_finalize_payload(acc: Dict[str, List[str]]) -> Dict[str, Any]:
+    if not acc:
+        return {}
+    flat: Dict[str, str] = {}
+    for ck, lst in acc.items():
+        if not lst:
+            continue
+        flat[ck] = ",".join(lst) if len(lst) > 1 else lst[0]
+    return _normalize_chartink_like_dict_df(flat)
+
+
+def df_chartink_accum_extend_from_starlette_form(
+    acc: Dict[str, List[str]], form_data: Any
+) -> Dict[str, str]:
+    """
+    Merge ChartInk multipart fields into accum. UploadFile parts are skipped (not used for DF symbols).
+    Returns a short summary for audit JSON (filename marker only).
+    """
+    summary: Dict[str, str] = {}
+    try:
+        items = form_data.multi_items()
+    except Exception:
+        items = ()
+
+    for k, v in items:
+        key = str(k) if isinstance(k, str) else str(k or "")
+        if not key.strip():
+            continue
+        if isinstance(v, UploadFile):
+            fn = getattr(v, "filename", None)
+            summary[key] = f"<UploadFile:{fn or ''}>"
+            continue
+        try:
+            s = str(v).strip()
+        except Exception:
+            continue
+        if not s:
+            continue
+        ck = _canonical_chartink_key_df(key)
+        acc.setdefault(ck, []).append(s)
+        summary[key] = s
+
+    return summary
+
+
+def df_chartink_audit_json_bytes(
+    *,
+    method: str,
+    content_type: str,
+    query_multi_items: Optional[List[Tuple[str, str]]] = None,
+    multipart_field_summary: Optional[Dict[str, str]] = None,
+    raw_body_note: Optional[str] = None,
+) -> bytes:
+    """Structured audit line for inbox when body is multipart or GET (no raw POST bytes)."""
+    doc: Dict[str, Any] = {
+        "df_chartink_audit": True,
+        "method": method,
+        "query_params": list(query_multi_items or ()),
+        "content_type": content_type or None,
+    }
+    if multipart_field_summary is not None:
+        doc["form_fields"] = multipart_field_summary
+    if raw_body_note:
+        doc["body_note"] = raw_body_note
+    return json.dumps(doc, ensure_ascii=False, sort_keys=True).encode("utf-8")
 
 
 def normalize_symbols_from_payload(payload: Any) -> List[str]:
