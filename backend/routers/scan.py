@@ -9569,3 +9569,119 @@ async def daily_futures_indicator_playbook(
             "For LONG positions, bullish_exit_count is the decision-side count; for SHORT positions, bearish_exit_count is the decision-side count.",
         ],
     }
+
+
+@router.get("/daily-futures-v2-playbook")
+async def daily_futures_v2_playbook(
+    trade_date: Optional[date] = Query(None, description="IST trade date (default: today)."),
+    db: Session = Depends(get_db),
+):
+    """Public API: V2 entry/exit playbook snapshot for today's trades."""
+    import pytz
+
+    ist = pytz.timezone("Asia/Kolkata")
+    td = trade_date or datetime.now(ist).date()
+    rows = db.execute(
+        text(
+            """
+            SELECT
+                t.id AS trade_id,
+                s.trade_date,
+                COALESCE(t.future_symbol, s.future_symbol, t.underlying, s.underlying) AS future_symbol,
+                COALESCE(t.direction_type, s.direction_type, 'LONG') AS direction_type,
+                t.order_status,
+                t.entry_time,
+                t.entry_price,
+                t.sell_time,
+                t.sell_price,
+                t.buy_time,
+                t.buy_price,
+                t.exit_time,
+                t.exit_price,
+                t.lot_size,
+                t.pnl_rupees,
+                t.hard_sl_price,
+                t.exit_reason,
+                s.second_scan_time,
+                s.entry_window_start,
+                s.entry_window_end,
+                s.pullback_target_price,
+                s.pullback_status
+            FROM daily_futures_user_trade t
+            JOIN daily_futures_screening s ON s.id = t.screening_id
+            WHERE s.trade_date = CAST(:td AS DATE)
+            ORDER BY t.id DESC
+            LIMIT 400
+            """
+        ),
+        {"td": str(td)},
+    ).mappings().all()
+
+    out: List[Dict[str, Any]] = []
+    for r in rows:
+        dtx = str(r.get("direction_type") or "LONG").strip().upper()
+        lot = float(r.get("lot_size") or 0.0)
+        if dtx == "SHORT":
+            actual_entry_time = r.get("sell_time")
+            actual_entry_price = float(r["sell_price"]) if r.get("sell_price") is not None else None
+            actual_exit_time = r.get("buy_time") or r.get("exit_time")
+            actual_exit_price = float(r["buy_price"]) if r.get("buy_price") is not None else (float(r["exit_price"]) if r.get("exit_price") is not None else None)
+        else:
+            actual_entry_time = r.get("entry_time")
+            actual_entry_price = float(r["entry_price"]) if r.get("entry_price") is not None else None
+            actual_exit_time = r.get("exit_time")
+            actual_exit_price = float(r["exit_price"]) if r.get("exit_price") is not None else None
+
+        pnl_correct = None
+        if actual_entry_price is not None and actual_exit_price is not None and lot > 0:
+            pts = (actual_entry_price - actual_exit_price) if dtx == "SHORT" else (actual_exit_price - actual_entry_price)
+            pnl_correct = round(float(pts) * float(lot), 2)
+
+        def _hm(v: Any) -> Optional[str]:
+            if v is None:
+                return None
+            if isinstance(v, datetime):
+                z = v.astimezone(ist) if v.tzinfo else ist.localize(v)
+                return z.strftime("%H:%M")
+            return None
+
+        ew_start = _hm(r.get("entry_window_start"))
+        ew_end = _hm(r.get("entry_window_end"))
+        if not ew_start or not ew_end:
+            ss = r.get("second_scan_time")
+            if isinstance(ss, datetime):
+                z = ss.astimezone(ist) if ss.tzinfo else ist.localize(ss)
+                ew_start = (z + timedelta(minutes=5)).strftime("%H:%M")
+                ew_end = (z + timedelta(minutes=20)).strftime("%H:%M")
+        entry_window = (ew_start + " - " + ew_end) if ew_start and ew_end else None
+
+        out.append(
+            {
+                "trade_id": int(r["trade_id"]),
+                "future_symbol": str(r.get("future_symbol") or ""),
+                "direction_type": dtx,
+                "order_status": str(r.get("order_status") or ""),
+                "entry_window": entry_window,
+                "pullback_target_price": float(r["pullback_target_price"]) if r.get("pullback_target_price") is not None else None,
+                "pullback_status": str(r.get("pullback_status") or ""),
+                "actual_entry_time": str(actual_entry_time) if actual_entry_time is not None else None,
+                "actual_entry_price": actual_entry_price,
+                "hard_sl_price": float(r["hard_sl_price"]) if r.get("hard_sl_price") is not None else None,
+                "actual_exit_time": str(actual_exit_time) if actual_exit_time is not None else None,
+                "actual_exit_price": actual_exit_price,
+                "exit_type": str(r.get("exit_reason") or ""),
+                "pnl_actual": float(r["pnl_rupees"]) if r.get("pnl_rupees") is not None else None,
+                "pnl_correct": pnl_correct,
+            }
+        )
+
+    return {
+        "success": True,
+        "trade_date": str(td),
+        "generated_at_ist": datetime.now(ist).isoformat(),
+        "rows": out,
+        "notes": [
+            "Entry window uses stored V2 window; fallback is second_scan_time +5m to +20m.",
+            "PnL correct is recomputed from normalized direction-wise entry/exit prices and lot_size.",
+        ],
+    }

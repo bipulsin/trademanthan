@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Daily Futures V2 Playbook</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 16px; background: #f8fafc; color: #0f172a; }
+    h1 { margin: 0 0 8px 0; font-size: 1.2rem; }
+    .meta { margin: 0 0 10px 0; font-size: 0.86rem; color: #475569; }
+    .rule { margin: 0 0 12px 0; padding: 10px; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px; font-size: 0.82rem; }
+    .tbl-wrap { overflow-x: auto; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    th, td { border-bottom: 1px solid #e2e8f0; padding: 6px 6px; text-align: left; white-space: nowrap; }
+    th { color: #475569; font-weight: 700; }
+    td.num, th.num { text-align: right; }
+    .empty { color: #64748b; font-size: 0.86rem; }
+  </style>
+</head>
+<body>
+  <h1>Daily Futures V2 Playbook (Today)</h1>
+  <p id="meta" class="meta">Loading...</p>
+  <div class="rule">
+    Columns shown: Entry window, pullback target, actual entry/exit, SL, exit type, PnL actual, and PnL corrected from direction-wise prices.
+  </div>
+  <div id="host"></div>
+  <script>
+    (function () {
+      const API = window.location.origin + '/scan/daily-futures-v2-playbook';
+      const host = document.getElementById('host');
+      const meta = document.getElementById('meta');
+      function esc(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
+      function num(v,d){const n=Number(v); return Number.isFinite(n)?n.toFixed(d==null?2:d):'—';}
+      fetch(API,{cache:'no-store'})
+        .then(r=>r.ok?r.json():Promise.reject(new Error('HTTP '+r.status)))
+        .then(j=>{
+          const rows = Array.isArray(j.rows)?j.rows:[];
+          meta.textContent = 'Trade date: ' + esc(j.trade_date||'—') + ' | Generated: ' + esc(j.generated_at_ist||'—');
+          if(!rows.length){host.innerHTML='<p class="empty">No rows for today.</p>'; return;}
+          const th = '<thead><tr><th>Future</th><th>Dir</th><th>Status</th><th>Entry Window</th><th class="num">Pullback Target</th><th>Pullback Status</th><th>Actual Entry Time</th><th class="num">Actual Entry Price</th><th class="num">SL Price</th><th>Actual Exit Time</th><th class="num">Actual Exit Price</th><th>Exit Type</th><th class="num">PnL Actual</th><th class="num">PnL Correct</th></tr></thead>';
+          const body = rows.map(function(r){
+            return '<tr>' +
+              '<td>'+esc(r.future_symbol)+'</td>' +
+              '<td>'+esc(r.direction_type)+'</td>' +
+              '<td>'+esc(r.order_status)+'</td>' +
+              '<td>'+esc(r.entry_window||'—')+'</td>' +
+              '<td class="num">'+num(r.pullback_target_price,2)+'</td>' +
+              '<td>'+esc(r.pullback_status||'—')+'</td>' +
+              '<td>'+esc(r.actual_entry_time||'—')+'</td>' +
+              '<td class="num">'+num(r.actual_entry_price,2)+'</td>' +
+              '<td class="num">'+num(r.hard_sl_price,2)+'</td>' +
+              '<td>'+esc(r.actual_exit_time||'—')+'</td>' +
+              '<td class="num">'+num(r.actual_exit_price,2)+'</td>' +
+              '<td>'+esc(r.exit_type||'—')+'</td>' +
+              '<td class="num">'+num(r.pnl_actual,2)+'</td>' +
+              '<td class="num">'+num(r.pnl_correct,2)+'</td>' +
+            '</tr>';
+          }).join('');
+          host.innerHTML = '<div class="tbl-wrap"><table>' + th + '<tbody>' + body + '</tbody></table></div>';
+        })
+        .catch(e=>{
+          meta.textContent = 'Failed to load playbook.';
+          host.innerHTML = '<p class="empty">Error: '+esc(e.message||e)+'</p>';
+        });
+    })();
+  </script>
+</body>
+</html>
