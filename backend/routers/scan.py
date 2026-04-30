@@ -9258,9 +9258,12 @@ async def daily_futures_indicator_playbook(
                     "wma21": None,
                     "ema3": None,
                     "rsi9": None,
+                    "di_plus": None,
+                    "di_minus": None,
                     "is_short": str(direction or "LONG").upper() == "SHORT",
                     "ema_vs_wma_ok": False,
                     "rsi_vs_wma_ok": False,
+                    "di_condition_ok": False,
                     "c3_ok": False,
                 },
             )
@@ -9310,9 +9313,12 @@ async def daily_futures_indicator_playbook(
             "wma21": float(wma21[i]) if wma21[i] is not None else None,
             "ema3": float(ema3[i]) if ema3[i] is not None else None,
             "rsi9": float(rsi9[i]) if rsi9[i] is not None else None,
+            "di_plus": float(di_plus[i]) if di_plus[i] is not None else None,
+            "di_minus": float(di_minus[i]) if di_minus[i] is not None else None,
             "is_short": is_short,
             "ema_vs_wma_ok": bool(ema_vs_wma_ok),
             "rsi_vs_wma_ok": bool(rsi_vs_wma_ok),
+            "di_condition_ok": bool(c2_bear if is_short else c2_bull),
             "c3_ok": bool(c3_bear if is_short else c3_bull),
         }
         return bull_count, bear_count, labels, bull_map, bear_map, hm

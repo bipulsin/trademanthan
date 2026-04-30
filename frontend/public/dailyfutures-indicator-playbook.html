@@ -88,6 +88,7 @@
             const hmBlock =
               '<div class="hm">' +
               '<div class="row"><strong>Latest scan Hilega-Milega inputs:</strong> WMA21=' + esc(fmtNum(hm.wma21, 4)) + ', EMA3=' + esc(fmtNum(hm.ema3, 4)) + ', RSI9=' + esc(fmtNum(hm.rsi9, 4)) + '</div>' +
+              '<div class="row"><strong>Latest scan DI inputs:</strong> DI+=' + esc(fmtNum(hm.di_plus, 4)) + ', DI-=' + esc(fmtNum(hm.di_minus, 4)) + ' | C2 rule => <span class="' + (hm.di_condition_ok ? 'good' : 'bad') + '">' + esc(Boolean(hm.di_condition_ok)) + '</span></div>' +
               '<div class="row">' + esc(emaRule) + ' => <span class="' + (hm.ema_vs_wma_ok ? 'good' : 'bad') + '">' + esc(Boolean(hm.ema_vs_wma_ok)) + '</span></div>' +
               '<div class="row">' + esc(rsiRule) + ' => <span class="' + (hm.rsi_vs_wma_ok ? 'good' : 'bad') + '">' + esc(Boolean(hm.rsi_vs_wma_ok)) + '</span></div>' +
               '<div class="row"><strong>C3 final:</strong> <span class="' + (hm.c3_ok ? 'good' : 'bad') + '">' + esc(Boolean(hm.c3_ok)) + '</span></div>' +
