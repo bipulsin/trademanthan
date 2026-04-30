@@ -3331,11 +3331,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                     s.trade_date = CAST(:td AS DATE)
                     OR (
                         s.trade_date < CAST(:td AS DATE)
-                        AND (
-                            t.buy_time IS NOT NULL
-                            OR t.exit_time IS NOT NULL
-                            OR DATE((COALESCE(t.updated_at, t.created_at) AT TIME ZONE 'Asia/Kolkata')) = CAST(:td AS DATE)
-                        )
+                        AND DATE((COALESCE(t.updated_at, t.created_at) AT TIME ZONE 'Asia/Kolkata')) = CAST(:td AS DATE)
                     )
                   )
             ORDER BY t.updated_at DESC
