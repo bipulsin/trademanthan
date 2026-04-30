@@ -371,21 +371,34 @@
     var c = Number((st && st.indicator_count) || 0);
     var en = Number((st && st.indicator_exit_now_threshold) || 3);
     var hx = Number((st && st.indicator_hard_exit_threshold) || 4);
+    var condCodes = (st && st.indicator_conditions && st.indicator_conditions.length)
+      ? st.indicator_conditions.join(', ')
+      : 'None';
+    var condCodesLine =
+      '<div class="df-s-decis-codes" title="Triggered indicator codes on latest closed 15m candle.">Codes: ' +
+      esc(condCodes) +
+      '</div>';
     var conds = (st && st.indicator_conditions_text && st.indicator_conditions_text.length)
       ? st.indicator_conditions_text.join(' · ')
       : 'No flipped indicator conditions on latest closed 15m candle.';
     if (d === 'hard_exit') {
       return (
-        '<span class="df-s-cell df-s-neg df-s-decis df-s-pulse" style="font-size:14px;font-weight:800;background:#b91c1c !important;color:#ffffff !important;border:1px solid #7f1d1d;" title="' + esc(conds) + '. Count=' + esc(c) + ' (Bull=' + esc(b) + ', Bear=' + esc(s) + '), HARD at ≥' + esc(hx) + '.">HARD EXIT</span>'
+        '<div class="df-s-decis-wrap"><span class="df-s-cell df-s-neg df-s-decis df-s-pulse" style="font-size:14px;font-weight:800;background:#b91c1c !important;color:#ffffff !important;border:1px solid #7f1d1d;" title="' + esc(conds) + '. Count=' + esc(c) + ' (Bull=' + esc(b) + ', Bear=' + esc(s) + '), HARD at ≥' + esc(hx) + '.">HARD EXIT</span>' +
+        condCodesLine +
+        '</div>'
       );
     }
     if (d === 'exit_now') {
       return (
-        '<span class="df-s-cell df-s-amb df-s-decis" style="font-weight:700;background:#f59e0b !important;color:#111827 !important;border:1px solid #d97706;" title="' + esc(conds) + '. Count=' + esc(c) + ' (Bull=' + esc(b) + ', Bear=' + esc(s) + '), EXIT NOW at ≥' + esc(en) + '.">EXIT NOW</span>'
+        '<div class="df-s-decis-wrap"><span class="df-s-cell df-s-amb df-s-decis" style="font-weight:700;background:#f59e0b !important;color:#111827 !important;border:1px solid #d97706;" title="' + esc(conds) + '. Count=' + esc(c) + ' (Bull=' + esc(b) + ', Bear=' + esc(s) + '), EXIT NOW at ≥' + esc(en) + '.">EXIT NOW</span>' +
+        condCodesLine +
+        '</div>'
       );
     }
     return (
-      '<span class="df-s-cell df-s-ok df-s-decis" title="No exit signal">No exit signal</span>'
+      '<div class="df-s-decis-wrap"><span class="df-s-cell df-s-ok df-s-decis" title="No exit signal">No exit signal</span>' +
+      condCodesLine +
+      '</div>'
     );
   }
 
