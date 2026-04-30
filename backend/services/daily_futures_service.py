@@ -839,19 +839,22 @@ def _compute_effective_conviction_and_5m_momentum(
                 mp = mcache[mkey]
             else:
                 c5 = _last_completed_5m_candles_for_instrument(upstox, ik, td, now_ist, limit=20)
-                if len(c5) >= 2:
+                if len(c5) >= 1:
                     latest = c5[-1]
                     vols = [float(x.get("volume") or 0.0) for x in c5]
-                    avg20 = (sum(vols) / len(vols)) if vols else 0.0
+                    avg_v = (sum(vols) / len(vols)) if vols else 0.0
+                    v_last = float(latest.get("volume") or 0.0)
                     cl = float(latest.get("close") or 0.0)
                     op = float(latest.get("open") or 0.0)
-                    # LONG: bullish 5m + volume confirmation; SHORT: bearish 5m + volume (same vol rule).
+                    # LONG: bullish last 5m; SHORT: bearish last 5m.
                     candle_ok = (cl < op) if drow == "SHORT" else (cl > op)
-                    mp = bool(
-                        candle_ok
-                        and avg20 > 0.0
-                        and float(latest.get("volume") or 0.0) >= 1.2 * avg20
-                    )
+                    # Volume spike vs rolling avg: meaningless with 1 bar (avg == last → 1.2× never passes).
+                    # Often NSE_FO 5m returns volume 0/omitted → avg_v==0; don't block Enter on bogus zeros.
+                    if len(c5) < 2 or avg_v <= 0.0:
+                        volume_ok = True
+                    else:
+                        volume_ok = v_last >= 1.2 * avg_v
+                    mp = bool(candle_ok and volume_ok)
                 else:
                     mp = False
                 mcache[mkey] = mp
