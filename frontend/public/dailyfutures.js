@@ -681,6 +681,17 @@
     if (bearBtn) bearBtn.hidden = !(open && bear.length > 0);
   }
 
+  function enterCellHtml(eligible, reason, enterBtn) {
+    if (eligible) return enterBtn;
+    return (
+      '<div class="df-enter-cell">' +
+      enterBtn +
+      '<div class="df-enter-block-reason" role="status">' +
+      esc(reason) +
+      '</div></div>'
+    );
+  }
+
   function renderAll(data) {
     state.workspace = data;
     renderPicksBullish(data);
@@ -746,9 +757,7 @@
           '<button type="button" class="df-btn df-btn-order" data-sid="' +
           r.screening_id +
           '"' + (eligible ? '' : ' disabled') + '>Enter</button>';
-        const enterCell = eligible
-          ? enterBtn
-          : ('<span class="df-disabled-tip" title="' + esc(reason) + '">' + enterBtn + '</span>');
+        const enterCell = enterCellHtml(eligible, reason, enterBtn);
         return (
           '<tr><td><strong>' +
           symbolWithDirectionHtml(r) +
@@ -844,9 +853,7 @@
           '<button type="button" class="df-btn df-btn-order" data-bear="1" data-sid="' +
           r.screening_id +
           '"' + (eligible ? '' : ' disabled') + '>Enter</button>';
-        const enterCell = eligible
-          ? enterBtn
-          : ('<span class="df-disabled-tip" title="' + esc(reason) + '">' + enterBtn + '</span>');
+        const enterCell = enterCellHtml(eligible, reason, enterBtn);
         return (
           '<tr><td><strong>' +
           symbolWithDirectionHtml(r) +
