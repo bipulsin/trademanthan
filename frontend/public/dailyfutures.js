@@ -1045,7 +1045,16 @@
             : '';
         const ewStart = r.entry_window_start ? fmtIsoTimeIst(r.entry_window_start) : null;
         const ewEnd = r.entry_window_end ? fmtIsoTimeIst(r.entry_window_end) : null;
-        const ewTxt = ewStart && ewEnd ? (ewStart + ' - ' + ewEnd) : '—';
+        const tdToday = String(r.trade_date || '') === String((state.workspace && state.workspace.trade_date) || '');
+        let ewTxt = ewStart && ewEnd ? (ewStart + ' - ' + ewEnd) : '—';
+        if (ewTxt === '—' && tdToday && r.second_scan_time) {
+          const base = new Date(r.second_scan_time);
+          if (!Number.isNaN(base.getTime())) {
+            const start = new Date(base.getTime() + 5 * 60 * 1000);
+            const end = new Date(base.getTime() + 20 * 60 * 1000);
+            ewTxt = fmtIsoTimeIst(start.toISOString()) + ' - ' + fmtIsoTimeIst(end.toISOString());
+          }
+        }
         return (
           '<tr><td><strong>' +
           symbolWithDirectionHtml(r) +

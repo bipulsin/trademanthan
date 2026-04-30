@@ -3354,7 +3354,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
             SELECT t.id, t.screening_id, t.underlying, COALESCE(t.direction_type, s.direction_type, 'LONG') AS direction_type, t.future_symbol, t.instrument_key, t.lot_size,
                    t.entry_time, t.entry_price, t.sell_time, t.sell_price, t.exit_time, t.exit_price, t.buy_time, t.buy_price,
                    t.pnl_points, t.pnl_rupees,
-                   s.entry_window_start, s.entry_window_end,
+                   s.second_scan_time, s.entry_window_start, s.entry_window_end,
                    s.first_hit_at,
                    s.ltp
             FROM daily_futures_user_trade t
@@ -3417,12 +3417,13 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                 "entry_price": ep_disp,
                 "exit_time": xt,
                 "exit_price": xp,
-                "entry_window_start": row[17].isoformat() if row[17] is not None and hasattr(row[17], "isoformat") else None,
-                "entry_window_end": row[18].isoformat() if row[18] is not None and hasattr(row[18], "isoformat") else None,
+                "second_scan_time": row[17].isoformat() if row[17] is not None and hasattr(row[17], "isoformat") else None,
+                "entry_window_start": row[18].isoformat() if row[18] is not None and hasattr(row[18], "isoformat") else None,
+                "entry_window_end": row[19].isoformat() if row[19] is not None and hasattr(row[19], "isoformat") else None,
                 "pnl_points": pnl_pts,
                 "pnl_rupees": pnl_rs,
-                "first_scan_time": row[19].isoformat() if row[19] is not None and hasattr(row[19], "isoformat") else None,
-                "ltp": float(row[20]) if row[20] is not None else None,
+                "first_scan_time": row[20].isoformat() if row[20] is not None and hasattr(row[20], "isoformat") else None,
+                "ltp": float(row[21]) if row[21] is not None else None,
                 "win_loss": wl,
             }
         )
