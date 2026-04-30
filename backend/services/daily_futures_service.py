@@ -772,43 +772,11 @@ def _evaluate_indicator_exit_signal(
     return out
 
 
-def _last_completed_5m_candles_for_instrument(
-    upstox: UpstoxService,
-    instrument_key: str,
-    session_date: date,
-    now_ist: datetime,
-    limit: int = 20,
-) -> List[Dict[str, Any]]:
-    ik = str(instrument_key or "").strip()
-    if not ik:
-        return []
-    raw = _upstox_fetch_5m_structured_rows(upstox, ik, session_date, log_label="5m_last_completed")
-
-    cutoff = now_ist.replace(minute=(now_ist.minute // 5) * 5, second=0, microsecond=0)
-
-    def _rows_to_completed(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        out_local: List[Dict[str, Any]] = []
-        for c in rows or []:
-            ts = _parse_iso_ist((c or {}).get("timestamp"))
-            if ts is None or ts.date() != session_date or ts >= cutoff:
-                continue
-            op = _safe_float((c or {}).get("open"))
-            cl = _safe_float((c or {}).get("close"))
-            vol = _safe_float((c or {}).get("volume"))
-            if op is None or cl is None or vol is None:
-                continue
-            out_local.append({"timestamp": ts, "open": op, "close": cl, "volume": vol})
-        out_local.sort(key=lambda x: x["timestamp"])
-        return out_local
-
-    out = _rows_to_completed(raw)
-    return out[-max(2, int(limit)):]
-
-
 def _compute_effective_conviction_and_5m_momentum(
     screenings: List[Dict[str, Any]],
     now_ist: datetime,
 ) -> None:
+    """Live effective conviction decay on workspace read. FO 5m momentum gate removed (no longer fetched or enforced)."""
     if not screenings:
         return
     decay_raw = os.getenv(
@@ -817,12 +785,6 @@ def _compute_effective_conviction_and_5m_momentum(
     )
     decay_per_scan = float(decay_raw or 0.08)
     decay_per_scan = max(0.0, min(0.5, decay_per_scan))
-    td = _workspace_trade_date_ist(now_ist)
-    try:
-        upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
-    except Exception:
-        upstox = None
-    mcache: Dict[Tuple[str, str], bool] = {}
     for s in screenings:
         raw_conv = _safe_float(s.get("conviction_score"))
         scan_count = int(s.get("scan_count") or 0)
@@ -830,35 +792,7 @@ def _compute_effective_conviction_and_5m_momentum(
         eff = round(float(raw_conv) * float(decay_factor), 1) if raw_conv is not None else None
         s["effective_conviction"] = eff
         s["conviction_decay_factor"] = round(float(decay_factor), 4)
-        ik = str(s.get("instrument_key") or "").strip()
-        drow = str(s.get("direction_type") or "LONG").strip().upper()
-        mp: Optional[bool] = None
-        if upstox is not None and ik:
-            mkey = (ik, drow)
-            if mkey in mcache:
-                mp = mcache[mkey]
-            else:
-                c5 = _last_completed_5m_candles_for_instrument(upstox, ik, td, now_ist, limit=20)
-                if len(c5) >= 1:
-                    latest = c5[-1]
-                    vols = [float(x.get("volume") or 0.0) for x in c5]
-                    avg_v = (sum(vols) / len(vols)) if vols else 0.0
-                    v_last = float(latest.get("volume") or 0.0)
-                    cl = float(latest.get("close") or 0.0)
-                    op = float(latest.get("open") or 0.0)
-                    # LONG: bullish last 5m; SHORT: bearish last 5m.
-                    candle_ok = (cl < op) if drow == "SHORT" else (cl > op)
-                    # Volume spike vs rolling avg: meaningless with 1 bar (avg == last → 1.2× never passes).
-                    # Often NSE_FO 5m returns volume 0/omitted → avg_v==0; don't block Enter on bogus zeros.
-                    if len(c5) < 2 or avg_v <= 0.0:
-                        volume_ok = True
-                    else:
-                        volume_ok = v_last >= 1.2 * avg_v
-                    mp = bool(candle_ok and volume_ok)
-                else:
-                    mp = False
-                mcache[mkey] = mp
-        s["last_5m_momentum_pass"] = mp
+        s["last_5m_momentum_pass"] = True
         s["last_5m_evaluated_at"] = now_ist.isoformat()
 
     # Persist live-computed values on workspace read (required).
@@ -3636,8 +3570,6 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
         else:
             if float(live_conv) < 60.0:
                 reasons.append(f"Effective conviction {round(float(live_conv),1)} is below 60")
-        if p.get("last_5m_momentum_pass") is not True:
-            reasons.append("5-min momentum weak — wait for next candle")
         p["order_eligible"] = len(reasons) == 0
         p["order_block_reason"] = reasons[0] if reasons else None
 
@@ -3746,7 +3678,7 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
             """
             SELECT id, underlying, direction_type, future_symbol, instrument_key, lot_size, scan_count,
                    conviction_score, second_scan_conviction_score, second_scan_time,
-                   effective_conviction, last_5m_momentum_pass
+                   effective_conviction
             FROM daily_futures_screening WHERE id = :sid AND trade_date = CAST(:d AS DATE)
             """
         ),
@@ -3764,9 +3696,6 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
         raise ValueError("Wait 5 minutes after second scan")
     dtp = str(row[2] or "LONG").strip().upper()
     live_score = float(row[10]) if row[10] is not None else None
-    momentum_pass = bool(row[11]) if row[11] is not None else False
-    if not momentum_pass:
-        raise ValueError("5-min momentum weak — wait for next candle")
     c2 = live_score
     if dtp == "SHORT":
         if c2 is None or c2 <= 50.0:
