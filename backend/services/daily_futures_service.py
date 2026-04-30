@@ -1262,18 +1262,10 @@ def _apply_exit_alerts_to_running(
         ind_conds_new = list(ind.get("conditions") or [])
         ind_text_new = list(ind.get("conditions_text") or [])
         ind_latest_ts = ind.get("latest_candle_ts")
-        exit_now_thr = int(
-            os.getenv(
-                "DAILY_FUTURES_EXIT_NOW_COUNT_THRESHOLD",
-                str(getattr(settings, "DAILY_FUTURES_EXIT_NOW_COUNT_THRESHOLD", 2) or 2),
-            )
-        )
-        hard_exit_thr = int(
-            os.getenv(
-                "DAILY_FUTURES_HARD_EXIT_COUNT_THRESHOLD",
-                str(getattr(settings, "DAILY_FUTURES_HARD_EXIT_COUNT_THRESHOLD", 3) or 3),
-            )
-        )
+        # Fixed thresholds by product decision (do not override from env):
+        # Exit Now at 2; Hard Exit at 3.
+        exit_now_thr = 2
+        hard_exit_thr = 3
         exit_now_thr = max(1, exit_now_thr)
         hard_exit_thr = max(exit_now_thr, hard_exit_thr)
         prev = prev_state.get(tid) or {}
