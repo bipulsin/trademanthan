@@ -9759,6 +9759,85 @@ async def daily_futures_v2_playbook(
                 except Exception:
                     pb = None
 
+        # Validate if pullback target was touched within entry window.
+        hit_in_window: Optional[bool] = None
+        out_pullback_status = str(r.get("pullback_status") or "")
+        out_pnl_correct = pnl_correct
+        if pb is not None:
+            ws_dt = r.get("entry_window_start")
+            we_dt = r.get("entry_window_end")
+            if (ws_dt is None or we_dt is None) and isinstance(r.get("second_scan_time"), datetime):
+                z = r["second_scan_time"].astimezone(ist) if r["second_scan_time"].tzinfo else ist.localize(r["second_scan_time"])
+                ws_dt = z + timedelta(minutes=5)
+                we_dt = z + timedelta(minutes=20)
+            if isinstance(ws_dt, datetime) and isinstance(we_dt, datetime):
+                try:
+                    ikey = str(r.get("instrument_key") or "").strip()
+                    if ikey:
+                        raw_1m = vwap_service.get_historical_candles_by_instrument_key(
+                            ikey, interval="minutes/1", days_back=2, range_end_date=td
+                        ) or []
+                        try:
+                            key_enc = quote(ikey, safe="")
+                            intraday_url = f"{vwap_service.base_url}/historical-candle/intraday/{key_enc}/minutes/1"
+                            raw_i = vwap_service.make_api_request(intraday_url, method="GET", timeout=15, max_retries=2) or {}
+                            if isinstance(raw_i, dict) and raw_i.get("status") == "success":
+                                rows_i = ((raw_i.get("data") or {}).get("candles")) or []
+                                for row_i in rows_i:
+                                    if isinstance(row_i, dict):
+                                        raw_1m.append(row_i)
+                                    elif isinstance(row_i, (list, tuple)) and len(row_i) >= 6:
+                                        raw_1m.append(
+                                            {
+                                                "timestamp": row_i[0],
+                                                "open": row_i[1],
+                                                "high": row_i[2],
+                                                "low": row_i[3],
+                                                "close": row_i[4],
+                                                "volume": row_i[5],
+                                            }
+                                        )
+                        except Exception:
+                            pass
+                        hit = False
+                        for c in raw_1m:
+                            ts_raw = c.get("timestamp")
+                            if isinstance(ts_raw, datetime):
+                                ts = ts_raw.astimezone(ist) if ts_raw.tzinfo else ist.localize(ts_raw)
+                            else:
+                                s = str(ts_raw or "").strip()
+                                if not s:
+                                    continue
+                                if s.endswith("Z"):
+                                    s = s[:-1] + "+00:00"
+                                try:
+                                    dtv = datetime.fromisoformat(s)
+                                    ts = dtv.astimezone(ist) if dtv.tzinfo else ist.localize(dtv)
+                                except Exception:
+                                    continue
+                            if ts < ws_dt or ts > we_dt:
+                                continue
+                            hi = c.get("high")
+                            lo = c.get("low")
+                            if hi is None or lo is None:
+                                continue
+                            hi_f = float(hi)
+                            lo_f = float(lo)
+                            if dtx == "SHORT":
+                                if hi_f >= float(pb):
+                                    hit = True
+                                    break
+                            else:
+                                if lo_f <= float(pb):
+                                    hit = True
+                                    break
+                        hit_in_window = hit
+                except Exception:
+                    hit_in_window = None
+        if hit_in_window is False:
+            out_pullback_status = "FAILED"
+            out_pnl_correct = 0.0
+
         out.append(
             {
                 "trade_id": int(r["trade_id"]),
@@ -9767,7 +9846,8 @@ async def daily_futures_v2_playbook(
                 "order_status": str(r.get("order_status") or ""),
                 "entry_window": entry_window,
                 "pullback_target_price": pb,
-                "pullback_status": str(r.get("pullback_status") or ""),
+                "pullback_status": out_pullback_status,
+                "pullback_hit_in_window": hit_in_window,
                 "actual_entry_time": str(actual_entry_time) if actual_entry_time is not None else None,
                 "actual_entry_price": actual_entry_price,
                 "hard_sl_price": float(r["hard_sl_price"]) if r.get("hard_sl_price") is not None else None,
@@ -9775,7 +9855,7 @@ async def daily_futures_v2_playbook(
                 "actual_exit_price": actual_exit_price,
                 "exit_type": str(r.get("exit_reason") or ""),
                 "pnl_actual": float(r["pnl_rupees"]) if r.get("pnl_rupees") is not None else None,
-                "pnl_correct": pnl_correct,
+                "pnl_correct": out_pnl_correct,
             }
         )
 
