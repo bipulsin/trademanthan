@@ -48,16 +48,17 @@ NIFTY50_INDEX_KEY = "NSE_INDEX|Nifty 50"
 
 def _bearish_index_gate_enabled() -> bool:
     """
-    When True (default), bearish pick visibility and SHORT order entry require NIFTY LTP
-    below the NIFTY session day open. Set DAILY_FUTURES_BEARISH_INDEX_GATE_ENABLED=0|off|no|false to disable.
+    When True, Today's pick — Bearish is filtered by NIFTY spot 5m structure (quotes/candles).
+
+    **Default is off**: no index-based hiding or SHORT entry block from this gate.
+
+    Legacy opt-in: set DAILY_FUTURES_BEARISH_INDEX_GATE_ENABLED=1|true|yes|on on the server.
     """
     raw = os.getenv("DAILY_FUTURES_BEARISH_INDEX_GATE_ENABLED")
     if raw is None or (isinstance(raw, str) and raw.strip() == ""):
-        return True
-    v = str(raw).strip().lower()
-    if v in ("0", "false", "no", "off"):
         return False
-    return True
+    v = str(raw).strip().lower()
+    return v in ("1", "true", "yes", "on")
 _DF_TABLES_READY = False
 _DF_TABLES_LOCK = threading.Lock()
 _INDICATOR_CANDLE_CACHE: Dict[Tuple[str, date, datetime], List[Dict[str, Any]]] = {}

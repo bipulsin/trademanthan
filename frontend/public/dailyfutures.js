@@ -792,8 +792,7 @@
     const gate = (data && data.index_bearish_gate) || {};
     if (hint) {
       if (gate && gate.index_gate_disabled === true) {
-        hint.innerHTML =
-          '<span class="df-meta">NIFTY day-open filter for bearish is <strong>off</strong> (server setting).</span>';
+        hint.textContent = '';
       } else if (gate && gate.nifty_bullish === true) {
         hint.innerHTML =
           '<span class="df-meta">NIFTY is Bullish, so no trade will be displayed in this section.</span>';
