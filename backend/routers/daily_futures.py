@@ -25,6 +25,7 @@ from backend.services.daily_futures_service import (
     get_workspace,
     manual_update_conviction_vwap,
     normalize_symbols_from_payload,
+    parse_daily_futures_chartink_webhook_body,
     persist_chartink_bearish_webhook_raw_body,
     persist_chartink_webhook_raw_body,
     process_chartink_webhook,
@@ -237,19 +238,11 @@ async def chartink_webhook(
 
     receipt_name = Path(inbox_path).name
 
-    payload: Any = None
     ct = (request.headers.get("content-type") or "").lower()
     try:
-        if "application/json" in ct:
-            payload = json.loads(raw.decode("utf-8", errors="replace"))
-        else:
-            s = raw.decode("utf-8", errors="replace").strip()
-            if s.startswith("{") or s.startswith("["):
-                payload = json.loads(s)
-            else:
-                payload = s
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Could not parse body: {e}")
+        payload = parse_daily_futures_chartink_webhook_body(raw, ct)
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=f"Could not parse body: {e}") from e
 
     symbols = normalize_symbols_from_payload(payload)
     if not symbols:
@@ -298,16 +291,9 @@ async def chartink_bearish_webhook(
     receipt_name = Path(inbox_path).name
     ct = (request.headers.get("content-type") or "").lower()
     try:
-        if "application/json" in ct:
-            payload: Any = json.loads(raw.decode("utf-8", errors="replace"))
-        else:
-            s = raw.decode("utf-8", errors="replace").strip()
-            if s.startswith("{") or s.startswith("["):
-                payload = json.loads(s)
-            else:
-                payload = s
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Could not parse body: {e}")
+        payload: Any = parse_daily_futures_chartink_webhook_body(raw, ct)
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=f"Could not parse body: {e}") from e
     symbols = normalize_symbols_from_payload(payload)
     if not symbols:
         raise HTTPException(status_code=400, detail="No symbols found in payload")

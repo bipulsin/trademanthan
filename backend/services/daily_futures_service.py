@@ -14,7 +14,7 @@ import threading
 from datetime import date, datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple
-from urllib.parse import quote
+from urllib.parse import quote, parse_qs
 
 import pytz
 from sqlalchemy import text
@@ -1866,16 +1866,88 @@ def _build_trade_if_could_rows(
     return out
 
 
+def _canonical_chartink_key_df(raw_key: str) -> str:
+    """Map ChartInk / client synonyms to stable names (mirror scan router loosely)."""
+    k = str(raw_key).strip().lower().replace("-", "_")
+    return {
+        "stock": "stocks",
+        "symbols": "stocks",
+        "symbol": "stocks",
+        "tickers": "stocks",
+        "ticker": "stocks",
+        "scr": "stocks",
+        "nsecode": "stocks",
+    }.get(k, k)
+
+
+def _normalize_chartink_like_dict_df(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge synonym keys so ``normalize_symbols_from_payload`` sees ``stocks`` etc."""
+    if not raw:
+        return {}
+    out: Dict[str, Any] = {}
+    for key, val in raw.items():
+        if not isinstance(key, str):
+            continue
+        ck = _canonical_chartink_key_df(key)
+        if ck in ("stocks", "trigger_prices") and ck in out and out[ck] not in (None, "") and val not in (None, ""):
+            out[ck] = f"{out[ck]},{val}"
+        else:
+            out[ck] = val
+    if isinstance(out.get("stocks"), list):
+        out["stocks"] = ",".join(str(x).strip() for x in out["stocks"] if str(x).strip())
+    return out
+
+
+def parse_daily_futures_chartink_webhook_body(
+    raw: bytes, content_type: Optional[str] = None
+) -> Any:
+    """
+    Decode Daily Futures webhook body the way ChartInk often sends it:
+    - JSON
+    - application/x-www-form-urlencoded (field ``stocks`` / ``symbol`` / ``stock``, etc.)
+
+    Previously only JSON was decoded; URL-encoded POSTs stayed as ``stocks=X&…`` strings and
+    ``normalize_symbols_from_payload`` produced zero symbols → 400 and nothing ingested.
+    """
+    ct = (content_type or "").lower().strip()
+    if not raw or not raw.strip():
+        raise ValueError("empty body")
+    if "application/json" in ct:
+        return json.loads(raw.decode("utf-8", errors="replace"))
+    if "application/x-www-form-urlencoded" in ct:
+        qs = parse_qs(raw.decode("utf-8", errors="replace"), keep_blank_values=True)
+        flat: Dict[str, Any] = {}
+        for k, vals in qs.items():
+            if not isinstance(k, str):
+                continue
+            ck = _canonical_chartink_key_df(k)
+            part = ",".join(str(v).strip() for v in vals if v is not None and str(v).strip())
+            if not part:
+                continue
+            if ck in flat and flat[ck]:
+                flat[ck] = f"{flat[ck]},{part}"
+            else:
+                flat[ck] = part
+        return _normalize_chartink_like_dict_df(flat)
+    # Content-Type missing or exotic: attempt JSON literal, then raw string (comma/split fallback)
+    s = raw.decode("utf-8", errors="replace").strip()
+    if s.startswith("{") or s.startswith("["):
+        return json.loads(s)
+    return s
+
+
 def normalize_symbols_from_payload(payload: Any) -> List[str]:
     out: List[str] = []
     if payload is None:
         return out
+    if isinstance(payload, dict):
+        payload = _normalize_chartink_like_dict_df(payload)
     if isinstance(payload, str):
         return sorted({s.strip().upper() for s in re.split(r"[\s,;\n]+", payload) if s.strip()})
     if isinstance(payload, list):
         return sorted({str(x).strip().upper() for x in payload if str(x).strip()})
     if isinstance(payload, dict):
-        for key in ("symbols", "symbol", "stocks", "tickers", "data", "alert_symbols"):
+        for key in ("symbols", "symbol", "stock", "stocks", "tickers", "ticker", "data", "alert_symbols"):
             v = payload.get(key)
             if isinstance(v, list):
                 out.extend(str(x).strip().upper() for x in v if x)
