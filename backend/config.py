@@ -101,5 +101,7 @@ class Settings(BaseSettings):
         "true",
         "yes",
     )
+    # ISO timestamp in IST/UTC after which V2 logic applies to newly opened trades.
+    DAILY_FUTURES_V2_DEPLOY_TS: str = os.getenv("DAILY_FUTURES_V2_DEPLOY_TS", "")
 
 settings = Settings()

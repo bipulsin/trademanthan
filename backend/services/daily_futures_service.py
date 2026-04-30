@@ -69,6 +69,27 @@ def _df_v2_mode_enabled() -> bool:
     return bool(getattr(settings, "DAILY_FUTURES_V2_MODE", False))
 
 
+def _df_v2_deploy_dt_ist() -> Optional[datetime]:
+    raw = str(getattr(settings, "DAILY_FUTURES_V2_DEPLOY_TS", "") or "").strip()
+    if not raw:
+        return None
+    try:
+        s = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+        dtv = datetime.fromisoformat(s)
+        return IST.localize(dtv) if dtv.tzinfo is None else dtv.astimezone(IST)
+    except Exception:
+        return None
+
+
+def _df_v2_applies_to_entry(entry_dt: Optional[datetime]) -> bool:
+    if not _df_v2_mode_enabled():
+        return False
+    deploy_dt = _df_v2_deploy_dt_ist()
+    if deploy_dt is None:
+        return False
+    return bool(entry_dt is not None and entry_dt >= deploy_dt)
+
+
 def _log_decision(
     trade_date: date,
     symbol: str,
@@ -1509,6 +1530,145 @@ def _apply_exit_alerts_to_running(
         r["peak_unrealized_pnl_rupees"] = round(float(new_peak), 2) if new_peak is not None else None
         r["profit_giveback_breach"] = merged_giveback
         r["position_atr"] = round(float(atr), 4) if atr is not None else r.get("position_atr")
+
+        # V2 exit engine (strict precedence) for entries after deploy timestamp.
+        if _df_v2_applies_to_entry(entry_dt):
+            current_ltp = _safe_float(r.get("ltp"))
+            if current_ltp is None:
+                continue
+            entry_px = ep
+            lot_v = _safe_float(r.get("lot_size")) or 0.0
+            atr_entry = _safe_float(r.get("atr_at_entry")) or atr
+            hard_sl = _safe_float(r.get("hard_sl_price"))
+            if hard_sl is None and atr_entry is not None and entry_px is not None:
+                hard_sl = (float(entry_px) + 1.6 * float(atr_entry)) if dirt == "SHORT" else (float(entry_px) - 1.6 * float(atr_entry))
+            # pnl pct and peak tracking
+            pnl_pct = None
+            if entry_px is not None and float(entry_px) > 0:
+                raw_pct = ((float(current_ltp) - float(entry_px)) / float(entry_px)) * 100.0
+                pnl_pct = (-raw_pct) if dirt == "SHORT" else raw_pct
+            old_peak_ltp = _safe_float(r.get("peak_ltp"))
+            if old_peak_ltp is None:
+                peak_ltp = float(current_ltp)
+            else:
+                peak_ltp = min(float(old_peak_ltp), float(current_ltp)) if dirt == "SHORT" else max(float(old_peak_ltp), float(current_ltp))
+            old_peak_pct = _safe_float(r.get("peak_pnl_pct"))
+            peak_pct = max(float(old_peak_pct or -1e9), float(pnl_pct)) if pnl_pct is not None else old_peak_pct
+            trail_active = bool(r.get("trailing_stop_active")) or (peak_pct is not None and float(peak_pct) >= 1.0)
+            trail_price = None
+            if trail_active and atr_entry is not None and atr_entry > 0:
+                cushion = 0.7 * float(atr_entry)
+                trail_price = (float(peak_ltp) + cushion) if dirt == "SHORT" else (float(peak_ltp) - cushion)
+
+            reason = None
+            combo = None
+            # Priority 1: hard SL
+            if hard_sl is not None:
+                if (dirt == "SHORT" and float(current_ltp) >= float(hard_sl)) or (dirt != "SHORT" and float(current_ltp) <= float(hard_sl)):
+                    reason = "SL_HIT"
+            # Priority 2: indicator 2-of-4 simultaneous
+            if reason is None and ind_count >= 2:
+                reason = "INDICATOR_2OF4"
+                combo = "+".join(ind_conds[:4]) if ind_conds else None
+            # Priority 3: trailing stop
+            if reason is None and trail_active and trail_price is not None:
+                if (dirt == "SHORT" and float(current_ltp) >= float(trail_price)) or (dirt != "SHORT" and float(current_ltp) <= float(trail_price)):
+                    reason = "TRAIL_STOP"
+            # Priority 4: time stop >=60m and pnl<0.5%
+            if reason is None and pos_age_s >= 60.0 * 60.0 and (pnl_pct is None or float(pnl_pct) < 0.5):
+                reason = "TIME_STOP_60M"
+            # Priority 5: EOD 15:20
+            if reason is None and now_ist.time() >= dt_time(15, 20):
+                reason = "EOD_1520"
+
+            try:
+                db.execute(
+                    text(
+                        """
+                        UPDATE daily_futures_user_trade
+                        SET atr_at_entry = COALESCE(CAST(:atr_e AS NUMERIC), atr_at_entry),
+                            hard_sl_price = COALESCE(CAST(:hsl AS NUMERIC), hard_sl_price),
+                            trailing_stop_active = CAST(:tsa AS BOOLEAN),
+                            peak_ltp = CAST(:pl AS NUMERIC),
+                            peak_pnl_pct = CAST(:pp AS NUMERIC),
+                            indicator_exit_combo = :combo,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = :id
+                        """
+                    ),
+                    {
+                        "atr_e": float(atr_entry) if atr_entry is not None else None,
+                        "hsl": float(hard_sl) if hard_sl is not None else None,
+                        "tsa": bool(trail_active),
+                        "pl": float(peak_ltp),
+                        "pp": float(peak_pct) if peak_pct is not None else None,
+                        "combo": combo,
+                        "id": tid,
+                    },
+                )
+            except Exception as e:
+                logger.debug("daily_futures: v2 state persist skipped trade_id=%s: %s", tid, e)
+
+            if reason is not None and entry_px is not None:
+                pts = (float(entry_px) - float(current_ltp)) if dirt == "SHORT" else (float(current_ltp) - float(entry_px))
+                pnl_rs = round(float(pts) * float(lot_v), 2) if lot_v > 0 else None
+                now_hm = now_ist.strftime("%H:%M")
+                try:
+                    if dirt == "SHORT":
+                        db.execute(
+                            text(
+                                """
+                                UPDATE daily_futures_user_trade
+                                SET order_status = 'sold',
+                                    buy_time = :tm,
+                                    buy_price = :px,
+                                    exit_time = :tm,
+                                    exit_price = :px,
+                                    pnl_points = :pts,
+                                    pnl_rupees = :pnl,
+                                    exit_reason = :er,
+                                    indicator_exit_combo = COALESCE(:combo, indicator_exit_combo),
+                                    updated_at = CURRENT_TIMESTAMP
+                                WHERE id = :id
+                                """
+                            ),
+                            {"tm": now_hm, "px": float(current_ltp), "pts": round(float(pts), 4), "pnl": pnl_rs, "er": reason, "combo": combo, "id": tid},
+                        )
+                    else:
+                        db.execute(
+                            text(
+                                """
+                                UPDATE daily_futures_user_trade
+                                SET order_status = 'sold',
+                                    exit_time = :tm,
+                                    exit_price = :px,
+                                    pnl_points = :pts,
+                                    pnl_rupees = :pnl,
+                                    exit_reason = :er,
+                                    indicator_exit_combo = COALESCE(:combo, indicator_exit_combo),
+                                    updated_at = CURRENT_TIMESTAMP
+                                WHERE id = :id
+                                """
+                            ),
+                            {"tm": now_hm, "px": float(current_ltp), "pts": round(float(pts), 4), "pnl": pnl_rs, "er": reason, "combo": combo, "id": tid},
+                        )
+                    dlog_map = {
+                        "SL_HIT": "EXIT_SL_HIT",
+                        "INDICATOR_2OF4": "EXIT_INDICATOR_2OF4",
+                        "TRAIL_STOP": "EXIT_TRAIL_STOP",
+                        "TIME_STOP_60M": "EXIT_TIME_STOP",
+                        "EOD_1520": "EXIT_EOD_1520",
+                    }
+                    _log_decision(
+                        trade_date,
+                        str(r.get("underlying") or ""),
+                        dlog_map.get(reason, f"EXIT_{reason}"),
+                        "TRIGGERED",
+                        {"ltp": current_ltp, "combo": combo},
+                    )
+                    r["alert_strip"]["decision"] = "hard_exit" if reason in {"SL_HIT", "EOD_1520"} else "exit_now"
+                except Exception as e:
+                    logger.warning("daily_futures: v2 auto-exit failed trade_id=%s reason=%s: %s", tid, reason, e)
 
     try:
         db.commit()
