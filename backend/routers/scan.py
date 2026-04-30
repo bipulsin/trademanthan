@@ -9589,6 +9589,8 @@ async def daily_futures_v2_playbook(
                 s.trade_date,
                 COALESCE(t.future_symbol, s.future_symbol, t.underlying, s.underlying) AS future_symbol,
                 COALESCE(t.direction_type, s.direction_type, 'LONG') AS direction_type,
+                s.instrument_key,
+                s.first_hit_at,
                 t.order_status,
                 t.entry_time,
                 t.entry_price,
@@ -9655,6 +9657,108 @@ async def daily_futures_v2_playbook(
                 ew_end = (z + timedelta(minutes=20)).strftime("%H:%M")
         entry_window = (ew_start + " - " + ew_end) if ew_start and ew_end else None
 
+        # Recompute pullback target by formula:
+        # trigger candle = 15m candle whose close is immediately before first_hit_at
+        # ATR14 from latest 14 completed 15m candles up to trigger candle.
+        computed_pullback = None
+        try:
+            ikey = str(r.get("instrument_key") or "").strip()
+            first_hit = r.get("first_hit_at")
+            if ikey and isinstance(first_hit, datetime):
+                fh = first_hit.astimezone(ist) if first_hit.tzinfo else ist.localize(first_hit)
+                raw = vwap_service.get_historical_candles_by_instrument_key(
+                    ikey, interval="minutes/15", days_back=15, range_end_date=td
+                ) or []
+                # Merge intraday for today's session
+                try:
+                    key_enc = quote(ikey, safe="")
+                    intraday_url = f"{vwap_service.base_url}/historical-candle/intraday/{key_enc}/minutes/15"
+                    raw_i = vwap_service.make_api_request(intraday_url, method="GET", timeout=15, max_retries=2) or {}
+                    if isinstance(raw_i, dict) and raw_i.get("status") == "success":
+                        rows_i = ((raw_i.get("data") or {}).get("candles")) or []
+                        for row_i in rows_i:
+                            if isinstance(row_i, dict):
+                                raw.append(row_i)
+                            elif isinstance(row_i, (list, tuple)) and len(row_i) >= 6:
+                                raw.append(
+                                    {
+                                        "timestamp": row_i[0],
+                                        "open": row_i[1],
+                                        "high": row_i[2],
+                                        "low": row_i[3],
+                                        "close": row_i[4],
+                                        "volume": row_i[5],
+                                    }
+                                )
+                except Exception:
+                    pass
+
+                cands: List[Dict[str, Any]] = []
+                for c in raw:
+                    ts_raw = c.get("timestamp")
+                    if isinstance(ts_raw, datetime):
+                        ts = ts_raw.astimezone(ist) if ts_raw.tzinfo else ist.localize(ts_raw)
+                    else:
+                        s = str(ts_raw or "").strip()
+                        if not s:
+                            continue
+                        if s.endswith("Z"):
+                            s = s[:-1] + "+00:00"
+                        try:
+                            dtv = datetime.fromisoformat(s)
+                            ts = dtv.astimezone(ist) if dtv.tzinfo else ist.localize(dtv)
+                        except Exception:
+                            continue
+                    o = float(c.get("open"))
+                    h = float(c.get("high"))
+                    l = float(c.get("low"))
+                    cl = float(c.get("close"))
+                    cands.append({"ts": ts, "open": o, "high": h, "low": l, "close": cl})
+                cands.sort(key=lambda x: x["ts"])
+                # completed before first_hit
+                completed = [x for x in cands if (x["ts"] + timedelta(minutes=15)) <= fh]
+                if len(completed) >= 15:
+                    trigger = completed[-1]
+                    highs = [x["high"] for x in completed]
+                    lows = [x["low"] for x in completed]
+                    closes = [x["close"] for x in completed]
+                    tr: List[float] = []
+                    for i in range(1, len(completed)):
+                        tr.append(
+                            max(
+                                highs[i] - lows[i],
+                                abs(highs[i] - closes[i - 1]),
+                                abs(lows[i] - closes[i - 1]),
+                            )
+                        )
+                    atr_arr = [None] * len(tr)
+                    p = 14
+                    if len(tr) >= p:
+                        seed = sum(tr[:p]) / float(p)
+                        atr_arr[p - 1] = seed
+                        prev = seed
+                        for i in range(p, len(tr)):
+                            prev = ((prev * (p - 1)) + tr[i]) / float(p)
+                            atr_arr[i] = prev
+                    atr14 = atr_arr[-1] if atr_arr else None
+                    if atr14 is not None and atr14 > 0:
+                        if dtx == "SHORT":
+                            computed_pullback = float(trigger["high"]) - (0.3 * float(atr14))
+                        else:
+                            computed_pullback = float(trigger["low"]) + (0.3 * float(atr14))
+        except Exception:
+            computed_pullback = None
+
+        pb = computed_pullback
+        if pb is None:
+            stored_pb = r.get("pullback_target_price")
+            if stored_pb is not None:
+                try:
+                    spb = float(stored_pb)
+                    pb = spb if spb > 0 else None
+                except Exception:
+                    pb = None
+
         out.append(
             {
                 "trade_id": int(r["trade_id"]),
@@ -9662,7 +9766,7 @@ async def daily_futures_v2_playbook(
                 "direction_type": dtx,
                 "order_status": str(r.get("order_status") or ""),
                 "entry_window": entry_window,
-                "pullback_target_price": float(r["pullback_target_price"]) if r.get("pullback_target_price") is not None else None,
+                "pullback_target_price": pb,
                 "pullback_status": str(r.get("pullback_status") or ""),
                 "actual_entry_time": str(actual_entry_time) if actual_entry_time is not None else None,
                 "actual_entry_price": actual_entry_price,
