@@ -9635,9 +9635,6 @@ async def daily_futures_v2_playbook(
             actual_exit_price = float(r["exit_price"]) if r.get("exit_price") is not None else None
 
         pnl_correct = None
-        if actual_entry_price is not None and actual_exit_price is not None and lot > 0:
-            pts = (actual_entry_price - actual_exit_price) if dtx == "SHORT" else (actual_exit_price - actual_entry_price)
-            pnl_correct = round(float(pts) * float(lot), 2)
 
         def _hm(v: Any) -> Optional[str]:
             if v is None:
@@ -9758,6 +9755,11 @@ async def daily_futures_v2_playbook(
                     pb = spb if spb > 0 else None
                 except Exception:
                     pb = None
+
+        # Corrected PnL always uses pullback target as corrected entry.
+        if pb is not None and actual_exit_price is not None and lot > 0:
+            pts = (float(pb) - actual_exit_price) if dtx == "SHORT" else (actual_exit_price - float(pb))
+            pnl_correct = round(float(pts) * float(lot), 2)
 
         # Validate if pullback target was touched within entry window.
         hit_in_window: Optional[bool] = None
