@@ -9264,6 +9264,8 @@ async def daily_futures_indicator_playbook(
                     "c3_ok": False,
                 },
             )
+        # Match live decision engine: indicators are evaluated on the latest 30 completed 15m candles.
+        cands = cands[-30:]
         closes = [float(c["close"]) for c in cands]
         highs = [float(c["high"]) for c in cands]
         lows = [float(c["low"]) for c in cands]
