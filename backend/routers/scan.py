@@ -9596,6 +9596,14 @@ async def daily_futures_v2_playbook(
             return dtv.astimezone(ist) if dtv.tzinfo else ist.localize(dtv)
         except Exception:
             return None
+
+    def _pb_status_v2_playbook(status: str) -> str:
+        """PLAYBOOK display only: WAITING reads as ambiguous on a hindsight page."""
+        st = str(status or "").strip()
+        if st.upper() == "WAITING":
+            return "Executed"
+        return st
+
     rows = db.execute(
         text(
             """
@@ -9863,7 +9871,7 @@ async def daily_futures_v2_playbook(
                 "order_status": str(r.get("order_status") or ""),
                 "entry_window": entry_window,
                 "pullback_target_price": pb,
-                "pullback_status": out_pullback_status,
+                "pullback_status": _pb_status_v2_playbook(out_pullback_status),
                 "pullback_hit_in_window": hit_in_window,
                 "actual_entry_time": str(actual_entry_time) if actual_entry_time is not None else None,
                 "actual_entry_price": actual_entry_price,
@@ -9893,7 +9901,8 @@ async def daily_futures_v2_playbook(
                 s.entry_window_end,
                 s.pullback_target_price,
                 s.pullback_status,
-                s.conviction_score
+                s.conviction_score,
+                s.lot_size
             FROM daily_futures_screening s
             WHERE s.trade_date = CAST(:td AS DATE)
               AND COALESCE(s.conviction_score, 0) > 60
@@ -9906,11 +9915,14 @@ async def daily_futures_v2_playbook(
 
     if_ordered_rows: List[Dict[str, Any]] = []
     eod_cutoff = ist.localize(datetime.combine(td, dt_time(15, 20)))
+    entry_cutoff_14 = ist.localize(datetime.combine(td, dt_time(14, 0)))
     for srow in screen_rows:
         dtx = str(srow.get("direction_type") or "LONG").strip().upper()
         ikey = str(srow.get("instrument_key") or "").strip()
         if not ikey:
             continue
+
+        lot_hypo = float(srow.get("lot_size") or 0.0)
 
         # Entry window display + concrete datetimes for checks.
         ew_start_dt = srow.get("entry_window_start")
@@ -9922,6 +9934,27 @@ async def daily_futures_v2_playbook(
         ew_start_txt = ew_start_dt.astimezone(ist).strftime("%H:%M") if isinstance(ew_start_dt, datetime) else None
         ew_end_txt = ew_end_dt.astimezone(ist).strftime("%H:%M") if isinstance(ew_end_dt, datetime) else None
         entry_window = (ew_start_txt + " - " + ew_end_txt) if ew_start_txt and ew_end_txt else None
+
+        # No new entries after 14:00 IST: do not simulate pullback/exits for late windows.
+        if isinstance(ew_start_dt, datetime) and ew_start_dt.astimezone(ist) >= entry_cutoff_14:
+            if_ordered_rows.append(
+                {
+                    "screening_id": int(srow["screening_id"]),
+                    "future_symbol": str(srow.get("future_symbol") or ""),
+                    "direction_type": dtx,
+                    "conviction_score": float(srow["conviction_score"]) if srow.get("conviction_score") is not None else None,
+                    "entry_window": entry_window,
+                    "pullback_target_price": None,
+                    "pullback_status": "FAILED",
+                    "pullback_hit_in_window": None,
+                    "hypothetical_exit_time": None,
+                    "hypothetical_exit_price": None,
+                    "hypothetical_exit_type": None,
+                    "hypothetical_pnl": None,
+                    "skip_reason": "ENTRY_WINDOW_AFTER_1400_IST",
+                }
+            )
+            continue
 
         # Pullback target (formula first, fallback to stored).
         pb = None
@@ -10132,6 +10165,11 @@ async def daily_futures_v2_playbook(
             except Exception:
                 pass
 
+        hypo_pnl: Optional[float] = None
+        if pb is not None and hypo_exit_price is not None and lot_hypo > 0:
+            pts_hypo = (float(pb) - float(hypo_exit_price)) if dtx == "SHORT" else (float(hypo_exit_price) - float(pb))
+            hypo_pnl = round(float(pts_hypo) * float(lot_hypo), 2)
+
         if_ordered_rows.append(
             {
                 "screening_id": int(srow["screening_id"]),
@@ -10140,11 +10178,13 @@ async def daily_futures_v2_playbook(
                 "conviction_score": float(srow["conviction_score"]) if srow.get("conviction_score") is not None else None,
                 "entry_window": entry_window,
                 "pullback_target_price": pb,
-                "pullback_status": out_pullback_status,
+                "pullback_status": _pb_status_v2_playbook(out_pullback_status),
                 "pullback_hit_in_window": hit_in_window,
                 "hypothetical_exit_time": hypo_exit_time,
                 "hypothetical_exit_price": hypo_exit_price,
                 "hypothetical_exit_type": hypo_exit_type,
+                "hypothetical_pnl": hypo_pnl,
+                "skip_reason": None,
             }
         )
 
@@ -10157,6 +10197,7 @@ async def daily_futures_v2_playbook(
         "notes": [
             "Entry window uses stored V2 window; fallback is second_scan_time +5m to +20m.",
             "PnL correct is recomputed from normalized direction-wise entry/exit prices and lot_size.",
-            "If ordered section includes today's conviction>60 picks and estimates non-SL exits (indicator/time/EOD only).",
+            "If ordered: conviction>60; entry_window_start>=14:00 IST is FAILED with no hypo exit/PnL; WAITING shows as Executed on this page.",
+            "Hypothetical PnL uses screening lot_size, pullback_target as entry and hypothetical_exit_price.",
         ],
     }

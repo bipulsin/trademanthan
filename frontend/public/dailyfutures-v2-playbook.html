@@ -24,7 +24,7 @@
     Columns shown: Entry window, pullback target, actual entry/exit, SL, exit type, PnL actual, and PnL corrected from direction-wise prices.
   </div>
   <div class="rule">
-    If ordered: includes today's scanned picks with conviction score above 60 and estimates exit using non-SL criteria only (indicator/time-stop/EOD).
+    If ordered: conviction &gt; 60; pullback status label &quot;Executed&quot; replaces stored WAITING on this page; entry windows starting at or after 14:00 IST are FAILED with no hypothetical exit/PnL; otherwise hypothetical PnL uses pullback target as entry price and hypothetical exit price (indicator/time-stop/EOD only, no SL).
   </div>
   <div id="host"></div>
   <script>
@@ -62,7 +62,7 @@
           }).join('');
           const mainHtml = rows.length ? ('<h2 style="font-size:1rem;margin:12px 0 8px 0;">Executed Trades</h2><div class="tbl-wrap"><table>' + th + '<tbody>' + body + '</tbody></table></div>') : '<p class="empty">No executed trades for today.</p>';
 
-          const ifTh = '<thead><tr><th>Future</th><th>Dir</th><th class="num">Conviction</th><th>Entry Window</th><th class="num">Pullback Target</th><th>Pullback Status</th><th>Hypothetical Exit Time</th><th class="num">Hypothetical Exit Price</th><th>Hypothetical Exit Type</th></tr></thead>';
+          const ifTh = '<thead><tr><th>Future</th><th>Dir</th><th class="num">Conviction</th><th>Entry Window</th><th class="num">Pullback Target</th><th>Pullback Status</th><th>Hypothetical Exit Time</th><th class="num">Hypothetical Exit Price</th><th>Hypothetical Exit Type</th><th class="num">Hypothetical PnL (₹)</th></tr></thead>';
           const ifBody = ifOrdered.map(function(r){
             return '<tr>' +
               '<td>'+esc(r.future_symbol)+'</td>' +
@@ -74,6 +74,7 @@
               '<td>'+esc(r.hypothetical_exit_time||'—')+'</td>' +
               '<td class="num">'+num(r.hypothetical_exit_price,2)+'</td>' +
               '<td>'+esc(r.hypothetical_exit_type||'—')+'</td>' +
+              '<td class="num">'+num(r.hypothetical_pnl,2)+'</td>' +
             '</tr>';
           }).join('');
           const ifHtml = ifOrdered.length ? ('<h2 style="font-size:1rem;margin:16px 0 8px 0;">If ordered</h2><div class="tbl-wrap"><table>' + ifTh + '<tbody>' + ifBody + '</tbody></table></div>') : '<h2 style="font-size:1rem;margin:16px 0 8px 0;">If ordered</h2><p class="empty">No conviction &gt; 60 picks for today.</p>';
