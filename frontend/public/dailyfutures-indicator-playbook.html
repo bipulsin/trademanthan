@@ -18,10 +18,21 @@
     .tbl th, .tbl td { border-bottom: 1px solid #e2e8f0; padding: 6px 5px; text-align: left; }
     .tbl th { color: #475569; font-weight: 700; }
     .empty { color: #64748b; font-size: 0.86rem; margin: 6px 0; }
+    .criteria { background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 10px; padding: 10px 12px; margin: 0 0 12px 0; }
+    .criteria h2 { margin: 0 0 6px 0; font-size: 0.95rem; color: #1e3a8a; }
+    .criteria p { margin: 4px 0; font-size: 0.8rem; color: #1f2937; }
+    .criteria strong { color: #0f172a; }
   </style>
 </head>
 <body>
   <h1>Daily Futures Indicator Exit Playbook</h1>
+  <div class="criteria">
+    <h2>C1–C4 Criteria (15m indicators)</h2>
+    <p><strong>C1 (MACD):</strong> LONG-exit: MACD line &lt; Signal; SHORT-exit: MACD line &gt; Signal.</p>
+    <p><strong>C2 (DI / ADX components):</strong> LONG-exit: DI- &gt; DI+; SHORT-exit: DI+ &gt; DI-.</p>
+    <p><strong>C3 (Hilega-Milega flip):</strong> LONG-exit: EMA3 &lt; WMA21 and RSI9 &lt; WMA21; SHORT-exit: EMA3 &gt; WMA21 and RSI9 &gt; WMA21.</p>
+    <p><strong>C4 (OBV trend):</strong> LONG-exit: OBV &lt; SMA10(OBV); SHORT-exit: OBV &gt; SMA10(OBV).</p>
+  </div>
   <p class="meta" id="meta">Loading...</p>
   <div id="host"></div>
 
