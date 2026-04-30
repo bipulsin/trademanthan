@@ -9242,9 +9242,28 @@ async def daily_futures_indicator_playbook(
             dim[i] = (float(mdr[i]) / float(trr[i])) * 100.0
         return dip, dim
 
-    def _count_for_slice(cands: List[Dict[str, Any]], direction: str) -> Tuple[int, int, List[str], Dict[str, bool], Dict[str, bool]]:
+    def _count_for_slice(
+        cands: List[Dict[str, Any]],
+        direction: str,
+    ) -> Tuple[int, int, List[str], Dict[str, bool], Dict[str, bool], Dict[str, Any]]:
         if len(cands) < 30:
-            return 0, 0, [], {"C1": False, "C2": False, "C3": False, "C4": False}, {"C1": False, "C2": False, "C3": False, "C4": False}
+            base_map = {"C1": False, "C2": False, "C3": False, "C4": False}
+            return (
+                0,
+                0,
+                [],
+                dict(base_map),
+                dict(base_map),
+                {
+                    "wma21": None,
+                    "ema3": None,
+                    "rsi9": None,
+                    "is_short": str(direction or "LONG").upper() == "SHORT",
+                    "ema_vs_wma_ok": False,
+                    "rsi_vs_wma_ok": False,
+                    "c3_ok": False,
+                },
+            )
         closes = [float(c["close"]) for c in cands]
         highs = [float(c["high"]) for c in cands]
         lows = [float(c["low"]) for c in cands]
@@ -9282,7 +9301,19 @@ async def daily_futures_indicator_playbook(
             labels = [k for k, v in bear_map.items() if v]
         else:
             labels = [k for k, v in bull_map.items() if v]
-        return bull_count, bear_count, labels, bull_map, bear_map
+        is_short = str(direction or "LONG").upper() == "SHORT"
+        ema_vs_wma_ok = bool(ema3[i] > wma21[i]) if is_short else bool(ema3[i] < wma21[i])
+        rsi_vs_wma_ok = bool(rsi9[i] > wma21[i]) if is_short else bool(rsi9[i] < wma21[i])
+        hm = {
+            "wma21": float(wma21[i]) if wma21[i] is not None else None,
+            "ema3": float(ema3[i]) if ema3[i] is not None else None,
+            "rsi9": float(rsi9[i]) if rsi9[i] is not None else None,
+            "is_short": is_short,
+            "ema_vs_wma_ok": bool(ema_vs_wma_ok),
+            "rsi_vs_wma_ok": bool(rsi_vs_wma_ok),
+            "c3_ok": bool(c3_bear if is_short else c3_bull),
+        }
+        return bull_count, bear_count, labels, bull_map, bear_map, hm
 
     if syms:
         q = text(
@@ -9471,13 +9502,15 @@ async def daily_futures_indicator_playbook(
         timeline: List[Dict[str, Any]] = []
         latest_bull_map: Dict[str, bool] = {"C1": False, "C2": False, "C3": False, "C4": False}
         latest_bear_map: Dict[str, bool] = {"C1": False, "C2": False, "C3": False, "C4": False}
+        latest_hm: Dict[str, Any] = {}
         for c in hold:
             # Keep prior-session warmup bars for MACD/DI/Hilega/OBV history,
             # but emit checkpoints only inside today's hold window.
             upto = [x for x in candles_all if x["timestamp"] <= c["timestamp"]]
-            bull_count, bear_count, labels, bull_map, bear_map = _count_for_slice(upto, direction)
+            bull_count, bear_count, labels, bull_map, bear_map, hm = _count_for_slice(upto, direction)
             latest_bull_map = dict(bull_map or latest_bull_map)
             latest_bear_map = dict(bear_map or latest_bear_map)
+            latest_hm = dict(hm or latest_hm)
             is_short_dir = str(direction or "LONG").upper() == "SHORT"
             relevant_count = bear_count if is_short_dir else bull_count
             timeline.append(
@@ -9512,6 +9545,7 @@ async def daily_futures_indicator_playbook(
                 "latest_c_values_long_exit": latest_bull_map,
                 "latest_c_values_short_exit": latest_bear_map,
                 "latest_relevant_c_values": latest_bear_map if str(direction or "LONG").upper() == "SHORT" else latest_bull_map,
+                "latest_hilega_milega": latest_hm,
             }
         )
 
