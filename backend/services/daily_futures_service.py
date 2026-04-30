@@ -3327,7 +3327,17 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
             JOIN daily_futures_screening s ON s.id = t.screening_id
             WHERE t.user_id = :u
               AND t.order_status = 'sold'
-              AND s.trade_date = CAST(:td AS DATE)
+              AND (
+                    s.trade_date = CAST(:td AS DATE)
+                    OR (
+                        s.trade_date < CAST(:td AS DATE)
+                        AND (
+                            t.buy_time IS NOT NULL
+                            OR t.exit_time IS NOT NULL
+                            OR DATE((COALESCE(t.updated_at, t.created_at) AT TIME ZONE 'Asia/Kolkata')) = CAST(:td AS DATE)
+                        )
+                    )
+                  )
             ORDER BY t.updated_at DESC
             LIMIT 200
             """
