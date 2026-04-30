@@ -733,20 +733,20 @@ def _evaluate_indicator_exit_signal(
     bull_map = {
         "C1": bool(macd_line[i] < macd_sig[i]),
         "C2": bool((di_minus[i] or 0) > (di_plus[i] or 0)),
-        # Hilega-Milega bearish flip (for LONG exit): fast EMA below WMA and RSI below 50.
+        # Hilega-Milega bearish flip (for LONG exit): fast EMA below WMA and RSI below WMA.
         "C3": bool(
             (wma21[i] is not None and rsi9[i] is not None and ema3[i] is not None)
-            and (ema3[i] < wma21[i] and rsi9[i] < 50.0)
+            and (ema3[i] < wma21[i] and rsi9[i] < wma21[i])
         ),
         "C4": bool(obv_sma10[i] is not None and obv[i] < float(obv_sma10[i])),
     }
     bear_map = {
         "C1": bool(macd_line[i] > macd_sig[i]),
         "C2": bool((di_minus[i] or 0) < (di_plus[i] or 0)),
-        # Hilega-Milega bullish flip (for SHORT exit): fast EMA above WMA and RSI above 50.
+        # Hilega-Milega bullish flip (for SHORT exit): fast EMA above WMA and RSI above WMA.
         "C3": bool(
             (wma21[i] is not None and rsi9[i] is not None and ema3[i] is not None)
-            and (ema3[i] > wma21[i] and rsi9[i] > 50.0)
+            and (ema3[i] > wma21[i] and rsi9[i] > wma21[i])
         ),
         "C4": bool(obv_sma10[i] is not None and obv[i] > float(obv_sma10[i])),
     }

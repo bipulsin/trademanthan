@@ -9264,14 +9264,14 @@ async def daily_futures_indicator_playbook(
         c2_bull = (di_minus[i] or 0.0) > (di_plus[i] or 0.0)
         c3_bull = bool(
             (wma21[i] is not None and rsi9[i] is not None and ema3[i] is not None)
-            and (ema3[i] < wma21[i] and rsi9[i] < 50.0)
+            and (ema3[i] < wma21[i] and rsi9[i] < wma21[i])
         )
         c4_bull = bool(obv_sma10[i] is not None and obv[i] < float(obv_sma10[i]))
         c1_bear = macd[i] > macd_sig[i]
         c2_bear = (di_minus[i] or 0.0) < (di_plus[i] or 0.0)
         c3_bear = bool(
             (wma21[i] is not None and rsi9[i] is not None and ema3[i] is not None)
-            and (ema3[i] > wma21[i] and rsi9[i] > 50.0)
+            and (ema3[i] > wma21[i] and rsi9[i] > wma21[i])
         )
         c4_bear = bool(obv_sma10[i] is not None and obv[i] > float(obv_sma10[i]))
         bull_map = {"C1": c1_bull, "C2": c2_bull, "C3": c3_bull, "C4": c4_bull}
