@@ -1026,6 +1026,27 @@ def _compute_position_atr_15m_5d(
     return float(sum(rs)) / float(len(rs))
 
 
+def _atr14_15m_from_candles(cands: List[Dict[str, Any]]) -> Optional[float]:
+    if len(cands) < 15:
+        return None
+    highs = [_safe_float(x.get("high")) for x in cands]
+    lows = [_safe_float(x.get("low")) for x in cands]
+    closes = [_safe_float(x.get("close")) for x in cands]
+    if any(v is None for v in highs) or any(v is None for v in lows) or any(v is None for v in closes):
+        return None
+    tr: List[float] = []
+    for i in range(1, len(cands)):
+        hi = float(highs[i] or 0.0)
+        lo = float(lows[i] or 0.0)
+        pc = float(closes[i - 1] or 0.0)
+        tr.append(max(hi - lo, abs(hi - pc), abs(lo - pc)))
+    atrs = _rma(tr, 14)
+    if not atrs:
+        return None
+    v = atrs[-1]
+    return float(v) if v is not None and float(v) > 0 else None
+
+
 def _momentum_exhausting_last_two(cands: List[Dict[str, Any]]) -> bool:
     """
     For the last two completed 15m candles (prev, last): body shrinks and weak close
@@ -3691,6 +3712,17 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                     "decision": "hold",
                 }
 
+    v2_mode = _df_v2_mode_enabled()
+    v2_upstox: Optional[UpstoxService] = None
+    v2_5m_cache: Dict[str, List[Dict[str, Any]]] = {}
+    v2_15m_cache: Dict[str, List[Dict[str, Any]]] = {}
+    if v2_mode:
+        try:
+            v2_upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+        except Exception as e:
+            logger.warning("daily_futures: v2 upstox init failed: %s", e)
+            v2_upstox = None
+
     for p in picks_mixed:
         reasons: List[str] = []
         dtp = str(p.get("direction_type") or "LONG").strip().upper()
@@ -3728,26 +3760,158 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
             last_hit_dt = _parse_iso_ist(p.get("last_hit_at"))
             if last_hit_dt is None or last_hit_dt <= sold_ts:
                 reasons.append("Re-entry unlocks after next scan post-exit")
-        if int(p.get("scan_count") or 0) < 2:
-            reasons.append("Needs at least 2 scans")
-        second_scan_dt = _parse_iso_ist(p.get("second_scan_time"))
-        if second_scan_dt is None:
-            reasons.append("Second scan time unavailable")
+        if not v2_mode:
+            if int(p.get("scan_count") or 0) < 2:
+                reasons.append("Needs at least 2 scans")
+            second_scan_dt = _parse_iso_ist(p.get("second_scan_time"))
+            if second_scan_dt is None:
+                reasons.append("Second scan time unavailable")
+            else:
+                if now_ist < (second_scan_dt + timedelta(minutes=5)):
+                    reasons.append("Wait 5 minutes after second scan")
+            live_conv = p.get("effective_conviction")
+            c2 = live_conv
+            if c2 is None:
+                reasons.append("Effective conviction unavailable")
+            elif dtp == "SHORT":
+                if float(c2) <= 50.0:
+                    reasons.append(f"Effective conviction {round(float(c2),1)} is not above 50")
+                if _bearish_index_gate_enabled() and not bool(index_bear.get("ok")):
+                    reasons.append("NIFTY 5m bearish structure is not confirmed (no SHORT from this list)")
+            else:
+                if float(live_conv) < 60.0:
+                    reasons.append(f"Effective conviction {round(float(live_conv),1)} is below 60")
         else:
-            if now_ist < (second_scan_dt + timedelta(minutes=5)):
-                reasons.append("Wait 5 minutes after second scan")
-        live_conv = p.get("effective_conviction")
-        c2 = live_conv
-        if c2 is None:
-            reasons.append("Effective conviction unavailable")
-        elif dtp == "SHORT":
-            if float(c2) <= 50.0:
-                reasons.append(f"Effective conviction {round(float(c2),1)} is not above 50")
-            if _bearish_index_gate_enabled() and not bool(index_bear.get("ok")):
-                reasons.append("NIFTY 5m bearish structure is not confirmed (no SHORT from this list)")
-        else:
-            if float(live_conv) < 60.0:
-                reasons.append(f"Effective conviction {round(float(live_conv),1)} is below 60")
+            # V2 eligibility: 1st scan + conviction>=60 + relative-strength gate + 5m candle confirmation + pullback hit.
+            raw_conv = _safe_float(p.get("conviction_score"))
+            if raw_conv is None or float(raw_conv) < 60.0:
+                reasons.append("Conviction score below 60")
+            sp = _safe_float(p.get("stock_change_pct"))
+            np = _safe_float(p.get("nifty_change_pct"))
+            if sp is None or np is None:
+                reasons.append("Relative strength unavailable")
+            else:
+                rs_ok = (float(sp) <= float(np)) if dtp == "SHORT" else (float(sp) >= float(np))
+                if not rs_ok:
+                    reasons.append("Relative strength gate not satisfied")
+            if now_ist.time() >= dt_time(14, 0):
+                reasons.append("After 14:00 IST — no new entries allowed")
+
+            ik = str(p.get("instrument_key") or "").strip()
+            first_hit_dt = _parse_iso_ist(p.get("first_hit_at"))
+            scan_candle_confirmation = False
+            pullback_status = str(p.get("pullback_status") or "WAITING").strip().upper() or "WAITING"
+            pullback_target = _safe_float(p.get("pullback_target_price"))
+            pullback_expires = _parse_iso_ist(p.get("pullback_window_expires_at"))
+            atr14 = _safe_float(p.get("atr_14_15m"))
+            trigger_hi = _safe_float(p.get("trigger_candle_high"))
+            trigger_lo = _safe_float(p.get("trigger_candle_low"))
+            if v2_upstox is not None and ik and first_hit_dt is not None:
+                if ik not in v2_5m_cache:
+                    v2_5m_cache[ik] = _upstox_fetch_5m_structured_rows(v2_upstox, ik, td, log_label="v2_scan_candle")
+                c5 = v2_5m_cache.get(ik) or []
+                cstart = first_hit_dt.replace(
+                    minute=(first_hit_dt.minute // 5) * 5, second=0, microsecond=0
+                )
+                cend = cstart + timedelta(minutes=5)
+                candle = None
+                for c in c5:
+                    ts = _parse_iso_ist((c or {}).get("timestamp"))
+                    if ts is not None and ts == cstart:
+                        candle = c
+                        break
+                if candle is not None and now_ist >= cend:
+                    op = _safe_float((candle or {}).get("open"))
+                    cl = _safe_float((candle or {}).get("close"))
+                    if op is not None and cl is not None:
+                        scan_candle_confirmation = (cl < op) if dtp == "SHORT" else (cl > op)
+
+                if ik not in v2_15m_cache:
+                    v2_15m_cache[ik] = _last_completed_15m_candles_for_instrument(v2_upstox, ik, td, first_hit_dt)
+                c15 = v2_15m_cache.get(ik) or []
+                if c15:
+                    trig = c15[-1]
+                    trigger_hi = _safe_float(trig.get("high"))
+                    trigger_lo = _safe_float(trig.get("low"))
+                    atr14 = _atr14_15m_from_candles(c15)
+                    if atr14 is not None and atr14 > 0:
+                        ltp_scan = _safe_float(p.get("ltp"))
+                        if dtp == "SHORT" and trigger_hi is not None:
+                            pullback_target = float(trigger_hi) - (0.3 * float(atr14))
+                        elif dtp != "SHORT" and trigger_lo is not None:
+                            pullback_target = float(trigger_lo) + (0.3 * float(atr14))
+                        if ltp_scan is not None and pullback_target is not None:
+                            dist = abs(float(ltp_scan) - float(pullback_target))
+                            if dist > float(atr14):
+                                pullback_status = "INVALID_TARGET_TOO_FAR"
+                            else:
+                                pullback_expires = first_hit_dt + timedelta(minutes=20)
+                                tol = 0.1 * float(atr14)
+                                hit = False
+                                ltp_now = _safe_float(p.get("ltp"))
+                                if ltp_now is not None:
+                                    if dtp == "SHORT":
+                                        hit = float(ltp_now) >= (float(pullback_target) - tol)
+                                    else:
+                                        hit = float(ltp_now) <= (float(pullback_target) + tol)
+                                if pullback_expires is not None and now_ist >= pullback_expires:
+                                    pullback_status = "EXPIRED"
+                                elif now_ist.time() >= dt_time(14, 0):
+                                    pullback_status = "EXPIRED"
+                                elif hit:
+                                    pullback_status = "HIT"
+                                else:
+                                    pullback_status = "WAITING"
+
+            p["scan_candle_confirmation"] = bool(scan_candle_confirmation)
+            p["trigger_candle_high"] = trigger_hi
+            p["trigger_candle_low"] = trigger_lo
+            p["atr_14_15m"] = atr14
+            p["pullback_target_price"] = pullback_target
+            p["pullback_window_expires_at"] = pullback_expires.isoformat() if pullback_expires else None
+            p["pullback_status"] = pullback_status
+            if not scan_candle_confirmation:
+                reasons.append("Waiting for first-scan 5m candle confirmation")
+            if pullback_status == "WAITING":
+                reasons.append("Waiting for pullback target")
+            elif pullback_status == "EXPIRED":
+                reasons.append("Pullback window expired")
+            elif pullback_status == "INVALID_TARGET_TOO_FAR":
+                reasons.append("Setup invalid: pullback too far")
+            elif pullback_status != "HIT":
+                reasons.append("Pullback not hit")
+
+            try:
+                if p.get("screening_id"):
+                    with engine.begin() as conn:
+                        conn.execute(
+                            text(
+                                """
+                                UPDATE daily_futures_screening
+                                SET scan_candle_confirmation = :scc,
+                                    trigger_candle_high = :th,
+                                    trigger_candle_low = :tl,
+                                    atr_14_15m = :atr,
+                                    pullback_target_price = :pt,
+                                    pullback_window_expires_at = CAST(:pe AS TIMESTAMPTZ),
+                                    pullback_status = :ps,
+                                    updated_at = CURRENT_TIMESTAMP
+                                WHERE id = :id
+                                """
+                            ),
+                            {
+                                "scc": bool(scan_candle_confirmation),
+                                "th": trigger_hi,
+                                "tl": trigger_lo,
+                                "atr": atr14,
+                                "pt": pullback_target,
+                                "pe": p.get("pullback_window_expires_at"),
+                                "ps": pullback_status,
+                                "id": int(p.get("screening_id")),
+                            },
+                        )
+            except Exception as e:
+                logger.debug("daily_futures: v2 pullback persist skipped id=%s: %s", p.get("screening_id"), e)
         p["order_eligible"] = len(reasons) == 0
         p["order_block_reason"] = reasons[0] if reasons else None
 
@@ -3856,7 +4020,7 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
             """
             SELECT id, underlying, direction_type, future_symbol, instrument_key, lot_size, scan_count,
                    conviction_score, second_scan_conviction_score, second_scan_time,
-                   effective_conviction
+                   effective_conviction, scan_candle_confirmation, pullback_status, pullback_target_price
             FROM daily_futures_screening WHERE id = :sid AND trade_date = CAST(:d AS DATE)
             """
         ),
@@ -3864,19 +4028,36 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
     ).fetchone()
     if not row:
         raise ValueError("Screening row not found for today")
-    if int(row[6] or 0) < 2:
-        raise ValueError("Needs at least 2 consecutive scans before order")
-    second_scan_time = row[9]
-    if second_scan_time is None:
-        raise ValueError("Second scan time unavailable")
-    ss_dt = second_scan_time.astimezone(IST) if getattr(second_scan_time, "tzinfo", None) else IST.localize(second_scan_time)
-    if datetime.now(IST) < (ss_dt + timedelta(minutes=5)):
-        raise ValueError("Wait 5 minutes after second scan")
+    if not _df_v2_mode_enabled():
+        if int(row[6] or 0) < 2:
+            raise ValueError("Needs at least 2 consecutive scans before order")
+        second_scan_time = row[9]
+        if second_scan_time is None:
+            raise ValueError("Second scan time unavailable")
+        ss_dt = second_scan_time.astimezone(IST) if getattr(second_scan_time, "tzinfo", None) else IST.localize(second_scan_time)
+        if datetime.now(IST) < (ss_dt + timedelta(minutes=5)):
+            raise ValueError("Wait 5 minutes after second scan")
+    else:
+        if datetime.now(IST).time() >= dt_time(14, 0):
+            raise ValueError("After 14:00 IST — no new entries allowed")
+        if not bool(row[11]):
+            raise ValueError("First-scan 5m candle confirmation pending")
+        pstat = str(row[12] or "").strip().upper()
+        if pstat != "HIT":
+            if pstat == "EXPIRED":
+                raise ValueError("Pullback window expired")
+            if pstat == "INVALID_TARGET_TOO_FAR":
+                raise ValueError("Setup invalid: pullback too far")
+            raise ValueError("Pullback target not hit yet")
     dtp = str(row[2] or "LONG").strip().upper()
     live_score = float(row[10]) if row[10] is not None else None
     c2 = live_score
     if dtp == "SHORT":
-        if c2 is None or c2 <= 50.0:
+        if _df_v2_mode_enabled():
+            raw_conv = float(row[7]) if row[7] is not None else None
+            if raw_conv is None or raw_conv < 60.0:
+                raise ValueError(f"Conviction score must be at least 60 (current: {round(raw_conv or 0.0, 1)})")
+        elif c2 is None or c2 <= 50.0:
             raise ValueError(f"Effective conviction must be above 50 for SHORT (current: {round(c2 or 0.0, 1)})")
         if _bearish_index_gate_enabled():
             ig = index_bearish_gate_from_quotes()
@@ -3885,7 +4066,13 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
                     "SHORT is allowed only when NIFTY 5m bearish structure is confirmed (last 2 red + last 3 closes descending)."
                 )
     else:
-        if live_score is None or live_score < 60.0:
+        if _df_v2_mode_enabled():
+            raw_conv = float(row[7]) if row[7] is not None else None
+            if raw_conv is None or raw_conv < 60.0:
+                raise ValueError(
+                    f"Conviction score must be at least 60 (current: {round(raw_conv or 0.0, 1)})"
+                )
+        elif live_score is None or live_score < 60.0:
             raise ValueError(
                 f"Effective conviction must be at least 60 (current: {round(live_score or 0.0, 1)})"
             )

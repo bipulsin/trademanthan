@@ -27,6 +27,10 @@
     const m = parts.find(function (p) { return p.type === 'minute'; });
     return (h ? h.value : '00') + ':' + (m ? m.value : '00');
   }
+  function isAfter1400Ist() {
+    const hm = istHmNow();
+    return hm >= '14:00';
+  }
 
   function fmtIso(iso) {
     if (!iso) return '—';
@@ -788,12 +792,13 @@
     const th =
       '<thead><tr><th>Future</th><th>Qty (1 lot)</th><th>Scan #</th><th>1st scan</th><th>Last scan</th><th class="num">Conviction</th>' +
       '<th class="df-th-rs" title="(FUT day % − Nifty day %); line shows spread + S and N %">Rel. str.</th>' +
-      '<th class="num">LTP</th><th></th></tr></thead>';
+      '<th class="num">LTP</th><th class="num">Target Entry</th><th></th></tr></thead>';
     const body = picks
       .map(function (r) {
         const eligible = r.order_eligible === true;
         const reason = r.order_block_reason || 'Not eligible to enter';
         const convTxt = formatConvictionEntryLive(r);
+        const targetEntryTxt = r.pullback_target_price != null ? fmtNum(r.pullback_target_price, 2) : '—';
         const enterBtn =
           '<button type="button" class="df-btn df-btn-order" data-sid="' +
           r.screening_id +
@@ -819,6 +824,8 @@
           fmtRelStrength(r) +
           '</td><td class="num">' +
           fmtNum(r.ltp, 2) +
+          '</td><td class="num df-target-entry">' +
+          targetEntryTxt +
           '</td><td>' + enterCell + '</td></tr>'
         );
       })
@@ -884,12 +891,13 @@
     const th =
       '<thead><tr><th>Future</th><th>Qty (1 lot)</th><th>Scan #</th><th>1st scan</th><th>Last scan</th><th class="num">Conviction</th>' +
       '<th class="df-th-rs" title="(FUT day % − Nifty day %); line shows spread + S and N %">Rel. str.</th>' +
-      '<th class="num">LTP</th><th></th></tr></thead>';
+      '<th class="num">LTP</th><th class="num">Target Entry</th><th></th></tr></thead>';
     const body = picks
       .map(function (r) {
         const eligible = r.order_eligible === true;
         const reason = r.order_block_reason || 'Not eligible to enter';
         const convTxt = formatConvictionEntryLive(r);
+        const targetEntryTxt = r.pullback_target_price != null ? fmtNum(r.pullback_target_price, 2) : '—';
         const enterBtn =
           '<button type="button" class="df-btn df-btn-order" data-bear="1" data-sid="' +
           r.screening_id +
@@ -915,6 +923,8 @@
           fmtRelStrength(r) +
           '</td><td class="num">' +
           fmtNum(r.ltp, 2) +
+          '</td><td class="num df-target-entry">' +
+          targetEntryTxt +
           '</td><td>' + enterCell + '</td></tr>'
         );
       })
@@ -1599,6 +1609,11 @@
             'Session date (IST): ' +
             (liteData.trade_date || '—') +
             ' · Data for this IST session only · Loading advanced sections…';
+          if (isAfter1400Ist()) {
+            b.textContent =
+              '⚠ After 14:00 IST — no new entries allowed. Managing existing positions only. · Session date (IST): ' +
+              (liteData.trade_date || '—');
+          }
         }
       }
       renderAll(liteData);
@@ -1631,6 +1646,11 @@
                 'Session date (IST): ' +
                 (liteData.trade_date || '—') +
                 ' · Data for this IST session only · Auto-refresh every 120 s';
+              if (isAfter1400Ist()) {
+                b.textContent =
+                  '⚠ After 14:00 IST — no new entries allowed. Managing existing positions only. · Session date (IST): ' +
+                  (liteData.trade_date || '—');
+              }
             }
           })
           .catch(function () {
