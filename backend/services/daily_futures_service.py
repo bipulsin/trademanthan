@@ -65,6 +65,42 @@ _INDICATOR_CANDLE_CACHE: Dict[Tuple[str, date, datetime], List[Dict[str, Any]]] 
 _INDICATOR_EVAL_CACHE: Dict[Tuple[str, str], Dict[str, Any]] = {}
 
 
+def _df_v2_mode_enabled() -> bool:
+    return bool(getattr(settings, "DAILY_FUTURES_V2_MODE", False))
+
+
+def _log_decision(
+    trade_date: date,
+    symbol: str,
+    decision_type: str,
+    decision_outcome: str,
+    payload: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Best-effort audit logging for daily futures gate/exit decisions."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO daily_futures_decision_log (
+                        trade_date, symbol, decision_type, decision_outcome, payload_json
+                    ) VALUES (
+                        CAST(:td AS DATE), :sym, :dt, :do, CAST(:pj AS JSONB)
+                    )
+                    """
+                ),
+                {
+                    "td": str(trade_date),
+                    "sym": str(symbol or "").strip().upper(),
+                    "dt": str(decision_type or "").strip().upper(),
+                    "do": str(decision_outcome or "").strip().upper(),
+                    "pj": json.dumps(payload or {}),
+                },
+            )
+    except Exception as e:
+        logger.debug("daily_futures: decision log insert skipped: %s", e)
+
+
 def _instruments_index():
     global _INSTRUMENT_CACHE
     if _INSTRUMENT_CACHE is None:
@@ -125,6 +161,13 @@ def ensure_daily_futures_tables() -> None:
         second_scan_vwap_leg NUMERIC(8,2),
         second_scan_stock_change_pct NUMERIC(18,6),
         second_scan_nifty_change_pct NUMERIC(18,6),
+        scan_candle_confirmation BOOLEAN NOT NULL DEFAULT FALSE,
+        trigger_candle_high NUMERIC(18,4),
+        trigger_candle_low NUMERIC(18,4),
+        atr_14_15m NUMERIC(18,4),
+        pullback_target_price NUMERIC(18,4),
+        pullback_window_expires_at TIMESTAMPTZ,
+        pullback_status VARCHAR(24) NOT NULL DEFAULT 'WAITING',
         qualifying_scan_streak INTEGER NOT NULL DEFAULT 0,
         entry_window_start TIMESTAMPTZ,
         entry_window_end TIMESTAMPTZ,
@@ -171,10 +214,28 @@ def ensure_daily_futures_tables() -> None:
         last_indicator_candle_ts TIMESTAMPTZ,
         first_amber_alert_at TIMESTAMPTZ,
         first_hard_exit_alert_at TIMESTAMPTZ,
+        atr_at_entry NUMERIC(18,4),
+        hard_sl_price NUMERIC(18,4),
+        indicator_exit_combo VARCHAR(16),
+        trailing_stop_active BOOLEAN NOT NULL DEFAULT FALSE,
+        peak_ltp NUMERIC(18,4),
+        peak_pnl_pct NUMERIC(8,4),
+        exit_reason VARCHAR(32),
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
     );
     CREATE INDEX IF NOT EXISTS idx_dfut_user_status ON daily_futures_user_trade (user_id, order_status);
+
+    CREATE TABLE IF NOT EXISTS daily_futures_decision_log (
+        id BIGSERIAL PRIMARY KEY,
+        trade_date DATE NOT NULL,
+        symbol VARCHAR(64) NOT NULL,
+        decision_type VARCHAR(32) NOT NULL,
+        decision_outcome VARCHAR(16) NOT NULL,
+        payload_json JSONB,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_df_decision_log_td_sym ON daily_futures_decision_log (trade_date, symbol, created_at DESC);
     """
         with engine.begin() as conn:
             conn.execute(text(ddl))
@@ -197,6 +258,13 @@ def ensure_daily_futures_tables() -> None:
             conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_vwap_leg NUMERIC(8,2)"))
             conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_stock_change_pct NUMERIC(18,6)"))
             conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_nifty_change_pct NUMERIC(18,6)"))
+            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS scan_candle_confirmation BOOLEAN NOT NULL DEFAULT FALSE"))
+            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS trigger_candle_high NUMERIC(18,4)"))
+            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS trigger_candle_low NUMERIC(18,4)"))
+            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS atr_14_15m NUMERIC(18,4)"))
+            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS pullback_target_price NUMERIC(18,4)"))
+            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS pullback_window_expires_at TIMESTAMPTZ"))
+            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS pullback_status VARCHAR(24) NOT NULL DEFAULT 'WAITING'"))
             conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS qualifying_scan_streak INTEGER NOT NULL DEFAULT 0"))
             conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS entry_window_start TIMESTAMPTZ"))
             conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS entry_window_end TIMESTAMPTZ"))
@@ -249,6 +317,13 @@ def ensure_daily_futures_tables() -> None:
             conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS last_indicator_candle_ts TIMESTAMPTZ"))
             conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS first_amber_alert_at TIMESTAMPTZ"))
             conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS first_hard_exit_alert_at TIMESTAMPTZ"))
+            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS atr_at_entry NUMERIC(18,4)"))
+            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS hard_sl_price NUMERIC(18,4)"))
+            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS indicator_exit_combo VARCHAR(16)"))
+            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS trailing_stop_active BOOLEAN NOT NULL DEFAULT FALSE"))
+            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS peak_ltp NUMERIC(18,4)"))
+            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS peak_pnl_pct NUMERIC(8,4)"))
+            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS exit_reason VARCHAR(32)"))
             conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS direction_type VARCHAR(16)"))
             conn.execute(text("UPDATE daily_futures_user_trade SET direction_type = 'LONG' WHERE direction_type IS NULL OR TRIM(direction_type) = ''"))
             conn.execute(text("ALTER TABLE daily_futures_user_trade ALTER COLUMN direction_type SET DEFAULT 'LONG'"))
@@ -270,6 +345,21 @@ def ensure_daily_futures_tables() -> None:
                 text(
                     "CREATE UNIQUE INDEX IF NOT EXISTS uq_daily_futures_screening_td_und_dir "
                     "ON daily_futures_screening (trade_date, (UPPER(TRIM(underlying))), (UPPER(TRIM(direction_type))))"
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS daily_futures_decision_log (
+                        id BIGSERIAL PRIMARY KEY,
+                        trade_date DATE NOT NULL,
+                        symbol VARCHAR(64) NOT NULL,
+                        decision_type VARCHAR(32) NOT NULL,
+                        decision_outcome VARCHAR(16) NOT NULL,
+                        payload_json JSONB,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                    """
                 )
             )
         _DF_TABLES_READY = True
@@ -1321,6 +1411,23 @@ def _apply_exit_alerts_to_running(
             "indicator_exit_now_threshold": exit_now_thr,
             "indicator_hard_exit_threshold": hard_exit_thr,
         }
+        if not _df_v2_mode_enabled():
+            symbol = str(r.get("underlying") or "")
+            if ind_count >= 2:
+                combo = "+".join(ind_conds[:4]) if ind_conds else None
+                _log_decision(
+                    trade_date,
+                    symbol,
+                    "EXIT_INDICATOR_2OF4",
+                    "TRIGGERED",
+                    {"indicator_count": ind_count, "conditions": ind_conds, "combo": combo, "direction_type": dirt},
+                )
+            if merged_hit:
+                _log_decision(trade_date, symbol, "EXIT_TRAIL_STOP", "TRIGGERED", {"direction_type": dirt})
+            if drawdown_15atr_breach:
+                _log_decision(trade_date, symbol, "EXIT_SL_HIT", "TRIGGERED", {"direction_type": dirt})
+            if merged_giveback:
+                _log_decision(trade_date, symbol, "EXIT_TIME_STOP", "TRIGGERED", {"note": "legacy giveback mapped in shadow"})
 
         try:
             db.execute(
@@ -3588,6 +3695,34 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
         reasons: List[str] = []
         dtp = str(p.get("direction_type") or "LONG").strip().upper()
         und_u = str(p.get("underlying") or "").strip().upper()
+        # V2 shadow audit logs (no behavior change while flag remains OFF).
+        if not _df_v2_mode_enabled():
+            raw_conv = _safe_float(p.get("conviction_score"))
+            conv_pass_v2 = raw_conv is not None and float(raw_conv) >= 60.0
+            stock_chg = _safe_float(p.get("stock_change_pct"))
+            nifty_chg = _safe_float(p.get("nifty_change_pct"))
+            rs_pass_v2 = False
+            if stock_chg is not None and nifty_chg is not None:
+                rs_pass_v2 = (stock_chg <= nifty_chg) if dtp == "SHORT" else (stock_chg >= nifty_chg)
+            cig = p.get("candle_is_green")
+            candle_pass_v2 = (cig is False) if dtp == "SHORT" else (cig is True)
+            cutoff_pass_v2 = now_ist.time() < dt_time(14, 0)
+            _log_decision(td, und_u, "GATE_CONVICTION", "PASS" if conv_pass_v2 else "BLOCK", {"conviction_score": raw_conv})
+            _log_decision(
+                td,
+                und_u,
+                "GATE_REL_STRENGTH",
+                "PASS" if rs_pass_v2 else "BLOCK",
+                {"stock_change_pct": stock_chg, "nifty_change_pct": nifty_chg, "direction_type": dtp},
+            )
+            _log_decision(
+                td,
+                und_u,
+                "GATE_CANDLE_CONFIRM",
+                "PASS" if candle_pass_v2 else "BLOCK",
+                {"candle_is_green": bool(cig) if cig is not None else None, "direction_type": dtp},
+            )
+            _log_decision(td, und_u, "CUTOFF_1400_BLOCK", "PASS" if cutoff_pass_v2 else "BLOCK", {"now_ist": now_ist.isoformat()})
         sold_ts = sold_latest_by_underlying.get(und_u)
         if sold_ts is not None:
             last_hit_dt = _parse_iso_ist(p.get("last_hit_at"))

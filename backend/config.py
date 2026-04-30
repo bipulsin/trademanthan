@@ -93,5 +93,13 @@ class Settings(BaseSettings):
     DAILY_FUTURES_NIFTY_MOMENTUM_ATR_MULTIPLIER: float = float(
         os.getenv("DAILY_FUTURES_NIFTY_MOMENTUM_ATR_MULTIPLIER", "0.25")
     )
+    # Daily Futures V2 migration flag.
+    # OFF(default): current production behavior; new V2 gate/exit outcomes should be logged only (shadow).
+    # ON: V2 behavior paths can be activated by services that support it.
+    DAILY_FUTURES_V2_MODE: bool = os.getenv("DAILY_FUTURES_V2_MODE", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
 
 settings = Settings()
