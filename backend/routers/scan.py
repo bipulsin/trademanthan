@@ -74,6 +74,7 @@ except ImportError:
     except ImportError:
         health_monitor = None  # Graceful degradation if not available
 from backend.services.upstox_service import upstox_service as vwap_service
+from backend.services.daily_futures_service import _evaluate_indicator_exit_signal
 from backend.services.market_sentiment_dials import build_dial_rows, utc_iso
 from backend.services.sector_movers import build_sector_stock_detail, get_sector_movers_cached
 from backend.services.premarket_watchlist_job import (
@@ -9581,6 +9582,20 @@ async def daily_futures_v2_playbook(
 
     ist = pytz.timezone("Asia/Kolkata")
     td = trade_date or datetime.now(ist).date()
+
+    def _parse_ist_ts_any(ts_raw: Any) -> Optional[datetime]:
+        if isinstance(ts_raw, datetime):
+            return ts_raw.astimezone(ist) if ts_raw.tzinfo else ist.localize(ts_raw)
+        s = str(ts_raw or "").strip()
+        if not s:
+            return None
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        try:
+            dtv = datetime.fromisoformat(s)
+            return dtv.astimezone(ist) if dtv.tzinfo else ist.localize(dtv)
+        except Exception:
+            return None
     rows = db.execute(
         text(
             """
@@ -9861,13 +9876,287 @@ async def daily_futures_v2_playbook(
             }
         )
 
+    # Hypothetical section: scanned picks (conviction > 60) as "If ordered".
+    screen_rows = db.execute(
+        text(
+            """
+            SELECT
+                s.id AS screening_id,
+                s.trade_date,
+                s.underlying,
+                s.future_symbol,
+                COALESCE(s.direction_type, 'LONG') AS direction_type,
+                s.instrument_key,
+                s.first_hit_at,
+                s.second_scan_time,
+                s.entry_window_start,
+                s.entry_window_end,
+                s.pullback_target_price,
+                s.pullback_status,
+                s.conviction_score
+            FROM daily_futures_screening s
+            WHERE s.trade_date = CAST(:td AS DATE)
+              AND COALESCE(s.conviction_score, 0) > 60
+            ORDER BY COALESCE(s.conviction_score, 0) DESC, s.id DESC
+            LIMIT 600
+            """
+        ),
+        {"td": str(td)},
+    ).mappings().all()
+
+    if_ordered_rows: List[Dict[str, Any]] = []
+    eod_cutoff = ist.localize(datetime.combine(td, dt_time(15, 20)))
+    for srow in screen_rows:
+        dtx = str(srow.get("direction_type") or "LONG").strip().upper()
+        ikey = str(srow.get("instrument_key") or "").strip()
+        if not ikey:
+            continue
+
+        # Entry window display + concrete datetimes for checks.
+        ew_start_dt = srow.get("entry_window_start")
+        ew_end_dt = srow.get("entry_window_end")
+        if (ew_start_dt is None or ew_end_dt is None) and isinstance(srow.get("second_scan_time"), datetime):
+            z = srow["second_scan_time"].astimezone(ist) if srow["second_scan_time"].tzinfo else ist.localize(srow["second_scan_time"])
+            ew_start_dt = z + timedelta(minutes=5)
+            ew_end_dt = z + timedelta(minutes=20)
+        ew_start_txt = ew_start_dt.astimezone(ist).strftime("%H:%M") if isinstance(ew_start_dt, datetime) else None
+        ew_end_txt = ew_end_dt.astimezone(ist).strftime("%H:%M") if isinstance(ew_end_dt, datetime) else None
+        entry_window = (ew_start_txt + " - " + ew_end_txt) if ew_start_txt and ew_end_txt else None
+
+        # Pullback target (formula first, fallback to stored).
+        pb = None
+        try:
+            fh = srow.get("first_hit_at")
+            if isinstance(fh, datetime):
+                fhz = fh.astimezone(ist) if fh.tzinfo else ist.localize(fh)
+                raw15 = vwap_service.get_historical_candles_by_instrument_key(
+                    ikey, interval="minutes/15", days_back=15, range_end_date=td
+                ) or []
+                try:
+                    key_enc = quote(ikey, safe="")
+                    intraday_url = f"{vwap_service.base_url}/historical-candle/intraday/{key_enc}/minutes/15"
+                    raw_i = vwap_service.make_api_request(intraday_url, method="GET", timeout=15, max_retries=2) or {}
+                    if isinstance(raw_i, dict) and raw_i.get("status") == "success":
+                        for row_i in (((raw_i.get("data") or {}).get("candles")) or []):
+                            if isinstance(row_i, dict):
+                                raw15.append(row_i)
+                            elif isinstance(row_i, (list, tuple)) and len(row_i) >= 6:
+                                raw15.append(
+                                    {
+                                        "timestamp": row_i[0],
+                                        "open": row_i[1],
+                                        "high": row_i[2],
+                                        "low": row_i[3],
+                                        "close": row_i[4],
+                                        "volume": row_i[5],
+                                    }
+                                )
+                except Exception:
+                    pass
+
+                c15: List[Dict[str, Any]] = []
+                for c in raw15:
+                    ts = _parse_ist_ts_any((c or {}).get("timestamp"))
+                    if ts is None:
+                        continue
+                    try:
+                        c15.append(
+                            {
+                                "timestamp": ts,
+                                "open": float(c.get("open")),
+                                "high": float(c.get("high")),
+                                "low": float(c.get("low")),
+                                "close": float(c.get("close")),
+                                "volume": float(c.get("volume") or 0.0),
+                            }
+                        )
+                    except Exception:
+                        continue
+                c15.sort(key=lambda x: x["timestamp"])
+                completed = [x for x in c15 if (x["timestamp"] + timedelta(minutes=15)) <= fhz]
+                if len(completed) >= 15:
+                    trigger = completed[-1]
+                    highs = [x["high"] for x in completed]
+                    lows = [x["low"] for x in completed]
+                    closes = [x["close"] for x in completed]
+                    tr: List[float] = []
+                    for i in range(1, len(completed)):
+                        tr.append(max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1])))
+                    if len(tr) >= 14:
+                        atr = sum(tr[:14]) / 14.0
+                        for i in range(14, len(tr)):
+                            atr = ((atr * 13.0) + tr[i]) / 14.0
+                        pb = (float(trigger["high"]) - (0.3 * float(atr))) if dtx == "SHORT" else (float(trigger["low"]) + (0.3 * float(atr)))
+        except Exception:
+            pb = None
+        if pb is None:
+            try:
+                pbs = float(srow.get("pullback_target_price"))
+                pb = pbs if pbs > 0 else None
+            except Exception:
+                pb = None
+
+        hit_in_window: Optional[bool] = None
+        hit_time: Optional[datetime] = None
+        out_pullback_status = str(srow.get("pullback_status") or "")
+
+        # Check if target touched in entry window (hypothetical entry trigger).
+        if pb is not None and isinstance(ew_start_dt, datetime) and isinstance(ew_end_dt, datetime):
+            try:
+                raw1 = vwap_service.get_historical_candles_by_instrument_key(
+                    ikey, interval="minutes/1", days_back=2, range_end_date=td
+                ) or []
+                try:
+                    key_enc = quote(ikey, safe="")
+                    intraday_url = f"{vwap_service.base_url}/historical-candle/intraday/{key_enc}/minutes/1"
+                    raw_i = vwap_service.make_api_request(intraday_url, method="GET", timeout=15, max_retries=2) or {}
+                    if isinstance(raw_i, dict) and raw_i.get("status") == "success":
+                        for row_i in (((raw_i.get("data") or {}).get("candles")) or []):
+                            if isinstance(row_i, dict):
+                                raw1.append(row_i)
+                            elif isinstance(row_i, (list, tuple)) and len(row_i) >= 6:
+                                raw1.append(
+                                    {
+                                        "timestamp": row_i[0],
+                                        "open": row_i[1],
+                                        "high": row_i[2],
+                                        "low": row_i[3],
+                                        "close": row_i[4],
+                                        "volume": row_i[5],
+                                    }
+                                )
+                except Exception:
+                    pass
+                for c in raw1:
+                    ts = _parse_ist_ts_any((c or {}).get("timestamp"))
+                    if ts is None or ts < ew_start_dt or ts > ew_end_dt:
+                        continue
+                    try:
+                        hi = float(c.get("high"))
+                        lo = float(c.get("low"))
+                    except Exception:
+                        continue
+                    if (dtx == "SHORT" and hi >= float(pb)) or (dtx != "SHORT" and lo <= float(pb)):
+                        hit_in_window = True
+                        hit_time = ts
+                        break
+                if hit_in_window is None:
+                    hit_in_window = False
+            except Exception:
+                hit_in_window = None
+
+        if hit_in_window is False:
+            out_pullback_status = "FAILED"
+
+        # Hypothetical non-SL exits: Indicator(2-of-4), then Time Stop(60m, pnl<0.5%), then EOD 15:20.
+        hypo_exit_time = None
+        hypo_exit_price = None
+        hypo_exit_type = None
+        if hit_time is not None and pb is not None:
+            try:
+                raw15 = vwap_service.get_historical_candles_by_instrument_key(
+                    ikey, interval="minutes/15", days_back=15, range_end_date=td
+                ) or []
+                try:
+                    key_enc = quote(ikey, safe="")
+                    intraday_url = f"{vwap_service.base_url}/historical-candle/intraday/{key_enc}/minutes/15"
+                    raw_i = vwap_service.make_api_request(intraday_url, method="GET", timeout=15, max_retries=2) or {}
+                    if isinstance(raw_i, dict) and raw_i.get("status") == "success":
+                        for row_i in (((raw_i.get("data") or {}).get("candles")) or []):
+                            if isinstance(row_i, dict):
+                                raw15.append(row_i)
+                            elif isinstance(row_i, (list, tuple)) and len(row_i) >= 6:
+                                raw15.append(
+                                    {
+                                        "timestamp": row_i[0],
+                                        "open": row_i[1],
+                                        "high": row_i[2],
+                                        "low": row_i[3],
+                                        "close": row_i[4],
+                                        "volume": row_i[5],
+                                    }
+                                )
+                except Exception:
+                    pass
+
+                c15: List[Dict[str, Any]] = []
+                for c in raw15:
+                    ts = _parse_ist_ts_any((c or {}).get("timestamp"))
+                    if ts is None:
+                        continue
+                    try:
+                        c15.append(
+                            {
+                                "timestamp": ts,
+                                "open": float(c.get("open")),
+                                "high": float(c.get("high")),
+                                "low": float(c.get("low")),
+                                "close": float(c.get("close")),
+                                "volume": float(c.get("volume") or 0.0),
+                            }
+                        )
+                    except Exception:
+                        continue
+                c15.sort(key=lambda x: x["timestamp"])
+
+                for i, c in enumerate(c15):
+                    c_end = c["timestamp"] + timedelta(minutes=15)
+                    if c_end <= hit_time or c_end > eod_cutoff:
+                        continue
+                    upto = c15[: i + 1]
+                    ev = _evaluate_indicator_exit_signal(ikey, dtx, upto[-30:] if len(upto) > 30 else upto)
+                    rel_cnt = int(ev.get("count") or 0)
+                    if rel_cnt >= 2:
+                        hypo_exit_time = c_end.strftime("%H:%M")
+                        hypo_exit_price = float(c["close"])
+                        hypo_exit_type = "INDICATOR_EXIT_2OF4"
+                        break
+                    elapsed_min = int(max(0, (c_end - hit_time).total_seconds() // 60))
+                    pnl_pct = ((float(pb) - float(c["close"])) / float(pb) * 100.0) if dtx == "SHORT" else ((float(c["close"]) - float(pb)) / float(pb) * 100.0)
+                    if elapsed_min >= 60 and pnl_pct < 0.5:
+                        hypo_exit_time = c_end.strftime("%H:%M")
+                        hypo_exit_price = float(c["close"])
+                        hypo_exit_type = "TIME_STOP_60M"
+                        break
+
+                if hypo_exit_time is None:
+                    eod_c = None
+                    for c in c15:
+                        c_end = c["timestamp"] + timedelta(minutes=15)
+                        if c_end <= eod_cutoff:
+                            eod_c = c
+                    if eod_c is not None:
+                        hypo_exit_time = eod_cutoff.strftime("%H:%M")
+                        hypo_exit_price = float(eod_c["close"])
+                        hypo_exit_type = "EOD_1520"
+            except Exception:
+                pass
+
+        if_ordered_rows.append(
+            {
+                "screening_id": int(srow["screening_id"]),
+                "future_symbol": str(srow.get("future_symbol") or ""),
+                "direction_type": dtx,
+                "conviction_score": float(srow["conviction_score"]) if srow.get("conviction_score") is not None else None,
+                "entry_window": entry_window,
+                "pullback_target_price": pb,
+                "pullback_status": out_pullback_status,
+                "pullback_hit_in_window": hit_in_window,
+                "hypothetical_exit_time": hypo_exit_time,
+                "hypothetical_exit_price": hypo_exit_price,
+                "hypothetical_exit_type": hypo_exit_type,
+            }
+        )
+
     return {
         "success": True,
         "trade_date": str(td),
         "generated_at_ist": datetime.now(ist).isoformat(),
         "rows": out,
+        "if_ordered_rows": if_ordered_rows,
         "notes": [
             "Entry window uses stored V2 window; fallback is second_scan_time +5m to +20m.",
             "PnL correct is recomputed from normalized direction-wise entry/exit prices and lot_size.",
+            "If ordered section includes today's conviction>60 picks and estimates non-SL exits (indicator/time/EOD only).",
         ],
     }
