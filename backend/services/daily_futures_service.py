@@ -125,6 +125,9 @@ def ensure_daily_futures_tables() -> None:
         second_scan_vwap_leg NUMERIC(8,2),
         second_scan_stock_change_pct NUMERIC(18,6),
         second_scan_nifty_change_pct NUMERIC(18,6),
+        qualifying_scan_streak INTEGER NOT NULL DEFAULT 0,
+        entry_window_start TIMESTAMPTZ,
+        entry_window_end TIMESTAMPTZ,
         effective_conviction NUMERIC(5,1),
         last_5m_momentum_pass BOOLEAN,
         last_5m_evaluated_at TIMESTAMPTZ,
@@ -194,6 +197,9 @@ def ensure_daily_futures_tables() -> None:
             conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_vwap_leg NUMERIC(8,2)"))
             conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_stock_change_pct NUMERIC(18,6)"))
             conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_nifty_change_pct NUMERIC(18,6)"))
+            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS qualifying_scan_streak INTEGER NOT NULL DEFAULT 0"))
+            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS entry_window_start TIMESTAMPTZ"))
+            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS entry_window_end TIMESTAMPTZ"))
             conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS effective_conviction NUMERIC(5,1)"))
             conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS last_5m_momentum_pass BOOLEAN"))
             conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS last_5m_evaluated_at TIMESTAMPTZ"))
@@ -2340,6 +2346,12 @@ def _ingest_df_webhook(symbols: List[str], direction: str) -> Dict[str, Any]:
     )
 
     ingest_now = datetime.now(IST)
+    decay_raw = os.getenv(
+        "DAILY_FUTURES_CONVICTION_DECAY_PER_SCAN",
+        str(getattr(settings, "DAILY_FUTURES_CONVICTION_DECAY_PER_SCAN", 0.08) or 0.08),
+    )
+    decay_per_scan = float(decay_raw or 0.08)
+    decay_per_scan = max(0.0, min(0.5, decay_per_scan))
     nifty_15m_bars = _last_completed_15m_candles_for_instrument(
         upstox, NIFTY50_INDEX_KEY, trade_date, ingest_now
     )
@@ -2402,7 +2414,8 @@ def _ingest_df_webhook(symbols: List[str], direction: str) -> Dict[str, Any]:
                     SELECT id, scan_count, total_oi, second_scan_time,
                            second_scan_conviction_score, second_scan_oi_leg, second_scan_vwap_leg,
                            second_scan_stock_change_pct, second_scan_nifty_change_pct,
-                           candle_is_green, candle_higher_high, candle_higher_low
+                           candle_is_green, candle_higher_high, candle_higher_low,
+                           qualifying_scan_streak, entry_window_start, entry_window_end
                     FROM daily_futures_screening
                     WHERE trade_date = CAST(:d AS DATE) AND UPPER(TRIM(underlying)) = :u
                       AND UPPER(TRIM(COALESCE(direction_type, 'LONG'))) = :dfdir
@@ -2529,6 +2542,9 @@ def _ingest_df_webhook(symbols: List[str], direction: str) -> Dict[str, Any]:
                 row_candle_is_green = bool(ex[9]) if ex[9] is not None else bool(x.get("candle_is_green"))
                 row_candle_higher_high = bool(ex[10]) if ex[10] is not None else bool(x.get("candle_higher_high"))
                 row_candle_higher_low = bool(ex[11]) if ex[11] is not None else bool(x.get("candle_higher_low"))
+                qualifying_streak = int(ex[12] or 0)
+                entry_window_start = ex[13]
+                entry_window_end = ex[14]
                 next_scan_count = prior_scan_count + 1
                 if prior_scan_count < 1:
                     next_scan_count = 1
@@ -2539,6 +2555,16 @@ def _ingest_df_webhook(symbols: List[str], direction: str) -> Dict[str, Any]:
                     second_scan_vwap_leg = x["conviction_vwap_leg"]
                     second_scan_stock = x["stock_change_pct"]
                     second_scan_nifty = x["nifty_change_pct"]
+                cscore = float(x.get("conviction_score") or 0.0)
+                live_decay_factor = max(0.5, 1.0 - max(0, next_scan_count - 1) * decay_per_scan)
+                effective_now = round(cscore * float(live_decay_factor), 1)
+                if effective_now >= 60.0:
+                    qualifying_streak = qualifying_streak + 1
+                else:
+                    qualifying_streak = 0
+                if qualifying_streak >= 2 and entry_window_start is None:
+                    entry_window_start = ingest_now + timedelta(minutes=5)
+                    entry_window_end = entry_window_start + timedelta(minutes=15)
                 conn.execute(
                     text(
                         """
@@ -2569,6 +2595,9 @@ def _ingest_df_webhook(symbols: List[str], direction: str) -> Dict[str, Any]:
                           second_scan_vwap_leg = COALESCE(:ss_vwap_leg, second_scan_vwap_leg),
                           second_scan_stock_change_pct = :ss_stock,
                           second_scan_nifty_change_pct = :ss_nifty,
+                          qualifying_scan_streak = :qss,
+                          entry_window_start = :ews,
+                          entry_window_end = :ewe,
                           candle_is_green = :cig,
                           candle_higher_high = :chh,
                           candle_higher_low = :chl,
@@ -2604,6 +2633,9 @@ def _ingest_df_webhook(symbols: List[str], direction: str) -> Dict[str, Any]:
                         "ss_vwap_leg": second_scan_vwap_leg if second_scan_vwap_leg is not None else x["conviction_vwap_leg"],
                         "ss_stock": second_scan_stock,
                         "ss_nifty": second_scan_nifty,
+                        "qss": qualifying_streak,
+                        "ews": entry_window_start,
+                        "ewe": entry_window_end,
                         "cig": row_candle_is_green,
                         "chh": row_candle_higher_high,
                         "chl": row_candle_higher_low,
@@ -2620,12 +2652,12 @@ def _ingest_df_webhook(symbols: List[str], direction: str) -> Dict[str, Any]:
                           scan_count, first_hit_at, last_hit_at, conviction_score,
                           conviction_oi_leg, conviction_vwap_leg, ltp, session_vwap, total_oi, oi_change_pct,
                           nifty_ltp, nifty_session_vwap, stock_prev_close, nifty_prev_close,
-                          stock_change_pct, nifty_change_pct, snapshotted_at,
+                          stock_change_pct, nifty_change_pct, snapshotted_at, qualifying_scan_streak,
                           candle_is_green, candle_higher_high, candle_higher_low, conviction_breakdown_json
                         ) VALUES (
                           CAST(:d AS DATE), :u, :dtd, :fs, :ik, :lot, 1, :fh, :lh, :cs,
                           :oi_leg, :vw_leg, :ltp, :svwap, :toi, :oi_chg,
-                          :nltp, :nsvwap, :spc, :npc, :scp, :ncp, :snap,
+                          :nltp, :nsvwap, :spc, :npc, :scp, :ncp, :snap, :qss,
                           :cig, :chh, :chl, CAST(:cbj AS JSONB)
                         )
                         RETURNING id
@@ -2654,6 +2686,7 @@ def _ingest_df_webhook(symbols: List[str], direction: str) -> Dict[str, Any]:
                         "scp": x["stock_change_pct"],
                         "ncp": x["nifty_change_pct"],
                         "snap": ingest_now,
+                        "qss": 1 if float(x.get("conviction_score") or 0.0) >= 60.0 else 0,
                         "cig": bool(x.get("candle_is_green")),
                         "chh": bool(x.get("candle_higher_high")),
                         "chl": bool(x.get("candle_higher_low")),
@@ -3321,6 +3354,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
             SELECT t.id, t.screening_id, t.underlying, COALESCE(t.direction_type, s.direction_type, 'LONG') AS direction_type, t.future_symbol, t.instrument_key, t.lot_size,
                    t.entry_time, t.entry_price, t.sell_time, t.sell_price, t.exit_time, t.exit_price, t.buy_time, t.buy_price,
                    t.pnl_points, t.pnl_rupees,
+                   s.entry_window_start, s.entry_window_end,
                    s.first_hit_at,
                    s.ltp
             FROM daily_futures_user_trade t
@@ -3383,10 +3417,12 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                 "entry_price": ep_disp,
                 "exit_time": xt,
                 "exit_price": xp,
+                "entry_window_start": row[17].isoformat() if row[17] is not None and hasattr(row[17], "isoformat") else None,
+                "entry_window_end": row[18].isoformat() if row[18] is not None and hasattr(row[18], "isoformat") else None,
                 "pnl_points": pnl_pts,
                 "pnl_rupees": pnl_rs,
-                "first_scan_time": row[17].isoformat() if row[17] is not None and hasattr(row[17], "isoformat") else None,
-                "ltp": float(row[18]) if row[18] is not None else None,
+                "first_scan_time": row[19].isoformat() if row[19] is not None and hasattr(row[19], "isoformat") else None,
+                "ltp": float(row[20]) if row[20] is not None else None,
                 "win_loss": wl,
             }
         )

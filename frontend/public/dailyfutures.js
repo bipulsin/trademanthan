@@ -1028,7 +1028,7 @@
       return;
     }
     const th =
-      '<thead><tr><th>Future</th><th>Qty</th><th>1st scan</th><th title="Long: buy time; Short: sell time">Entry</th><th class="num" title="Long: buy ₹; Short: sell ₹">Entry ₹</th><th title="Long: sell time; Short: cover time">Exit</th><th class="num" title="Long: sell ₹; Short: cover ₹">Exit ₹</th><th class="num">PnL ₹</th><th>Win/Loss</th></tr></thead>';
+      '<thead><tr><th>Future</th><th>Qty</th><th title="Starts 5 min after second qualifying scan (effective conviction >= 60) and lasts 15 minutes.">Entry window</th><th title="Long: buy time; Short: sell time">Entry</th><th class="num" title="Long: buy ₹; Short: sell ₹">Entry ₹</th><th title="Long: sell time; Short: cover time">Exit</th><th class="num" title="Long: sell ₹; Short: cover ₹">Exit ₹</th><th class="num">PnL ₹</th><th>Win/Loss</th></tr></thead>';
     const body = rows
       .map(function (r) {
         const wl = r.win_loss || '—';
@@ -1043,13 +1043,16 @@
                 ? 'df-pnl-neg'
                 : ''
             : '';
+        const ewStart = r.entry_window_start ? fmtIsoTimeIst(r.entry_window_start) : null;
+        const ewEnd = r.entry_window_end ? fmtIsoTimeIst(r.entry_window_end) : null;
+        const ewTxt = ewStart && ewEnd ? (ewStart + ' - ' + ewEnd) : '—';
         return (
           '<tr><td><strong>' +
           symbolWithDirectionHtml(r) +
           '</strong></td><td class="num">' +
           esc(r.lot_size) +
           '</td><td>' +
-          fmtIsoTimeIst(r.first_scan_time) +
+          esc(ewTxt) +
           '</td><td>' +
           esc(r.entry_time) +
           '</td><td class="num">' +
