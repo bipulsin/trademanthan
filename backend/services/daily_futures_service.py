@@ -485,7 +485,7 @@ def _last_completed_15m_candles_for_instrument(
         out_local: List[Dict[str, Any]] = []
         for c in rows or []:
             ts = _parse_iso_ist(c.get("timestamp"))
-            if ts is None or ts.date() != session_date or ts >= cutoff:
+            if ts is None or ts.date() != session_date or ts > cutoff:
                 continue
             op = _safe_float(c.get("open"))
             hi = _safe_float(c.get("high"))
@@ -556,7 +556,7 @@ def _last_completed_15m_candles_for_indicator(
     merged: Dict[str, Dict[str, Any]] = {}
     for c in rows_all:
         ts = _parse_iso_ist((c or {}).get("timestamp"))
-        if ts is None or ts >= cutoff:
+        if ts is None or ts > cutoff:
             continue
         op = _safe_float((c or {}).get("open"))
         hi = _safe_float((c or {}).get("high"))
