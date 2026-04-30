@@ -61,12 +61,13 @@
             const badgeCls = r.first_count_ge2_at ? 'warn' : 'ok';
             const badgeTxt = r.first_count_ge2_at ? 'Triggered' : 'Not Triggered';
             const table = timeline.length
-              ? ('<table class="tbl"><thead><tr><th>Time</th><th>Bullish Exit Count</th><th>Bearish Exit Count</th><th>Active Conditions</th></tr></thead><tbody>' +
+              ? ('<table class="tbl"><thead><tr><th>Time</th><th>Bullish Exit Count</th><th>Bearish Exit Count</th><th>Relevant Count</th><th>C1</th><th>C2</th><th>C3</th><th>C4</th><th>Active Conditions</th></tr></thead><tbody>' +
                  timeline.map(function (t) {
-                   return '<tr><td>' + esc(t.timestamp_ist) + '</td><td>' + esc(t.bullish_exit_count) + '</td><td>' + esc(t.bearish_exit_count) + '</td><td>' + esc((t.active_conditions || []).join(',')) + '</td></tr>';
+                  const cv = t.c_values_relevant || {};
+                  return '<tr><td>' + esc(t.timestamp_ist) + '</td><td>' + esc(t.bullish_exit_count) + '</td><td>' + esc(t.bearish_exit_count) + '</td><td>' + esc(t.relevant_exit_count) + '</td><td>' + esc(Boolean(cv.C1)) + '</td><td>' + esc(Boolean(cv.C2)) + '</td><td>' + esc(Boolean(cv.C3)) + '</td><td>' + esc(Boolean(cv.C4)) + '</td><td>' + esc((t.active_conditions || []).join(',')) + '</td></tr>';
                  }).join('') +
                  '</tbody></table>')
-              : '<p class="empty">No 15m candle in hold window crossed count >= 2.</p>';
+              : '<p class="empty">No 15m candles found in hold window.</p>';
             return (
               '<div class="card">' +
               '<div class="sym">' + esc(r.future_symbol || r.underlying) + '</div>' +

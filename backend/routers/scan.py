@@ -9480,17 +9480,23 @@ async def daily_futures_indicator_playbook(
             latest_bear_map = dict(bear_map or latest_bear_map)
             is_short_dir = str(direction or "LONG").upper() == "SHORT"
             relevant_count = bear_count if is_short_dir else bull_count
-            if relevant_count >= 2:
-                timeline.append(
-                    {
-                        "timestamp_ist": c["timestamp"].strftime("%H:%M"),
-                        "bullish_exit_count": bull_count,
-                        "bearish_exit_count": bear_count,
-                        "relevant_exit_count": relevant_count,
-                        "active_conditions": labels,
-                    }
-                )
-        first_ge2 = timeline[0]["timestamp_ist"] if timeline else None
+            timeline.append(
+                {
+                    "timestamp_ist": c["timestamp"].strftime("%H:%M"),
+                    "bullish_exit_count": bull_count,
+                    "bearish_exit_count": bear_count,
+                    "relevant_exit_count": relevant_count,
+                    "active_conditions": labels,
+                    "c_values_long_exit": bull_map,
+                    "c_values_short_exit": bear_map,
+                    "c_values_relevant": bear_map if is_short_dir else bull_map,
+                }
+            )
+        first_ge2 = None
+        for t in timeline:
+            if int(t.get("relevant_exit_count") or 0) >= 2:
+                first_ge2 = t.get("timestamp_ist")
+                break
         out.append(
             {
                 "trade_id": int(tr["trade_id"]),
