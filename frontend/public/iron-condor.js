@@ -334,7 +334,7 @@
     for (var i = 0; i < s.length; i++) {
       var r = s[i];
       if (!r || typeof r !== "object") continue;
-      var sym = String(r.symbol || "").trim();
+      var sym = String(r.symbol || "").trim().toUpperCase();
       if (!sym) continue;
       out.push({ symbol: sym, sector: String(r.sector || "").trim() });
     }
@@ -397,14 +397,14 @@
       "<option value=\"\">— Choose underlying —</option>" +
       rows
         .map(function (r) {
-          var sym = String(r.symbol || "").trim();
+          var sym = String(r.symbol || "").trim().toUpperCase();
           return "<option value=\"" + esc(sym) + "\">" + esc(sym) + " — " + esc(r.sector || "") + "</option>";
         })
         .join("");
     var symVal = "";
     for (var pi = 0; pi < rows.length; pi++) {
       if (String(rows[pi].symbol || "").trim().toUpperCase() === curUp) {
-        symVal = String(rows[pi].symbol || "").trim();
+        symVal = String(rows[pi].symbol || "").trim().toUpperCase();
         break;
       }
     }
@@ -454,7 +454,8 @@
       var row = res.row;
       pickerShowQuoteBanner(res.quotes_error || "");
       state.pickerSymbols = [row];
-      state.symbol = row.symbol;
+      state.symbol = String(row.symbol || "").trim().toUpperCase();
+      if (sel) sel.value = state.symbol;
       if (tb) {
         tb.innerHTML = renderPickerRow(row);
         wirePicker(tb);
