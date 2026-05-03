@@ -50,6 +50,7 @@ class SettingsBody(BaseModel):
 class ChecklistBody(BaseModel):
     underlying: str = Field(..., min_length=1, max_length=32)
     new_capital_estimate: float = Field(0.0, ge=0)
+    declared_next_earnings_iso: Optional[str] = Field(None, max_length=12)
 
 
 class AnalyzeBody(BaseModel):
@@ -58,6 +59,7 @@ class AnalyzeBody(BaseModel):
 
 class AnalyzeDetailedBody(BaseModel):
     underlying: str = Field(..., min_length=1, max_length=32)
+    strike_overrides: Optional[Dict[str, Any]] = None
 
 
 class ConfirmEntryBody(BaseModel):
@@ -65,10 +67,19 @@ class ConfirmEntryBody(BaseModel):
     fills: Dict[str, float]
     lot_size: Optional[int] = None
     num_lots: Optional[int] = Field(1, ge=1)
+    declared_next_earnings_iso: Optional[str] = Field(None, max_length=12)
+    placed_orders_confirmed: bool = False
+
+
+class LogAdjustmentBody(BaseModel):
+    strikes: Dict[str, float]
+    fills: Dict[str, float]
+    notes: Optional[str] = Field(None, max_length=512)
 
 
 class CloseJournalBody(BaseModel):
     position_id: int = Field(..., ge=1)
+    squaring_confirmed: bool = False
     exit_reason: str = Field(..., min_length=2, max_length=64)
     emotion: str = Field(..., min_length=2, max_length=32)
     followed_rules: bool
@@ -81,15 +92,42 @@ class SaveBody(BaseModel):
     analysis: Dict[str, Any]
 
 
+def _feed_status(db: Session, user_id: int) -> Dict[str, Any]:
+    ice.iron_condor_migrations_v2()
+    st = ic.get_or_create_settings(db, user_id)
+    streak = int(st.get("ic_poll_fail_streak") or 0)
+    lo = st.get("ic_last_quote_success_at")
+    return {
+        "poll_fail_streak": streak,
+        "last_quote_success_at": lo.isoformat() if hasattr(lo, "isoformat") else (str(lo) if lo else None),
+        "data_feed_lost": streak >= 3,
+    }
+
+
 @router.get("/session")
-def session_state(user: User = Depends(_auth)) -> Dict[str, Any]:
+def session_state(db: Session = Depends(get_db), user: User = Depends(_auth)) -> Dict[str, Any]:
     ic.ensure_iron_condor_tables()
     now = mh._normalize_ist(None)
     poll = ice.is_iron_condor_poll_window_ist(now)
+    qf = _feed_status(db, int(user.id))
+    banner = None if poll else "Market closed — live leg polling paused. Last LTPs are stale until next session."
+    if poll and qf.get("data_feed_lost"):
+        banner = "Data feed lost after {} failed poll cycle(s). Last quote update: {} — do not trust stop/adjust triggers until fresh quotes return.".format(
+            qf.get("poll_fail_streak"),
+            qf.get("last_quote_success_at") or "unknown",
+        )
     return {
         "market_poll_active": poll,
-        "banner": None if poll else "Market closed — 5m leg polling paused.",
+        "banner": banner,
+        "quote_feed": qf,
+        "position_verify_prompt": ice.session_position_verify_needed(db, int(user.id)),
     }
+
+
+@router.post("/session/verify-positions-held")
+def verify_positions_held(db: Session = Depends(get_db), user: User = Depends(_auth)) -> Dict[str, Any]:
+    ice.mark_positions_verified_for_session(db, int(user.id))
+    return {"success": True}
 
 
 @router.get("/universe")
@@ -152,7 +190,14 @@ def post_checklist(
     sec = sector_for_symbol(und)
     if not sec:
         raise HTTPException(status_code=400, detail="Symbol not in approved universe.")
-    chk_out = chk.run_pre_entry_checklist(db, int(user.id), und, sec, body.new_capital_estimate)
+    chk_out = chk.run_pre_entry_checklist(
+        db,
+        int(user.id),
+        und,
+        sec,
+        body.new_capital_estimate,
+        body.declared_next_earnings_iso,
+    )
     return {"success": True, **chk_out}
 
 
@@ -163,8 +208,10 @@ def workspace(
 ) -> Dict[str, Any]:
     ic.ensure_iron_condor_tables()
     st = ic.get_or_create_settings(db, int(user.id))
-    positions = [_ser(r) for r in ic.list_positions(db, int(user.id))]
-    alerts = [_ser(r) for r in ic.recent_alerts(db, int(user.id), 80)]
+    raw_positions = ic.list_positions(db, int(user.id))
+    raw_alerts = ic.recent_alerts(db, int(user.id), 80)
+    positions = [_ser(r) for r in ice.merge_positions_peak_alert_severity(raw_positions, raw_alerts)]
+    alerts = [_ser(r) for r in raw_alerts]
     dash = ice.dashboard_summary(db, int(user.id))
     sess = mh._normalize_ist(None)
     return {
@@ -209,7 +256,9 @@ def analyze_detailed(
     user: User = Depends(_auth),
 ) -> Dict[str, Any]:
     try:
-        out = ice.analyze_iron_condor_detailed(body.underlying.strip(), db, int(user.id))
+        out = ice.analyze_iron_condor_detailed(
+            body.underlying.strip(), db, int(user.id), strike_overrides=body.strike_overrides
+        )
         return {"success": True, "analysis": out}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -226,12 +275,21 @@ def confirm_entry(
     req = {"sell_call_fill", "buy_call_fill", "sell_put_fill", "buy_put_fill"}
     if not req.issubset(set(body.fills.keys())):
         raise HTTPException(status_code=400, detail="fills must include all 4 legs.")
+    if not body.placed_orders_confirmed:
+        raise HTTPException(
+            status_code=400,
+            detail='Confirm checkbox: "I placed all four legs in Upstox."',
+        )
     try:
+        ana = dict(body.analysis)
+        if body.declared_next_earnings_iso:
+            ana["declared_next_earnings_iso"] = body.declared_next_earnings_iso.strip()
         pack: Dict[str, Any] = {
-            "analysis": body.analysis,
+            "analysis": ana,
             "fills": body.fills,
             "lot_size": body.lot_size,
             "num_lots": body.num_lots or 1,
+            "declared_next_earnings_iso": body.declared_next_earnings_iso.strip() if body.declared_next_earnings_iso else None,
         }
         pid = ice.confirm_entry_iron_condor(db, int(user.id), pack)
         if not pid:
@@ -297,6 +355,8 @@ def close_with_journal_route(
     db: Session = Depends(get_db),
     user: User = Depends(_auth),
 ) -> Dict[str, Any]:
+    if not body.squaring_confirmed:
+        raise HTTPException(status_code=400, detail='Confirm that you squared off in Upstox ("I exited in broker").')
     ok = ice.close_with_journal(db, int(user.id), body.model_dump())
     if not ok:
         raise HTTPException(status_code=404, detail="Position not found")
@@ -335,6 +395,28 @@ def trade_journal(limit: int = Query(80, ge=1, le=500), db: Session = Depends(ge
 @router.get("/dashboard-summary")
 def dashboard_summary(db: Session = Depends(get_db), user: User = Depends(_auth)) -> Dict[str, Any]:
     return {"success": True, **_ser(ice.dashboard_summary(db, int(user.id)))}
+
+
+@router.get("/equity-curve")
+def equity_curve(months: int = Query(36, ge=3, le=120), db: Session = Depends(get_db), user: User = Depends(_auth)) -> Dict[str, Any]:
+    return {"success": True, "points": ice.equity_curve_realized(db, int(user.id), limit_months=months)}
+
+
+@router.post("/positions/{position_id}/log-adjustment")
+def log_adjustment(
+    position_id: int,
+    body: LogAdjustmentBody,
+    db: Session = Depends(get_db),
+    user: User = Depends(_auth),
+) -> Dict[str, Any]:
+    try:
+        payload = {"strikes": body.strikes, "fills": body.fills, "notes": body.notes}
+        ok = ice.log_adjustment_iron_condor(db, int(user.id), position_id, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not ok:
+        raise HTTPException(status_code=404, detail="Position not found or not active")
+    return {"success": True}
 
 
 @router.get("/price-history/{position_id}")

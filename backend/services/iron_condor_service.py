@@ -189,34 +189,66 @@ def _pick_buy_wing(
     sell_strike: float,
     step: float,
     long_call: bool,
-) -> Optional[Tuple[float, float, float]]:
+) -> Optional[Tuple[float, float, float, List[str]]]:
     """
-    Buy wing 5 or 6 strikes from sell (using strike step spacing).
-    Prefer strike with highest OI in {5*step, 6*step} offset from sell_strike.
-    Returns (strike, ltp, oi) or None.
+    Buy wing ~5–6 strikes from sell; if exact step not on chain, widen search and pick
+    closest strike with best OI. Returns (strike, ltp, oi, warnings) or None.
     """
-    candidates: List[Tuple[float, float, float]] = []
-    for k in (5, 6):
-        target = sell_strike + k * step if long_call else sell_strike - k * step
-        best_sp = None
-        best_dist = None
-        for sp in sorted_strikes:
-            d = abs(sp - target)
-            if best_sp is None or d < best_dist:
-                best_sp, best_dist = sp, d
-        if best_sp is None or best_dist is None or best_dist > step * 0.51:
-            continue
-        row = agg.get(best_sp)
-        if not row:
-            continue
-        if long_call:
-            ltp, oi = row["ce_ltp"], row["ce_oi"]
-        else:
-            ltp, oi = row["pe_ltp"], row["pe_oi"]
-        candidates.append((best_sp, ltp, max(oi, 0.0)))
-    if not candidates:
+    if not sorted_strikes or step <= 0:
         return None
-    return max(candidates, key=lambda t: (t[2], t[0]))
+    warnings: List[str] = []
+
+    def collect_for_steps(ks: Tuple[int, ...], tol_mult: float, min_oi: float) -> List[Tuple[float, float, float, int]]:
+        out: List[Tuple[float, float, float, int]] = []
+        for k in ks:
+            target = sell_strike + k * step if long_call else sell_strike - k * step
+            best_sp = None
+            best_dist = None
+            for sp in sorted_strikes:
+                d = abs(sp - target)
+                if best_sp is None or d < best_dist:
+                    best_sp, best_dist = sp, d
+            if best_sp is None or best_dist is None or best_dist > step * tol_mult:
+                continue
+            row = agg.get(best_sp)
+            if not row:
+                continue
+            if long_call:
+                ltp, oi = row["ce_ltp"], row["ce_oi"]
+            else:
+                ltp, oi = row["pe_ltp"], row["pe_oi"]
+            m_oi = max(oi, 0.0)
+            if m_oi < min_oi:
+                continue
+            out.append((best_sp, float(ltp), m_oi, k))
+        return out
+
+    # Prefer ideal 5–6 step with tight chain fit; then widen; lower OI floor last.
+    plans: List[Tuple[Tuple[int, ...], float, float]] = [
+        ((5, 6), 0.55, 500.0),
+        ((5, 6), 0.55, 0.0),
+        ((4, 7), 1.05, 500.0),
+        ((4, 7), 1.05, 0.0),
+        ((3, 8), 1.55, 0.0),
+        ((2, 9), 2.05, 0.0),
+    ]
+    for i, (ks, tol, min_oi) in enumerate(plans):
+        bucket = collect_for_steps(ks, tol, min_oi)
+        if not bucket:
+            continue
+        if i == 1:
+            warnings.append(
+                "Ideal hedge distance had OI under 500 on chain snapshot; using strike with best available OI."
+            )
+        elif i >= 2:
+            warnings.append(
+                "Hedge strike mapped to closest available strike (spacing widened vs ideal 5–6 steps). "
+                "Confirm bid/ask and OI in Upstox."
+            )
+        best = max(bucket, key=lambda t: (t[2], -abs(t[3] - 5)))
+        return (best[0], best[1], best[2], warnings)
+
+    return None
 
 
 def classify_hedge_ratio(ratio: float) -> Tuple[str, str]:
@@ -387,8 +419,9 @@ def analyze_iron_condor(symbol: str, db: Session, user_id: int) -> Dict[str, Any
     if wing_ce is None or wing_pe is None:
         raise RuntimeError("Could not resolve long wings (5–6 strikes away).")
 
-    buy_ce_strike, prem_buy_ce, _ = wing_ce
-    buy_pe_strike, prem_buy_pe, _ = wing_pe
+    buy_ce_strike, prem_buy_ce, _, wcall = wing_ce
+    buy_pe_strike, prem_buy_pe, _, wput = wing_pe
+    strike_warnings = list(dict.fromkeys([x for x in (wcall + wput) if x]))
 
     sr = agg[sell_ce]
     pr = agg[sell_pe]
@@ -442,6 +475,7 @@ def analyze_iron_condor(symbol: str, db: Session, user_id: int) -> Dict[str, Any
         },
         "disclaimer": "Advisory only — no orders placed. Execute manually on Upstox.",
         "notes": expiry_note,
+        "strike_selection_warnings": strike_warnings,
     }
 
 

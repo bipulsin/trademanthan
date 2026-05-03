@@ -25,6 +25,272 @@ IST = pytz.timezone("Asia/Kolkata")
 
 LAST_POLL_CACHE: Dict[str, Any] = {"ts": 0.0, "spot_by_sym": {}, "ttl": 60.0}
 
+SEVERITY_RANK = {
+    "CRITICAL_RED": 0,
+    "RED": 1,
+    "ORANGE": 2,
+    "YELLOW": 3,
+    "GREEN": 4,
+    "BLUE": 5,
+    "INFO": 6,
+    "WARN": 7,
+}
+
+
+def _severity_rank(sev: Optional[str]) -> int:
+    if not sev:
+        return 99
+    return SEVERITY_RANK.get(str(sev).strip().upper(), 15)
+
+
+def merge_positions_peak_alert_severity(
+    positions: List[Dict[str, Any]], alerts: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """Attach card_peak_severity (worst unacked per position) for UI border color."""
+    by_pid: Dict[int, List[str]] = {}
+    for a in alerts or []:
+        if a.get("acknowledged"):
+            continue
+        pid = a.get("position_id")
+        if pid is None:
+            continue
+        try:
+            pi = int(pid)
+        except (TypeError, ValueError):
+            continue
+        by_pid.setdefault(pi, []).append(str(a.get("severity") or "INFO"))
+    out: List[Dict[str, Any]] = []
+    for p in positions:
+        d = dict(p)
+        sevs = by_pid.get(int(d.get("id") or 0), [])
+        if not sevs:
+            d["card_peak_severity"] = None
+            out.append(d)
+            continue
+        best = sorted(sevs, key=_severity_rank)[0]
+        d["card_peak_severity"] = best
+        out.append(d)
+    return out
+
+
+def equity_curve_realized(db: Session, user_id: int, limit_months: int = 36) -> List[Dict[str, Any]]:
+    """Cumulative realized P&amp;L from closed journal rows by calendar month."""
+    iron_condor_migrations_v2()
+    lim = max(1, min(limit_months, 120))
+    rows = db.execute(
+        text(
+            """
+            SELECT * FROM (
+              SELECT date_trunc('month', exit_date)::date AS m,
+                     COALESCE(SUM(realized_pnl_rupees), 0)::float AS s
+              FROM iron_condor_trade_journal
+              WHERE user_id = :uid AND realized_pnl_rupees IS NOT NULL
+              GROUP BY 1
+              ORDER BY 1 DESC
+              LIMIT :lim
+            ) q ORDER BY 1 ASC
+            """
+        ),
+        {"uid": user_id, "lim": lim},
+    ).fetchall()
+    cum = 0.0
+    pts: List[Dict[str, Any]] = []
+    for m, s in rows or []:
+        cum += float(s or 0)
+        pts.append({"month": str(m) if m else None, "month_pnl": float(s or 0), "cumulative": round(cum, 2)})
+    return pts
+
+
+def _update_quote_feed_streak(db: Session, user_id: int, cycle_had_any_quote_ok: bool) -> Dict[str, Any]:
+    """Track consecutive poll cycles with no successful option quote refresh."""
+    iron_condor_migrations_v2()
+    st = ic.get_or_create_settings(db, user_id)
+    streak = int(st.get("ic_poll_fail_streak") or 0)
+    if cycle_had_any_quote_ok:
+        streak = 0
+        db.execute(
+            text(
+                """
+                UPDATE iron_condor_user_settings SET
+                  ic_poll_fail_streak = 0,
+                  ic_last_quote_success_at = CURRENT_TIMESTAMP
+                WHERE user_id = :u
+                """
+            ),
+            {"u": user_id},
+        )
+    else:
+        streak += 1
+        db.execute(
+            text("UPDATE iron_condor_user_settings SET ic_poll_fail_streak = :s WHERE user_id = :u"),
+            {"s": streak, "u": user_id},
+        )
+    db.commit()
+    st2 = ic.get_or_create_settings(db, user_id)
+    last_ok = st2.get("ic_last_quote_success_at")
+    last_ok_s = last_ok.isoformat() if hasattr(last_ok, "isoformat") else (str(last_ok) if last_ok else None)
+    return {
+        "poll_fail_streak": streak,
+        "last_quote_success_at": last_ok_s,
+        "data_feed_lost": streak >= 3,
+    }
+
+
+def mark_positions_verified_for_session(db: Session, user_id: int) -> None:
+    iron_condor_migrations_v2()
+    db.execute(
+        text(
+            """
+            UPDATE iron_condor_user_settings
+            SET ic_position_verify_date = CAST(:d AS DATE)
+            WHERE user_id = :u
+            """
+        ),
+        {"u": user_id, "d": str(datetime.now(IST).date())},
+    )
+    db.commit()
+
+
+def session_position_verify_needed(db: Session, user_id: int) -> bool:
+    """True on first market window of the day when user still has open condors."""
+    iron_condor_migrations_v2()
+    if not is_iron_condor_poll_window_ist():
+        return False
+    n = db.execute(
+        text(
+            """
+            SELECT COUNT(*) FROM iron_condor_position
+            WHERE user_id=:u AND UPPER(status) IN ('ACTIVE','OPEN','ADJUSTED')
+            """
+        ),
+        {"u": user_id},
+    ).scalar()
+    if not int(n or 0):
+        return False
+    st = ic.get_or_create_settings(db, user_id)
+    vd = st.get("ic_position_verify_date")
+    today = datetime.now(IST).date()
+    if hasattr(vd, "date"):
+        vd = vd.date()
+    if vd is None:
+        return True
+    return vd != today
+
+
+def log_adjustment_iron_condor(db: Session, user_id: int, position_id: int, payload: Dict[str, Any]) -> bool:
+    """After manual roll: new strikes + marks; recompute thresholds (advisory)."""
+    iron_condor_migrations_v2()
+    row = db.execute(
+        text("SELECT * FROM iron_condor_position WHERE id=:p AND user_id=:u LIMIT 1"),
+        {"p": position_id, "u": user_id},
+    ).mappings().first()
+    if not row:
+        return False
+    r = dict(row)
+    if str(r.get("status") or "").upper() not in ("ACTIVE", "OPEN", "ADJUSTED"):
+        return False
+
+    st_in = payload.get("strikes") or {}
+    fl = payload.get("fills") or {}
+    need_st = {"sell_call", "buy_call", "sell_put", "buy_put"}
+    need_fl = {"sell_call_fill", "buy_call_fill", "sell_put_fill", "buy_put_fill"}
+    if not need_st.issubset(st_in) or not need_fl.issubset(fl):
+        raise ValueError("strikes and fills must include all four legs.")
+
+    st = {k: float(st_in[k]) for k in need_st}
+    scf = float(fl["sell_call_fill"])
+    bpf = float(fl["buy_call_fill"])
+    spf = float(fl["sell_put_fill"])
+    bpgf = float(fl["buy_put_fill"])
+
+    prem_c = scf + spf
+    hedge_c = bpf + bpgf
+    net_pts = prem_c - hedge_c
+    w_ce = float(st["buy_call"]) - float(st["sell_call"])
+    w_pe = float(st["sell_put"]) - float(st["buy_put"])
+    spread_width = w_ce + w_pe
+    max_loss_pts = max(0.0, spread_width - net_pts)
+    lot = int(r.get("lot_size") or 1)
+    nlot = int(r.get("num_lots") or 1)
+    qty_mult = float(lot * nlot)
+    max_loss_rupees = round(max_loss_pts * qty_mult, 2)
+    max_profit_rupees = round(max(0.0, net_pts) * qty_mult, 2)
+    stop_c = round(2.0 * scf, 4)
+    stop_p = round(2.0 * spf, 4)
+    adj_c = round(1.5 * scf, 4)
+    adj_p = round(1.5 * spf, 4)
+    profit_tgt = round(0.5 * max_profit_rupees, 2)
+    be_u = float(st["sell_call"]) + net_pts
+    be_l = float(st["sell_put"]) - net_pts
+    hedge_ratio = (hedge_c / prem_c) if prem_c > 0 else 0.0
+    gate, _ = ic.classify_hedge_ratio(hedge_ratio)
+
+    hist = r.get("adjustments_history")
+    if isinstance(hist, str):
+        try:
+            hist = json.loads(hist)
+        except Exception:
+            hist = []
+    if not isinstance(hist, list):
+        hist = []
+    hist.append(
+        {
+            "at": datetime.now(IST).isoformat(),
+            "notes": payload.get("notes"),
+            "strikes": st,
+            "fills": fl,
+        }
+    )
+
+    db.execute(
+        text(
+            """
+            UPDATE iron_condor_position SET
+              status = 'ADJUSTED',
+              sell_call_strike=:sce, buy_call_strike=:bce, sell_put_strike=:spe, buy_put_strike=:bpe,
+              premium_sell_call=:scf, premium_buy_call=:bcf, premium_sell_put=:spf, premium_buy_put=:bpf,
+              premium_collected=:pcol, hedge_cost=:hcost, hedge_ratio=:hrat, hedge_gate=:hg,
+              sell_call_entry_fill=:scf, buy_call_entry_fill=:bcf, sell_put_entry_fill=:spf, buy_put_entry_fill=:bpf,
+              sell_call_current=:scf, buy_call_current=:bcf, sell_put_current=:spf, buy_put_current=:bpf,
+              net_credit_pts=:nc, max_profit_rupees=:maxp, max_loss_rupees=:maxl,
+              breakeven_lower=:bel, breakeven_upper=:beu,
+              stop_sl_call_px=:stc, stop_sl_put_px=:stp, adjust_call_px=:adc, adjust_put_px=:adp,
+              profit_target_rupees=:ptgt,
+              adjustments_history = CAST(:adj AS JSONB)
+            WHERE id=:pid AND user_id=:uid
+            """
+        ),
+        {
+            "sce": st["sell_call"],
+            "bce": st["buy_call"],
+            "spe": st["sell_put"],
+            "bpe": st["buy_put"],
+            "scf": scf,
+            "bcf": bpf,
+            "spf": spf,
+            "bpf": bpgf,
+            "pcol": prem_c,
+            "hcost": hedge_c,
+            "hrat": hedge_ratio,
+            "hg": gate,
+            "nc": round(net_pts, 6),
+            "maxp": max_profit_rupees,
+            "maxl": max_loss_rupees,
+            "bel": round(be_l, 4),
+            "beu": round(be_u, 4),
+            "stc": stop_c,
+            "stp": stop_p,
+            "adc": adj_c,
+            "adp": adj_p,
+            "ptgt": profit_tgt,
+            "adj": json.dumps(hist),
+            "pid": position_id,
+            "uid": user_id,
+        },
+    )
+    db.commit()
+    return True
+
 ALERT_KEYS = (
     ("ALERT_PROFIT_50", "GREEN"),
     ("ALERT_ADJUST_150", "ORANGE"),
@@ -115,7 +381,11 @@ def iron_condor_migrations_v2() -> None:
     ALTER TABLE iron_condor_position ADD COLUMN IF NOT EXISTS realized_pnl_rupees NUMERIC(18,2);
     ALTER TABLE iron_condor_position ADD COLUMN IF NOT EXISTS last_poll_at TIMESTAMPTZ;
     ALTER TABLE iron_condor_position ADD COLUMN IF NOT EXISTS position_health VARCHAR(32);
+    ALTER TABLE iron_condor_position ADD COLUMN IF NOT EXISTS next_earnings_estimate DATE;
     ALTER TABLE iron_condor_user_settings ADD COLUMN IF NOT EXISTS ic_last_vix_alert_level NUMERIC(10,4);
+    ALTER TABLE iron_condor_user_settings ADD COLUMN IF NOT EXISTS ic_poll_fail_streak INTEGER DEFAULT 0;
+    ALTER TABLE iron_condor_user_settings ADD COLUMN IF NOT EXISTS ic_last_quote_success_at TIMESTAMPTZ;
+    ALTER TABLE iron_condor_user_settings ADD COLUMN IF NOT EXISTS ic_position_verify_date DATE;
     """
 
     seeds = [
@@ -241,7 +511,9 @@ def enrich_leg(chain_strike_row: Dict[str, Any], ce: bool) -> Dict[str, Any]:
     }
 
 
-def analyze_iron_condor_detailed(symbol: str, db: Session, user_id: int) -> Dict[str, Any]:
+def analyze_iron_condor_detailed(
+    symbol: str, db: Session, user_id: int, strike_overrides: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     ic.ensure_iron_condor_tables()
     iron_condor_migrations_v2()
     core = ic.analyze_iron_condor(symbol, db, user_id)
@@ -270,7 +542,21 @@ def analyze_iron_condor_detailed(symbol: str, db: Session, user_id: int) -> Dict
         payload = chain.get("data") or chain
     strike_list = ic._extract_chain_strike_list(payload if isinstance(payload, dict) else {}) or []
 
-    strikes = core["strikes"]
+    strikes = dict(core["strikes"])
+    ov_warn = []
+    if strike_overrides:
+        for k in ("sell_call", "buy_call", "sell_put", "buy_put"):
+            v = strike_overrides.get(k)
+            if v is not None and str(v).strip() != "":
+                strikes[k] = float(v)
+        ov_warn.append("Strikes were overridden — quotes may be incomplete if not on chain; confirm in Upstox.")
+
+    need_sp = {
+        float(strikes["sell_call"]),
+        float(strikes["buy_call"]),
+        float(strikes["sell_put"]),
+        float(strikes["buy_put"]),
+    }
     agg_row = {}
     for sd in strike_list:
         if not isinstance(sd, dict):
@@ -278,12 +564,7 @@ def analyze_iron_condor_detailed(symbol: str, db: Session, user_id: int) -> Dict
         sp_raw = sd.get("strike_price")
         if sp_raw is None:
             continue
-        if float(sp_raw) in (
-            float(strikes["sell_call"]),
-            float(strikes["buy_call"]),
-            float(strikes["sell_put"]),
-            float(strikes["buy_put"]),
-        ):
+        if float(sp_raw) in need_sp:
             agg_row[float(sp_raw)] = sd
 
     def leg(sp: float, ce: bool) -> Dict[str, Any]:
@@ -300,8 +581,12 @@ def analyze_iron_condor_detailed(symbol: str, db: Session, user_id: int) -> Dict
     spe = leg(float(strikes["sell_put"]), False)
     bpe = leg(float(strikes["buy_put"]), False)
 
-    psc = core["premium_collected"]
-    phc = core["hedge_cost"]
+    if strike_overrides:
+        psc = float(sce.get("ltp") or 0.0) + float(spe.get("ltp") or 0.0)
+        phc = float(bce.get("ltp") or 0.0) + float(bpe.get("ltp") or 0.0)
+    else:
+        psc = float(core["premium_collected"])
+        phc = float(core["hedge_cost"])
     net_pts = float(psc) - float(phc)
     w_ce = float(strikes["buy_call"]) - float(strikes["sell_call"])
     w_pe = float(strikes["sell_put"]) - float(strikes["buy_put"])
@@ -317,12 +602,26 @@ def analyze_iron_condor_detailed(symbol: str, db: Session, user_id: int) -> Dict
         rr = round(net_pts / max_loss_pts, 4)
 
     core_out = dict(core)
+    core_out["strikes"] = strikes
+    core_out["premiums"] = {
+        "sell_call": float(sce.get("ltp") or 0.0),
+        "buy_call": float(bce.get("ltp") or 0.0),
+        "sell_put": float(spe.get("ltp") or 0.0),
+        "buy_put": float(bpe.get("ltp") or 0.0),
+    }
+    core_out["premium_collected"] = round(psc, 4)
+    core_out["hedge_cost"] = round(phc, 4)
+    core_out["hedge_ratio"] = round((phc / psc) if psc > 0 else 0.0, 4)
+    hg, hgm = ic.classify_hedge_ratio(float(core_out["hedge_ratio"]))
+    core_out["hedge_gate"], core_out["hedge_gate_message"] = hg, hgm
+
     core_out["legs_quote"] = {
         "sell_call": sce,
         "buy_call": bce,
         "sell_put": spe,
         "buy_put": bpe,
     }
+    gate_color = hg == "VALID" and "GREEN" or (hg == "WARN" and "YELLOW" or "RED")
     core_out["economics"] = {
         "lot_size": lot,
         "num_lots": 1,
@@ -335,9 +634,10 @@ def analyze_iron_condor_detailed(symbol: str, db: Session, user_id: int) -> Dict
         "breakeven_lower": round(be_l, 4),
         "breakeven_upper": round(be_u, 4),
         "risk_reward_net_to_max_loss": rr,
-        "hedge_gate_color": core.get("hedge_gate") == "VALID" and "GREEN" or (core.get("hedge_gate") == "WARN" and "YELLOW" or "RED"),
+        "hedge_gate_color": gate_color,
     }
     core_out["live"] = {"spot_ltp": core.get("spot"), "underlying_change_pct_today": pct_day}
+    core_out["strike_selection_warnings"] = list(dict.fromkeys((core.get("strike_selection_warnings") or []) + ov_warn))
     return core_out
 
 
@@ -387,6 +687,8 @@ def confirm_entry_iron_condor(db: Session, user_id: int, payload: Dict[str, Any]
     td = datetime.now(IST).date()
 
     ic_row = ana.get("position_sizing") or {}
+    ne_raw = payload.get("declared_next_earnings_iso") or ana.get("declared_next_earnings_iso")
+    next_earn = _parse_next_earnings_date(ne_raw) if ne_raw else None
     db.execute(
         text(
             """
@@ -402,7 +704,7 @@ def confirm_entry_iron_condor(db: Session, user_id: int, payload: Dict[str, Any]
                 sell_call_current, buy_call_current, sell_put_current, buy_put_current,
                 net_credit_pts, max_profit_rupees, max_loss_rupees, breakeven_lower, breakeven_upper,
                 stop_sl_call_px, stop_sl_put_px, adjust_call_px, adjust_put_px,
-                profit_target_rupees, adjustments_history
+                profit_target_rupees, adjustments_history, next_earnings_estimate
             ) VALUES (
                 :uid, :und, :sec, 'ACTIVE', :expd, :entd,
                 :matr, :sdist, :spot, :sint,
@@ -415,7 +717,7 @@ def confirm_entry_iron_condor(db: Session, user_id: int, payload: Dict[str, Any]
                 :scf, :bcf, :spf, :bpf,
                 :nc_pts, :maxp, :maxl, :bel, :beu,
                 :stc, :stp, :adc, :adp,
-                :ptgt, CAST(:adjh AS JSONB))
+                :ptgt, CAST(:adjh AS JSONB), CAST(:nee AS DATE))
             ON CONFLICT (user_id, underlying, expiry_date) DO UPDATE SET
                 status = 'ACTIVE',
                 entry_date = EXCLUDED.entry_date,
@@ -438,7 +740,8 @@ def confirm_entry_iron_condor(db: Session, user_id: int, payload: Dict[str, Any]
                 adjust_put_px = EXCLUDED.adjust_put_px,
                 profit_target_rupees = EXCLUDED.profit_target_rupees,
                 hedge_ratio = EXCLUDED.hedge_ratio,
-                hedge_gate = EXCLUDED.hedge_gate
+                hedge_gate = EXCLUDED.hedge_gate,
+                next_earnings_estimate = COALESCE(EXCLUDED.next_earnings_estimate, iron_condor_position.next_earnings_estimate)
             """
         ),
         {
@@ -482,6 +785,7 @@ def confirm_entry_iron_condor(db: Session, user_id: int, payload: Dict[str, Any]
             "adp": adj_p,
             "ptgt": profit_tgt,
             "adjh": "[]",
+            "nee": next_earn,
         },
     )
     db.commit()
@@ -521,6 +825,19 @@ def _insert_alert(db: Session, uid: int, pid: Optional[int], code: str, sev: str
     )
 
 
+def _parse_next_earnings_date(ne: Any) -> Optional[date]:
+    if ne is None:
+        return None
+    if isinstance(ne, datetime):
+        return ne.date()
+    if isinstance(ne, date):
+        return ne
+    try:
+        return datetime.strptime(str(ne)[:10], "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
 def alert_exists_recent(db: Session, uid: int, pid: Optional[int], rule: str, hours: float = 4.0) -> bool:
     if pid is None:
         q = db.execute(
@@ -547,11 +864,40 @@ def alert_exists_recent(db: Session, uid: int, pid: Optional[int], rule: str, ho
     return bool(q)
 
 
-def evaluate_active_position(db: Session, user_id: int, rowm: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Full alert suite for one ACTIVE-ish position."""
+def evaluate_active_position(db: Session, user_id: int, rowm: Dict[str, Any]) -> Dict[str, Any]:
+    """Full alert suite for one ACTIVE-ish position. Skip price-driven rules if quotes missing (stale feed)."""
     iron_condor_migrations_v2()
     pid = int(rowm["id"])
     uid = user_id
+    new_alerts: List[Dict[str, Any]] = []
+
+    def fire(code: str, sev: str, msg: str, pl: Dict[str, Any], hours_cooldown: float = 2.0) -> None:
+        if alert_exists_recent(db, uid, pid, code, hours=hours_cooldown):
+            return
+        _insert_alert(db, uid, pid, code, sev, msg, pl)
+        new_alerts.append({"rule_code": code, "severity": sev, "message": msg})
+
+    today = datetime.now(IST).date()
+    exp_raw = rowm["expiry_date"]
+    if isinstance(exp_raw, datetime):
+        exp = exp_raw.date()
+    elif isinstance(exp_raw, date):
+        exp = exp_raw
+    else:
+        exp = datetime.strptime(str(exp_raw)[:10], "%Y-%m-%d").date()
+    dte = (exp - today).days
+
+    ne_date = _parse_next_earnings_date(rowm.get("next_earnings_estimate"))
+    if ne_date is not None:
+        dd_e = (ne_date - today).days
+        if 0 < dd_e <= 5:
+            fire(
+                "ALERT_EARNINGS_NEAR",
+                "ORANGE",
+                "{}: Declared/tracked result date in {} day(s) — review risk.".format(rowm["underlying"], dd_e),
+                {"days": dd_e, "date": str(ne_date)},
+                hours_cooldown=18.0,
+            )
 
     strikes = {
         "sell_call": float(rowm["sell_call_strike"]),
@@ -561,7 +907,8 @@ def evaluate_active_position(db: Session, user_id: int, rowm: Dict[str, Any]) ->
     }
     qc = ic._fresh_chain_quotes(str(rowm["underlying"]), strikes)
     if not qc:
-        return []
+        db.commit()
+        return {"alerts": new_alerts, "quotes_refreshed": False}
 
     sc = float(qc["sc_ltp"])
     bc = float(qc["bc_ltp"])
@@ -583,12 +930,6 @@ def evaluate_active_position(db: Session, user_id: int, rowm: Dict[str, Any]) ->
 
     max_profit = float(rowm.get("max_profit_rupees") or 0)
     max_loss = float(rowm.get("max_loss_rupees") or 0)
-
-    today = datetime.now(IST).date()
-    exp = rowm["expiry_date"]
-    if hasattr(exp, "date"):
-        exp = exp.date()
-    dte = (exp - today).days
 
     health = "ON_TRACK"
     if esf > 0 and sc >= 2.0 * esf:
@@ -646,14 +987,6 @@ def evaluate_active_position(db: Session, user_id: int, rowm: Dict[str, Any]) ->
             "ex": json.dumps({"health": health}),
         },
     )
-
-    new_alerts: List[Dict[str, Any]] = []
-
-    def fire(code: str, sev: str, msg: str, pl: Dict[str, Any], hours_cooldown: float = 2.0) -> None:
-        if alert_exists_recent(db, uid, pid, code, hours=hours_cooldown):
-            return
-        _insert_alert(db, uid, pid, code, sev, msg, pl)
-        new_alerts.append({"rule_code": code, "severity": sev, "message": msg})
 
     if max_profit > 0 and mtm_rupees >= 0.5 * max_profit:
         pct = (mtm_rupees / max_profit * 100) if max_profit else 0
@@ -735,13 +1068,18 @@ def evaluate_active_position(db: Session, user_id: int, rowm: Dict[str, Any]) ->
         )
 
     db.commit()
-    return new_alerts
+    return {"alerts": new_alerts, "quotes_refreshed": True}
 
 
 def poll_user_iron_condors(db: Session, user_id: int) -> Dict[str, Any]:
     iron_condor_migrations_v2()
     if not is_iron_condor_poll_window_ist():
-        return {"market_open": False, "new_alerts": [], "positions_updated": 0}
+        return {
+            "market_open": False,
+            "new_alerts": [],
+            "positions_updated": 0,
+            "quote_feed": {"data_feed_lost": False, "poll_fail_streak": 0, "last_quote_success_at": None},
+        }
 
     rows = db.execute(
         text(
@@ -753,8 +1091,17 @@ def poll_user_iron_condors(db: Session, user_id: int) -> Dict[str, Any]:
         {"uid": user_id},
     ).mappings().all()
     all_new: List[Dict[str, Any]] = []
+    any_quotes_ok = False
     for r in rows:
-        all_new.extend(evaluate_active_position(db, user_id, dict(r)))
+        ev = evaluate_active_position(db, user_id, dict(r))
+        all_new.extend(ev.get("alerts") or [])
+        if ev.get("quotes_refreshed"):
+            any_quotes_ok = True
+
+    if not rows:
+        qf = _update_quote_feed_streak(db, user_id, True)
+    else:
+        qf = _update_quote_feed_streak(db, user_id, any_quotes_ok)
 
     # Global VIX spike (per user, once per cross)
     vix, _ = fetch_india_vix()
@@ -789,7 +1136,12 @@ def poll_user_iron_condors(db: Session, user_id: int) -> Dict[str, Any]:
         )
         db.commit()
 
-    return {"market_open": True, "new_alerts": all_new, "positions_updated": len(rows)}
+    return {
+        "market_open": True,
+        "new_alerts": all_new,
+        "positions_updated": len(rows),
+        "quote_feed": qf,
+    }
 
 
 def acknowledge_alert(db: Session, user_id: int, alert_id: int) -> bool:

@@ -17,7 +17,7 @@
     var err;
     for (var i = 0; i < paths.length; i++) {
       try {
-        var r = await fetch(API_BASE + paths[i], opts);
+        var r = await fetch(API_BASE + paths[i], opts || {});
         var j = r.ok ? await r.json() : null;
         if (r.ok) return j;
         err = paths[i] + " " + r.status;
@@ -37,7 +37,31 @@
     detailed: null,
     checklist: null,
     pollTimer: null,
+    pickerSymbols: [],
+    mtmSpark: [],
+    soundEpoch: 0,
   };
+
+  function bodyEl() {
+    return document.body;
+  }
+
+  function applySavedTheme() {
+    var lg = bodyEl().classList.contains("iron-c-page");
+    if (!lg) return;
+    var d = localStorage.getItem("ic_ui_theme") || "light";
+    bodyEl().setAttribute("data-theme", d);
+    var b = document.getElementById("icThemeFlip");
+    if (b) b.textContent = d === "dark" ? "Light" : "Dark";
+  }
+
+  function flipTheme() {
+    var cur = bodyEl().getAttribute("data-theme") || "light";
+    var nx = cur === "dark" ? "light" : "dark";
+    bodyEl().setAttribute("data-theme", nx);
+    localStorage.setItem("ic_ui_theme", nx);
+    applySavedTheme();
+  }
 
   function showPane(n) {
     document.querySelectorAll("[data-pane]").forEach(function (el) {
@@ -48,7 +72,17 @@
     });
   }
 
+  function skelBars(n) {
+    var h = "";
+    for (var i = 0; i < n; i++)
+      h += '<div class="ic-skel-row"><div class="ic-skel-bar"></div><div class="ic-skel-bar"></div><div class="ic-skel-bar"></div></div>';
+    return h;
+  }
+
   function playRedSound() {
+    var now = Date.now();
+    if (now - state.soundEpoch < 90000) return;
+    state.soundEpoch = now;
     try {
       var ctx = new (window.AudioContext || window.webkitAudioContext)();
       var o = ctx.createOscillator();
@@ -57,53 +91,56 @@
       g.connect(ctx.destination);
       o.frequency.value = 880;
       o.type = "sine";
-      g.gain.value = 0.05;
+      g.gain.value = 0.045;
       o.start();
       setTimeout(function () {
         o.stop();
       }, 180);
     } catch (_e) {}
+    try {
+      if (Notification.permission === "granted") new Notification("Iron Condor: critical advisory");
+      else if (Notification.permission !== "denied") Notification.requestPermission();
+    } catch (_e2) {}
   }
 
   function renderAlertsBar(alerts) {
     var host = document.getElementById("alertStack");
-    if (!host || !alerts || !alerts.length) {
+    if (!host) return;
+    if (!alerts || !alerts.length) {
       host.innerHTML = "";
       return;
     }
-    var html = alerts
+    host.innerHTML = alerts
       .filter(function (a) {
         return !a.acknowledged;
       })
       .slice(0, 15)
       .map(function (a) {
         var sev = a.severity || "default";
-        if (!a.severity && /STOP|CRITICAL/i.test(String(a.rule_code || a.alert_type || "")))
-          sev = "RED";
-        var cls = "ic-sev-" + (sev || "default");
+        if (!a.severity && /STOP|CRITICAL/i.test(String(a.rule_code || a.alert_type || ""))) sev = "RED";
+        var cls = "ic-alert-bar ic-sev-" + (sev || "default");
         var id = a.id;
         return (
-          '<div class="ic-alert-bar ' +
+          "<div class=\"" +
           cls +
-          '">' +
+          "\">" +
           "<span>" +
           esc(a.message || "") +
-          '</span><span style="opacity:0.85;font-weight:600;">' +
+          "</span><span class=\"ic-num\">" +
           esc(a.rule_code || a.alert_type || "") +
           "</span>" +
-          (id ? '<button type="button" class="ic-btn ic-btn-ghost" data-aid="' + id + '">Ack</button>' : "")
+          (id ? "<button type=\"button\" class=\"ic-btn-global\" data-aid=\"" + id + "\">Ack</button>" : "")
         );
       })
       .join("");
-    host.innerHTML = html;
     host.querySelectorAll("button[data-aid]").forEach(function (btn) {
       btn.onclick = function () {
         ackAlert(Number(btn.getAttribute("data-aid")));
       };
     });
     alerts.some(function (a) {
-      if (!a.severity) return String(a.rule_code || "").indexOf("STOP") >= 0;
-      return /^RED|CRITICAL/.test(String(a.severity || ""));
+      if (!a.acknowledged && /^RED|CRITICAL_RED/i.test(String(a.severity || ""))) return true;
+      return !a.acknowledged && /STOP|CRITICAL/i.test(String(a.rule_code || ""));
     }) && playRedSound();
   }
 
@@ -116,63 +153,111 @@
     refreshWorkspaceQuiet();
   }
 
+  function renderSessionTop(sess) {
+    var host = document.getElementById("sessionBannerHost");
+    host.innerHTML = "";
+    var line =
+      sess.market_poll_active
+        ? "Session · IST quotation window · polling on."
+        : String(sess.banner || "Market closed — polling paused.");
+
+    document.getElementById("sessionLine").textContent = line;
+
+    if (sess.banner && sess.market_poll_active) {
+      host.innerHTML = "<div class=\"ic-feed-banner\" role=\"status\">" + esc(sess.banner) + "</div>";
+    }
+
+    if (sess.position_verify_prompt && document.getElementById("verifyModal").getAttribute("data-show") !== "1") {
+      document.getElementById("verifyModal").setAttribute("data-show", "1");
+    }
+  }
+
   async function loadSessionLine() {
     try {
       var s = await fj(["/api/iron-condor/session", "/iron-condor/session"], { headers: authHeaders(), cache: "no-store" });
-      document.getElementById("sessionLine").textContent =
-        (s.market_poll_active ? "Session: IST market window (polling eligible)." : s.banner) || "";
+      renderSessionTop(s);
     } catch (_) {
       document.getElementById("sessionLine").textContent = "Session unavailable";
     }
   }
 
+  function filterPicker() {
+    var q = (document.getElementById("pickerSearch").value || "").trim().toUpperCase();
+    var tb = document.getElementById("pickerBody");
+    if (!state.pickerSymbols.length || !tb) return;
+    tb.innerHTML =
+      "<tr><td colspan=\"6\"><span class=\"ic-muted\">No matches.</span></td></tr>";
+    var found = [];
+    state.pickerSymbols.forEach(function (row) {
+      if (q && row.symbol.indexOf(q) < 0) return;
+      found.push(renderPickerRow(row));
+    });
+    if (found.length) tb.innerHTML = found.join("");
+    wirePicker(tb);
+  }
+
+  function renderPickerRow(row) {
+    var warn = row.active_position ? '<span class="ic-chip-warn ic-chip-pass">Dup</span>' : "";
+    var act = row.active_position ? "Yes" : "—";
+    return (
+      "<tr data-sym=\"" +
+      esc(row.symbol) +
+      "\">" +
+      "<td><strong class=\"ic-mono\">" +
+      esc(row.symbol) +
+      "</strong>" +
+      warn +
+      "</td>" +
+      "<td><span class=\"ic-chip-pass ic-chip-sector\">" +
+      esc(row.sector) +
+      "</span></td>" +
+      "<td class=\"ic-num ic-mono\">" +
+      (row.ltp != null ? Number(row.ltp).toFixed(2) : "—") +
+      "</td>" +
+      "<td class=\"ic-num\">" +
+      (row.change_pct_day != null ? Number(row.change_pct_day).toFixed(2) + "%" : "—") +
+      "</td>" +
+      "<td class=\"ic-num\">" +
+      esc(act) +
+      "</td>" +
+      "<td><button type=\"button\" class=\"ic-btn-global ic-btn-primary pickRow\">Analyze</button></td>" +
+      "</tr>"
+    );
+  }
+
+  function wirePicker(tb) {
+    tb.querySelectorAll("button.pickRow").forEach(function (b) {
+      b.onclick = function () {
+        var tr = b.closest("tr");
+        state.symbol = tr.getAttribute("data-sym") || "";
+        document.getElementById("gotoChecklistBtn").disabled = false;
+        tr.parentElement.querySelectorAll("tr").forEach(function (r) {
+          r.style.outline = "";
+        });
+        tr.style.outline = "3px solid #1f3864";
+      };
+    });
+  }
+
   async function loadPicker() {
     var tbody = document.getElementById("pickerBody");
-    tbody.innerHTML = "<tr><td colspan='6'>Loading…</td></tr>";
+    var sk = document.getElementById("pickerSkeletonHost");
+    sk.style.display = "block";
+    sk.innerHTML = skelBars(4);
+    tbody.innerHTML = "";
     try {
       var u = await fj(["/api/iron-condor/universe-with-quotes", "/iron-condor/universe-with-quotes"], {
         headers: authHeaders(),
         cache: "no-store",
       });
-      tbody.innerHTML = (u.symbols || [])
-        .map(function (row) {
-          var act = row.active_position ? "Yes" : "—";
-          var warn = row.active_position ? '<span class="ic-chip-warn">Active</span>' : "";
-          return (
-            "<tr data-sym=\"" +
-            esc(row.symbol) +
-            "\">" +
-            "<td><strong>" +
-            esc(row.symbol) +
-            "</strong>" +
-            warn +
-            "</td>" +
-            "<td><span class='ic-chip-pass'>" +
-            esc(row.sector) +
-            "</span></td>" +
-            "<td>" +
-            (row.ltp != null ? Number(row.ltp).toFixed(2) : "—") +
-            "</td>" +
-            "<td>" +
-            (row.change_pct_day != null ? Number(row.change_pct_day).toFixed(2) + "%" : "—") +
-            "</td>" +
-            "<td>" +
-            esc(act) +
-            "</td>" +
-            "<td><button type='button' class='ic-btn ic-btn-ghost pickRow'>Analyze</button></td>"
-          );
-        })
-        .join("");
-      tbody.querySelectorAll("button.pickRow").forEach(function (b) {
-        b.onclick = function () {
-          var tr = b.closest("tr");
-          state.symbol = tr.getAttribute("data-sym") || "";
-          document.getElementById("gotoChecklistBtn").disabled = false;
-          tr.style.outline = "2px solid #2563eb";
-        };
-      });
+      sk.style.display = "none";
+      state.pickerSymbols = u.symbols || [];
+      tbody.innerHTML = "";
+      filterPicker();
+      if (!tbody.querySelectorAll("tr[data-sym]").length) tbody.innerHTML = "<tr><td colspan=\"6\" class=\"ic-muted\">Universe unavailable.</td></tr>";
     } catch (e) {
-      tbody.innerHTML = "<tr><td colspan='6'>Failed: " + esc(e.message) + "</td></tr>";
+      sk.style.display = "none";
+      tbody.innerHTML = "<tr><td colspan=\"6\" class=\"ic-muted\">" + esc(e.message) + "</td></tr>";
     }
   }
 
@@ -185,224 +270,408 @@
 
   async function runChecklist() {
     if (!state.symbol) return;
+    document.getElementById("strikeOverrideBox").style.display = "none";
+    document.getElementById("strikeOverrideToggle").checked = false;
+    ["ovSc", "ovBc", "ovSp", "ovBp"].forEach(function (id) {
+      var el = document.getElementById(id);
+      el.disabled = true;
+      el.value = "";
+    });
+
     var capEst = Number(document.getElementById("icCapital").value) || 0;
     var pct = Number(document.getElementById("icSlots").value) >= 5 ? 3 : 5;
     var estimate = capEst > 0 ? (capEst * pct) / 100 : 0;
+
+    var ed = document.getElementById("icEarningsDate").value;
     var j = await fj(["/api/iron-condor/checklist", "/iron-condor/checklist"], {
       method: "POST",
       headers: authHeaders(),
-      body: JSON.stringify({ underlying: state.symbol, new_capital_estimate: estimate }),
+      body: JSON.stringify({
+        underlying: state.symbol,
+        new_capital_estimate: estimate,
+        declared_next_earnings_iso: ed || undefined,
+      }),
     }).catch(function (e) {
       throw e;
     });
     state.checklist = j;
+    state.detailed = null;
     var chips = j.chips || [];
     document.getElementById("checklistArea").innerHTML =
       chips
         .map(function (c) {
-          return "<div style='margin:6px 0'><span class='" + chipCls(c.status) + "'>" + esc(c.code) + " · " + esc(c.status) + "</span> " + esc(c.message) + "</div>";
+          return (
+            "<div style=\"margin:8px 0;line-height:1.45\"><span class=\"" +
+            chipCls(c.status) +
+            "\">" +
+            esc(c.code) +
+            " · " +
+            esc(c.status) +
+            "</span> · " +
+            esc(c.message) +
+            "</div>"
+          );
         })
-        .join("") || "—";
+        .join("") || "<span class=\"ic-muted\">—</span>";
 
-    document.getElementById("toStrikesBtn").disabled = !!(j.may_proceed_blocked);
+    document.getElementById("toStrikesBtn").disabled = !!j.may_proceed_blocked;
   }
 
   function fmtLeg(l) {
     if (!l) return "—";
     var bd = l.bid != null ? Number(l.bid).toFixed(2) : "—";
     var ak = l.ask != null ? Number(l.ask).toFixed(2) : "—";
-    return Number(l.ltp || 0).toFixed(2) + " (Bid/Ask: " + bd + "/" + ak + ")";
+    var oi = l.oi != null ? Math.round(l.oi) : "—";
+    return Number(l.ltp || 0).toFixed(2) + " (Bid/Ask " + bd + "/" + ak + "; OI " + oi + ")";
   }
 
-  async function analyzeDetailed() {
+  async function analyzeDetailed(overrideMap) {
     if (!state.symbol) throw new Error("No symbol");
-    var j = await fj(["/api/iron-condor/analyze-detailed", "/iron-condor/analyze-detailed"], {
-      method: "POST",
-      headers: authHeaders(),
-      body: JSON.stringify({ underlying: state.symbol }),
-    });
-    state.detailed = j.analysis;
-    var a = state.detailed;
-    var econ = a.economics || {};
-    var lq = a.legs_quote || {};
-    var hk = econ.hedge_gate_color === "GREEN" ? "#22c55e" : econ.hedge_gate_color === "YELLOW" ? "#eab308" : "#ef4444";
-    document.getElementById("strikeCard").innerHTML =
-      "<p><strong>" +
-      esc(a.underlying) +
-      "</strong> · Spot ₹" +
-      esc(a.live && a.live.spot_ltp) +
-      (a.live && a.live.underlying_change_pct_today != null ? " · Day " + a.live.underlying_change_pct_today + "%" : "") +
-      " · Sector " +
-      esc(a.sector) +
-      "</p>" +
-      "<p>Monthly ATR(14): ₹" +
-      esc(a.monthly_atr_14) +
-      " · Strike distance: ₹" +
-      esc(a.strike_distance) +
-      "</p>" +
-      "<hr style='border-color:#334155'/>" +
-      "<p><strong>SELL (short strangle)</strong></p>" +
-      "<p>Sell Call: " +
-      a.strikes.sell_call +
-      " CE @ " +
-      fmtLeg(lq.sell_call) +
-      "</p>" +
-      "<p>Sell Put: " +
-      a.strikes.sell_put +
-      " PE @ " +
-      fmtLeg(lq.sell_put) +
-      "</p>" +
-      "<p><strong>BUY (hedge)</strong></p>" +
-      "<p>Buy Call: " +
-      a.strikes.buy_call +
-      " CE @ " +
-      fmtLeg(lq.buy_call) +
-      " · OI max in 5–6 step range</p>" +
-      "<p>Buy Put: " +
-      a.strikes.buy_put +
-      " PE @ " +
-      fmtLeg(lq.buy_put) +
-      "</p>" +
-      "<p><strong>Economics (× lot qty)</strong></p>" +
-      "<p>Premium collected (pts): " +
-      esc(econ.premium_collected_pts) +
-      " · Hedge cost (pts): " +
-      esc(econ.hedge_cost_pts) +
-      " · Net credit (pts): " +
-      esc(econ.net_credit_pts) +
-      "</p>" +
-      "<p>Hedge ratio " +
-      Number(a.hedge_ratio).toFixed(2) +
-      " — <strong style='color:" +
-      hk +
-      "'>" +
-      esc(a.hedge_gate) +
-      "</strong></p>" +
-      "<p>Max profit est ₹" +
-      esc(econ.max_profit_rupees_est) +
-      " · Max loss est ₹" +
-      esc(econ.max_loss_rupees_est) +
-      "</p>" +
-      "<p>R:R proxy " +
-      (econ.risk_reward_net_to_max_loss != null ? econ.risk_reward_net_to_max_loss : "—") +
-      "</p>" +
-      "<p>Breakeven range: ₹" +
-      econ.breakeven_lower +
-      " ↔ ₹" +
-      econ.breakeven_upper +
-      "</p>";
+    var payload = { underlying: state.symbol };
+    if (overrideMap) payload.strike_overrides = overrideMap;
+    var host = document.getElementById("strikeCardSkeletonHost");
+    host.style.display = "block";
+    host.innerHTML = skelBars(4);
+    try {
+      var j = await fj(["/api/iron-condor/analyze-detailed", "/iron-condor/analyze-detailed"], {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify(payload),
+      });
+      host.style.display = "none";
+      state.detailed = j.analysis;
 
-    document.getElementById("fsc").value = a.premiums.sell_call || "";
-    document.getElementById("fbc").value = a.premiums.buy_call || "";
-    document.getElementById("fsp").value = a.premiums.sell_put || "";
-    document.getElementById("fbp").value = a.premiums.buy_put || "";
+      document.getElementById("strikeOverrideBox").style.display = "block";
+      syncOverrideInputs(false);
+
+      var a = state.detailed;
+      var econ = a.economics || {};
+      var lq = a.legs_quote || {};
+      var hk =
+        econ.hedge_gate_color === "GREEN" ? "#2e7d32" : econ.hedge_gate_color === "YELLOW" ? "#e65100" : "#c00000";
+      var warns = (a.strike_selection_warnings || []).map(function (w) {
+        return "<li class=\"ic-muted\">" + esc(w) + "</li>";
+      });
+      var wl = warns.length ? "<ul style=\"margin:8px 0 0;padding-left:20px;color:#e65100;\">" + warns.join("") + "</ul>" : "";
+
+      document.getElementById("strikeCard").innerHTML =
+        "<p><strong class=\"ic-mono\">" +
+        esc(a.underlying) +
+        "</strong> · Spot <span class=\"ic-num ic-mono\">₹" +
+        esc(a.live && a.live.spot_ltp) +
+        "</span>" +
+        (a.live && a.live.underlying_change_pct_today != null
+          ? " · Day <span class=\"ic-num\">" + esc(a.live.underlying_change_pct_today) + "%</span>"
+          : "") +
+        " · Sector " +
+        esc(a.sector) +
+        "</p>" +
+        "<p class=\"ic-num\">Monthly ATR(14): ₹<span class=\"ic-mono\">" +
+        esc(a.monthly_atr_14) +
+        "</span> · Strike gap: ₹<span class=\"ic-mono\">" +
+        esc(a.strike_distance) +
+        "</span></p>" +
+        wl +
+        "<hr style=\"border-color:var(--theme-border)\">" +
+        "<p style=\"margin:12px 0 6px;font-weight:700;\">SHORT strangle</p>" +
+        "<p><span class=\"ic-mono\">" +
+        a.strikes.sell_call +
+        " CE</span> @ <span class=\"ic-mono\">" +
+        fmtLeg(lq.sell_call) +
+        "</span></p>" +
+        "<p><span class=\"ic-mono\">" +
+        a.strikes.sell_put +
+        " PE</span> @ <span class=\"ic-mono\">" +
+        fmtLeg(lq.sell_put) +
+        "</span></p>" +
+        "<p style=\"margin:12px 0 6px;font-weight:700;\">HEDGE</p>" +
+        "<p><span class=\"ic-mono\">" +
+        a.strikes.buy_call +
+        " CE</span> @ <span class=\"ic-mono\">" +
+        fmtLeg(lq.buy_call) +
+        "</span></p>" +
+        "<p><span class=\"ic-mono\">" +
+        a.strikes.buy_put +
+        " PE</span> @ <span class=\"ic-mono\">" +
+        fmtLeg(lq.buy_put) +
+        "</span></p>" +
+        "<p style=\"margin:14px 0 6px;font-weight:700;\">Economics · lot qty</p>" +
+        "<p class=\"ic-num\"><span>Premium ₹pts</span> " +
+        esc(econ.premium_collected_pts) +
+        " · Hedge " +
+        esc(econ.hedge_cost_pts) +
+        " · Net " +
+        esc(econ.net_credit_pts) +
+        "</p>" +
+        "<p class=\"ic-num\"><span>Hedge ratio</span> " +
+        Number(a.hedge_ratio).toFixed(3) +
+        " · <strong style=\"color:" +
+        hk +
+        "\">" +
+        esc(a.hedge_gate) +
+        "</strong></p>" +
+        "<p class=\"ic-num\"><span>MPE ₹</span> " +
+        esc(econ.max_profit_rupees_est) +
+        " · Max loss ₹" +
+        esc(econ.max_loss_rupees_est) +
+        "</p>" +
+        "<p class=\"ic-num\">Breakevens ₹<span class=\"ic-mono\">" +
+        econ.breakeven_lower +
+        " ↔ " +
+        econ.breakeven_upper +
+        "</span></p>";
+
+      document.getElementById("fsc").value = a.premiums.sell_call || "";
+      document.getElementById("fbc").value = a.premiums.buy_call || "";
+      document.getElementById("fsp").value = a.premiums.sell_put || "";
+      document.getElementById("fbp").value = a.premiums.buy_put || "";
+
+      syncOverrideInputs(true);
+    } catch (e) {
+      host.style.display = "none";
+      throw e;
+    }
+  }
+
+  function syncOverrideInputs(fromAnalysis) {
+    var a = state.detailed;
+    if (!a || !fromAnalysis) return;
+    if (!document.getElementById("strikeOverrideToggle").checked) {
+      document.getElementById("ovSc").value = a.strikes.sell_call;
+      document.getElementById("ovBc").value = a.strikes.buy_call;
+      document.getElementById("ovSp").value = a.strikes.sell_put;
+      document.getElementById("ovBp").value = a.strikes.buy_put;
+    }
+  }
+
+  function strikeOverridePayload() {
+    if (!document.getElementById("strikeOverrideToggle").checked) return null;
+    return {
+      sell_call: Number(document.getElementById("ovSc").value),
+      buy_call: Number(document.getElementById("ovBc").value),
+      sell_put: Number(document.getElementById("ovSp").value),
+      buy_put: Number(document.getElementById("ovBp").value),
+    };
   }
 
   async function confirmEntrySave() {
     var a = state.detailed;
-    if (!a) return;
+    if (!a) return alert("Analyze strikes first.");
+    if (!document.getElementById("upstoxPlacedCk").checked) return alert('Check "I placed four orders in Upstox".');
     await fj(["/api/iron-condor/confirm-entry", "/iron-condor/confirm-entry"], {
       method: "POST",
       headers: authHeaders(),
       body: JSON.stringify({
         analysis: a,
+        placed_orders_confirmed: true,
         fills: {
           sell_call_fill: Number(document.getElementById("fsc").value),
           buy_call_fill: Number(document.getElementById("fbc").value),
           sell_put_fill: Number(document.getElementById("fsp").value),
           buy_put_fill: Number(document.getElementById("fbp").value),
         },
-        lot_size: (state.detailed && state.detailed.economics && state.detailed.economics.lot_size) || null,
+        lot_size: a.economics && a.economics.lot_size,
         num_lots: Number(document.getElementById("flots").value) || 1,
+        declared_next_earnings_iso: document.getElementById("icEarningsDate").value || undefined,
       }),
     });
     showPane(5);
     refreshWorkspaceQuiet();
-    alert("Stored as ACTIVE. Roll 4 legs on Upstox as advised.");
+    loadEquityCurve();
+    alert("Workbook ACTIVE. Maintain legs only through Upstox.");
+  }
+
+  function miniSpark(vals) {
+    if (!vals || vals.length < 2)
+      return "<svg class=\"ic-mini-spark\" viewBox=\"0 0 80 28\" xmlns=\"http://www.w3.org/2000/svg\"><text x=\"4\" y=\"16\" fill=\"currentColor\" font-size=\"10\">⋯</text></svg>";
+    var lo = Math.min.apply(null, vals);
+    var hi = Math.max.apply(null, vals);
+    if (hi === lo) hi = lo + 1;
+    var pts = [];
+    for (var i = 0; i < vals.length; i++) {
+      var x = (i / Math.max(vals.length - 1, 1)) * 78 + 2;
+      var y = 24 - ((vals[i] - lo) / (hi - lo)) * 20;
+      pts.push(x + "," + y);
+    }
+    return (
+      '<svg class="ic-mini-spark" viewBox="0 0 80 28" xmlns="http://www.w3.org/2000/svg"><polyline fill="none" stroke="#1976d2" stroke-width="1.25" points="' +
+      pts.join(" ") +
+      '" /></svg>'
+    );
   }
 
   async function refreshWorkspaceQuiet() {
     var w = await fj(["/api/iron-condor/workspace", "/iron-condor/workspace"], { headers: authHeaders(), cache: "no-store" });
     renderAlertsBar(w.alerts || []);
 
+    try {
+      var adjBox = document.getElementById("adjustmentRecommendation");
+      adjBox.style.display = "none";
+      adjBox.innerHTML = "";
+      var hits = (w.alerts || []).filter(function (a) {
+        return String(a.rule_code || "").indexOf("ADJUST") >= 0 && !a.acknowledged && a.position_id;
+      });
+      if (hits.length) {
+        adjBox.style.display = "block";
+        adjBox.innerHTML =
+          "<strong>Adjustment window</strong><p class=\"ic-muted\">" +
+          esc(hits[0].message || "") +
+          '</p><p class="ic-muted">Only roll/strengthen the <em>profit</em> side; never add risk on the pain side without a deliberate plan. Log fills after resting orders.</p>';
+      }
+    } catch (_) {}
+
     var d = w.dashboard || {};
-    document.getElementById("kpiDash").innerHTML =
-      "<div>Capital ₹" +
-      Number(d.trading_capital || 0).toFixed(0) +
-      "</div>" +
-      "<div>Deployed ₹" +
-      Number(d.deployed_capital_rupees || 0).toFixed(0) +
-      " (" +
-      (d.deployed_pct != null ? d.deployed_pct + "%)" : "") +
-      "</div>" +
-      "<div>Open MTM est ₹" +
-      Number(d.open_mtm_sum_rupees || 0).toFixed(0) +
-      "</div>" +
-      "<div>This month ₹" +
-      Number(d.realized_month_rupees || 0).toFixed(0) +
-      "</div>" +
-      "<div>YTD ₹" +
-      Number(d.realized_year_rupees || 0).toFixed(0) +
-      "</div>" +
-      "<div>Avail est ₹" +
-      (d.capital_available_est != null ? Number(d.capital_available_est).toFixed(0) : "—") +
-      "</div>";
+
+    state.mtmSpark.push(Number(d.open_mtm_sum_rupees || 0));
+    if (state.mtmSpark.length > 28) state.mtmSpark.shift();
+
+    var kpis = [
+      { k: "Capital", v: Number(d.trading_capital || 0).toFixed(0), g: miniSpark([]) },
+      { k: "Deployed", v: Number(d.deployed_capital_rupees || 0).toFixed(0), g: miniSpark([]) },
+      { k: "Open MTM", v: Number(d.open_mtm_sum_rupees || 0).toFixed(0), g: miniSpark(state.mtmSpark) },
+      { k: "Mo realized", v: Number(d.realized_month_rupees || 0).toFixed(0), g: miniSpark([]) },
+      { k: "YTD realized", v: Number(d.realized_year_rupees || 0).toFixed(0), g: miniSpark([]) },
+      { k: "Avail ₹", v: d.capital_available_est != null ? Number(d.capital_available_est).toFixed(0) : "—", g: miniSpark([]) },
+    ];
+    document.getElementById("kpiDash").innerHTML = kpis
+      .map(function (t) {
+        return (
+          "<div class=\"ic-kpi-tile\"><div class=\"lbl\">" +
+          esc(t.k) +
+          "</div><div class=\"val ic-num\">" +
+          esc(t.v) +
+          "</div>" +
+          t.g +
+          "</div>"
+        );
+      })
+      .join("");
 
     var pos = (w.positions || []).filter(function (p) {
       return String(p.status).toUpperCase() !== "CLOSED";
     });
-    document.getElementById("posCards").innerHTML = pos.length
-      ? pos
-          .map(function (p) {
-            var h = esc(p.position_health || "");
-            return (
-              '<div class="ic-pos-card" data-h="' +
-              esc(p.position_health) +
-              '"><strong>' +
-              esc(p.underlying) +
-              "</strong> · " +
-              esc(p.sector) +
-              "<div class=\"ic-pos-detail\">DTE/expiry · " +
-              esc(p.expiry_date) +
-              "</div><div class=\"ic-pos-detail\">SL call ref ₹" +
-              esc(p.stop_sl_call_px) +
-              " · SL put ₹" +
-              esc(p.stop_sl_put_px) +
-              "</div><div class=\"ic-pos-detail\">Health: <strong>" +
-              h +
-              "</strong></div></div>"
-            );
-          })
-          .join("")
-      : "<span class=\"ic-muted\">No active positions.</span>";
+
+    document.getElementById("posEmptyHint").style.display = pos.length ? "none" : "block";
+    document.getElementById("posEmptyHint").innerHTML = pos.length
+      ? ""
+      : "<div class=\"ic-panel-empty\">No active condors.<br/><button type=\"button\" id=\"ctaEmptyIc\" class=\"ic-btn-global ic-btn-primary\">Start new Iron Condor</button></div>";
+
+    document.getElementById("posCards").innerHTML =
+      pos.length > 0
+        ? pos
+            .map(function (p) {
+              var pk = esc(p.card_peak_severity || "—");
+              return (
+                '<div class="ic-pos-card ic-num" style="border:1px solid var(--theme-border)" data-expand="0">' +
+                '<div class="ic-pos-head"><span class="ic-mono">' +
+                esc(p.underlying) +
+                '</span> <span class="ic-pos-sector">' +
+                esc(p.sector || "") +
+                '</span></div>' +
+                '<div class="ic-muted" style="margin-top:8px;font-size:0.8rem;line-height:1.45"><div>Expiry · <span class="ic-mono">' +
+                esc(p.expiry_date) +
+                '</span></div><div>Unread alert tier · <strong>' +
+                pk +
+                '</strong></div><div>Playbook chip · ' +
+                esc(p.position_health || "—") +
+                '</div></div>' +
+                '<div class="ic-pos-expand">' +
+                '<div class="ic-muted ic-mono" style="margin-top:10px;line-height:1.65;font-size:0.78rem;">' +
+                "SL ₹ " +
+                esc(p.stop_sl_call_px) +
+                " / " +
+                esc(p.stop_sl_put_px) +
+                "<br />Adj ₹ " +
+                esc(p.adjust_call_px) +
+                " / " +
+                esc(p.adjust_put_px) +
+                "<br />Profit target ₹" +
+                esc(p.profit_target_rupees) +
+                "</div></div></div>"
+              );
+            })
+            .join("")
+        : "";
+
+    wirePosExpand();
+    bindEmptyCta();
 
     var sel = document.getElementById("closePick");
-    sel.innerHTML =
+    var adj = document.getElementById("adjPick");
+    var opts =
       '<option value="">—</option>' +
-      (w.positions || [])
-        .filter(function (p) {
-          return String(p.status).toUpperCase() !== "CLOSED";
-        })
+      pos
         .map(function (p) {
-          return '<option value="' + esc(p.id) + '">' + esc(p.underlying + " #" + p.id) + "</option>";
+          return '<option value="' + esc(String(p.id)) + '">' + esc(p.underlying + " #" + p.id) + "</option>";
         })
         .join("");
+    sel.innerHTML = opts;
+    adj.innerHTML = opts;
+
+    return w;
+  }
+
+  function wirePosExpand() {
+    document.querySelectorAll(".ic-pos-card").forEach(function (c) {
+      c.onclick = function () {
+        var ex = c.getAttribute("data-expand") === "1";
+        c.setAttribute("data-expand", ex ? "0" : "1");
+        c.classList.toggle("ic-expanded", !ex);
+      };
+    });
+  }
+
+  function bindEmptyCta() {
+    var b = document.getElementById("ctaEmptyIc");
+    if (b) b.onclick = function () {showPane(1);};
+  }
+
+  async function loadEquityCurve() {
+    try {
+      var p = await fj(["/api/iron-condor/equity-curve", "/iron-condor/equity-curve"], { headers: authHeaders(), cache: "no-store" });
+      var pts = (p.points || []).map(function (x) {
+        return x.cumulative;
+      });
+      if (!pts.length) {
+        document.getElementById("equitySvg").innerHTML =
+          "<text x=\"8\" y=\"80\" fill=\"currentColor\">No closed trades yet</text>";
+        return;
+      }
+      var svg = document.getElementById("equitySvg");
+      svg.setAttribute("viewBox", "0 0 320 140");
+      var lo = Math.min.apply(null, pts);
+      var hi = Math.max.apply(null, pts);
+      if (hi === lo) hi = lo + Math.abs(lo || 1);
+      var d = "";
+      pts.forEach(function (v, i) {
+        var x = (i / Math.max(pts.length - 1, 1)) * 290 + 20;
+        var y = 120 - ((v - lo) / (hi - lo)) * 96;
+        d += i ? " L " + x + " " + y : "M " + x + " " + y;
+      });
+      svg.innerHTML =
+        '<rect width="320" height="140" fill="transparent" /><path d="' +
+        d +
+        '" fill="none" stroke="#1f3864" stroke-width="2" />';
+    } catch (_) {
+      document.getElementById("equitySvg").innerHTML = "";
+    }
   }
 
   async function pollTick() {
     try {
-      var w = await fj(["/api/iron-condor/session", "/iron-condor/session"], { headers: authHeaders(), cache: "no-store" });
-      if (!w.market_poll_active) return;
+      var s = await fj(["/api/iron-condor/session", "/iron-condor/session"], { headers: authHeaders(), cache: "no-store" });
+      renderSessionTop(s);
+      if (!s.market_poll_active) return;
       await fj(["/api/iron-condor/poll", "/iron-condor/poll"], { method: "POST", headers: authHeaders(), body: "{}" });
+      await loadSessionLine();
       await refreshWorkspaceQuiet();
+      loadEquityCurve();
     } catch (_e) {}
   }
 
   function startPolling() {
     if (state.pollTimer) clearInterval(state.pollTimer);
-    state.pollTimer = setInterval(function () {
-      pollTick();
-    }, 5 * 60 * 1000);
+    state.pollTimer = setInterval(pollTick, 5 * 60 * 1000);
     pollTick();
   }
 
@@ -412,8 +681,28 @@
     };
   });
 
+  document.getElementById("pickerSearch").addEventListener("input", filterPicker);
+
+  document.getElementById("strikeOverrideToggle").onchange = function () {
+    var on = document.getElementById("strikeOverrideToggle").checked;
+    ["ovSc", "ovBc", "ovSp", "ovBp"].forEach(function (id) {
+      document.getElementById(id).disabled = !on;
+    });
+    syncOverrideInputs(!!state.detailed);
+  };
+
+  document.getElementById("recalcStrikeBtn").onclick = async function () {
+    if (!state.symbol) return;
+    try {
+      await analyzeDetailed(strikeOverridePayload());
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+
   document.getElementById("gotoChecklistBtn").onclick = async function () {
     showPane(2);
+    document.getElementById("checklistArea").innerHTML = skelBars(3);
     try {
       await runChecklist();
     } catch (e) {
@@ -422,22 +711,22 @@
   };
 
   document.getElementById("toStrikesBtn").onclick = async function () {
-    if (
-      state.checklist &&
-      state.checklist.warnings_require_ack &&
-      !document.getElementById("warnAck").checked
-    ) {
-      alert("Check the acknowledgment box for WARN items.");
+    if (state.checklist && state.checklist.warnings_require_ack && !document.getElementById("warnAck").checked) {
+      alert("Acknowledge WARN items first.");
       return;
     }
     showPane(3);
-    document.getElementById("strikeCard").textContent = "Computing strikes…";
+    document.getElementById("strikeCard").textContent = "Computing…";
     try {
-      await analyzeDetailed();
+      await analyzeDetailed(null);
     } catch (e) {
       document.getElementById("strikeCard").textContent = "Error: " + e.message;
     }
   };
+
+  document.getElementById("btnNewIc").onclick = function () {showPane(1);};
+
+  document.getElementById("icThemeFlip").onclick = flipTheme;
 
   document.getElementById("back1").onclick = function () {
     showPane(1);
@@ -446,6 +735,17 @@
     showPane(2);
   };
   document.getElementById("toConfirmBtn").onclick = function () {
+    try {
+      if (document.getElementById("strikeOverrideToggle").checked) {
+        var ems = strikeOverridePayload();
+        if (
+          ![ems.sell_call, ems.buy_call, ems.sell_put, ems.buy_put].every(function (x) {
+            return Number.isFinite(x) && x > 0;
+          })
+        )
+          return alert("Override strikes incomplete.");
+      }
+    } catch (_) {}
     showPane(4);
   };
   document.getElementById("back3").onclick = function () {
@@ -455,8 +755,22 @@
     try {
       await confirmEntrySave();
     } catch (e) {
-      alert(e.message);
+      alert(e.message || String(e));
     }
+  };
+
+  document.getElementById("verifyOkBtn").onclick = async function () {
+    await fj(["/api/iron-condor/session/verify-positions-held", "/iron-condor/session/verify-positions-held"], {
+      method: "POST",
+      headers: authHeaders(),
+      body: "{}",
+    }).catch(function () {});
+    document.getElementById("verifyModal").setAttribute("data-show", "0");
+    loadSessionLine();
+  };
+
+  document.getElementById("verifyDismissBtn").onclick = function () {
+    document.getElementById("verifyModal").setAttribute("data-show", "0");
   };
 
   document.getElementById("icSaveCap").onclick = async function () {
@@ -475,11 +789,15 @@
   document.getElementById("journalCloseBtn").onclick = async function () {
     var pid = Number(document.getElementById("closePick").value);
     if (!pid) return alert("Pick position.");
+    if (!document.getElementById("jxUpstoxOut").checked)
+      return alert("Confirm exits were done in Upstox before saving the journal.");
+
     await fj(["/api/iron-condor/close-with-journal", "/iron-condor/close-with-journal"], {
       method: "POST",
       headers: authHeaders(),
       body: JSON.stringify({
         position_id: pid,
+        squaring_confirmed: true,
         exit_reason: document.getElementById("jxReason").value,
         emotion: document.getElementById("jxEmo").value,
         followed_rules: document.getElementById("jxFollow").checked,
@@ -493,7 +811,36 @@
         },
       }),
     });
-    alert("Saved.");
+    alert("Closed + journal recorded.");
+    refreshWorkspaceQuiet();
+    loadEquityCurve();
+  };
+
+  document.getElementById("adjSubmitBtn").onclick = async function () {
+    var pid = Number(document.getElementById("adjPick").value);
+    if (!pid) return alert("Pick row.");
+    await fj(["/api/iron-condor/positions/" + pid + "/log-adjustment", "/iron-condor/positions/" + pid + "/log-adjustment"], {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        strikes: {
+          sell_call: Number(document.getElementById("aSc").value),
+          buy_call: Number(document.getElementById("aBc").value),
+          sell_put: Number(document.getElementById("aSp").value),
+          buy_put: Number(document.getElementById("aBp").value),
+        },
+        fills: {
+          sell_call_fill: Number(document.getElementById("afSc").value),
+          buy_call_fill: Number(document.getElementById("afBc").value),
+          sell_put_fill: Number(document.getElementById("afSp").value),
+          buy_put_fill: Number(document.getElementById("afBp").value),
+        },
+        notes: document.getElementById("adjNotes").value || null,
+      }),
+    }).catch(function (e) {
+      alert(e.message || "");
+    });
+    alert("Adjustment stored.");
     refreshWorkspaceQuiet();
   };
 
@@ -505,9 +852,11 @@
     })
     .catch(function () {})
     .finally(function () {
+      applySavedTheme();
       loadSessionLine();
       loadPicker();
       refreshWorkspaceQuiet();
+      loadEquityCurve();
       startPolling();
       showPane(1);
     });

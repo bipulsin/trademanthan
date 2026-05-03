@@ -68,11 +68,32 @@ def fetch_gap_check(eq_key: str) -> Dict[str, Any]:
         return _chip("WARN", "GAP_MOVE", f"Gap check error: {e}", {})
 
 
-def fetch_earnings_chip(symbol: str) -> Dict[str, Any]:
+def fetch_earnings_chip(symbol: str, declared_next_earnings_iso: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Optional user-declared next result date from checklist POST (manual truth).
+    If absent: WARN (automated feed not wired). If within 25 days: FAIL.
+    """
+    if declared_next_earnings_iso:
+        try:
+            d = datetime.strptime(str(declared_next_earnings_iso).strip()[:10], "%Y-%m-%d").date()
+        except ValueError:
+            return _chip("WARN", "EARNINGS_25D", "Invalid earnings date format; use YYYY-MM-DD.", {})
+        today = datetime.now(IST).date()
+        days = (d - today).days
+        if days < 0:
+            return _chip("PASS", "EARNINGS_25D", "Declared result date is in the past — verify if already announced.", {"date": str(d)})
+        if days <= 25:
+            return _chip(
+                "FAIL",
+                "EARNINGS_25D",
+                f"Declared next result ~{days} day(s) away (≤25). Avoid new short-vol entries.",
+                {"days": days, "date": str(d)},
+            )
+        return _chip("PASS", "EARNINGS_25D", f"Declared next result ~{days} day(s) out (>25).", {"days": days, "date": str(d)})
     return _chip(
         "WARN",
         "EARNINGS_25D",
-        "Automated NSE earnings date not wired — verify next result manually (avoid new entry if earnings ≤25 days).",
+        "Enter optional next known result date to enforce the 25-day rule; otherwise verify manually.",
         {"symbol": symbol, "automated": False},
     )
 
@@ -250,7 +271,14 @@ def active_same_symbol_chip(db: Session, user_id: int, symbol: str) -> Dict[str,
     return _chip("PASS", "ACTIVE_SAME_STOCK", "No active position on this stock.", {})
 
 
-def run_pre_entry_checklist(db: Session, user_id: int, symbol: str, sector: str, new_capital_estimate: float) -> Dict[str, Any]:
+def run_pre_entry_checklist(
+    db: Session,
+    user_id: int,
+    symbol: str,
+    sector: str,
+    new_capital_estimate: float,
+    declared_next_earnings_iso: Optional[str] = None,
+) -> Dict[str, Any]:
     api_sym = option_chain_underlying(symbol)
     eq_key = vwap_service.get_instrument_key(api_sym)
     chips: List[Dict[str, Any]] = []
@@ -270,7 +298,7 @@ def run_pre_entry_checklist(db: Session, user_id: int, symbol: str, sector: str,
         chips.append(_chip("WARN", "EQUITY", "No equity key for underlying.", {"symbol": api_sym}))
 
     chips.append(active_same_symbol_chip(db, user_id, symbol))
-    chips.append(fetch_earnings_chip(symbol))
+    chips.append(fetch_earnings_chip(symbol, declared_next_earnings_iso))
     chips.append(iv_rank_proxy_chip(symbol))
     chips.append(macro_event_chip(db))
     chips.append(sector_concentration_chip(db, user_id, sector))

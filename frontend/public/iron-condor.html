@@ -9,44 +9,10 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
   <link rel="stylesheet" href="left-menu.css?v=3.22" />
   <link rel="stylesheet" href="theme.css?v=1.3" />
+  <link rel="stylesheet" href="iron-condor.css?v=1" />
   <link rel="stylesheet" href="settings.css" />
-  <style>
-    .ic-shell { padding: 10px 14px 40px; max-width: 1100px; margin: 0 auto; font-size: 0.88rem; }
-    .ic-banner-stack { position: sticky; top: 0; z-index: 50; max-height: 180px; overflow-y: auto; margin-bottom: 10px; }
-    .ic-alert-bar { padding: 8px 10px; margin-bottom: 4px; border-radius: 8px; font-weight: 600; border: 1px solid rgba(255,255,255,0.08); display: flex; justify-content: space-between; gap: 8px; align-items: center; flex-wrap: wrap; }
-    .ic-sev-GREEN { background: #052e16; color: #86efac; border-color: #166534; }
-    .ic-sev-BLUE { background: #172554; color: #93c5fd; border-color: #1d4ed8; }
-    .ic-sev-YELLOW { background: #422006; color: #fde047; border-color: #a16207; }
-    .ic-sev-ORANGE { background: #431407; color: #fdba74; border-color: #c2410c; }
-    .ic-sev-RED { background: #450a0a; color: #fecaca; border-color: #b91c1c; }
-    .ic-sev-CRITICAL_RED { background: #1f0004; color: #ff8585; border-color: #7f1d1d; }
-    .ic-sev-default { background: #1e293b; color: #e2e8f0; }
-    .ic-steps { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
-    .ic-step-pill { padding: 4px 10px; border-radius: 999px; background: #334155; color: #94a3b8; font-weight: 600; cursor: pointer; border: none; font-size: 0.82rem; }
-    .ic-step-pill[data-active="1"] { background: #2563eb; color: #fff; }
-    .ic-card { background: var(--theme-card); border: 1px solid var(--theme-border,#334155); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
-    .ic-muted { color: var(--theme-muted,#94a3b8); font-size: 0.82rem; }
-    .ic-btn { padding: 7px 12px; border-radius: 8px; border: none; font-weight: 700; cursor: pointer; background: #2563eb; color: #fff; font-size: 0.82rem; }
-    .ic-btn[disabled] { opacity: 0.45; cursor: not-allowed; }
-    .ic-btn-ghost { background: #475569; }
-    table.ic-t { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
-    table.ic-t th, table.ic-t td { padding: 6px 4px; border-bottom: 1px solid var(--theme-border,#1e293b); text-align: left; }
-    .ic-chip-pass { background: #14532d; color: #bbf7d0; padding: 2px 8px; border-radius: 6px; font-size: 0.74rem; font-weight: 700; margin-right: 4px; }
-    .ic-chip-fail { background: #450a0a; color: #fecaca; padding: 2px 8px; border-radius: 6px; font-size: 0.74rem; font-weight: 700; margin-right: 4px; }
-    .ic-chip-warn { background: #422006; color: #fde68a; padding: 2px 8px; border-radius: 6px; font-size: 0.74rem; font-weight: 700; margin-right: 4px; }
-    .ic-chip-info { background: #1e3a8a; color: #dbeafe; padding: 2px 8px; border-radius: 6px; font-size: 0.74rem; font-weight: 700; margin-right: 4px; }
-    .ic-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(200px,1fr)); gap: 8px; }
-    textarea.ic-ta { width: 100%; min-height: 56px; border-radius: 8px; padding: 8px; font-size: 0.86rem; }
-    .ic-pos-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill,minmax(280px,1fr)); }
-    .ic-pos-card { border: 1px solid var(--theme-border,#334155); border-radius: 10px; padding: 10px 12px; background: rgba(30,41,59,0.35); cursor: pointer; }
-    .ic-pos-card[data-h="STOP_LOSS"] { border-color: #b91c1c; }
-    .ic-pos-card[data-h="ADJUST_ZONE"] { border-color: #ea580c; }
-    .ic-pos-card[data-h="WATCH"] { border-color: #ca8a04; }
-    .ic-pos-card[data-h="PROFIT_TARGET"] { border-color: #2563eb; }
-    .ic-pos-detail { margin-top: 8px; font-size: 0.78rem; }
-  </style>
 </head>
-<body>
+<body class="theme-page iron-c-page" data-theme="light">
   <div class="mobile-title-bar">
     <button type="button" class="mobile-menu-toggle" id="mobileMenuToggle" aria-label="Open menu"><i class="fas fa-bars"></i></button>
     <div class="mobile-title-content">
@@ -54,90 +20,187 @@
       <span class="mobile-title">Iron Condor</span>
     </div>
   </div>
+
+  <div id="verifyModal" class="ic-verify-modal ic-modal" data-show="0" role="dialog" aria-modal="true" aria-labelledby="verifyTitle">
+    <div class="ic-modal-card">
+      <h3 id="verifyTitle" style="margin:0 0 8px;font-size:1rem;">Holdings check</h3>
+      <p class="ic-muted" style="margin:0 0 12px;">You have open advisory positions in the workbook. Confirm you still hold the four-legged structure in Upstox (or close it there first).</p>
+      <div style="display:flex;gap:8px;">
+        <button type="button" class="ic-btn-global ic-theme-toggle ic-btn-primary" id="verifyOkBtn">Positions still open in Upstox</button>
+        <button type="button" class="ic-btn-global" id="verifyDismissBtn">Dismiss for now</button>
+      </div>
+    </div>
+  </div>
+
   <div class="app-container app-with-left-menu">
     <div id="left-menu-container"></div>
     <main class="right-panel main-content-area ic-shell">
+      <div class="ic-toolbar">
+        <div class="ic-title-row">
+          <h1><i class="fas fa-layer-group"></i> Iron Condor Advisory</h1>
+          <p class="ic-muted ic-num" style="margin:4px 0 0;font-size:0.86rem;line-height:1.35;"><span id="sessionLine">—</span></p>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
+          <button type="button" class="ic-btn-global ic-theme-toggle ic-btn-primary" id="icThemeFlip" aria-label="Toggle theme">Dark</button>
+          <button type="button" class="ic-btn-global ic-btn-primary" id="btnNewIc" type="button">New Iron Condor</button>
+        </div>
+      </div>
+
+      <div id="sessionBannerHost"></div>
+
       <div class="ic-banner-stack" id="alertStack"></div>
-      <h1 style="font-size:1.15rem;margin:0 0 6px 0;display:flex;align-items:center;gap:8px;"><i class="fas fa-layer-group"></i> Iron Condor Advisory</h1>
-      <p class="ic-muted" id="sessionLine">—</p>
 
       <div class="ic-steps" id="stepNav">
-        <button type="button" class="ic-step-pill" data-step="1" data-active="1">1 · Pick stock</button>
+        <button type="button" class="ic-step-pill" data-step="1" data-active="1">1 · Universe</button>
         <button type="button" class="ic-step-pill" data-step="2">2 · Checklist</button>
         <button type="button" class="ic-step-pill" data-step="3">3 · Strikes</button>
-        <button type="button" class="ic-step-pill" data-step="4">4 · Confirm fills</button>
-        <button type="button" class="ic-step-pill" data-step="5">5 · Active</button>
+        <button type="button" class="ic-step-pill" data-step="4">4 · Fills</button>
+        <button type="button" class="ic-step-pill" data-step="5">5 · Book</button>
       </div>
 
       <section class="ic-card" data-pane="1">
-        <strong>Trading capital</strong>
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px;">
+          <strong>Trading capital</strong>
+          <span class="ic-muted" style="font-size:0.78rem;font-weight:600;">Advisory-only — platform never sends orders.</span>
+        </div>
         <div style="margin:8px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-          <input type="number" id="icCapital" class="theme-input-like" placeholder="₹ Total capital" style="padding:8px;border-radius:8px;max-width:200px;border:1px solid #475569;background:var(--theme-input-bg,#0f172a);color:inherit;" />
-          <input type="number" id="icSlots" value="5" min="1" max="10" style="padding:8px;width:80px;border-radius:8px;" />
-          <button type="button" class="ic-btn ic-btn-ghost" id="icSaveCap">Save</button>
+          <input type="number" id="icCapital" class="theme-input-like ic-num" placeholder="₹ Total capital" style="padding:8px;border-radius:8px;max-width:200px;border:1px solid var(--theme-border);background:var(--theme-card-alt);" />
+          <label class="ic-muted ic-num">Slots <input type="number" id="icSlots" value="5" min="1" max="10" style="width:76px;margin-left:4px;padding:8px;border-radius:8px;border:1px solid var(--theme-border);" /></label>
+          <button type="button" class="ic-btn-global" id="icSaveCap">Save</button>
         </div>
-        <p class="ic-muted">Universe picks (live LTP). Warns if active position exists on symbol.</p>
-        <table class="ic-t"><thead><tr><th>U</th><th>Sector</th><th class="num">LTP</th><th>% day</th><th>Active</th><th></th></tr></thead><tbody id="pickerBody"><tr><td colspan="6">Loading…</td></tr></tbody></table>
-        <button type="button" class="ic-btn" style="margin-top:10px" id="gotoChecklistBtn" disabled>Next: Run checklist →</button>
+        <label class="ic-muted" for="pickerSearch" style="display:block;margin-top:12px;margin-bottom:4px;font-size:0.8rem;font-weight:600;">Search universe</label>
+        <input type="search" id="pickerSearch" class="ic-picker-search theme-input-like" autocomplete="off" placeholder="Ticker e.g. SBIN …" />
+
+        <div id="pickerSkeletonHost" style="margin:12px 0;display:none;"></div>
+        <div class="ic-table-wrap">
+          <table class="ic-t theme-table-like" style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+            <thead>
+              <tr>
+                <th style="text-align:left;padding:8px 4px;border-bottom:1px solid var(--theme-border);">Underlying</th>
+                <th style="text-align:left;padding:8px 4px;border-bottom:1px solid var(--theme-border);">Sector</th>
+                <th style="text-align:right;padding:8px 4px;border-bottom:1px solid var(--theme-border);" class="ic-num ic-mono">LTP</th>
+                <th style="text-align:right;padding:8px 4px;border-bottom:1px solid var(--theme-border);" class="ic-num">Δ day</th>
+                <th style="text-align:left;padding:8px 4px;border-bottom:1px solid var(--theme-border);">Active?</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="pickerBody"><tr><td colspan="6" class="ic-muted">Loading…</td></tr></tbody>
+          </table>
+        </div>
+        <button type="button" class="ic-btn-global ic-btn-primary" style="margin-top:12px;padding:10px 16px;font-weight:700;border-radius:8px;border:none;" id="gotoChecklistBtn" disabled>Next: checklist →</button>
       </section>
 
-      <section class="ic-card" data-pane="2" style="display:none">
+      <section class="ic-card" data-pane="2" style="display:none;">
         <h2 style="margin:0 0 8px 0;font-size:1rem;">Pre-entry checklist</h2>
-        <div id="checklistArea" class="ic-muted">Select a symbol in step 1.</div>
-        <label style="display:flex;gap:8px;align-items:center;margin-top:12px;"><input type="checkbox" id="warnAck" /> I acknowledge WARN items and still want to review strikes.</label>
+        <label style="display:block;margin-bottom:10px;font-size:0.8rem;"><span class="ic-muted">Optional — next known quarterly result date (YYYY-MM-DD). Used for FAIL if ≤25 sessions away and for mid-trade alerts.</span></label>
+        <input type="date" id="icEarningsDate" class="theme-input-like ic-num" style="padding:8px;border-radius:8px;border:1px solid var(--theme-border);" />
+        <div id="checklistArea" class="ic-muted" style="margin-top:12px;">Select a symbol in step 1.</div>
+        <label style="display:flex;gap:8px;align-items:center;margin-top:12px;font-size:0.85rem;"><input type="checkbox" id="warnAck" /> I acknowledge WARN items and still want to review strikes.</label>
         <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
-          <button type="button" class="ic-btn ic-btn-ghost" id="back1">← Back</button>
-          <button type="button" class="ic-btn" id="toStrikesBtn" disabled>Analyze strikes →</button>
+          <button type="button" class="ic-btn-global" id="back1">← Back</button>
+          <button type="button" class="ic-btn-global ic-btn-primary" id="toStrikesBtn" disabled>Analyze strikes →</button>
         </div>
       </section>
 
-      <section class="ic-card" data-pane="3" style="display:none">
-        <h2 style="margin:0 0 8px;font-size:1rem;">ATR & strikes</h2>
+      <section class="ic-card" data-pane="3" style="display:none;">
+        <h2 style="margin:0 0 8px;font-size:1rem;">ATR &amp; strikes</h2>
+
+        <div id="strikeCardSkeletonHost" style="display:none;"></div>
+
+        <div id="strikeOverrideBox" style="margin:14px 0;padding:12px;border:1px dashed var(--theme-border);border-radius:10px;display:none;">
+          <label style="display:flex;align-items:center;gap:8px;font-weight:700;">
+            <input type="checkbox" id="strikeOverrideToggle" /> Override strikes from chain defaults
+          </label>
+          <p class="ic-muted" style="font-size:0.78rem;margin:6px 0 8px;">Pull fresh quotes server-side using your overrides. Hedge ratio may fall outside playbook — discretionary.</p>
+          <div class="ic-num" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-top:8px;">
+            <label>Sell CE <input id="ovSc" type="number" step="any" disabled class="ic-strike-field theme-input-like" /></label>
+            <label>Buy CE <input id="ovBc" type="number" step="any" disabled class="ic-strike-field theme-input-like" /></label>
+            <label>Sell PE <input id="ovSp" type="number" step="any" disabled class="ic-strike-field theme-input-like" /></label>
+            <label>Buy PE <input id="ovBp" type="number" step="any" disabled class="ic-strike-field theme-input-like" /></label>
+          </div>
+          <button type="button" class="ic-btn-global" style="margin-top:10px;" id="recalcStrikeBtn">Recalc quotes</button>
+        </div>
+
         <div id="strikeCard" class="ic-muted">Run checklist pass first.</div>
-        <div style="margin-top:12px;display:flex;gap:8px;"><button type="button" class="ic-btn ic-btn-ghost" id="back2">← Back</button><button type="button" class="ic-btn" id="toConfirmBtn">Proceed to entry →</button></div>
+
+        <div style="margin-top:12px;display:flex;gap:8px;"><button type="button" class="ic-btn-global" id="back2">← Back</button><button type="button" class="ic-btn-global ic-btn-primary" id="toConfirmBtn">Proceed to fills →</button></div>
       </section>
 
-      <section class="ic-card" data-pane="4" style="display:none">
-        <h2 style="margin:0 0 8px;font-size:1rem;">Confirm entry (manual)</h2>
-        <p class="ic-muted">Place 4 legs in Upstox, then enter your actual fills below.</p>
-        <div class="ic-grid">
-          <label>Sell CE fill <input type="number" step="0.05" id="fsc" /></label>
-          <label>Buy CE fill <input type="number" step="0.05" id="fbc" /></label>
-          <label>Sell PE fill <input type="number" step="0.05" id="fsp" /></label>
-          <label>Buy PE fill <input type="number" step="0.05" id="fbp" /></label>
-          <label>Lots <input type="number" id="flots" value="1" min="1" /></label>
+      <section class="ic-card" data-pane="4" style="display:none;">
+        <h2 style="margin:0 0 8px;font-size:1rem;">Confirm fills (manual in Upstox)</h2>
+        <p class="ic-muted">Place both shorts and hedges first. Enter fills you achieved (₹).</p>
+
+        <div class="ic-num ic-mono" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-top:10px;">
+          <label>Sell CE<br /><input type="number" step="0.05" id="fsc" class="theme-input-like" /></label>
+          <label>Buy CE<br /><input type="number" step="0.05" id="fbc" class="theme-input-like" /></label>
+          <label>Sell PE<br /><input type="number" step="0.05" id="fsp" class="theme-input-like" /></label>
+          <label>Buy PE<br /><input type="number" step="0.05" id="fbp" class="theme-input-like" /></label>
+          <label>Lots<br /><input type="number" id="flots" value="1" min="1" class="theme-input-like" /></label>
         </div>
-        <button type="button" class="ic-btn" style="margin-top:12px;" id="confirmEntryBtn">Save ACTIVE position</button>
-        <div style="margin-top:12px;display:flex;"><button type="button" class="ic-btn ic-btn-ghost" id="back3">← Back</button></div>
+
+        <label style="margin-top:14px;display:flex;gap:8px;font-size:0.88rem;"><input type="checkbox" id="upstoxPlacedCk" /><span>I have placed these <strong>four</strong> orders in Upstox.</span></label>
+
+        <button type="button" class="ic-btn-global ic-btn-primary" style="margin-top:14px;padding:11px 16px;font-weight:800;border-radius:8px;border:none;" id="confirmEntryBtn">Save ACTIVE workbook row</button>
+        <div style="margin-top:12px;"><button type="button" class="ic-btn-global" id="back3">← Back</button></div>
       </section>
 
-      <section class="ic-card" data-pane="5" style="display:none">
-        <h2 style="margin:0 0 8px;font-size:1rem;">Dashboard</h2>
-        <div class="ic-grid ic-muted" id="kpiDash">—</div>
-        <h3 style="margin:14px 0 6px;font-size:0.95rem;">Open positions</h3>
-        <div class="ic-pos-grid" id="posCards"></div>
-        <h3 style="margin:14px 0 6px;font-size:0.95rem;">Close + journal</h3>
-        <p class="ic-muted">Select position id:</p>
-        <select id="closePick" style="max-width:100%;margin-bottom:6px;"></select>
-        <div class="ic-grid">
-          <label>Exit Sell CE / Buy CE / Sell PE / Buy PE<input type="text" placeholder="comma CSV optional" id="exitCsvTip" /></label>
+      <section class="ic-card" data-pane="5" style="display:none;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:8px;">
+          <div>
+            <h2 style="margin:0;font-size:1rem;">Position book</h2>
+            <p class="ic-muted" style="margin:6px 0 0;font-size:0.8rem;">Highest-severity unread alert paints the card border.</p>
+          </div>
         </div>
-        <div class="ic-grid" style="margin-top:8px;">
-          <label>SC exit <input type="number" id="xsc"></label>
-          <label>BC exit <input type="number" id="xbc"></label>
-          <label>SP exit <input type="number" id="xsp"></label>
-          <label>BP exit <input type="number" id="xbp"></label>
+
+        <div id="kpiSkeletonHost" style="display:none;"></div>
+
+        <div class="ic-kpi-grid ic-num" id="kpiDash">—</div>
+
+        <div id="adjustmentRecommendation" style="display:none;margin-bottom:14px;"></div>
+
+        <div style="margin:18px 0 8px;">
+          <strong class="ic-num" style="font-size:0.85rem;text-transform:uppercase;letter-spacing:0.04em;">Realized equity (month-end)</strong>
+          <svg id="equitySvg" class="ic-equity-svg" role="img" aria-label="Cumulative realized equity"></svg>
         </div>
-        <label>Exit reason<select id="jxReason"><option>Profit Target</option><option>Stop Loss</option><option>Time Exit</option><option>Manual</option></select></label>
-        <label>Emotion<select id="jxEmo"><option>Disciplined</option><option>Confident</option><option>Anxious</option><option>Greedy</option><option>Fearful</option></select></label>
-        <label><input type="checkbox" id="jxFollow" checked /> Followed rulebook</label>
-        <label>Deviation<textarea id="jxDev" class="ic-ta"></textarea></label>
-        <label>Lesson<textarea id="jxLes" class="ic-ta"></textarea></label>
-        <button type="button" class="ic-btn" id="journalCloseBtn" style="margin-top:10px;">Mark CLOSED + save journal</button>
+
+        <h3 style="margin:16px 0 8px;font-size:0.95rem;">Active condors</h3>
+        <div id="posEmptyHint" style="margin-bottom:8px;display:none;"></div>
+        <div class="ic-pos-grid" style="display:grid;gap:11px;grid-template-columns:repeat(auto-fill,minmax(294px,1fr));" id="posCards"></div>
+
+        <div class="ic-card" style="margin-top:22px;background:var(--theme-card-alt);">
+          <h3 style="margin:0 0 8px;font-size:0.95rem;">Log adjustment (manual roll)</h3>
+          <p class="ic-muted" style="font-size:0.76rem;margin:0 0 12px;line-height:1.45;">Roll only the profitable / untested side per playbook — never add net short without acknowledging risk. Submit after resting orders.</p>
+          <label class="ic-num">Position<select id="adjPick" style="width:100%;margin-top:4px;"></select></label>
+          <div style="margin-top:10px;display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;" class="ic-mono">
+            <label>SC<input id="aSc" type="number" /></label><label>BC<input id="aBc" /></label><label>SP<input id="aSp" /></label><label>BP<input id="aBp" /></label>
+          </div>
+          <div style="margin-top:8px;display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;" class="ic-mono">
+            <label>Fill SC<input id="afSc" /></label><label>Fill BC<input id="afBc" /></label><label>Fill SP<input id="afSp" /></label><label>Fill BP<input id="afBp" /></label>
+          </div>
+          <textarea id="adjNotes" class="theme-input-like" placeholder="Adjustment notes…" rows="2" style="width:100%;margin-top:10px;border-radius:8px;padding:8px;"></textarea>
+          <button type="button" id="adjSubmitBtn" class="ic-btn-global ic-btn-primary" style="margin-top:12px;font-weight:800;">Confirm adjustment logged</button>
+        </div>
+
+        <div class="ic-card" style="margin-top:18px;">
+          <h3 style="margin:0 0 8px;font-size:0.95rem;">Square-off + journal</h3>
+          <label style="margin-top:4px;display:block;"><span class="ic-muted">Open position</span><select id="closePick"></select></label>
+          <div class="ic-num ic-mono" style="margin-top:10px;display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;">
+            <label>Exit SC<input id="xsc" /></label><label>Exit BC<input id="xbc" /></label><label>Exit SP<input id="xsp" /></label><label>Exit BP<input id="xbp" /></label>
+          </div>
+          <div style="margin-top:12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;font-size:0.86rem;">
+            <label>Exit reason<select id="jxReason"><option>Profit Target</option><option>Stop Loss</option><option>Time Exit</option><option>Manual</option></select></label>
+            <label>Emotion<select id="jxEmo"><option>Disciplined</option><option>Confident</option><option>Anxious</option><option>Greedy</option><option>Fearful</option></select></label>
+          </div>
+          <label style="margin-top:10px;display:flex;gap:8px;"><input id="jxFollow" type="checkbox" checked />Followed playbook</label>
+          <label class="ic-muted"><input id="jxUpstoxOut" type="checkbox" /><span>I closed or rolled all relevant legs <strong>in Upstox</strong> before logging here.</span></label>
+          <label>Deviation<textarea id="jxDev" rows="3" style="width:100%;border-radius:8px;padding:8px;border:1px solid var(--theme-border);"></textarea></label>
+          <label>Lesson<textarea id="jxLes" rows="3" style="width:100%;border-radius:8px;padding:8px;border:1px solid var(--theme-border);"></textarea></label>
+          <button type="button" id="journalCloseBtn" class="ic-btn-global ic-btn-primary" style="margin-top:12px;font-weight:800;border-radius:8px;padding:11px;">Mark CLOSED + save journal</button>
+        </div>
       </section>
     </main>
   </div>
   <script src="left-menu.js?v=3.22"></script>
-  <script src="iron-condor.js?v=3"></script>
+  <script src="iron-condor.js?v=4"></script>
 </body>
 </html>
