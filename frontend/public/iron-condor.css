@@ -304,10 +304,11 @@ body.theme-page.iron-c-page[data-theme="light"] .ic-step-pill {
   font-weight: 700;
 }
 
-.ic-mini-spark {
-  margin-top: 6px;
-  height: 24px;
+.ic-chart-shell {
+  position: relative;
   width: 100%;
+  margin-top: 8px;
+  min-height: 74px;
 }
 
 .ic-panel-empty {

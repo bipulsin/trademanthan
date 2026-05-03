@@ -8,6 +8,12 @@ Backend depends on Postgres (via `DATABASE_URL`) and authenticated user token (s
 
 Serve static UI: `frontend/public/iron-condor.html`.
 
+Charts use **Chart.js 4.x** loaded from jsDelivr (see page `<script>` tags). KPI tiles stay numeric‑dense; **open MTM** and **equity curve** canvases consume poll + `/equity-curve` JSON respectively.
+
+Checklist **IV_VOL** merges (a) dispersion of IV across today’s strikes near ATM — an IVR‑style snapshot proxy — with (b) **10‑day realised vol** percentile vs trailing history from daily spot candles (still not broker ATM IV strips for 252 sessions).
+
+Checklist **EARNINGS_25D** prefers a user-declared ISO date when provided; otherwise it calls NSE corporate announcements (`nse_corporate_client`) and heuristic text parsing (`iron_condor_earnings`). Parsing can miss or misfire — **always verify broker calendar** before risking capital.
+
 ## Primary HTTP surface
 
 - `GET /iron-condor/session` — market window, banner, quote-feed streak, holdings verify prompt  

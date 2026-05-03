@@ -40,6 +40,8 @@
     pickerSymbols: [],
     mtmSpark: [],
     soundEpoch: 0,
+    mtmChartJs: null,
+    equityChartJs: null,
   };
 
   function bodyEl() {
@@ -61,6 +63,75 @@
     bodyEl().setAttribute("data-theme", nx);
     localStorage.setItem("ic_ui_theme", nx);
     applySavedTheme();
+    renderMtmChart();
+    loadEquityCurve();
+  }
+
+  function chartPalette() {
+    var dark = bodyEl().getAttribute("data-theme") === "dark";
+    return {
+      text: dark ? "#e2e8f0" : "#1e293b",
+      grid: dark ? "rgba(148,163,184,0.2)" : "rgba(31,56,100,0.12)",
+      linePrimary: "#1f3864",
+      lineAccent: "#1976d2",
+      fillPrimary: dark ? "rgba(31,56,100,0.35)" : "rgba(31,56,100,0.12)",
+      fillAccent: dark ? "rgba(25,118,210,0.28)" : "rgba(25,118,210,0.14)",
+    };
+  }
+
+  function destroyChartJs(key) {
+    if (state[key]) {
+      try {
+        state[key].destroy();
+      } catch (_e) {}
+      state[key] = null;
+    }
+  }
+
+  function renderMtmChart() {
+    if (typeof Chart === "undefined") return;
+    destroyChartJs("mtmChartJs");
+    var cnv = document.getElementById("icMtmChart");
+    if (!cnv) return;
+    var raw = state.mtmSpark.slice();
+    if (raw.length < 2) raw = raw.length === 1 ? [raw[0], raw[0]] : [0, 0];
+    var pal = chartPalette();
+    var lbl = raw.map(function (_v, i) {
+      return String(i + 1);
+    });
+    state.mtmChartJs = new Chart(cnv.getContext("2d"), {
+      type: "line",
+      data: {
+        labels: lbl,
+        datasets: [
+          {
+            label: "Open MTM est",
+            data: raw,
+            borderColor: pal.lineAccent,
+            backgroundColor: pal.fillAccent,
+            fill: true,
+            tension: 0.35,
+            pointRadius: 0,
+            borderWidth: 2,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: {
+            ticks: { color: pal.text, font: { size: 10 }, maxTicksLimit: 8 },
+            grid: { color: pal.grid },
+          },
+          y: {
+            ticks: { color: pal.text, font: { size: 10 } },
+            grid: { color: pal.grid },
+          },
+        },
+      },
+    });
   }
 
   function showPane(n) {
@@ -481,25 +552,6 @@
     alert("Workbook ACTIVE. Maintain legs only through Upstox.");
   }
 
-  function miniSpark(vals) {
-    if (!vals || vals.length < 2)
-      return "<svg class=\"ic-mini-spark\" viewBox=\"0 0 80 28\" xmlns=\"http://www.w3.org/2000/svg\"><text x=\"4\" y=\"16\" fill=\"currentColor\" font-size=\"10\">⋯</text></svg>";
-    var lo = Math.min.apply(null, vals);
-    var hi = Math.max.apply(null, vals);
-    if (hi === lo) hi = lo + 1;
-    var pts = [];
-    for (var i = 0; i < vals.length; i++) {
-      var x = (i / Math.max(vals.length - 1, 1)) * 78 + 2;
-      var y = 24 - ((vals[i] - lo) / (hi - lo)) * 20;
-      pts.push(x + "," + y);
-    }
-    return (
-      '<svg class="ic-mini-spark" viewBox="0 0 80 28" xmlns="http://www.w3.org/2000/svg"><polyline fill="none" stroke="#1976d2" stroke-width="1.25" points="' +
-      pts.join(" ") +
-      '" /></svg>'
-    );
-  }
-
   async function refreshWorkspaceQuiet() {
     var w = await fj(["/api/iron-condor/workspace", "/iron-condor/workspace"], { headers: authHeaders(), cache: "no-store" });
     renderAlertsBar(w.alerts || []);
@@ -526,12 +578,12 @@
     if (state.mtmSpark.length > 28) state.mtmSpark.shift();
 
     var kpis = [
-      { k: "Capital", v: Number(d.trading_capital || 0).toFixed(0), g: miniSpark([]) },
-      { k: "Deployed", v: Number(d.deployed_capital_rupees || 0).toFixed(0), g: miniSpark([]) },
-      { k: "Open MTM", v: Number(d.open_mtm_sum_rupees || 0).toFixed(0), g: miniSpark(state.mtmSpark) },
-      { k: "Mo realized", v: Number(d.realized_month_rupees || 0).toFixed(0), g: miniSpark([]) },
-      { k: "YTD realized", v: Number(d.realized_year_rupees || 0).toFixed(0), g: miniSpark([]) },
-      { k: "Avail ₹", v: d.capital_available_est != null ? Number(d.capital_available_est).toFixed(0) : "—", g: miniSpark([]) },
+      { k: "Capital", v: Number(d.trading_capital || 0).toFixed(0) },
+      { k: "Deployed", v: Number(d.deployed_capital_rupees || 0).toFixed(0) },
+      { k: "Open MTM", v: Number(d.open_mtm_sum_rupees || 0).toFixed(0) },
+      { k: "Mo realized", v: Number(d.realized_month_rupees || 0).toFixed(0) },
+      { k: "YTD realized", v: Number(d.realized_year_rupees || 0).toFixed(0) },
+      { k: "Avail ₹", v: d.capital_available_est != null ? Number(d.capital_available_est).toFixed(0) : "—" },
     ];
     document.getElementById("kpiDash").innerHTML = kpis
       .map(function (t) {
@@ -540,12 +592,12 @@
           esc(t.k) +
           "</div><div class=\"val ic-num\">" +
           esc(t.v) +
-          "</div>" +
-          t.g +
-          "</div>"
+          "</div></div>"
         );
       })
       .join("");
+
+    renderMtmChart();
 
     var pos = (w.positions || []).filter(function (p) {
       return String(p.status).toUpperCase() !== "CLOSED";
@@ -560,9 +612,25 @@
       pos.length > 0
         ? pos
             .map(function (p) {
-              var pk = esc(p.card_peak_severity || "—");
+              var pkRaw = String(p.card_peak_severity || "");
+              var sevHex = {
+                CRITICAL_RED: "#620000",
+                RED: "#C00000",
+                ORANGE: "#E65100",
+                YELLOW: "#F9A825",
+                GREEN: "#2E7D32",
+                BLUE: "#1976D2",
+              };
+              var ac = sevHex[pkRaw.toUpperCase()] || "";
+              var border =
+                ac !== ""
+                  ? "border-left:6px solid " + ac + ";border-top:1px solid var(--theme-border);border-right:1px solid var(--theme-border);border-bottom:1px solid var(--theme-border)"
+                  : "border:1px solid var(--theme-border)";
+              var pk = esc(pkRaw || "—");
               return (
-                '<div class="ic-pos-card ic-num" style="border:1px solid var(--theme-border)" data-expand="0">' +
+                '<div class="ic-pos-card ic-num" style="' +
+                esc(border) +
+                '" data-expand="0">' +
                 '<div class="ic-pos-head"><span class="ic-mono">' +
                 esc(p.underlying) +
                 '</span> <span class="ic-pos-sector">' +
@@ -627,33 +695,62 @@
   }
 
   async function loadEquityCurve() {
+    destroyChartJs("equityChartJs");
     try {
+      if (typeof Chart === "undefined") return;
       var p = await fj(["/api/iron-condor/equity-curve", "/iron-condor/equity-curve"], { headers: authHeaders(), cache: "no-store" });
-      var pts = (p.points || []).map(function (x) {
-        return x.cumulative;
-      });
-      if (!pts.length) {
-        document.getElementById("equitySvg").innerHTML =
-          "<text x=\"8\" y=\"80\" fill=\"currentColor\">No closed trades yet</text>";
+      var raw = (p.points || []).slice();
+      var cnv = document.getElementById("icEquityChart");
+      if (!cnv || !cnv.getContext) return;
+      if (!raw.length) {
         return;
       }
-      var svg = document.getElementById("equitySvg");
-      svg.setAttribute("viewBox", "0 0 320 140");
-      var lo = Math.min.apply(null, pts);
-      var hi = Math.max.apply(null, pts);
-      if (hi === lo) hi = lo + Math.abs(lo || 1);
-      var d = "";
-      pts.forEach(function (v, i) {
-        var x = (i / Math.max(pts.length - 1, 1)) * 290 + 20;
-        var y = 120 - ((v - lo) / (hi - lo)) * 96;
-        d += i ? " L " + x + " " + y : "M " + x + " " + y;
+      var lbl = raw.map(function (row) {
+        var m = row.month || "";
+        return typeof m === "string" ? m.slice(0, 7) : String(m || "");
       });
-      svg.innerHTML =
-        '<rect width="320" height="140" fill="transparent" /><path d="' +
-        d +
-        '" fill="none" stroke="#1f3864" stroke-width="2" />';
-    } catch (_) {
-      document.getElementById("equitySvg").innerHTML = "";
+      var ys = raw.map(function (row) {
+        return Number(row.cumulative || 0);
+      });
+      var pal = chartPalette();
+      state.equityChartJs = new Chart(cnv.getContext("2d"), {
+        type: "line",
+        data: {
+          labels: lbl.length ? lbl : ys.map(function (_y, i) { return "" + i; }),
+          datasets: [
+            {
+              label: "Cumulative realized ₹",
+              data: ys,
+              borderColor: pal.linePrimary,
+              backgroundColor: pal.fillPrimary,
+              fill: true,
+              tension: 0.25,
+              borderWidth: 2,
+              pointRadius: 2,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { labels: { color: pal.text } },
+            tooltip: { mode: "index", intersect: false },
+          },
+          scales: {
+            x: {
+              ticks: { color: pal.text, maxRotation: 45, font: { size: 10 } },
+              grid: { color: pal.grid },
+            },
+            y: {
+              ticks: { color: pal.text, font: { size: 10 } },
+              grid: { color: pal.grid },
+            },
+          },
+        },
+      });
+    } catch (_e) {
+      destroyChartJs("equityChartJs");
     }
   }
 
@@ -842,6 +939,7 @@
     });
     alert("Adjustment stored.");
     refreshWorkspaceQuiet();
+    loadEquityCurve();
   };
 
   fj(["/api/iron-condor/workspace", "/iron-condor/workspace"], { headers: authHeaders() })

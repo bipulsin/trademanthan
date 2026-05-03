@@ -13,6 +13,8 @@ from sqlalchemy.orm import Session
 
 from backend.services.upstox_service import upstox_service as vwap_service
 from backend.services.iron_condor_service import option_chain_underlying, ensure_iron_condor_tables
+from backend.services.iron_condor_earnings import fetch_nse_results_hint
+from backend.services.iron_condor_iv_vol import iv_context_chip
 
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
@@ -70,72 +72,68 @@ def fetch_gap_check(eq_key: str) -> Dict[str, Any]:
 
 def fetch_earnings_chip(symbol: str, declared_next_earnings_iso: Optional[str] = None) -> Dict[str, Any]:
     """
-    Optional user-declared next result date from checklist POST (manual truth).
-    If absent: WARN (automated feed not wired). If within 25 days: FAIL.
+    Prefer user-declared result date when supplied.
+    Else best-effort NSE corporate-announcement scan for forward-looking filings text.
+    If within 25 calendar days → FAIL advisory entry.
     """
+    today = datetime.now(IST).date()
     if declared_next_earnings_iso:
         try:
             d = datetime.strptime(str(declared_next_earnings_iso).strip()[:10], "%Y-%m-%d").date()
         except ValueError:
             return _chip("WARN", "EARNINGS_25D", "Invalid earnings date format; use YYYY-MM-DD.", {})
-        today = datetime.now(IST).date()
-        days = (d - today).days
-        if days < 0:
-            return _chip("PASS", "EARNINGS_25D", "Declared result date is in the past — verify if already announced.", {"date": str(d)})
-        if days <= 25:
+        days_d = (d - today).days
+        if days_d < 0:
+            return _chip(
+                "PASS",
+                "EARNINGS_25D",
+                "Declared result date is in the past — verify corporate calendar.",
+                {"date": str(d), "source": "declared"},
+            )
+        if days_d <= 25:
             return _chip(
                 "FAIL",
                 "EARNINGS_25D",
-                f"Declared next result ~{days} day(s) away (≤25). Avoid new short-vol entries.",
-                {"days": days, "date": str(d)},
+                f"Declared result ~{days_d} calendar day(s) away (≤25). Avoid fresh short‑vol initiation.",
+                {"days": days_d, "date": str(d), "source": "declared"},
             )
-        return _chip("PASS", "EARNINGS_25D", f"Declared next result ~{days} day(s) out (>25).", {"days": days, "date": str(d)})
-    return _chip(
-        "WARN",
-        "EARNINGS_25D",
-        "Enter optional next known result date to enforce the 25-day rule; otherwise verify manually.",
-        {"symbol": symbol, "automated": False},
-    )
+        return _chip(
+            "PASS",
+            "EARNINGS_25D",
+            f"Declared result ~{days_d} calendar day(s) out (>25 horizon).",
+            {"days": days_d, "date": str(d), "source": "declared"},
+        )
 
-
-def iv_rank_proxy_chip(symbol: str) -> Dict[str, Any]:
-    api_sym = option_chain_underlying(symbol)
-    chain = vwap_service.get_option_chain(api_sym)
-    payload = chain
-    if isinstance(chain, dict) and chain.get("status") == "success":
-        payload = chain.get("data") or chain
-    strikes = payload.get("strikes") if isinstance(payload, dict) else None
-    if not strikes or not isinstance(strikes, list):
-        return _chip("WARN", "IVR", "IV rank unavailable (no IV on chain). Review manually.", {})
-    ivs: List[float] = []
-    for sd in strikes:
-        if not isinstance(sd, dict):
-            continue
-        for side in ("call_options", "put_options"):
-            node = sd.get(side)
-            od = node.get("market_data", node) if isinstance(node, dict) else None
-            if isinstance(od, dict):
-                iv = od.get("iv") or od.get("implied_volatility")
-                try:
-                    if iv is not None:
-                        ivs.append(float(iv))
-                except (TypeError, ValueError):
-                    pass
-    if len(ivs) < 10:
-        return _chip("WARN", "IVR", "Insufficient IV samples; discretionary IV review.", {"samples": len(ivs)})
-    lo, hi = min(ivs), max(ivs)
-    mid_iv = sorted(ivs)[len(ivs) // 2]
-    if hi <= lo:
-        return _chip("WARN", "IVR", "IV range flat on chain snapshot.", {})
-    ivr_pct = (mid_iv - lo) / (hi - lo + 1e-9) * 100.0
-    if ivr_pct < 30:
+    auto_date, rationale, diag = fetch_nse_results_hint(symbol)
+    detail = dict(diag)
+    detail["hint"] = rationale
+    if auto_date is None:
         return _chip(
             "WARN",
-            "IVR",
-            f"IV proxy rank is low ({ivr_pct:.0f}%).",
-            {"ivr_proxy": round(ivr_pct, 2)},
+            "EARNINGS_25D",
+            "Could not confidently resolve next earnings / board-results window ("
+            + (rationale[:180] + ("…" if len(rationale) > 180 else ""))
+            + "). Optionally enter manual YYYY‑MM‑DD.",
+            detail,
         )
-    return _chip("PASS", "IVR", f"IV proxy rank OK (~{ivr_pct:.0f}%).", {"ivr_proxy": round(ivr_pct, 2)})
+    gap = (auto_date - today).days
+    if gap <= 25:
+        merged = dict(detail)
+        merged.update({"date": str(auto_date), "calendar_days": gap, "source": "nse_text_parse"})
+        return _chip(
+            "FAIL",
+            "EARNINGS_25D",
+            f"Estimated result-adjacent event on {auto_date.isoformat()} (~{gap} day(s)). Rule blocks entry ≤25.",
+            merged,
+        )
+    merged = dict(detail)
+    merged.update({"date": str(auto_date), "calendar_days": gap, "source": "nse_text_parse"})
+    return _chip(
+        "PASS",
+        "EARNINGS_25D",
+        f"No parsed result-risk window ≤25 days. Next hinted corporate marker ≈ {auto_date.isoformat()}. Verify on NSE / broker.",
+        merged,
+    )
 
 
 def macro_event_chip(db: Session) -> Dict[str, Any]:
@@ -299,7 +297,7 @@ def run_pre_entry_checklist(
 
     chips.append(active_same_symbol_chip(db, user_id, symbol))
     chips.append(fetch_earnings_chip(symbol, declared_next_earnings_iso))
-    chips.append(iv_rank_proxy_chip(symbol))
+    chips.append(iv_context_chip(symbol))
     chips.append(macro_event_chip(db))
     chips.append(sector_concentration_chip(db, user_id, sector))
     chips.append(capital_chip(db, user_id, tc, new_capital_estimate))

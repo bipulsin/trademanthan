@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
   <link rel="stylesheet" href="left-menu.css?v=3.22" />
   <link rel="stylesheet" href="theme.css?v=1.3" />
-  <link rel="stylesheet" href="iron-condor.css?v=1" />
+  <link rel="stylesheet" href="iron-condor.css?v=2" />
   <link rel="stylesheet" href="settings.css" />
 </head>
 <body class="theme-page iron-c-page" data-theme="light">
@@ -156,11 +156,16 @@
 
         <div class="ic-kpi-grid ic-num" id="kpiDash">—</div>
 
+        <div style="margin:14px 0 6px;">
+          <strong class="ic-num" style="font-size:0.82rem;text-transform:uppercase;letter-spacing:0.04em;">Open MTM (poll trail)</strong>
+          <div class="ic-chart-shell"><canvas id="icMtmChart" height="74" aria-label="Open MTM samples"></canvas></div>
+        </div>
+
         <div id="adjustmentRecommendation" style="display:none;margin-bottom:14px;"></div>
 
         <div style="margin:18px 0 8px;">
-          <strong class="ic-num" style="font-size:0.85rem;text-transform:uppercase;letter-spacing:0.04em;">Realized equity (month-end)</strong>
-          <svg id="equitySvg" class="ic-equity-svg" role="img" aria-label="Cumulative realized equity"></svg>
+          <strong class="ic-num" style="font-size:0.85rem;text-transform:uppercase;letter-spacing:0.04em;">Realized equity (journal, Chart.js)</strong>
+          <div class="ic-chart-shell"><canvas id="icEquityChart" height="172" aria-label="Cumulative realized equity"></canvas></div>
         </div>
 
         <h3 style="margin:16px 0 8px;font-size:0.95rem;">Active condors</h3>
@@ -200,7 +205,8 @@
       </section>
     </main>
   </div>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" crossorigin="anonymous"></script>
   <script src="left-menu.js?v=3.22"></script>
-  <script src="iron-condor.js?v=4"></script>
+  <script src="iron-condor.js?v=5"></script>
 </body>
 </html>
