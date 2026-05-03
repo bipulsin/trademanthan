@@ -3,8 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <title>Iron Condor Advisory - TradeWithCTO</title>
+  <title>Iron Condor Advisory — TradeWithCTO</title>
   <link rel="icon" type="image/x-icon" href="favicon.ico?v=3" />
   <script src="auth-check.js?v=1"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
@@ -12,121 +11,133 @@
   <link rel="stylesheet" href="theme.css?v=1.3" />
   <link rel="stylesheet" href="settings.css" />
   <style>
-    .ic-main { padding: 12px 16px 32px; max-width: 1100px; margin: 0 auto; }
-    .ic-card {
-      background: var(--theme-card, rgba(255,255,255,0.95));
-      border: 1px solid var(--theme-border, #e2e8f0);
-      border-radius: 12px;
-      padding: 16px 18px;
-      margin-bottom: 16px;
-    }
-    .ic-card h2 { margin: 0 0 10px 0; font-size: 1.05rem; }
-    .ic-muted { color: var(--theme-muted, #64748b); font-size: 0.85rem; }
-    .ic-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-bottom: 10px; }
-    .ic-row label { display: flex; flex-direction: column; font-size: 0.82rem; gap: 4px; }
-    .ic-input, .ic-select {
-      padding: 8px 10px;
-      border-radius: 8px;
-      border: 1px solid var(--theme-border, #cbd5e1);
-      background: var(--theme-input-bg, #fff);
-      color: var(--theme-text, #0f172a);
-      min-width: 160px;
-    }
-    .ic-btn {
-      padding: 8px 14px;
-      border-radius: 8px;
-      border: none;
-      font-weight: 600;
-      cursor: pointer;
-      background: #2563eb;
-      color: #fff;
-    }
-    .ic-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .ic-btn-secondary { background: #475569; }
-    .ic-gate-valid { color: #15803d; font-weight: 700; }
-    .ic-gate-warn { color: #b45309; font-weight: 700; }
-    .ic-gate-block { color: #b91c1c; font-weight: 700; }
-    .ic-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; font-size: 0.88rem; }
-    .ic-pre { white-space: pre-wrap; font-size: 0.8rem; background: var(--theme-code-bg, #f1f5f9); padding: 10px; border-radius: 8px; overflow-x: auto; }
-    table.ic-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
-    table.ic-table th, table.ic-table td { border-bottom: 1px solid var(--theme-border, #e2e8f0); padding: 6px 4px; text-align: left; }
-    table.ic-table td.num { text-align: right; }
+    .ic-shell { padding: 10px 14px 40px; max-width: 1100px; margin: 0 auto; font-size: 0.88rem; }
+    .ic-banner-stack { position: sticky; top: 0; z-index: 50; max-height: 180px; overflow-y: auto; margin-bottom: 10px; }
+    .ic-alert-bar { padding: 8px 10px; margin-bottom: 4px; border-radius: 8px; font-weight: 600; border: 1px solid rgba(255,255,255,0.08); display: flex; justify-content: space-between; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .ic-sev-GREEN { background: #052e16; color: #86efac; border-color: #166534; }
+    .ic-sev-BLUE { background: #172554; color: #93c5fd; border-color: #1d4ed8; }
+    .ic-sev-YELLOW { background: #422006; color: #fde047; border-color: #a16207; }
+    .ic-sev-ORANGE { background: #431407; color: #fdba74; border-color: #c2410c; }
+    .ic-sev-RED { background: #450a0a; color: #fecaca; border-color: #b91c1c; }
+    .ic-sev-CRITICAL_RED { background: #1f0004; color: #ff8585; border-color: #7f1d1d; }
+    .ic-sev-default { background: #1e293b; color: #e2e8f0; }
+    .ic-steps { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+    .ic-step-pill { padding: 4px 10px; border-radius: 999px; background: #334155; color: #94a3b8; font-weight: 600; cursor: pointer; border: none; font-size: 0.82rem; }
+    .ic-step-pill[data-active="1"] { background: #2563eb; color: #fff; }
+    .ic-card { background: var(--theme-card); border: 1px solid var(--theme-border,#334155); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
+    .ic-muted { color: var(--theme-muted,#94a3b8); font-size: 0.82rem; }
+    .ic-btn { padding: 7px 12px; border-radius: 8px; border: none; font-weight: 700; cursor: pointer; background: #2563eb; color: #fff; font-size: 0.82rem; }
+    .ic-btn[disabled] { opacity: 0.45; cursor: not-allowed; }
+    .ic-btn-ghost { background: #475569; }
+    table.ic-t { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    table.ic-t th, table.ic-t td { padding: 6px 4px; border-bottom: 1px solid var(--theme-border,#1e293b); text-align: left; }
+    .ic-chip-pass { background: #14532d; color: #bbf7d0; padding: 2px 8px; border-radius: 6px; font-size: 0.74rem; font-weight: 700; margin-right: 4px; }
+    .ic-chip-fail { background: #450a0a; color: #fecaca; padding: 2px 8px; border-radius: 6px; font-size: 0.74rem; font-weight: 700; margin-right: 4px; }
+    .ic-chip-warn { background: #422006; color: #fde68a; padding: 2px 8px; border-radius: 6px; font-size: 0.74rem; font-weight: 700; margin-right: 4px; }
+    .ic-chip-info { background: #1e3a8a; color: #dbeafe; padding: 2px 8px; border-radius: 6px; font-size: 0.74rem; font-weight: 700; margin-right: 4px; }
+    .ic-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(200px,1fr)); gap: 8px; }
+    textarea.ic-ta { width: 100%; min-height: 56px; border-radius: 8px; padding: 8px; font-size: 0.86rem; }
+    .ic-pos-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill,minmax(280px,1fr)); }
+    .ic-pos-card { border: 1px solid var(--theme-border,#334155); border-radius: 10px; padding: 10px 12px; background: rgba(30,41,59,0.35); cursor: pointer; }
+    .ic-pos-card[data-h="STOP_LOSS"] { border-color: #b91c1c; }
+    .ic-pos-card[data-h="ADJUST_ZONE"] { border-color: #ea580c; }
+    .ic-pos-card[data-h="WATCH"] { border-color: #ca8a04; }
+    .ic-pos-card[data-h="PROFIT_TARGET"] { border-color: #2563eb; }
+    .ic-pos-detail { margin-top: 8px; font-size: 0.78rem; }
   </style>
 </head>
 <body>
   <div class="mobile-title-bar">
-    <button class="mobile-menu-toggle" id="mobileMenuToggle" type="button" aria-label="Open menu"><i class="fas fa-bars"></i></button>
+    <button type="button" class="mobile-menu-toggle" id="mobileMenuToggle" aria-label="Open menu"><i class="fas fa-bars"></i></button>
     <div class="mobile-title-content">
-      <img src="tradewithcto-logo.png" alt="TradeWithCTO" class="mobile-logo" />
-      <h1 class="mobile-title">Iron Condor</h1>
+      <img src="tradewithcto-logo.png" alt="Logo" class="mobile-logo" />
+      <span class="mobile-title">Iron Condor</span>
     </div>
   </div>
-
   <div class="app-container app-with-left-menu">
     <div id="left-menu-container"></div>
-    <main class="right-panel main-content-area ic-main">
-      <div class="ic-card">
-        <h2><i class="fas fa-layer-group"></i> Iron Condor Advisory</h2>
-        <p class="ic-muted">
-          Monthly Iron Condor on approved NIFTY large-caps — strike math from Monthly ATR(14) × 1.25, hedge-ratio check 25–35%, sizing rules.
-          <strong>No orders</strong>; execute manually on Upstox.
-        </p>
+    <main class="right-panel main-content-area ic-shell">
+      <div class="ic-banner-stack" id="alertStack"></div>
+      <h1 style="font-size:1.15rem;margin:0 0 6px 0;display:flex;align-items:center;gap:8px;"><i class="fas fa-layer-group"></i> Iron Condor Advisory</h1>
+      <p class="ic-muted" id="sessionLine">—</p>
+
+      <div class="ic-steps" id="stepNav">
+        <button type="button" class="ic-step-pill" data-step="1" data-active="1">1 · Pick stock</button>
+        <button type="button" class="ic-step-pill" data-step="2">2 · Checklist</button>
+        <button type="button" class="ic-step-pill" data-step="3">3 · Strikes</button>
+        <button type="button" class="ic-step-pill" data-step="4">4 · Confirm fills</button>
+        <button type="button" class="ic-step-pill" data-step="5">5 · Active</button>
       </div>
 
-      <div class="ic-card">
-        <h2>Your settings</h2>
-        <div class="ic-row">
-          <label>Total trading capital (₹)
-            <input type="number" id="icCapital" class="ic-input" min="0" step="1000" placeholder="e.g. 500000" />
-          </label>
-          <label>Target position slots (≥5 ⇒ 3% each; else 5% max)
-            <input type="number" id="icSlots" class="ic-input" min="1" max="10" value="5" />
-          </label>
-          <button type="button" class="ic-btn ic-btn-secondary" id="icSaveSettings">Save settings</button>
+      <section class="ic-card" data-pane="1">
+        <strong>Trading capital</strong>
+        <div style="margin:8px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+          <input type="number" id="icCapital" class="theme-input-like" placeholder="₹ Total capital" style="padding:8px;border-radius:8px;max-width:200px;border:1px solid #475569;background:var(--theme-input-bg,#0f172a);color:inherit;" />
+          <input type="number" id="icSlots" value="5" min="1" max="10" style="padding:8px;width:80px;border-radius:8px;" />
+          <button type="button" class="ic-btn ic-btn-ghost" id="icSaveCap">Save</button>
         </div>
-        <div class="ic-row">
-          <label>Optional: exit advisory at % of entry net credit (profit)
-            <input type="number" id="icPt" class="ic-input" min="0" max="100" step="1" placeholder="e.g. 50" />
-          </label>
-          <label>Optional: stop advisory at % of entry net (loss depth)
-            <input type="number" id="icSl" class="ic-input" min="0" max="300" step="5" placeholder="e.g. 150" />
-          </label>
-        </div>
-        <p class="ic-muted" id="icSettingsNote"></p>
-      </div>
+        <p class="ic-muted">Universe picks (live LTP). Warns if active position exists on symbol.</p>
+        <table class="ic-t"><thead><tr><th>U</th><th>Sector</th><th class="num">LTP</th><th>% day</th><th>Active</th><th></th></tr></thead><tbody id="pickerBody"><tr><td colspan="6">Loading…</td></tr></tbody></table>
+        <button type="button" class="ic-btn" style="margin-top:10px" id="gotoChecklistBtn" disabled>Next: Run checklist →</button>
+      </section>
 
-      <div class="ic-card">
-        <h2>Build strikes</h2>
-        <div class="ic-row">
-          <label>Underlying
-            <select id="icSymbol" class="ic-select"><option value="">Loading…</option></select>
-          </label>
-          <button type="button" class="ic-btn" id="icAnalyze">Analyze</button>
+      <section class="ic-card" data-pane="2" style="display:none">
+        <h2 style="margin:0 0 8px 0;font-size:1rem;">Pre-entry checklist</h2>
+        <div id="checklistArea" class="ic-muted">Select a symbol in step 1.</div>
+        <label style="display:flex;gap:8px;align-items:center;margin-top:12px;"><input type="checkbox" id="warnAck" /> I acknowledge WARN items and still want to review strikes.</label>
+        <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" class="ic-btn ic-btn-ghost" id="back1">← Back</button>
+          <button type="button" class="ic-btn" id="toStrikesBtn" disabled>Analyze strikes →</button>
         </div>
-        <div id="icAnalysis"></div>
-      </div>
+      </section>
 
-      <div class="ic-card">
-        <h2>Open positions</h2>
-        <p class="ic-muted">Refresh workspace after saving. Evaluate alerts pulls fresh option chain (mid estimate).</p>
-        <div class="ic-table-wrap" style="overflow-x:auto">
-          <table class="ic-table" id="icPosTable">
-            <thead>
-              <tr><th>U</th><th>Sector</th><th class="num">Short CE</th><th class="num">Long CE</th><th class="num">Short PE</th><th class="num">Long PE</th><th>Gate</th><th>Expiry</th><th></th></tr>
-            </thead>
-            <tbody id="icPosBody"><tr><td colspan="9">Loading…</td></tr></tbody>
-          </table>
+      <section class="ic-card" data-pane="3" style="display:none">
+        <h2 style="margin:0 0 8px;font-size:1rem;">ATR & strikes</h2>
+        <div id="strikeCard" class="ic-muted">Run checklist pass first.</div>
+        <div style="margin-top:12px;display:flex;gap:8px;"><button type="button" class="ic-btn ic-btn-ghost" id="back2">← Back</button><button type="button" class="ic-btn" id="toConfirmBtn">Proceed to entry →</button></div>
+      </section>
+
+      <section class="ic-card" data-pane="4" style="display:none">
+        <h2 style="margin:0 0 8px;font-size:1rem;">Confirm entry (manual)</h2>
+        <p class="ic-muted">Place 4 legs in Upstox, then enter your actual fills below.</p>
+        <div class="ic-grid">
+          <label>Sell CE fill <input type="number" step="0.05" id="fsc" /></label>
+          <label>Buy CE fill <input type="number" step="0.05" id="fbc" /></label>
+          <label>Sell PE fill <input type="number" step="0.05" id="fsp" /></label>
+          <label>Buy PE fill <input type="number" step="0.05" id="fbp" /></label>
+          <label>Lots <input type="number" id="flots" value="1" min="1" /></label>
         </div>
-      </div>
+        <button type="button" class="ic-btn" style="margin-top:12px;" id="confirmEntryBtn">Save ACTIVE position</button>
+        <div style="margin-top:12px;display:flex;"><button type="button" class="ic-btn ic-btn-ghost" id="back3">← Back</button></div>
+      </section>
 
-      <div class="ic-card">
-        <h2>Recent alerts</h2>
-        <div id="icAlerts" class="ic-muted">—</div>
-      </div>
+      <section class="ic-card" data-pane="5" style="display:none">
+        <h2 style="margin:0 0 8px;font-size:1rem;">Dashboard</h2>
+        <div class="ic-grid ic-muted" id="kpiDash">—</div>
+        <h3 style="margin:14px 0 6px;font-size:0.95rem;">Open positions</h3>
+        <div class="ic-pos-grid" id="posCards"></div>
+        <h3 style="margin:14px 0 6px;font-size:0.95rem;">Close + journal</h3>
+        <p class="ic-muted">Select position id:</p>
+        <select id="closePick" style="max-width:100%;margin-bottom:6px;"></select>
+        <div class="ic-grid">
+          <label>Exit Sell CE / Buy CE / Sell PE / Buy PE<input type="text" placeholder="comma CSV optional" id="exitCsvTip" /></label>
+        </div>
+        <div class="ic-grid" style="margin-top:8px;">
+          <label>SC exit <input type="number" id="xsc"></label>
+          <label>BC exit <input type="number" id="xbc"></label>
+          <label>SP exit <input type="number" id="xsp"></label>
+          <label>BP exit <input type="number" id="xbp"></label>
+        </div>
+        <label>Exit reason<select id="jxReason"><option>Profit Target</option><option>Stop Loss</option><option>Time Exit</option><option>Manual</option></select></label>
+        <label>Emotion<select id="jxEmo"><option>Disciplined</option><option>Confident</option><option>Anxious</option><option>Greedy</option><option>Fearful</option></select></label>
+        <label><input type="checkbox" id="jxFollow" checked /> Followed rulebook</label>
+        <label>Deviation<textarea id="jxDev" class="ic-ta"></textarea></label>
+        <label>Lesson<textarea id="jxLes" class="ic-ta"></textarea></label>
+        <button type="button" class="ic-btn" id="journalCloseBtn" style="margin-top:10px;">Mark CLOSED + save journal</button>
+      </section>
     </main>
   </div>
-
   <script src="left-menu.js?v=3.22"></script>
-  <script src="iron-condor.js?v=1"></script>
+  <script src="iron-condor.js?v=3"></script>
 </body>
 </html>

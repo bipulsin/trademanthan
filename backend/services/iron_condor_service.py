@@ -95,6 +95,12 @@ def ensure_iron_condor_tables() -> None:
             s = stmt.strip()
             if s:
                 conn.execute(text(s))
+    try:
+        from backend.services.iron_condor_extended import iron_condor_migrations_v2
+
+        iron_condor_migrations_v2()
+    except Exception as e:
+        logger.warning("iron_condor_extended migrations: %s", e)
 
 
 def _monthly_atr_wilder_14(monthly_rows: List[Dict[str, Any]]) -> Optional[float]:
@@ -302,7 +308,7 @@ def _open_sectors(db: Session, user_id: int) -> List[str]:
         text(
             """
             SELECT sector FROM iron_condor_position
-            WHERE user_id = :uid AND status = 'OPEN'
+            WHERE user_id = :uid AND UPPER(status) IN ('OPEN', 'ACTIVE', 'ADJUSTED')
             """
         ),
         {"uid": user_id},
@@ -458,7 +464,7 @@ def persist_position_from_analysis(db: Session, user_id: int, snapshot: Dict[str
                 premium_collected, hedge_cost, hedge_ratio, hedge_gate,
                 allocation_pct, suggested_capital_rupees
             ) VALUES (
-                :uid, :und, :sec, 'OPEN', :exp,
+                :uid, :und, :sec, 'ACTIVE', :exp,
                 :matr, :sdist, :spot, :sint,
                 :sce, :bce, :spe, :bpe,
                 :psce, :pbce, :pspe, :pbpe,
@@ -467,7 +473,7 @@ def persist_position_from_analysis(db: Session, user_id: int, snapshot: Dict[str
             )
             ON CONFLICT (user_id, underlying, expiry_date)
             DO UPDATE SET
-                status = 'OPEN',
+                status = 'ACTIVE',
                 monthly_atr = EXCLUDED.monthly_atr,
                 strike_distance = EXCLUDED.strike_distance,
                 spot_at_snapshot = EXCLUDED.spot_at_snapshot,
@@ -549,7 +555,7 @@ def close_position(db: Session, user_id: int, position_id: int) -> bool:
             """
             UPDATE iron_condor_position
             SET status = 'CLOSED', closed_at = CURRENT_TIMESTAMP
-            WHERE id = :pid AND user_id = :uid AND status = 'OPEN'
+            WHERE id = :pid AND user_id = :uid AND UPPER(status) IN ('OPEN','ACTIVE','ADJUSTED')
             """
         ),
         {"pid": position_id, "uid": user_id},
@@ -591,7 +597,7 @@ def evaluate_position_alerts(db: Session, user_id: int, position_id: int) -> Lis
     ).mappings().first()
     if not row:
         return []
-    if str(row.get("status")) != "OPEN":
+    if str(row.get("status") or "").upper() not in ("OPEN", "ACTIVE", "ADJUSTED"):
         return []
 
     st = {
