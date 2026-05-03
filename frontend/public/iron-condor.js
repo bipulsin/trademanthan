@@ -50,7 +50,12 @@
           continue;
         }
 
+        /* 200 + HTML on a non-/api/ path: SPA fallback or mis-proxy — keep a prior JSON/API error if we have one. */
         if (t0 === "<") {
+          if (paths[i].indexOf("/api/") !== 0) {
+            if (!lastErr) lastErr = icHtmlOrAuthMessage(r.status);
+            continue;
+          }
           throw new Error(icHtmlOrAuthMessage(r.status));
         }
         try {
@@ -64,6 +69,17 @@
       }
     }
     throw new Error(lastErr || "fetch failed");
+  }
+
+  /**
+   * FastAPI exposes Iron Condor at /api/iron-condor/* and /iron-condor/* (see nginx-tradentical.conf proxy).
+   */
+  function icApiPaths(rest) {
+    var p = "/api/iron-condor/" + rest;
+    if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+      return [p, "/iron-condor/" + rest];
+    }
+    return [p];
   }
 
   function esc(s) {
@@ -266,7 +282,7 @@
   }
 
   async function ackAlert(id) {
-    await fj(["/api/iron-condor/alerts/" + id + "/acknowledge", "/iron-condor/alerts/" + id + "/acknowledge"], {
+    await fj(icApiPaths("alerts/" + id + "/acknowledge"), {
       method: "POST",
       headers: authHeaders(),
       body: "{}",
@@ -295,7 +311,7 @@
 
   async function loadSessionLine() {
     try {
-      var s = await fj(["/api/iron-condor/session", "/iron-condor/session"], { headers: authHeaders(), cache: "no-store" });
+      var s = await fj(icApiPaths("session"), { headers: authHeaders(), cache: "no-store" });
       renderSessionTop(s);
     } catch (_) {
       document.getElementById("sessionLine").textContent = "Session unavailable";
@@ -333,14 +349,14 @@
     }
     pickerShowQuoteBanner("");
     try {
-      var u = await fj(["/api/iron-condor/universe", "/iron-condor/universe"], {
+      var u = await fj(icApiPaths("universe"), {
         headers: authHeaders(),
         cache: "no-store",
       });
       var list = normalizeUniverseSymbolsPayload(u);
       if (!list.length) {
         try {
-          var u2 = await fj(["/api/iron-condor/universe-with-quotes", "/iron-condor/universe-with-quotes"], {
+          var u2 = await fj(icApiPaths("universe-with-quotes"), {
             headers: authHeaders(),
             cache: "no-store",
           });
@@ -431,10 +447,7 @@
     state.pickerSymbols = [];
     try {
       var res = await fj(
-        [
-          "/api/iron-condor/universe-symbol-quote?underlying=" + encodeURIComponent(s),
-          "/iron-condor/universe-symbol-quote?underlying=" + encodeURIComponent(s),
-        ],
+        icApiPaths("universe-symbol-quote?underlying=" + encodeURIComponent(s)),
         { headers: authHeaders(), cache: "no-store" }
       );
       if (sk) sk.style.display = "none";
@@ -533,7 +546,7 @@
     });
 
     var ed = document.getElementById("icEarningsDate").value;
-    var j = await fj(["/api/iron-condor/checklist", "/iron-condor/checklist"], {
+    var j = await fj(icApiPaths("checklist"), {
       method: "POST",
       headers: authHeaders(),
       body: JSON.stringify({
@@ -582,7 +595,7 @@
     host.style.display = "block";
     host.innerHTML = skelBars(4);
     try {
-      var j = await fj(["/api/iron-condor/analyze-detailed", "/iron-condor/analyze-detailed"], {
+      var j = await fj(icApiPaths("analyze-detailed"), {
         method: "POST",
         headers: authHeaders(),
         body: JSON.stringify(payload),
@@ -707,7 +720,7 @@
     var a = state.detailed;
     if (!a) return alert("Analyze strikes first.");
     if (!document.getElementById("upstoxPlacedCk").checked) return alert('Check "I placed four orders in Upstox".');
-    await fj(["/api/iron-condor/confirm-entry", "/iron-condor/confirm-entry"], {
+    await fj(icApiPaths("confirm-entry"), {
       method: "POST",
       headers: authHeaders(),
       body: JSON.stringify({
@@ -731,7 +744,7 @@
   }
 
   async function refreshWorkspaceQuiet() {
-    var w = await fj(["/api/iron-condor/workspace", "/iron-condor/workspace"], { headers: authHeaders(), cache: "no-store" });
+    var w = await fj(icApiPaths("workspace"), { headers: authHeaders(), cache: "no-store" });
     renderAlertsBar(w.alerts || []);
 
     try {
@@ -876,7 +889,7 @@
     destroyChartJs("equityChartJs");
     try {
       if (typeof Chart === "undefined") return;
-      var p = await fj(["/api/iron-condor/equity-curve", "/iron-condor/equity-curve"], { headers: authHeaders(), cache: "no-store" });
+      var p = await fj(icApiPaths("equity-curve"), { headers: authHeaders(), cache: "no-store" });
       var raw = (p.points || []).slice();
       var cnv = document.getElementById("icEquityChart");
       if (!cnv || !cnv.getContext) return;
@@ -934,10 +947,10 @@
 
   async function pollTick() {
     try {
-      var s = await fj(["/api/iron-condor/session", "/iron-condor/session"], { headers: authHeaders(), cache: "no-store" });
+      var s = await fj(icApiPaths("session"), { headers: authHeaders(), cache: "no-store" });
       renderSessionTop(s);
       if (!s.market_poll_active) return;
-      await fj(["/api/iron-condor/poll", "/iron-condor/poll"], { method: "POST", headers: authHeaders(), body: "{}" });
+      await fj(icApiPaths("poll"), { method: "POST", headers: authHeaders(), body: "{}" });
       await loadSessionLine();
       await refreshWorkspaceQuiet();
       loadEquityCurve();
@@ -1035,7 +1048,7 @@
   };
 
   document.getElementById("verifyOkBtn").onclick = async function () {
-    await fj(["/api/iron-condor/session/verify-positions-held", "/iron-condor/session/verify-positions-held"], {
+    await fj(icApiPaths("session/verify-positions-held"), {
       method: "POST",
       headers: authHeaders(),
       body: "{}",
@@ -1054,7 +1067,7 @@
     if (!document.getElementById("jxUpstoxOut").checked)
       return alert("Confirm exits were done in Upstox before saving the journal.");
 
-    await fj(["/api/iron-condor/close-with-journal", "/iron-condor/close-with-journal"], {
+    await fj(icApiPaths("close-with-journal"), {
       method: "POST",
       headers: authHeaders(),
       body: JSON.stringify({
@@ -1081,7 +1094,7 @@
   document.getElementById("adjSubmitBtn").onclick = async function () {
     var pid = Number(document.getElementById("adjPick").value);
     if (!pid) return alert("Pick row.");
-    await fj(["/api/iron-condor/positions/" + pid + "/log-adjustment", "/iron-condor/positions/" + pid + "/log-adjustment"], {
+    await fj(icApiPaths("positions/" + pid + "/log-adjustment"), {
       method: "POST",
       headers: authHeaders(),
       body: JSON.stringify({
@@ -1107,7 +1120,7 @@
     loadEquityCurve();
   };
 
-  fj(["/api/iron-condor/workspace", "/iron-condor/workspace"], { headers: authHeaders() })
+  fj(icApiPaths("workspace"), { headers: authHeaders() })
     .catch(function () {})
     .finally(function () {
       applySavedTheme();
