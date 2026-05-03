@@ -45,9 +45,11 @@ body.theme-page.iron-c-page[data-theme="light"] .ic-muted {
 }
 
 .ic-shell {
-  max-width: 1120px;
-  margin: 0 auto;
-  padding: 12px 16px 48px;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: min(1120px, 100%);
+  margin-inline: auto;
+  padding: 12px clamp(12px, 2vw, 16px) 48px;
 }
 
 .ic-toolbar {
@@ -128,6 +130,7 @@ body.theme-page.iron-c-page[data-theme="dark"] .ic-feed-banner {
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 14px;
+  max-width: 100%;
 }
 
 .ic-step-pill {
@@ -307,8 +310,43 @@ body.theme-page.iron-c-page[data-theme="light"] .ic-step-pill {
 .ic-chart-shell {
   position: relative;
   width: 100%;
+  max-width: 100%;
   margin-top: 8px;
   min-height: 74px;
+  min-width: 0;
+}
+
+/* Column min respects narrow main when left menu + padding reduce usable width */
+.ic-grid-strike-ov {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(140px, 100%), 1fr));
+  gap: 10px;
+}
+
+.ic-grid-fills {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(160px, 100%), 1fr));
+  gap: 10px;
+}
+
+.ic-pos-grid {
+  display: grid;
+  gap: 11px;
+  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
+  min-width: 0;
+}
+
+.ic-grid-adj {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(112px, 100%), 1fr));
+  gap: 8px;
+}
+
+.ic-grid-journal {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(160px, 100%), 1fr));
+  gap: 10px;
+  font-size: 0.86rem;
 }
 
 .ic-panel-empty {

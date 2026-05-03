@@ -20,6 +20,7 @@
 .app-with-left-menu {
     display: flex;
     min-height: 100vh;
+    min-width: 0;
 }
 
 .left-menu-wrapper {
@@ -638,18 +639,20 @@ body[data-theme="light"] .tm-telegram-modal__textarea {
 
 /* Main content area - adjusts when panel expands/collapses */
 .app-with-left-menu > .main-content-area {
-    flex: 1 1 auto;
+    /* flex item must not claim width: 100% beside margin-left — that overflows past the viewport */
+    flex: 1 1 0%;
     min-width: 0;
-    width: 100%;
+    width: auto;
     max-width: 100%;
     box-sizing: border-box;
 }
 
 .main-content-area {
-    flex: 1;
+    flex: 1 1 0%;
     margin-left: clamp(var(--left-menu-min), var(--left-menu-width), var(--left-menu-max));
     transition: margin-left 0.3s ease;
     min-width: 0;
+    box-sizing: border-box;
 }
 
 .main-content-area.menu-collapsed {
