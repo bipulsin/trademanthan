@@ -161,6 +161,23 @@ def universe_with_quotes(
     return {"symbols": out, "quotes_error": quotes_error}
 
 
+@router.get("/universe-symbol-quote")
+def universe_symbol_quote(
+    underlying: str = Query(..., min_length=1, max_length=32),
+    db: Session = Depends(get_db),
+    user: User = Depends(_auth),
+) -> Dict[str, Any]:
+    """Live quote for one approved underlying after user selection (no full-universe prefetch)."""
+    ic.ensure_iron_condor_tables()
+    row, quotes_error = ic.universe_picker_row_for_symbol(db, int(user.id), underlying.strip())
+    if not row:
+        raise HTTPException(
+            status_code=400,
+            detail=quotes_error or "Unknown or disallowed underlying",
+        )
+    return {"row": row, "quotes_error": quotes_error}
+
+
 @router.post("/checklist")
 def post_checklist(
     body: ChecklistBody,

@@ -66,34 +66,25 @@
     throw new Error(lastErr || "fetch failed");
   }
 
-  var IC_PICK_CACHE = "tm_ic_universe_quotes_v1";
-  var IC_CACHE_MS = 50000;
-
-  function readPickerCache() {
-    try {
-      var raw = sessionStorage.getItem(IC_PICK_CACHE);
-      if (!raw) return null;
-      var o = JSON.parse(raw);
-      if (!o || !o.symbols || !Array.isArray(o.symbols)) return null;
-      if (typeof o.exp !== "number" || Date.now() > o.exp) return null;
-      return o;
-    } catch (_e) {
-      return null;
-    }
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
 
-  function writePickerCache(symbols, quotesError) {
-    try {
-      sessionStorage.setItem(
-        IC_PICK_CACHE,
-        JSON.stringify({
-          symbols: symbols,
-          quotes_error: quotesError || null,
-          exp: Date.now() + IC_CACHE_MS,
-        })
-      );
-    } catch (_e) {}
-  }
+  var state = {
+    symbol: "",
+    detailed: null,
+    checklist: null,
+    pollTimer: null,
+    pickerSymbols: [],
+    universeMeta: [],
+    comboFiltered: [],
+    comboOpen: false,
+    comboHi: -1,
+    mtmSpark: [],
+    soundEpoch: 0,
+    mtmChartJs: null,
+    equityChartJs: null,
+  };
 
   function pickerShowQuoteBanner(msg) {
     var el = document.getElementById("pickerQuoteWarn");
@@ -106,37 +97,6 @@
     el.removeAttribute("hidden");
     el.textContent = msg;
   }
-
-  function populatePickerDatalist() {
-    var dl = document.getElementById("icPickerList");
-    if (!dl) return;
-    var html = "";
-    state.pickerSymbols.forEach(function (r) {
-      html +=
-        "<option value=\"" +
-        esc(r.symbol) +
-        "\">" +
-        esc((r.sector || "") + " · " + (r.ltp != null ? Number(r.ltp).toFixed(2) : "—")) +
-        "</option>";
-    });
-    dl.innerHTML = html;
-  }
-
-  function esc(s) {
-    return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  }
-
-  var state = {
-    symbol: "",
-    detailed: null,
-    checklist: null,
-    pollTimer: null,
-    pickerSymbols: [],
-    mtmSpark: [],
-    soundEpoch: 0,
-    mtmChartJs: null,
-    equityChartJs: null,
-  };
 
   function bodyEl() {
     return document.body;
@@ -345,23 +305,252 @@
     }
   }
 
-  function filterPicker() {
-    var q = (document.getElementById("pickerSearch").value || "").trim().toUpperCase();
+  function setPickerTablePlaceholder() {
     var tb = document.getElementById("pickerBody");
     if (!tb) return;
-    if (!state.pickerSymbols.length) {
-      tb.innerHTML = "<tr><td colspan=\"6\" class=\"ic-muted\">No universe rows yet.</td></tr>";
+    tb.innerHTML =
+      "<tr><td colspan=\"6\" class=\"ic-muted\">Select a symbol above — quotes load only after you pick one.</td></tr>";
+  }
+
+  async function loadUniverseMeta() {
+    try {
+      var u = await fj(["/api/iron-condor/universe", "/iron-condor/universe"], {
+        headers: authHeaders(),
+        cache: "no-store",
+      });
+      state.universeMeta = (u.symbols || []).slice();
+    } catch (e) {
+      state.universeMeta = [];
+      var tb = document.getElementById("pickerBody");
+      if (tb) {
+        tb.innerHTML =
+          "<tr><td colspan=\"6\" class=\"ic-muted\">" + esc(e.message || String(e)) + "</td></tr>";
+      }
+    }
+  }
+
+  function comboListEl() {
+    return document.getElementById("pickerComboList");
+  }
+
+  function comboInputEl() {
+    return document.getElementById("pickerSearch");
+  }
+
+  function refreshComboFilter() {
+    var inp = comboInputEl();
+    if (!inp) return;
+    var q = (inp.value || "").trim().toUpperCase();
+    var all = state.universeMeta || [];
+    state.comboFiltered = !q
+      ? all.slice()
+      : all.filter(function (r) {
+          var sym = (r.symbol || "").toUpperCase();
+          var sec = (r.sector || "").toUpperCase();
+          return sym.indexOf(q) >= 0 || sec.indexOf(q) >= 0;
+        });
+    renderComboList();
+  }
+
+  function renderComboList() {
+    var ul = comboListEl();
+    var inp = comboInputEl();
+    if (!ul || !inp) return;
+    var src = state.comboFiltered;
+    var items = src.slice(0, 50);
+    if (!state.comboOpen) {
+      ul.innerHTML = "";
+      ul.setAttribute("hidden", "hidden");
+      inp.setAttribute("aria-expanded", "false");
       return;
     }
-    tb.innerHTML =
-      "<tr><td colspan=\"6\"><span class=\"ic-muted\">No matches.</span></td></tr>";
-    var found = [];
-    state.pickerSymbols.forEach(function (row) {
-      if (q && row.symbol.indexOf(q) < 0) return;
-      found.push(renderPickerRow(row));
+    if (!items.length) {
+      var qhint = (inp.value || "").trim();
+      ul.removeAttribute("hidden");
+      inp.setAttribute("aria-expanded", "true");
+      ul.innerHTML =
+        "<li class=\"ic-combo-empty ic-muted\" role=\"presentation\">" +
+        (state.universeMeta.length
+          ? qhint
+            ? "No matches — try symbol or sector"
+            : "Type to filter"
+          : "Universe list failed to load — refresh page") +
+        "</li>";
+      return;
+    }
+    ul.removeAttribute("hidden");
+    inp.setAttribute("aria-expanded", "true");
+    ul.innerHTML = items
+      .map(function (r, i) {
+        var sel = i === state.comboHi;
+        return (
+          "<li role=\"option\" class=\"ic-combo-item" +
+          (sel ? " ic-combo-item-hi" : "") +
+          "\" data-sym=\"" +
+          esc(r.symbol) +
+          "\" aria-selected=\"" +
+          (sel ? "true" : "false") +
+          "\"><strong class=\"ic-mono\">" +
+          esc(r.symbol) +
+          "</strong> <span class=\"ic-muted\">" +
+          esc(r.sector || "") +
+          "</span></li>"
+        );
+      })
+      .join("");
+    ul.querySelectorAll(".ic-combo-item").forEach(function (li) {
+      li.onmousedown = function (ev) {
+        ev.preventDefault();
+        var s = li.getAttribute("data-sym");
+        if (s) selectUniverseSymbol(s);
+      };
     });
-    if (found.length) tb.innerHTML = found.join("");
-    wirePicker(tb);
+  }
+
+  function openCombo() {
+    state.comboOpen = true;
+    if (state.comboHi < 0) state.comboHi = -1;
+    refreshComboFilter();
+  }
+
+  function closeCombo() {
+    state.comboOpen = false;
+    state.comboHi = -1;
+    var ul = comboListEl();
+    var inp = comboInputEl();
+    if (ul) {
+      ul.innerHTML = "";
+      ul.setAttribute("hidden", "hidden");
+    }
+    if (inp) inp.setAttribute("aria-expanded", "false");
+  }
+
+  async function selectUniverseSymbol(sym) {
+    var s = (sym || "").trim().toUpperCase();
+    if (!s) return;
+    var inp = comboInputEl();
+    if (inp) inp.value = s;
+    closeCombo();
+    var sk = document.getElementById("pickerSkeletonHost");
+    var tb = document.getElementById("pickerBody");
+    if (sk) {
+      sk.style.display = "block";
+      sk.innerHTML = skelBars(2);
+    }
+    if (tb) tb.innerHTML = "";
+    pickerShowQuoteBanner("");
+    document.getElementById("gotoChecklistBtn").disabled = true;
+    state.symbol = "";
+    state.pickerSymbols = [];
+    try {
+      var res = await fj(
+        [
+          "/api/iron-condor/universe-symbol-quote?underlying=" + encodeURIComponent(s),
+          "/iron-condor/universe-symbol-quote?underlying=" + encodeURIComponent(s),
+        ],
+        { headers: authHeaders(), cache: "no-store" }
+      );
+      if (sk) sk.style.display = "none";
+      var row = res.row;
+      pickerShowQuoteBanner(res.quotes_error || "");
+      state.pickerSymbols = [row];
+      state.symbol = row.symbol;
+      if (tb) {
+        tb.innerHTML = renderPickerRow(row);
+        wirePicker(tb);
+        tb.querySelectorAll("tr").forEach(function (r) {
+          r.style.outline = "3px solid #1f3864";
+        });
+      }
+      document.getElementById("gotoChecklistBtn").disabled = false;
+    } catch (e) {
+      if (sk) sk.style.display = "none";
+      pickerShowQuoteBanner("");
+      state.symbol = "";
+      state.pickerSymbols = [];
+      if (tb) {
+        tb.innerHTML =
+          "<tr><td colspan=\"6\" class=\"ic-muted\">" + esc(e.message || String(e)) + "</td></tr>";
+      }
+    }
+  }
+
+  function tryCommitInputSymbol() {
+    var inp = comboInputEl();
+    if (!inp) return;
+    var raw = (inp.value || "").trim().toUpperCase();
+    if (!raw) return;
+    var match = state.universeMeta.filter(function (r) {
+      return (r.symbol || "").toUpperCase() === raw;
+    });
+    if (match.length) {
+      selectUniverseSymbol(raw);
+      return;
+    }
+    if (state.comboFiltered.length === 1) selectUniverseSymbol(state.comboFiltered[0].symbol);
+  }
+
+  function resetUniversePicker() {
+    state.symbol = "";
+    state.pickerSymbols = [];
+    var inp = comboInputEl();
+    if (inp) inp.value = "";
+    closeCombo();
+    pickerShowQuoteBanner("");
+    document.getElementById("gotoChecklistBtn").disabled = true;
+    setPickerTablePlaceholder();
+  }
+
+  function wirePickerCombo() {
+    var inp = comboInputEl();
+    var wrap = document.getElementById("pickerComboWrap");
+    if (!inp || inp.getAttribute("data-ic-combo-wired")) return;
+    inp.setAttribute("data-ic-combo-wired", "1");
+    inp.addEventListener("focus", function () {
+      openCombo();
+    });
+    inp.addEventListener("input", function () {
+      state.comboHi = -1;
+      openCombo();
+      refreshComboFilter();
+    });
+    inp.addEventListener("keydown", function (ev) {
+      var n = state.comboFiltered.length;
+      if (ev.key === "ArrowDown") {
+        ev.preventDefault();
+        if (!state.comboOpen) openCombo();
+        if (!n) return;
+        state.comboHi = state.comboHi < 0 ? 0 : Math.min(state.comboHi + 1, n - 1);
+        renderComboList();
+        return;
+      }
+      if (ev.key === "ArrowUp") {
+        ev.preventDefault();
+        if (!n) return;
+        state.comboHi = state.comboHi <= 0 ? 0 : state.comboHi - 1;
+        renderComboList();
+        return;
+      }
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        if (state.comboHi >= 0 && state.comboFiltered[state.comboHi]) {
+          selectUniverseSymbol(state.comboFiltered[state.comboHi].symbol);
+        } else {
+          tryCommitInputSymbol();
+        }
+        return;
+      }
+      if (ev.key === "Escape") closeCombo();
+    });
+    if (wrap) {
+      document.addEventListener(
+        "click",
+        function (ev) {
+          if (!wrap.contains(ev.target)) closeCombo();
+        },
+        true
+      );
+    }
   }
 
   function renderPickerRow(row) {
@@ -405,53 +594,6 @@
         tr.style.outline = "3px solid #1f3864";
       };
     });
-  }
-
-  async function loadPicker() {
-    var tbody = document.getElementById("pickerBody");
-    var sk = document.getElementById("pickerSkeletonHost");
-    var cached = readPickerCache();
-
-    if (cached && cached.symbols.length) {
-      state.pickerSymbols = cached.symbols;
-      pickerShowQuoteBanner(cached.quotes_error || "");
-      populatePickerDatalist();
-      if (sk) sk.style.display = "none";
-      filterPicker();
-    } else {
-      pickerShowQuoteBanner("");
-      if (sk) {
-        sk.style.display = "block";
-        sk.innerHTML = skelBars(3);
-      }
-      if (tbody)
-        tbody.innerHTML = "<tr><td colspan=\"6\" class=\"ic-muted\">Loading quotes…</td></tr>";
-    }
-
-    try {
-      var u = await fj(["/api/iron-condor/universe-with-quotes", "/iron-condor/universe-with-quotes"], {
-        headers: authHeaders(),
-        cache: "no-store",
-      });
-      if (sk) sk.style.display = "none";
-      state.pickerSymbols = u.symbols || [];
-      writePickerCache(state.pickerSymbols, u.quotes_error);
-      populatePickerDatalist();
-      filterPicker();
-      pickerShowQuoteBanner(u.quotes_error || "");
-      if (tbody && !tbody.querySelectorAll("tr[data-sym]").length) {
-        tbody.innerHTML = "<tr><td colspan=\"6\" class=\"ic-muted\">Universe unavailable.</td></tr>";
-      }
-    } catch (e) {
-      if (sk) sk.style.display = "none";
-      if (!(cached && cached.symbols.length)) {
-        pickerShowQuoteBanner("");
-        if (tbody) {
-          tbody.innerHTML =
-            "<tr><td colspan=\"6\" class=\"ic-muted\">" + esc(e.message || String(e)) + "</td></tr>";
-        }
-      }
-    }
   }
 
   function chipCls(st) {
@@ -895,7 +1037,6 @@
     };
   });
 
-  document.getElementById("pickerSearch").addEventListener("input", filterPicker);
 
   document.getElementById("strikeOverrideToggle").onchange = function () {
     var on = document.getElementById("strikeOverrideToggle").checked;
@@ -938,7 +1079,10 @@
     }
   };
 
-  document.getElementById("btnNewIc").onclick = function () {showPane(1);};
+  document.getElementById("btnNewIc").onclick = function () {
+    resetUniversePicker();
+    showPane(1);
+  };
 
   document.getElementById("back1").onclick = function () {
     showPane(1);
@@ -1050,7 +1194,9 @@
       applySavedTheme();
       bindThemeSyncForCharts();
       loadSessionLine();
-      loadPicker();
+      setPickerTablePlaceholder();
+      wirePickerCombo();
+      loadUniverseMeta();
       refreshWorkspaceQuiet();
       loadEquityCurve();
       startPolling();

@@ -146,6 +146,83 @@ def option_chain_underlying(symbol: str) -> str:
     return OPTION_CHAIN_API_SYMBOL.get(key, key)
 
 
+def universe_picker_row_for_symbol(db: Session, user_id: int, symbol: str) -> Tuple[Dict[str, Any], Optional[str]]:
+    """
+    One picker row with live quote (single batched key). Used after user picks a symbol.
+    Does not use the universe-wide quote cache.
+    """
+    ensure_iron_condor_tables()
+    sym = (symbol or "").strip().upper()
+    sec = sector_for_symbol(sym)
+    if not sec:
+        return {}, "Symbol is not in the Iron Condor universe."
+
+    row_ct = db.execute(
+        text(
+            """
+            SELECT COUNT(*) FROM iron_condor_position
+            WHERE user_id = :uid AND UPPER(TRIM(underlying)) = UPPER(:sy)
+              AND UPPER(status) IN ('ACTIVE', 'OPEN', 'ADJUSTED')
+            """
+        ),
+        {"uid": user_id, "sy": sym},
+    ).scalar()
+    active = int(row_ct or 0) >= 1
+
+    api = option_chain_underlying(sym)
+    ik = vwap_service.get_instrument_key(api)
+    tok = (getattr(vwap_service, "access_token", None) or "").strip()
+    quotes_error: Optional[str] = None
+    ltp_f: Optional[float] = None
+    chg: Optional[float] = None
+
+    if not tok:
+        quotes_error = (
+            "Upstox is not connected (no access token). Sign in to Upstox from "
+            "Settings or use the OAuth link, then retry."
+        )
+    elif not ik:
+        quotes_error = "Could not resolve equity instrument key for this symbol."
+    else:
+        try:
+            snap = vwap_service.get_market_quote_snapshots_batch([ik], max_per_request=10)
+            batch = snap if snap else {}
+            qd = _batch_lookup(batch, ik)
+            if not qd:
+                quotes_error = (
+                    "Upstox returned no quote for this symbol (session may be expired)."
+                )
+            else:
+                try:
+                    lp = float(qd.get("last_price") or 0)
+                    ltp_f = lp if lp > 0 else None
+                    nested = qd.get("ohlc") if isinstance(qd.get("ohlc"), dict) else {}
+                    prev = float(
+                        nested.get("close")
+                        or nested.get("previous_close")
+                        or nested.get("prev_close")
+                        or 0
+                    )
+                    if ltp_f and prev > 0:
+                        chg = round((ltp_f - prev) / prev * 100.0, 2)
+                except (TypeError, ValueError):
+                    pass
+        except Exception as ex:
+            logger.warning("Iron Condor single-symbol quote failed: %s", ex)
+            quotes_error = "Upstox quote request failed — check broker connection."
+
+    return (
+        {
+            "symbol": sym,
+            "sector": sec,
+            "ltp": ltp_f,
+            "change_pct_day": chg,
+            "active_position": active,
+        },
+        quotes_error,
+    )
+
+
 def ensure_iron_condor_tables() -> None:
     if engine is None:
         return
