@@ -77,9 +77,6 @@
     pollTimer: null,
     pickerSymbols: [],
     universeMeta: [],
-    comboFiltered: [],
-    comboOpen: false,
-    comboHi: -1,
     mtmSpark: [],
     soundEpoch: 0,
     mtmChartJs: null,
@@ -319,8 +316,10 @@
         cache: "no-store",
       });
       state.universeMeta = (u.symbols || []).slice();
+      populatePickerSelect();
     } catch (e) {
       state.universeMeta = [];
+      populatePickerSelect();
       var tb = document.getElementById("pickerBody");
       if (tb) {
         tb.innerHTML =
@@ -329,108 +328,55 @@
     }
   }
 
-  function comboListEl() {
-    return document.getElementById("pickerComboList");
-  }
-
-  function comboInputEl() {
-    return document.getElementById("pickerSearch");
-  }
-
-  function refreshComboFilter() {
-    var inp = comboInputEl();
-    if (!inp) return;
-    var q = (inp.value || "").trim().toUpperCase();
-    var all = state.universeMeta || [];
-    state.comboFiltered = !q
-      ? all.slice()
-      : all.filter(function (r) {
-          var sym = (r.symbol || "").toUpperCase();
-          var sec = (r.sector || "").toUpperCase();
-          return sym.indexOf(q) >= 0 || sec.indexOf(q) >= 0;
-        });
-    renderComboList();
-  }
-
-  function renderComboList() {
-    var ul = comboListEl();
-    var inp = comboInputEl();
-    if (!ul || !inp) return;
-    var src = state.comboFiltered;
-    var items = src.slice(0, 50);
-    if (!state.comboOpen) {
-      ul.innerHTML = "";
-      ul.setAttribute("hidden", "hidden");
-      inp.setAttribute("aria-expanded", "false");
-      return;
-    }
-    if (!items.length) {
-      var qhint = (inp.value || "").trim();
-      ul.removeAttribute("hidden");
-      inp.setAttribute("aria-expanded", "true");
-      ul.innerHTML =
-        "<li class=\"ic-combo-empty ic-muted\" role=\"presentation\">" +
-        (state.universeMeta.length
-          ? qhint
-            ? "No matches — try symbol or sector"
-            : "Type to filter"
-          : "Universe list failed to load — refresh page") +
-        "</li>";
-      return;
-    }
-    ul.removeAttribute("hidden");
-    inp.setAttribute("aria-expanded", "true");
-    ul.innerHTML = items
-      .map(function (r, i) {
-        var sel = i === state.comboHi;
-        return (
-          "<li role=\"option\" class=\"ic-combo-item" +
-          (sel ? " ic-combo-item-hi" : "") +
-          "\" data-sym=\"" +
-          esc(r.symbol) +
-          "\" aria-selected=\"" +
-          (sel ? "true" : "false") +
-          "\"><strong class=\"ic-mono\">" +
-          esc(r.symbol) +
-          "</strong> <span class=\"ic-muted\">" +
-          esc(r.sector || "") +
-          "</span></li>"
-        );
-      })
-      .join("");
-    ul.querySelectorAll(".ic-combo-item").forEach(function (li) {
-      li.onmousedown = function (ev) {
-        ev.preventDefault();
-        var s = li.getAttribute("data-sym");
-        if (s) selectUniverseSymbol(s);
-      };
+  function populatePickerSelect() {
+    var sel = document.getElementById("pickerSelect");
+    if (!sel) return;
+    var curGuess = String(state.symbol || sel.value || "").trim();
+    var curUp = curGuess.toUpperCase();
+    var rows = state.universeMeta.slice().sort(function (a, b) {
+      return String(a.symbol || "").localeCompare(String(b.symbol || ""));
     });
-  }
-
-  function openCombo() {
-    state.comboOpen = true;
-    if (state.comboHi < 0) state.comboHi = -1;
-    refreshComboFilter();
-  }
-
-  function closeCombo() {
-    state.comboOpen = false;
-    state.comboHi = -1;
-    var ul = comboListEl();
-    var inp = comboInputEl();
-    if (ul) {
-      ul.innerHTML = "";
-      ul.setAttribute("hidden", "hidden");
+    sel.innerHTML =
+      "<option value=\"\">— Choose underlying —</option>" +
+      rows
+        .map(function (r) {
+          var sym = String(r.symbol || "").trim();
+          return "<option value=\"" + esc(sym) + "\">" + esc(sym) + " — " + esc(r.sector || "") + "</option>";
+        })
+        .join("");
+    var symVal = "";
+    for (var pi = 0; pi < rows.length; pi++) {
+      if (String(rows[pi].symbol || "").trim().toUpperCase() === curUp) {
+        symVal = String(rows[pi].symbol || "").trim();
+        break;
+      }
     }
-    if (inp) inp.setAttribute("aria-expanded", "false");
+    sel.value = symVal;
+  }
+
+  function wirePickerSelect() {
+    var sel = document.getElementById("pickerSelect");
+    if (!sel || sel.getAttribute("data-ic-select-wired")) return;
+    sel.setAttribute("data-ic-select-wired", "1");
+    sel.addEventListener("change", function () {
+      var v = (sel.value || "").trim();
+      if (!v) {
+        state.symbol = "";
+        state.pickerSymbols = [];
+        pickerShowQuoteBanner("");
+        document.getElementById("gotoChecklistBtn").disabled = true;
+        setPickerTablePlaceholder();
+        return;
+      }
+      selectUniverseSymbol(v);
+    });
   }
 
   async function selectUniverseSymbol(sym) {
     var s = (sym || "").trim().toUpperCase();
     if (!s) return;
-    var inp = comboInputEl();
-    if (inp) inp.value = s;
-    closeCombo();
+    var sel = document.getElementById("pickerSelect");
+    if (sel) sel.value = s;
     var sk = document.getElementById("pickerSkeletonHost");
     var tb = document.getElementById("pickerBody");
     if (sk) {
@@ -475,82 +421,14 @@
     }
   }
 
-  function tryCommitInputSymbol() {
-    var inp = comboInputEl();
-    if (!inp) return;
-    var raw = (inp.value || "").trim().toUpperCase();
-    if (!raw) return;
-    var match = state.universeMeta.filter(function (r) {
-      return (r.symbol || "").toUpperCase() === raw;
-    });
-    if (match.length) {
-      selectUniverseSymbol(raw);
-      return;
-    }
-    if (state.comboFiltered.length === 1) selectUniverseSymbol(state.comboFiltered[0].symbol);
-  }
-
   function resetUniversePicker() {
     state.symbol = "";
     state.pickerSymbols = [];
-    var inp = comboInputEl();
-    if (inp) inp.value = "";
-    closeCombo();
+    var sel = document.getElementById("pickerSelect");
+    if (sel) sel.value = "";
     pickerShowQuoteBanner("");
     document.getElementById("gotoChecklistBtn").disabled = true;
     setPickerTablePlaceholder();
-  }
-
-  function wirePickerCombo() {
-    var inp = comboInputEl();
-    var wrap = document.getElementById("pickerComboWrap");
-    if (!inp || inp.getAttribute("data-ic-combo-wired")) return;
-    inp.setAttribute("data-ic-combo-wired", "1");
-    inp.addEventListener("focus", function () {
-      openCombo();
-    });
-    inp.addEventListener("input", function () {
-      state.comboHi = -1;
-      openCombo();
-      refreshComboFilter();
-    });
-    inp.addEventListener("keydown", function (ev) {
-      var n = state.comboFiltered.length;
-      if (ev.key === "ArrowDown") {
-        ev.preventDefault();
-        if (!state.comboOpen) openCombo();
-        if (!n) return;
-        state.comboHi = state.comboHi < 0 ? 0 : Math.min(state.comboHi + 1, n - 1);
-        renderComboList();
-        return;
-      }
-      if (ev.key === "ArrowUp") {
-        ev.preventDefault();
-        if (!n) return;
-        state.comboHi = state.comboHi <= 0 ? 0 : state.comboHi - 1;
-        renderComboList();
-        return;
-      }
-      if (ev.key === "Enter") {
-        ev.preventDefault();
-        if (state.comboHi >= 0 && state.comboFiltered[state.comboHi]) {
-          selectUniverseSymbol(state.comboFiltered[state.comboHi].symbol);
-        } else {
-          tryCommitInputSymbol();
-        }
-        return;
-      }
-      if (ev.key === "Escape") closeCombo();
-    });
-    if (wrap) {
-      document.addEventListener(
-        "click",
-        function (ev) {
-          if (!wrap.contains(ev.target)) closeCombo();
-        },
-        true
-      );
-    }
   }
 
   function renderPickerRow(row) {
@@ -1195,7 +1073,7 @@
       bindThemeSyncForCharts();
       loadSessionLine();
       setPickerTablePlaceholder();
-      wirePickerCombo();
+      wirePickerSelect();
       loadUniverseMeta();
       refreshWorkspaceQuiet();
       loadEquityCurve();
