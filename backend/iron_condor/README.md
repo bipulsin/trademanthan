@@ -27,6 +27,12 @@ Checklist **EARNINGS_25D** prefers a user-declared ISO date when provided; other
 - `POST /iron-condor/close-with-journal` — requires `squaring_confirmed`  
 - `GET /iron-condor/equity-curve` — cumulative realized from journal  
 
+## Upstox data helpers
+
+Scheduler-friendly fetchers (no embedded keys): `backend/services/upstox_iron_condor.py` — spot quote/LTP, option chain with explicit expiry, per-strike OI grid from chain, batched option LTPs (`OptionLegRef`), monthly equity candles for ATR, India VIX quote, last few daily OHLC bars. Uses `backend.config.settings` (`UPSTOX_API_KEY`, `UPSTOX_API_SECRET`) and the same OAuth token storage as `UpstoxService`.  
+
+`backend/services/upstox_service.py` also accepts `expiry_date=` on `get_option_chain` for analysis at a chosen expiry.
+
 ## Extend safely
 
 1. Strike math lives in `backend/services/iron_condor_service.py` (`_pick_buy_wing`, `analyze_iron_condor`).  

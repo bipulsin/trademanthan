@@ -5,7 +5,7 @@ import requests
 import logging
 import time
 from datetime import date, datetime, timedelta
-from typing import Dict, Optional, List, Any, Tuple
+from typing import Dict, Optional, List, Any, Tuple, Union
 from urllib.parse import quote
 import pytz
 
@@ -1485,7 +1485,12 @@ class UpstoxService:
             logger.error(f"❌ Error fetching monthly candles for {instrument_key}: {str(e)}")
             return None
     
-    def get_option_chain(self, symbol: str, use_next_month_expiry: bool = False) -> Optional[Dict]:
+    def get_option_chain(
+        self,
+        symbol: str,
+        use_next_month_expiry: bool = False,
+        expiry_date: Optional[Union[date, datetime]] = None,
+    ) -> Optional[Dict]:
         """
         Get option chain data for a symbol from Upstox
         
@@ -1493,6 +1498,8 @@ class UpstoxService:
             symbol: Stock symbol (e.g., "RELIANCE")
             use_next_month_expiry: If True, use next month's expiry (last Tuesday of next month).
                                   Useful for testing. Default False uses normal get_monthly_expiry logic.
+            expiry_date: When set, use this expiry (``date`` or timezone-aware/naive ``datetime``)
+                instead of ``get_monthly_expiry`` / ``use_next_month_expiry``.
             
         Returns:
             Option chain data or None
@@ -1504,14 +1511,24 @@ class UpstoxService:
                 logger.error(f"❌ OPTION_CHAIN_FAIL: Could not get instrument key for {symbol} (get_instrument_key returned None/empty)")
                 return None
             
-            # Get monthly expiry date (optionally force next month for testing)
-            if use_next_month_expiry:
-                ref = datetime.now(pytz.timezone('Asia/Kolkata'))
+            ist = pytz.timezone("Asia/Kolkata")
+            if expiry_date is not None:
+                if isinstance(expiry_date, datetime):
+                    ed = expiry_date.astimezone(ist).date() if expiry_date.tzinfo else expiry_date.date()
+                elif isinstance(expiry_date, date):
+                    ed = expiry_date
+                else:
+                    logger.error("OPTION_CHAIN_FAIL: expiry_date must be date or datetime, got %s", type(expiry_date))
+                    return None
+                expiry_date_str = ed.strftime("%Y-%m-%d")
+            elif use_next_month_expiry:
+                ref = datetime.now(ist)
                 ref = ref.replace(day=19)  # day > 18 => get_monthly_expiry returns next month
                 monthly_expiry = self.get_monthly_expiry(reference_date=ref)
+                expiry_date_str = monthly_expiry.strftime('%Y-%m-%d')
             else:
                 monthly_expiry = self.get_monthly_expiry()
-            expiry_date_str = monthly_expiry.strftime('%Y-%m-%d')
+                expiry_date_str = monthly_expiry.strftime('%Y-%m-%d')
             
             # Upstox v2 API endpoint for option chain
             url = f"https://api.upstox.com/v2/option/chain"
@@ -4072,14 +4089,16 @@ class UpstoxService:
             }
 
 
-# Initialize Upstox service with credentials
-UPSTOX_API_KEY = "dd1d3bcc-e1a4-4eed-be7c-1833d9301738"
-UPSTOX_API_SECRET = "8lvpi8fb1f"
-UPSTOX_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI3RkFENUwiLCJqdGkiOiI2OGZlZjJjNDc1ODIwOTY3ZDdhZDlmOGIiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6dHJ1ZSwiaWF0IjoxNzYxNTM4NzU2LCJpc3MiOiJ1ZGFwaS1nYXRld2F5LXNlcnZpY2UiLCJleHAiOjE3NjE2MDI0MDB9.4I6bjhXxVoH9-RY6V-esAKC8yItcq4nrkQoKBgmS60Q"
+# Default process-wide client: keys from environment via settings; token from token_manager if set.
+try:
+    from backend.config import settings as _settings
 
-upstox_service = UpstoxService(
-    api_key=UPSTOX_API_KEY,
-    api_secret=UPSTOX_API_SECRET,
-    access_token=UPSTOX_ACCESS_TOKEN
-)
+    upstox_service = UpstoxService(
+        api_key=_settings.UPSTOX_API_KEY,
+        api_secret=_settings.UPSTOX_API_SECRET,
+        access_token=None,
+    )
+except Exception as _e:
+    logger.warning("upstox_service default init using empty keys (config import failed): %s", _e)
+    upstox_service = UpstoxService(api_key="", api_secret="", access_token=None)
 
