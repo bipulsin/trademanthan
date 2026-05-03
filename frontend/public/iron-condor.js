@@ -309,22 +309,63 @@
       "<tr><td colspan=\"6\" class=\"ic-muted\">Select a symbol above — quotes load only after you pick one.</td></tr>";
   }
 
+  /** Normalize GET /universe or /universe-with-quotes payloads into [{symbol, sector}, ...]. */
+  function normalizeUniverseSymbolsPayload(u) {
+    if (!u || typeof u !== "object") return [];
+    var s = u.symbols;
+    if (!Array.isArray(s)) return [];
+    var out = [];
+    for (var i = 0; i < s.length; i++) {
+      var r = s[i];
+      if (!r || typeof r !== "object") continue;
+      var sym = String(r.symbol || "").trim();
+      if (!sym) continue;
+      out.push({ symbol: sym, sector: String(r.sector || "").trim() });
+    }
+    return out;
+  }
+
   async function loadUniverseMeta() {
+    var sel = document.getElementById("pickerSelect");
+    if (sel) {
+      sel.disabled = true;
+      sel.innerHTML = "<option value=\"\">Loading universe…</option>";
+    }
+    pickerShowQuoteBanner("");
     try {
       var u = await fj(["/api/iron-condor/universe", "/iron-condor/universe"], {
         headers: authHeaders(),
         cache: "no-store",
       });
-      state.universeMeta = (u.symbols || []).slice();
+      var list = normalizeUniverseSymbolsPayload(u);
+      if (!list.length) {
+        try {
+          var u2 = await fj(["/api/iron-condor/universe-with-quotes", "/iron-condor/universe-with-quotes"], {
+            headers: authHeaders(),
+            cache: "no-store",
+          });
+          list = normalizeUniverseSymbolsPayload(u2);
+        } catch (_e2) {
+          /* keep list empty — primary path may already contain the actionable error below */
+        }
+      }
+      state.universeMeta = list;
       populatePickerSelect();
+      if (!list.length) {
+        pickerShowQuoteBanner("Could not load the approved symbol list. Refresh the page or sign in again.");
+      }
     } catch (e) {
       state.universeMeta = [];
       populatePickerSelect();
+      pickerShowQuoteBanner("");
       var tb = document.getElementById("pickerBody");
       if (tb) {
         tb.innerHTML =
           "<tr><td colspan=\"6\" class=\"ic-muted\">" + esc(e.message || String(e)) + "</td></tr>";
       }
+    } finally {
+      var s2 = document.getElementById("pickerSelect");
+      if (s2) s2.disabled = false;
     }
   }
 
