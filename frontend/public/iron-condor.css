@@ -246,7 +246,9 @@ body.theme-page.iron-c-page[data-theme="light"] .ic-step-pill {
   margin-bottom: 10px;
   font-family: inherit;
   font-size: inherit;
-  color: inherit;
+  line-height: 1.35;
+  color: var(--theme-text, inherit);
+  -webkit-text-fill-color: var(--theme-text, currentColor);
   cursor: pointer;
   box-sizing: border-box;
 }

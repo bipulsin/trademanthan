@@ -30,7 +30,7 @@
       try {
         var r = await fetch(API_BASE + paths[i], o);
         var txt = await r.text();
-        var trimmed = txt.trim();
+        var trimmed = txt.replace(/^\uFEFF/, "").trim();
         var t0 = trimmed ? trimmed.charAt(0) : "";
 
         if (!r.ok) {
@@ -38,11 +38,9 @@
             lastErr = icHtmlOrAuthMessage(r.status);
           } else {
             try {
-              var ej = JSON.parse(txt);
+              var ej = JSON.parse(trimmed);
               lastErr =
-                typeof ej.detail === "string"
-                  ? ej.detail
-                  : ej.message || paths[i] + " HTTP " + r.status;
+                fmtFastApiDetail(ej.detail) || ej.message || paths[i] + " HTTP " + r.status;
             } catch (_parseErr) {
               lastErr = paths[i] + " HTTP " + r.status;
             }
@@ -60,7 +58,7 @@
         }
         try {
           if (!trimmed) return {};
-          return JSON.parse(txt);
+          return JSON.parse(trimmed);
         } catch (_e4) {
           throw new Error("Server response was not valid JSON.");
         }
@@ -86,6 +84,45 @@
     return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
 
+  /** FastAPI may return detail as string or list of validation objects ({msg,...}). */
+  function fmtFastApiDetail(detail) {
+    if (detail == null || detail === "") return "";
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail)) {
+      var out = [];
+      for (var di = 0; di < detail.length; di++) {
+        var it = detail[di];
+        if (it && typeof it === "object" && typeof it.msg === "string") out.push(it.msg);
+        else if (typeof it === "string") out.push(it);
+        else out.push(JSON.stringify(it));
+      }
+      return out.join("; ");
+    }
+    return String(detail);
+  }
+
+  /**
+   * Same entries as backend/services/iron_condor_universe.py — used only if universe APIs return no rows.
+   * Keeps the picker usable during proxy/API issues without masking auth failures (those throw before fallback).
+   */
+  function icUniverseFallbackRows() {
+    return [
+      { symbol: "RELIANCE", sector: "Energy" },
+      { symbol: "TCS", sector: "IT" },
+      { symbol: "INFOSYS", sector: "IT" },
+      { symbol: "HDFCBANK", sector: "Banking" },
+      { symbol: "ICICIBANK", sector: "Banking" },
+      { symbol: "SBIN", sector: "Banking" },
+      { symbol: "BHARTIARTL", sector: "Telecom" },
+      { symbol: "KOTAKBANK", sector: "Banking" },
+      { symbol: "LT", sector: "Capital Goods" },
+      { symbol: "HINDUNILVR", sector: "FMCG" },
+      { symbol: "ITC", sector: "FMCG" },
+      { symbol: "AXISBANK", sector: "Banking" },
+      { symbol: "BAJFINANCE", sector: "Financial Services" },
+    ];
+  }
+
   var state = {
     symbol: "",
     detailed: null,
@@ -97,6 +134,7 @@
     soundEpoch: 0,
     mtmChartJs: null,
     equityChartJs: null,
+    pickerQuoteGen: 0,
   };
 
   function pickerShowQuoteBanner(msg) {
@@ -362,22 +400,31 @@
           });
           list = normalizeUniverseSymbolsPayload(u2);
         } catch (_e2) {
-          /* keep list empty — primary path may already contain the actionable error below */
+          /* keep list empty — may use embedded fallback below */
         }
+      }
+      if (!list.length) {
+        list = icUniverseFallbackRows();
+        pickerShowQuoteBanner("Using embedded approved list (server returned no symbols). Refresh if this persists.");
+      } else {
+        pickerShowQuoteBanner("");
       }
       state.universeMeta = list;
       populatePickerSelect();
-      if (!list.length) {
-        pickerShowQuoteBanner("Could not load the approved symbol list. Refresh the page or sign in again.");
-      }
     } catch (e) {
-      state.universeMeta = [];
+      var em = String(e.message || e || "");
+      var authish = /session|authenticate|not authenticated|401|403|sign in/i.test(em);
+      state.universeMeta = authish ? [] : icUniverseFallbackRows();
       populatePickerSelect();
-      pickerShowQuoteBanner("");
+      if (!authish) {
+        pickerShowQuoteBanner(em.length > 220 ? em.slice(0, 217) + "…" : em);
+      } else {
+        pickerShowQuoteBanner("");
+      }
       var tb = document.getElementById("pickerBody");
       if (tb) {
         tb.innerHTML =
-          "<tr><td colspan=\"6\" class=\"ic-muted\">" + esc(e.message || String(e)) + "</td></tr>";
+          "<tr><td colspan=\"6\" class=\"ic-muted\">" + esc(em) + "</td></tr>";
       }
     } finally {
       var s2 = document.getElementById("pickerSelect");
@@ -388,27 +435,42 @@
   function populatePickerSelect() {
     var sel = document.getElementById("pickerSelect");
     if (!sel) return;
-    var curGuess = String(state.symbol || sel.value || "").trim();
-    var curUp = curGuess.toUpperCase();
+    var curGuess = String(state.symbol || sel.value || "").trim().toUpperCase();
     var rows = state.universeMeta.slice().sort(function (a, b) {
       return String(a.symbol || "").localeCompare(String(b.symbol || ""));
     });
-    sel.innerHTML =
-      "<option value=\"\">— Choose underlying —</option>" +
-      rows
-        .map(function (r) {
-          var sym = String(r.symbol || "").trim().toUpperCase();
-          return "<option value=\"" + esc(sym) + "\">" + esc(sym) + " — " + esc(r.sector || "") + "</option>";
-        })
-        .join("");
+    while (sel.firstChild) {
+      sel.removeChild(sel.firstChild);
+    }
+    var ph = document.createElement("option");
+    ph.value = "";
+    ph.textContent = "Choose underlying…";
+    sel.appendChild(ph);
+    for (var ri = 0; ri < rows.length; ri++) {
+      var r = rows[ri];
+      var sym = String(r.symbol || "").trim().toUpperCase();
+      if (!sym) continue;
+      var op = document.createElement("option");
+      op.value = sym;
+      op.textContent = sym + " - " + String(r.sector || "").trim();
+      sel.appendChild(op);
+    }
     var symVal = "";
     for (var pi = 0; pi < rows.length; pi++) {
-      if (String(rows[pi].symbol || "").trim().toUpperCase() === curUp) {
+      if (String(rows[pi].symbol || "").trim().toUpperCase() === curGuess) {
         symVal = String(rows[pi].symbol || "").trim().toUpperCase();
         break;
       }
     }
     sel.value = symVal;
+    if (symVal && sel.value !== symVal) {
+      for (var qi = 0; qi < sel.options.length; qi++) {
+        if (sel.options[qi].value === symVal) {
+          sel.selectedIndex = qi;
+          break;
+        }
+      }
+    }
   }
 
   function wirePickerSelect() {
@@ -432,8 +494,19 @@
   async function selectUniverseSymbol(sym) {
     var s = (sym || "").trim().toUpperCase();
     if (!s) return;
+    var gen = ++state.pickerQuoteGen;
     var sel = document.getElementById("pickerSelect");
-    if (sel) sel.value = s;
+    if (sel) {
+      sel.value = s;
+      if (sel.value !== s) {
+        for (var qi = 0; qi < sel.options.length; qi++) {
+          if (sel.options[qi].value === s) {
+            sel.selectedIndex = qi;
+            break;
+          }
+        }
+      }
+    }
     var sk = document.getElementById("pickerSkeletonHost");
     var tb = document.getElementById("pickerBody");
     if (sk) {
@@ -450,12 +523,26 @@
         icApiPaths("universe-symbol-quote?underlying=" + encodeURIComponent(s)),
         { headers: authHeaders(), cache: "no-store" }
       );
+      if (gen !== state.pickerQuoteGen) return;
       if (sk) sk.style.display = "none";
       var row = res.row;
+      if (!row || typeof row !== "object") {
+        throw new Error("Invalid quote response (missing row).");
+      }
       pickerShowQuoteBanner(res.quotes_error || "");
       state.pickerSymbols = [row];
       state.symbol = String(row.symbol || "").trim().toUpperCase();
-      if (sel) sel.value = state.symbol;
+      if (sel) {
+        sel.value = state.symbol;
+        if (sel.value !== state.symbol) {
+          for (var qj = 0; qj < sel.options.length; qj++) {
+            if (sel.options[qj].value === state.symbol) {
+              sel.selectedIndex = qj;
+              break;
+            }
+          }
+        }
+      }
       if (tb) {
         tb.innerHTML = renderPickerRow(row);
         wirePicker(tb);
@@ -465,13 +552,27 @@
       }
       document.getElementById("gotoChecklistBtn").disabled = false;
     } catch (e) {
+      if (gen !== state.pickerQuoteGen) return;
       if (sk) sk.style.display = "none";
-      pickerShowQuoteBanner("");
       state.symbol = "";
       state.pickerSymbols = [];
+      var em = e.message || String(e);
+      pickerShowQuoteBanner(em.length > 220 ? em.slice(0, 217) + "…" : em);
+      if (sel) {
+        var keep = false;
+        for (var qk = 0; qk < sel.options.length; qk++) {
+          if (sel.options[qk].value === s) {
+            keep = true;
+            break;
+          }
+        }
+        if (keep) {
+          sel.value = s;
+          if (sel.value !== s) sel.selectedIndex = qk;
+        }
+      }
       if (tb) {
-        tb.innerHTML =
-          "<tr><td colspan=\"6\" class=\"ic-muted\">" + esc(e.message || String(e)) + "</td></tr>";
+        tb.innerHTML = "<tr><td colspan=\"6\" class=\"ic-muted\">" + esc(em) + "</td></tr>";
       }
     }
   }
