@@ -19,7 +19,6 @@ from backend.services import iron_condor_extended as ice
 from backend.config import settings
 from backend.services import iron_condor_checklist as chk
 from backend.services import market_holiday as mh
-from backend.services.upstox_service import upstox_service as vwap_service
 
 router = APIRouter(prefix="/iron-condor", tags=["iron-condor"])
 
@@ -141,7 +140,7 @@ def universe_with_quotes(
     db: Session = Depends(get_db),
     user: User = Depends(_auth),
 ) -> Dict[str, Any]:
-    """Picker: LTP, day %change, sector chip, active-underlying flag."""
+    """Picker: LTP, day %change, sector — one batched Upstox request + short TTL cache."""
     ic.ensure_iron_condor_tables()
     active_rows = db.execute(
         text(
@@ -153,31 +152,13 @@ def universe_with_quotes(
         {"uid": int(user.id)},
     ).fetchall()
     active_set = {str(r[0]) for r in active_rows if r and r[0]}
+    base_rows, quotes_error = ic.build_universe_picker_rows_with_quotes_cached()
     out = []
-    for sym, sec in sorted(IRON_CONDOR_UNIVERSE.items()):
-        api = ic.option_chain_underlying(sym)
-        ik = vwap_service.get_instrument_key(api)
-        ltp, chg = None, None
-        if ik:
-            o = vwap_service.get_ohlc_data(ik) or {}
-            try:
-                ltp = float(o.get("last_price") or o.get("close") or 0) or None
-                nested = o.get("ohlc") if isinstance(o.get("ohlc"), dict) else {}
-                prev = float(nested.get("close") or o.get("close_price") or 0)
-                if ltp and prev:
-                    chg = round((ltp - prev) / prev * 100.0, 2)
-            except Exception:
-                pass
-        out.append(
-            {
-                "symbol": sym,
-                "sector": sec,
-                "ltp": ltp,
-                "change_pct_day": chg,
-                "active_position": sym.upper() in active_set,
-            }
-        )
-    return {"symbols": out}
+    for r in base_rows:
+        item = dict(r)
+        item["active_position"] = str(item.get("symbol") or "").upper() in active_set
+        out.append(item)
+    return {"symbols": out, "quotes_error": quotes_error}
 
 
 @router.post("/checklist")

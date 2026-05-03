@@ -6,6 +6,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import time
+import copy
 from datetime import datetime, date
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -14,12 +17,120 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.database import engine
-from backend.services.iron_condor_universe import sector_for_symbol
+from backend.services.iron_condor_universe import IRON_CONDOR_UNIVERSE, sector_for_symbol
 from backend.services.upstox_service import upstox_service as vwap_service
 
 logger = logging.getLogger(__name__)
 
 IST = pytz.timezone("Asia/Kolkata")
+
+# Process-wide cache: batched universe quotes (symbols × one Upstox call per TTL)
+_ic_uq_cache_deadline: float = 0.0
+_ic_uq_cache_rows: List[Dict[str, Any]] = []
+
+
+def _normalize_ik_key(k: str) -> str:
+    return k.replace(" ", "").replace(":", "|").upper()
+
+
+def _batch_lookup(batch: Dict[str, Dict[str, Any]], ik: str) -> Optional[Dict[str, Any]]:
+    if not ik or not batch:
+        return None
+    if ik in batch:
+        return batch[ik]
+    a1, a2 = ik.replace("|", ":"), ik.replace(":", "|")
+    if a1 in batch:
+        return batch[a1]
+    if a2 in batch:
+        return batch[a2]
+    nreq = _normalize_ik_key(ik)
+    for rk, qd in batch.items():
+        if _normalize_ik_key(str(rk)) == nreq:
+            return qd if isinstance(qd, dict) else None
+    return None
+
+
+def build_universe_picker_rows_with_quotes_cached() -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """
+    Build universe picker rows (symbol, sector, ltp, change_pct_day) in one batched
+    Upstox request. Cached briefly to keep the UI snappy.
+
+    Returns:
+        (rows, quotes_error). Rows omit active_position — merge in the router.
+        quotes_error is human-readable when broker/auth is unavailable.
+    """
+    global _ic_uq_cache_deadline, _ic_uq_cache_rows
+
+    ttl = float(os.getenv("IRON_CONDOR_UNIVERSE_QUOTES_CACHE_SEC", "55") or "55")
+    now = time.monotonic()
+    if _ic_uq_cache_rows and now < _ic_uq_cache_deadline:
+        return ([copy.deepcopy(r) for r in _ic_uq_cache_rows], None)
+
+    pairs: List[Tuple[str, str, Optional[str]]] = []
+    for sym, sec in sorted(IRON_CONDOR_UNIVERSE.items()):
+        api = option_chain_underlying(sym)
+        ik = vwap_service.get_instrument_key(api)
+        pairs.append((sym, sec, ik))
+
+    tok = (getattr(vwap_service, "access_token", None) or "").strip()
+    quotes_error: Optional[str] = None
+    batch: Dict[str, Dict[str, Any]] = {}
+    keys = [ik for _, _, ik in pairs if ik]
+
+    if not tok:
+        quotes_error = (
+            "Upstox is not connected (no access token). Sign in to Upstox from "
+            "Settings or use the OAuth link, then reload this page."
+        )
+    elif not keys:
+        quotes_error = (
+            "Could not resolve equity instrument keys for the universe (instruments data missing?)."
+        )
+    else:
+        try:
+            snap = vwap_service.get_market_quote_snapshots_batch(keys, max_per_request=100)
+            batch = snap if snap else {}
+            if not batch:
+                quotes_error = (
+                    "Upstox returned no quote data (session may be expired). Reconnect Upstox and retry."
+                )
+        except Exception as ex:
+            logger.warning("Iron Condor universe batch quotes failed: %s", ex)
+            quotes_error = "Upstox quotes request failed — check broker connection and token."
+
+    rows: List[Dict[str, Any]] = []
+    for sym, sec, ik in pairs:
+        ltp_f: Optional[float] = None
+        chg: Optional[float] = None
+        qd = _batch_lookup(batch, ik) if ik else None
+        if qd:
+            try:
+                lp = float(qd.get("last_price") or 0)
+                ltp_f = lp if lp > 0 else None
+                nested = qd.get("ohlc") if isinstance(qd.get("ohlc"), dict) else {}
+                prev = float(
+                    nested.get("close")
+                    or nested.get("previous_close")
+                    or nested.get("prev_close")
+                    or 0
+                )
+                if ltp_f and prev > 0:
+                    chg = round((ltp_f - prev) / prev * 100.0, 2)
+            except (TypeError, ValueError):
+                pass
+        rows.append(
+            {
+                "symbol": sym,
+                "sector": sec,
+                "ltp": ltp_f,
+                "change_pct_day": chg,
+            }
+        )
+
+    _ic_uq_cache_rows = [copy.deepcopy(r) for r in rows]
+    _ic_uq_cache_deadline = now + max(5.0, ttl)
+
+    return ([copy.deepcopy(r) for r in rows], quotes_error)
 
 # Same mappings as scan router for rare symbol variants (option chain underlying).
 OPTION_CHAIN_API_SYMBOL = {

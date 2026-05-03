@@ -13,19 +13,113 @@
     };
   }
 
+  function icHtmlOrAuthMessage(status) {
+    if (status === 401 || status === 403) return "Session expired — please sign in again.";
+    if (status === 504) return "Gateway timeout — try again.";
+    if (status >= 500) return "Server error — try again shortly.";
+    return (
+      "Received a web page instead of API JSON (often: session or proxy). " +
+      "Sign in again, or reconnect Upstox if quotes fail."
+    );
+  }
+
   async function fj(paths, opts) {
-    var err;
+    var lastErr = "Request failed";
+    var o = opts || {};
     for (var i = 0; i < paths.length; i++) {
       try {
-        var r = await fetch(API_BASE + paths[i], opts || {});
-        var j = r.ok ? await r.json() : null;
-        if (r.ok) return j;
-        err = paths[i] + " " + r.status;
+        var r = await fetch(API_BASE + paths[i], o);
+        var txt = await r.text();
+        var trimmed = txt.trim();
+        var t0 = trimmed ? trimmed.charAt(0) : "";
+
+        if (!r.ok) {
+          if (!trimmed || t0 === "<") {
+            lastErr = icHtmlOrAuthMessage(r.status);
+          } else {
+            try {
+              var ej = JSON.parse(txt);
+              lastErr =
+                typeof ej.detail === "string"
+                  ? ej.detail
+                  : ej.message || paths[i] + " HTTP " + r.status;
+            } catch (_parseErr) {
+              lastErr = paths[i] + " HTTP " + r.status;
+            }
+          }
+          continue;
+        }
+
+        if (t0 === "<") {
+          throw new Error(icHtmlOrAuthMessage(r.status));
+        }
+        try {
+          if (!trimmed) return {};
+          return JSON.parse(txt);
+        } catch (_e4) {
+          throw new Error("Server response was not valid JSON.");
+        }
       } catch (e) {
-        err = e.message || String(e);
+        lastErr = e.message || String(e);
       }
     }
-    throw new Error(err || "fetch failed");
+    throw new Error(lastErr || "fetch failed");
+  }
+
+  var IC_PICK_CACHE = "tm_ic_universe_quotes_v1";
+  var IC_CACHE_MS = 50000;
+
+  function readPickerCache() {
+    try {
+      var raw = sessionStorage.getItem(IC_PICK_CACHE);
+      if (!raw) return null;
+      var o = JSON.parse(raw);
+      if (!o || !o.symbols || !Array.isArray(o.symbols)) return null;
+      if (typeof o.exp !== "number" || Date.now() > o.exp) return null;
+      return o;
+    } catch (_e) {
+      return null;
+    }
+  }
+
+  function writePickerCache(symbols, quotesError) {
+    try {
+      sessionStorage.setItem(
+        IC_PICK_CACHE,
+        JSON.stringify({
+          symbols: symbols,
+          quotes_error: quotesError || null,
+          exp: Date.now() + IC_CACHE_MS,
+        })
+      );
+    } catch (_e) {}
+  }
+
+  function pickerShowQuoteBanner(msg) {
+    var el = document.getElementById("pickerQuoteWarn");
+    if (!el) return;
+    if (!msg) {
+      el.setAttribute("hidden", "hidden");
+      el.textContent = "";
+      return;
+    }
+    el.removeAttribute("hidden");
+    el.textContent = msg;
+  }
+
+  function populatePickerDatalist() {
+    var dl = document.getElementById("icPickerList");
+    if (!dl) return;
+    var html = "";
+    state.pickerSymbols.forEach(function (r) {
+      html +=
+        "<option value=\"" +
+        esc(r.symbol) +
+        "\">" +
+        esc((r.sector || "") + " · " + (r.ltp != null ? Number(r.ltp).toFixed(2) : "—")) +
+        "</option>";
+    });
+    dl.innerHTML = html;
   }
 
   function esc(s) {
@@ -254,7 +348,11 @@
   function filterPicker() {
     var q = (document.getElementById("pickerSearch").value || "").trim().toUpperCase();
     var tb = document.getElementById("pickerBody");
-    if (!state.pickerSymbols.length || !tb) return;
+    if (!tb) return;
+    if (!state.pickerSymbols.length) {
+      tb.innerHTML = "<tr><td colspan=\"6\" class=\"ic-muted\">No universe rows yet.</td></tr>";
+      return;
+    }
     tb.innerHTML =
       "<tr><td colspan=\"6\"><span class=\"ic-muted\">No matches.</span></td></tr>";
     var found = [];
@@ -312,22 +410,47 @@
   async function loadPicker() {
     var tbody = document.getElementById("pickerBody");
     var sk = document.getElementById("pickerSkeletonHost");
-    sk.style.display = "block";
-    sk.innerHTML = skelBars(4);
-    tbody.innerHTML = "";
+    var cached = readPickerCache();
+
+    if (cached && cached.symbols.length) {
+      state.pickerSymbols = cached.symbols;
+      pickerShowQuoteBanner(cached.quotes_error || "");
+      populatePickerDatalist();
+      if (sk) sk.style.display = "none";
+      filterPicker();
+    } else {
+      pickerShowQuoteBanner("");
+      if (sk) {
+        sk.style.display = "block";
+        sk.innerHTML = skelBars(3);
+      }
+      if (tbody)
+        tbody.innerHTML = "<tr><td colspan=\"6\" class=\"ic-muted\">Loading quotes…</td></tr>";
+    }
+
     try {
       var u = await fj(["/api/iron-condor/universe-with-quotes", "/iron-condor/universe-with-quotes"], {
         headers: authHeaders(),
         cache: "no-store",
       });
-      sk.style.display = "none";
+      if (sk) sk.style.display = "none";
       state.pickerSymbols = u.symbols || [];
-      tbody.innerHTML = "";
+      writePickerCache(state.pickerSymbols, u.quotes_error);
+      populatePickerDatalist();
       filterPicker();
-      if (!tbody.querySelectorAll("tr[data-sym]").length) tbody.innerHTML = "<tr><td colspan=\"6\" class=\"ic-muted\">Universe unavailable.</td></tr>";
+      pickerShowQuoteBanner(u.quotes_error || "");
+      if (tbody && !tbody.querySelectorAll("tr[data-sym]").length) {
+        tbody.innerHTML = "<tr><td colspan=\"6\" class=\"ic-muted\">Universe unavailable.</td></tr>";
+      }
     } catch (e) {
-      sk.style.display = "none";
-      tbody.innerHTML = "<tr><td colspan=\"6\" class=\"ic-muted\">" + esc(e.message) + "</td></tr>";
+      if (sk) sk.style.display = "none";
+      if (!(cached && cached.symbols.length)) {
+        pickerShowQuoteBanner("");
+        if (tbody) {
+          tbody.innerHTML =
+            "<tr><td colspan=\"6\" class=\"ic-muted\">" + esc(e.message || String(e)) + "</td></tr>";
+        }
+      }
     }
   }
 

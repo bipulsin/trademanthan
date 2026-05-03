@@ -8,6 +8,8 @@ Backend depends on Postgres (via `DATABASE_URL`) and authenticated user token (s
 
 Sizing for checklist and strike analysis is fixed from environment (not the Iron Condor HTML form): **`IRON_CONDOR_TRADING_CAPITAL_DEFAULT`** (default `500000`) and **`IRON_CONDOR_TARGET_POSITION_SLOTS`** (default `5`). Set these on the server (e.g. EC2 `.env` / systemd) to change deployed behaviour.
 
+Universe picker quotes use one batched Upstox call plus optional **`IRON_CONDOR_UNIVERSE_QUOTES_CACHE_SEC`** (default `55`) server-side TTL so the UI stays fast.
+
 Serve static UI: `frontend/public/iron-condor.html`.
 
 Charts use **Chart.js 4.x** loaded from jsDelivr (see page `<script>` tags). KPI tiles stay numeric‑dense; **open MTM** and **equity curve** canvases consume poll + `/equity-curve` JSON respectively.

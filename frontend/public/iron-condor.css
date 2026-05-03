@@ -237,13 +237,34 @@ body.theme-page.iron-c-page[data-theme="light"] .ic-step-pill {
 }
 
 .ic-picker-search {
-  width: min(340px, 100%);
+  width: min(420px, 100%);
   padding: 10px 12px;
   border-radius: 8px;
   border: 1px solid var(--theme-border);
   background: var(--theme-card-alt);
   margin-bottom: 10px;
   font-family: inherit;
+  box-sizing: border-box;
+}
+
+input[list].ic-picker-search {
+  width: 100%;
+  max-width: min(420px, 100%);
+}
+
+.ic-picker-warn {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ic-warn);
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--ic-warn) 40%, transparent);
+  background: color-mix(in srgb, var(--ic-warn) 14%, transparent);
+}
+
+body.theme-page.iron-c-page[data-theme="dark"] .ic-picker-warn {
+  background: rgba(230, 81, 0, 0.12);
 }
 
 .ic-skel-row {
