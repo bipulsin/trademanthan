@@ -281,44 +281,55 @@ def compute_position_suggestion(
     return pct, None
 
 
+def _iron_condor_capital_slots_from_env() -> Tuple[float, int]:
+    from backend.config import settings as _settings
+
+    return (
+        float(getattr(_settings, "IRON_CONDOR_TRADING_CAPITAL_DEFAULT", 500_000.0)),
+        int(getattr(_settings, "IRON_CONDOR_TARGET_POSITION_SLOTS", 5)),
+    )
+
+
 def get_or_create_settings(db: Session, user_id: int) -> Dict[str, Any]:
     ensure_iron_condor_tables()
+    env_tc, env_slots = _iron_condor_capital_slots_from_env()
     row = db.execute(
         text("SELECT * FROM iron_condor_user_settings WHERE user_id = :uid LIMIT 1"),
         {"uid": user_id},
     ).mappings().first()
     if row:
-        return dict(row)
+        d = dict(row)
+        d["trading_capital"] = env_tc
+        d["target_position_slots"] = max(1, min(10, env_slots))
+        return d
     db.execute(
         text(
             """
             INSERT INTO iron_condor_user_settings (user_id, trading_capital, max_simultaneous_positions, target_position_slots)
-            VALUES (:uid, 0, 3, 5)
+            VALUES (:uid, :tc, 3, :ts)
             """
         ),
-        {"uid": user_id},
+        {"uid": user_id, "tc": env_tc, "ts": max(1, min(10, env_slots))},
     )
     db.commit()
     row2 = db.execute(
         text("SELECT * FROM iron_condor_user_settings WHERE user_id = :uid LIMIT 1"),
         {"uid": user_id},
     ).mappings().first()
-    return dict(row2 or {})
+    d2 = dict(row2 or {})
+    d2["trading_capital"] = env_tc
+    d2["target_position_slots"] = max(1, min(10, env_slots))
+    return d2
 
 
 def update_settings(db: Session, user_id: int, body: Dict[str, Any]) -> Dict[str, Any]:
     get_or_create_settings(db, user_id)
     patches = []
     params: Dict[str, Any] = {"uid": user_id}
-    if "trading_capital" in body:
-        patches.append("trading_capital = :tc")
-        params["tc"] = float(body["trading_capital"])
+    # trading_capital / target_position_slots come from IRON_CONDOR_* env vars only
     if "max_simultaneous_positions" in body:
         patches.append("max_simultaneous_positions = :mx")
         params["mx"] = max(1, min(12, int(body["max_simultaneous_positions"])))
-    if "target_position_slots" in body:
-        patches.append("target_position_slots = :ts")
-        params["ts"] = max(1, min(10, int(body["target_position_slots"])))
     if "profit_target_pct_of_credit" in body:
         patches.append("profit_target_pct_of_credit = :pp")
         params["pp"] = body["profit_target_pct_of_credit"]

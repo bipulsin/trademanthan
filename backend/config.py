@@ -42,6 +42,10 @@ class Settings(BaseSettings):
         "yes",
     )
 
+    # Iron Condor advisory sizing (workspace UI no longer edits these; override via env on EC2)
+    IRON_CONDOR_TRADING_CAPITAL_DEFAULT: float = float(os.getenv("IRON_CONDOR_TRADING_CAPITAL_DEFAULT", "500000"))
+    IRON_CONDOR_TARGET_POSITION_SLOTS: int = int(os.getenv("IRON_CONDOR_TARGET_POSITION_SLOTS", "5"))
+
     # CAR GPT Configuration
     CAR_NUMBER_OF_WEEKS: int = int(os.getenv("CAR_NUMBER_OF_WEEKS", "52"))
 

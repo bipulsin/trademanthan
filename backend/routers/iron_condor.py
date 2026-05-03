@@ -16,6 +16,7 @@ from backend.routers.auth import get_user_from_token, oauth2_scheme
 from backend.services.iron_condor_universe import IRON_CONDOR_UNIVERSE, sector_for_symbol
 from backend.services import iron_condor_service as ic
 from backend.services import iron_condor_extended as ice
+from backend.config import settings
 from backend.services import iron_condor_checklist as chk
 from backend.services import market_holiday as mh
 from backend.services.upstox_service import upstox_service as vwap_service
@@ -190,12 +191,16 @@ def post_checklist(
     sec = sector_for_symbol(und)
     if not sec:
         raise HTTPException(status_code=400, detail="Symbol not in approved universe.")
+    _tc = float(getattr(settings, "IRON_CONDOR_TRADING_CAPITAL_DEFAULT", 500_000.0))
+    _slots = int(getattr(settings, "IRON_CONDOR_TARGET_POSITION_SLOTS", 5))
+    _pct = 3.0 if _slots >= 5 else 5.0
+    capital_estimate = (_tc * _pct) / 100.0 if _tc > 0 else 0.0
     chk_out = chk.run_pre_entry_checklist(
         db,
         int(user.id),
         und,
         sec,
-        body.new_capital_estimate,
+        capital_estimate,
         body.declared_next_earnings_iso,
     )
     return {"success": True, **chk_out}

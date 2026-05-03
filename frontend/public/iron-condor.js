@@ -49,22 +49,21 @@
   }
 
   function applySavedTheme() {
-    var lg = bodyEl().classList.contains("iron-c-page");
-    if (!lg) return;
-    var d = localStorage.getItem("ic_ui_theme") || "light";
+    if (!bodyEl().classList.contains("iron-c-page")) return;
+    // Match left-menu theme (tradentical_theme); legacy ic_ui_theme as fallback
+    var d = localStorage.getItem("tradentical_theme") || localStorage.getItem("ic_ui_theme") || "dark";
+    if (d !== "light" && d !== "dark") d = "dark";
     bodyEl().setAttribute("data-theme", d);
-    var b = document.getElementById("icThemeFlip");
-    if (b) b.textContent = d === "dark" ? "Light" : "Dark";
   }
 
-  function flipTheme() {
-    var cur = bodyEl().getAttribute("data-theme") || "light";
-    var nx = cur === "dark" ? "light" : "dark";
-    bodyEl().setAttribute("data-theme", nx);
-    localStorage.setItem("ic_ui_theme", nx);
-    applySavedTheme();
-    renderMtmChart();
-    loadEquityCurve();
+  function bindThemeSyncForCharts() {
+    try {
+      var obs = new MutationObserver(function () {
+        renderMtmChart();
+        loadEquityCurve();
+      });
+      obs.observe(document.body, { attributes: true, attributeFilter: ["data-theme"] });
+    } catch (_e) {}
   }
 
   function chartPalette() {
@@ -349,17 +348,12 @@
       el.value = "";
     });
 
-    var capEst = Number(document.getElementById("icCapital").value) || 0;
-    var pct = Number(document.getElementById("icSlots").value) >= 5 ? 3 : 5;
-    var estimate = capEst > 0 ? (capEst * pct) / 100 : 0;
-
     var ed = document.getElementById("icEarningsDate").value;
     var j = await fj(["/api/iron-condor/checklist", "/iron-condor/checklist"], {
       method: "POST",
       headers: authHeaders(),
       body: JSON.stringify({
         underlying: state.symbol,
-        new_capital_estimate: estimate,
         declared_next_earnings_iso: ed || undefined,
       }),
     }).catch(function (e) {
@@ -823,8 +817,6 @@
 
   document.getElementById("btnNewIc").onclick = function () {showPane(1);};
 
-  document.getElementById("icThemeFlip").onclick = flipTheme;
-
   document.getElementById("back1").onclick = function () {
     showPane(1);
   };
@@ -868,19 +860,6 @@
 
   document.getElementById("verifyDismissBtn").onclick = function () {
     document.getElementById("verifyModal").setAttribute("data-show", "0");
-  };
-
-  document.getElementById("icSaveCap").onclick = async function () {
-    var cap = Number(document.getElementById("icCapital").value);
-    var slots = Number(document.getElementById("icSlots").value);
-    await fj(["/api/iron-condor/settings", "/iron-condor/settings"], {
-      method: "PUT",
-      headers: authHeaders(),
-      body: JSON.stringify({
-        trading_capital: Number.isFinite(cap) ? cap : undefined,
-        target_position_slots: Number.isFinite(slots) ? slots : undefined,
-      }),
-    }).catch(function () {});
   };
 
   document.getElementById("journalCloseBtn").onclick = async function () {
@@ -943,14 +922,10 @@
   };
 
   fj(["/api/iron-condor/workspace", "/iron-condor/workspace"], { headers: authHeaders() })
-    .then(function (w) {
-      var st = (w && w.settings) || {};
-      if (st.trading_capital != null) document.getElementById("icCapital").value = st.trading_capital;
-      if (st.target_position_slots != null) document.getElementById("icSlots").value = st.target_position_slots;
-    })
     .catch(function () {})
     .finally(function () {
       applySavedTheme();
+      bindThemeSyncForCharts();
       loadSessionLine();
       loadPicker();
       refreshWorkspaceQuiet();

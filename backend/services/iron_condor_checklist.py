@@ -283,11 +283,9 @@ def run_pre_entry_checklist(
     vix, verr = fetch_india_vix()
     chips.append(vix_chip(vix))
 
-    rows = db.execute(
-        text("SELECT trading_capital FROM iron_condor_user_settings WHERE user_id = :uid LIMIT 1"),
-        {"uid": user_id},
-    ).mappings().first()
-    tc = float((rows or {}).get("trading_capital") or 0)
+    from backend.config import settings as _settings
+
+    tc = float(getattr(_settings, "IRON_CONDOR_TRADING_CAPITAL_DEFAULT", 500_000.0))
 
     if eq_key:
         chips.append(fetch_gap_check(eq_key))
