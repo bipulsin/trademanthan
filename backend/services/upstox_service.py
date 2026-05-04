@@ -2265,9 +2265,23 @@ class UpstoxService:
                 url, method="GET", timeout=request_timeout, max_retries=max_retries
             )
             if not data or data.get("status") != "success" or "data" not in data:
+                logger.warning(
+                    "Upstox market-quote GET: non-success or no data block "
+                    "(method=GET url=%s instrument_keys=%s response_status=%s response_top_keys=%s)",
+                    url,
+                    keys_batch,
+                    data.get("status") if isinstance(data, dict) else None,
+                    list(data.keys())[:30] if isinstance(data, dict) else type(data).__name__,
+                )
                 return out
             raw = data.get("data") or {}
             if not isinstance(raw, dict):
+                logger.warning(
+                    "Upstox market-quote GET: data is not a dict (method=GET url=%s instrument_keys=%s raw_type=%s)",
+                    url,
+                    keys_batch,
+                    type(raw).__name__,
+                )
                 return out
 
             def normalize_key(k: str) -> str:
@@ -2357,6 +2371,21 @@ class UpstoxService:
                     "ohlc": ohlc,
                     "average_price": atp or None,
                 }
+            missing_keys = [k for k in keys_batch if k not in out]
+            zero_last = [
+                k for k in keys_batch if k in out and float(out[k].get("last_price") or 0) <= 0
+            ]
+            if missing_keys or zero_last:
+                rsp_keys_sample = list(raw.keys())[:50] if isinstance(raw, dict) else []
+                logger.warning(
+                    "Upstox market-quote GET: unmatched or zero last_price "
+                    "(method=GET url=%s requested=%s missing=%s zero_last_price=%s response_instrument_key_sample=%s)",
+                    url,
+                    keys_batch,
+                    missing_keys,
+                    zero_last,
+                    rsp_keys_sample,
+                )
         except Exception as e:
             logger.error(f"❌ Error fetching batch quote snapshots: {str(e)}")
         return out
