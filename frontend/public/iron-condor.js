@@ -581,16 +581,16 @@
       "<tr data-sym=\"" +
       esc(sym) +
       "\">" +
-      "<td><strong class=\"ic-mono\">" +
+      "<td class=\"ic-col-symbol\"><strong class=\"ic-mono\">" +
       esc(sym) +
       "</strong></td>" +
-      "<td><span class=\"ic-chip-pass ic-chip-sector\">" +
+      "<td class=\"ic-col-sector\"><span class=\"ic-chip-pass ic-chip-sector\">" +
       esc(sector || "—") +
       "</span></td>" +
-      "<td class=\"ic-num ic-mono\"><span class=\"ic-muted\">—</span></td>" +
-      "<td class=\"ic-num\"><span class=\"ic-muted\">—</span></td>" +
-      "<td>No Trade</td>" +
-      "<td><button type=\"button\" class=\"ic-btn-global ic-btn-primary pickRow\">Analyze</button></td>" +
+      "<td class=\"ic-col-ltp ic-num ic-mono\"><span class=\"ic-muted\">—</span></td>" +
+      "<td class=\"ic-col-delta ic-num\"><span class=\"ic-muted\">—</span></td>" +
+      "<td class=\"ic-col-active\">No Trade</td>" +
+      "<td class=\"ic-col-action\"><button type=\"button\" class=\"ic-btn-global ic-btn-primary pickRow\">Analyze</button></td>" +
       "</tr>"
     );
   }
@@ -708,16 +708,16 @@
       "<tr data-sym=\"" +
       esc(sym) +
       "\" class=\"ic-picker-loading\">" +
-      "<td><strong class=\"ic-mono\">" +
+      "<td class=\"ic-col-symbol\"><strong class=\"ic-mono\">" +
       esc(sym) +
       "</strong></td>" +
-      "<td><span class=\"ic-chip-pass ic-chip-sector\">" +
+      "<td class=\"ic-col-sector\"><span class=\"ic-chip-pass ic-chip-sector\">" +
       esc(sector || "—") +
       "</span></td>" +
-      "<td class=\"ic-num ic-mono\"><span class=\"ic-muted\">…</span></td>" +
-      "<td class=\"ic-num\"><span class=\"ic-muted\">…</span></td>" +
-      "<td class=\"ic-num\"><span class=\"ic-muted\">…</span></td>" +
-      "<td><span class=\"ic-muted\">No Trade</span></td>" +
+      "<td class=\"ic-col-ltp ic-num ic-mono\"><span class=\"ic-muted\">…</span></td>" +
+      "<td class=\"ic-col-delta ic-num\"><span class=\"ic-muted\">…</span></td>" +
+      "<td class=\"ic-col-active\"><span class=\"ic-muted\">No Trade</span></td>" +
+      "<td class=\"ic-col-action\"><button type=\"button\" class=\"ic-btn-global ic-btn-primary pickRow\" disabled title=\"Loading quote\">Analyze</button></td>" +
       "</tr>"
     );
   }
@@ -740,24 +740,24 @@
       "<tr data-sym=\"" +
       esc(row.symbol) +
       "\">" +
-      "<td><strong class=\"ic-mono\">" +
+      "<td class=\"ic-col-symbol\"><strong class=\"ic-mono\">" +
       esc(row.symbol) +
       "</strong>" +
       warn +
       "</td>" +
-      "<td><span class=\"ic-chip-pass ic-chip-sector\">" +
+      "<td class=\"ic-col-sector\"><span class=\"ic-chip-pass ic-chip-sector\">" +
       esc(row.sector) +
       "</span></td>" +
-      "<td class=\"ic-num ic-mono\">" +
+      "<td class=\"ic-col-ltp ic-num ic-mono\">" +
       fmtPxCell(row.ltp) +
       "</td>" +
-      "<td class=\"ic-num\">" +
+      "<td class=\"ic-col-delta ic-num\">" +
       fmtPctCell(row.change_pct_day) +
       "</td>" +
-      "<td class=\"ic-num\">" +
+      "<td class=\"ic-col-active\">" +
       esc(act) +
       "</td>" +
-      "<td><button type=\"button\" class=\"ic-btn-global ic-btn-primary pickRow\">Analyze</button></td>" +
+      "<td class=\"ic-col-action\"><button type=\"button\" class=\"ic-btn-global ic-btn-primary pickRow\">Analyze</button></td>" +
       "</tr>"
     );
   }

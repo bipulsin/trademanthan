@@ -82,6 +82,57 @@ body.theme-page.iron-c-page[data-theme="light"] .ic-universe-table tbody td.ic-n
   font-variant-numeric: tabular-nums;
 }
 
+/* Step-1 universe picker: fixed column model so headers line up with body cells */
+.ic-universe-table {
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+.ic-universe-table thead th {
+  text-align: left;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--theme-border);
+  vertical-align: bottom;
+  font-weight: 600;
+}
+.ic-universe-table thead th.ic-col-ltp,
+.ic-universe-table thead th.ic-col-delta {
+  text-align: center;
+}
+.ic-universe-table tbody td {
+  padding: 8px 6px;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--theme-border, rgba(148, 163, 184, 0.35));
+}
+.ic-universe-table .ic-col-symbol {
+  width: 18%;
+}
+.ic-universe-table .ic-col-sector {
+  width: 16%;
+}
+.ic-universe-table .ic-col-ltp {
+  width: 14%;
+  text-align: center;
+}
+.ic-universe-table .ic-col-delta {
+  width: 11%;
+  text-align: center;
+}
+.ic-universe-table .ic-col-active {
+  width: 14%;
+  text-align: left;
+}
+.ic-universe-table .ic-col-action {
+  width: 12%;
+  min-width: 5.5rem;
+  text-align: right;
+}
+.ic-universe-table .ic-col-symbol,
+.ic-universe-table .ic-col-sector {
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .ic-mono,
 .ic-price,
 .ic-strike-field {

@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
   <link rel="stylesheet" href="left-menu.css?v=3.23" />
   <link rel="stylesheet" href="theme.css?v=1.3" />
-  <link rel="stylesheet" href="iron-condor.css?v=10" />
+  <link rel="stylesheet" href="iron-condor.css?v=11" />
   <link rel="stylesheet" href="settings.css" />
 </head>
 <body class="theme-page iron-c-page" data-theme="light">
@@ -71,15 +71,15 @@
 
         <div id="pickerSkeletonHost" style="margin:12px 0;display:none;"></div>
         <div class="ic-table-wrap">
-          <table class="ic-t ic-universe-table theme-table-like" style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+          <table class="ic-t ic-universe-table theme-table-like" style="width:100%;font-size:0.82rem;">
             <thead>
               <tr>
-                <th style="text-align:left;padding:8px 4px;border-bottom:1px solid var(--theme-border);">Underlying</th>
-                <th style="text-align:left;padding:8px 4px;border-bottom:1px solid var(--theme-border);">Sector</th>
-                <th style="text-align:right;padding:8px 4px;border-bottom:1px solid var(--theme-border);" class="ic-num ic-mono">LTP</th>
-                <th style="text-align:right;padding:8px 4px;border-bottom:1px solid var(--theme-border);" class="ic-num">Δ day</th>
-                <th style="text-align:left;padding:8px 4px;border-bottom:1px solid var(--theme-border);">Active?</th>
-                <th></th>
+                <th class="ic-col-symbol">Underlying</th>
+                <th class="ic-col-sector">Sector</th>
+                <th class="ic-col-ltp ic-num ic-mono">LTP</th>
+                <th class="ic-col-delta ic-num">Δ day</th>
+                <th class="ic-col-active">Active?</th>
+                <th class="ic-col-action" aria-label="Action"></th>
               </tr>
             </thead>
             <tbody id="pickerBody"><tr><td colspan="6" class="ic-muted">Select a symbol above — quotes load after you pick one.</td></tr></tbody>
@@ -205,6 +205,6 @@
   </div>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" crossorigin="anonymous"></script>
   <script src="left-menu.js?v=3.22"></script>
-  <script src="iron-condor.js?v=33"></script>
+  <script src="iron-condor.js?v=34"></script>
 </body>
 </html>
