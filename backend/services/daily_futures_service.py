@@ -3620,13 +3620,54 @@ def index_bearish_gate_from_quotes() -> Dict[str, Any]:
     return out
 
 
+def _short_target_entry_feasible_vs_ltp(
+    pb: Optional[float],
+    sv: Optional[float],
+    ltp: Optional[float],
+    atr: Optional[float],
+) -> Optional[float]:
+    """
+    SHORT Target Entry must stay plausible vs current LTP. Session VWAP often sits far above LTP when
+    the name has sold off — showing raw VWAP reads like an impossible entry vs spot.
+
+    Prefer pullback (V2) or VWAP only when within ~3% of LTP or within ~3×15m ATR; else use LTP as anchor.
+    """
+    if ltp is None or float(ltp) <= 0:
+        return None
+
+    def _gap_ok(candidate: float) -> bool:
+        g = abs(float(candidate) - float(ltp))
+        pct = g / float(ltp) * 100.0
+        if pct <= 3.0:
+            return True
+        if atr is not None and float(atr) > 0 and g <= 3.0 * float(atr):
+            return True
+        return False
+
+    if pb is not None and float(pb) > 0 and _gap_ok(float(pb)):
+        return float(pb)
+    if sv is not None and float(sv) > 0 and _gap_ok(float(sv)):
+        return float(sv)
+    return float(ltp)
+
+
 def _workspace_attach_target_entry_price(p: Dict[str, Any]) -> None:
     """
-    One field for the Premium Futures 'Target Entry' column: pullback (V2) if set, else session VWAP, else LTP.
+    One field for the Premium Futures 'Target Entry' column.
+    LONG: pullback (V2) > session VWAP > LTP.
+    SHORT: same priority but clamp vs LTP so VWAP is not shown when it is far from spot (see helper).
     """
     pb = _safe_float(p.get("pullback_target_price"))
     sv = _safe_float(p.get("session_vwap"))
     ltp = _safe_float(p.get("ltp"))
+    atr = _safe_float(p.get("atr_14_15m"))
+    dtp = str(p.get("direction_type") or "LONG").strip().upper()
+
+    if dtp == "SHORT":
+        te = _short_target_entry_feasible_vs_ltp(pb, sv, ltp, atr)
+        p["target_entry_price"] = round(float(te), 4) if te is not None and float(te) > 0 else None
+        return
+
     if pb is not None and pb > 0:
         p["target_entry_price"] = round(float(pb), 4)
     elif sv is not None and sv > 0:
