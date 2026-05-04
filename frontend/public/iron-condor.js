@@ -453,7 +453,7 @@
     return row.active_position === true || row.active_position === false;
   }
 
-  /** Δ month = (LTP − curr_month_open) / curr_month_open × 100. Uses absolute magnitude for banding (both directions risky). */
+  /** Δ month = (LTP − curr_month_open) / curr_month_open × 100. Bands use signed % (direction matters). */
   function deltaMonthPctFromRow(row) {
     var mo = parseNumOrNull(row.curr_month_open);
     var lp = parseNumOrNull(row.ltp);
@@ -465,19 +465,22 @@
   function deltaMonthChipHtml(row) {
     var pct = deltaMonthPctFromRow(row);
     if (pct == null) return "<span class=\"ic-muted\">—</span>";
-    var ap = Math.abs(pct);
     var txt = (pct >= 0 ? "+" : "") + pct.toFixed(2) + "%";
     var base = "ic-chip-delta-month ic-num ic-mono";
     var tier = "";
     var blink = "";
-    if (ap < 7) {
-      tier = " ic-dm-white";
-    } else if (ap <= 10) {
-      if (ap <= 8) tier = " ic-dm-yellow";
-      else tier = " ic-dm-red";
-    } else {
+    if (pct < -10 || pct > 10) {
       tier = " ic-dm-red";
       blink = " ic-dm-blink";
+    } else if ((pct >= -10 && pct < -8) || (pct > 8 && pct <= 10)) {
+      tier = " ic-dm-red";
+    } else if ((pct >= -8 && pct < -6) || (pct > 6 && pct <= 8)) {
+      tier = " ic-dm-yellow";
+    } else if (pct >= -6 && pct <= 6) {
+      tier = " ic-dm-white";
+    } else {
+      // Defensive: should not hit (gaps covered by branches above).
+      tier = " ic-dm-white";
     }
     return (
       '<span class="' +
