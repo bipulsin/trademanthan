@@ -73,6 +73,22 @@
     throw new Error(lastErr || "fetch failed");
   }
 
+  /** One automatic retry after gateway/proxy errors (504/502) — quote path only. */
+  async function fjWithGatewayRetry(paths, opts) {
+    try {
+      return await fj(paths, opts);
+    } catch (e) {
+      var m = String((e && e.message) || e || "");
+      if (/Gateway timeout|504|502|Bad Gateway|timed out waiting/i.test(m)) {
+        await new Promise(function (r) {
+          setTimeout(r, 2000);
+        });
+        return await fj(paths, opts);
+      }
+      throw e;
+    }
+  }
+
   /**
    * FastAPI exposes Iron Condor at /api/iron-condor/* and /iron-condor/* (see nginx-tradentical.conf proxy).
    */
@@ -536,8 +552,7 @@
     state.symbol = "";
     state.pickerSymbols = [];
     try {
-      /* No client AbortController — server caps Upstox (~8s); premature abort caused false "Request timed out". */
-      var res = await fj(
+      var res = await fjWithGatewayRetry(
         icApiPaths("universe-symbol-quote?underlying=" + encodeURIComponent(s)),
         { headers: authHeaders(), cache: "no-store" }
       );

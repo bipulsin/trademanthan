@@ -28,6 +28,9 @@ IST = pytz.timezone("Asia/Kolkata")
 _ic_uq_cache_deadline: float = 0.0
 _ic_uq_cache_rows: List[Dict[str, Any]] = []
 
+# In-process cache for equity instrument_key lookups (get_instrument_key can load large instruments JSON).
+_ic_equity_ik_cache: Dict[str, str] = {}
+
 
 def _normalize_ik_key(k: str) -> str:
     return k.replace(" ", "").replace(":", "|").upper()
@@ -146,6 +149,19 @@ def option_chain_underlying(symbol: str) -> str:
     return OPTION_CHAIN_API_SYMBOL.get(key, key)
 
 
+def _instrument_key_for_ic_equity(api_symbol: str) -> Optional[str]:
+    """Cached wrapper — avoids repeated cold loads from instruments_downloader for picker clicks."""
+    k = (api_symbol or "").strip().upper()
+    if not k:
+        return None
+    if k in _ic_equity_ik_cache:
+        return _ic_equity_ik_cache[k]
+    ik = vwap_service.get_instrument_key(api_symbol)
+    if ik:
+        _ic_equity_ik_cache[k] = ik
+    return ik
+
+
 def universe_picker_row_for_symbol(db: Session, user_id: int, symbol: str) -> Tuple[Dict[str, Any], Optional[str]]:
     """
     One picker row with live quote (single batched key). Used after user picks a symbol.
@@ -170,7 +186,7 @@ def universe_picker_row_for_symbol(db: Session, user_id: int, symbol: str) -> Tu
     active = int(row_ct or 0) >= 1
 
     api = option_chain_underlying(sym)
-    ik = vwap_service.get_instrument_key(api)
+    ik = _instrument_key_for_ic_equity(api)
     tok = (getattr(vwap_service, "access_token", None) or "").strip()
     quotes_error: Optional[str] = None
     ltp_f: Optional[float] = None
