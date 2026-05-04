@@ -551,16 +551,10 @@
     document.getElementById("gotoChecklistBtn").disabled = true;
     state.symbol = "";
     state.pickerSymbols = [];
-    var ctrl = new AbortController();
-    var to = setTimeout(function () {
-      try {
-        ctrl.abort();
-      } catch (_a) {}
-    }, 30000);
     try {
       var res = await fjWithGatewayRetry(
         icApiPaths("universe-symbol-quote?underlying=" + encodeURIComponent(s)),
-        { headers: authHeaders(), cache: "no-store", signal: ctrl.signal }
+        { headers: authHeaders(), cache: "no-store" }
       );
       if (gen !== state.pickerQuoteGen) return;
       if (sk) sk.style.display = "none";
@@ -613,8 +607,6 @@
       if (tb) {
         tb.innerHTML = "<tr><td colspan=\"6\" class=\"ic-muted\">" + esc(em) + "</td></tr>";
       }
-    } finally {
-      clearTimeout(to);
     }
   }
 

@@ -7,8 +7,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 import copy
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import datetime, date, time as dt_time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -32,6 +34,10 @@ _ic_uq_cache_rows: List[Dict[str, Any]] = []
 
 # In-process cache for equity instrument_key lookups (get_instrument_key can load large instruments JSON).
 _ic_equity_ik_cache: Dict[str, str] = {}
+
+# DDL + extended migrations once per worker — they were doubling per /universe-symbol-quote (~tens of seconds).
+_ic_tables_lock = threading.Lock()
+_iron_condor_tables_ready_flag = False
 
 
 def _normalize_ik_key(k: str) -> str:
@@ -168,6 +174,7 @@ def universe_picker_row_for_symbol(db: Session, user_id: int, symbol: str) -> Tu
     """
     One picker row with live quote (single batched key). Used after user picks a symbol.
     Does not use the universe-wide quote cache.
+    Broker call is capped (thread pool + short HTTP timeouts) so the route cannot stall nginx/clients for minutes.
     """
     ensure_iron_condor_tables()
     sym = (symbol or "").strip().upper()
@@ -187,6 +194,9 @@ def universe_picker_row_for_symbol(db: Session, user_id: int, symbol: str) -> Tu
     ).scalar()
     active = int(row_ct or 0) >= 1
 
+    trade_date = mh_ic._normalize_ist(None).date()
+    _, closes = read_underlying_atr_closes_session(db, trade_date, sym)
+
     api = option_chain_underlying(sym)
     ik = _instrument_key_for_ic_equity(api)
     tok = (getattr(vwap_service, "access_token", None) or "").strip()
@@ -195,6 +205,7 @@ def universe_picker_row_for_symbol(db: Session, user_id: int, symbol: str) -> Tu
     chg: Optional[float] = None
 
     quote_source = "live"
+    live_timed_out = False
     if not tok:
         quotes_error = (
             "Upstox is not connected (no access token). Sign in to Upstox from "
@@ -203,43 +214,55 @@ def universe_picker_row_for_symbol(db: Session, user_id: int, symbol: str) -> Tu
     elif not ik:
         quotes_error = "Could not resolve equity instrument key for this symbol."
     else:
-        # Short HTTP timeouts + single retry so nginx never waits ~120s and returns 504.
-        try:
-            snap = vwap_service.get_market_quote_snapshots_batch(
-                [ik],
-                max_per_request=10,
-                request_timeout=8,
-                max_retries=1,
-            )
-            batch = snap if snap else {}
-            qd = _batch_lookup(batch, ik)
-            if not qd:
-                quotes_error = (
-                    "Upstox returned no quote for this symbol (session may be expired)."
-                )
-            else:
-                try:
-                    lp = float(qd.get("last_price") or 0)
-                    ltp_f = lp if lp > 0 else None
-                    nested = qd.get("ohlc") if isinstance(qd.get("ohlc"), dict) else {}
-                    prev = float(
-                        nested.get("close")
-                        or nested.get("previous_close")
-                        or nested.get("prev_close")
-                        or 0
-                    )
-                    if ltp_f and prev > 0:
-                        chg = round((ltp_f - prev) / prev * 100.0, 2)
-                except (TypeError, ValueError):
-                    pass
-        except Exception as ex:
-            logger.warning("Iron Condor single-symbol quote failed: %s", ex)
-            quotes_error = "Upstox quote request failed — check broker connection."
 
-    # Step-1 picker: if live LTP is missing, use today's pre-market daily_closes snapshot (same job as refresh-daily-cache).
+        def _snap() -> Dict[str, Any]:
+            try:
+                snap = vwap_service.get_market_quote_snapshots_batch(
+                    [ik],
+                    max_per_request=10,
+                    request_timeout=5,
+                    max_retries=1,
+                )
+                return snap if snap else {}
+            except Exception as ex:
+                logger.warning("Iron Condor single-symbol quote failed: %s", ex)
+                return {}
+
+        batch: Dict[str, Any] = {}
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            fut = pool.submit(_snap)
+            try:
+                batch = fut.result(timeout=12)
+            except FuturesTimeoutError:
+                live_timed_out = True
+                quotes_error = "Live quote timed out (broker slow or unreachable)."
+
+        qd = _batch_lookup(batch, ik) if batch else None
+        if qd:
+            try:
+                lp = float(qd.get("last_price") or 0)
+                ltp_f = lp if lp > 0 else None
+                nested = qd.get("ohlc") if isinstance(qd.get("ohlc"), dict) else {}
+                prev = float(
+                    nested.get("close")
+                    or nested.get("previous_close")
+                    or nested.get("prev_close")
+                    or 0
+                )
+                if ltp_f and prev > 0:
+                    chg = round((ltp_f - prev) / prev * 100.0, 2)
+                if ltp_f is not None and ltp_f > 0:
+                    quotes_error = None
+                    quote_source = "live"
+            except (TypeError, ValueError):
+                pass
+        elif not live_timed_out:
+            quotes_error = quotes_error or (
+                "Upstox returned no quote for this symbol (session may be expired)."
+            )
+
+    # If live LTP is missing: use today's pre-market daily_closes snapshot (same job as refresh-daily-cache).
     if ltp_f is None or (isinstance(ltp_f, float) and ltp_f <= 0):
-        trade_date = mh_ic._normalize_ist(None).date()
-        _atr_v, closes = read_underlying_atr_closes_session(db, trade_date, sym)
         if closes and len(closes) >= 1:
             try:
                 last = float(closes[-1])
@@ -276,9 +299,15 @@ def universe_picker_row_for_symbol(db: Session, user_id: int, symbol: str) -> Tu
 
 
 def ensure_iron_condor_tables() -> None:
+    global _iron_condor_tables_ready_flag
     if engine is None:
         return
-    ddl = """
+    if _iron_condor_tables_ready_flag:
+        return
+    with _ic_tables_lock:
+        if _iron_condor_tables_ready_flag:
+            return
+        ddl = """
     CREATE TABLE IF NOT EXISTS iron_condor_user_settings (
         user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
         trading_capital NUMERIC(18,2) NOT NULL DEFAULT 0,
@@ -330,23 +359,24 @@ def ensure_iron_condor_tables() -> None:
     );
     CREATE INDEX IF NOT EXISTS idx_ic_alert_user_created ON iron_condor_alert(user_id, created_at DESC);
     """
-    with engine.begin() as conn:
-        for stmt in ddl.split(";"):
-            s = stmt.strip()
-            if s:
-                conn.execute(text(s))
-    try:
-        from backend.services.iron_condor_extended import iron_condor_migrations_v2
+        with engine.begin() as conn:
+            for stmt in ddl.split(";"):
+                s = stmt.strip()
+                if s:
+                    conn.execute(text(s))
+        try:
+            from backend.services.iron_condor_extended import iron_condor_migrations_v2
 
-        iron_condor_migrations_v2()
-    except Exception as e:
-        logger.warning("iron_condor_extended migrations: %s", e)
-    try:
-        from backend.services.iron_condor_snapshot_cache import ensure_iron_condor_snapshot_tables
+            iron_condor_migrations_v2()
+        except Exception as e:
+            logger.warning("iron_condor_extended migrations: %s", e)
+        try:
+            from backend.services.iron_condor_snapshot_cache import ensure_iron_condor_snapshot_tables
 
-        ensure_iron_condor_snapshot_tables()
-    except Exception as e:
-        logger.warning("iron_condor snapshot tables: %s", e)
+            ensure_iron_condor_snapshot_tables()
+        except Exception as e:
+            logger.warning("iron_condor snapshot tables: %s", e)
+        _iron_condor_tables_ready_flag = True
 
 
 def _strike_ladder_price_list(spot: float, step: float, *, half_width: int = 60) -> List[float]:

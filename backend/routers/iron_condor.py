@@ -191,7 +191,6 @@ def universe_symbol_quote(
     user: User = Depends(_auth),
 ) -> Dict[str, Any]:
     """Live quote for one approved underlying after user selection (no full-universe prefetch)."""
-    ic.ensure_iron_condor_tables()
     row, quotes_error = ic.universe_picker_row_for_symbol(db, int(user.id), underlying.strip())
     if not row:
         raise HTTPException(
