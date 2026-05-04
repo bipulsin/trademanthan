@@ -169,7 +169,7 @@ async def lifespan(app: FastAPI):
         try:
             from backend.services import iron_condor_service as _ic_warm
 
-            logger.info("Warming Iron Condor tables + universe equity keys (runs once per worker)...")
+            logger.info("Warming Iron Condor (DDL + instruments/ISIN preload + universe equity keys, once per worker)...")
             await asyncio.to_thread(_ic_warm.warm_iron_condor_startup)
             logger.info("✅ Iron Condor startup warm finished")
         except Exception as e:

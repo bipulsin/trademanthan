@@ -352,10 +352,24 @@ def universe_picker_snapshot_row_only(db: Session, user_id: int, symbol: str) ->
 def warm_iron_condor_startup() -> None:
     """
     Run once per worker at process boot (see main.py lifespan).
-    Pays DDL/migrations once so checklist/positions paths are ready. Does not pre-build the universe
-    instrument list (that is lazy on first /universe or /approved-underlyings).
+    DDL/migrations plus one-time heavyweight work that must NOT happen on GET /universe-symbol-quote:
+    - load_isin_from_instruments(): full parse of NSE instruments JSON when the file exists
+    - equity instrument_key resolve for each approved universe name (fills _ic_equity_ik_cache)
     """
     ensure_iron_condor_tables()
+    try:
+        from backend.services.symbol_isin_mapping import load_isin_from_instruments
+
+        load_isin_from_instruments()
+    except Exception as e:
+        logger.warning("Iron Condor warm: ISIN/instruments preload skipped: %s", e)
+
+    try:
+        for sym_u in sorted(IRON_CONDOR_UNIVERSE.keys()):
+            api = option_chain_underlying(str(sym_u))
+            _instrument_key_for_ic_equity(api)
+    except Exception as e:
+        logger.warning("Iron Condor warm: equity IK preload skipped: %s", e)
 
 
 def universe_picker_row_for_symbol(db: Session, user_id: int, symbol: str) -> Tuple[Dict[str, Any], Optional[str]]:
@@ -363,14 +377,18 @@ def universe_picker_row_for_symbol(db: Session, user_id: int, symbol: str) -> Tu
     Hot path: DB active check (no DDL) + one Upstox snapshot for the picked symbol only.
     Instrument key comes from the per-symbol resolver cache, not the full universe master list.
     """
+    t0 = time.perf_counter()
     sym = (symbol or "").strip().upper()
     sec = sector_for_symbol(sym)
     if not sec:
         return {}, "Symbol is not in the Iron Condor universe."
 
+    t1 = time.perf_counter()
     active = user_has_ic_active_open_position(db, user_id, sym)
+    t2 = time.perf_counter()
     api = option_chain_underlying(sym)
     ik = _instrument_key_for_ic_equity(api) or ""
+    t3 = time.perf_counter()
 
     tok = (getattr(vwap_service, "access_token", None) or "").strip()
     quotes_error: Optional[str] = None
@@ -415,6 +433,32 @@ def universe_picker_row_for_symbol(db: Session, user_id: int, symbol: str) -> Tu
             quotes_error = quotes_error or (
                 "Upstox returned no quote for this symbol (session may be expired)."
             )
+
+    t_done = time.perf_counter()
+    ms_active = (t2 - t1) * 1000.0
+    ms_ik = (t3 - t2) * 1000.0
+    ms_broker = max(0.0, (t_done - t3) * 1000.0)
+    ms_total = (t_done - t0) * 1000.0
+    if ms_total >= 2000.0:
+        logger.warning(
+            "IC picker quote slow: sym=%s total_ms=%.0f ms_active=%.0f ms_ik=%.0f ms_after_ik=%.0f ik_set=%s err=%s",
+            sym,
+            ms_total,
+            ms_active,
+            ms_ik,
+            ms_broker,
+            bool(ik),
+            (quotes_error or "")[:120],
+        )
+    else:
+        logger.debug(
+            "IC picker quote: sym=%s total_ms=%.0f ms_active=%.0f ms_ik=%.0f ms_broker=%.0f",
+            sym,
+            ms_total,
+            ms_active,
+            ms_ik,
+            ms_broker,
+        )
 
     return (
         normalize_ic_picker_row_for_api(
