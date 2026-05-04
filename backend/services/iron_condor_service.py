@@ -588,19 +588,54 @@ def _ic_trusted_equity_key_from_client(
     return ck
 
 
+def _ic_picker_ltp_from_daily_cache(sym: str) -> Tuple[Optional[float], Optional[float]]:
+    """Today's last close from iron_condor_daily_underlying_cache — no Upstox (fast)."""
+    if SessionLocal is None:
+        return None, None
+    k = (sym or "").strip().upper()
+    if not k:
+        return None, None
+    ensure_iron_condor_snapshot_tables()
+    db = SessionLocal()
+    try:
+        trade_date = mh_ic._normalize_ist(None).date()
+        _, closes = read_underlying_atr_closes_session(db, trade_date, k)
+        if not closes or len(closes) < 1:
+            return None, None
+        last = float(closes[-1])
+        if last <= 0:
+            return None, None
+        chg_o: Optional[float] = None
+        if len(closes) >= 2:
+            prev_d = float(closes[-2])
+            if prev_d > 0:
+                chg_o = round((last - prev_d) / prev_d * 100.0, 2)
+        return last, chg_o
+    except Exception:
+        return None, None
+    finally:
+        db.close()
+
+
 def universe_picker_row_timeout_fallback(symbol: str) -> Dict[str, Any]:
-    """No I/O — used when the bounded worker wall clock is exceeded (avoid hanging the client)."""
+    """Cheap fallbacks only — avoids empty cells when the broker thread exceeds the wall clock."""
     sym = (symbol or "").strip().upper()
     sec = ic_sector_for_symbol(sym) or ""
+    cltp, cchg = _ic_picker_ltp_from_daily_cache(sym)
+    ik_fb = ""
+    with _ic_universe_master_lock:
+        um = _ic_universe_master_by_symbol.get(sym)
+        ik_fb = str((um.get("instrument_key") if um else "") or "").strip()
+    qsrc = "daily_cache" if cltp and cltp > 0 else "timeout_fallback"
     return normalize_ic_picker_row_for_api(
         {
             "symbol": sym,
             "sector": sec,
-            "instrument_key": "",
-            "ltp": None,
-            "change_pct_day": None,
+            "instrument_key": ik_fb,
+            "ltp": cltp if cltp and cltp > 0 else None,
+            "change_pct_day": cchg if cltp and cltp > 0 else None,
             "active_position": False,
-            "quote_source": "timeout_fallback",
+            "quote_source": qsrc,
         }
     )
 
@@ -680,6 +715,18 @@ def universe_picker_row_for_symbol(
             quotes_error = quotes_error or (
                 "Upstox returned no quote for this symbol (session may be expired)."
             )
+
+    if ltp_f is None or ltp_f <= 0:
+        cltp, cchg = _ic_picker_ltp_from_daily_cache(sym)
+        if cltp is not None and cltp > 0:
+            ltp_f = cltp
+            chg = cchg
+            quote_source = "daily_cache"
+            hint = "Showing snapshot close (pre-market cache) — live LTP may still be loading."
+            if quotes_error:
+                quotes_error = f"{quotes_error} {hint}"
+            else:
+                quotes_error = hint
 
     t_done = time.perf_counter()
     ms_active = (t2 - t1) * 1000.0

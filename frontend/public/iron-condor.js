@@ -625,12 +625,31 @@
       "universe-symbol-quote?underlying=" + encodeURIComponent(s) +
       (ikMeta ? "&instrument_key=" + encodeURIComponent(ikMeta) : "");
 
+    var snapQs =
+      "universe-symbol-snapshot-row?underlying=" + encodeURIComponent(s);
+
+    /* Snapshot (DB-only, fast) paints LTP/% while live Upstox quote catches up. */
+    var liveQuoteDoneOk = false;
+    var snapshotRendered = false;
+    fj(icApiPaths(snapQs), { headers: authHeaders(), cache: "no-store" })
+      .then(function (snap) {
+        if (gen !== state.pickerQuoteGen || liveQuoteDoneOk) return;
+        var r0 = snap && snap.row;
+        if (!r0 || typeof r0 !== "object") return;
+        snapshotRendered = true;
+        var sh = snap.quotes_error ? snap.quotes_error + " · " : "";
+        pickerShowQuoteBanner(sh + "Refreshing live quote…");
+        applyPickerDomFromRow(sel, tb, s, r0);
+      })
+      .catch(function () {});
+
     try {
       var res = await fjWithGatewayRetry(icApiPaths(quoteQs), {
         headers: authHeaders(),
         cache: "no-store",
       });
       if (gen !== state.pickerQuoteGen) return;
+      liveQuoteDoneOk = true;
       var row = res && res.row;
       if (!row || typeof row !== "object") {
         throw new Error("Invalid quote response (missing row).");
@@ -642,13 +661,20 @@
       state.symbol = s;
       setPickerNextEnabled(s);
       var em = e.message || String(e);
-      pickerShowQuoteBanner(em.length > 220 ? em.slice(0, 217) + "…" : em);
-      if (tb) {
-        tb.innerHTML = renderPickerRowQuoteError(s, sectorForPickerMeta(s));
-        wirePicker(tb);
-        tb.querySelectorAll("tr").forEach(function (r) {
-          r.style.outline = "3px solid #1f3864";
-        });
+      if (snapshotRendered) {
+        pickerShowQuoteBanner(
+          (em.length > 220 ? em.slice(0, 217) + "…" : em) +
+            " · Showing cached figures above."
+        );
+      } else {
+        pickerShowQuoteBanner(em.length > 220 ? em.slice(0, 217) + "…" : em);
+        if (tb) {
+          tb.innerHTML = renderPickerRowQuoteError(s, sectorForPickerMeta(s));
+          wirePicker(tb);
+          tb.querySelectorAll("tr").forEach(function (r) {
+            r.style.outline = "3px solid #1f3864";
+          });
+        }
       }
     }
   }
