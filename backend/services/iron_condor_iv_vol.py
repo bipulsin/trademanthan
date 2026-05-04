@@ -102,7 +102,12 @@ def atm_iv_metric_from_chain(chain_payload: Any) -> Tuple[Optional[float], List[
     return med_iv, ivs
 
 
-def iv_context_chip(symbol: str, db: Optional[Any] = None) -> Dict[str, Any]:
+def iv_context_chip(
+    symbol: str,
+    db: Optional[Any] = None,
+    *,
+    precached_daily: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     """
     Realised‑vol percentile vs trailing history (+ optional India VIX / RV linkage).
     Skips option‑chain scrape: uses Iron Condor pre‑market equity close cache when available.
@@ -130,6 +135,8 @@ def iv_context_chip(symbol: str, db: Optional[Any] = None) -> Dict[str, Any]:
     rows_for_rv: List[Dict[str, Any]] = []
     if closes_cached and len(closes_cached) >= 42:
         rows_for_rv = [{"close": float(c)} for c in closes_cached if c is not None]
+    elif precached_daily and len(precached_daily) >= 42:
+        rows_for_rv = [dict(x) for x in precached_daily if isinstance(x, dict)]
     eq_key = vwap_service.get_instrument_key(api_sym)
     if len(rows_for_rv) < 42 and eq_key:
         try:
@@ -164,6 +171,12 @@ def iv_context_chip(symbol: str, db: Optional[Any] = None) -> Dict[str, Any]:
     if india_v_snap is not None and rv_now is not None and rv_now > 1e-6:
         ix_rv = float(india_v_snap) / float(rv_now)
 
+    closes_src = "live_or_short"
+    if closes_cached and len(closes_cached or []) >= 42:
+        closes_src = "prefetch_db"
+    elif precached_daily and len(precached_daily) >= 42:
+        closes_src = "checklist_bundle"
+
     detail = {
         "atm_iv_med": None,
         "ivr_dispersion_proxy_pct": None,
@@ -172,7 +185,7 @@ def iv_context_chip(symbol: str, db: Optional[Any] = None) -> Dict[str, Any]:
         "chain_iv_samples": 0,
         "india_vix_snapshot": round(india_v_snap, 3) if india_v_snap else None,
         "iv_to_rv_ratio": round(ix_rv, 3) if ix_rv else None,
-        "closes_source": "prefetch_db" if (closes_cached and len(closes_cached or []) >= 42) else "live_or_short",
+        "closes_source": closes_src,
     }
 
     if rv_hist_pct is None and rv_now is None:

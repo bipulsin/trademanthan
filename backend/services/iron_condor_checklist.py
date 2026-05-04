@@ -4,7 +4,7 @@ Pre-entry checklist for Iron Condor (chips: PASS / FAIL / WARN).
 from __future__ import annotations
 
 import logging
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import datetime, timedelta, date
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -37,9 +37,9 @@ def fetch_india_vix() -> Tuple[Optional[float], Optional[str]]:
     return None, "Could not fetch India VIX"
 
 
-def fetch_gap_check(eq_key: str) -> Dict[str, Any]:
+def gap_chip_from_daily_candles(candles: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Gap rule on pre-fetched daily bars (sorted by broker timestamp); same logic as fetch_gap_check."""
     try:
-        candles = vwap_service.get_historical_candles_by_instrument_key(eq_key, interval="days/1", days_back=14) or []
         if len(candles) < 6:
             return _chip(
                 "WARN",
@@ -67,6 +67,14 @@ def fetch_gap_check(eq_key: str) -> Dict[str, Any]:
                 {"worst_gap_pct": worst, "day": worst_day},
             )
         return _chip("PASS", "GAP_MOVE", f"Largest gap in window: {worst:.2f}% (≤4%).", {"worst_gap_pct": worst})
+    except Exception as e:
+        return _chip("WARN", "GAP_MOVE", f"Gap check error: {e}", {})
+
+
+def fetch_gap_check(eq_key: str) -> Dict[str, Any]:
+    try:
+        candles = vwap_service.get_historical_candles_by_instrument_key(eq_key, interval="days/1", days_back=14) or []
+        return gap_chip_from_daily_candles(candles)
     except Exception as e:
         return _chip("WARN", "GAP_MOVE", f"Gap check error: {e}", {})
 
@@ -253,6 +261,33 @@ def spot_change_chip(eq_key: str) -> Dict[str, Any]:
         return _chip("INFO", "SPOT_CHG", "Spot change unavailable: {}".format(e), {})
 
 
+def _checklist_daily_candles_bundle(eq_key: Optional[str]) -> List[Dict[str, Any]]:
+    """One equity daily history pull for checklist (gap + realised-vol reuse)."""
+    if not eq_key:
+        return []
+    try:
+        return (
+            vwap_service.get_historical_candles_by_instrument_key(
+                eq_key, interval="days/1", days_back=320
+            )
+            or []
+        )
+    except Exception as ex:
+        logger.warning("Iron Condor checklist daily bundle fetch failed: %s", ex)
+        return []
+
+
+def _iv_context_worker(sym: str, iv_precached: Optional[List[Dict[str, Any]]]) -> Dict[str, Any]:
+    """Per-thread Session — checklist parallel workers must not share request-scoped Session."""
+    from backend.database import SessionLocal
+
+    s = SessionLocal()
+    try:
+        return iv_context_chip(sym, s, precached_daily=iv_precached)
+    finally:
+        s.close()
+
+
 def active_same_symbol_chip(db: Session, user_id: int, symbol: str) -> Dict[str, Any]:
     ensure_iron_condor_tables()
     n = db.execute(
@@ -296,29 +331,64 @@ def run_pre_entry_checklist(
 
     tc = float(getattr(_settings, "IRON_CONDOR_TRADING_CAPITAL_DEFAULT", 500_000.0))
 
+    # Single daily history bundle for gap + realised-vol (avoids sequential IV_HISTORY after pool).
+    daily_bundle: List[Dict[str, Any]] = []
+    iv_precached: Optional[List[Dict[str, Any]]] = None
+    if eq_key:
+        raw = _checklist_daily_candles_bundle(eq_key)
+        daily_bundle = [dict(x) for x in raw if isinstance(x, dict)]
+        iv_precached = daily_bundle if len(daily_bundle) >= 42 else None
+
+    _pool_wall = float(getattr(_settings, "IRON_CONDOR_CHECKLIST_POOL_TIMEOUT_SEC", 72))
+
     parallel_pack: Dict[str, Dict[str, Any]] = {}
     with ThreadPoolExecutor(max_workers=4) as pool:
         f_earn = pool.submit(fetch_earnings_chip, symbol, declared_next_earnings_iso)
-        gap_fut = pool.submit(fetch_gap_check, eq_key) if eq_key else None
         spot_fut = pool.submit(spot_change_chip, eq_key) if eq_key else None
+        gap_fallback_fut = (
+            pool.submit(fetch_gap_check, eq_key) if (eq_key and len(daily_bundle) < 6) else None
+        )
+        iv_fut = pool.submit(_iv_context_worker, symbol, iv_precached)
+
+        futures_set = {f_earn, iv_fut}
+        if spot_fut is not None:
+            futures_set.add(spot_fut)
+        if gap_fallback_fut is not None:
+            futures_set.add(gap_fallback_fut)
+        _done_x, pend_x = wait(futures_set, timeout=_pool_wall)
+        for xf in pend_x:
+            try:
+                xf.cancel()
+            except Exception:
+                pass
+
         try:
-            parallel_pack["EAR"] = f_earn.result(timeout=120)
+            parallel_pack["EAR"] = f_earn.result(timeout=0)
         except Exception as e:
             parallel_pack["EAR"] = _chip("WARN", "EARNINGS_25D", "Earnings check interrupted: %s" % str(e)[:160], {})
-        if gap_fut is not None:
+
+        if len(daily_bundle) >= 6:
+            parallel_pack["GAP"] = gap_chip_from_daily_candles(daily_bundle)
+        elif gap_fallback_fut is not None:
             try:
-                parallel_pack["GAP"] = gap_fut.result(timeout=120)
+                parallel_pack["GAP"] = gap_fallback_fut.result(timeout=0)
             except Exception as e:
                 parallel_pack["GAP"] = _chip("WARN", "GAP_MOVE", "Gap check interrupted: %s" % str(e)[:160], {})
         else:
             parallel_pack["GAP"] = None
+
         if spot_fut is not None:
             try:
-                parallel_pack["SPOT"] = spot_fut.result(timeout=120)
+                parallel_pack["SPOT"] = spot_fut.result(timeout=0)
             except Exception as e:
                 parallel_pack["SPOT"] = _chip("INFO", "SPOT_CHG", "Spot snapshot interrupted.", {})
         else:
             parallel_pack["SPOT"] = None
+
+        try:
+            parallel_pack["IV"] = iv_fut.result(timeout=0)
+        except Exception as e:
+            parallel_pack["IV"] = _chip("WARN", "IV_VOL", "IV/volatility check interrupted: %s" % str(e)[:160], {})
 
     if eq_key and parallel_pack.get("GAP"):
         chips.append(parallel_pack["GAP"])
@@ -329,7 +399,7 @@ def run_pre_entry_checklist(
 
     chips.append(active_same_symbol_chip(db, user_id, symbol))
     chips.append(parallel_pack.get("EAR") or _chip("WARN", "EARNINGS_25D", "Earnings unavailable.", {}))
-    chips.append(iv_context_chip(symbol, db))
+    chips.append(parallel_pack.get("IV") or _chip("WARN", "IV_VOL", "IV context unavailable.", {}))
     chips.append(macro_event_chip(db))
     chips.append(sector_concentration_chip(db, user_id, sector))
     chips.append(capital_chip(db, user_id, tc, new_capital_estimate))
