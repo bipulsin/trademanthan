@@ -287,15 +287,28 @@ def universe_symbol_quote(
             try:
                 row, quotes_error = fut.result(timeout=_IC_UNIVERSE_QUOTE_WALL_SEC)
             except FuturesTimeoutError:
-                logger.warning(
-                    "universe-symbol-quote wall timeout %.0fs underlying=%s",
-                    _IC_UNIVERSE_QUOTE_WALL_SEC,
-                    und,
-                )
                 row = ic.universe_picker_row_timeout_fallback(und)
-                quotes_error = (
-                    "Quote took too long (broker or network busy). Pick the symbol again or wait a few seconds."
-                )
+                try:
+                    _ltp = row.get("ltp")
+                    has_cache_ltp = _ltp is not None and float(_ltp) > 0
+                except (TypeError, ValueError):
+                    has_cache_ltp = False
+                if has_cache_ltp:
+                    logger.warning(
+                        "universe-symbol-quote wall timeout %.0fs underlying=%s — returning daily_cache LTP to UI (no banner)",
+                        _IC_UNIVERSE_QUOTE_WALL_SEC,
+                        und,
+                    )
+                    quotes_error = None
+                else:
+                    logger.warning(
+                        "universe-symbol-quote wall timeout %.0fs underlying=%s (no cache LTP)",
+                        _IC_UNIVERSE_QUOTE_WALL_SEC,
+                        und,
+                    )
+                    quotes_error = (
+                        "Quote took too long (broker or network busy). Pick the symbol again or wait a few seconds."
+                    )
         if not row:
             raise HTTPException(
                 status_code=400,

@@ -716,17 +716,20 @@ def universe_picker_row_for_symbol(
                 "Upstox returned no quote for this symbol (session may be expired)."
             )
 
+    suppressed_ui_error: Optional[str] = None
     if ltp_f is None or ltp_f <= 0:
         cltp, cchg = _ic_picker_ltp_from_daily_cache(sym)
         if cltp is not None and cltp > 0:
             ltp_f = cltp
             chg = cchg
             quote_source = "daily_cache"
-            hint = "Showing snapshot close (pre-market cache) — live LTP may still be loading."
-            if quotes_error:
-                quotes_error = f"{quotes_error} {hint}"
-            else:
-                quotes_error = hint
+            suppressed_ui_error = quotes_error
+            quotes_error = None
+            logger.info(
+                "Iron Condor picker: showing daily_cache LTP for %s (live quote unavailable: %s)",
+                sym,
+                suppressed_ui_error or "empty broker response",
+            )
 
     t_done = time.perf_counter()
     ms_active = (t2 - t1) * 1000.0
@@ -742,7 +745,7 @@ def universe_picker_row_for_symbol(
             ms_ik,
             ms_broker,
             bool(ik),
-            (quotes_error or "")[:120],
+            (quotes_error or suppressed_ui_error or "")[:120],
         )
     else:
         logger.debug(
