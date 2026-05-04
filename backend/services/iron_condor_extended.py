@@ -522,71 +522,30 @@ def analyze_iron_condor_detailed(
     und = core["underlying"]
     lot = resolve_lot_size(db, ic.option_chain_underlying(und))
 
-    eq_key = vwap_service.get_instrument_key(api_sym)
-    if not eq_key:
-        raise RuntimeError("Equity instrument key missing for rich quote.")
-    pct_day = None
-    try:
-        o = vwap_service.get_ohlc_data(eq_key) or {}
-        lp = float(o.get("last_price") or 0)
-        nested = (o.get("ohlc") or {}) if isinstance(o.get("ohlc"), dict) else {}
-        pcl = float(nested.get("close") or 0)
-        if lp and pcl:
-            pct_day = round((lp - pcl) / pcl * 100.0, 2)
-    except Exception:
-        pct_day = None
-
-    chain = vwap_service.get_option_chain(api_sym)
-    payload = chain
-    if isinstance(chain, dict) and chain.get("status") == "success":
-        payload = chain.get("data") or chain
-    strike_list = ic._extract_chain_strike_list(payload if isinstance(payload, dict) else {}) or []
+    pct_day = core.get("underlying_change_pct_today")
 
     strikes = dict(core["strikes"])
-    ov_warn = []
+    ov_warn: List[str] = []
     if strike_overrides:
         for k in ("sell_call", "buy_call", "sell_put", "buy_put"):
             v = strike_overrides.get(k)
             if v is not None and str(v).strip() != "":
                 strikes[k] = float(v)
-        ov_warn.append("Strikes were overridden — quotes may be incomplete if not on chain; confirm in Upstox.")
+        ov_warn.append("Strikes were overridden — re‑quoted legs via targeted batch snapshots; confirm in Upstox.")
 
-    need_sp = {
-        float(strikes["sell_call"]),
-        float(strikes["buy_call"]),
-        float(strikes["sell_put"]),
-        float(strikes["buy_put"]),
-    }
-    agg_row = {}
-    for sd in strike_list:
-        if not isinstance(sd, dict):
-            continue
-        sp_raw = sd.get("strike_price")
-        if sp_raw is None:
-            continue
-        if float(sp_raw) in need_sp:
-            agg_row[float(sp_raw)] = sd
-
-    def leg(sp: float, ce: bool) -> Dict[str, Any]:
-        row = agg_row.get(float(sp))
-        if not row:
-            return {"strike": sp, "side": "CE" if ce else "PE", "ltp": None, "bid": None, "ask": None, "oi": 0}
-        d = enrich_leg(row, ce)
-        d["strike"] = sp
-        d["side"] = "CE" if ce else "PE"
-        return d
-
-    sce = leg(float(strikes["sell_call"]), True)
-    bce = leg(float(strikes["buy_call"]), True)
-    spe = leg(float(strikes["sell_put"]), False)
-    bpe = leg(float(strikes["buy_put"]), False)
-
+    exp_d_calc = datetime.strptime(str(core["expiry_date"]), "%Y-%m-%d").date()
     if strike_overrides:
-        psc = float(sce.get("ltp") or 0.0) + float(spe.get("ltp") or 0.0)
-        phc = float(bce.get("ltp") or 0.0) + float(bpe.get("ltp") or 0.0)
+        legs_src = ic.batch_legs_quote_for_strikes(api_sym, exp_d_calc, strikes)
     else:
-        psc = float(core["premium_collected"])
-        phc = float(core["hedge_cost"])
+        legs_src = core.get("legs_quote") or ic.batch_legs_quote_for_strikes(api_sym, exp_d_calc, strikes)
+
+    sce = dict(legs_src.get("sell_call") or {})
+    bce = dict(legs_src.get("buy_call") or {})
+    spe = dict(legs_src.get("sell_put") or {})
+    bpe = dict(legs_src.get("buy_put") or {})
+
+    psc = float(sce.get("ltp") or 0.0) + float(spe.get("ltp") or 0.0)
+    phc = float(bce.get("ltp") or 0.0) + float(bpe.get("ltp") or 0.0)
     net_pts = float(psc) - float(phc)
     w_ce = float(strikes["buy_call"]) - float(strikes["sell_call"])
     w_pe = float(strikes["sell_put"]) - float(strikes["buy_put"])

@@ -4,6 +4,7 @@ Pre-entry checklist for Iron Condor (chips: PASS / FAIL / WARN).
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, date
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -280,22 +281,55 @@ def run_pre_entry_checklist(
     api_sym = option_chain_underlying(symbol)
     eq_key = vwap_service.get_instrument_key(api_sym)
     chips: List[Dict[str, Any]] = []
-    vix, verr = fetch_india_vix()
+
+    from backend.services.iron_condor_snapshot_cache import read_india_vix_session
+
+    td_chk = datetime.now(IST).date()
+    vix_live_cache = read_india_vix_session(db, td_chk)
+    if vix_live_cache is not None and vix_live_cache > 0:
+        vix, verr = vix_live_cache, None
+    else:
+        vix, verr = fetch_india_vix()
     chips.append(vix_chip(vix))
 
     from backend.config import settings as _settings
 
     tc = float(getattr(_settings, "IRON_CONDOR_TRADING_CAPITAL_DEFAULT", 500_000.0))
 
-    if eq_key:
-        chips.append(fetch_gap_check(eq_key))
-        chips.append(spot_change_chip(eq_key))
-    else:
+    parallel_pack: Dict[str, Dict[str, Any]] = {}
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        f_earn = pool.submit(fetch_earnings_chip, symbol, declared_next_earnings_iso)
+        gap_fut = pool.submit(fetch_gap_check, eq_key) if eq_key else None
+        spot_fut = pool.submit(spot_change_chip, eq_key) if eq_key else None
+        try:
+            parallel_pack["EAR"] = f_earn.result(timeout=120)
+        except Exception as e:
+            parallel_pack["EAR"] = _chip("WARN", "EARNINGS_25D", "Earnings check interrupted: %s" % str(e)[:160], {})
+        if gap_fut is not None:
+            try:
+                parallel_pack["GAP"] = gap_fut.result(timeout=120)
+            except Exception as e:
+                parallel_pack["GAP"] = _chip("WARN", "GAP_MOVE", "Gap check interrupted: %s" % str(e)[:160], {})
+        else:
+            parallel_pack["GAP"] = None
+        if spot_fut is not None:
+            try:
+                parallel_pack["SPOT"] = spot_fut.result(timeout=120)
+            except Exception as e:
+                parallel_pack["SPOT"] = _chip("INFO", "SPOT_CHG", "Spot snapshot interrupted.", {})
+        else:
+            parallel_pack["SPOT"] = None
+
+    if eq_key and parallel_pack.get("GAP"):
+        chips.append(parallel_pack["GAP"])
+    if eq_key and parallel_pack.get("SPOT"):
+        chips.append(parallel_pack["SPOT"])
+    if not eq_key:
         chips.append(_chip("WARN", "EQUITY", "No equity key for underlying.", {"symbol": api_sym}))
 
     chips.append(active_same_symbol_chip(db, user_id, symbol))
-    chips.append(fetch_earnings_chip(symbol, declared_next_earnings_iso))
-    chips.append(iv_context_chip(symbol))
+    chips.append(parallel_pack.get("EAR") or _chip("WARN", "EARNINGS_25D", "Earnings unavailable.", {}))
+    chips.append(iv_context_chip(symbol, db))
     chips.append(macro_event_chip(db))
     chips.append(sector_concentration_chip(db, user_id, sector))
     chips.append(capital_chip(db, user_id, tc, new_capital_estimate))

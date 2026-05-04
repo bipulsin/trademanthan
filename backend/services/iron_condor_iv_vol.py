@@ -5,12 +5,16 @@ from __future__ import annotations
 import logging
 import math
 import statistics
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
+
+import pytz
 
 from backend.services.iron_condor_service import option_chain_underlying
 from backend.services.upstox_service import upstox_service as vwap_service
 
 logger = logging.getLogger(__name__)
+IST = pytz.timezone("Asia/Kolkata")
 
 
 def _mk(status: str, code: str, message: str, detail: Dict[str, Any]) -> Dict[str, Any]:
@@ -98,27 +102,36 @@ def atm_iv_metric_from_chain(chain_payload: Any) -> Tuple[Optional[float], List[
     return med_iv, ivs
 
 
-def iv_context_chip(symbol: str) -> Dict[str, Any]:
+def iv_context_chip(symbol: str, db: Optional[Any] = None) -> Dict[str, Any]:
     """
-    Approximates elevated / compressed premium environment:
-      • IV dispersion percentile on current chain (IVR-style proxy vs snapshot range)
-      • 10‑day realised vol vs trailing distribution (history-aware)
-    True 52‑week ATM IV series is broker-dependent; RV history uses spot closes.
+    Realised‑vol percentile vs trailing history (+ optional India VIX / RV linkage).
+    Skips option‑chain scrape: uses Iron Condor pre‑market equity close cache when available.
     """
-    api_sym = option_chain_underlying(symbol)
-    chain = vwap_service.get_option_chain(api_sym)
-    atm_iv, all_iv = atm_iv_metric_from_chain(chain)
+    sym_u = (symbol or "").strip().upper()
+    api_sym = option_chain_underlying(sym_u)
 
-    ivr_dispersion_pct: Optional[float] = None
-    if atm_iv is not None and len(all_iv) >= 14:
-        lo, hi = min(all_iv), max(all_iv)
-        if hi > lo + 1e-9:
-            ivr_dispersion_pct = (atm_iv - lo) / (hi - lo) * 100.0
+    india_v_snap: Optional[float] = None
+    closes_cached: Optional[List[float]] = None
+    if db is not None:
+        try:
+            from backend.services.iron_condor_snapshot_cache import (
+                read_india_vix_session,
+                read_underlying_atr_closes_session,
+            )
+
+            td = datetime.now(IST).date()
+            india_v_snap = read_india_vix_session(db, td)
+            _atr_gap, closes_cached = read_underlying_atr_closes_session(db, td, sym_u)
+        except Exception as e:
+            logger.debug("iron_condor_iv_vol: cache read skipped %s", e)
 
     rv_now: Optional[float] = None
     rv_hist_pct: Optional[float] = None
+    rows_for_rv: List[Dict[str, Any]] = []
+    if closes_cached and len(closes_cached) >= 42:
+        rows_for_rv = [{"close": float(c)} for c in closes_cached if c is not None]
     eq_key = vwap_service.get_instrument_key(api_sym)
-    if eq_key:
+    if len(rows_for_rv) < 42 and eq_key:
         try:
             cnd = (
                 vwap_service.get_historical_candles_by_instrument_key(
@@ -126,59 +139,66 @@ def iv_context_chip(symbol: str) -> Dict[str, Any]:
                 )
                 or []
             )
-            rows = [dict(x) for x in cnd if isinstance(x, dict)]
-            rv_now, rv_series = _rolling_rv_ann(rows)
+            rows_for_rv = [dict(x) for x in cnd if isinstance(x, dict)]
+        except Exception as e:
+            logger.info("iron_condor_iv_vol: RV candles skipped %s: %s", symbol, e)
+    if rows_for_rv:
+        try:
+            rv_now, rv_series = _rolling_rv_ann(rows_for_rv)
             hist_pool = rv_series[:-42] if len(rv_series) > 60 else rv_series[:-10]
             if rv_now is not None and hist_pool:
                 rv_hist_pct = _percentile_approx(rv_now, hist_pool)
         except Exception as e:
-            logger.info("iron_condor_iv_vol: RV skipped %s: %s", symbol, e)
+            logger.info("iron_condor_iv_vol: RV compute skipped %s: %s", symbol, e)
+
+    if india_v_snap is None:
+        try:
+            vk = getattr(vwap_service, "INDIA_VIX_KEY", "NSE_INDEX|India VIX")
+            qq = vwap_service.get_market_quote_by_key(vk) or {}
+            ll = qq.get("last_price") or qq.get("ltp")
+            india_v_snap = float(ll) if ll is not None and float(ll) > 0 else None
+        except Exception:
+            pass
+
+    ix_rv = None
+    if india_v_snap is not None and rv_now is not None and rv_now > 1e-6:
+        ix_rv = float(india_v_snap) / float(rv_now)
 
     detail = {
-        "atm_iv_med": atm_iv,
-        "ivr_dispersion_proxy_pct": round(ivr_dispersion_pct, 2) if ivr_dispersion_pct is not None else None,
+        "atm_iv_med": None,
+        "ivr_dispersion_proxy_pct": None,
         "rv_ann_10d": round(rv_now, 4) if rv_now else None,
         "rv_hist_percentile": rv_hist_pct,
-        "chain_iv_samples": len(all_iv),
+        "chain_iv_samples": 0,
+        "india_vix_snapshot": round(india_v_snap, 3) if india_v_snap else None,
+        "iv_to_rv_ratio": round(ix_rv, 3) if ix_rv else None,
+        "closes_source": "prefetch_db" if (closes_cached and len(closes_cached or []) >= 42) else "live_or_short",
     }
 
-    if ivr_dispersion_pct is None and rv_hist_pct is None:
+    if rv_hist_pct is None and rv_now is None:
         return _mk(
             "WARN",
             "IV_VOL",
-            "IV / volatility context unavailable (chain or equity history incomplete). Review manually.",
+            "Realised‑vol context unavailable (cache + live history incomplete). Review manually.",
             detail,
         )
 
     warns_msg: List[str] = []
-
-    # Cheap IV wing vs entire chain ⇒ structurally suppressed short-vol payoff.
-    if ivr_dispersion_pct is not None and ivr_dispersion_pct < 30:
-        warns_msg.append("ATM IV skews LOW vs snapshot chain range (premium selling yield thin).")
-
-    # Quiet coil: RV floor vs own history ⇒ gap / expansion tail risk relative to credited premium.
     if rv_hist_pct is not None and rv_hist_pct < 22:
         warns_msg.append("10d realised vol is subdued vs trailing history — gap / expansion tail risk.")
-
-    # Informational linkage: comparatively rich IV vs realised — not auto PASS/FAIL.
-    iv_rv_gap = None
-    if atm_iv and rv_now and rv_now > 1e-6:
-        iv_rv_gap = atm_iv / rv_now
-
-    detail["iv_to_rv_ratio"] = round(iv_rv_gap, 3) if iv_rv_gap else None
 
     if warns_msg:
         return _mk("WARN", "IV_VOL", " ".join(warns_msg[:2]), detail)
 
-    extras = []
-    if ivr_dispersion_pct is not None:
-        extras.append("Chain IV dispersion proxy ~{:.0f}%.".format(ivr_dispersion_pct))
+    extras: List[str] = []
     if rv_hist_pct is not None:
         extras.append("RV percentile ~{:.0f}%.".format(rv_hist_pct))
+    if ix_rv is not None:
+        extras.append("India VIX / 10d RV ~ {:.2f}.".format(ix_rv))
 
     return _mk(
         "PASS",
         "IV_VOL",
-        " ".join(extras) if extras else "IV / realised-vol posture acceptable at snapshot.",
+        " ".join(extras) if extras else "Realised‑vol posture acceptable at snapshot (no chain IV scrape).",
         detail,
     )

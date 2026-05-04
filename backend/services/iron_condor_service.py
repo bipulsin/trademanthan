@@ -9,7 +9,7 @@ import logging
 import os
 import time
 import copy
-from datetime import datetime, date
+from datetime import datetime, date, time as dt_time
 from typing import Any, Dict, List, Optional, Tuple
 
 import pytz
@@ -311,6 +311,97 @@ def ensure_iron_condor_tables() -> None:
         iron_condor_migrations_v2()
     except Exception as e:
         logger.warning("iron_condor_extended migrations: %s", e)
+    try:
+        from backend.services.iron_condor_snapshot_cache import ensure_iron_condor_snapshot_tables
+
+        ensure_iron_condor_snapshot_tables()
+    except Exception as e:
+        logger.warning("iron_condor snapshot tables: %s", e)
+
+
+def _strike_ladder_price_list(spot: float, step: float, *, half_width: int = 60) -> List[float]:
+    if step <= 0:
+        return []
+    mid = round(float(spot) / step) * step
+    out: List[float] = []
+    for i in range(-half_width, half_width + 1):
+        px = mid + float(i) * step
+        if px > 0:
+            out.append(round(px, 6))
+    return sorted(set(out))
+
+
+def _align_geometric_long_wing(sell_strike: float, step: float, *, long_call: bool, wing_steps: int = 5) -> float:
+    raw = (
+        float(sell_strike) + float(wing_steps) * float(step)
+        if long_call
+        else float(sell_strike) - float(wing_steps) * float(step)
+    )
+    aligned = round(raw / step) * step
+    if long_call and aligned <= float(sell_strike):
+        aligned += step
+    if not long_call and aligned >= float(sell_strike):
+        aligned -= step
+    return float(aligned)
+
+
+def _leg_dict_from_quote(strike: float, ce_side: bool, quote: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not isinstance(quote, dict):
+        return {
+            "strike": strike,
+            "side": "CE" if ce_side else "PE",
+            "ltp": None,
+            "bid": None,
+            "ask": None,
+            "oi": 0,
+            "iv": None,
+        }
+    lp = float(quote.get("last_price") or quote.get("ltp") or 0.0)
+    oi_raw = quote.get("oi")
+    try:
+        oi = int(float(oi_raw)) if oi_raw is not None else 0
+    except (TypeError, ValueError):
+        oi = 0
+    ohlc = quote.get("ohlc") if isinstance(quote.get("ohlc"), dict) else {}
+    bid = ohlc.get("close") if isinstance(ohlc, dict) else None  # placeholders; vendor often omits NBBO depth
+    return {
+        "strike": strike,
+        "side": "CE" if ce_side else "PE",
+        "ltp": round(lp, 4) if lp else None,
+        "bid": bid,
+        "ask": bid,
+        "oi": max(oi, 0),
+        "iv": None,
+    }
+
+
+def batch_legs_quote_for_strikes(api_sym: str, expiry_date: date, strikes: Dict[str, float]) -> Dict[str, Dict[str, Any]]:
+    """
+    Four targeted option quotes via instrument keys + batch market-quote (no full chain download).
+    """
+    exp_dt = IST.localize(datetime.combine(expiry_date, dt_time(12, 0)))
+    spec: List[Tuple[str, float, str]] = [
+        ("sell_call", float(strikes["sell_call"]), "CE"),
+        ("buy_call", float(strikes["buy_call"]), "CE"),
+        ("sell_put", float(strikes["sell_put"]), "PE"),
+        ("buy_put", float(strikes["buy_put"]), "PE"),
+    ]
+    ik_list: List[Optional[str]] = [
+        vwap_service.get_option_instrument_key(api_sym, exp_dt, st, ot) for _nm, st, ot in spec
+    ]
+    valid_keys = [k for k in ik_list if k]
+    snaps: Dict[str, Dict[str, Any]] = {}
+    if valid_keys:
+        snaps = vwap_service.get_market_quote_snapshots_batch(valid_keys, request_timeout=12, max_retries=2) or {}
+    out: Dict[str, Dict[str, Any]] = {}
+    for j, (nm, st, ot) in enumerate(spec):
+        ik = ik_list[j]
+        ce = ot.upper() == "CE"
+        qd = None
+        if ik:
+            qd = snaps.get(ik) or snaps.get(ik.replace("|", ":"))
+        out[nm] = _leg_dict_from_quote(st, ce, qd)
+    return out
 
 
 def _monthly_atr_wilder_14(monthly_rows: List[Dict[str, Any]]) -> Optional[float]:
@@ -593,68 +684,83 @@ def analyze_iron_condor(symbol: str, db: Session, user_id: int) -> Dict[str, Any
     if not eq_key:
         raise RuntimeError(f"No equity instrument key for {api_sym}")
 
-    spot = vwap_service.get_candle_vwap_by_instrument_key(eq_key, interval="days/1", days_back=3)
-    if spot is None or spot <= 0:
-        ohlc = vwap_service.get_ohlc_data(eq_key)
-        if isinstance(ohlc, dict):
-            spot = float(ohlc.get("last_price") or ohlc.get("close") or 0)
-        if spot is None or spot <= 0:
-            mq = vwap_service.get_market_quote(api_sym)
-            if isinstance(mq, dict) and mq.get("last_price"):
-                spot = float(mq["last_price"])
-    if spot is None or spot <= 0:
+    ohlc_live = vwap_service.get_ohlc_data(eq_key) or {}
+    spot = float(ohlc_live.get("last_price") or ohlc_live.get("close") or 0.0)
+    nested_lc = ohlc_live.get("ohlc") if isinstance(ohlc_live.get("ohlc"), dict) else {}
+    prev_close_live = float(
+        nested_lc.get("close") or ohlc_live.get("close_price") or nested_lc.get("previous_close") or 0.0
+    )
+    pct_day_live: Optional[float] = None
+    if spot > 0 and prev_close_live > 0:
+        pct_day_live = round((spot - prev_close_live) / prev_close_live * 100.0, 2)
+
+    if spot <= 0:
+        spot_try = vwap_service.get_candle_vwap_by_instrument_key(eq_key, interval="days/1", days_back=3)
+        if spot_try is not None and spot_try > 0:
+            spot = float(spot_try)
+    if spot <= 0:
+        mq = vwap_service.get_market_quote(api_sym)
+        if isinstance(mq, dict) and mq.get("last_price"):
+            spot = float(mq["last_price"])
+    if spot <= 0:
         raise RuntimeError(f"Could not resolve spot for {api_sym}")
 
-    months = vwap_service.get_monthly_candles_by_instrument_key(eq_key, months_back=48) or []
-    monthly_atr = _monthly_atr_wilder_14(months)
+    td_ic = datetime.now(IST).date()
+    from backend.services.iron_condor_snapshot_cache import read_underlying_atr_closes_session
+
+    cached_atr, _ = read_underlying_atr_closes_session(db, td_ic, und)
+    atr_from_prefetch = cached_atr is not None and float(cached_atr) > 0
+    monthly_atr: Optional[float] = float(cached_atr) if atr_from_prefetch else None
+    if monthly_atr is None or monthly_atr <= 0:
+        months_live = vwap_service.get_monthly_candles_by_instrument_key(eq_key, months_back=48) or []
+        monthly_atr = _monthly_atr_wilder_14(months_live)
     if monthly_atr is None or monthly_atr <= 0:
         raise RuntimeError("Insufficient monthly candles for ATR(14).")
 
     strike_distance = 1.25 * float(monthly_atr)
     step = float(vwap_service.calculate_strike_interval(float(spot)))
-
-    chain_wrapped = vwap_service.get_option_chain(api_sym)
-    if not chain_wrapped:
-        raise RuntimeError("Option chain request failed (no data).")
-    payload = chain_wrapped
-    if isinstance(chain_wrapped, dict) and chain_wrapped.get("status") == "success":
-        payload = chain_wrapped.get("data") or chain_wrapped
-    strike_list = _extract_chain_strike_list(payload if isinstance(payload, dict) else {})
-    if not strike_list:
-        raise RuntimeError("Option chain unavailable or empty.")
-
-    agg = _build_strike_aggregate(strike_list)
-    strikes_sorted = sorted(agg.keys())
-    if len(strikes_sorted) < 4:
-        raise RuntimeError("Not enough strikes on chain.")
+    ladder = _strike_ladder_price_list(float(spot), step)
 
     sell_call_thr = float(spot) + strike_distance
     sell_put_thr = float(spot) - strike_distance
-    sell_ce = _nearest_strike_ge(strikes_sorted, sell_call_thr)
-    sell_pe = _nearest_strike_le(strikes_sorted, sell_put_thr)
+    sell_ce = _nearest_strike_ge(ladder, sell_call_thr)
+    sell_pe = _nearest_strike_le(ladder, sell_put_thr)
     if sell_ce is None or sell_pe is None:
         raise RuntimeError("Could not place short strikes relative to strike distance.")
 
-    wing_ce = _pick_buy_wing(strikes_sorted, agg, sell_ce, step, long_call=True)
-    wing_pe = _pick_buy_wing(strikes_sorted, agg, sell_pe, step, long_call=False)
-    if wing_ce is None or wing_pe is None:
-        raise RuntimeError("Could not resolve long wings (5–6 strikes away).")
+    buy_ce_strike = _align_geometric_long_wing(float(sell_ce), step, long_call=True, wing_steps=5)
+    buy_pe_strike = _align_geometric_long_wing(float(sell_pe), step, long_call=False, wing_steps=5)
 
-    buy_ce_strike, prem_buy_ce, _, wcall = wing_ce
-    buy_pe_strike, prem_buy_pe, _, wput = wing_pe
-    strike_warnings = list(dict.fromkeys([x for x in (wcall + wput) if x]))
+    exp = vwap_service.get_monthly_expiry()
+    exp_d = exp.date()
 
-    sr = agg[sell_ce]
-    pr = agg[sell_pe]
-    prem_sell_ce = sr["ce_ltp"]
-    prem_sell_pe = pr["pe_ltp"]
+    strikes_plan = {
+        "sell_call": float(sell_ce),
+        "buy_call": float(buy_ce_strike),
+        "sell_put": float(sell_pe),
+        "buy_put": float(buy_pe_strike),
+    }
+    legs_quote = batch_legs_quote_for_strikes(api_sym, exp_d, strikes_plan)
+
+    def _ltp(nm: str) -> float:
+        return float(((legs_quote.get(nm) or {}).get("ltp")) or 0.0)
+
+    prem_sell_ce = _ltp("sell_call")
+    prem_sell_pe = _ltp("sell_put")
+    prem_buy_ce = _ltp("buy_call")
+    prem_buy_pe = _ltp("buy_put")
 
     prem_collected = prem_sell_ce + prem_sell_pe
     hedge_cost = prem_buy_ce + prem_buy_pe
     hedge_ratio = (hedge_cost / prem_collected) if prem_collected > 0 else 0.0
     gate, gate_msg = classify_hedge_ratio(hedge_ratio)
 
-    exp = vwap_service.get_monthly_expiry()
+    strike_warnings = [
+        "Strikes: symmetric ladder for shorts + geometric 5‑step hedges — four targeted broker quotes "
+        "(no full chain scrape). Confirm bid/ask and OI manually in Upstox."
+    ]
+    if atr_from_prefetch:
+        strike_warnings.insert(0, "Monthly ATR(14) reused from today's Iron Condor pre‑market cache when available.")
 
     expiry_note = (
         "Cycle: hold from day 1 of new monthly expiry until profit target / stop loss / 10 days before expiry (advisory)."
@@ -665,7 +771,7 @@ def analyze_iron_condor(symbol: str, db: Session, user_id: int) -> Dict[str, Any
         "sector": sec,
         "option_chain_symbol": api_sym,
         "spot": round(float(spot), 4),
-        "monthly_atr_14": round(monthly_atr, 4),
+        "monthly_atr_14": round(float(monthly_atr), 4),
         "strike_distance": round(strike_distance, 4),
         "strike_interval": step,
         "expiry_date": exp.strftime("%Y-%m-%d"),
@@ -686,6 +792,8 @@ def analyze_iron_condor(symbol: str, db: Session, user_id: int) -> Dict[str, Any
         "hedge_ratio": round(hedge_ratio, 4),
         "hedge_gate": gate,
         "hedge_gate_message": gate_msg,
+        "legs_quote": legs_quote,
+        "underlying_change_pct_today": pct_day_live,
         "position_sizing": {
             "trading_capital": tc,
             "target_position_slots": target_slots,
@@ -821,26 +929,25 @@ def close_position(db: Session, user_id: int, position_id: int) -> bool:
 
 def _fresh_chain_quotes(underlying: str, strikes_pack: Dict[str, float]) -> Optional[Dict[str, float]]:
     api_sym = option_chain_underlying(underlying)
-    chain_wrapped = vwap_service.get_option_chain(api_sym)
-    payload = chain_wrapped
-    if isinstance(chain_wrapped, dict) and chain_wrapped.get("status"):
-        payload = chain_wrapped.get("data") or chain_wrapped
-    strike_list = _extract_chain_strike_list(payload if isinstance(payload, dict) else {})
-    if not strike_list:
+    try:
+        exp_d = vwap_service.get_monthly_expiry().date()
+    except Exception:
         return None
-    agg = _build_strike_aggregate(strike_list)
-    sce = agg.get(float(strikes_pack["sell_call"]))
-    bce = agg.get(float(strikes_pack["buy_call"]))
-    spe = agg.get(float(strikes_pack["sell_put"]))
-    bpe = agg.get(float(strikes_pack["buy_put"]))
-    if not all((sce, bce, spe, bpe)):
-        return None
-    return {
-        "sc_ltp": sce["ce_ltp"],
-        "bc_ltp": bce["ce_ltp"],
-        "sp_ltp": spe["pe_ltp"],
-        "bp_ltp": bpe["pe_ltp"],
+    sp = {
+        "sell_call": float(strikes_pack["sell_call"]),
+        "buy_call": float(strikes_pack["buy_call"]),
+        "sell_put": float(strikes_pack["sell_put"]),
+        "buy_put": float(strikes_pack["buy_put"]),
     }
+    lq = batch_legs_quote_for_strikes(api_sym, exp_d, sp)
+
+    def _lq(nm: str) -> float:
+        return float(((lq.get(nm) or {}).get("ltp")) or 0.0)
+
+    sc, bc, spp, bp = _lq("sell_call"), _lq("buy_call"), _lq("sell_put"), _lq("buy_put")
+    if sc <= 0 or bc <= 0 or spp <= 0 or bp <= 0:
+        return None
+    return {"sc_ltp": sc, "bc_ltp": bc, "sp_ltp": spp, "bp_ltp": bp}
 
 
 def evaluate_position_alerts(db: Session, user_id: int, position_id: int) -> List[Dict[str, Any]]:

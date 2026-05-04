@@ -45,6 +45,10 @@ from backend.services.chartink_df_webhook_inbox_scheduler import (
     start_chartink_df_webhook_inbox_scheduler,
     stop_chartink_df_webhook_inbox_scheduler,
 )
+from backend.services.iron_condor_snapshot_scheduler import (
+    start_iron_condor_snapshot_scheduler,
+    stop_iron_condor_snapshot_scheduler,
+)
 # Configure logging with file handler - MUST be done before any loggers are created
 log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
 os.makedirs(log_dir, exist_ok=True)
@@ -152,6 +156,14 @@ async def lifespan(app: FastAPI):
             logger.error(f"❌ ChartInk DF inbox cleanup scheduler: FAILED - {e}", exc_info=True)
             logger.warning("⚠️ Continuing without ChartInk DF inbox cleanup scheduler")
 
+        try:
+            logger.info("Starting Iron Condor daily snapshot scheduler (pre-market VIX + ATR cache)...")
+            start_iron_condor_snapshot_scheduler()
+            logger.info("✅ Iron Condor snapshot scheduler: STARTED (08:33 IST weekdays)")
+        except Exception as e:
+            logger.error(f"❌ Iron Condor snapshot scheduler: FAILED - {e}", exc_info=True)
+            logger.warning("⚠️ Continuing without Iron Condor snapshot scheduler")
+
         logger.info("=" * 60)
         logger.info("✅ STARTUP COMPLETE - All Services Active")
         logger.info("=" * 60)
@@ -208,6 +220,12 @@ async def lifespan(app: FastAPI):
         logger.info("✅ ChartInk DF inbox cleanup scheduler stopped")
     except Exception as e:
         logger.error(f"⚠️ Error stopping ChartInk DF inbox cleanup scheduler: {e}", exc_info=True)
+
+    try:
+        stop_iron_condor_snapshot_scheduler()
+        logger.info("✅ Iron Condor snapshot scheduler stopped")
+    except Exception as e:
+        logger.error(f"⚠️ Error stopping Iron Condor snapshot scheduler: {e}", exc_info=True)
 
     logger.info("✅ Shutdown complete")
 

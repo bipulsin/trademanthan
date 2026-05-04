@@ -19,6 +19,10 @@ from backend.services import iron_condor_extended as ice
 from backend.config import settings
 from backend.services import iron_condor_checklist as chk
 from backend.services import market_holiday as mh
+from backend.services.iron_condor_snapshot_cache import (
+    ensure_iron_condor_snapshot_tables,
+    run_iron_condor_daily_snapshot_job,
+)
 
 router = APIRouter(prefix="/iron-condor", tags=["iron-condor"])
 
@@ -102,6 +106,16 @@ def _feed_status(db: Session, user_id: int) -> Dict[str, Any]:
         "last_quote_success_at": lo.isoformat() if hasattr(lo, "isoformat") else (str(lo) if lo else None),
         "data_feed_lost": streak >= 3,
     }
+
+
+@router.post("/refresh-daily-cache")
+def iron_condor_refresh_daily_cache(_user: User = Depends(_auth)) -> Dict[str, Any]:
+    """
+    Rebuild today's Iron Condor pre-market cache (India VIX + per-underlying monthly ATR + daily closes).
+    Same workload as the 08:33 IST scheduler — use when pre-market job was missed.
+    """
+    ensure_iron_condor_snapshot_tables()
+    return run_iron_condor_daily_snapshot_job()
 
 
 @router.get("/session")
