@@ -3197,14 +3197,14 @@ def _apply_live_ltps_to_picks_and_running(
     for r in combined:
         ik = (r.get("instrument_key") or "").strip()
         lp, q_fb = _resolve_ltp(ik)
-        if lp is None:
-            continue
-        lp_r = round(lp, 4)
-        r["ltp"] = lp_r
-        sid = r.get("screening_id")
-        if sid is not None:
-            by_screening[int(sid)] = lp_r
-        if r.get("session_vwap") is None:
+        if lp is not None:
+            lp_r = round(lp, 4)
+            r["ltp"] = lp_r
+            sid = r.get("screening_id")
+            if sid is not None:
+                by_screening[int(sid)] = lp_r
+        # Fill session VWAP even when LTP fails (bearish rows often need Target Entry from ATP).
+        if r.get("session_vwap") is None and ik:
             sv = _float_map_lookup(ik, vwap_map)
             if sv is not None:
                 r["session_vwap"] = round(sv, 4)
@@ -3575,6 +3575,23 @@ def index_bearish_gate_from_quotes() -> Dict[str, Any]:
     out["nifty_bullish"] = not bearish
     out["ok"] = bearish
     return out
+
+
+def _workspace_attach_target_entry_price(p: Dict[str, Any]) -> None:
+    """
+    One field for the Premium Futures 'Target Entry' column: pullback (V2) if set, else session VWAP, else LTP.
+    """
+    pb = _safe_float(p.get("pullback_target_price"))
+    sv = _safe_float(p.get("session_vwap"))
+    ltp = _safe_float(p.get("ltp"))
+    if pb is not None and pb > 0:
+        p["target_entry_price"] = round(float(pb), 4)
+    elif sv is not None and sv > 0:
+        p["target_entry_price"] = round(float(sv), 4)
+    elif ltp is not None and ltp > 0:
+        p["target_entry_price"] = round(float(ltp), 4)
+    else:
+        p["target_entry_price"] = None
 
 
 def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[str, Any]:
@@ -4134,6 +4151,9 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
         )
     except Exception as e:
         logger.debug("daily_futures: sector mover badges skipped: %s", e)
+
+    for _tp in list(picks_mixed) + list(picks_low_conv_bull) + list(picks_low_conv_bear):
+        _workspace_attach_target_entry_price(_tp)
 
     return {
         "trade_date": str(td),

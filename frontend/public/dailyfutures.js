@@ -113,6 +113,23 @@
     return n.toFixed(d != null ? d : 2);
   }
 
+  /** Workspace sends target_entry_price (pullback > VWAP > LTP); keep fallbacks for older payloads. */
+  function targetEntryPx(r) {
+    if (!r) return null;
+    const pick = function (x) {
+      if (x == null || x === '') return null;
+      const n = Number(x);
+      return Number.isFinite(n) && n > 0 ? n : null;
+    };
+    return (
+      pick(r.target_entry_price) ||
+      pick(r.pullback_target_price) ||
+      pick(r.session_vwap) ||
+      pick(r.ltp) ||
+      null
+    );
+  }
+
   function fmtMoney(v) {
     if (v == null || v === '') return '—';
     const n = Number(v);
@@ -798,9 +815,7 @@
         const eligible = r.order_eligible === true;
         const reason = r.order_block_reason || 'Not eligible to enter';
         const convTxt = formatConvictionEntryLive(r);
-        const targetPx =
-          r.pullback_target_price != null ? r.pullback_target_price : r.session_vwap != null ? r.session_vwap : null;
-        const targetEntryTxt = targetPx != null ? fmtNum(targetPx, 2) : '—';
+        const targetEntryTxt = fmtNum(targetEntryPx(r), 2);
         const enterBtn =
           '<button type="button" class="df-btn df-btn-order" data-sid="' +
           r.screening_id +
@@ -899,9 +914,7 @@
         const eligible = r.order_eligible === true;
         const reason = r.order_block_reason || 'Not eligible to enter';
         const convTxt = formatConvictionEntryLive(r);
-        const targetPx =
-          r.pullback_target_price != null ? r.pullback_target_price : r.session_vwap != null ? r.session_vwap : null;
-        const targetEntryTxt = targetPx != null ? fmtNum(targetPx, 2) : '—';
+        const targetEntryTxt = fmtNum(targetEntryPx(r), 2);
         const enterBtn =
           '<button type="button" class="df-btn df-btn-order" data-bear="1" data-sid="' +
           r.screening_id +
