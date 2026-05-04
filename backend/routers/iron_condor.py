@@ -31,6 +31,8 @@ logger = logging.getLogger(__name__)
 
 # Hard wall for picker quote (return 200 + fallback row instead of hanging past client/proxy timeouts).
 _IC_UNIVERSE_QUOTE_WALL_SEC = 22.0
+# Batch universe quotes can block past proxy limits; fall back to list-only rows.
+_IC_UNIVERSE_BATCH_QUOTES_WALL_SEC = 26.0
 
 
 def _auth(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
@@ -215,7 +217,19 @@ def universe_with_quotes(
                 {"uid": int(user.id)},
             ).fetchall()
             active_set = {str(r[0]) for r in active_rows if r and r[0]}
-        base_rows, quotes_error = ic.build_universe_picker_rows_with_quotes_cached()
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            fut = pool.submit(ic.build_universe_picker_rows_with_quotes_cached)
+            try:
+                base_rows, quotes_error = fut.result(timeout=_IC_UNIVERSE_BATCH_QUOTES_WALL_SEC)
+            except FuturesTimeoutError:
+                logger.warning(
+                    "universe-with-quotes wall timeout %.0fs user_id=%s",
+                    _IC_UNIVERSE_BATCH_QUOTES_WALL_SEC,
+                    int(user.id),
+                )
+                base_rows, quotes_error = ic.build_universe_picker_rows_list_only(
+                    "Live universe quotes timed out — select each symbol for a fresh quote, or retry shortly."
+                )
         out = []
         for r in base_rows:
             item = dict(r)

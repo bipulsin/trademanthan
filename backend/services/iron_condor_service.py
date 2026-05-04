@@ -324,51 +324,9 @@ def _batch_lookup(batch: Dict[str, Dict[str, Any]], ik: str) -> Optional[Dict[st
     return None
 
 
-def build_universe_picker_rows_with_quotes_cached() -> Tuple[List[Dict[str, Any]], Optional[str]]:
-    """
-    Build universe picker rows (symbol, sector, ltp, change_pct_day) in one batched
-    Upstox request. Cached briefly to keep the UI snappy.
-
-    Returns:
-        (rows, quotes_error). Rows omit active_position — merge in the router.
-        quotes_error is human-readable when broker/auth is unavailable.
-    """
-    global _ic_uq_cache_deadline, _ic_uq_cache_rows
-
-    ttl = float(os.getenv("IRON_CONDOR_UNIVERSE_QUOTES_CACHE_SEC", "55") or "55")
-    now = time.monotonic()
-    if _ic_uq_cache_rows and now < _ic_uq_cache_deadline:
-        return ([copy.deepcopy(r) for r in _ic_uq_cache_rows], None)
-
-    pairs_meta: List[Tuple[str, str, str, Any]] = ic_universe_ordered_pairs()
-    pairs_keys: List[Tuple[str, str, str]] = [(a, b, c) for a, b, c, _ in pairs_meta]
-
-    tok = (getattr(vwap_service, "access_token", None) or "").strip()
-    quotes_error: Optional[str] = None
-    batch: Dict[str, Dict[str, Any]] = {}
-    keys = [ik for _, _, ik in pairs_keys if ik]
-
-    if not tok:
-        quotes_error = (
-            "Upstox is not connected (no access token). Sign in to Upstox from "
-            "Settings or use the OAuth link, then reload this page."
-        )
-    elif not keys:
-        quotes_error = (
-            "Could not resolve equity instrument keys for the universe (instruments data missing?)."
-        )
-    else:
-        try:
-            snap = vwap_service.get_market_quote_snapshots_batch(keys, max_per_request=100)
-            batch = snap if snap else {}
-            if not batch:
-                quotes_error = (
-                    "Upstox returned no quote data (session may be expired). Reconnect Upstox and retry."
-                )
-        except Exception as ex:
-            logger.warning("Iron Condor universe batch quotes failed: %s", ex)
-            quotes_error = "Upstox quotes request failed — check broker connection and token."
-
+def _universe_picker_rows_from_quote_batch(
+    pairs_meta: List[Tuple[str, str, str, Any]], batch: Dict[str, Dict[str, Any]]
+) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for sym, sec, ik, uat in pairs_meta:
         ltp_f: Optional[float] = None
@@ -396,6 +354,70 @@ def build_universe_picker_rows_with_quotes_cached() -> Tuple[List[Dict[str, Any]
                 }
             )
         )
+    return rows
+
+
+def build_universe_picker_rows_list_only(quotes_error: Optional[str]) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """Universe shape without broker I/O — for gateway-timeout fallback on /universe-with-quotes."""
+    pairs_meta = ic_universe_ordered_pairs()
+    rows = _universe_picker_rows_from_quote_batch(pairs_meta, {})
+    return ([copy.deepcopy(r) for r in rows], quotes_error)
+
+
+def build_universe_picker_rows_with_quotes_cached() -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """
+    Build universe picker rows (symbol, sector, ltp, change_pct_day) in one batched
+    Upstox request. Cached briefly to keep the UI snappy.
+
+    Returns:
+        (rows, quotes_error). Rows omit active_position — merge in the router.
+        quotes_error is human-readable when broker/auth is unavailable.
+    """
+    global _ic_uq_cache_deadline, _ic_uq_cache_rows
+
+    ttl = float(os.getenv("IRON_CONDOR_UNIVERSE_QUOTES_CACHE_SEC", "55") or "55")
+    now = time.monotonic()
+    if _ic_uq_cache_rows and now < _ic_uq_cache_deadline:
+        return ([copy.deepcopy(r) for r in _ic_uq_cache_rows], None)
+
+    pairs_meta: List[Tuple[str, str, str, Any]] = ic_universe_ordered_pairs()
+    pairs_keys: List[Tuple[str, str, str]] = [(a, b, c) for a, b, c, _ in pairs_meta]
+
+    tok = (getattr(vwap_service, "access_token", None) or "").strip()
+    quotes_error: Optional[str] = None
+    batch: Dict[str, Dict[str, Any]] = {}
+    keys = [ik for _, _, ik in pairs_keys if ik]
+
+    req_to = int(os.getenv("IRON_CONDOR_UNIVERSE_BATCH_QUOTE_TIMEOUT_SEC", "8") or "8")
+    req_retries = int(os.getenv("IRON_CONDOR_UNIVERSE_BATCH_QUOTE_RETRIES", "1") or "1")
+
+    if not tok:
+        quotes_error = (
+            "Upstox is not connected (no access token). Sign in to Upstox from "
+            "Settings or use the OAuth link, then reload this page."
+        )
+    elif not keys:
+        quotes_error = (
+            "Could not resolve equity instrument keys for the universe (instruments data missing?)."
+        )
+    else:
+        try:
+            snap = vwap_service.get_market_quote_snapshots_batch(
+                keys,
+                max_per_request=100,
+                request_timeout=max(3, req_to),
+                max_retries=max(0, req_retries),
+            )
+            batch = snap if snap else {}
+            if not batch:
+                quotes_error = (
+                    "Upstox returned no quote data (session may be expired). Reconnect Upstox and retry."
+                )
+        except Exception as ex:
+            logger.warning("Iron Condor universe batch quotes failed: %s", ex)
+            quotes_error = "Upstox quotes request failed — check broker connection and token."
+
+    rows = _universe_picker_rows_from_quote_batch(pairs_meta, batch)
 
     _ic_uq_cache_rows = [copy.deepcopy(r) for r in rows]
     _ic_uq_cache_deadline = now + max(5.0, ttl)
@@ -499,7 +521,8 @@ def universe_picker_snapshot_row_only(db: Session, user_id: int, symbol: str) ->
     _ensure_ic_universe_master_memory_loaded()
     with _ic_universe_master_lock:
         um = _ic_universe_master_by_symbol.get(sym)
-    ik_snap = (um.get("instrument_key") if um else "") or (_instrument_key_for_ic_equity(option_chain_underlying(sym)) or "")
+    # Do not call get_instrument_key here — cold instruments JSON load breaks the "fast snapshot" contract.
+    ik_snap = str((um.get("instrument_key") if um else "") or "").strip()
 
     return (
         normalize_ic_picker_row_for_api(
@@ -608,11 +631,9 @@ def universe_picker_row_for_symbol(
         finally:
             dbq.close()
     t2 = time.perf_counter()
-    api = option_chain_underlying(sym)
     ik = (
         _ic_trusted_equity_key_from_client(sym, client_instrument_key, master_instrument_key=master_ik)
-        or master_ik
-        or (_instrument_key_for_ic_equity(api) or "")
+        or str(master_ik or "").strip()
     )
     t3 = time.perf_counter()
 

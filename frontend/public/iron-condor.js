@@ -462,15 +462,8 @@
           list = normalizeUniverseSymbolsPayload(u);
         } catch (_e2) {}
       }
-      if (!list.length) {
-        try {
-          var u2 = await fj(icApiPaths("universe-with-quotes"), {
-            headers: authHeaders(),
-            cache: "no-store",
-          });
-          list = normalizeUniverseSymbolsPayload(u2);
-        } catch (_e3) {}
-      }
+      /* Intentionally do not fallback to /universe-with-quotes here: it batches all symbols
+         through Upstox and commonly hits gateway timeouts; symbol list-only paths are enough. */
       if (!list.length) {
         state.universeMeta = prev;
         populatePickerSelect();
