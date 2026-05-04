@@ -691,6 +691,78 @@ def user_has_ic_active_open_position(db: Session, user_id: int, underlying: str)
         return False
 
 
+def ic_active_underlying_symbols_upper(db: Session, user_id: int) -> set[str]:
+    """Distinct underlyings with ACTIVE/OPEN/ADJUSTED rows. Missing relation → empty."""
+    try:
+        ar = db.execute(
+            text(
+                """
+                SELECT DISTINCT UPPER(TRIM(underlying)) AS u
+                FROM iron_condor_position
+                WHERE user_id = :uid AND UPPER(status) IN ('ACTIVE', 'OPEN', 'ADJUSTED')
+                """
+            ),
+            {"uid": int(user_id)},
+        ).fetchall()
+        return {str(r[0]).strip().upper() for r in ar if r and r[0]}
+    except Exception:
+        return set()
+
+
+def build_universe_board_base_rows(db: Session, user_id: int) -> List[Dict[str, Any]]:
+    """Step 1 skeleton: universe master (+ prev close from DB/cache) + active flags. No broker I/O."""
+    active_set = ic_active_underlying_symbols_upper(db, user_id)
+    out: List[Dict[str, Any]] = []
+    for m in get_iron_condor_universe_master_rows():
+        sym_u = str(m.get("symbol") or "").strip().upper()
+        if not sym_u:
+            continue
+        item = normalize_ic_universe_row_for_api(
+            {
+                "symbol": sym_u,
+                "sector": str(m.get("sector") or "").strip(),
+                "instrument_key": str(m.get("instrument_key") or "").strip(),
+                "previous_day_close": m.get("previous_day_close"),
+                "previous_close_as_of": m.get("previous_close_as_of") or "",
+                "updated_at": m.get("updated_at"),
+                "ltp": None,
+                "change_pct_day": None,
+                "active_position": sym_u in active_set,
+            }
+        )
+        out.append(item)
+    return out
+
+
+def build_universe_quotes_by_symbol_cached() -> Tuple[Dict[str, Dict[str, Any]], Optional[str]]:
+    """Batched broker LTP/day-% for universe — same cache + batch as legacy picker."""
+    rows, quotes_error = build_universe_picker_rows_with_quotes_cached()
+    by_sym: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        sym = str(r.get("symbol") or "").strip().upper()
+        if sym:
+            by_sym[sym] = {"ltp": r.get("ltp"), "change_pct_day": r.get("change_pct_day")}
+    return by_sym, quotes_error
+
+
+def merge_universe_board_quotes(
+    base_rows: List[Dict[str, Any]],
+    quotes_by_symbol: Dict[str, Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Attach broker fields to skeleton rows (order preserved)."""
+    out: List[Dict[str, Any]] = []
+    q = quotes_by_symbol or {}
+    for row in base_rows:
+        it = dict(row)
+        sym = str(it.get("symbol") or "").strip().upper()
+        pq = q.get(sym)
+        if pq and isinstance(pq, dict):
+            it["ltp"] = pq.get("ltp")
+            it["change_pct_day"] = pq.get("change_pct_day")
+        out.append(normalize_ic_universe_row_for_api(it))
+    return out
+
+
 def universe_picker_snapshot_row_only(db: Session, user_id: int, symbol: str) -> Tuple[Dict[str, Any], Optional[str]]:
     """
     DB-only picker row (today's pre-market daily closes). Skips ensure_iron_condor_tables and Upstox.

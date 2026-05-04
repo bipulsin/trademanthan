@@ -31,8 +31,7 @@ logger = logging.getLogger(__name__)
 
 # Hard wall for picker quote (return 200 + fallback row instead of hanging past client/proxy timeouts).
 _IC_UNIVERSE_QUOTE_WALL_SEC = 22.0
-# Batch universe quotes can block past proxy limits; fall back to list-only rows.
-_IC_UNIVERSE_BATCH_QUOTES_WALL_SEC = 26.0
+# Batch universe quotes: client uses /universe-board-base + /universe-board-quotes (no thread wall).
 
 
 def _auth(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
@@ -212,54 +211,41 @@ def iron_condor_universe(_user: User = Depends(_auth)) -> Dict[str, Any]:
     return {"symbols": ic.get_iron_condor_universe_master_rows()}
 
 
+@router.get("/universe-board-base")
+def universe_board_base(db: Session = Depends(get_db), user: User = Depends(_auth)) -> Dict[str, Any]:
+    """Step 1 tier 1: master + prev close + Active? — Postgres only (fast UI paint)."""
+    try:
+        return {"symbols": ic.build_universe_board_base_rows(db, int(user.id))}
+    except Exception as e:
+        logger.exception("universe_board_base failed: %s", e)
+        raise HTTPException(status_code=503, detail="Could not load universe — try again shortly.") from e
+
+
+@router.get("/universe-board-quotes")
+def universe_board_quotes(_user: User = Depends(_auth)) -> Dict[str, Any]:
+    """Step 1 tier 2: single batched broker quote pass for all universe symbols (merge on client)."""
+    try:
+        by_sym, quotes_error = ic.build_universe_quotes_by_symbol_cached()
+        return {"quotes_by_symbol": by_sym, "quotes_error": quotes_error}
+    except Exception as e:
+        logger.exception("universe_board_quotes failed: %s", e)
+        return {
+            "quotes_by_symbol": {},
+            "quotes_error": "Quotes temporarily unavailable — try again shortly.",
+        }
+
+
 @router.get("/universe-with-quotes")
 def universe_with_quotes(
     db: Session = Depends(get_db),
     user: User = Depends(_auth),
 ) -> Dict[str, Any]:
-    """Picker: LTP, day %change, sector — one batched Upstox request + short TTL cache."""
+    """Full picker grid in one response (DB skeleton + broker batch). Prefer board-base + board-quotes for UI."""
     try:
-        active_set = set()
-        if ic.iron_condor_position_table_exists(db):
-            active_rows = db.execute(
-                text(
-                    """
-                    SELECT UPPER(TRIM(underlying)) AS u FROM iron_condor_position
-                    WHERE user_id = :uid AND UPPER(status) IN ('ACTIVE', 'OPEN', 'ADJUSTED')
-                    """
-                ),
-                {"uid": int(user.id)},
-            ).fetchall()
-            active_set = {str(r[0]) for r in active_rows if r and r[0]}
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            fut = pool.submit(ic.build_universe_picker_rows_with_quotes_cached)
-            try:
-                base_rows, quotes_error = fut.result(timeout=_IC_UNIVERSE_BATCH_QUOTES_WALL_SEC)
-            except FuturesTimeoutError:
-                logger.warning(
-                    "universe-with-quotes wall timeout %.0fs user_id=%s",
-                    _IC_UNIVERSE_BATCH_QUOTES_WALL_SEC,
-                    int(user.id),
-                )
-                base_rows, quotes_error = ic.build_universe_picker_rows_list_only(
-                    "Live universe quotes timed out — select each symbol for a fresh quote, or retry shortly."
-                )
-        master_by = {
-            str(m.get("symbol") or "").strip().upper(): m
-            for m in ic.get_iron_condor_universe_master_rows()
-        }
-        out = []
-        for r in base_rows:
-            item = ic.normalize_ic_universe_row_for_api(dict(r))
-            sym_u = str(item.get("symbol") or "").strip().upper()
-            item["active_position"] = sym_u in active_set
-            mb = master_by.get(sym_u)
-            if mb:
-                item["previous_day_close"] = mb.get("previous_day_close")
-                item["previous_close_as_of"] = mb.get("previous_close_as_of") or ""
-                item = ic.normalize_ic_universe_row_for_api(item)
-            out.append(item)
-        return {"symbols": out, "quotes_error": quotes_error}
+        base = ic.build_universe_board_base_rows(db, int(user.id))
+        qmap, quotes_error = ic.build_universe_quotes_by_symbol_cached()
+        merged = ic.merge_universe_board_quotes(base, qmap)
+        return {"symbols": merged, "quotes_error": quotes_error}
     except Exception as e:
         logger.exception("universe_with_quotes failed: %s", e)
         return {
