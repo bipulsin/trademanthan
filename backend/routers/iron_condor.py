@@ -33,13 +33,17 @@ def _auth(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) ->
     return get_user_from_token(token, db)
 
 
-def _auth_quick_db(token: str = Depends(oauth2_scheme)) -> User:
-    """Same as _auth but closes the session before the route runs — do not hold DB pool through slow broker calls."""
+def _auth_user_id_quick_close_db(token: str = Depends(oauth2_scheme)) -> int:
+    """
+    Resolve JWT to user id then close DB before the route body (don't hold pool through broker I/O).
+    Returns primitives only — never a detached SQLAlchemy User bound to the closed session.
+    """
     if SessionLocal is None:
         raise HTTPException(status_code=503, detail="Database unavailable.")
     db = SessionLocal()
     try:
-        return get_user_from_token(token, db)
+        user = get_user_from_token(token, db)
+        return int(user.id)
     finally:
         db.close()
 
@@ -239,11 +243,11 @@ def universe_symbol_snapshot_row(
 @router.get("/universe-symbol-quote")
 def universe_symbol_quote(
     underlying: str = Query(..., min_length=1, max_length=32),
-    user: User = Depends(_auth_quick_db),
+    user_id: int = Depends(_auth_user_id_quick_close_db),
 ) -> Dict[str, Any]:
     """Live quote for one approved underlying after user selection (no full-universe prefetch)."""
     try:
-        row, quotes_error = ic.universe_picker_row_for_symbol(int(user.id), underlying.strip())
+        row, quotes_error = ic.universe_picker_row_for_symbol(user_id, underlying.strip())
         if not row:
             raise HTTPException(
                 status_code=400,
