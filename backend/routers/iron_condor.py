@@ -3,6 +3,7 @@ Iron Condor advisory API — checklist, analysis, entry confirm, polling, alerts
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -25,6 +26,7 @@ from backend.services.iron_condor_snapshot_cache import (
 )
 
 router = APIRouter(prefix="/iron-condor", tags=["iron-condor"])
+logger = logging.getLogger(__name__)
 
 
 def _auth(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
@@ -97,7 +99,10 @@ class SaveBody(BaseModel):
 
 
 def _feed_status(db: Session, user_id: int) -> Dict[str, Any]:
-    ice.iron_condor_migrations_v2()
+    try:
+        ice.iron_condor_migrations_v2()
+    except Exception as e:
+        logger.warning("iron_condor _feed_status migrations_v2: %s", e)
     st = ic.get_or_create_settings(db, user_id)
     streak = int(st.get("ic_poll_fail_streak") or 0)
     lo = st.get("ic_last_quote_success_at")
@@ -164,24 +169,31 @@ def universe_with_quotes(
     user: User = Depends(_auth),
 ) -> Dict[str, Any]:
     """Picker: LTP, day %change, sector — one batched Upstox request + short TTL cache."""
-    ic.ensure_iron_condor_tables()
-    active_rows = db.execute(
-        text(
-            """
-            SELECT UPPER(TRIM(underlying)) AS u FROM iron_condor_position
-            WHERE user_id = :uid AND UPPER(status) IN ('ACTIVE', 'OPEN', 'ADJUSTED')
-            """
-        ),
-        {"uid": int(user.id)},
-    ).fetchall()
-    active_set = {str(r[0]) for r in active_rows if r and r[0]}
-    base_rows, quotes_error = ic.build_universe_picker_rows_with_quotes_cached()
-    out = []
-    for r in base_rows:
-        item = dict(r)
-        item["active_position"] = str(item.get("symbol") or "").upper() in active_set
-        out.append(item)
-    return {"symbols": out, "quotes_error": quotes_error}
+    try:
+        ic.ensure_iron_condor_tables()
+        active_rows = db.execute(
+            text(
+                """
+                SELECT UPPER(TRIM(underlying)) AS u FROM iron_condor_position
+                WHERE user_id = :uid AND UPPER(status) IN ('ACTIVE', 'OPEN', 'ADJUSTED')
+                """
+            ),
+            {"uid": int(user.id)},
+        ).fetchall()
+        active_set = {str(r[0]) for r in active_rows if r and r[0]}
+        base_rows, quotes_error = ic.build_universe_picker_rows_with_quotes_cached()
+        out = []
+        for r in base_rows:
+            item = dict(r)
+            item["active_position"] = str(item.get("symbol") or "").upper() in active_set
+            out.append(item)
+        return {"symbols": out, "quotes_error": quotes_error}
+    except Exception as e:
+        logger.exception("universe_with_quotes failed: %s", e)
+        return {
+            "symbols": [],
+            "quotes_error": "Universe quotes temporarily unavailable — try again shortly.",
+        }
 
 
 @router.get("/universe-symbol-snapshot-row")
@@ -194,13 +206,22 @@ def universe_symbol_snapshot_row(
     Fast DB-only row for step-1 picker (today's cached daily closes). No IC DDL migrations, no Upstox.
     Lets the UI render before the slower /universe-symbol-quote finishes.
     """
-    row, quotes_error = ic.universe_picker_snapshot_row_only(db, int(user.id), underlying.strip())
-    if not row:
+    try:
+        row, quotes_error = ic.universe_picker_snapshot_row_only(db, int(user.id), underlying.strip())
+        if not row:
+            raise HTTPException(
+                status_code=400,
+                detail=quotes_error or "Unknown or disallowed underlying",
+            )
+        return {"row": row, "quotes_error": quotes_error}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("universe-symbol-snapshot-row failed: %s", e)
         raise HTTPException(
-            status_code=400,
-            detail=quotes_error or "Unknown or disallowed underlying",
-        )
-    return {"row": row, "quotes_error": quotes_error}
+            status_code=503,
+            detail="Could not load snapshot row — try again shortly.",
+        ) from e
 
 
 @router.get("/universe-symbol-quote")
@@ -210,13 +231,22 @@ def universe_symbol_quote(
     user: User = Depends(_auth),
 ) -> Dict[str, Any]:
     """Live quote for one approved underlying after user selection (no full-universe prefetch)."""
-    row, quotes_error = ic.universe_picker_row_for_symbol(db, int(user.id), underlying.strip())
-    if not row:
+    try:
+        row, quotes_error = ic.universe_picker_row_for_symbol(db, int(user.id), underlying.strip())
+        if not row:
+            raise HTTPException(
+                status_code=400,
+                detail=quotes_error or "Unknown or disallowed underlying",
+            )
+        return {"row": row, "quotes_error": quotes_error}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("universe-symbol-quote failed: %s", e)
         raise HTTPException(
-            status_code=400,
-            detail=quotes_error or "Unknown or disallowed underlying",
-        )
-    return {"row": row, "quotes_error": quotes_error}
+            status_code=503,
+            detail="Quote request failed — try again shortly.",
+        ) from e
 
 
 @router.post("/checklist")

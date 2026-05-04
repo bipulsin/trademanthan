@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import threading
 import time
@@ -41,6 +42,55 @@ _ic_equity_ik_cache: Dict[str, str] = {}
 # DDL + extended migrations once per worker — they were doubling per /universe-symbol-quote (~tens of seconds).
 _ic_tables_lock = threading.Lock()
 _iron_condor_tables_ready_flag = False
+
+
+def _sanitize_ic_quote_numbers(ltp_v: Any, pct_v: Any) -> Tuple[Optional[float], Optional[float]]:
+    """Strip NaN/Inf and coerce to JSON-safe floats (avoids 500 during response serialization)."""
+    ltp_o: Optional[float] = None
+    if ltp_v is not None:
+        try:
+            x = float(ltp_v)
+            if math.isfinite(x) and x > 0:
+                ltp_o = round(x, 6)
+        except (TypeError, ValueError):
+            pass
+    pct_o: Optional[float] = None
+    if pct_v is not None:
+        try:
+            y = float(pct_v)
+            if math.isfinite(y):
+                pct_o = round(y, 4)
+        except (TypeError, ValueError):
+            pass
+    return ltp_o, pct_o
+
+
+def normalize_ic_picker_row_for_api(row: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(row, dict):
+        return row
+    r = dict(row)
+    lt, cg = _sanitize_ic_quote_numbers(r.get("ltp"), r.get("change_pct_day"))
+    r["ltp"] = lt
+    r["change_pct_day"] = cg
+    r["symbol"] = str(r.get("symbol") or "").strip().upper()
+    r["sector"] = str(r.get("sector") or "").strip()
+    r["active_position"] = bool(r.get("active_position"))
+    qs = r.get("quote_source")
+    if qs is not None:
+        r["quote_source"] = str(qs)
+    return r
+
+
+def normalize_ic_universe_row_for_api(row: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(row, dict):
+        return row
+    r = dict(row)
+    lt, cg = _sanitize_ic_quote_numbers(r.get("ltp"), r.get("change_pct_day"))
+    r["symbol"] = str(r.get("symbol") or "").strip().upper()
+    r["sector"] = str(r.get("sector") or "").strip()
+    r["ltp"] = lt
+    r["change_pct_day"] = cg
+    return r
 
 
 def _normalize_ik_key(k: str) -> str:
@@ -133,12 +183,14 @@ def build_universe_picker_rows_with_quotes_cached() -> Tuple[List[Dict[str, Any]
             except (TypeError, ValueError):
                 pass
         rows.append(
-            {
-                "symbol": sym,
-                "sector": sec,
-                "ltp": ltp_f,
-                "change_pct_day": chg,
-            }
+            normalize_ic_universe_row_for_api(
+                {
+                    "symbol": sym,
+                    "sector": sec,
+                    "ltp": ltp_f,
+                    "change_pct_day": chg,
+                }
+            )
         )
 
     _ic_uq_cache_rows = [copy.deepcopy(r) for r in rows]
@@ -226,14 +278,16 @@ def universe_picker_snapshot_row_only(db: Session, user_id: int, symbol: str) ->
         )
 
     return (
-        {
-            "symbol": sym,
-            "sector": sec,
-            "ltp": ltp_f,
-            "change_pct_day": chg,
-            "active_position": active,
-            "quote_source": "daily_cache",
-        },
+        normalize_ic_picker_row_for_api(
+            {
+                "symbol": sym,
+                "sector": sec,
+                "ltp": ltp_f,
+                "change_pct_day": chg,
+                "active_position": active,
+                "quote_source": "daily_cache",
+            }
+        ),
         quotes_error,
     )
 
@@ -372,14 +426,16 @@ def universe_picker_row_for_symbol(db: Session, user_id: int, symbol: str) -> Tu
         # snapshot_ok + no live payload: keep quiet — LTP/% already come from DB snapshot
 
     return (
-        {
-            "symbol": sym,
-            "sector": sec,
-            "ltp": ltp_f,
-            "change_pct_day": chg,
-            "active_position": active,
-            "quote_source": quote_source,
-        },
+        normalize_ic_picker_row_for_api(
+            {
+                "symbol": sym,
+                "sector": sec,
+                "ltp": ltp_f,
+                "change_pct_day": chg,
+                "active_position": active,
+                "quote_source": quote_source,
+            }
+        ),
         quotes_error,
     )
 
