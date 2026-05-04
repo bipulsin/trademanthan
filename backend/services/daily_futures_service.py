@@ -3720,6 +3720,27 @@ def _workspace_attach_target_entry_price(
         p["target_entry_price"] = None
 
 
+def _sort_todays_pick_workspace_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Order for Today's pick tables: rows with Enter enabled first, then by highest live conviction
+    (effective_conviction, else conviction_score descending).
+    """
+    if len(rows) < 2:
+        return rows
+
+    def _conv_live(p: Dict[str, Any]) -> float:
+        cv = _safe_float(p.get("effective_conviction"))
+        if cv is not None:
+            return float(cv)
+        cv2 = _safe_float(p.get("conviction_score"))
+        return float(cv2) if cv2 is not None else 0.0
+
+    return sorted(
+        rows,
+        key=lambda p: (0 if bool(p.get("order_eligible")) else 1, -_conv_live(p)),
+    )
+
+
 def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[str, Any]:
     ensure_daily_futures_tables()
     td = _workspace_trade_date_ist()
@@ -4299,6 +4320,9 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
     for _tp in list(picks_mixed) + list(picks_low_conv_bull) + list(picks_low_conv_bear):
         ik_row = str((_tp.get("instrument_key") or "")).strip()
         _workspace_attach_target_entry_price(_tp, c15_for_target.get(ik_row))
+
+    picks_bull = _sort_todays_pick_workspace_rows(list(picks_bull))
+    picks_bearish = _sort_todays_pick_workspace_rows(list(picks_bearish))
 
     return {
         "trade_date": str(td),
