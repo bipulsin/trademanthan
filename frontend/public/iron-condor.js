@@ -646,7 +646,9 @@
         }
         state.universeStep1Rows = rows;
         renderUniverseStep1Table(rows);
-        pickerShowQuoteBanner("Optional: sign in for Active?, row picks, and live LTP.");
+        if (!state.universeStep1AuthMerged) {
+          pickerShowQuoteBanner("");
+        }
       })
       .catch(function () {
         if (gen !== state.universeStep1QuoteGen) return;
@@ -677,9 +679,7 @@
         if (gen !== state.universeStep1QuoteGen) return;
         state.universeStep1AuthMerged = false;
         state.universeStep1PickLocked = true;
-        pickerShowQuoteBanner(
-          "Sign in to enable Active?, row selection, and live LTP (table above is public master data)."
-        );
+        pickerShowQuoteBanner("");
         if (state.universeStep1Rows && state.universeStep1Rows.length) {
           renderUniverseStep1Table(state.universeStep1Rows);
         }
@@ -691,6 +691,12 @@
     applySavedTheme();
     bindThemeSyncForCharts();
     loadSessionLine();
+    var wa = document.getElementById("warnAck");
+    if (wa) {
+      wa.onchange = function () {
+        updateToStrikesBtnState();
+      };
+    }
     loadUniverseStep1Grid();
   }
 
@@ -762,6 +768,26 @@
       esc(chip.message);
   }
 
+  /** After checklist stream finishes: enable unless FAIL, or until WARN ack when required. */
+  function updateToStrikesBtnState() {
+    var btn = document.getElementById("toStrikesBtn");
+    var ackEl = document.getElementById("warnAck");
+    if (!btn) return;
+    if (!state.checklist) {
+      btn.disabled = true;
+      return;
+    }
+    if (state.checklist.may_proceed_blocked) {
+      btn.disabled = true;
+      return;
+    }
+    if (state.checklist.warnings_require_ack && !(ackEl && ackEl.checked)) {
+      btn.disabled = true;
+      return;
+    }
+    btn.disabled = false;
+  }
+
   async function runChecklistStream() {
     if (!state.symbol) return;
     document.getElementById("strikeOverrideBox").style.display = "none";
@@ -773,6 +799,8 @@
     });
     state.detailed = null;
     state.checklist = null;
+    var wa = document.getElementById("warnAck");
+    if (wa) wa.checked = false;
     document.getElementById("toStrikesBtn").disabled = true;
 
     var paths = icApiPaths("checklist-stream");
@@ -815,9 +843,6 @@
         if (ev.kind === "chip") {
           chipsAcc.push(ev.chip);
           applyChipRow(ev.chip);
-          if (ev.may_proceed_blocked !== undefined) {
-            document.getElementById("toStrikesBtn").disabled = !!ev.may_proceed_blocked;
-          }
         } else if (ev.kind === "done") {
           state.checklist = {
             success: true,
@@ -827,7 +852,7 @@
             vix_value: ev.vix_value,
             vix_error: ev.vix_error,
           };
-          document.getElementById("toStrikesBtn").disabled = !!ev.may_proceed_blocked;
+          updateToStrikesBtnState();
         }
       }
     }
@@ -1269,10 +1294,6 @@
   };
 
   document.getElementById("toStrikesBtn").onclick = async function () {
-    if (state.checklist && state.checklist.warnings_require_ack && !document.getElementById("warnAck").checked) {
-      alert("Acknowledge WARN items first.");
-      return;
-    }
     showPane(3);
     document.getElementById("strikeCard").textContent = "Computing…";
     try {

@@ -29,7 +29,8 @@ class Settings(BaseSettings):
     GOOGLE_REDIRECT_URI: str = os.getenv("GOOGLE_REDIRECT_URI", "https://www.tradewithcto.com/login.html")
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "production")
     DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "4320"))  # 72 hours default
+    # Long-lived JWT: survives hard refresh until explicit logout (token cleared client-side). Override via env if needed.
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "525600"))  # default ~365 days
     
     # Upstox OAuth Configuration (redirect URI must match Upstox "My Apps" redirect URL exactly)
     UPSTOX_API_KEY: str = os.getenv("UPSTOX_API_KEY", "dd1d3bcc-e1a4-4eed-be7c-1833d9301738")
