@@ -59,8 +59,23 @@ body.theme-page.iron-c-page[data-theme="dark"] {
   --ic-skel: linear-gradient(90deg, rgba(51,65,85,0.6) 25%, rgba(71,85,105,0.5) 37%, rgba(51,65,85,0.6) 63%);
 }
 
+body.theme-page.iron-c-page[data-theme="dark"] .ic-muted {
+  color: var(--ic-muted-ink);
+}
+
 body.theme-page.iron-c-page[data-theme="light"] .ic-muted {
   color: var(--ic-muted-ink);
+}
+
+/* Numeric cells should stay readable without inheriting muted body text gaps */
+body.theme-page.iron-c-page[data-theme="dark"] .ic-universe-table tbody td.ic-num.ic-mono,
+body.theme-page.iron-c-page[data-theme="dark"] .ic-universe-table tbody td.ic-num {
+  color: #e2e8f0;
+}
+
+body.theme-page.iron-c-page[data-theme="light"] .ic-universe-table tbody td.ic-num.ic-mono,
+body.theme-page.iron-c-page[data-theme="light"] .ic-universe-table tbody td.ic-num {
+  color: #0f172a;
 }
 
 .ic-num {

@@ -155,7 +155,68 @@
     mtmChartJs: null,
     equityChartJs: null,
     pickerQuoteGen: 0,
+    /** SYMBOL -> { ltp, change_pct_day } from last /universe-with-quotes (fills snapshot gaps). */
+    universeQuotesBySym: {},
   };
+
+  function ingestUniverseQuotesPayload(pub) {
+    var q = {};
+    var syms = (pub && pub.symbols) || [];
+    for (var iq = 0; iq < syms.length; iq++) {
+      var r = syms[iq];
+      if (!r || typeof r !== "object") continue;
+      var sx = String(r.symbol || "").trim().toUpperCase();
+      if (!sx) continue;
+      q[sx] = { ltp: r.ltp, change_pct_day: r.change_pct_day };
+    }
+    state.universeQuotesBySym = q;
+  }
+
+  function mergeUniverseQuotesIntoPickerRow(sym, row) {
+    if (!row || typeof row !== "object") return row;
+    var s = String(sym || row.symbol || "").trim().toUpperCase();
+    var q = state.universeQuotesBySym && state.universeQuotesBySym[s];
+    if (!q) return row;
+    var out = {};
+    var k;
+    for (k in row) {
+      if (Object.prototype.hasOwnProperty.call(row, k)) out[k] = row[k];
+    }
+    if ((out.ltp == null || out.ltp === "" || Number(out.ltp) <= 0) && q.ltp != null && Number(q.ltp) > 0) {
+      out.ltp = q.ltp;
+    }
+    if ((out.change_pct_day == null || out.change_pct_day === "") && q.change_pct_day != null) {
+      out.change_pct_day = q.change_pct_day;
+    }
+    return out;
+  }
+
+  function fmtPxCell(v) {
+    if (v == null || v === "") return "—";
+    var n = parseFloat(v);
+    if (!isFinite(n) || n <= 0) return "—";
+    return n.toFixed(2);
+  }
+
+  function fmtPctCell(v) {
+    if (v == null || v === "") return "—";
+    var n = parseFloat(v);
+    if (!isFinite(n)) return "—";
+    return n.toFixed(2) + "%";
+  }
+
+  /** Checklist API only needs underlying; enable once a symbol row is confirmed. */
+  function setPickerNextEnabled(rowOrSymbol) {
+    var sym =
+      typeof rowOrSymbol === "string"
+        ? rowOrSymbol
+        : rowOrSymbol && rowOrSymbol.symbol
+          ? rowOrSymbol.symbol
+          : "";
+    var ok = String(sym || "").trim().length > 0;
+    var btn = document.getElementById("gotoChecklistBtn");
+    if (btn) btn.disabled = !ok;
+  }
 
   function pickerShowQuoteBanner(msg) {
     var el = document.getElementById("pickerQuoteWarn");
@@ -447,6 +508,13 @@
       state.universeMeta = list;
       populatePickerSelect();
       pickerShowQuoteBanner("");
+      try {
+        var uq = await fj(icApiPaths("universe-with-quotes"), {
+          headers: authHeaders(),
+          cache: "no-store",
+        });
+        ingestUniverseQuotesPayload(uq);
+      } catch (_uq) {}
     } catch (_e) {
       state.universeMeta = prev;
       populatePickerSelect();
@@ -516,7 +584,7 @@
         state.symbol = "";
         state.pickerSymbols = [];
         pickerShowQuoteBanner("");
-        document.getElementById("gotoChecklistBtn").disabled = true;
+        setPickerNextEnabled("");
         setPickerTablePlaceholder();
         return;
       }
@@ -525,12 +593,9 @@
   }
 
   function rowHasUsableSpot(row) {
-    return (
-      row &&
-      row.ltp != null &&
-      !isNaN(Number(row.ltp)) &&
-      Number(row.ltp) > 0
-    );
+    if (!row) return false;
+    var n = parseFloat(row.ltp);
+    return isFinite(n) && n > 0;
   }
 
   /** Sync select + outline after row update */
@@ -555,6 +620,7 @@
         r.style.outline = "3px solid #1f3864";
       });
     }
+    setPickerNextEnabled(row);
   }
 
   /** After snapshot LTP is shown, try live upgrade without blocking the UI for 20–40s. */
@@ -576,7 +642,6 @@
         if (!row || typeof row !== "object") return;
         pickerShowQuoteBanner(res.quotes_error || "");
         applyPickerDomFromRow(sel, tb, sArg, row);
-        document.getElementById("gotoChecklistBtn").disabled = false;
       })
       .catch(function () {
         clearTimeout(to);
@@ -607,11 +672,11 @@
     }
     if (tb) tb.innerHTML = renderPickerRowPending(s, sectorForPickerMeta(s));
     pickerShowQuoteBanner("");
-    document.getElementById("gotoChecklistBtn").disabled = true;
+    setPickerNextEnabled("");
     state.symbol = "";
     state.pickerSymbols = [];
 
-    /* Phase A: DB snapshot — fast path for LTP when daily cache exists */
+    /* Phase A: DB snapshot + fallback from batched universe quotes (fills LTP gaps) */
     var fastHadSpot = false;
     var gotPartialFastRow = false;
     try {
@@ -622,12 +687,12 @@
       if (gen !== state.pickerQuoteGen) return;
       if (snapRes && snapRes.row && typeof snapRes.row === "object") {
         gotPartialFastRow = true;
-        applyPickerDomFromRow(sel, tb, s, snapRes.row);
-        fastHadSpot = rowHasUsableSpot(snapRes.row);
+        var mergedSnap = mergeUniverseQuotesIntoPickerRow(s, snapRes.row);
+        applyPickerDomFromRow(sel, tb, s, mergedSnap);
+        fastHadSpot = rowHasUsableSpot(mergedSnap);
         if (fastHadSpot) {
-          document.getElementById("gotoChecklistBtn").disabled = false;
           pickerShowQuoteBanner(snapRes.quotes_error || "");
-          /* Do not await slow route — banner stays clear; live may refresh row in background */
+          /* Do not await slow route — live may refresh row in background */
           runLiveQuoteUpgradeBackground(gen, s, sel, tb);
           return;
         }
@@ -662,32 +727,41 @@
       if (!row || typeof row !== "object") {
         throw new Error("Invalid quote response (missing row).");
       }
+      var mergedSlow = mergeUniverseQuotesIntoPickerRow(s, row);
       pickerShowQuoteBanner(res.quotes_error || "");
-      applyPickerDomFromRow(sel, tb, s, row);
-      document.getElementById("gotoChecklistBtn").disabled = false;
+      applyPickerDomFromRow(sel, tb, s, mergedSlow);
     } catch (e) {
       if (gen !== state.pickerQuoteGen) return;
       var aborted =
         e &&
         (e.name === "AbortError" || /aborted|AbortError|timed out|timeout/i.test(String(e.message || "")));
-      if (fastHadSpot) {
+      if (rowHasUsableSpot(state.pickerSymbols && state.pickerSymbols[0])) {
         pickerShowQuoteBanner("");
         return;
       }
       if (gotPartialFastRow) {
+        var cur = state.pickerSymbols && state.pickerSymbols[0];
+        if (cur) {
+          var mergedCatch = mergeUniverseQuotesIntoPickerRow(s, cur);
+          applyPickerDomFromRow(sel, tb, s, mergedCatch);
+        }
+        var hasSpotNow = rowHasUsableSpot(state.pickerSymbols && state.pickerSymbols[0]);
         var emSlow = e.message || String(e);
         pickerShowQuoteBanner(
-          aborted
-            ? "Live quote timed out — try again or reload."
-            : emSlow.length > 180
-              ? emSlow.slice(0, 177) + "…"
-              : emSlow
+          hasSpotNow
+            ? ""
+            : aborted
+              ? "Live quote timed out — try again or reload."
+              : emSlow.length > 180
+                ? emSlow.slice(0, 177) + "…"
+                : emSlow
         );
-        document.getElementById("gotoChecklistBtn").disabled = true;
+        setPickerNextEnabled(state.symbol || s);
         return;
       }
       state.symbol = "";
       state.pickerSymbols = [];
+      setPickerNextEnabled("");
       var em = e.message || String(e);
       pickerShowQuoteBanner(em.length > 220 ? em.slice(0, 217) + "…" : em);
       if (sel) {
@@ -749,13 +823,14 @@
     var sel = document.getElementById("pickerSelect");
     if (sel) sel.value = "";
     pickerShowQuoteBanner("");
-    document.getElementById("gotoChecklistBtn").disabled = true;
+    setPickerNextEnabled("");
     setPickerTablePlaceholder();
   }
 
   function renderPickerRow(row) {
-    var warn = row.active_position ? '<span class="ic-chip-warn ic-chip-pass">Dup</span>' : "";
-    var act = row.active_position ? "Yes" : "—";
+    var ap = !!row.active_position;
+    var warn = ap ? '<span class="ic-chip-warn ic-chip-pass">Dup</span>' : "";
+    var act = ap ? "Yes" : "—";
     return (
       "<tr data-sym=\"" +
       esc(row.symbol) +
@@ -769,10 +844,10 @@
       esc(row.sector) +
       "</span></td>" +
       "<td class=\"ic-num ic-mono\">" +
-      (row.ltp != null ? Number(row.ltp).toFixed(2) : "—") +
+      fmtPxCell(row.ltp) +
       "</td>" +
       "<td class=\"ic-num\">" +
-      (row.change_pct_day != null ? Number(row.change_pct_day).toFixed(2) + "%" : "—") +
+      fmtPctCell(row.change_pct_day) +
       "</td>" +
       "<td class=\"ic-num\">" +
       esc(act) +
@@ -787,7 +862,7 @@
       b.onclick = function () {
         var tr = b.closest("tr");
         state.symbol = tr.getAttribute("data-sym") || "";
-        document.getElementById("gotoChecklistBtn").disabled = false;
+        setPickerNextEnabled(state.symbol);
         tr.parentElement.querySelectorAll("tr").forEach(function (r) {
           r.style.outline = "";
         });
