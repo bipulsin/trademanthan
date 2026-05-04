@@ -45,6 +45,8 @@ _iron_condor_tables_ready_flag = False
 # Postgres-backed master — mirrored in memory (`iron_condor_universe_master` table).
 _ic_universe_master_lock = threading.Lock()
 _ic_universe_master_by_symbol: Dict[str, Dict[str, Any]] = {}
+# Monotonic time of last refresh_ic_universe_master_memory(); avoid stale Δ% after DB edits (TTL reload).
+_ic_universe_master_cache_mono: float = 0.0
 
 
 def _sanitize_ic_quote_numbers(ltp_v: Any, pct_v: Any) -> Tuple[Optional[float], Optional[float]]:
@@ -148,7 +150,7 @@ def _universe_master_row_for_api(internal: Dict[str, Any]) -> Dict[str, Any]:
 
 def refresh_ic_universe_master_memory(db: Session) -> None:
     """Load Postgres master into module cache (caller holds db session)."""
-    global _ic_universe_master_by_symbol
+    global _ic_universe_master_by_symbol, _ic_universe_master_cache_mono
     try:
         rows = db.execute(
             text(
@@ -176,6 +178,7 @@ def refresh_ic_universe_master_memory(db: Session) -> None:
     with _ic_universe_master_lock:
         _ic_universe_master_by_symbol.clear()
         _ic_universe_master_by_symbol.update(neu)
+        _ic_universe_master_cache_mono = time.monotonic()
 
 
 def iron_condor_universe_master_bootstrap_seed_if_empty(db: Session) -> int:
@@ -362,9 +365,13 @@ def ensure_iron_condor_universe_master_ready(db: Session) -> None:
 def _ensure_ic_universe_master_memory_loaded() -> None:
     if SessionLocal is None:
         return
+    ttl = float(os.getenv("IC_UNIVERSE_MASTER_MEMORY_TTL_SEC", "90") or "90")
+    ttl = max(15.0, ttl)
     with _ic_universe_master_lock:
-        if _ic_universe_master_by_symbol:
-            return
+        cache_age = time.monotonic() - _ic_universe_master_cache_mono
+        skip = bool(_ic_universe_master_by_symbol) and cache_age <= ttl
+    if skip:
+        return
     db = SessionLocal()
     try:
         ensure_iron_condor_tables()
@@ -437,6 +444,32 @@ def _ic_prev_day_close_from_ohlc(nested: Any) -> float:
     return 0.0
 
 
+def _master_previous_day_close_for_sym(sym: str) -> float:
+    """Universe-master previous_day_close (authoritative denominator for Δ day when present)."""
+    sk = (sym or "").strip().upper()
+    if not sk:
+        return 0.0
+    with _ic_universe_master_lock:
+        um = _ic_universe_master_by_symbol.get(sk)
+    if not um:
+        return 0.0
+    v = um.get("previous_day_close")
+    try:
+        if v is None or v == "":
+            return 0.0
+        x = float(v)
+        return float(x) if math.isfinite(x) and x > 0 else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _ic_prev_denominator(sym: str, ohlc_nested: Any) -> float:
+    px = _master_previous_day_close_for_sym(sym)
+    if px > 0:
+        return px
+    return _ic_prev_day_close_from_ohlc(ohlc_nested)
+
+
 def _normalize_ik_key(k: str) -> str:
     return k.replace(" ", "").replace(":", "|").upper()
 
@@ -470,7 +503,7 @@ def _universe_picker_rows_from_quote_batch(
             try:
                 lp_base = vwap_service.ltp_from_quote_snapshot(qd)
                 nested = qd.get("ohlc") if isinstance(qd.get("ohlc"), dict) else {}
-                prev = _ic_prev_day_close_from_ohlc(nested)
+                prev = _ic_prev_denominator(sym, nested)
                 ltp_o = lp_base if lp_base is not None and lp_base > 0 else None
                 if ltp_o and prev > 0:
                     chg = round((ltp_o - prev) / prev * 100.0, 2)
@@ -664,7 +697,10 @@ def universe_picker_snapshot_row_only(db: Session, user_id: int, symbol: str) ->
             last = float(closes[-1])
             if last > 0:
                 ltp_f = last
-                if len(closes) >= 2:
+                pm_snap = _master_previous_day_close_for_sym(sym)
+                if pm_snap > 0:
+                    chg = round((last - pm_snap) / pm_snap * 100.0, 2)
+                elif len(closes) >= 2:
                     prev_d = float(closes[-2])
                     if prev_d > 0:
                         chg = round((last - prev_d) / prev_d * 100.0, 2)
@@ -775,7 +811,10 @@ def _ic_picker_ltp_from_daily_cache(sym: str) -> Tuple[Optional[float], Optional
         if last <= 0:
             return None, None
         chg_o: Optional[float] = None
-        if len(closes) >= 2:
+        pm_snap = _master_previous_day_close_for_sym(k)
+        if pm_snap > 0:
+            chg_o = round((last - pm_snap) / pm_snap * 100.0, 2)
+        elif len(closes) >= 2:
             prev_d = float(closes[-2])
             if prev_d > 0:
                 chg_o = round((last - prev_d) / prev_d * 100.0, 2)
@@ -871,7 +910,7 @@ def universe_picker_row_for_symbol(
             try:
                 lp_base = vwap_service.ltp_from_quote_snapshot(qd)
                 nested = qd.get("ohlc") if isinstance(qd.get("ohlc"), dict) else {}
-                prev = _ic_prev_day_close_from_ohlc(nested)
+                prev = _ic_prev_denominator(sym, nested)
                 live_ltp = lp_base if lp_base is not None and lp_base > 0 else None
                 if live_ltp and prev > 0:
                     chg = round((live_ltp - prev) / prev * 100.0, 2)
