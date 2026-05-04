@@ -63,7 +63,11 @@
           throw new Error("Server response was not valid JSON.");
         }
       } catch (e) {
-        lastErr = e.message || String(e);
+        if (e && (e.name === "AbortError" || /aborted/i.test(String(e.message || "")))) {
+          lastErr = "Request timed out — try again.";
+        } else {
+          lastErr = e.message || String(e);
+        }
       }
     }
     throw new Error(lastErr || "fetch failed");
@@ -522,11 +526,32 @@
     document.getElementById("gotoChecklistBtn").disabled = true;
     state.symbol = "";
     state.pickerSymbols = [];
+    var quoteAbortTimer = null;
     try {
-      var res = await fj(
-        icApiPaths("universe-symbol-quote?underlying=" + encodeURIComponent(s)),
-        { headers: authHeaders(), cache: "no-store" }
-      );
+      var abortCtl = typeof AbortController !== "undefined" ? new AbortController() : null;
+      if (abortCtl) {
+        quoteAbortTimer = setTimeout(function () {
+          try {
+            abortCtl.abort();
+          } catch (_ab) {}
+        }, 22000);
+      }
+      var res;
+      try {
+        res = await fj(
+          icApiPaths("universe-symbol-quote?underlying=" + encodeURIComponent(s)),
+          {
+            headers: authHeaders(),
+            cache: "no-store",
+            signal: abortCtl ? abortCtl.signal : undefined,
+          }
+        );
+      } finally {
+        if (quoteAbortTimer) {
+          clearTimeout(quoteAbortTimer);
+          quoteAbortTimer = null;
+        }
+      }
       if (gen !== state.pickerQuoteGen) return;
       if (sk) sk.style.display = "none";
       var row = res.row;

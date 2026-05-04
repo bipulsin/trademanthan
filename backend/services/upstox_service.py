@@ -2238,7 +2238,12 @@ class UpstoxService:
         return result
 
     def get_market_quote_snapshots_batch(
-        self, instrument_keys: list[str], max_per_request: int = 100
+        self,
+        instrument_keys: list[str],
+        max_per_request: int = 100,
+        *,
+        request_timeout: int = 20,
+        max_retries: int = 2,
     ) -> dict[str, Dict[str, Any]]:
         """
         Full v2 market-quote payload per instrument (volume, oi, net_change, etc.).
@@ -2256,7 +2261,9 @@ class UpstoxService:
 
             keys_param = ",".join(keys_batch)
             url = f"https://api.upstox.com/v2/market-quote/quotes?instrument_key={quote(keys_param, safe=',')}"
-            data = self.make_api_request(url, method="GET", timeout=20, max_retries=2)
+            data = self.make_api_request(
+                url, method="GET", timeout=request_timeout, max_retries=max_retries
+            )
             if not data or data.get("status") != "success" or "data" not in data:
                 return out
             raw = data.get("data") or {}

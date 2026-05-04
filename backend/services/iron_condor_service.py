@@ -184,8 +184,14 @@ def universe_picker_row_for_symbol(db: Session, user_id: int, symbol: str) -> Tu
     elif not ik:
         quotes_error = "Could not resolve equity instrument key for this symbol."
     else:
+        # Short HTTP timeouts + single retry so nginx never waits ~120s and returns 504.
         try:
-            snap = vwap_service.get_market_quote_snapshots_batch([ik], max_per_request=10)
+            snap = vwap_service.get_market_quote_snapshots_batch(
+                [ik],
+                max_per_request=10,
+                request_timeout=8,
+                max_retries=1,
+            )
             batch = snap if snap else {}
             qd = _batch_lookup(batch, ik)
             if not qd:
