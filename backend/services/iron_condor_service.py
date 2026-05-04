@@ -644,7 +644,7 @@ def build_universe_picker_rows_with_quotes_cached() -> Tuple[List[Dict[str, Any]
     """
     global _ic_uq_cache_deadline, _ic_uq_cache_rows
 
-    ttl = float(os.getenv("IRON_CONDOR_UNIVERSE_QUOTES_CACHE_SEC", "55") or "55")
+    ttl = float(os.getenv("IRON_CONDOR_UNIVERSE_QUOTES_CACHE_SEC", "25") or "25")
     now = time.monotonic()
     if _ic_uq_cache_rows and now < _ic_uq_cache_deadline:
         return ([copy.deepcopy(r) for r in _ic_uq_cache_rows], None)
@@ -713,7 +713,12 @@ def build_universe_picker_rows_with_quotes_cached() -> Tuple[List[Dict[str, Any]
     rows = _universe_picker_rows_from_quote_batch(pairs_meta, batch)
 
     _ic_uq_cache_rows = [copy.deepcopy(r) for r in rows]
-    _ic_uq_cache_deadline = now + max(5.0, ttl)
+    # Failed / empty broker responses: short TTL so the next request retries soon instead of freezing ~55s.
+    err_ttl = float(os.getenv("IRON_CONDOR_UNIVERSE_QUOTES_ERROR_CACHE_SEC", "6") or "6")
+    if quotes_error:
+        _ic_uq_cache_deadline = now + max(2.0, err_ttl)
+    else:
+        _ic_uq_cache_deadline = now + max(5.0, ttl)
 
     return ([copy.deepcopy(r) for r in rows], quotes_error)
 

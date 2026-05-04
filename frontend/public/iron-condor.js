@@ -115,6 +115,7 @@
     universeStep1PickLocked: false,
     universeStep1AuthMerged: false,
     universeStep1QuoteGen: 0,
+    universeQuoteTimer: null,
     mtmSpark: [],
     soundEpoch: 0,
     mtmChartJs: null,
@@ -255,6 +256,9 @@
     document.querySelectorAll(".ic-step-pill").forEach(function (b) {
       b.setAttribute("data-active", b.getAttribute("data-step") === String(n) ? "1" : "0");
     });
+    if (n === 1) {
+      refreshUniverseQuotesQuiet();
+    }
   }
 
   function skelBars(n) {
@@ -620,6 +624,41 @@
       });
   }
 
+  /** Re-fetch LTP / day % without reloading the grid (same quote-gen guard as initial fetch). */
+  function refreshUniverseQuotesQuiet() {
+    if (!state.universeStep1AuthMerged) return;
+    if (!state.universeStep1Rows || !state.universeStep1Rows.length) return;
+    if (!(localStorage.getItem("trademanthan_token") || "").trim()) return;
+    var myGen = state.universeStep1QuoteGen;
+    fj(icApiPaths("universe-board-quotes"), {
+      headers: authHeaders(),
+      cache: "no-store",
+    })
+      .then(function (qj) {
+        if (myGen !== state.universeStep1QuoteGen) return;
+        applyUniverseQuotesPatch(state.universeStep1Rows, qj.quotes_by_symbol);
+        pickerShowQuoteBanner(qj.quotes_error || "");
+        renderUniverseStep1Table(state.universeStep1Rows);
+      })
+      .catch(function () {
+        if (myGen !== state.universeStep1QuoteGen) return;
+        pickerShowQuoteBanner("Live quotes unavailable — prev close from database (auto-retry every 30s).");
+        renderUniverseStep1Table(state.universeStep1Rows);
+      });
+  }
+
+  var UNIVERSE_QUOTE_POLL_MS = 30000;
+
+  function startUniverseQuotePolling() {
+    if (state.universeQuoteTimer) {
+      clearInterval(state.universeQuoteTimer);
+      state.universeQuoteTimer = null;
+    }
+    state.universeQuoteTimer = setInterval(function () {
+      refreshUniverseQuotesQuiet();
+    }, UNIVERSE_QUOTE_POLL_MS);
+  }
+
   /**
    * Public list paints first (no JWT). Signed-in tier upgrades Active? / radios then broker LTP batch.
    */
@@ -691,12 +730,19 @@
     applySavedTheme();
     bindThemeSyncForCharts();
     loadSessionLine();
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) {
+        refreshUniverseQuotesQuiet();
+        loadSessionLine();
+      }
+    });
     var wa = document.getElementById("warnAck");
     if (wa) {
       wa.onchange = function () {
         updateToStrikesBtnState();
       };
     }
+    startUniverseQuotePolling();
     loadUniverseStep1Grid();
   }
 
@@ -1228,6 +1274,7 @@
     try {
       var s = await fj(icApiPaths("session"), { headers: authHeaders(), cache: "no-store" });
       renderSessionTop(s);
+      refreshUniverseQuotesQuiet();
       if (!s.market_poll_active) return;
       await fj(icApiPaths("poll"), { method: "POST", headers: authHeaders(), body: "{}" });
       await loadSessionLine();
