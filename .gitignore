@@ -54,6 +54,7 @@ inbox/chartink_daily_futures/
 *.csv
 !backend/fno_sector_mapping.csv
 !backend/nse_holidays_2026.csv
+!scripts/ic_universe_sheet9.csv
 *.xlsx
 data/
 

@@ -124,6 +124,34 @@ def normalize_ic_universe_row_for_api(row: Dict[str, Any]) -> Dict[str, Any]:
             r["previous_close_as_of"] = str(pca)
     else:
         r["previous_close_as_of"] = str(pca or "").strip()
+
+    cm = r.get("curr_month_open")
+    pm = r.get("prev_mth_close")
+    cm_o: Optional[float] = None
+    pm_o: Optional[float] = None
+    try:
+        if cm is not None and cm != "":
+            xf = float(cm)
+            cm_o = round(xf, 4) if math.isfinite(xf) and xf > 0 else None
+    except (TypeError, ValueError):
+        pass
+    try:
+        if pm is not None and pm != "":
+            yf = float(pm)
+            pm_o = round(yf, 4) if math.isfinite(yf) and yf > 0 else None
+    except (TypeError, ValueError):
+        pass
+    r["curr_month_open"] = cm_o
+    r["prev_mth_close"] = pm_o
+    for dk in ("prev_mth_expiry", "curr_mth_expiry", "nxt_earning_date"):
+        dv = r.get(dk)
+        if dv is not None and hasattr(dv, "isoformat"):
+            try:
+                r[dk] = dv.isoformat()
+            except Exception:
+                r[dk] = str(dv)
+        else:
+            r[dk] = str(dv or "").strip()
     return r
 
 
@@ -155,12 +183,37 @@ def _universe_master_row_for_api(internal: Dict[str, Any]) -> Dict[str, Any]:
                 pca_s = str(pca)
         else:
             pca_s = str(pca)
+
+    def _opt_num(v: Any) -> Optional[float]:
+        if v is None or v == "":
+            return None
+        try:
+            x = float(v)
+            return round(x, 4) if math.isfinite(x) and x > 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    def _date_str(v: Any) -> str:
+        if v is None:
+            return ""
+        if hasattr(v, "isoformat"):
+            try:
+                return v.isoformat()
+            except Exception:
+                return str(v)
+        return str(v).strip()
+
     return {
         "symbol": str(internal.get("symbol") or "").strip().upper(),
         "sector": str(internal.get("sector") or "").strip(),
         "instrument_key": str(internal.get("instrument_key") or "").strip(),
         "previous_day_close": pdc_o,
         "previous_close_as_of": pca_s,
+        "curr_month_open": _opt_num(internal.get("curr_month_open")),
+        "prev_mth_close": _opt_num(internal.get("prev_mth_close")),
+        "prev_mth_expiry": _date_str(internal.get("prev_mth_expiry")),
+        "curr_mth_expiry": _date_str(internal.get("curr_mth_expiry")),
+        "nxt_earning_date": _date_str(internal.get("nxt_earning_date")),
         "updated_at": iso,
     }
 
@@ -173,7 +226,9 @@ def refresh_ic_universe_master_memory(db: Session) -> None:
             text(
                 """
                 SELECT symbol, sector, instrument_key,
-                       previous_day_close, previous_close_as_of, updated_at
+                       previous_day_close, previous_close_as_of, updated_at,
+                       curr_month_open, prev_mth_close,
+                       prev_mth_expiry, curr_mth_expiry, nxt_earning_date
                 FROM iron_condor_universe_master
                 ORDER BY symbol
                 """
@@ -191,6 +246,11 @@ def refresh_ic_universe_master_memory(db: Session) -> None:
             "previous_day_close": row.get("previous_day_close"),
             "previous_close_as_of": row.get("previous_close_as_of"),
             "updated_at": row["updated_at"],
+            "curr_month_open": row.get("curr_month_open"),
+            "prev_mth_close": row.get("prev_mth_close"),
+            "prev_mth_expiry": row.get("prev_mth_expiry"),
+            "curr_mth_expiry": row.get("curr_mth_expiry"),
+            "nxt_earning_date": row.get("nxt_earning_date"),
         }
     with _ic_universe_master_lock:
         _ic_universe_master_by_symbol.clear()
@@ -639,6 +699,7 @@ OPTION_CHAIN_API_SYMBOL = {
     "LTIMINDTREE": "LTIM",
     "HPCL": "HINDPETRO",
     "PERSISTENTSYS": "PERSISTENT",
+    "INFOSYS": "INFY",  # Universe master keeps INFOSYS; NSE/Upstox ticker is INFY (same as Sheet9 INFY row).
 }
 
 
@@ -1158,6 +1219,14 @@ def ensure_iron_condor_tables() -> None:
                         "ADD COLUMN IF NOT EXISTS previous_close_as_of DATE"
                     )
                 )
+                for col_sql in (
+                    "ADD COLUMN IF NOT EXISTS curr_month_open NUMERIC(18,4)",
+                    "ADD COLUMN IF NOT EXISTS prev_mth_close NUMERIC(18,4)",
+                    "ADD COLUMN IF NOT EXISTS prev_mth_expiry DATE",
+                    "ADD COLUMN IF NOT EXISTS curr_mth_expiry DATE",
+                    "ADD COLUMN IF NOT EXISTS nxt_earning_date DATE",
+                ):
+                    conn.execute(text(f"ALTER TABLE iron_condor_universe_master {col_sql}"))
             except Exception as e:
                 logger.warning("iron_condor_universe_master column migration: %s", e)
         try:
