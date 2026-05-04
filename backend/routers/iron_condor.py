@@ -4,6 +4,7 @@ Iron Condor advisory API — checklist, analysis, entry confirm, polling, alerts
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -27,6 +28,9 @@ from backend.services.iron_condor_snapshot_cache import (
 
 router = APIRouter(prefix="/iron-condor", tags=["iron-condor"])
 logger = logging.getLogger(__name__)
+
+# Hard wall for picker quote (return 200 + fallback row instead of hanging past client/proxy timeouts).
+_IC_UNIVERSE_QUOTE_WALL_SEC = 22.0
 
 
 def _auth(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
@@ -243,11 +247,27 @@ def universe_symbol_snapshot_row(
 @router.get("/universe-symbol-quote")
 def universe_symbol_quote(
     underlying: str = Query(..., min_length=1, max_length=32),
+    instrument_key: Optional[str] = Query(None, max_length=160),
     user_id: int = Depends(_auth_user_id_quick_close_db),
 ) -> Dict[str, Any]:
     """Live quote for one approved underlying after user selection (no full-universe prefetch)."""
+    und = underlying.strip()
+    cikey = instrument_key.strip() if instrument_key else None
     try:
-        row, quotes_error = ic.universe_picker_row_for_symbol(user_id, underlying.strip())
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            fut = pool.submit(ic.universe_picker_row_for_symbol, user_id, und, cikey)
+            try:
+                row, quotes_error = fut.result(timeout=_IC_UNIVERSE_QUOTE_WALL_SEC)
+            except FuturesTimeoutError:
+                logger.warning(
+                    "universe-symbol-quote wall timeout %.0fs underlying=%s",
+                    _IC_UNIVERSE_QUOTE_WALL_SEC,
+                    und,
+                )
+                row = ic.universe_picker_row_timeout_fallback(und)
+                quotes_error = (
+                    "Quote took too long (broker or network busy). Pick the symbol again or wait a few seconds."
+                )
         if not row:
             raise HTTPException(
                 status_code=400,

@@ -626,17 +626,16 @@
     if (tb) tb.innerHTML = renderPickerRowPending(s, sectorForPickerMeta(s));
     pickerShowQuoteBanner("");
 
-    var ctrlSlow = new AbortController();
-    var slowTo = setTimeout(function () {
-      try {
-        ctrlSlow.abort();
-      } catch (_ab) {}
-    }, 60000);
+    var ikMeta = instrumentKeyForPickerMeta(s);
+    var quoteQs =
+      "universe-symbol-quote?underlying=" + encodeURIComponent(s) +
+      (ikMeta ? "&instrument_key=" + encodeURIComponent(ikMeta) : "");
+
     try {
-      var res = await fjWithGatewayRetry(
-        icApiPaths("universe-symbol-quote?underlying=" + encodeURIComponent(s)),
-        { headers: authHeaders(), cache: "no-store", signal: ctrlSlow.signal }
-      );
+      var res = await fjWithGatewayRetry(icApiPaths(quoteQs), {
+        headers: authHeaders(),
+        cache: "no-store",
+      });
       if (gen !== state.pickerQuoteGen) return;
       var row = res && res.row;
       if (!row || typeof row !== "object") {
@@ -657,9 +656,19 @@
           r.style.outline = "3px solid #1f3864";
         });
       }
-    } finally {
-      clearTimeout(slowTo);
     }
+  }
+
+  function instrumentKeyForPickerMeta(sym) {
+    var u = String(sym || "").trim().toUpperCase();
+    var m = state.universeMeta || [];
+    for (var iki = 0; iki < m.length; iki++) {
+      var r = m[iki];
+      if (String(r.symbol || "").trim().toUpperCase() === u) {
+        return String(r.instrument_key || "").trim();
+      }
+    }
+    return "";
   }
 
   function sectorForPickerMeta(sym) {

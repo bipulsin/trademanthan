@@ -372,9 +372,47 @@ def warm_iron_condor_startup() -> None:
         logger.warning("Iron Condor warm: equity IK preload skipped: %s", e)
 
 
-def universe_picker_row_for_symbol(user_id: int, symbol: str) -> Tuple[Dict[str, Any], Optional[str]]:
+def _ic_trusted_equity_key_from_client(sym: str, client_ik_raw: Optional[str]) -> str:
+    """If UI passes instrument_key from universe master, validate shape and skip disk resolver when possible."""
+    if not client_ik_raw:
+        return ""
+    ck = str(client_ik_raw).strip().replace(" ", "")
+    if "|" not in ck:
+        return ""
+    seg, rest = ck.split("|", 1)
+    if seg.strip().upper() != "NSE_EQ":
+        return ""
+    rest = rest.strip()
+    if len(rest) < 12 or not rest.upper().startswith("INE"):
+        return ""
+    if not sector_for_symbol(sym):
+        return ""
+    return ck
+
+
+def universe_picker_row_timeout_fallback(symbol: str) -> Dict[str, Any]:
+    """No I/O — used when the bounded worker wall clock is exceeded (avoid hanging the client)."""
+    sym = (symbol or "").strip().upper()
+    sec = sector_for_symbol(sym) or ""
+    return normalize_ic_picker_row_for_api(
+        {
+            "symbol": sym,
+            "sector": sec,
+            "instrument_key": "",
+            "ltp": None,
+            "change_pct_day": None,
+            "active_position": False,
+            "quote_source": "timeout_fallback",
+        }
+    )
+
+
+def universe_picker_row_for_symbol(
+    user_id: int, symbol: str, client_instrument_key: Optional[str] = None
+) -> Tuple[Dict[str, Any], Optional[str]]:
     """
     Hot path: short DB session for active-position only, then Upstox (no pooled connection held across broker I/O).
+    Optional client_instrument_key: from /approved-underlyings master list — avoids cold get_instrument_key / JSON parse.
     """
     t0 = time.perf_counter()
     sym = (symbol or "").strip().upper()
@@ -392,7 +430,7 @@ def universe_picker_row_for_symbol(user_id: int, symbol: str) -> Tuple[Dict[str,
             dbq.close()
     t2 = time.perf_counter()
     api = option_chain_underlying(sym)
-    ik = _instrument_key_for_ic_equity(api) or ""
+    ik = _ic_trusted_equity_key_from_client(sym, client_instrument_key) or (_instrument_key_for_ic_equity(api) or "")
     t3 = time.perf_counter()
 
     tok = (getattr(vwap_service, "access_token", None) or "").strip()
