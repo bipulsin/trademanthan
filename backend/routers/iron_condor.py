@@ -184,6 +184,25 @@ def universe_with_quotes(
     return {"symbols": out, "quotes_error": quotes_error}
 
 
+@router.get("/universe-symbol-snapshot-row")
+def universe_symbol_snapshot_row(
+    underlying: str = Query(..., min_length=1, max_length=32),
+    db: Session = Depends(get_db),
+    user: User = Depends(_auth),
+) -> Dict[str, Any]:
+    """
+    Fast DB-only row for step-1 picker (today's cached daily closes). No IC DDL migrations, no Upstox.
+    Lets the UI render before the slower /universe-symbol-quote finishes.
+    """
+    row, quotes_error = ic.universe_picker_snapshot_row_only(db, int(user.id), underlying.strip())
+    if not row:
+        raise HTTPException(
+            status_code=400,
+            detail=quotes_error or "Unknown or disallowed underlying",
+        )
+    return {"row": row, "quotes_error": quotes_error}
+
+
 @router.get("/universe-symbol-quote")
 def universe_symbol_quote(
     underlying: str = Query(..., min_length=1, max_length=32),

@@ -21,7 +21,10 @@ from sqlalchemy.orm import Session
 from backend.database import engine
 from backend.services.iron_condor_universe import IRON_CONDOR_UNIVERSE, sector_for_symbol
 from backend.services.upstox_service import upstox_service as vwap_service
-from backend.services.iron_condor_snapshot_cache import read_underlying_atr_closes_session
+from backend.services.iron_condor_snapshot_cache import (
+    ensure_iron_condor_snapshot_tables,
+    read_underlying_atr_closes_session,
+)
 from backend.services import market_holiday as mh_ic
 
 logger = logging.getLogger(__name__)
@@ -168,6 +171,71 @@ def _instrument_key_for_ic_equity(api_symbol: str) -> Optional[str]:
     if ik:
         _ic_equity_ik_cache[k] = ik
     return ik
+
+
+def universe_picker_snapshot_row_only(db: Session, user_id: int, symbol: str) -> Tuple[Dict[str, Any], Optional[str]]:
+    """
+    DB-only picker row (today's pre-market daily closes). Skips ensure_iron_condor_tables and Upstox.
+    Used to unblock the UI when the full quote route is slow (migrations / broker).
+    """
+    ensure_iron_condor_snapshot_tables()
+    sym = (symbol or "").strip().upper()
+    sec = sector_for_symbol(sym)
+    if not sec:
+        return {}, "Symbol is not in the Iron Condor universe."
+
+    active = False
+    try:
+        reg = db.execute(text("SELECT to_regclass('public.iron_condor_position')")).scalar()
+        if reg:
+            row_ct = db.execute(
+                text(
+                    """
+                    SELECT COUNT(*) FROM iron_condor_position
+                    WHERE user_id = :uid AND UPPER(TRIM(underlying)) = UPPER(:sy)
+                      AND UPPER(status) IN ('ACTIVE', 'OPEN', 'ADJUSTED')
+                    """
+                ),
+                {"uid": user_id, "sy": sym},
+            ).scalar()
+            active = int(row_ct or 0) >= 1
+    except Exception:
+        active = False
+
+    trade_date = mh_ic._normalize_ist(None).date()
+    _, closes = read_underlying_atr_closes_session(db, trade_date, sym)
+
+    ltp_f: Optional[float] = None
+    chg: Optional[float] = None
+    if closes and len(closes) >= 1:
+        try:
+            last = float(closes[-1])
+            if last > 0:
+                ltp_f = last
+                if len(closes) >= 2:
+                    prev_d = float(closes[-2])
+                    if prev_d > 0:
+                        chg = round((last - prev_d) / prev_d * 100.0, 2)
+        except (TypeError, ValueError):
+            pass
+
+    quotes_error: Optional[str] = None
+    if ltp_f is None or ltp_f <= 0:
+        quotes_error = (
+            "No snapshot close for today yet — run refresh daily cache or wait for the pre-market job."
+        )
+
+    return (
+        {
+            "symbol": sym,
+            "sector": sec,
+            "ltp": ltp_f,
+            "change_pct_day": chg,
+            "active_position": active,
+            "quote_source": "daily_cache",
+        },
+        quotes_error,
+    )
 
 
 def warm_iron_condor_startup() -> None:

@@ -524,6 +524,39 @@
     });
   }
 
+  function rowHasUsableSpot(row) {
+    return (
+      row &&
+      row.ltp != null &&
+      !isNaN(Number(row.ltp)) &&
+      Number(row.ltp) > 0
+    );
+  }
+
+  /** Sync select + outline after row update */
+  function applyPickerDomFromRow(sel, tb, symUpper, row) {
+    state.pickerSymbols = [row];
+    state.symbol = String(row.symbol || symUpper || "").trim().toUpperCase();
+    if (sel) {
+      sel.value = state.symbol;
+      if (sel.value !== state.symbol) {
+        for (var qj = 0; qj < sel.options.length; qj++) {
+          if (sel.options[qj].value === state.symbol) {
+            sel.selectedIndex = qj;
+            break;
+          }
+        }
+      }
+    }
+    if (tb) {
+      tb.innerHTML = renderPickerRow(row);
+      wirePicker(tb);
+      tb.querySelectorAll("tr").forEach(function (r) {
+        r.style.outline = "3px solid #1f3864";
+      });
+    }
+  }
+
   async function selectUniverseSymbol(sym) {
     var s = (sym || "").trim().toUpperCase();
     if (!s) return;
@@ -551,49 +584,80 @@
     document.getElementById("gotoChecklistBtn").disabled = true;
     state.symbol = "";
     state.pickerSymbols = [];
+
+    /* Phase A: DB snapshot only (milliseconds) — clears endless “Fetching quote…” when cache exists */
+    var fastHadSpot = false;
+    var gotPartialFastRow = false;
     try {
-      var res = await fjWithGatewayRetry(
-        icApiPaths("universe-symbol-quote?underlying=" + encodeURIComponent(s)),
+      var snapRes = await fj(
+        icApiPaths("universe-symbol-snapshot-row?underlying=" + encodeURIComponent(s)),
         { headers: authHeaders(), cache: "no-store" }
       );
       if (gen !== state.pickerQuoteGen) return;
-      if (sk) sk.style.display = "none";
+      if (snapRes && snapRes.row && typeof snapRes.row === "object") {
+        gotPartialFastRow = true;
+        applyPickerDomFromRow(sel, tb, s, snapRes.row);
+        fastHadSpot = rowHasUsableSpot(snapRes.row);
+        if (fastHadSpot) {
+          document.getElementById("gotoChecklistBtn").disabled = false;
+          pickerShowQuoteBanner(snapRes.quotes_error || "");
+        } else {
+          pickerShowQuoteBanner(snapRes.quotes_error || "Fetching quote…");
+        }
+      }
+    } catch (_snapErr) {}
+
+    if (gen !== state.pickerQuoteGen) return;
+
+    /* Phase B: full route (DDL + broker) — upgrade live; capped so UI can settle on snapshot */
+    var ctrlSlow = new AbortController();
+    var slowTo = setTimeout(function () {
+      try {
+        ctrlSlow.abort();
+      } catch (_ab) {}
+    }, 40000);
+    try {
+      var res = await fjWithGatewayRetry(
+        icApiPaths("universe-symbol-quote?underlying=" + encodeURIComponent(s)),
+        { headers: authHeaders(), cache: "no-store", signal: ctrlSlow.signal }
+      );
+      if (gen !== state.pickerQuoteGen) return;
       var row = res.row;
       if (!row || typeof row !== "object") {
         throw new Error("Invalid quote response (missing row).");
       }
       pickerShowQuoteBanner(res.quotes_error || "");
-      state.pickerSymbols = [row];
-      state.symbol = String(row.symbol || "").trim().toUpperCase();
-      if (sel) {
-        sel.value = state.symbol;
-        if (sel.value !== state.symbol) {
-          for (var qj = 0; qj < sel.options.length; qj++) {
-            if (sel.options[qj].value === state.symbol) {
-              sel.selectedIndex = qj;
-              break;
-            }
-          }
-        }
-      }
-      if (tb) {
-        tb.innerHTML = renderPickerRow(row);
-        wirePicker(tb);
-        tb.querySelectorAll("tr").forEach(function (r) {
-          r.style.outline = "3px solid #1f3864";
-        });
-      }
+      applyPickerDomFromRow(sel, tb, s, row);
       document.getElementById("gotoChecklistBtn").disabled = false;
     } catch (e) {
       if (gen !== state.pickerQuoteGen) return;
-      if (sk) sk.style.display = "none";
+      var aborted =
+        e &&
+        (e.name === "AbortError" || /aborted|AbortError|timed out|timeout/i.test(String(e.message || "")));
+      if (fastHadSpot) {
+        pickerShowQuoteBanner("");
+        return;
+      }
+      if (gotPartialFastRow) {
+        var emSlow = e.message || String(e);
+        pickerShowQuoteBanner(
+          aborted
+            ? "Live quote timed out — try again or reload."
+            : emSlow.length > 180
+              ? emSlow.slice(0, 177) + "…"
+              : emSlow
+        );
+        document.getElementById("gotoChecklistBtn").disabled = true;
+        return;
+      }
       state.symbol = "";
       state.pickerSymbols = [];
       var em = e.message || String(e);
       pickerShowQuoteBanner(em.length > 220 ? em.slice(0, 217) + "…" : em);
       if (sel) {
         var keep = false;
-        for (var qk = 0; qk < sel.options.length; qk++) {
+        var qk;
+        for (qk = 0; qk < sel.options.length; qk++) {
           if (sel.options[qk].value === s) {
             keep = true;
             break;
@@ -607,6 +671,8 @@
       if (tb) {
         tb.innerHTML = "<tr><td colspan=\"6\" class=\"ic-muted\">" + esc(em) + "</td></tr>";
       }
+    } finally {
+      clearTimeout(slowTo);
     }
   }
 
