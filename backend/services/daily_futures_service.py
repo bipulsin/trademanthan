@@ -3135,6 +3135,26 @@ def _apply_live_ltps_to_picks_and_running(
                 return float(v)
         return None
 
+    def _ltp_from_snapshot_row(sn: Optional[Dict[str, Any]]) -> Optional[float]:
+        """Prefer last_price; else OHLC close (snapshot sometimes has 0 last_price early session)."""
+        if not sn or not isinstance(sn, dict):
+            return None
+        lp = sn.get("last_price")
+        try:
+            if lp is not None and float(lp) > 0:
+                return float(lp)
+        except (TypeError, ValueError):
+            pass
+        ohlc = sn.get("ohlc") if isinstance(sn.get("ohlc"), dict) else {}
+        for k in ("close", "last_price"):
+            v = ohlc.get(k)
+            try:
+                if v is not None and float(v) > 0:
+                    return float(v)
+            except (TypeError, ValueError):
+                continue
+        return None
+
     ltp_map: Dict[str, float] = {}
     vwap_map: Dict[str, float] = {}
     try:
@@ -3149,12 +3169,9 @@ def _apply_live_ltps_to_picks_and_running(
                         break
             if not sn:
                 continue
-            lp = sn.get("last_price")
-            try:
-                if lp is not None and float(lp) > 0:
-                    ltp_map[req_key] = float(lp)
-            except (TypeError, ValueError):
-                pass
+            px = _ltp_from_snapshot_row(sn)
+            if px is not None:
+                ltp_map[req_key] = float(px)
             ap = sn.get("average_price")
             try:
                 if ap is not None and float(ap) > 0:
@@ -3170,8 +3187,8 @@ def _apply_live_ltps_to_picks_and_running(
             logger.warning("daily_futures: batch LTP failed: %s", e)
 
     # Keep workspace responsive when broker quote API is degraded.
-    # Batch is preferred; single-key fallback is capped.
-    single_fallback_budget = max(8, min(30, len(running) * 3))
+    # Scale fallback budget with symbol count so bearish-only rows are not starved when running=[].
+    single_fallback_budget = max(16, min(80, len(uniq_keys) + 16))
     single_fallback_used = 0
 
     def _resolve_ltp(ik: str) -> Tuple[Optional[float], Optional[Dict[str, Any]]]:
@@ -3212,6 +3229,32 @@ def _apply_live_ltps_to_picks_and_running(
                 sv2 = _session_vwap_for_conviction(q_fb)
                 if sv2 is not None and float(sv2) > 0:
                     r["session_vwap"] = round(float(sv2), 4)
+
+    # Second pass: Today's pick rows (bull + bear + low-conv extras) still missing LTP after batch + shared fallback.
+    pick_supplement_budget = max(0, min(32, len(picks) + 12))
+    pick_supplement_used = 0
+    for r in picks:
+        if pick_supplement_used >= pick_supplement_budget:
+            break
+        ik = (r.get("instrument_key") or "").strip()
+        if not ik:
+            continue
+        cur = _safe_float(r.get("ltp"))
+        if cur is not None and float(cur) > 0:
+            continue
+        pick_supplement_used += 1
+        try:
+            q = upstox.get_market_quote_by_key(ik)
+            if q and q.get("last_price"):
+                v = float(q["last_price"])
+                if v > 0:
+                    lp_r = round(v, 4)
+                    r["ltp"] = lp_r
+                    sid = r.get("screening_id")
+                    if sid is not None:
+                        by_screening[int(sid)] = lp_r
+        except Exception as ex:
+            logger.debug("daily_futures: pick LTP supplement failed for %s: %s", ik, ex)
 
     if not by_screening or not persist_screening:
         return
