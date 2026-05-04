@@ -3921,14 +3921,18 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
             if last_hit_dt is None or last_hit_dt <= sold_ts:
                 reasons.append("Re-entry unlocks after next scan post-exit")
         if not v2_mode:
-            if int(p.get("scan_count") or 0) < 2:
-                reasons.append("Needs at least 2 scans")
+            scn_ic = int(p.get("scan_count") or 0)
+            if scn_ic < 1:
+                reasons.append("Needs at least 1 scan")
+            # 5m cool-off after qualifying scan: prefer 2nd-scan anchor when present, else last/first hit (1-scan path).
             second_scan_dt = _parse_iso_ist(p.get("second_scan_time"))
-            if second_scan_dt is None:
-                reasons.append("Second scan time unavailable")
-            else:
-                if now_ist < (second_scan_dt + timedelta(minutes=5)):
-                    reasons.append("Wait 5 minutes after second scan")
+            last_hit_dt = _parse_iso_ist(p.get("last_hit_at"))
+            first_hit_dt = _parse_iso_ist(p.get("first_hit_at"))
+            anchor_dt = second_scan_dt or last_hit_dt or first_hit_dt
+            if anchor_dt is None:
+                reasons.append("Scan time unavailable")
+            elif now_ist < (anchor_dt + timedelta(minutes=5)):
+                reasons.append("Wait 5 minutes after qualifying scan")
             live_conv = p.get("effective_conviction")
             c2 = live_conv
             if c2 is None:
@@ -4180,7 +4184,8 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
             """
             SELECT id, underlying, direction_type, future_symbol, instrument_key, lot_size, scan_count,
                    conviction_score, second_scan_conviction_score, second_scan_time,
-                   effective_conviction, scan_candle_confirmation, pullback_status, pullback_target_price
+                   effective_conviction, scan_candle_confirmation, pullback_status, pullback_target_price,
+                   first_hit_at, last_hit_at
             FROM daily_futures_screening WHERE id = :sid AND trade_date = CAST(:d AS DATE)
             """
         ),
@@ -4189,14 +4194,14 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
     if not row:
         raise ValueError("Screening row not found for today")
     if not _df_v2_mode_enabled():
-        if int(row[6] or 0) < 2:
-            raise ValueError("Needs at least 2 consecutive scans before order")
-        second_scan_time = row[9]
-        if second_scan_time is None:
-            raise ValueError("Second scan time unavailable")
-        ss_dt = second_scan_time.astimezone(IST) if getattr(second_scan_time, "tzinfo", None) else IST.localize(second_scan_time)
+        if int(row[6] or 0) < 1:
+            raise ValueError("Needs at least 1 scan before order")
+        anchor_t = row[9] or row[15] or row[14]
+        if anchor_t is None:
+            raise ValueError("Scan time unavailable")
+        ss_dt = anchor_t.astimezone(IST) if getattr(anchor_t, "tzinfo", None) else IST.localize(anchor_t)
         if datetime.now(IST) < (ss_dt + timedelta(minutes=5)):
-            raise ValueError("Wait 5 minutes after second scan")
+            raise ValueError("Wait 5 minutes after qualifying scan")
     else:
         if datetime.now(IST).time() >= dt_time(14, 0):
             raise ValueError("After 14:00 IST — no new entries allowed")
