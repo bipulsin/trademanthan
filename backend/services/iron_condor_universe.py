@@ -1,13 +1,13 @@
 """
-Approved underlying universe for Iron Condor advisory (NIFTY 50 large-cap subset).
-Symbol → sector; validation uses uppercased symbol keys.
+Iron Condor advisory universe: authoritative data lives in Postgres (`iron_condor_universe_master`).
+This module only holds the static SEED used once to populate an empty table plus a thin `sector_for_symbol` shim.
 """
 from __future__ import annotations
 
 from typing import Dict, Optional
 
-# Hardcoded per product spec (symbol, sector).
-IRON_CONDOR_UNIVERSE: Dict[str, str] = {
+# Initial seed — inserted into `iron_condor_universe_master` when the table is empty (bootstrap only).
+IRON_CONDOR_UNIVERSE_SEED: Dict[str, str] = {
     "RELIANCE": "Energy",
     "TCS": "IT",
     "INFOSYS": "IT",
@@ -23,7 +23,12 @@ IRON_CONDOR_UNIVERSE: Dict[str, str] = {
     "BAJFINANCE": "Financial Services",
 }
 
+# Backward-compat alias — runtime source of truth is Postgres table `iron_condor_universe_master`.
+IRON_CONDOR_UNIVERSE = IRON_CONDOR_UNIVERSE_SEED
+
 
 def sector_for_symbol(symbol: str) -> Optional[str]:
-    key = (symbol or "").strip().upper()
-    return IRON_CONDOR_UNIVERSE.get(key)
+    """Sector from Postgres-backed universe master (lazy loads cache on first access)."""
+    from backend.services.iron_condor_service import ic_sector_for_symbol
+
+    return ic_sector_for_symbol(symbol)

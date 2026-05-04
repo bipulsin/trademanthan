@@ -127,19 +127,19 @@
    */
   function icUniverseFallbackRows() {
     return [
-      { symbol: "RELIANCE", sector: "Energy", instrument_key: "" },
-      { symbol: "TCS", sector: "IT", instrument_key: "" },
-      { symbol: "INFOSYS", sector: "IT", instrument_key: "" },
-      { symbol: "HDFCBANK", sector: "Banking", instrument_key: "" },
-      { symbol: "ICICIBANK", sector: "Banking", instrument_key: "" },
-      { symbol: "SBIN", sector: "Banking", instrument_key: "" },
-      { symbol: "BHARTIARTL", sector: "Telecom", instrument_key: "" },
-      { symbol: "KOTAKBANK", sector: "Banking", instrument_key: "" },
-      { symbol: "LT", sector: "Capital Goods", instrument_key: "" },
-      { symbol: "HINDUNILVR", sector: "FMCG", instrument_key: "" },
-      { symbol: "ITC", sector: "FMCG", instrument_key: "" },
-      { symbol: "AXISBANK", sector: "Banking", instrument_key: "" },
-      { symbol: "BAJFINANCE", sector: "Financial Services", instrument_key: "" },
+      { symbol: "RELIANCE", sector: "Energy", instrument_key: "", updated_at: "" },
+      { symbol: "TCS", sector: "IT", instrument_key: "", updated_at: "" },
+      { symbol: "INFOSYS", sector: "IT", instrument_key: "", updated_at: "" },
+      { symbol: "HDFCBANK", sector: "Banking", instrument_key: "", updated_at: "" },
+      { symbol: "ICICIBANK", sector: "Banking", instrument_key: "", updated_at: "" },
+      { symbol: "SBIN", sector: "Banking", instrument_key: "", updated_at: "" },
+      { symbol: "BHARTIARTL", sector: "Telecom", instrument_key: "", updated_at: "" },
+      { symbol: "KOTAKBANK", sector: "Banking", instrument_key: "", updated_at: "" },
+      { symbol: "LT", sector: "Capital Goods", instrument_key: "", updated_at: "" },
+      { symbol: "HINDUNILVR", sector: "FMCG", instrument_key: "", updated_at: "" },
+      { symbol: "ITC", sector: "FMCG", instrument_key: "", updated_at: "" },
+      { symbol: "AXISBANK", sector: "Banking", instrument_key: "", updated_at: "" },
+      { symbol: "BAJFINANCE", sector: "Financial Services", instrument_key: "", updated_at: "" },
     ];
   }
 
@@ -434,6 +434,7 @@
         symbol: sym,
         sector: String(r.sector || "").trim(),
         instrument_key: String(r.instrument_key || "").trim(),
+        updated_at: String(r.updated_at || "").trim(),
       });
     }
     return out;

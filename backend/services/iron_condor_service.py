@@ -19,7 +19,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.database import SessionLocal, engine
-from backend.services.iron_condor_universe import IRON_CONDOR_UNIVERSE, sector_for_symbol
+from backend.services.iron_condor_universe import IRON_CONDOR_UNIVERSE_SEED
 from backend.services.upstox_service import upstox_service as vwap_service
 from backend.services.iron_condor_snapshot_cache import (
     ensure_iron_condor_snapshot_tables,
@@ -42,9 +42,9 @@ _ic_equity_ik_cache: Dict[str, str] = {}
 _ic_tables_lock = threading.Lock()
 _iron_condor_tables_ready_flag = False
 
-# One-time-ish cache: symbol, sector, equity instrument_key (master for picker / static APIs).
-_ic_master_universe_lock = threading.Lock()
-_ic_master_universe_rows: Optional[List[Dict[str, Any]]] = None
+# Postgres-backed master — mirrored in memory (`iron_condor_universe_master` table).
+_ic_universe_master_lock = threading.Lock()
+_ic_universe_master_by_symbol: Dict[str, Dict[str, Any]] = {}
 
 
 def _sanitize_ic_quote_numbers(ltp_v: Any, pct_v: Any) -> Tuple[Optional[float], Optional[float]]:
@@ -97,27 +97,191 @@ def normalize_ic_universe_row_for_api(row: Dict[str, Any]) -> Dict[str, Any]:
     r["change_pct_day"] = cg
     iku = r.get("instrument_key")
     r["instrument_key"] = str(iku).strip() if iku else ""
+    ua = r.get("updated_at")
+    if ua is not None and hasattr(ua, "isoformat"):
+        try:
+            r["updated_at"] = ua.isoformat()
+        except Exception:
+            r["updated_at"] = str(ua)
+    elif "updated_at" in r and r["updated_at"] is not None:
+        r["updated_at"] = str(r["updated_at"])
     return r
 
 
+def _universe_master_row_for_api(internal: Dict[str, Any]) -> Dict[str, Any]:
+    ua = internal.get("updated_at")
+    iso = ""
+    if ua is not None and hasattr(ua, "isoformat"):
+        try:
+            iso = ua.isoformat()
+        except Exception:
+            iso = str(ua)
+    elif ua is not None:
+        iso = str(ua)
+    return {
+        "symbol": str(internal.get("symbol") or "").strip().upper(),
+        "sector": str(internal.get("sector") or "").strip(),
+        "instrument_key": str(internal.get("instrument_key") or "").strip(),
+        "updated_at": iso,
+    }
+
+
+def refresh_ic_universe_master_memory(db: Session) -> None:
+    """Load Postgres master into module cache (caller holds db session)."""
+    global _ic_universe_master_by_symbol
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT symbol, sector, instrument_key, updated_at
+                FROM iron_condor_universe_master
+                ORDER BY symbol
+                """
+            )
+        ).mappings().all()
+    except Exception:
+        rows = []
+    neu: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        sym_u = str(row["symbol"]).strip().upper()
+        neu[sym_u] = {
+            "symbol": sym_u,
+            "sector": str(row["sector"] or "").strip(),
+            "instrument_key": str(row["instrument_key"] or "").strip(),
+            "updated_at": row["updated_at"],
+        }
+    with _ic_universe_master_lock:
+        _ic_universe_master_by_symbol.clear()
+        _ic_universe_master_by_symbol.update(neu)
+
+
+def iron_condor_universe_master_bootstrap_seed_if_empty(db: Session) -> int:
+    """Insert seed rows once when master table is empty. Returns rows inserted."""
+    n = db.execute(text("SELECT COUNT(*) FROM iron_condor_universe_master")).scalar()
+    if int(n or 0) > 0:
+        return 0
+    ins = text(
+        """
+        INSERT INTO iron_condor_universe_master (symbol, sector, instrument_key, updated_at)
+        VALUES (:sym, :sector, '', CURRENT_TIMESTAMP)
+        """
+    )
+    count = 0
+    for sym_u, sector in sorted(IRON_CONDOR_UNIVERSE_SEED.items()):
+        db.execute(
+            ins,
+            {"sym": str(sym_u).strip().upper(), "sector": str(sector).strip()},
+        )
+        count += 1
+    db.commit()
+    logger.info("iron_condor_universe_master: seeded %d symbols (one-time bootstrap).", count)
+    return count
+
+
+def iron_condor_universe_master_sync_instrument_keys(db: Session, *, force_all: bool = False) -> int:
+    """
+    Populate / refresh equity instrument_key from Upstox resolver into the master table.
+    """
+    if force_all:
+        sym_rows = db.execute(
+            text("SELECT symbol FROM iron_condor_universe_master ORDER BY symbol")
+        ).fetchall()
+    else:
+        sym_rows = db.execute(
+            text(
+                """
+                SELECT symbol FROM iron_condor_universe_master
+                WHERE TRIM(COALESCE(instrument_key,'')) = ''
+                ORDER BY symbol
+                """
+            )
+        ).fetchall()
+    upd = text(
+        """
+        UPDATE iron_condor_universe_master
+        SET instrument_key = :ik, updated_at = CURRENT_TIMESTAMP
+        WHERE symbol = :sym
+        """
+    )
+    touched = 0
+    for (sym_raw,) in sym_rows:
+        sym_clean = str(sym_raw or "").strip().upper()
+        if not sym_clean:
+            continue
+        api = option_chain_underlying(sym_clean)
+        ik = (_instrument_key_for_ic_equity(api) or "").strip()
+        db.execute(upd, {"ik": ik, "sym": sym_clean})
+        touched += 1
+    if touched:
+        db.commit()
+    refresh_ic_universe_master_memory(db)
+    return touched
+
+
+def ensure_iron_condor_universe_master_ready(db: Session) -> None:
+    """Bootstrap seed, fill missing keys, reload memory."""
+    iron_condor_universe_master_bootstrap_seed_if_empty(db)
+    iron_condor_universe_master_sync_instrument_keys(db, force_all=False)
+    refresh_ic_universe_master_memory(db)
+
+
+def _ensure_ic_universe_master_memory_loaded() -> None:
+    if SessionLocal is None:
+        return
+    with _ic_universe_master_lock:
+        if _ic_universe_master_by_symbol:
+            return
+    db = SessionLocal()
+    try:
+        ensure_iron_condor_tables()
+        ensure_iron_condor_universe_master_ready(db)
+    except Exception as ex:
+        logger.warning("Iron Condor universe master load failed: %s", ex)
+    finally:
+        db.close()
+
+
+def ic_sector_for_symbol(symbol: str) -> Optional[str]:
+    k = (symbol or "").strip().upper()
+    if not k:
+        return None
+    _ensure_ic_universe_master_memory_loaded()
+    with _ic_universe_master_lock:
+        row = _ic_universe_master_by_symbol.get(k)
+    if not row:
+        return None
+    return row.get("sector") or None
+
+
+def ic_universe_ordered_pairs() -> List[Tuple[str, str, str, Any]]:
+    """Sorted (symbol, sector, instrument_key, updated_at) from master cache."""
+    _ensure_ic_universe_master_memory_loaded()
+    with _ic_universe_master_lock:
+        items = [_ic_universe_master_by_symbol[s] for s in sorted(_ic_universe_master_by_symbol.keys())]
+    out: List[Tuple[str, str, str, Any]] = []
+    for it in items:
+        out.append(
+            (
+                str(it["symbol"]).strip().upper(),
+                str(it.get("sector") or "").strip(),
+                str(it.get("instrument_key") or "").strip(),
+                it.get("updated_at"),
+            )
+        )
+    return out
+
+
+def ic_universe_symbol_list_ordered() -> List[str]:
+    _ensure_ic_universe_master_memory_loaded()
+    with _ic_universe_master_lock:
+        return sorted(_ic_universe_master_by_symbol.keys())
+
+
 def get_iron_condor_universe_master_rows() -> List[Dict[str, Any]]:
-    """
-    Symbol, sector, equity instrument_key for the approved universe — used only by /universe and
-    /approved-underlyings (lazy first call per worker). Hot paths resolve one key via
-    `_instrument_key_for_ic_equity` instead of building this list.
-    """
-    global _ic_master_universe_rows
-    if _ic_master_universe_rows is not None:
-        return [{**r} for r in _ic_master_universe_rows]
-    with _ic_master_universe_lock:
-        if _ic_master_universe_rows is None:
-            rows: List[Dict[str, Any]] = []
-            for sym_u, sector in sorted(IRON_CONDOR_UNIVERSE.items()):
-                api = option_chain_underlying(str(sym_u))
-                ik = _instrument_key_for_ic_equity(api) or ""
-                rows.append({"symbol": str(sym_u), "sector": str(sector), "instrument_key": ik})
-            _ic_master_universe_rows = rows
-        return [{**r} for r in _ic_master_universe_rows]
+    """API list: symbol, sector, instrument_key, updated_at."""
+    _ensure_ic_universe_master_memory_loaded()
+    with _ic_universe_master_lock:
+        return [_universe_master_row_for_api(_ic_universe_master_by_symbol[k]) for k in sorted(_ic_universe_master_by_symbol.keys())]
 
 
 def _ic_prev_day_close_from_ohlc(nested: Any) -> float:
@@ -173,16 +337,13 @@ def build_universe_picker_rows_with_quotes_cached() -> Tuple[List[Dict[str, Any]
     if _ic_uq_cache_rows and now < _ic_uq_cache_deadline:
         return ([copy.deepcopy(r) for r in _ic_uq_cache_rows], None)
 
-    pairs: List[Tuple[str, str, str]] = []
-    for sym_u, sector in sorted(IRON_CONDOR_UNIVERSE.items()):
-        api = option_chain_underlying(str(sym_u))
-        ik_u = _instrument_key_for_ic_equity(api) or ""
-        pairs.append((str(sym_u), str(sector), ik_u))
+    pairs_meta: List[Tuple[str, str, str, Any]] = ic_universe_ordered_pairs()
+    pairs_keys: List[Tuple[str, str, str]] = [(a, b, c) for a, b, c, _ in pairs_meta]
 
     tok = (getattr(vwap_service, "access_token", None) or "").strip()
     quotes_error: Optional[str] = None
     batch: Dict[str, Dict[str, Any]] = {}
-    keys = [ik for _, _, ik in pairs if ik]
+    keys = [ik for _, _, ik in pairs_keys if ik]
 
     if not tok:
         quotes_error = (
@@ -206,7 +367,7 @@ def build_universe_picker_rows_with_quotes_cached() -> Tuple[List[Dict[str, Any]
             quotes_error = "Upstox quotes request failed — check broker connection and token."
 
     rows: List[Dict[str, Any]] = []
-    for sym, sec, ik in pairs:
+    for sym, sec, ik, uat in pairs_meta:
         ltp_f: Optional[float] = None
         chg: Optional[float] = None
         qd = _batch_lookup(batch, ik) if ik else None
@@ -228,6 +389,7 @@ def build_universe_picker_rows_with_quotes_cached() -> Tuple[List[Dict[str, Any]
                     "instrument_key": ik or "",
                     "ltp": ltp_f,
                     "change_pct_day": chg,
+                    "updated_at": uat,
                 }
             )
         )
@@ -302,7 +464,7 @@ def universe_picker_snapshot_row_only(db: Session, user_id: int, symbol: str) ->
     """
     ensure_iron_condor_snapshot_tables()
     sym = (symbol or "").strip().upper()
-    sec = sector_for_symbol(sym)
+    sec = ic_sector_for_symbol(sym)
     if not sec:
         return {}, "Symbol is not in the Iron Condor universe."
 
@@ -331,7 +493,10 @@ def universe_picker_snapshot_row_only(db: Session, user_id: int, symbol: str) ->
             "No snapshot close for today yet — run refresh daily cache or wait for the pre-market job."
         )
 
-    ik_snap = _instrument_key_for_ic_equity(option_chain_underlying(sym)) or ""
+    _ensure_ic_universe_master_memory_loaded()
+    with _ic_universe_master_lock:
+        um = _ic_universe_master_by_symbol.get(sym)
+    ik_snap = (um.get("instrument_key") if um else "") or (_instrument_key_for_ic_equity(option_chain_underlying(sym)) or "")
 
     return (
         normalize_ic_picker_row_for_api(
@@ -364,16 +529,20 @@ def warm_iron_condor_startup() -> None:
     except Exception as e:
         logger.warning("Iron Condor warm: ISIN/instruments preload skipped: %s", e)
 
-    try:
-        for sym_u in sorted(IRON_CONDOR_UNIVERSE.keys()):
-            api = option_chain_underlying(str(sym_u))
-            _instrument_key_for_ic_equity(api)
-    except Exception as e:
-        logger.warning("Iron Condor warm: equity IK preload skipped: %s", e)
+    if SessionLocal is not None:
+        dbw = SessionLocal()
+        try:
+            ensure_iron_condor_universe_master_ready(dbw)
+        except Exception as e:
+            logger.warning("Iron Condor warm: universe master sync skipped: %s", e)
+        finally:
+            dbw.close()
 
 
-def _ic_trusted_equity_key_from_client(sym: str, client_ik_raw: Optional[str]) -> str:
-    """If UI passes instrument_key from universe master, validate shape and skip disk resolver when possible."""
+def _ic_trusted_equity_key_from_client(
+    sym: str, client_ik_raw: Optional[str], *, master_instrument_key: str = ""
+) -> str:
+    """Accept client instrument_key only if symbol is in universe and key matches Postgres master when set."""
     if not client_ik_raw:
         return ""
     ck = str(client_ik_raw).strip().replace(" ", "")
@@ -385,15 +554,18 @@ def _ic_trusted_equity_key_from_client(sym: str, client_ik_raw: Optional[str]) -
     rest = rest.strip()
     if len(rest) < 12 or not rest.upper().startswith("INE"):
         return ""
-    if not sector_for_symbol(sym):
+    if not ic_sector_for_symbol(sym):
         return ""
+    mk = _normalize_ik_key(str(master_instrument_key or ""))
+    if mk:
+        return ck if _normalize_ik_key(ck) == mk else ""
     return ck
 
 
 def universe_picker_row_timeout_fallback(symbol: str) -> Dict[str, Any]:
     """No I/O — used when the bounded worker wall clock is exceeded (avoid hanging the client)."""
     sym = (symbol or "").strip().upper()
-    sec = sector_for_symbol(sym) or ""
+    sec = ic_sector_for_symbol(sym) or ""
     return normalize_ic_picker_row_for_api(
         {
             "symbol": sym,
@@ -416,9 +588,13 @@ def universe_picker_row_for_symbol(
     """
     t0 = time.perf_counter()
     sym = (symbol or "").strip().upper()
-    sec = sector_for_symbol(sym)
+    sec = ic_sector_for_symbol(sym)
     if not sec:
         return {}, "Symbol is not in the Iron Condor universe."
+
+    with _ic_universe_master_lock:
+        um = _ic_universe_master_by_symbol.get(sym)
+    master_ik = (um.get("instrument_key") if um else "") or ""
 
     t1 = time.perf_counter()
     active = False
@@ -430,7 +606,11 @@ def universe_picker_row_for_symbol(
             dbq.close()
     t2 = time.perf_counter()
     api = option_chain_underlying(sym)
-    ik = _ic_trusted_equity_key_from_client(sym, client_instrument_key) or (_instrument_key_for_ic_equity(api) or "")
+    ik = (
+        _ic_trusted_equity_key_from_client(sym, client_instrument_key, master_instrument_key=master_ik)
+        or master_ik
+        or (_instrument_key_for_ic_equity(api) or "")
+    )
     t3 = time.perf_counter()
 
     tok = (getattr(vwap_service, "access_token", None) or "").strip()
@@ -579,6 +759,13 @@ def ensure_iron_condor_tables() -> None:
         acknowledged BOOLEAN NOT NULL DEFAULT FALSE
     );
     CREATE INDEX IF NOT EXISTS idx_ic_alert_user_created ON iron_condor_alert(user_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS iron_condor_universe_master (
+        symbol VARCHAR(32) PRIMARY KEY,
+        sector VARCHAR(128) NOT NULL,
+        instrument_key VARCHAR(160) NOT NULL DEFAULT '',
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_ic_universe_sector ON iron_condor_universe_master(sector);
     """
         with engine.begin() as conn:
             for stmt in ddl.split(";"):
@@ -944,7 +1131,7 @@ def _open_sectors(db: Session, user_id: int) -> List[str]:
 def analyze_iron_condor(symbol: str, db: Session, user_id: int) -> Dict[str, Any]:
     ensure_iron_condor_tables()
     und = (symbol or "").strip().upper()
-    sec = sector_for_symbol(und)
+    sec = ic_sector_for_symbol(und)
     if not sec:
         raise ValueError(f"Symbol {und} is not in the approved Iron Condor universe.")
 

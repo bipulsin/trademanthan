@@ -16,7 +16,6 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.database import engine
-from backend.services.iron_condor_universe import IRON_CONDOR_UNIVERSE
 from backend.services.upstox_service import UpstoxService
 from backend.config import settings
 from backend.services.market_holiday import IST
@@ -256,7 +255,10 @@ def run_iron_condor_daily_snapshot_job(*, symbols: Optional[Sequence[str]] = Non
     """
     ensure_iron_condor_snapshot_tables()
     td = _ist_today()
-    syms = [s.strip().upper() for s in (symbols or list(IRON_CONDOR_UNIVERSE.keys())) if s.strip()]
+    from backend.services.iron_condor_service import ic_universe_symbol_list_ordered
+
+    sym_default = ic_universe_symbol_list_ordered()
+    syms = [s.strip().upper() for s in (symbols or sym_default) if s.strip()]
     if not syms:
         return {"ok": False, "error": "no symbols"}
 

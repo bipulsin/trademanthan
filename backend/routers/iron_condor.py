@@ -168,6 +168,20 @@ def verify_positions_held(db: Session = Depends(get_db), user: User = Depends(_a
     return {"success": True}
 
 
+@router.post("/universe-master/refresh")
+def iron_condor_universe_master_refresh(
+    db: Session = Depends(get_db),
+    _user: User = Depends(_auth),
+) -> Dict[str, Any]:
+    """
+    Re-resolve every row's Upstox equity instrument_key into iron_condor_universe_master and reload cache.
+    Admin / power-user — same resolver as bootstrap; use after instruments file or symbol list changes.
+    """
+    ic.ensure_iron_condor_tables()
+    n = ic.iron_condor_universe_master_sync_instrument_keys(db, force_all=True)
+    return {"success": True, "rows_updated": n, "symbols": ic.get_iron_condor_universe_master_rows()}
+
+
 @router.get("/approved-underlyings")
 def iron_condor_approved_underlyings() -> Dict[str, Any]:
     """
