@@ -181,7 +181,21 @@ def iron_condor_universe_master_refresh(
     """
     ic.ensure_iron_condor_tables()
     n = ic.iron_condor_universe_master_sync_instrument_keys(db, force_all=True)
-    return {"success": True, "rows_updated": n, "symbols": ic.get_iron_condor_universe_master_rows()}
+    pc: Dict[str, Any] = {}
+    try:
+        from backend.services.upstox_service import upstox_service
+
+        pc = ic.iron_condor_universe_master_update_previous_day_closes_from_upstox(
+            db, upstox_service, only_if_null_previous_close=False
+        )
+    except Exception as ex:
+        pc = {"ok": False, "rows_updated": 0, "errors": [str(ex)]}
+    return {
+        "success": True,
+        "rows_updated": n,
+        "previous_close_refresh": pc,
+        "symbols": ic.get_iron_condor_universe_master_rows(),
+    }
 
 
 @router.get("/approved-underlyings")

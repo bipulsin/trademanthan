@@ -118,10 +118,30 @@ def _universe_master_row_for_api(internal: Dict[str, Any]) -> Dict[str, Any]:
             iso = str(ua)
     elif ua is not None:
         iso = str(ua)
+    pdc = internal.get("previous_day_close")
+    pdc_o: Optional[float] = None
+    if pdc is not None:
+        try:
+            x = float(pdc)
+            pdc_o = round(x, 4) if math.isfinite(x) and x > 0 else None
+        except (TypeError, ValueError):
+            pdc_o = None
+    pca = internal.get("previous_close_as_of")
+    pca_s = ""
+    if pca is not None:
+        if hasattr(pca, "isoformat"):
+            try:
+                pca_s = pca.isoformat()
+            except Exception:
+                pca_s = str(pca)
+        else:
+            pca_s = str(pca)
     return {
         "symbol": str(internal.get("symbol") or "").strip().upper(),
         "sector": str(internal.get("sector") or "").strip(),
         "instrument_key": str(internal.get("instrument_key") or "").strip(),
+        "previous_day_close": pdc_o,
+        "previous_close_as_of": pca_s,
         "updated_at": iso,
     }
 
@@ -133,7 +153,8 @@ def refresh_ic_universe_master_memory(db: Session) -> None:
         rows = db.execute(
             text(
                 """
-                SELECT symbol, sector, instrument_key, updated_at
+                SELECT symbol, sector, instrument_key,
+                       previous_day_close, previous_close_as_of, updated_at
                 FROM iron_condor_universe_master
                 ORDER BY symbol
                 """
@@ -148,6 +169,8 @@ def refresh_ic_universe_master_memory(db: Session) -> None:
             "symbol": sym_u,
             "sector": str(row["sector"] or "").strip(),
             "instrument_key": str(row["instrument_key"] or "").strip(),
+            "previous_day_close": row.get("previous_day_close"),
+            "previous_close_as_of": row.get("previous_close_as_of"),
             "updated_at": row["updated_at"],
         }
     with _ic_universe_master_lock:
@@ -218,6 +241,117 @@ def iron_condor_universe_master_sync_instrument_keys(db: Session, *, force_all: 
     return touched
 
 
+def _prior_nse_calendar_trade_date(ist_calendar_date: date) -> date:
+    """Latest NSE equity session date strictly before ist_calendar_date (weekends + holiday table)."""
+    from datetime import timedelta
+    from backend.services import market_holiday as mh_h
+
+    d = ist_calendar_date - timedelta(days=1)
+    for _ in range(25):
+        if d.weekday() < 5:
+            noon = IST.localize(datetime(d.year, d.month, d.day, 12, 0, 0))
+            if not mh_h.is_nse_holiday_ist(noon):
+                return d
+        d -= timedelta(days=1)
+    return ist_calendar_date - timedelta(days=1)
+
+
+def _previous_session_close_px_from_quote_sn(sn: Optional[Dict[str, Any]]) -> Optional[float]:
+    """Prior session settle from quote/OHLC (same preference order as Δ-day denominator)."""
+    if not isinstance(sn, dict):
+        return None
+    ohlc = sn.get("ohlc") if isinstance(sn.get("ohlc"), dict) else {}
+    for blob in (ohlc, sn):
+        px = _ic_prev_day_close_from_ohlc(blob)
+        if px and px > 0:
+            return float(px)
+    return None
+
+
+def iron_condor_universe_master_update_previous_day_closes_from_upstox(
+    db: Session,
+    svc: Any,
+    *,
+    only_if_null_previous_close: bool = False,
+    commit: bool = True,
+) -> Dict[str, Any]:
+    """
+    Populate previous_day_close + previous_close_as_of via GET /v2/market-quote (batch snapshots).
+    Runs daily after 08:33 snapshot; use only_if_null_previous_close for lazy backfill.
+    """
+    out: Dict[str, Any] = {"ok": True, "rows_updated": 0, "prior_session_date": None, "errors": []}
+    tok = (getattr(svc, "access_token", None) or "").strip()
+    if not tok:
+        out["ok"] = False
+        out["errors"].append("Upstox not connected")
+        return out
+
+    asof_dt = mh_ic._normalize_ist(None).date()
+    prior_d = _prior_nse_calendar_trade_date(asof_dt)
+    out["prior_session_date"] = str(prior_d)
+
+    q_sql = """
+        SELECT symbol, instrument_key FROM iron_condor_universe_master
+        WHERE TRIM(COALESCE(instrument_key, '')) <> ''
+    """
+    if only_if_null_previous_close:
+        q_sql += " AND previous_day_close IS NULL"
+    q_sql += " ORDER BY symbol"
+    maps = []
+    try:
+        maps = db.execute(text(q_sql)).mappings().all()
+    except Exception as ex:
+        out["ok"] = False
+        out["errors"].append(str(ex))
+        return out
+    if not maps:
+        return out
+
+    keys = [str(r["instrument_key"]).strip() for r in maps if str(r.get("instrument_key") or "").strip()]
+    keys = list(dict.fromkeys(keys))
+    snaps: Dict[str, Dict[str, Any]] = {}
+    try:
+        snaps = svc.get_market_quote_snapshots_batch(
+            keys, max_per_request=100, request_timeout=18, max_retries=2
+        )
+    except Exception as ex:
+        logger.warning("IC universe_master previous_close: batch failed %s", ex)
+        snaps = {}
+
+    upd = text(
+        """
+        UPDATE iron_condor_universe_master
+        SET previous_day_close = :px,
+            previous_close_as_of = CAST(:asof AS DATE),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE symbol = :sym
+        """
+    )
+    touched = 0
+    for r in maps:
+        sym_clean = str(r["symbol"]).strip().upper()
+        ik = str(r["instrument_key"] or "").strip()
+        if not sym_clean or not ik:
+            continue
+        sn = svc.snapshot_for_requested_key(snaps, ik) if snaps else None
+        if sn is None and isinstance(snaps, dict) and snaps:
+            sn = _batch_lookup(snaps, ik)
+        px = _previous_session_close_px_from_quote_sn(sn)
+        if px is None or px <= 0:
+            continue
+        try:
+            db.execute(upd, {"px": px, "asof": str(prior_d), "sym": sym_clean})
+            touched += 1
+        except Exception as ex:
+            out["errors"].append(f"{sym_clean}: {ex}")
+    if touched:
+        if commit:
+            db.commit()
+        refresh_ic_universe_master_memory(db)
+    out["rows_updated"] = touched
+    return out
+
+
 def ensure_iron_condor_universe_master_ready(db: Session) -> None:
     """Bootstrap seed, fill missing keys, reload memory."""
     iron_condor_universe_master_bootstrap_seed_if_empty(db)
@@ -281,7 +415,7 @@ def ic_universe_symbol_list_ordered() -> List[str]:
 
 
 def get_iron_condor_universe_master_rows() -> List[Dict[str, Any]]:
-    """API list: symbol, sector, instrument_key, updated_at."""
+    """API list: symbol, sector, instrument_key, previous_day_close, previous_close_as_of, updated_at."""
     _ensure_ic_universe_master_memory_loaded()
     with _ic_universe_master_lock:
         return [_universe_master_row_for_api(_ic_universe_master_by_symbol[k]) for k in sorted(_ic_universe_master_by_symbol.keys())]
@@ -584,6 +718,16 @@ def warm_iron_condor_startup() -> None:
         dbw = SessionLocal()
         try:
             ensure_iron_condor_universe_master_ready(dbw)
+            try:
+                from backend.services.upstox_service import upstox_service as _ux
+
+                tok = (getattr(_ux, "access_token", None) or "").strip()
+                if tok:
+                    iron_condor_universe_master_update_previous_day_closes_from_upstox(
+                        dbw, _ux, only_if_null_previous_close=True
+                    )
+            except Exception as e2:
+                logger.warning("Iron Condor warm: universe previous_close backfill skipped: %s", e2)
         except Exception as e:
             logger.warning("Iron Condor warm: universe master sync skipped: %s", e)
         finally:
@@ -862,6 +1006,8 @@ def ensure_iron_condor_tables() -> None:
         symbol VARCHAR(32) PRIMARY KEY,
         sector VARCHAR(128) NOT NULL,
         instrument_key VARCHAR(160) NOT NULL DEFAULT '',
+        previous_day_close NUMERIC(18,4),
+        previous_close_as_of DATE,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE INDEX IF NOT EXISTS idx_ic_universe_sector ON iron_condor_universe_master(sector);
@@ -871,6 +1017,21 @@ def ensure_iron_condor_tables() -> None:
                 s = stmt.strip()
                 if s:
                     conn.execute(text(s))
+            try:
+                conn.execute(
+                    text(
+                        "ALTER TABLE iron_condor_universe_master "
+                        "ADD COLUMN IF NOT EXISTS previous_day_close NUMERIC(18,4)"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE iron_condor_universe_master "
+                        "ADD COLUMN IF NOT EXISTS previous_close_as_of DATE"
+                    )
+                )
+            except Exception as e:
+                logger.warning("iron_condor_universe_master column migration: %s", e)
         try:
             from backend.services.iron_condor_extended import iron_condor_migrations_v2
 

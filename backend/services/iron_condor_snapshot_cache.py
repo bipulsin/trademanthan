@@ -317,6 +317,14 @@ def run_iron_condor_daily_snapshot_job(*, symbols: Optional[Sequence[str]] = Non
                 "monthly_atr_14": atr,
                 "daily_closes_n": len(closes),
             }
+        try:
+            from backend.services.iron_condor_service import iron_condor_universe_master_update_previous_day_closes_from_upstox
+
+            results["universe_master_previous_close"] = iron_condor_universe_master_update_previous_day_closes_from_upstox(
+                db, svc, only_if_null_previous_close=False, commit=False
+            )
+        except Exception as e:
+            logger.warning("iron_condor snapshot: universe previous_close refresh failed: %s", e)
         db.commit()
     except Exception as e:
         db.rollback()

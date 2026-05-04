@@ -127,19 +127,19 @@
    */
   function icUniverseFallbackRows() {
     return [
-      { symbol: "RELIANCE", sector: "Energy", instrument_key: "", updated_at: "" },
-      { symbol: "TCS", sector: "IT", instrument_key: "", updated_at: "" },
-      { symbol: "INFOSYS", sector: "IT", instrument_key: "", updated_at: "" },
-      { symbol: "HDFCBANK", sector: "Banking", instrument_key: "", updated_at: "" },
-      { symbol: "ICICIBANK", sector: "Banking", instrument_key: "", updated_at: "" },
-      { symbol: "SBIN", sector: "Banking", instrument_key: "", updated_at: "" },
-      { symbol: "BHARTIARTL", sector: "Telecom", instrument_key: "", updated_at: "" },
-      { symbol: "KOTAKBANK", sector: "Banking", instrument_key: "", updated_at: "" },
-      { symbol: "LT", sector: "Capital Goods", instrument_key: "", updated_at: "" },
-      { symbol: "HINDUNILVR", sector: "FMCG", instrument_key: "", updated_at: "" },
-      { symbol: "ITC", sector: "FMCG", instrument_key: "", updated_at: "" },
-      { symbol: "AXISBANK", sector: "Banking", instrument_key: "", updated_at: "" },
-      { symbol: "BAJFINANCE", sector: "Financial Services", instrument_key: "", updated_at: "" },
+      { symbol: "RELIANCE", sector: "Energy", instrument_key: "", updated_at: "", previous_day_close: null, previous_close_as_of: "" },
+      { symbol: "TCS", sector: "IT", instrument_key: "", updated_at: "", previous_day_close: null, previous_close_as_of: "" },
+      { symbol: "INFOSYS", sector: "IT", instrument_key: "", updated_at: "", previous_day_close: null, previous_close_as_of: "" },
+      { symbol: "HDFCBANK", sector: "Banking", instrument_key: "", updated_at: "", previous_day_close: null, previous_close_as_of: "" },
+      { symbol: "ICICIBANK", sector: "Banking", instrument_key: "", updated_at: "", previous_day_close: null, previous_close_as_of: "" },
+      { symbol: "SBIN", sector: "Banking", instrument_key: "", updated_at: "", previous_day_close: null, previous_close_as_of: "" },
+      { symbol: "BHARTIARTL", sector: "Telecom", instrument_key: "", updated_at: "", previous_day_close: null, previous_close_as_of: "" },
+      { symbol: "KOTAKBANK", sector: "Banking", instrument_key: "", updated_at: "", previous_day_close: null, previous_close_as_of: "" },
+      { symbol: "LT", sector: "Capital Goods", instrument_key: "", updated_at: "", previous_day_close: null, previous_close_as_of: "" },
+      { symbol: "HINDUNILVR", sector: "FMCG", instrument_key: "", updated_at: "", previous_day_close: null, previous_close_as_of: "" },
+      { symbol: "ITC", sector: "FMCG", instrument_key: "", updated_at: "", previous_day_close: null, previous_close_as_of: "" },
+      { symbol: "AXISBANK", sector: "Banking", instrument_key: "", updated_at: "", previous_day_close: null, previous_close_as_of: "" },
+      { symbol: "BAJFINANCE", sector: "Financial Services", instrument_key: "", updated_at: "", previous_day_close: null, previous_close_as_of: "" },
     ];
   }
 
@@ -430,11 +430,15 @@
       if (!r || typeof r !== "object") continue;
       var sym = String(r.symbol || "").trim().toUpperCase();
       if (!sym) continue;
+      var _pdc = r.previous_day_close;
+      var pdc_ok = typeof _pdc === "number" && isFinite(_pdc) ? _pdc : _pdc != null && String(_pdc).trim() !== "" ? parseFloat(String(_pdc).trim()) : null;
       out.push({
         symbol: sym,
         sector: String(r.sector || "").trim(),
         instrument_key: String(r.instrument_key || "").trim(),
         updated_at: String(r.updated_at || "").trim(),
+        previous_day_close: typeof pdc_ok === "number" && isFinite(pdc_ok) && pdc_ok > 0 ? pdc_ok : null,
+        previous_close_as_of: String(r.previous_close_as_of || "").trim(),
       });
     }
     return out;
