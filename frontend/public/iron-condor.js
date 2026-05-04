@@ -378,7 +378,7 @@
     var tb = document.getElementById("pickerBody");
     if (!tb) return;
     tb.innerHTML =
-      "<tr><td colspan=\"7\" class=\"ic-muted\">" + esc(msg || "Loading…") + "</td></tr>";
+      "<tr><td colspan=\"8\" class=\"ic-muted\">" + esc(msg || "Loading…") + "</td></tr>";
   }
 
   function parseNumOrNull(v) {
@@ -453,6 +453,43 @@
     return row.active_position === true || row.active_position === false;
   }
 
+  /** Δ month = (LTP − curr_month_open) / curr_month_open × 100. Uses absolute magnitude for banding (both directions risky). */
+  function deltaMonthPctFromRow(row) {
+    var mo = parseNumOrNull(row.curr_month_open);
+    var lp = parseNumOrNull(row.ltp);
+    if (mo == null || mo <= 0 || lp == null || lp <= 0) return null;
+    var pct = ((lp - mo) / mo) * 100;
+    return isFinite(pct) ? pct : null;
+  }
+
+  function deltaMonthChipHtml(row) {
+    var pct = deltaMonthPctFromRow(row);
+    if (pct == null) return "<span class=\"ic-muted\">—</span>";
+    var ap = Math.abs(pct);
+    var txt = (pct >= 0 ? "+" : "") + pct.toFixed(2) + "%";
+    var base = "ic-chip-delta-month ic-num ic-mono";
+    var tier = "";
+    var blink = "";
+    if (ap < 7) {
+      tier = " ic-dm-white";
+    } else if (ap <= 10) {
+      if (ap <= 8) tier = " ic-dm-yellow";
+      else tier = " ic-dm-red";
+    } else {
+      tier = " ic-dm-red";
+      blink = " ic-dm-blink";
+    }
+    return (
+      '<span class="' +
+      base +
+      tier +
+      blink +
+      "\" title=\"(LTP − curr month open) / curr month open\">" +
+      esc(txt) +
+      "</span>"
+    );
+  }
+
   function renderUniverseStep1Row(row) {
     var sym = String(row.symbol || "").trim().toUpperCase();
     var apKnown = universeActiveKnown(row);
@@ -490,6 +527,9 @@
       "</td>" +
       "<td class=\"ic-col-delta ic-num\">" +
       fmtPctCell(row.change_pct_day) +
+      "</td>" +
+      "<td class=\"ic-col-deltam ic-num\">" +
+      deltaMonthChipHtml(row) +
       "</td>" +
       "<td class=\"ic-col-active\">" +
       act +
@@ -531,14 +571,14 @@
     if (!tb) return;
     var src = Array.isArray(rows) ? rows : [];
     if (!src.length) {
-      tb.innerHTML = "<tr><td colspan=\"7\" class=\"ic-muted\">No universe rows configured.</td></tr>";
+      tb.innerHTML = "<tr><td colspan=\"8\" class=\"ic-muted\">No universe rows configured.</td></tr>";
       setUniverseNextFromRadio();
       return;
     }
     var vis = filterUniverseRowsForStep1EarningsWindow(src);
     if (!vis.length) {
       tb.innerHTML =
-        "<tr><td colspan=\"7\" class=\"ic-muted\">No symbols to show — next earnings falls between the previous and current monthly F&amp;O expiries for every underlying (see master sheet).</td></tr>";
+        "<tr><td colspan=\"8\" class=\"ic-muted\">No symbols to show — next earnings falls between the previous and current monthly F&amp;O expiries for every underlying (see master sheet).</td></tr>";
       wireUniverseStep1Radios();
       setUniverseNextFromRadio();
       return;
@@ -587,7 +627,7 @@
     pickerShowQuoteBanner("");
     state.symbol = "";
     if (tb) {
-      tb.innerHTML = "<tr><td colspan=\"7\" class=\"ic-muted\">Loading approved list…</td></tr>";
+      tb.innerHTML = "<tr><td colspan=\"8\" class=\"ic-muted\">Loading approved list…</td></tr>";
     }
 
     fj(["/api/iron-condor/approved-underlyings"], { cache: "no-store" })
