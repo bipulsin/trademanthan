@@ -352,12 +352,21 @@
   }
 
   async function loadSessionLine() {
-    try {
-      var s = await fj(icApiPaths("session"), { headers: authHeaders(), cache: "no-store" });
-      renderSessionTop(s);
-    } catch (_) {
-      document.getElementById("sessionLine").textContent = "Session unavailable";
+    var el = document.getElementById("sessionLine");
+    if (!el) return;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        if (attempt > 0) {
+          await new Promise(function (resolve) {
+            setTimeout(resolve, 350 + attempt * 200);
+          });
+        }
+        var s = await fj(icApiPaths("session"), { headers: authHeaders(), cache: "no-store" });
+        renderSessionTop(s);
+        return;
+      } catch (_e) {}
     }
+    el.textContent = "Session line unavailable — refresh or sign in again.";
   }
 
   function setPickerTablePlaceholder() {
@@ -526,32 +535,12 @@
     document.getElementById("gotoChecklistBtn").disabled = true;
     state.symbol = "";
     state.pickerSymbols = [];
-    var quoteAbortTimer = null;
     try {
-      var abortCtl = typeof AbortController !== "undefined" ? new AbortController() : null;
-      if (abortCtl) {
-        quoteAbortTimer = setTimeout(function () {
-          try {
-            abortCtl.abort();
-          } catch (_ab) {}
-        }, 22000);
-      }
-      var res;
-      try {
-        res = await fj(
-          icApiPaths("universe-symbol-quote?underlying=" + encodeURIComponent(s)),
-          {
-            headers: authHeaders(),
-            cache: "no-store",
-            signal: abortCtl ? abortCtl.signal : undefined,
-          }
-        );
-      } finally {
-        if (quoteAbortTimer) {
-          clearTimeout(quoteAbortTimer);
-          quoteAbortTimer = null;
-        }
-      }
+      /* No client AbortController — server caps Upstox (~8s); premature abort caused false "Request timed out". */
+      var res = await fj(
+        icApiPaths("universe-symbol-quote?underlying=" + encodeURIComponent(s)),
+        { headers: authHeaders(), cache: "no-store" }
+      );
       if (gen !== state.pickerQuoteGen) return;
       if (sk) sk.style.display = "none";
       var row = res.row;
