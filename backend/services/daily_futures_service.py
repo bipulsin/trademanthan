@@ -3620,6 +3620,32 @@ def index_bearish_gate_from_quotes() -> Dict[str, Any]:
     return out
 
 
+def _target_pullback_ema5_half_atr(
+    dtp: str,
+    ltp: Optional[float],
+    ema5: Optional[float],
+    atr: Optional[float],
+) -> Optional[float]:
+    """
+    Target pullback level for Today's pick display:
+    use 15m EMA(5) when |LTP − EMA5| >= 0.5×ATR(14,15m); else use LTP ± 0.5×ATR
+    (LONG: below spot for dip entry; SHORT: above spot for bounce entry).
+    """
+    if ltp is None or float(ltp) <= 0 or ema5 is None or float(ema5) <= 0:
+        return None
+    ltp_f = float(ltp)
+    ema_f = float(ema5)
+    half = 0.5 * float(atr) if atr is not None and float(atr) > 0 else None
+    dist = abs(ltp_f - ema_f)
+    if half is not None and half > 0:
+        if dist >= half:
+            return ema_f
+        is_short = str(dtp).strip().upper() == "SHORT"
+        raw = (ltp_f + half) if is_short else (ltp_f - half)
+        return max(raw, 1e-6)
+    return ema_f
+
+
 def _short_target_entry_feasible_vs_ltp(
     pb: Optional[float],
     sv: Optional[float],
@@ -3651,18 +3677,34 @@ def _short_target_entry_feasible_vs_ltp(
     return float(ltp)
 
 
-def _workspace_attach_target_entry_price(p: Dict[str, Any]) -> None:
+def _workspace_attach_target_entry_price(
+    p: Dict[str, Any],
+    candles_15m: Optional[List[Dict[str, Any]]] = None,
+) -> None:
     """
-    One field for the Premium Futures 'Target Entry' column.
-    LONG: pullback (V2) > session VWAP > LTP.
-    SHORT: same priority but clamp vs LTP so VWAP is not shown when it is far from spot (see helper).
+    Premium Futures 'Target Entry': primary rule uses 15m EMA(5) vs 0.5×ATR(14,15m) (see _target_pullback_ema5_half_atr).
+    If 15m history is insufficient, fall back: SHORT uses VWAP-feasibility helper; LONG uses V2 pullback / VWAP / LTP.
     """
+    dtp = str(p.get("direction_type") or "LONG").strip().upper()
     pb = _safe_float(p.get("pullback_target_price"))
     sv = _safe_float(p.get("session_vwap"))
     ltp = _safe_float(p.get("ltp"))
-    atr = _safe_float(p.get("atr_14_15m"))
-    dtp = str(p.get("direction_type") or "LONG").strip().upper()
+    atr_row = _safe_float(p.get("atr_14_15m"))
 
+    if candles_15m and len(candles_15m) >= 15:
+        closes_raw = [_safe_float(c.get("close")) for c in candles_15m]
+        if not any(x is None for x in closes_raw) and len(closes_raw) >= 5:
+            fv = [float(x) for x in closes_raw if x is not None]
+            ema_s = _ema(fv, 5)
+            ema5 = float(ema_s[-1]) if ema_s else None
+            atr_c = _atr14_15m_from_candles(candles_15m)
+            atr_use = atr_c if atr_c is not None and float(atr_c) > 0 else atr_row
+            te = _target_pullback_ema5_half_atr(dtp, ltp, ema5, atr_use)
+            if te is not None and float(te) > 0:
+                p["target_entry_price"] = round(float(te), 4)
+                return
+
+    atr = atr_row
     if dtp == "SHORT":
         te = _short_target_entry_feasible_vs_ltp(pb, sv, ltp, atr)
         p["target_entry_price"] = round(float(te), 4) if te is not None and float(te) > 0 else None
@@ -4236,8 +4278,27 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
     except Exception as e:
         logger.debug("daily_futures: sector mover badges skipped: %s", e)
 
+    c15_for_target: Dict[str, List[Dict[str, Any]]] = {}
+    try:
+        ux_te = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+        seen_te: Set[str] = set()
+        for _tp in list(picks_mixed) + list(picks_low_conv_bull) + list(picks_low_conv_bear):
+            ik_te = str((_tp.get("instrument_key") or "")).strip()
+            if not ik_te or ik_te in seen_te:
+                continue
+            seen_te.add(ik_te)
+            try:
+                bars_te = _last_completed_15m_candles_for_indicator(ux_te, ik_te, td, now_ist, limit=40)
+                if bars_te:
+                    c15_for_target[ik_te] = bars_te
+            except Exception as e:
+                logger.debug("daily_futures: 15m bars for target entry %s: %s", ik_te, e)
+    except Exception as e:
+        logger.warning("daily_futures: target-entry EMA Upstox init failed: %s", e)
+
     for _tp in list(picks_mixed) + list(picks_low_conv_bull) + list(picks_low_conv_bear):
-        _workspace_attach_target_entry_price(_tp)
+        ik_row = str((_tp.get("instrument_key") or "")).strip()
+        _workspace_attach_target_entry_price(_tp, c15_for_target.get(ik_row))
 
     return {
         "trade_date": str(td),
