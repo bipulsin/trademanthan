@@ -246,14 +246,67 @@
     /** @type {Record<string, boolean>} dedupe key: trade|candle|decision */
     prevIndicatorAlertKeys: {},
     refreshSeq: 0,
+    /** Reused for repeated 15m strip beeps (avoids dozens of AudioContext instances). */
+    sharedStripAudioCtx: null,
+    stripAlarmIntervalId: null,
+    stripAlarmTimeoutId: null,
   };
+
+  function getSharedStripAudioContext() {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return null;
+      if (!state.sharedStripAudioCtx) {
+        state.sharedStripAudioCtx = new Ctx();
+      }
+      var ctx = state.sharedStripAudioCtx;
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(function () {});
+      }
+      return ctx;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function stopStripDecisionAlarm() {
+    if (state.stripAlarmIntervalId != null) {
+      clearInterval(state.stripAlarmIntervalId);
+      state.stripAlarmIntervalId = null;
+    }
+    if (state.stripAlarmTimeoutId != null) {
+      clearTimeout(state.stripAlarmTimeoutId);
+      state.stripAlarmTimeoutId = null;
+    }
+  }
+
+  /**
+   * Repeating beep: HARD EXIT = 3 min, EXIT NOW = 1 min (interval 3s).
+   * @param {'amber' | 'hard'} beepKind
+   * @param {number} durationMs
+   */
+  function startStripDecisionAlarm(beepKind, durationMs) {
+    stopStripDecisionAlarm();
+    playStrip15mBeep(beepKind);
+    state.stripAlarmIntervalId = window.setInterval(function () {
+      playStrip15mBeep(beepKind);
+    }, 3000);
+    state.stripAlarmTimeoutId = window.setTimeout(function () {
+      stopStripDecisionAlarm();
+    }, durationMs);
+  }
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('beforeunload', function () {
+      stopStripDecisionAlarm();
+    });
+  }
 
   /** @param {'amber' | 'hard'} kind */
   function playStrip15mBeep(kind) {
     try {
-      const Ctx = window.AudioContext || window.webkitAudioContext;
-      if (!Ctx) return;
-      const ctx = new Ctx();
+      const ctx = getSharedStripAudioContext();
+      if (!ctx) return;
       const tones = kind === 'hard' ? [1240, 980] : [760];
       tones.forEach(function (freq, idx) {
         const o = ctx.createOscillator();
@@ -291,26 +344,40 @@
 
   function updateStrip15mDecisionAudio(rows) {
     if (!rows || !rows.length) return;
+    var wantHard = false;
+    var wantExit = false;
     rows.forEach(function (r) {
       var tid = r.trade_id;
       if (tid == null) return;
       var st = r.alert_strip || {};
-      var count = Number(st.indicator_count || 0);
       var decision = String(st.decision || 'hold');
       var candleTs = String(st.indicator_latest_candle_ts || '');
       var dedupeKey = String(tid) + '|' + candleTs + '|' + decision;
       if ((decision === 'exit_now' || decision === 'hard_exit') && candleTs && !state.prevIndicatorAlertKeys[dedupeKey]) {
         var symbol = String(r.future_symbol || r.underlying || 'Position');
+        var condText = (st.indicator_conditions_text || []).join(' · ');
         if (decision === 'hard_exit') {
-          playStrip15mBeep('hard');
-          fireDecisionNotification('HARD EXIT: ' + symbol, (st.indicator_conditions_text || []).join(' · '));
+          wantHard = true;
+          fireDecisionNotification('HARD EXIT: ' + symbol, condText);
         } else {
-          playStrip15mBeep('amber');
-          fireDecisionNotification('Exit Warning: ' + symbol, (st.indicator_conditions_text || []).join(' · '));
+          wantExit = true;
+          fireDecisionNotification('EXIT NOW: ' + symbol, condText);
+        }
+        if (typeof window.notifyTelegramUserMessage === 'function') {
+          var tmsg =
+            decision === 'hard_exit'
+              ? '🚨 Premium Futures 15m strip: HARD EXIT — ' + symbol + (condText ? '\n' + condText : '')
+              : '⚠️ Premium Futures 15m strip: EXIT NOW — ' + symbol + (condText ? '\n' + condText : '');
+          window.notifyTelegramUserMessage(tmsg).catch(function () {});
         }
         state.prevIndicatorAlertKeys[dedupeKey] = true;
       }
     });
+    if (wantHard) {
+      startStripDecisionAlarm('hard', 3 * 60 * 1000);
+    } else if (wantExit) {
+      startStripDecisionAlarm('amber', 60 * 1000);
+    }
   }
 
   function stripL1Cell(st) {
