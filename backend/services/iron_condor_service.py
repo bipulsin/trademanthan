@@ -19,6 +19,8 @@ from sqlalchemy.orm import Session
 from backend.database import engine
 from backend.services.iron_condor_universe import IRON_CONDOR_UNIVERSE, sector_for_symbol
 from backend.services.upstox_service import upstox_service as vwap_service
+from backend.services.iron_condor_snapshot_cache import read_underlying_atr_closes_session
+from backend.services import market_holiday as mh_ic
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +194,7 @@ def universe_picker_row_for_symbol(db: Session, user_id: int, symbol: str) -> Tu
     ltp_f: Optional[float] = None
     chg: Optional[float] = None
 
+    quote_source = "live"
     if not tok:
         quotes_error = (
             "Upstox is not connected (no access token). Sign in to Upstox from "
@@ -233,6 +236,32 @@ def universe_picker_row_for_symbol(db: Session, user_id: int, symbol: str) -> Tu
             logger.warning("Iron Condor single-symbol quote failed: %s", ex)
             quotes_error = "Upstox quote request failed — check broker connection."
 
+    # Step-1 picker: if live LTP is missing, use today's pre-market daily_closes snapshot (same job as refresh-daily-cache).
+    if ltp_f is None or (isinstance(ltp_f, float) and ltp_f <= 0):
+        trade_date = mh_ic._normalize_ist(None).date()
+        _atr_v, closes = read_underlying_atr_closes_session(db, trade_date, sym)
+        if closes and len(closes) >= 1:
+            try:
+                last = float(closes[-1])
+                if last > 0:
+                    ltp_f = last
+                    if len(closes) >= 2:
+                        prev_d = float(closes[-2])
+                        if prev_d > 0:
+                            chg = round((last - prev_d) / prev_d * 100.0, 2)
+                    quote_source = "daily_cache"
+                    if quotes_error:
+                        quotes_error = (
+                            quotes_error
+                            + " Showing last cached daily close from today's pre-market snapshot."
+                        )
+                    else:
+                        quotes_error = (
+                            "Live quote unavailable — showing last cached daily close from today's snapshot."
+                        )
+            except (TypeError, ValueError):
+                pass
+
     return (
         {
             "symbol": sym,
@@ -240,6 +269,7 @@ def universe_picker_row_for_symbol(db: Session, user_id: int, symbol: str) -> Tu
             "ltp": ltp_f,
             "change_pct_day": chg,
             "active_position": active,
+            "quote_source": quote_source,
         },
         quotes_error,
     )
