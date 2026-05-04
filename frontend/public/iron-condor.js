@@ -112,6 +112,7 @@
     pollTimer: null,
     universeStep1Rows: [],
     universeStep1PickLocked: false,
+    universeStep1AuthMerged: false,
     universeStep1QuoteGen: 0,
     mtmSpark: [],
     soundEpoch: 0,
@@ -399,15 +400,22 @@
       var sym = String(r.symbol || "").trim().toUpperCase();
       if (!sym) continue;
       var pdc = parseNumOrNull(r.previous_day_close);
+      var cm = parseNumOrNull(r.curr_month_open);
+      var pmc = parseNumOrNull(r.prev_mth_close);
       out.push({
         symbol: sym,
         sector: String(r.sector || "").trim(),
         instrument_key: String(r.instrument_key || "").trim(),
         previous_day_close: pdc !== null && pdc > 0 ? pdc : null,
         previous_close_as_of: String(r.previous_close_as_of || "").trim(),
+        curr_month_open: cm !== null && cm > 0 ? cm : null,
+        prev_mth_close: pmc !== null && pmc > 0 ? pmc : null,
+        prev_mth_expiry: String(r.prev_mth_expiry || "").trim(),
+        curr_mth_expiry: String(r.curr_mth_expiry || "").trim(),
+        nxt_earning_date: String(r.nxt_earning_date || "").trim(),
         ltp: null,
         change_pct_day: null,
-        active_position: false,
+        active_position: null,
       });
     }
     out.sort(function (a, b) {
@@ -416,15 +424,20 @@
     return out;
   }
 
+  function universeActiveKnown(row) {
+    return row.active_position === true || row.active_position === false;
+  }
+
   function renderUniverseStep1Row(row) {
     var sym = String(row.symbol || "").trim().toUpperCase();
+    var apKnown = universeActiveKnown(row);
     var ap = !!row.active_position;
-    var warn = ap ? '<span class="ic-chip-warn ic-chip-pass">Dup</span>' : "";
-    var act = ap ? "Yes" : "No Trade";
+    var warn = apKnown && ap ? '<span class="ic-chip-warn ic-chip-pass">Dup</span>' : "";
+    var act = !apKnown ? "—" : ap ? "Yes" : "No Trade";
     var pdcHtml = fmtPxCell(row.previous_day_close);
     var rad =
       "<span class=\"ic-muted\">—</span>";
-    if (!ap && !state.universeStep1PickLocked) {
+    if (apKnown && !ap && !state.universeStep1PickLocked) {
       rad =
         "<label class=\"ic-universe-radio\"><input type=\"radio\" name=\"icUniversePick\" value=\"" +
         esc(sym) +
@@ -510,63 +523,88 @@
     });
   }
 
+  function startUniverseQuotesFetch(gen) {
+    fj(icApiPaths("universe-board-quotes"), {
+      headers: authHeaders(),
+      cache: "no-store",
+    })
+      .then(function (qj) {
+        if (gen !== state.universeStep1QuoteGen) return;
+        applyUniverseQuotesPatch(state.universeStep1Rows, qj.quotes_by_symbol);
+        pickerShowQuoteBanner(qj.quotes_error || "");
+        renderUniverseStep1Table(state.universeStep1Rows);
+      })
+      .catch(function () {
+        if (gen !== state.universeStep1QuoteGen) return;
+        pickerShowQuoteBanner("Live quotes unavailable — prev close shown from database.");
+        renderUniverseStep1Table(state.universeStep1Rows);
+      });
+  }
+
   /**
-   * Tier 1: Postgres master + Active? (fast paint).
-   * Tier 2: one batched broker call; merge into table (preserves radio pick).
+   * Public list paints first (no JWT). Signed-in tier upgrades Active? / radios then broker LTP batch.
    */
-  async function loadUniverseStep1Grid() {
+  function loadUniverseStep1Grid() {
     var tb = document.getElementById("pickerBody");
     var gen = ++state.universeStep1QuoteGen;
-    state.universeStep1PickLocked = false;
+    state.universeStep1AuthMerged = false;
+    state.universeStep1PickLocked = true;
     pickerShowQuoteBanner("");
     state.symbol = "";
-    if (tb) tb.innerHTML = "<tr><td colspan=\"7\" class=\"ic-muted\">Loading universe…</td></tr>";
-    try {
-      var baseResp = await fj(icApiPaths("universe-board-base"), {
-        headers: authHeaders(),
-        cache: "no-store",
-      });
-      if (gen !== state.universeStep1QuoteGen) return;
-      var rows = Array.isArray(baseResp.symbols) ? baseResp.symbols.slice() : [];
-      rows.sort(function (a, b) {
-        return String(a.symbol || "").localeCompare(String(b.symbol || ""));
-      });
-      state.universeStep1Rows = rows;
-      renderUniverseStep1Table(rows);
-      pickerShowQuoteBanner("Loading live LTP from Upstox…");
-
-      fj(icApiPaths("universe-board-quotes"), {
-        headers: authHeaders(),
-        cache: "no-store",
-      })
-        .then(function (qj) {
-          if (gen !== state.universeStep1QuoteGen) return;
-          applyUniverseQuotesPatch(state.universeStep1Rows, qj.quotes_by_symbol);
-          pickerShowQuoteBanner(qj.quotes_error || "");
-          renderUniverseStep1Table(state.universeStep1Rows);
-        })
-        .catch(function () {
-          if (gen !== state.universeStep1QuoteGen) return;
-          pickerShowQuoteBanner("Live quotes unavailable — prev close shown from database.");
-          renderUniverseStep1Table(state.universeStep1Rows);
-        });
-      return;
-    } catch (_eAuth) {}
-
-    pickerShowQuoteBanner(
-      "Sign in (session + broker) on this browser to load live LTP from Upstox, Active? column, and row selection."
-    );
-    try {
-      var pub = await fj(["/api/iron-condor/approved-underlyings"], { cache: "no-store" });
-      var rowsFallback = rowsFromApprovedUnderlyingsPayload(pub);
-      state.universeStep1PickLocked = true;
-      state.universeStep1Rows = rowsFallback;
-      renderUniverseStep1Table(rowsFallback);
-    } catch (_e2) {
-      state.universeStep1Rows = [];
-      setUniverseTablePlaceholder("Could not load universe — refresh or try again shortly.");
-      setUniverseNextFromRadio();
+    if (tb) {
+      tb.innerHTML = "<tr><td colspan=\"7\" class=\"ic-muted\">Loading approved list…</td></tr>";
     }
+
+    fj(["/api/iron-condor/approved-underlyings"], { cache: "no-store" })
+      .then(function (pub) {
+        if (gen !== state.universeStep1QuoteGen) return;
+        if (state.universeStep1AuthMerged) return;
+        var rows = rowsFromApprovedUnderlyingsPayload(pub);
+        if (!rows.length) {
+          setUniverseTablePlaceholder("No universe rows configured.");
+          setUniverseNextFromRadio();
+          return;
+        }
+        state.universeStep1Rows = rows;
+        renderUniverseStep1Table(rows);
+        pickerShowQuoteBanner("Optional: sign in for Active?, row picks, and live LTP.");
+      })
+      .catch(function () {
+        if (gen !== state.universeStep1QuoteGen) return;
+        if (state.universeStep1AuthMerged) return;
+        state.universeStep1Rows = [];
+        setUniverseTablePlaceholder("Could not load approved list — retry shortly.");
+        setUniverseNextFromRadio();
+      });
+
+    fj(icApiPaths("universe-board-base"), {
+      headers: authHeaders(),
+      cache: "no-store",
+    })
+      .then(function (baseResp) {
+        if (gen !== state.universeStep1QuoteGen) return;
+        var rows = Array.isArray(baseResp.symbols) ? baseResp.symbols.slice() : [];
+        rows.sort(function (a, b) {
+          return String(a.symbol || "").localeCompare(String(b.symbol || ""));
+        });
+        state.universeStep1AuthMerged = true;
+        state.universeStep1PickLocked = false;
+        state.universeStep1Rows = rows;
+        renderUniverseStep1Table(rows);
+        pickerShowQuoteBanner("Loading live LTP from Upstox…");
+        startUniverseQuotesFetch(gen);
+      })
+      .catch(function () {
+        if (gen !== state.universeStep1QuoteGen) return;
+        state.universeStep1AuthMerged = false;
+        state.universeStep1PickLocked = true;
+        pickerShowQuoteBanner(
+          "Sign in to enable Active?, row selection, and live LTP (table above is public master data)."
+        );
+        if (state.universeStep1Rows && state.universeStep1Rows.length) {
+          renderUniverseStep1Table(state.universeStep1Rows);
+        }
+      });
   }
 
   /** Run as soon as DOM is ready — step 1 table does not depend on workspace. */
