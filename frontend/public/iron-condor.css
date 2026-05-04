@@ -387,18 +387,24 @@ body.theme-page.iron-c-page[data-theme="dark"] .ic-chip-delta-month.ic-dm-yellow
 }
 
 .ic-picker-warn {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
   font-size: 0.82rem;
   font-weight: 600;
-  color: var(--ic-warn);
+  line-height: 1.45;
   margin: 0 0 10px;
-  padding: 8px 10px;
+  padding: 10px 12px;
   border-radius: 8px;
-  border: 1px solid color-mix(in srgb, var(--ic-warn) 40%, transparent);
-  background: color-mix(in srgb, var(--ic-warn) 14%, transparent);
+  color: #bf360c;
+  border: 1px solid rgba(230, 81, 0, 0.42);
+  background: rgba(230, 81, 0, 0.12);
 }
 
 body.theme-page.iron-c-page[data-theme="dark"] .ic-picker-warn {
-  background: rgba(230, 81, 0, 0.12);
+  color: #ffb74d;
+  border-color: rgba(255, 183, 77, 0.38);
+  background: rgba(255, 183, 77, 0.1);
 }
 
 .ic-skel-row {

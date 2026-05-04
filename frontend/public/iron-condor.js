@@ -151,13 +151,34 @@
   function pickerShowQuoteBanner(msg) {
     var el = document.getElementById("pickerQuoteWarn");
     if (!el) return;
-    if (!msg) {
+    var s = msg != null ? String(msg).trim() : "";
+    if (!s) {
       el.setAttribute("hidden", "hidden");
       el.textContent = "";
+      el.removeAttribute("aria-label");
       return;
     }
     el.removeAttribute("hidden");
-    el.textContent = msg;
+    el.textContent = s;
+    el.setAttribute("aria-label", s);
+  }
+
+  /** After quotes patch: show server error, or fallback if no row has LTP (common when Upstox disconnected). */
+  function quoteStatusMessageAfterPatch(qj) {
+    var err = qj && qj.quotes_error != null ? String(qj.quotes_error).trim() : "";
+    if (err) return err;
+    var vis = filterUniverseRowsForStep1EarningsWindow(state.universeStep1Rows || []);
+    if (!vis.length) return "";
+    for (var i = 0; i < vis.length; i++) {
+      var lp = vis[i].ltp;
+      if (lp == null || lp === "") continue;
+      var n = typeof lp === "number" ? lp : parseFloat(String(lp));
+      if (isFinite(n) && n > 0) return "";
+    }
+    return (
+      "Live LTP not received from the broker (table shows prev. close from DB). " +
+      "Reconnect Upstox from the app broker / Settings link, then refresh this page."
+    );
   }
 
   function bodyEl() {
@@ -652,7 +673,7 @@
       .then(function (qj) {
         if (gen !== state.universeStep1QuoteGen) return;
         applyUniverseQuotesPatch(state.universeStep1Rows, qj.quotes_by_symbol);
-        pickerShowQuoteBanner(qj.quotes_error || "");
+        pickerShowQuoteBanner(quoteStatusMessageAfterPatch(qj));
         renderUniverseStep1Table(state.universeStep1Rows);
       })
       .catch(function () {
@@ -674,7 +695,7 @@
       .then(function (qj) {
         if (myGen !== state.universeStep1QuoteGen) return;
         applyUniverseQuotesPatch(state.universeStep1Rows, qj.quotes_by_symbol);
-        pickerShowQuoteBanner(qj.quotes_error || "");
+        pickerShowQuoteBanner(quoteStatusMessageAfterPatch(qj));
         renderUniverseStep1Table(state.universeStep1Rows);
       })
       .catch(function () {
@@ -755,7 +776,9 @@
         if (gen !== state.universeStep1QuoteGen) return;
         state.universeStep1AuthMerged = false;
         state.universeStep1PickLocked = true;
-        pickerShowQuoteBanner("");
+        pickerShowQuoteBanner(
+          "Signed-in universe unavailable (session). Refresh the page or sign in again to load live LTP, Active?, and row picks."
+        );
         if (state.universeStep1Rows && state.universeStep1Rows.length) {
           renderUniverseStep1Table(state.universeStep1Rows);
         }
