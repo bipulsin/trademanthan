@@ -234,7 +234,10 @@ def _ensure_ic_universe_master_memory_loaded() -> None:
     db = SessionLocal()
     try:
         ensure_iron_condor_tables()
-        ensure_iron_condor_universe_master_ready(db)
+        # Avoid instrument_key sync here: resolver + sequential DB updates can exceed
+        # gateway timeouts on first GET. Sync runs in warm_iron_condor_startup() and POST refresh.
+        iron_condor_universe_master_bootstrap_seed_if_empty(db)
+        refresh_ic_universe_master_memory(db)
     except Exception as ex:
         logger.warning("Iron Condor universe master load failed: %s", ex)
     finally:
