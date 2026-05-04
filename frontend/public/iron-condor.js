@@ -388,6 +388,31 @@
     return isFinite(n) ? n : null;
   }
 
+  /** YYYY-MM-DD from API (leading part of ISO datetime is enough). */
+  function universeRowYmd(v) {
+    if (v == null || v === "") return null;
+    var s = String(v).trim().slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+  }
+
+  /** True when nxt_earning_date is on or between prev_mth_expiry and curr_mth_expiry (endpoints inclusive). */
+  function universeRowEarningsInsideExpiryWindow(row) {
+    var e = universeRowYmd(row.nxt_earning_date);
+    var p = universeRowYmd(row.prev_mth_expiry);
+    var c = universeRowYmd(row.curr_mth_expiry);
+    if (!e || !p || !c) return false;
+    var lo = p <= c ? p : c;
+    var hi = p <= c ? c : p;
+    return e >= lo && e <= hi;
+  }
+
+  function filterUniverseRowsForStep1EarningsWindow(rows) {
+    if (!Array.isArray(rows)) return [];
+    return rows.filter(function (r) {
+      return !universeRowEarningsInsideExpiryWindow(r);
+    });
+  }
+
   /** Public master shape → step-1 row (no LTP / no active until merged from auth grid). */
   function rowsFromApprovedUnderlyingsPayload(pub) {
     if (!pub || typeof pub !== "object") return [];
@@ -504,12 +529,22 @@
   function renderUniverseStep1Table(rows) {
     var tb = document.getElementById("pickerBody");
     if (!tb) return;
-    if (!rows.length) {
+    var src = Array.isArray(rows) ? rows : [];
+    if (!src.length) {
       tb.innerHTML = "<tr><td colspan=\"7\" class=\"ic-muted\">No universe rows configured.</td></tr>";
+      setUniverseNextFromRadio();
+      return;
+    }
+    var vis = filterUniverseRowsForStep1EarningsWindow(src);
+    if (!vis.length) {
+      tb.innerHTML =
+        "<tr><td colspan=\"7\" class=\"ic-muted\">No symbols to show — next earnings falls between the previous and current monthly F&amp;O expiries for every underlying (see master sheet).</td></tr>";
+      wireUniverseStep1Radios();
+      setUniverseNextFromRadio();
       return;
     }
     var picked = universePickedSymbolFromDom();
-    tb.innerHTML = rows.map(renderUniverseStep1Row).join("");
+    tb.innerHTML = vis.map(renderUniverseStep1Row).join("");
     restoreUniverseRadioPick(picked);
     wireUniverseStep1Radios();
     setUniverseNextFromRadio();
