@@ -334,12 +334,13 @@ def _universe_picker_rows_from_quote_batch(
         qd = _batch_lookup(batch, ik) if ik else None
         if qd:
             try:
-                lp = float(qd.get("last_price") or 0)
-                ltp_f = lp if lp > 0 else None
+                lp_base = vwap_service.ltp_from_quote_snapshot(qd)
                 nested = qd.get("ohlc") if isinstance(qd.get("ohlc"), dict) else {}
                 prev = _ic_prev_day_close_from_ohlc(nested)
-                if ltp_f and prev > 0:
-                    chg = round((ltp_f - prev) / prev * 100.0, 2)
+                ltp_o = lp_base if lp_base is not None and lp_base > 0 else None
+                if ltp_o and prev > 0:
+                    chg = round((ltp_o - prev) / prev * 100.0, 2)
+                ltp_f = ltp_o
             except (TypeError, ValueError):
                 pass
         rows.append(
@@ -388,8 +389,9 @@ def build_universe_picker_rows_with_quotes_cached() -> Tuple[List[Dict[str, Any]
     batch: Dict[str, Dict[str, Any]] = {}
     keys = [ik for _, _, ik in pairs_keys if ik]
 
-    req_to = int(os.getenv("IRON_CONDOR_UNIVERSE_BATCH_QUOTE_TIMEOUT_SEC", "8") or "8")
-    req_retries = int(os.getenv("IRON_CONDOR_UNIVERSE_BATCH_QUOTE_RETRIES", "1") or "1")
+    # Align with daily_futures defaults (15s × retries) — short timeouts caused false "no quote".
+    req_to = int(os.getenv("IRON_CONDOR_UNIVERSE_BATCH_QUOTE_TIMEOUT_SEC", "15") or "15")
+    req_retries = int(os.getenv("IRON_CONDOR_UNIVERSE_BATCH_QUOTE_RETRIES", "2") or "2")
 
     if not tok:
         quotes_error = (
@@ -405,11 +407,34 @@ def build_universe_picker_rows_with_quotes_cached() -> Tuple[List[Dict[str, Any]
             snap = vwap_service.get_market_quote_snapshots_batch(
                 keys,
                 max_per_request=100,
-                request_timeout=max(3, req_to),
+                request_timeout=max(5, req_to),
                 max_retries=max(0, req_retries),
             )
-            batch = snap if snap else {}
-            if not batch:
+            batch = dict(snap) if snap else {}
+            # Daily Futures–style: fill gaps (0 last_price / key mismatch) per instrument.
+            for ik in keys:
+                if not ik:
+                    continue
+                sn0 = vwap_service.snapshot_for_requested_key(batch, ik)
+                if sn0 is not None and vwap_service.ltp_from_quote_snapshot(sn0) is not None:
+                    continue
+                got = vwap_service.resolve_market_quote_snapshot_for_key(
+                    ik,
+                    request_timeout=max(5, req_to),
+                    max_retries=max(0, req_retries),
+                    skip_batch_snapshot=sn0 is not None,
+                )
+                if got:
+                    batch[ik] = got
+            any_ltp = False
+            for ik in keys:
+                if not ik:
+                    continue
+                sn1 = vwap_service.snapshot_for_requested_key(batch, ik)
+                if sn1 is not None and vwap_service.ltp_from_quote_snapshot(sn1) is not None:
+                    any_ltp = True
+                    break
+            if not any_ltp:
                 quotes_error = (
                     "Upstox returned no quote data (session may be expired). Reconnect Upstox and retry."
                 )
@@ -686,24 +711,24 @@ def universe_picker_row_for_symbol(
     elif not ik:
         quotes_error = "Could not resolve equity instrument key for this symbol."
     else:
-        batch: Dict[str, Any] = {}
+        qd: Optional[Dict[str, Any]] = None
         try:
-            batch = vwap_service.get_market_quote_snapshots_batch(
-                [ik],
-                max_per_request=10,
-                request_timeout=4,
-                max_retries=1,
+            req_to = int(os.getenv("IRON_CONDOR_UPSTOX_QUOTE_TIMEOUT_SEC", "15") or "15")
+            req_retries = int(os.getenv("IRON_CONDOR_UPSTOX_QUOTE_RETRIES", "2") or "2")
+            qd = vwap_service.resolve_market_quote_snapshot_for_key(
+                ik,
+                request_timeout=max(5, req_to),
+                max_retries=max(0, req_retries),
             )
         except Exception as ex:
             logger.warning("Iron Condor single-symbol quote failed: %s", ex)
             quotes_error = "Upstox quotes request failed — check broker connection and token."
-        qd = _batch_lookup(batch, ik) if batch else None
         if qd:
             try:
-                lp = float(qd.get("last_price") or 0)
-                live_ltp = lp if lp > 0 else None
+                lp_base = vwap_service.ltp_from_quote_snapshot(qd)
                 nested = qd.get("ohlc") if isinstance(qd.get("ohlc"), dict) else {}
                 prev = _ic_prev_day_close_from_ohlc(nested)
+                live_ltp = lp_base if lp_base is not None and lp_base > 0 else None
                 if live_ltp and prev > 0:
                     chg = round((live_ltp - prev) / prev * 100.0, 2)
                 if live_ltp is not None and live_ltp > 0:

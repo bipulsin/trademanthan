@@ -2237,6 +2237,171 @@ class UpstoxService:
             logger.error(f"❌ Error fetching batch market quotes: {str(e)}")
         return result
 
+    @staticmethod
+    def normalize_instrument_key_cmp(k: str) -> str:
+        return str(k or "").replace(":", "|").replace(" ", "").upper()
+
+    @staticmethod
+    def ltp_from_quote_snapshot(sn: Optional[Dict[str, Any]]) -> Optional[float]:
+        """
+        Same rules as daily_futures_service._ltp_from_snapshot_row: prefer last_price,
+        else OHLC close (snapshot often has 0 last_price early session).
+        """
+        if not sn or not isinstance(sn, dict):
+            return None
+        lp = sn.get("last_price")
+        try:
+            if lp is not None and float(lp) > 0:
+                return float(lp)
+        except (TypeError, ValueError):
+            pass
+        ohlc = sn.get("ohlc") if isinstance(sn.get("ohlc"), dict) else {}
+        for k in ("close", "last_price"):
+            v = ohlc.get(k)
+            try:
+                if v is not None and float(v) > 0:
+                    return float(v)
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    def snapshot_for_requested_key(
+        self,
+        snaps: Dict[str, Dict[str, Any]],
+        instrument_key: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Pick quote dict for a key from a batch snapshot map (matches daily_futures key fallbacks)."""
+        ik = instrument_key.strip()
+        if not ik:
+            return None
+        if ik in snaps:
+            s = snaps[ik]
+            return s if isinstance(s, dict) else None
+        nk = self.normalize_instrument_key_cmp(ik)
+        for bk, s in snaps.items():
+            if isinstance(s, dict) and self.normalize_instrument_key_cmp(str(bk)) == nk:
+                return s
+        return None
+
+    def _lookup_batch_ltp_fuzzy(self, ltp_map: Dict[str, float], instrument_key: str) -> Optional[float]:
+        ik = instrument_key.strip()
+        if not ik:
+            return None
+        if ik in ltp_map:
+            v = ltp_map[ik]
+            try:
+                if v and float(v) > 0:
+                    return float(v)
+            except (TypeError, ValueError):
+                pass
+        nk = self.normalize_instrument_key_cmp(ik)
+        for bk, v in ltp_map.items():
+            if self.normalize_instrument_key_cmp(str(bk)) != nk:
+                continue
+            try:
+                if v and float(v) > 0:
+                    return float(v)
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    def fetch_raw_market_quote_quote_data(
+        self,
+        instrument_key: str,
+        *,
+        timeout: int = 15,
+        max_retries: int = 2,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Raw quote object from GET /v2/market-quote/quotes for one instrument (URL-encoded key).
+        Unlike get_market_quote_by_key(), does not drop rows when last_price is 0 — keeps OHLC for LTP fallback.
+        """
+        ik = instrument_key.strip()
+        if not ik:
+            return None
+        try:
+            from urllib.parse import quote
+
+            url = f"https://api.upstox.com/v2/market-quote/quotes?instrument_key={quote(ik, safe=',')}"
+            data = self.make_api_request(url, method="GET", timeout=timeout, max_retries=max_retries)
+            if not data or data.get("status") != "success" or "data" not in data:
+                return None
+            raw = data.get("data") or {}
+            if not isinstance(raw, dict) or not raw:
+                return None
+
+            def normalize_key(kk: str) -> str:
+                return kk.replace(" ", "").replace(":", "|").upper()
+
+            if ik in raw:
+                qd = raw[ik]
+                return qd if isinstance(qd, dict) else None
+            alt1, alt2 = ik.replace("|", ":"), ik.replace(":", "|")
+            for candidate in (alt1, alt2):
+                if candidate in raw:
+                    qd = raw[candidate]
+                    return qd if isinstance(qd, dict) else None
+            nreq = normalize_key(ik)
+            for resp_key, qd in raw.items():
+                if not isinstance(qd, dict):
+                    continue
+                if normalize_key(str(resp_key)) == nreq:
+                    return qd
+            if len(raw) == 1:
+                only = next(iter(raw.values()))
+                return only if isinstance(only, dict) else None
+        except Exception as e:
+            logger.warning("fetch_raw_market_quote_quote_data failed for %s: %s", instrument_key[:48], e)
+        return None
+
+    def resolve_market_quote_snapshot_for_key(
+        self,
+        instrument_key: str,
+        *,
+        request_timeout: int = 15,
+        max_retries: int = 2,
+        skip_batch_snapshot: bool = False,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Mirror daily_futures LTP resolution for one equity/F&O instrument key:
+        1) get_market_quote_snapshots_batch (full snapshot, OHLC-aware LTP via ltp_from_quote_snapshot)
+        2) get_market_quotes_batch_by_keys when snapshot has no usable LTP
+        3) Raw single GET parse (OHLC fallback when last_price is 0)
+
+        skip_batch_snapshot: when callers already merged a worthless row from a larger batch —
+        skips step 1 to avoid a duplicate snapshot round-trip per symbol.
+        """
+        ik = instrument_key.strip()
+        if not ik:
+            return None
+        tok = (getattr(self, "access_token", None) or "").strip()
+        if not tok:
+            return None
+        if not skip_batch_snapshot:
+            try:
+                snaps = self.get_market_quote_snapshots_batch(
+                    [ik],
+                    max_per_request=10,
+                    request_timeout=request_timeout,
+                    max_retries=max_retries,
+                )
+                sn = self.snapshot_for_requested_key(snaps or {}, ik)
+                if sn and self.ltp_from_quote_snapshot(sn) is not None:
+                    return sn
+            except Exception as ex:
+                logger.debug("resolve snapshot batch failed %s: %s", ik[:48], ex)
+        try:
+            ltm = self.get_market_quotes_batch_by_keys([ik])
+            lp = self._lookup_batch_ltp_fuzzy(ltm, ik)
+            if lp is not None and lp > 0:
+                return {"last_price": lp, "ohlc": {}}
+        except Exception as ex:
+            logger.debug("resolve batch LTP failed %s: %s", ik[:48], ex)
+        raw = self.fetch_raw_market_quote_quote_data(ik, timeout=request_timeout, max_retries=max_retries)
+        if raw and self.ltp_from_quote_snapshot(raw) is not None:
+            return raw
+        return None
+
     def get_market_quote_snapshots_batch(
         self,
         instrument_keys: list[str],
