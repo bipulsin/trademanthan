@@ -798,7 +798,9 @@
         const eligible = r.order_eligible === true;
         const reason = r.order_block_reason || 'Not eligible to enter';
         const convTxt = formatConvictionEntryLive(r);
-        const targetEntryTxt = r.pullback_target_price != null ? fmtNum(r.pullback_target_price, 2) : '—';
+        const targetPx =
+          r.pullback_target_price != null ? r.pullback_target_price : r.session_vwap != null ? r.session_vwap : null;
+        const targetEntryTxt = targetPx != null ? fmtNum(targetPx, 2) : '—';
         const enterBtn =
           '<button type="button" class="df-btn df-btn-order" data-sid="' +
           r.screening_id +
@@ -897,7 +899,9 @@
         const eligible = r.order_eligible === true;
         const reason = r.order_block_reason || 'Not eligible to enter';
         const convTxt = formatConvictionEntryLive(r);
-        const targetEntryTxt = r.pullback_target_price != null ? fmtNum(r.pullback_target_price, 2) : '—';
+        const targetPx =
+          r.pullback_target_price != null ? r.pullback_target_price : r.session_vwap != null ? r.session_vwap : null;
+        const targetEntryTxt = targetPx != null ? fmtNum(targetPx, 2) : '—';
         const enterBtn =
           '<button type="button" class="df-btn df-btn-order" data-bear="1" data-sid="' +
           r.screening_id +

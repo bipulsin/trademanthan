@@ -3044,7 +3044,8 @@ def _fetch_screening_dicts(conn: Any, trade_date: date) -> List[Dict[str, Any]]:
                    second_scan_time, second_scan_conviction_score, second_scan_oi_leg, second_scan_vwap_leg,
                    second_scan_stock_change_pct, second_scan_nifty_change_pct,
                    stock_change_pct, nifty_change_pct, effective_conviction, last_5m_momentum_pass, last_5m_evaluated_at,
-                   candle_is_green, candle_higher_high, candle_higher_low, conviction_breakdown_json
+                   candle_is_green, candle_higher_high, candle_higher_low, conviction_breakdown_json,
+                   session_vwap, pullback_target_price
             FROM daily_futures_screening
             WHERE trade_date = CAST(:d AS DATE)
             ORDER BY conviction_score DESC NULLS LAST, underlying
@@ -3084,6 +3085,8 @@ def _fetch_screening_dicts(conn: Any, trade_date: date) -> List[Dict[str, Any]]:
                 "candle_higher_high": bool(row[25]) if row[25] is not None else None,
                 "candle_higher_low": bool(row[26]) if row[26] is not None else None,
                 "conviction_breakdown_json": row[27] if row[27] is not None else None,
+                "session_vwap": float(row[28]) if row[28] is not None else None,
+                "pullback_target_price": float(row[29]) if row[29] is not None else None,
             }
         )
     return out
@@ -3098,6 +3101,7 @@ def _apply_live_ltps_to_picks_and_running(
 ) -> None:
     """
     Refresh LTP from Upstox for every row (batch + per-key fallback), update dicts in place.
+    Also fills session_vwap from batch quote snapshots when available (Target Entry column on dailyfutures UI).
     Optionally persist ltp on daily_futures_screening (skipped for lite workspace to save many UPDATEs).
     """
     # Prioritize running rows first so LTP for open positions is refreshed even
@@ -3114,48 +3118,85 @@ def _apply_live_ltps_to_picks_and_running(
         return
 
     upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
-    batch: Dict[str, float] = {}
-    try:
-        batch = upstox.get_market_quotes_batch_by_keys(uniq_keys)
-    except Exception as e:
-        logger.warning("daily_futures: batch LTP failed: %s", e)
 
     def _norm(k: str) -> str:
         return k.replace(":", "|").replace(" ", "").upper()
+
+    def _float_map_lookup(ik: str, m: Dict[str, float]) -> Optional[float]:
+        if not ik:
+            return None
+        if ik in m:
+            v = m[ik]
+            if v and float(v) > 0:
+                return float(v)
+        nk = _norm(ik)
+        for bk, v in m.items():
+            if _norm(str(bk)) == nk and v and float(v) > 0:
+                return float(v)
+        return None
+
+    ltp_map: Dict[str, float] = {}
+    vwap_map: Dict[str, float] = {}
+    try:
+        snaps = upstox.get_market_quote_snapshots_batch(uniq_keys)
+        for req_key in uniq_keys:
+            sn = snaps.get(req_key)
+            if not sn:
+                nk = _norm(req_key)
+                for bk, s in snaps.items():
+                    if _norm(str(bk)) == nk:
+                        sn = s
+                        break
+            if not sn:
+                continue
+            lp = sn.get("last_price")
+            try:
+                if lp is not None and float(lp) > 0:
+                    ltp_map[req_key] = float(lp)
+            except (TypeError, ValueError):
+                pass
+            ap = sn.get("average_price")
+            try:
+                if ap is not None and float(ap) > 0:
+                    vwap_map[req_key] = float(ap)
+            except (TypeError, ValueError):
+                pass
+    except Exception as e:
+        logger.warning("daily_futures: batch quote snapshots failed: %s", e)
+    if not ltp_map:
+        try:
+            ltp_map = upstox.get_market_quotes_batch_by_keys(uniq_keys)
+        except Exception as e:
+            logger.warning("daily_futures: batch LTP failed: %s", e)
 
     # Keep workspace responsive when broker quote API is degraded.
     # Batch is preferred; single-key fallback is capped.
     single_fallback_budget = max(8, min(30, len(running) * 3))
     single_fallback_used = 0
 
-    def _resolve_ltp(ik: str) -> Optional[float]:
+    def _resolve_ltp(ik: str) -> Tuple[Optional[float], Optional[Dict[str, Any]]]:
+        """Returns (ltp, raw_quote_or_none) for optional VWAP extraction on fallback."""
         nonlocal single_fallback_used
-        if not ik:
-            return None
-        if ik in batch:
-            lp = batch[ik]
-            if lp and float(lp) > 0:
-                return float(lp)
-        nk = _norm(ik)
-        for bk, lp in batch.items():
-            if _norm(bk) == nk and lp and float(lp) > 0:
-                return float(lp)
+        lp0 = _float_map_lookup(ik, ltp_map)
+        if lp0 is not None:
+            return lp0, None
         if single_fallback_used >= single_fallback_budget:
-            return None
+            return None, None
         try:
             single_fallback_used += 1
             q = upstox.get_market_quote_by_key(ik)
             if q and q.get("last_price"):
                 v = float(q["last_price"])
-                return v if v > 0 else None
+                if v > 0:
+                    return v, q
         except Exception as ex:
             logger.debug("daily_futures: single-quote LTP failed for %s: %s", ik, ex)
-        return None
+        return None, None
 
     by_screening: Dict[int, float] = {}
     for r in combined:
         ik = (r.get("instrument_key") or "").strip()
-        lp = _resolve_ltp(ik)
+        lp, q_fb = _resolve_ltp(ik)
         if lp is None:
             continue
         lp_r = round(lp, 4)
@@ -3163,6 +3204,14 @@ def _apply_live_ltps_to_picks_and_running(
         sid = r.get("screening_id")
         if sid is not None:
             by_screening[int(sid)] = lp_r
+        if r.get("session_vwap") is None:
+            sv = _float_map_lookup(ik, vwap_map)
+            if sv is not None:
+                r["session_vwap"] = round(sv, 4)
+            elif q_fb is not None:
+                sv2 = _session_vwap_for_conviction(q_fb)
+                if sv2 is not None and float(sv2) > 0:
+                    r["session_vwap"] = round(float(sv2), 4)
 
     if not by_screening or not persist_screening:
         return
