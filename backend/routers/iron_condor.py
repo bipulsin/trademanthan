@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
-from backend.services.iron_condor_universe import IRON_CONDOR_UNIVERSE, sector_for_symbol
+from backend.services.iron_condor_universe import sector_for_symbol
 from backend.services import iron_condor_service as ic
 from backend.services import iron_condor_extended as ice
 from backend.config import settings
@@ -152,15 +152,15 @@ def verify_positions_held(db: Session = Depends(get_db), user: User = Depends(_a
 @router.get("/approved-underlyings")
 def iron_condor_approved_underlyings() -> Dict[str, Any]:
     """
-    Static approved symbol ↔ sector list (same source as /universe). No auth — used to populate
-    the picker when JWT/session is missing or slow; quotes/checklist still require login.
+    Approved universe rows: symbol, sector, equity instrument_key (cached server-side).
+    No auth — used to populate the picker when JWT/session is missing or slow; quotes still require broker login.
     """
-    return {"symbols": [{"symbol": k, "sector": v} for k, v in sorted(IRON_CONDOR_UNIVERSE.items())]}
+    return {"symbols": ic.get_iron_condor_universe_master_rows()}
 
 
 @router.get("/universe")
 def iron_condor_universe(_user: User = Depends(_auth)) -> Dict[str, Any]:
-    return {"symbols": [{"symbol": k, "sector": v} for k, v in sorted(IRON_CONDOR_UNIVERSE.items())]}
+    return {"symbols": ic.get_iron_condor_universe_master_rows()}
 
 
 @router.get("/universe-with-quotes")

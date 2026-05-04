@@ -127,19 +127,19 @@
    */
   function icUniverseFallbackRows() {
     return [
-      { symbol: "RELIANCE", sector: "Energy" },
-      { symbol: "TCS", sector: "IT" },
-      { symbol: "INFOSYS", sector: "IT" },
-      { symbol: "HDFCBANK", sector: "Banking" },
-      { symbol: "ICICIBANK", sector: "Banking" },
-      { symbol: "SBIN", sector: "Banking" },
-      { symbol: "BHARTIARTL", sector: "Telecom" },
-      { symbol: "KOTAKBANK", sector: "Banking" },
-      { symbol: "LT", sector: "Capital Goods" },
-      { symbol: "HINDUNILVR", sector: "FMCG" },
-      { symbol: "ITC", sector: "FMCG" },
-      { symbol: "AXISBANK", sector: "Banking" },
-      { symbol: "BAJFINANCE", sector: "Financial Services" },
+      { symbol: "RELIANCE", sector: "Energy", instrument_key: "" },
+      { symbol: "TCS", sector: "IT", instrument_key: "" },
+      { symbol: "INFOSYS", sector: "IT", instrument_key: "" },
+      { symbol: "HDFCBANK", sector: "Banking", instrument_key: "" },
+      { symbol: "ICICIBANK", sector: "Banking", instrument_key: "" },
+      { symbol: "SBIN", sector: "Banking", instrument_key: "" },
+      { symbol: "BHARTIARTL", sector: "Telecom", instrument_key: "" },
+      { symbol: "KOTAKBANK", sector: "Banking", instrument_key: "" },
+      { symbol: "LT", sector: "Capital Goods", instrument_key: "" },
+      { symbol: "HINDUNILVR", sector: "FMCG", instrument_key: "" },
+      { symbol: "ITC", sector: "FMCG", instrument_key: "" },
+      { symbol: "AXISBANK", sector: "Banking", instrument_key: "" },
+      { symbol: "BAJFINANCE", sector: "Financial Services", instrument_key: "" },
     ];
   }
 
@@ -155,41 +155,7 @@
     mtmChartJs: null,
     equityChartJs: null,
     pickerQuoteGen: 0,
-    /** SYMBOL -> { ltp, change_pct_day } from last /universe-with-quotes (fills snapshot gaps). */
-    universeQuotesBySym: {},
   };
-
-  function ingestUniverseQuotesPayload(pub) {
-    var q = {};
-    var syms = (pub && pub.symbols) || [];
-    for (var iq = 0; iq < syms.length; iq++) {
-      var r = syms[iq];
-      if (!r || typeof r !== "object") continue;
-      var sx = String(r.symbol || "").trim().toUpperCase();
-      if (!sx) continue;
-      q[sx] = { ltp: r.ltp, change_pct_day: r.change_pct_day };
-    }
-    state.universeQuotesBySym = q;
-  }
-
-  function mergeUniverseQuotesIntoPickerRow(sym, row) {
-    if (!row || typeof row !== "object") return row;
-    var s = String(sym || row.symbol || "").trim().toUpperCase();
-    var q = state.universeQuotesBySym && state.universeQuotesBySym[s];
-    if (!q) return row;
-    var out = {};
-    var k;
-    for (k in row) {
-      if (Object.prototype.hasOwnProperty.call(row, k)) out[k] = row[k];
-    }
-    if ((out.ltp == null || out.ltp === "" || Number(out.ltp) <= 0) && q.ltp != null && Number(q.ltp) > 0) {
-      out.ltp = q.ltp;
-    }
-    if ((out.change_pct_day == null || out.change_pct_day === "") && q.change_pct_day != null) {
-      out.change_pct_day = q.change_pct_day;
-    }
-    return out;
-  }
 
   function fmtPxCell(v) {
     if (v == null || v === "") return "—";
@@ -453,7 +419,7 @@
       "<tr><td colspan=\"6\" class=\"ic-muted\">Select a symbol above — quotes load only after you pick one.</td></tr>";
   }
 
-  /** Normalize GET /universe or /universe-with-quotes payloads into [{symbol, sector}, ...]. */
+  /** Normalize GET /universe or /approved-underlyings payloads into [{symbol, sector, instrument_key}, ...]. */
   function normalizeUniverseSymbolsPayload(u) {
     if (!u || typeof u !== "object") return [];
     var s = u.symbols;
@@ -464,15 +430,19 @@
       if (!r || typeof r !== "object") continue;
       var sym = String(r.symbol || "").trim().toUpperCase();
       if (!sym) continue;
-      out.push({ symbol: sym, sector: String(r.sector || "").trim() });
+      out.push({
+        symbol: sym,
+        sector: String(r.sector || "").trim(),
+        instrument_key: String(r.instrument_key || "").trim(),
+      });
     }
     return out;
   }
 
   /**
-   * Refresh universe rows from API without wiping the <select> (no "Loading…" flash).
-   * Order: public static list (no JWT) → authenticated /universe → /universe-with-quotes.
-   * Always keeps prior embedded fallback if all fail.
+   * Refresh universe master rows without wiping the <select> (no "Loading…" flash).
+   * Order: public list (no JWT) → authenticated /universe.
+   * Optional: /universe-with-quotes payload shape is accepted as a fallback for symbol list only.
    */
   async function loadUniverseMeta() {
     var prev = (state.universeMeta && state.universeMeta.length) ? state.universeMeta.slice() : icUniverseFallbackRows();
@@ -508,13 +478,6 @@
       state.universeMeta = list;
       populatePickerSelect();
       pickerShowQuoteBanner("");
-      try {
-        var uq = await fj(icApiPaths("universe-with-quotes"), {
-          headers: authHeaders(),
-          cache: "no-store",
-        });
-        ingestUniverseQuotesPayload(uq);
-      } catch (_uq) {}
     } catch (_e) {
       state.universeMeta = prev;
       populatePickerSelect();
@@ -588,14 +551,11 @@
         setPickerTablePlaceholder();
         return;
       }
-      selectUniverseSymbol(v);
+      var vu = v.toUpperCase();
+      state.symbol = vu;
+      setPickerNextEnabled(vu);
+      selectUniverseSymbol(vu);
     });
-  }
-
-  function rowHasUsableSpot(row) {
-    if (!row) return false;
-    var n = parseFloat(row.ltp);
-    return isFinite(n) && n > 0;
   }
 
   /** Sync select + outline after row update */
@@ -620,32 +580,25 @@
         r.style.outline = "3px solid #1f3864";
       });
     }
-    setPickerNextEnabled(row);
   }
 
-  /** After snapshot LTP is shown, try live upgrade without blocking the UI for 20–40s. */
-  function runLiveQuoteUpgradeBackground(genArg, sArg, sel, tb) {
-    var ctrl = new AbortController();
-    var to = setTimeout(function () {
-      try {
-        ctrl.abort();
-      } catch (_x) {}
-    }, 12000);
-    fjWithGatewayRetry(
-      icApiPaths("universe-symbol-quote?underlying=" + encodeURIComponent(sArg)),
-      { headers: authHeaders(), cache: "no-store", signal: ctrl.signal }
-    )
-      .then(function (res) {
-        clearTimeout(to);
-        if (genArg !== state.pickerQuoteGen) return;
-        var row = res && res.row;
-        if (!row || typeof row !== "object") return;
-        pickerShowQuoteBanner(res.quotes_error || "");
-        applyPickerDomFromRow(sel, tb, sArg, row);
-      })
-      .catch(function () {
-        clearTimeout(to);
-      });
+  function renderPickerRowQuoteError(sym, sector) {
+    return (
+      "<tr data-sym=\"" +
+      esc(sym) +
+      "\">" +
+      "<td><strong class=\"ic-mono\">" +
+      esc(sym) +
+      "</strong></td>" +
+      "<td><span class=\"ic-chip-pass ic-chip-sector\">" +
+      esc(sector || "—") +
+      "</span></td>" +
+      "<td class=\"ic-num ic-mono\"><span class=\"ic-muted\">—</span></td>" +
+      "<td class=\"ic-num\"><span class=\"ic-muted\">—</span></td>" +
+      "<td>No Trade</td>" +
+      "<td><button type=\"button\" class=\"ic-btn-global ic-btn-primary pickRow\">Analyze</button></td>" +
+      "</tr>"
+    );
   }
 
   async function selectUniverseSymbol(sym) {
@@ -672,114 +625,37 @@
     }
     if (tb) tb.innerHTML = renderPickerRowPending(s, sectorForPickerMeta(s));
     pickerShowQuoteBanner("");
-    setPickerNextEnabled("");
-    state.symbol = "";
-    state.pickerSymbols = [];
 
-    /* Phase A: DB snapshot + fallback from batched universe quotes (fills LTP gaps) */
-    var fastHadSpot = false;
-    var gotPartialFastRow = false;
-    try {
-      var snapRes = await fj(
-        icApiPaths("universe-symbol-snapshot-row?underlying=" + encodeURIComponent(s)),
-        { headers: authHeaders(), cache: "no-store" }
-      );
-      if (gen !== state.pickerQuoteGen) return;
-      if (snapRes && snapRes.row && typeof snapRes.row === "object") {
-        gotPartialFastRow = true;
-        var mergedSnap = mergeUniverseQuotesIntoPickerRow(s, snapRes.row);
-        applyPickerDomFromRow(sel, tb, s, mergedSnap);
-        fastHadSpot = rowHasUsableSpot(mergedSnap);
-        if (fastHadSpot) {
-          pickerShowQuoteBanner(snapRes.quotes_error || "");
-          /* Do not await slow route — live may refresh row in background */
-          runLiveQuoteUpgradeBackground(gen, s, sel, tb);
-          return;
-        }
-        pickerShowQuoteBanner(snapRes.quotes_error || "Waiting for live price…");
-      }
-    } catch (_snapErr) {
-      if (gen === state.pickerQuoteGen) {
-        pickerShowQuoteBanner("Loading live quote…");
-      }
-    }
-
-    if (gen !== state.pickerQuoteGen) return;
-    if (!gotPartialFastRow) {
-      pickerShowQuoteBanner("Loading live quote…");
-    }
-
-    /* Phase B: need full route — keep wait bounded (avoid 40s “Fetching…” feel) */
-    var slowMs = gotPartialFastRow ? 18000 : 22000;
     var ctrlSlow = new AbortController();
     var slowTo = setTimeout(function () {
       try {
         ctrlSlow.abort();
       } catch (_ab) {}
-    }, slowMs);
+    }, 12000);
     try {
       var res = await fjWithGatewayRetry(
         icApiPaths("universe-symbol-quote?underlying=" + encodeURIComponent(s)),
         { headers: authHeaders(), cache: "no-store", signal: ctrlSlow.signal }
       );
       if (gen !== state.pickerQuoteGen) return;
-      var row = res.row;
+      var row = res && res.row;
       if (!row || typeof row !== "object") {
         throw new Error("Invalid quote response (missing row).");
       }
-      var mergedSlow = mergeUniverseQuotesIntoPickerRow(s, row);
       pickerShowQuoteBanner(res.quotes_error || "");
-      applyPickerDomFromRow(sel, tb, s, mergedSlow);
+      applyPickerDomFromRow(sel, tb, s, row);
     } catch (e) {
       if (gen !== state.pickerQuoteGen) return;
-      var aborted =
-        e &&
-        (e.name === "AbortError" || /aborted|AbortError|timed out|timeout/i.test(String(e.message || "")));
-      if (rowHasUsableSpot(state.pickerSymbols && state.pickerSymbols[0])) {
-        pickerShowQuoteBanner("");
-        return;
-      }
-      if (gotPartialFastRow) {
-        var cur = state.pickerSymbols && state.pickerSymbols[0];
-        if (cur) {
-          var mergedCatch = mergeUniverseQuotesIntoPickerRow(s, cur);
-          applyPickerDomFromRow(sel, tb, s, mergedCatch);
-        }
-        var hasSpotNow = rowHasUsableSpot(state.pickerSymbols && state.pickerSymbols[0]);
-        var emSlow = e.message || String(e);
-        pickerShowQuoteBanner(
-          hasSpotNow
-            ? ""
-            : aborted
-              ? "Live quote timed out — try again or reload."
-              : emSlow.length > 180
-                ? emSlow.slice(0, 177) + "…"
-                : emSlow
-        );
-        setPickerNextEnabled(state.symbol || s);
-        return;
-      }
-      state.symbol = "";
-      state.pickerSymbols = [];
-      setPickerNextEnabled("");
+      state.symbol = s;
+      setPickerNextEnabled(s);
       var em = e.message || String(e);
       pickerShowQuoteBanner(em.length > 220 ? em.slice(0, 217) + "…" : em);
-      if (sel) {
-        var keep = false;
-        var qk;
-        for (qk = 0; qk < sel.options.length; qk++) {
-          if (sel.options[qk].value === s) {
-            keep = true;
-            break;
-          }
-        }
-        if (keep) {
-          sel.value = s;
-          if (sel.value !== s) sel.selectedIndex = qk;
-        }
-      }
       if (tb) {
-        tb.innerHTML = "<tr><td colspan=\"6\" class=\"ic-muted\">" + esc(em) + "</td></tr>";
+        tb.innerHTML = renderPickerRowQuoteError(s, sectorForPickerMeta(s));
+        wirePicker(tb);
+        tb.querySelectorAll("tr").forEach(function (r) {
+          r.style.outline = "3px solid #1f3864";
+        });
       }
     } finally {
       clearTimeout(slowTo);
@@ -812,7 +688,7 @@
       "<td class=\"ic-num ic-mono\"><span class=\"ic-muted\">…</span></td>" +
       "<td class=\"ic-num\"><span class=\"ic-muted\">…</span></td>" +
       "<td class=\"ic-num\"><span class=\"ic-muted\">…</span></td>" +
-      "<td><span class=\"ic-muted\">—</span></td>" +
+      "<td><span class=\"ic-muted\">No Trade</span></td>" +
       "</tr>"
     );
   }
@@ -830,7 +706,7 @@
   function renderPickerRow(row) {
     var ap = !!row.active_position;
     var warn = ap ? '<span class="ic-chip-warn ic-chip-pass">Dup</span>' : "";
-    var act = ap ? "Yes" : "—";
+    var act = ap ? "Yes" : "No Trade";
     return (
       "<tr data-sym=\"" +
       esc(row.symbol) +

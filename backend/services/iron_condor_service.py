@@ -11,7 +11,6 @@ import os
 import threading
 import time
 import copy
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import datetime, date, time as dt_time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -42,6 +41,10 @@ _ic_equity_ik_cache: Dict[str, str] = {}
 # DDL + extended migrations once per worker — they were doubling per /universe-symbol-quote (~tens of seconds).
 _ic_tables_lock = threading.Lock()
 _iron_condor_tables_ready_flag = False
+
+# One-time-ish cache: symbol, sector, equity instrument_key (master for picker / static APIs).
+_ic_master_universe_lock = threading.Lock()
+_ic_master_universe_rows: Optional[List[Dict[str, Any]]] = None
 
 
 def _sanitize_ic_quote_numbers(ltp_v: Any, pct_v: Any) -> Tuple[Optional[float], Optional[float]]:
@@ -78,6 +81,8 @@ def normalize_ic_picker_row_for_api(row: Dict[str, Any]) -> Dict[str, Any]:
     qs = r.get("quote_source")
     if qs is not None:
         r["quote_source"] = str(qs)
+    ik = r.get("instrument_key")
+    r["instrument_key"] = str(ik).strip() if ik else ""
     return r
 
 
@@ -90,7 +95,41 @@ def normalize_ic_universe_row_for_api(row: Dict[str, Any]) -> Dict[str, Any]:
     r["sector"] = str(r.get("sector") or "").strip()
     r["ltp"] = lt
     r["change_pct_day"] = cg
+    iku = r.get("instrument_key")
+    r["instrument_key"] = str(iku).strip() if iku else ""
     return r
+
+
+def get_iron_condor_universe_master_rows() -> List[Dict[str, Any]]:
+    """Symbol, sector, equity instrument_key for the approved universe (cached after first resolve)."""
+    global _ic_master_universe_rows
+    if _ic_master_universe_rows is not None:
+        return [{**r} for r in _ic_master_universe_rows]
+    with _ic_master_universe_lock:
+        if _ic_master_universe_rows is None:
+            rows: List[Dict[str, Any]] = []
+            for sym_u, sector in sorted(IRON_CONDOR_UNIVERSE.items()):
+                api = option_chain_underlying(str(sym_u))
+                ik = _instrument_key_for_ic_equity(api) or ""
+                rows.append({"symbol": str(sym_u), "sector": str(sector), "instrument_key": ik})
+            _ic_master_universe_rows = rows
+        return [{**r} for r in _ic_master_universe_rows]
+
+
+def _ic_prev_day_close_from_ohlc(nested: Any) -> float:
+    """Prefer previous session close keys from Upstox ohlc; fall back to close."""
+    if not isinstance(nested, dict):
+        return 0.0
+    for key in ("previous_close", "prev_close", "close"):
+        v = nested.get(key)
+        if v is not None and v != "":
+            try:
+                f = float(v)
+                if f > 0:
+                    return f
+            except (TypeError, ValueError):
+                continue
+    return 0.0
 
 
 def _normalize_ik_key(k: str) -> str:
@@ -130,11 +169,16 @@ def build_universe_picker_rows_with_quotes_cached() -> Tuple[List[Dict[str, Any]
     if _ic_uq_cache_rows and now < _ic_uq_cache_deadline:
         return ([copy.deepcopy(r) for r in _ic_uq_cache_rows], None)
 
-    pairs: List[Tuple[str, str, Optional[str]]] = []
-    for sym, sec in sorted(IRON_CONDOR_UNIVERSE.items()):
-        api = option_chain_underlying(sym)
-        ik = vwap_service.get_instrument_key(api)
-        pairs.append((sym, sec, ik))
+    master = get_iron_condor_universe_master_rows()
+    pairs: List[Tuple[str, str, str]] = []
+    for r in master:
+        sym_u = str(r.get("symbol") or "").strip()
+        sec_u = str(r.get("sector") or "").strip()
+        ik_u = str(r.get("instrument_key") or "").strip()
+        if not ik_u and sym_u:
+            api = option_chain_underlying(sym_u)
+            ik_u = _instrument_key_for_ic_equity(api) or ""
+        pairs.append((sym_u, sec_u, ik_u))
 
     tok = (getattr(vwap_service, "access_token", None) or "").strip()
     quotes_error: Optional[str] = None
@@ -172,12 +216,7 @@ def build_universe_picker_rows_with_quotes_cached() -> Tuple[List[Dict[str, Any]
                 lp = float(qd.get("last_price") or 0)
                 ltp_f = lp if lp > 0 else None
                 nested = qd.get("ohlc") if isinstance(qd.get("ohlc"), dict) else {}
-                prev = float(
-                    nested.get("close")
-                    or nested.get("previous_close")
-                    or nested.get("prev_close")
-                    or 0
-                )
+                prev = _ic_prev_day_close_from_ohlc(nested)
                 if ltp_f and prev > 0:
                     chg = round((ltp_f - prev) / prev * 100.0, 2)
             except (TypeError, ValueError):
@@ -187,6 +226,7 @@ def build_universe_picker_rows_with_quotes_cached() -> Tuple[List[Dict[str, Any]
                 {
                     "symbol": sym,
                     "sector": sec,
+                    "instrument_key": ik or "",
                     "ltp": ltp_f,
                     "change_pct_day": chg,
                 }
@@ -277,11 +317,18 @@ def universe_picker_snapshot_row_only(db: Session, user_id: int, symbol: str) ->
             "No snapshot close for today yet — run refresh daily cache or wait for the pre-market job."
         )
 
+    ik_snap = ""
+    for r in get_iron_condor_universe_master_rows():
+        if str(r.get("symbol") or "").strip().upper() == sym:
+            ik_snap = str(r.get("instrument_key") or "").strip()
+            break
+
     return (
         normalize_ic_picker_row_for_api(
             {
                 "symbol": sym,
                 "sector": sec,
+                "instrument_key": ik_snap,
                 "ltp": ltp_f,
                 "change_pct_day": chg,
                 "active_position": active,
@@ -295,20 +342,16 @@ def universe_picker_snapshot_row_only(db: Session, user_id: int, symbol: str) ->
 def warm_iron_condor_startup() -> None:
     """
     Run once per worker at process boot (see main.py lifespan).
-    Pays DDL/migrations off the picker path and warms equity instrument-key resolution for every
-    approved underlying so the first /universe-symbol-quote is not penalized by cold ISIN/files.
+    Pays DDL/migrations off the picker path and resolves equity instrument keys once for the universe.
     """
     ensure_iron_condor_tables()
-    for sym in sorted(IRON_CONDOR_UNIVERSE.keys()):
-        api = option_chain_underlying(str(sym))
-        _instrument_key_for_ic_equity(api)
+    get_iron_condor_universe_master_rows()
 
 
 def universe_picker_row_for_symbol(db: Session, user_id: int, symbol: str) -> Tuple[Dict[str, Any], Optional[str]]:
     """
-    One picker row with live quote (single batched key). Used after user picks a symbol.
-    Does not use the universe-wide quote cache.
-    Broker call is capped (thread pool + short HTTP timeouts) so the route cannot stall nginx/clients for minutes.
+    One picker row: LTP + prior session close from a single Upstox market-quote snapshot (one key),
+    active flag from DB. Uses cached master instrument_key for the symbol.
     """
     ensure_iron_condor_tables()
     sym = (symbol or "").strip().upper()
@@ -328,108 +371,65 @@ def universe_picker_row_for_symbol(db: Session, user_id: int, symbol: str) -> Tu
     ).scalar()
     active = int(row_ct or 0) >= 1
 
-    trade_date = mh_ic._normalize_ist(None).date()
-    _, closes = read_underlying_atr_closes_session(db, trade_date, sym)
+    ik = ""
+    for r in get_iron_condor_universe_master_rows():
+        if str(r.get("symbol") or "").strip().upper() == sym:
+            ik = str(r.get("instrument_key") or "").strip()
+            break
+    if not ik:
+        api = option_chain_underlying(sym)
+        ik = _instrument_key_for_ic_equity(api) or ""
 
-    api = option_chain_underlying(sym)
-    ik = _instrument_key_for_ic_equity(api)
     tok = (getattr(vwap_service, "access_token", None) or "").strip()
     quotes_error: Optional[str] = None
     ltp_f: Optional[float] = None
     chg: Optional[float] = None
-
     quote_source = "live"
-    snapshot_ok = False
-    # Prefill from DB snapshot first so picker returns usable LTP/% quickly when pre-market job ran,
-    # then optionally overlay live (short wait if snapshot_ok — avoids hanging on broker).
-    if closes and len(closes) >= 1:
-        try:
-            last = float(closes[-1])
-            if last > 0:
-                ltp_f = last
-                if len(closes) >= 2:
-                    prev_d = float(closes[-2])
-                    if prev_d > 0:
-                        chg = round((last - prev_d) / prev_d * 100.0, 2)
-                snapshot_ok = True
-                quote_source = "daily_cache"
-        except (TypeError, ValueError):
-            pass
-
-    live_timed_out = False
-    broker_wall_s = 3.0 if snapshot_ok else 12.0
 
     if not tok:
-        if not snapshot_ok:
-            quotes_error = (
-                "Upstox is not connected (no access token). Sign in to Upstox from "
-                "Settings or use the OAuth link, then retry."
-            )
-        else:
-            quotes_error = None
+        quotes_error = (
+            "Upstox is not connected (no access token). Sign in to Upstox from "
+            "Settings or use the OAuth link, then reload this page."
+        )
     elif not ik:
-        if not snapshot_ok:
-            quotes_error = "Could not resolve equity instrument key for this symbol."
-        else:
-            quotes_error = None
+        quotes_error = "Could not resolve equity instrument key for this symbol."
     else:
-
-        def _snap() -> Dict[str, Any]:
-            try:
-                snap = vwap_service.get_market_quote_snapshots_batch(
-                    [ik],
-                    max_per_request=10,
-                    request_timeout=5,
-                    max_retries=1,
-                )
-                return snap if snap else {}
-            except Exception as ex:
-                logger.warning("Iron Condor single-symbol quote failed: %s", ex)
-                return {}
-
         batch: Dict[str, Any] = {}
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            fut = pool.submit(_snap)
-            try:
-                batch = fut.result(timeout=broker_wall_s)
-            except FuturesTimeoutError:
-                live_timed_out = True
-                if snapshot_ok:
-                    quotes_error = None
-                else:
-                    quotes_error = "Live quote timed out (broker slow or unreachable)."
-
+        try:
+            batch = vwap_service.get_market_quote_snapshots_batch(
+                [ik],
+                max_per_request=10,
+                request_timeout=4,
+                max_retries=1,
+            )
+        except Exception as ex:
+            logger.warning("Iron Condor single-symbol quote failed: %s", ex)
+            quotes_error = "Upstox quotes request failed — check broker connection and token."
         qd = _batch_lookup(batch, ik) if batch else None
         if qd:
             try:
                 lp = float(qd.get("last_price") or 0)
                 live_ltp = lp if lp > 0 else None
                 nested = qd.get("ohlc") if isinstance(qd.get("ohlc"), dict) else {}
-                prev = float(
-                    nested.get("close")
-                    or nested.get("previous_close")
-                    or nested.get("prev_close")
-                    or 0
-                )
+                prev = _ic_prev_day_close_from_ohlc(nested)
                 if live_ltp and prev > 0:
                     chg = round((live_ltp - prev) / prev * 100.0, 2)
                 if live_ltp is not None and live_ltp > 0:
                     ltp_f = live_ltp
                     quotes_error = None
-                    quote_source = "live"
             except (TypeError, ValueError):
                 pass
-        elif not live_timed_out and not snapshot_ok:
+        if ltp_f is None or ltp_f <= 0:
             quotes_error = quotes_error or (
                 "Upstox returned no quote for this symbol (session may be expired)."
             )
-        # snapshot_ok + no live payload: keep quiet — LTP/% already come from DB snapshot
 
     return (
         normalize_ic_picker_row_for_api(
             {
                 "symbol": sym,
                 "sector": sec,
+                "instrument_key": ik,
                 "ltp": ltp_f,
                 "change_pct_day": chg,
                 "active_position": active,
