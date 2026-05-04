@@ -130,6 +130,15 @@ def verify_positions_held(db: Session = Depends(get_db), user: User = Depends(_a
     return {"success": True}
 
 
+@router.get("/approved-underlyings")
+def iron_condor_approved_underlyings() -> Dict[str, Any]:
+    """
+    Static approved symbol ↔ sector list (same source as /universe). No auth — used to populate
+    the picker when JWT/session is missing or slow; quotes/checklist still require login.
+    """
+    return {"symbols": [{"symbol": k, "sector": v} for k, v in sorted(IRON_CONDOR_UNIVERSE.items())]}
+
+
 @router.get("/universe")
 def iron_condor_universe(_user: User = Depends(_auth)) -> Dict[str, Any]:
     return {"symbols": [{"symbol": k, "sector": v} for k, v in sorted(IRON_CONDOR_UNIVERSE.items())]}

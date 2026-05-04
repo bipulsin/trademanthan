@@ -379,19 +379,28 @@
     return out;
   }
 
+  /**
+   * Refresh universe rows from API without wiping the <select> (no "Loading…" flash).
+   * Order: public static list (no JWT) → authenticated /universe → /universe-with-quotes.
+   * Always keeps prior embedded fallback if all fail.
+   */
   async function loadUniverseMeta() {
-    var sel = document.getElementById("pickerSelect");
-    if (sel) {
-      sel.disabled = true;
-      sel.innerHTML = "<option value=\"\">Loading universe…</option>";
-    }
-    pickerShowQuoteBanner("");
+    var prev = (state.universeMeta && state.universeMeta.length) ? state.universeMeta.slice() : icUniverseFallbackRows();
     try {
-      var u = await fj(icApiPaths("universe"), {
-        headers: authHeaders(),
-        cache: "no-store",
-      });
-      var list = normalizeUniverseSymbolsPayload(u);
+      var list = [];
+      try {
+        var pub = await fj(["/api/iron-condor/approved-underlyings"], { cache: "no-store" });
+        list = normalizeUniverseSymbolsPayload(pub);
+      } catch (_ePub) {}
+      if (!list.length) {
+        try {
+          var u = await fj(icApiPaths("universe"), {
+            headers: authHeaders(),
+            cache: "no-store",
+          });
+          list = normalizeUniverseSymbolsPayload(u);
+        } catch (_e2) {}
+      }
       if (!list.length) {
         try {
           var u2 = await fj(icApiPaths("universe-with-quotes"), {
@@ -399,37 +408,32 @@
             cache: "no-store",
           });
           list = normalizeUniverseSymbolsPayload(u2);
-        } catch (_e2) {
-          /* keep list empty — may use embedded fallback below */
-        }
+        } catch (_e3) {}
       }
       if (!list.length) {
-        list = icUniverseFallbackRows();
-        pickerShowQuoteBanner("Using embedded approved list (server returned no symbols). Refresh if this persists.");
-      } else {
-        pickerShowQuoteBanner("");
+        state.universeMeta = prev;
+        populatePickerSelect();
+        return;
       }
       state.universeMeta = list;
       populatePickerSelect();
-    } catch (e) {
-      var em = String(e.message || e || "");
-      var authish = /session|authenticate|not authenticated|401|403|sign in/i.test(em);
-      state.universeMeta = authish ? [] : icUniverseFallbackRows();
+      pickerShowQuoteBanner("");
+    } catch (_e) {
+      state.universeMeta = prev;
       populatePickerSelect();
-      if (!authish) {
-        pickerShowQuoteBanner(em.length > 220 ? em.slice(0, 217) + "…" : em);
-      } else {
-        pickerShowQuoteBanner("");
-      }
-      var tb = document.getElementById("pickerBody");
-      if (tb) {
-        tb.innerHTML =
-          "<tr><td colspan=\"6\" class=\"ic-muted\">" + esc(em) + "</td></tr>";
-      }
-    } finally {
-      var s2 = document.getElementById("pickerSelect");
-      if (s2) s2.disabled = false;
     }
+  }
+
+  /** Run as soon as DOM is ready — do not wait for /workspace (that was blocking the picker). */
+  function bootIronCondorUiEarly() {
+    applySavedTheme();
+    bindThemeSyncForCharts();
+    loadSessionLine();
+    setPickerTablePlaceholder();
+    wirePickerSelect();
+    state.universeMeta = icUniverseFallbackRows();
+    populatePickerSelect();
+    loadUniverseMeta();
   }
 
   function populatePickerSelect() {
@@ -1222,15 +1226,15 @@
     loadEquityCurve();
   };
 
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", bootIronCondorUiEarly);
+  } else {
+    bootIronCondorUiEarly();
+  }
+
   fj(icApiPaths("workspace"), { headers: authHeaders() })
     .catch(function () {})
     .finally(function () {
-      applySavedTheme();
-      bindThemeSyncForCharts();
-      loadSessionLine();
-      setPickerTablePlaceholder();
-      wirePickerSelect();
-      loadUniverseMeta();
       refreshWorkspaceQuiet();
       loadEquityCurve();
       startPolling();
