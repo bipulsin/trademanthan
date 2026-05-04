@@ -18,7 +18,7 @@ import pytz
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from backend.database import engine
+from backend.database import SessionLocal, engine
 from backend.services.iron_condor_universe import IRON_CONDOR_UNIVERSE, sector_for_symbol
 from backend.services.upstox_service import upstox_service as vwap_service
 from backend.services.iron_condor_snapshot_cache import (
@@ -372,10 +372,9 @@ def warm_iron_condor_startup() -> None:
         logger.warning("Iron Condor warm: equity IK preload skipped: %s", e)
 
 
-def universe_picker_row_for_symbol(db: Session, user_id: int, symbol: str) -> Tuple[Dict[str, Any], Optional[str]]:
+def universe_picker_row_for_symbol(user_id: int, symbol: str) -> Tuple[Dict[str, Any], Optional[str]]:
     """
-    Hot path: DB active check (no DDL) + one Upstox snapshot for the picked symbol only.
-    Instrument key comes from the per-symbol resolver cache, not the full universe master list.
+    Hot path: short DB session for active-position only, then Upstox (no pooled connection held across broker I/O).
     """
     t0 = time.perf_counter()
     sym = (symbol or "").strip().upper()
@@ -384,7 +383,13 @@ def universe_picker_row_for_symbol(db: Session, user_id: int, symbol: str) -> Tu
         return {}, "Symbol is not in the Iron Condor universe."
 
     t1 = time.perf_counter()
-    active = user_has_ic_active_open_position(db, user_id, sym)
+    active = False
+    if SessionLocal is not None:
+        dbq = SessionLocal()
+        try:
+            active = user_has_ic_active_open_position(dbq, user_id, sym)
+        finally:
+            dbq.close()
     t2 = time.perf_counter()
     api = option_chain_underlying(sym)
     ik = _instrument_key_for_ic_equity(api) or ""

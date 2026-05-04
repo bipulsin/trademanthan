@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from backend.database import get_db
+from backend.database import SessionLocal, get_db
 from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
 from backend.services.iron_condor_universe import sector_for_symbol
@@ -31,6 +31,17 @@ logger = logging.getLogger(__name__)
 
 def _auth(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
     return get_user_from_token(token, db)
+
+
+def _auth_quick_db(token: str = Depends(oauth2_scheme)) -> User:
+    """Same as _auth but closes the session before the route runs — do not hold DB pool through slow broker calls."""
+    if SessionLocal is None:
+        raise HTTPException(status_code=503, detail="Database unavailable.")
+    db = SessionLocal()
+    try:
+        return get_user_from_token(token, db)
+    finally:
+        db.close()
 
 
 def _ser(d: Dict[str, Any]) -> Dict[str, Any]:
@@ -228,12 +239,11 @@ def universe_symbol_snapshot_row(
 @router.get("/universe-symbol-quote")
 def universe_symbol_quote(
     underlying: str = Query(..., min_length=1, max_length=32),
-    db: Session = Depends(get_db),
-    user: User = Depends(_auth),
+    user: User = Depends(_auth_quick_db),
 ) -> Dict[str, Any]:
     """Live quote for one approved underlying after user selection (no full-universe prefetch)."""
     try:
-        row, quotes_error = ic.universe_picker_row_for_symbol(db, int(user.id), underlying.strip())
+        row, quotes_error = ic.universe_picker_row_for_symbol(int(user.id), underlying.strip())
         if not row:
             raise HTTPException(
                 status_code=400,
