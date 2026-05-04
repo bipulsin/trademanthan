@@ -557,6 +557,32 @@
     }
   }
 
+  /** After snapshot LTP is shown, try live upgrade without blocking the UI for 20–40s. */
+  function runLiveQuoteUpgradeBackground(genArg, sArg, sel, tb) {
+    var ctrl = new AbortController();
+    var to = setTimeout(function () {
+      try {
+        ctrl.abort();
+      } catch (_x) {}
+    }, 12000);
+    fjWithGatewayRetry(
+      icApiPaths("universe-symbol-quote?underlying=" + encodeURIComponent(sArg)),
+      { headers: authHeaders(), cache: "no-store", signal: ctrl.signal }
+    )
+      .then(function (res) {
+        clearTimeout(to);
+        if (genArg !== state.pickerQuoteGen) return;
+        var row = res && res.row;
+        if (!row || typeof row !== "object") return;
+        pickerShowQuoteBanner(res.quotes_error || "");
+        applyPickerDomFromRow(sel, tb, sArg, row);
+        document.getElementById("gotoChecklistBtn").disabled = false;
+      })
+      .catch(function () {
+        clearTimeout(to);
+      });
+  }
+
   async function selectUniverseSymbol(sym) {
     var s = (sym || "").trim().toUpperCase();
     if (!s) return;
@@ -580,12 +606,12 @@
       sk.innerHTML = "";
     }
     if (tb) tb.innerHTML = renderPickerRowPending(s, sectorForPickerMeta(s));
-    pickerShowQuoteBanner("Fetching quote…");
+    pickerShowQuoteBanner("");
     document.getElementById("gotoChecklistBtn").disabled = true;
     state.symbol = "";
     state.pickerSymbols = [];
 
-    /* Phase A: DB snapshot only (milliseconds) — clears endless “Fetching quote…” when cache exists */
+    /* Phase A: DB snapshot — fast path for LTP when daily cache exists */
     var fastHadSpot = false;
     var gotPartialFastRow = false;
     try {
@@ -601,21 +627,31 @@
         if (fastHadSpot) {
           document.getElementById("gotoChecklistBtn").disabled = false;
           pickerShowQuoteBanner(snapRes.quotes_error || "");
-        } else {
-          pickerShowQuoteBanner(snapRes.quotes_error || "Fetching quote…");
+          /* Do not await slow route — banner stays clear; live may refresh row in background */
+          runLiveQuoteUpgradeBackground(gen, s, sel, tb);
+          return;
         }
+        pickerShowQuoteBanner(snapRes.quotes_error || "Waiting for live price…");
       }
-    } catch (_snapErr) {}
+    } catch (_snapErr) {
+      if (gen === state.pickerQuoteGen) {
+        pickerShowQuoteBanner("Loading live quote…");
+      }
+    }
 
     if (gen !== state.pickerQuoteGen) return;
+    if (!gotPartialFastRow) {
+      pickerShowQuoteBanner("Loading live quote…");
+    }
 
-    /* Phase B: full route (DDL + broker) — upgrade live; capped so UI can settle on snapshot */
+    /* Phase B: need full route — keep wait bounded (avoid 40s “Fetching…” feel) */
+    var slowMs = gotPartialFastRow ? 18000 : 22000;
     var ctrlSlow = new AbortController();
     var slowTo = setTimeout(function () {
       try {
         ctrlSlow.abort();
       } catch (_ab) {}
-    }, 40000);
+    }, slowMs);
     try {
       var res = await fjWithGatewayRetry(
         icApiPaths("universe-symbol-quote?underlying=" + encodeURIComponent(s)),
