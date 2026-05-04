@@ -631,7 +631,7 @@
       try {
         ctrlSlow.abort();
       } catch (_ab) {}
-    }, 12000);
+    }, 25000);
     try {
       var res = await fjWithGatewayRetry(
         icApiPaths("universe-symbol-quote?underlying=" + encodeURIComponent(s)),

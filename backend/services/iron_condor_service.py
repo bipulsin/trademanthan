@@ -101,7 +101,11 @@ def normalize_ic_universe_row_for_api(row: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def get_iron_condor_universe_master_rows() -> List[Dict[str, Any]]:
-    """Symbol, sector, equity instrument_key for the approved universe (cached after first resolve)."""
+    """
+    Symbol, sector, equity instrument_key for the approved universe — used only by /universe and
+    /approved-underlyings (lazy first call per worker). Hot paths resolve one key via
+    `_instrument_key_for_ic_equity` instead of building this list.
+    """
     global _ic_master_universe_rows
     if _ic_master_universe_rows is not None:
         return [{**r} for r in _ic_master_universe_rows]
@@ -169,16 +173,11 @@ def build_universe_picker_rows_with_quotes_cached() -> Tuple[List[Dict[str, Any]
     if _ic_uq_cache_rows and now < _ic_uq_cache_deadline:
         return ([copy.deepcopy(r) for r in _ic_uq_cache_rows], None)
 
-    master = get_iron_condor_universe_master_rows()
     pairs: List[Tuple[str, str, str]] = []
-    for r in master:
-        sym_u = str(r.get("symbol") or "").strip()
-        sec_u = str(r.get("sector") or "").strip()
-        ik_u = str(r.get("instrument_key") or "").strip()
-        if not ik_u and sym_u:
-            api = option_chain_underlying(sym_u)
-            ik_u = _instrument_key_for_ic_equity(api) or ""
-        pairs.append((sym_u, sec_u, ik_u))
+    for sym_u, sector in sorted(IRON_CONDOR_UNIVERSE.items()):
+        api = option_chain_underlying(str(sym_u))
+        ik_u = _instrument_key_for_ic_equity(api) or ""
+        pairs.append((str(sym_u), str(sector), ik_u))
 
     tok = (getattr(vwap_service, "access_token", None) or "").strip()
     quotes_error: Optional[str] = None
@@ -265,6 +264,37 @@ def _instrument_key_for_ic_equity(api_symbol: str) -> Optional[str]:
     return ik
 
 
+def iron_condor_position_table_exists(db: Session) -> bool:
+    """Fast check — avoids ensure_iron_condor_tables() when the table is already there."""
+    try:
+        return bool(db.execute(text("SELECT to_regclass('public.iron_condor_position')")).scalar())
+    except Exception:
+        return False
+
+
+def user_has_ic_active_open_position(db: Session, user_id: int, underlying: str) -> bool:
+    """Active / open / adjusted row for this underlying; no DDL if table missing."""
+    if not iron_condor_position_table_exists(db):
+        return False
+    sym = (underlying or "").strip()
+    if not sym:
+        return False
+    try:
+        row_ct = db.execute(
+            text(
+                """
+                SELECT COUNT(*) FROM iron_condor_position
+                WHERE user_id = :uid AND UPPER(TRIM(underlying)) = UPPER(:sy)
+                  AND UPPER(status) IN ('ACTIVE', 'OPEN', 'ADJUSTED')
+                """
+            ),
+            {"uid": user_id, "sy": sym},
+        ).scalar()
+        return int(row_ct or 0) >= 1
+    except Exception:
+        return False
+
+
 def universe_picker_snapshot_row_only(db: Session, user_id: int, symbol: str) -> Tuple[Dict[str, Any], Optional[str]]:
     """
     DB-only picker row (today's pre-market daily closes). Skips ensure_iron_condor_tables and Upstox.
@@ -276,23 +306,7 @@ def universe_picker_snapshot_row_only(db: Session, user_id: int, symbol: str) ->
     if not sec:
         return {}, "Symbol is not in the Iron Condor universe."
 
-    active = False
-    try:
-        reg = db.execute(text("SELECT to_regclass('public.iron_condor_position')")).scalar()
-        if reg:
-            row_ct = db.execute(
-                text(
-                    """
-                    SELECT COUNT(*) FROM iron_condor_position
-                    WHERE user_id = :uid AND UPPER(TRIM(underlying)) = UPPER(:sy)
-                      AND UPPER(status) IN ('ACTIVE', 'OPEN', 'ADJUSTED')
-                    """
-                ),
-                {"uid": user_id, "sy": sym},
-            ).scalar()
-            active = int(row_ct or 0) >= 1
-    except Exception:
-        active = False
+    active = user_has_ic_active_open_position(db, user_id, sym)
 
     trade_date = mh_ic._normalize_ist(None).date()
     _, closes = read_underlying_atr_closes_session(db, trade_date, sym)
@@ -317,11 +331,7 @@ def universe_picker_snapshot_row_only(db: Session, user_id: int, symbol: str) ->
             "No snapshot close for today yet — run refresh daily cache or wait for the pre-market job."
         )
 
-    ik_snap = ""
-    for r in get_iron_condor_universe_master_rows():
-        if str(r.get("symbol") or "").strip().upper() == sym:
-            ik_snap = str(r.get("instrument_key") or "").strip()
-            break
+    ik_snap = _instrument_key_for_ic_equity(option_chain_underlying(sym)) or ""
 
     return (
         normalize_ic_picker_row_for_api(
@@ -342,43 +352,25 @@ def universe_picker_snapshot_row_only(db: Session, user_id: int, symbol: str) ->
 def warm_iron_condor_startup() -> None:
     """
     Run once per worker at process boot (see main.py lifespan).
-    Pays DDL/migrations off the picker path and resolves equity instrument keys once for the universe.
+    Pays DDL/migrations once so checklist/positions paths are ready. Does not pre-build the universe
+    instrument list (that is lazy on first /universe or /approved-underlyings).
     """
     ensure_iron_condor_tables()
-    get_iron_condor_universe_master_rows()
 
 
 def universe_picker_row_for_symbol(db: Session, user_id: int, symbol: str) -> Tuple[Dict[str, Any], Optional[str]]:
     """
-    One picker row: LTP + prior session close from a single Upstox market-quote snapshot (one key),
-    active flag from DB. Uses cached master instrument_key for the symbol.
+    Hot path: DB active check (no DDL) + one Upstox snapshot for the picked symbol only.
+    Instrument key comes from the per-symbol resolver cache, not the full universe master list.
     """
-    ensure_iron_condor_tables()
     sym = (symbol or "").strip().upper()
     sec = sector_for_symbol(sym)
     if not sec:
         return {}, "Symbol is not in the Iron Condor universe."
 
-    row_ct = db.execute(
-        text(
-            """
-            SELECT COUNT(*) FROM iron_condor_position
-            WHERE user_id = :uid AND UPPER(TRIM(underlying)) = UPPER(:sy)
-              AND UPPER(status) IN ('ACTIVE', 'OPEN', 'ADJUSTED')
-            """
-        ),
-        {"uid": user_id, "sy": sym},
-    ).scalar()
-    active = int(row_ct or 0) >= 1
-
-    ik = ""
-    for r in get_iron_condor_universe_master_rows():
-        if str(r.get("symbol") or "").strip().upper() == sym:
-            ik = str(r.get("instrument_key") or "").strip()
-            break
-    if not ik:
-        api = option_chain_underlying(sym)
-        ik = _instrument_key_for_ic_equity(api) or ""
+    active = user_has_ic_active_open_position(db, user_id, sym)
+    api = option_chain_underlying(sym)
+    ik = _instrument_key_for_ic_equity(api) or ""
 
     tok = (getattr(vwap_service, "access_token", None) or "").strip()
     quotes_error: Optional[str] = None

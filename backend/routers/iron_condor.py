@@ -170,17 +170,18 @@ def universe_with_quotes(
 ) -> Dict[str, Any]:
     """Picker: LTP, day %change, sector — one batched Upstox request + short TTL cache."""
     try:
-        ic.ensure_iron_condor_tables()
-        active_rows = db.execute(
-            text(
-                """
-                SELECT UPPER(TRIM(underlying)) AS u FROM iron_condor_position
-                WHERE user_id = :uid AND UPPER(status) IN ('ACTIVE', 'OPEN', 'ADJUSTED')
-                """
-            ),
-            {"uid": int(user.id)},
-        ).fetchall()
-        active_set = {str(r[0]) for r in active_rows if r and r[0]}
+        active_set = set()
+        if ic.iron_condor_position_table_exists(db):
+            active_rows = db.execute(
+                text(
+                    """
+                    SELECT UPPER(TRIM(underlying)) AS u FROM iron_condor_position
+                    WHERE user_id = :uid AND UPPER(status) IN ('ACTIVE', 'OPEN', 'ADJUSTED')
+                    """
+                ),
+                {"uid": int(user.id)},
+            ).fetchall()
+            active_set = {str(r[0]) for r in active_rows if r and r[0]}
         base_rows, quotes_error = ic.build_universe_picker_rows_with_quotes_cached()
         out = []
         for r in base_rows:
