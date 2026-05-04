@@ -4,6 +4,7 @@ Pre-entry checklist for Iron Condor (chips: PASS / FAIL / WARN).
 from __future__ import annotations
 
 import logging
+import math
 from concurrent.futures import ThreadPoolExecutor, as_completed, wait
 from datetime import datetime, timedelta, date
 from typing import Any, Dict, Iterator, List, Optional, Tuple
@@ -16,6 +17,7 @@ from backend.services.upstox_service import upstox_service as vwap_service
 from backend.services.iron_condor_service import option_chain_underlying, ensure_iron_condor_tables
 from backend.services.iron_condor_earnings import fetch_nse_results_hint
 from backend.services.iron_condor_iv_vol import iv_context_chip
+from backend.services.market_sentiment_dials import build_dial_rows
 
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
@@ -300,12 +302,33 @@ def iter_pre_entry_checklist_events(
     api_sym = option_chain_underlying(symbol)
     eq_key = vwap_service.get_instrument_key(api_sym)
 
-    td_chk = datetime.now(IST).date()
-    vix_live_cache = read_india_vix_session(db, td_chk)
-    if vix_live_cache is not None and vix_live_cache > 0:
-        vix, verr = vix_live_cache, None
-    else:
-        vix, verr = fetch_india_vix()
+    # Same India VIX spot as dashboard "Market Sentiments" (Upstox → Yahoo); fallback to legacy quote/cache.
+    vix: Optional[float] = None
+    verr: Optional[str] = None
+    try:
+        for row in build_dial_rows(vwap_service, basis="today"):
+            if str(row.get("id") or "").lower() == "indiavix":
+                vv = row.get("vix_value")
+                if vv is None:
+                    vv = row.get("last")
+                if vv is not None:
+                    try:
+                        vf = float(vv)
+                        if math.isfinite(vf) and vf > 0:
+                            vix = vf
+                    except (TypeError, ValueError):
+                        pass
+                break
+    except Exception as ex:
+        logger.warning("checklist: build_dial_rows (India VIX): %s", ex)
+    if vix is None:
+        td_chk = datetime.now(IST).date()
+        vix_live_cache = read_india_vix_session(db, td_chk)
+        if vix_live_cache is not None and vix_live_cache > 0:
+            vix = float(vix_live_cache)
+            verr = None
+        else:
+            vix, verr = fetch_india_vix()
     yield emit_chip(vix_chip(vix))
     yield emit_chip(active_same_symbol_chip(db, user_id, symbol))
     yield emit_chip(sector_concentration_chip(db, user_id, sector))

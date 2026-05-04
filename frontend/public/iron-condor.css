@@ -407,6 +407,27 @@ body.theme-page.iron-c-page[data-theme="dark"] .ic-picker-warn {
   background: rgba(255, 183, 77, 0.1);
 }
 
+/* Pre-entry checklist chips — two columns (step 2) */
+.ic-chk-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 16px;
+  align-items: start;
+}
+
+.ic-chk-cell {
+  margin: 0;
+  line-height: 1.45;
+  font-size: 0.82rem;
+  min-height: 1.5em;
+}
+
+@media (max-width: 560px) {
+  .ic-chk-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .ic-skel-row {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;

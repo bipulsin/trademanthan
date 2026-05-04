@@ -116,6 +116,8 @@
     universeStep1AuthMerged: false,
     universeStep1QuoteGen: 0,
     universeQuoteTimer: null,
+    checklistFillPollTimer: null,
+    checklistPollRounds: 0,
     mtmSpark: [],
     soundEpoch: 0,
     mtmChartJs: null,
@@ -277,6 +279,9 @@
     document.querySelectorAll(".ic-step-pill").forEach(function (b) {
       b.setAttribute("data-active", b.getAttribute("data-step") === String(n) ? "1" : "0");
     });
+    if (n !== 2) {
+      stopChecklistFillPolling();
+    }
     if (n === 1) {
       refreshUniverseQuotesQuiet();
     }
@@ -807,6 +812,7 @@
   }
 
   function resetUniversePicker() {
+    stopChecklistFillPolling();
     state.symbol = "";
     state.nxt_earning_iso = "";
     state.checklist = null;
@@ -838,16 +844,16 @@
 
   function renderChecklistPlaceholders() {
     var area = document.getElementById("checklistArea");
-    area.innerHTML = CHECKLIST_PLACEHOLDER_CODES.map(function (code) {
+    var cells = CHECKLIST_PLACEHOLDER_CODES.map(function (code) {
       return (
-        '<div data-ic-chk="' +
+        '<div class="ic-chk-cell" data-ic-chk="' +
         esc(code) +
-        "\" style=\"margin:8px 0;line-height:1.45\">" +
-        "<span class=\"ic-chip-info\">" +
+        '"><span class="ic-chip-info">' +
         esc(code) +
         ' · …</span> · <span class="ic-muted">—</span></div>'
       );
     }).join("");
+    area.innerHTML = '<div class="ic-chk-grid" role="list">' + cells + "</div>";
   }
 
   function applyChipRow(chip) {
@@ -855,13 +861,15 @@
     if (!code) return;
     var host = document.getElementById("checklistArea");
     if (!host) return;
-    var el = host.querySelector('[data-ic-chk="' + code.replace(/"/g, "") + '"]');
+    var grid = host.querySelector(".ic-chk-grid");
+    var root = grid || host;
+    var el = root.querySelector('[data-ic-chk="' + code.replace(/"/g, "") + '"]');
     if (!el) {
       el = document.createElement("div");
+      el.className = "ic-chk-cell";
       el.setAttribute("data-ic-chk", code);
-      el.style.margin = "8px 0";
-      el.style.lineHeight = "1.45";
-      host.appendChild(el);
+      if (grid) grid.appendChild(el);
+      else host.appendChild(el);
     }
     el.innerHTML =
       '<span class="' +
@@ -872,6 +880,95 @@
       esc(chip.status) +
       '</span> · ' +
       esc(chip.message);
+  }
+
+  /** Re-fetch full checklist stream (merge) every 20s while chips still look empty/unavailable. */
+  var CHECKLIST_FILL_POLL_MS = 20000;
+  var CHECKLIST_POLL_MAX_ROUNDS = 30;
+
+  function stopChecklistFillPolling() {
+    if (state.checklistFillPollTimer) {
+      clearInterval(state.checklistFillPollTimer);
+      state.checklistFillPollTimer = null;
+    }
+    state.checklistPollRounds = 0;
+  }
+
+  function checklistStreamLooksIncomplete(chips) {
+    if (!chips || !chips.length) return true;
+    var blob = (chips || [])
+      .map(function (c) {
+        return String((c && c.message) || "") + " " + String((c && c.status) || "");
+      })
+      .join(" ");
+    if (/India VIX not available/i.test(blob)) return true;
+    if (/unavailable|not available|timed out|interrupted|Could not resolve/i.test(blob)) return true;
+    return false;
+  }
+
+  function startChecklistFillPolling() {
+    stopChecklistFillPolling();
+    state.checklistPollRounds = 0;
+    state.checklistFillPollTimer = setInterval(function () {
+      if (!state.symbol || !state.checklist) {
+        stopChecklistFillPolling();
+        return;
+      }
+      state.checklistPollRounds++;
+      if (state.checklistPollRounds > CHECKLIST_POLL_MAX_ROUNDS) {
+        stopChecklistFillPolling();
+        return;
+      }
+      if (!checklistStreamLooksIncomplete(state.checklist.chips)) {
+        stopChecklistFillPolling();
+        return;
+      }
+      runChecklistStreamMerge().catch(function () {});
+    }, CHECKLIST_FILL_POLL_MS);
+  }
+
+  async function runChecklistStreamMerge() {
+    if (!state.symbol) return;
+    var paths = icApiPaths("checklist-stream");
+    var url = API_BASE + paths[0];
+    var resp = await fetch(url, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ underlying: state.symbol }),
+      cache: "no-store",
+    });
+    if (!resp.ok) return;
+    if (!resp.body || !resp.body.getReader) return;
+    var reader = resp.body.getReader();
+    var dec = new TextDecoder();
+    var buf = "";
+    var chipsAcc = [];
+    while (true) {
+      var rd = await reader.read();
+      if (rd.done) break;
+      buf += dec.decode(rd.value, { stream: true });
+      var lines = buf.split("\n");
+      buf = lines.pop() || "";
+      for (var li = 0; li < lines.length; li++) {
+        var line = lines[li].trim();
+        if (!line) continue;
+        var ev = JSON.parse(line);
+        if (ev.kind === "chip") {
+          chipsAcc.push(ev.chip);
+          applyChipRow(ev.chip);
+        } else if (ev.kind === "done") {
+          state.checklist = {
+            success: true,
+            chips: chipsAcc,
+            may_proceed_blocked: ev.may_proceed_blocked,
+            warnings_require_ack: ev.warnings_require_ack,
+            vix_value: ev.vix_value,
+            vix_error: ev.vix_error,
+          };
+          updateToStrikesBtnState();
+        }
+      }
+    }
   }
 
   /** After checklist stream finishes: enable unless FAIL, or until WARN ack when required. */
@@ -896,6 +993,7 @@
 
   async function runChecklistStream() {
     if (!state.symbol) return;
+    stopChecklistFillPolling();
     document.getElementById("strikeOverrideBox").style.display = "none";
     document.getElementById("strikeOverrideToggle").checked = false;
     ["ovSc", "ovBc", "ovSp", "ovBp"].forEach(function (id) {
@@ -962,6 +1060,7 @@
         }
       }
     }
+    startChecklistFillPolling();
   }
 
   function fmtLeg(l) {
