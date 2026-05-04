@@ -1870,6 +1870,7 @@ def _empty_daily_futures_workspace(trade_date: date, *, session_before_open: boo
             "screening_count": 0,
             "hidden_because_bought": 0,
             "hidden_because_sold_today": 0,
+            "hidden_not_in_recent_two_scans": 0,
         },
         "running": [],
         "closed": [],
@@ -1899,6 +1900,41 @@ def _parse_iso_ist(ts: Optional[str]) -> Optional[datetime]:
         return dt.astimezone(IST)
     except Exception:
         return None
+
+
+# Hide Today's pick rows that trail the freshest fleet last_hit_at by more than ~two 15m slots.
+_DF_TODAYS_PICK_MAX_MINUTES_BEHIND_FLEET = 28.0
+
+
+def _fleet_latest_last_hit_at_ist(screenings: List[Dict[str, Any]]) -> Optional[datetime]:
+    best: Optional[datetime] = None
+    for s in screenings:
+        lh = _parse_iso_ist(s.get("last_hit_at"))
+        if lh is None:
+            continue
+        lh_ist = lh.astimezone(IST) if lh.tzinfo else IST.localize(lh)
+        if best is None or lh_ist > best:
+            best = lh_ist
+    return best
+
+
+def _df_todays_pick_in_recent_two_scans(p: Dict[str, Any], anchor_latest: Optional[datetime]) -> bool:
+    """
+    Require at least two ChartInk hits today and a last_hit_at within the last ~two scan cadences
+    vs the freshest last_hit_at in today's screening rows (proxy for presence in recent runs).
+    """
+    if anchor_latest is None:
+        return False
+    if int(p.get("scan_count") or 0) < 2:
+        return False
+    lh = _parse_iso_ist(p.get("last_hit_at"))
+    if lh is None:
+        return False
+    lh_ist = lh.astimezone(IST) if lh.tzinfo else IST.localize(lh)
+    gap_min = (anchor_latest - lh_ist).total_seconds() / 60.0
+    if gap_min > _DF_TODAYS_PICK_MAX_MINUTES_BEHIND_FLEET:
+        return False
+    return True
 
 
 def _fmt_hm(dt: Optional[datetime]) -> str:
@@ -3769,12 +3805,18 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
         [s for s in screenings if int(s.get("screening_id") or 0) in bought_sids]
     )
     not_bought = [s for s in screenings if s["screening_id"] not in bought_sids]
+    _anchor_lh = _fleet_latest_last_hit_at_ist(screenings)
+    n_hidden_recent_two_scans = len(
+        [s for s in not_bought if not _df_todays_pick_in_recent_two_scans(s, _anchor_lh)]
+    )
     # Today's pick should surface only symbols with sufficient LIVE conviction.
     # A symbol appears automatically once live conviction reaches the threshold.
+    # Also hide symbols that did not appear in the last ~two ChartInk runs (vs fleet last_hit_at).
     picks = [
         s
         for s in not_bought
         if s.get("conviction_score") is not None and float(s.get("conviction_score")) >= 50.0
+        and _df_todays_pick_in_recent_two_scans(s, _anchor_lh)
     ]
     picks_before_closed_filter = list(picks)
 
@@ -3966,7 +4008,9 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
         [
             s
             for s in not_bought_open
-            if str(s.get("direction_type") or "LONG").strip().upper() == "LONG" and _under_fifty(s)
+            if str(s.get("direction_type") or "LONG").strip().upper() == "LONG"
+            and _under_fifty(s)
+            and _df_todays_pick_in_recent_two_scans(s, _anchor_lh)
         ],
         key=lambda x: (-float(x.get("conviction_score") or 0.0), str(x.get("underlying") or "")),
     )
@@ -3974,7 +4018,9 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
         [
             s
             for s in not_bought_open
-            if str(s.get("direction_type") or "LONG").strip().upper() == "SHORT" and _under_fifty(s)
+            if str(s.get("direction_type") or "LONG").strip().upper() == "SHORT"
+            and _under_fifty(s)
+            and _df_todays_pick_in_recent_two_scans(s, _anchor_lh)
         ],
         key=lambda x: (-float(x.get("conviction_score") or 0.0), str(x.get("underlying") or "")),
     )
@@ -4338,6 +4384,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
             "screening_count": screening_total,
             "hidden_because_bought": n_hidden_bought,
             "hidden_because_sold_today": n_hidden_closed,
+            "hidden_not_in_recent_two_scans": n_hidden_recent_two_scans,
         },
         "running": running,
         "closed": closed,

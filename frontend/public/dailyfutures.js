@@ -841,6 +841,7 @@
     const scn = d.screening_count;
     const hb = d.hidden_because_bought;
     const hcl = d.hidden_because_sold_today;
+    const hn2 = Number(d.hidden_not_in_recent_two_scans) || 0;
     if (!picks || !picks.length) {
       if (data && data.session_before_open) {
         el.innerHTML =
@@ -868,6 +869,19 @@
           ' for today, but <strong>Today&rsquo;s pick (Bullish)</strong> is empty: ' +
           parts.join(' and ') +
           '.</p>';
+        return;
+      }
+      if (hn2 > 0 && scn > 0) {
+        el.innerHTML =
+          '<p class="df-meta">Scanner has <strong>' +
+          scn +
+          '</strong> symbol' +
+          (scn === 1 ? '' : 's') +
+          ' for today; <strong>' +
+          hn2 +
+          '</strong> ' +
+          (hn2 === 1 ? 'is' : 'are') +
+          ' not on the last two ChartInk passes (stale) and stay hidden here until listed again.</p>';
         return;
       }
       el.innerHTML = '<p class="df-meta">No picks yet.</p>';
