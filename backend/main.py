@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import sessionmaker
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 import os
 import logging
 import threading
@@ -308,16 +309,26 @@ async def root():
         ]
     }
 
-@app.get("/health")
-async def health_check():
+def _health_payload() -> dict:
+    """Shared JSON for /health and /api/health (nginx often proxies only /api/*)."""
     db_status, environment = get_database_info()
     return {
         "status": "healthy",
         "service": "Trade Manthan API",
         "database": db_status,
         "environment": environment,
-        "timestamp": "2024-01-01T00:00:00Z"
+        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
+
+
+@app.get("/health")
+async def health_check():
+    return _health_payload()
+
+
+@app.get("/api/health")
+async def health_check_api():
+    return _health_payload()
 
 @app.get("/api/status")
 async def api_status():
