@@ -3,11 +3,13 @@ Iron Condor advisory API — checklist, analysis, entry confirm, polling, alerts
 """
 from __future__ import annotations
 
+import json
 import logging
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -75,8 +77,6 @@ class SettingsBody(BaseModel):
 
 class ChecklistBody(BaseModel):
     underlying: str = Field(..., min_length=1, max_length=32)
-    new_capital_estimate: float = Field(0.0, ge=0)
-    declared_next_earnings_iso: Optional[str] = Field(None, max_length=12)
 
 
 class AnalyzeBody(BaseModel):
@@ -346,19 +346,28 @@ def post_checklist(
     sec = sector_for_symbol(und)
     if not sec:
         raise HTTPException(status_code=400, detail="Symbol not in approved universe.")
-    _tc = float(getattr(settings, "IRON_CONDOR_TRADING_CAPITAL_DEFAULT", 500_000.0))
-    _slots = int(getattr(settings, "IRON_CONDOR_TARGET_POSITION_SLOTS", 5))
-    _pct = 3.0 if _slots >= 5 else 5.0
-    capital_estimate = (_tc * _pct) / 100.0 if _tc > 0 else 0.0
-    chk_out = chk.run_pre_entry_checklist(
-        db,
-        int(user.id),
-        und,
-        sec,
-        capital_estimate,
-        body.declared_next_earnings_iso,
-    )
+    chk_out = chk.run_pre_entry_checklist(db, int(user.id), und, sec)
     return {"success": True, **chk_out}
+
+
+@router.post("/checklist-stream")
+def post_checklist_stream(
+    body: ChecklistBody,
+    db: Session = Depends(get_db),
+    user: User = Depends(_auth),
+) -> StreamingResponse:
+    """Same rules as POST /checklist, emitted as NDJSON lines for progressive UI."""
+    ic.ensure_iron_condor_tables()
+    und = body.underlying.strip().upper()
+    sec = sector_for_symbol(und)
+    if not sec:
+        raise HTTPException(status_code=400, detail="Symbol not in approved universe.")
+
+    def gen() -> Any:
+        for ev in chk.iter_pre_entry_checklist_events(db, int(user.id), und, sec):
+            yield json.dumps(ev, default=str) + "\n"
+
+    return StreamingResponse(gen(), media_type="application/x-ndjson")
 
 
 @router.get("/workspace")

@@ -107,6 +107,7 @@
 
   var state = {
     symbol: "",
+    nxt_earning_iso: "",
     detailed: null,
     checklist: null,
     pollTimer: null,
@@ -695,6 +696,7 @@
 
   function resetUniversePicker() {
     state.symbol = "";
+    state.nxt_earning_iso = "";
     state.checklist = null;
     state.detailed = null;
     pickerShowQuoteBanner("");
@@ -711,7 +713,56 @@
     return "ic-chip-info";
   }
 
-  async function runChecklist() {
+  /** Placeholder rows; real data replaces each line as NDJSON events arrive (no section-level loading). */
+  var CHECKLIST_PLACEHOLDER_CODES = [
+    "INDIA_VIX",
+    "ACTIVE_SAME_STOCK",
+    "SECTOR_POSITION",
+    "EARNINGS_25D",
+    "GAP_MOVE",
+    "SPOT_CHG",
+    "IV_VOL",
+  ];
+
+  function renderChecklistPlaceholders() {
+    var area = document.getElementById("checklistArea");
+    area.innerHTML = CHECKLIST_PLACEHOLDER_CODES.map(function (code) {
+      return (
+        '<div data-ic-chk="' +
+        esc(code) +
+        "\" style=\"margin:8px 0;line-height:1.45\">" +
+        "<span class=\"ic-chip-info\">" +
+        esc(code) +
+        ' · …</span> · <span class="ic-muted">—</span></div>'
+      );
+    }).join("");
+  }
+
+  function applyChipRow(chip) {
+    var code = String(chip.code || "");
+    if (!code) return;
+    var host = document.getElementById("checklistArea");
+    if (!host) return;
+    var el = host.querySelector('[data-ic-chk="' + code.replace(/"/g, "") + '"]');
+    if (!el) {
+      el = document.createElement("div");
+      el.setAttribute("data-ic-chk", code);
+      el.style.margin = "8px 0";
+      el.style.lineHeight = "1.45";
+      host.appendChild(el);
+    }
+    el.innerHTML =
+      '<span class="' +
+      chipCls(chip.status) +
+      '">' +
+      esc(code) +
+      " · " +
+      esc(chip.status) +
+      '</span> · ' +
+      esc(chip.message);
+  }
+
+  async function runChecklistStream() {
     if (!state.symbol) return;
     document.getElementById("strikeOverrideBox").style.display = "none";
     document.getElementById("strikeOverrideToggle").checked = false;
@@ -720,39 +771,66 @@
       el.disabled = true;
       el.value = "";
     });
+    state.detailed = null;
+    state.checklist = null;
+    document.getElementById("toStrikesBtn").disabled = true;
 
-    var ed = document.getElementById("icEarningsDate").value;
-    var j = await fj(icApiPaths("checklist"), {
+    var paths = icApiPaths("checklist-stream");
+    var url = API_BASE + paths[0];
+    var resp = await fetch(url, {
       method: "POST",
       headers: authHeaders(),
-      body: JSON.stringify({
-        underlying: state.symbol,
-        declared_next_earnings_iso: ed || undefined,
-      }),
-    }).catch(function (e) {
-      throw e;
+      body: JSON.stringify({ underlying: state.symbol }),
+      cache: "no-store",
     });
-    state.checklist = j;
-    state.detailed = null;
-    var chips = j.chips || [];
-    document.getElementById("checklistArea").innerHTML =
-      chips
-        .map(function (c) {
-          return (
-            "<div style=\"margin:8px 0;line-height:1.45\"><span class=\"" +
-            chipCls(c.status) +
-            "\">" +
-            esc(c.code) +
-            " · " +
-            esc(c.status) +
-            "</span> · " +
-            esc(c.message) +
-            "</div>"
-          );
-        })
-        .join("") || "<span class=\"ic-muted\">—</span>";
-
-    document.getElementById("toStrikesBtn").disabled = !!j.may_proceed_blocked;
+    if (!resp.ok) {
+      var errBody = await resp.text();
+      var msg = "Checklist stream HTTP " + resp.status;
+      try {
+        var trimmed = errBody.replace(/^\uFEFF/, "").trim();
+        if (trimmed && trimmed.charAt(0) === "{") {
+          var ej = JSON.parse(trimmed);
+          msg = fmtFastApiDetail(ej.detail) || ej.message || msg;
+        }
+      } catch (_e) {}
+      throw new Error(msg);
+    }
+    if (!resp.body || !resp.body.getReader) {
+      throw new Error("Streaming checklist not supported in this browser.");
+    }
+    var reader = resp.body.getReader();
+    var dec = new TextDecoder();
+    var buf = "";
+    var chipsAcc = [];
+    while (true) {
+      var rd = await reader.read();
+      if (rd.done) break;
+      buf += dec.decode(rd.value, { stream: true });
+      var lines = buf.split("\n");
+      buf = lines.pop() || "";
+      for (var li = 0; li < lines.length; li++) {
+        var line = lines[li].trim();
+        if (!line) continue;
+        var ev = JSON.parse(line);
+        if (ev.kind === "chip") {
+          chipsAcc.push(ev.chip);
+          applyChipRow(ev.chip);
+          if (ev.may_proceed_blocked !== undefined) {
+            document.getElementById("toStrikesBtn").disabled = !!ev.may_proceed_blocked;
+          }
+        } else if (ev.kind === "done") {
+          state.checklist = {
+            success: true,
+            chips: chipsAcc,
+            may_proceed_blocked: ev.may_proceed_blocked,
+            warnings_require_ack: ev.warnings_require_ack,
+            vix_value: ev.vix_value,
+            vix_error: ev.vix_error,
+          };
+          document.getElementById("toStrikesBtn").disabled = !!ev.may_proceed_blocked;
+        }
+      }
+    }
   }
 
   function fmtLeg(l) {
@@ -910,7 +988,7 @@
         },
         lot_size: a.economics && a.economics.lot_size,
         num_lots: Number(document.getElementById("flots").value) || 1,
-        declared_next_earnings_iso: document.getElementById("icEarningsDate").value || undefined,
+        declared_next_earnings_iso: state.nxt_earning_iso || undefined,
       }),
     });
     showPane(5);
@@ -1170,10 +1248,21 @@
       return;
     }
     state.symbol = String(rad.value).trim().toUpperCase();
+    state.nxt_earning_iso = "";
+    var rows = state.universeStep1Rows || [];
+    for (var ri = 0; ri < rows.length; ri++) {
+      if (String(rows[ri].symbol || "")
+        .trim()
+        .toUpperCase() === state.symbol) {
+        var ned = rows[ri].nxt_earning_date;
+        state.nxt_earning_iso = ned ? String(ned).trim().slice(0, 10) : "";
+        break;
+      }
+    }
     showPane(2);
-    document.getElementById("checklistArea").innerHTML = skelBars(3);
+    renderChecklistPlaceholders();
     try {
-      await runChecklist();
+      await runChecklistStream();
     } catch (e) {
       document.getElementById("checklistArea").innerHTML = "Error " + esc(e.message);
     }

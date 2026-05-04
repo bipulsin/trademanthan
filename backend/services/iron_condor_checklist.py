@@ -4,9 +4,9 @@ Pre-entry checklist for Iron Condor (chips: PASS / FAIL / WARN).
 from __future__ import annotations
 
 import logging
-from concurrent.futures import ThreadPoolExecutor, wait
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait
 from datetime import datetime, timedelta, date
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import pytz
 from sqlalchemy import text
@@ -145,31 +145,37 @@ def fetch_earnings_chip(symbol: str, declared_next_earnings_iso: Optional[str] =
     )
 
 
-def macro_event_chip(db: Session) -> Dict[str, Any]:
+def get_nxt_earning_iso_from_master(db: Session, symbol: str) -> Optional[str]:
     ensure_iron_condor_tables()
-    today = datetime.now(IST).date()
-    horizon = today + timedelta(days=7)
-    rows = db.execute(
+    row = db.execute(
         text(
             """
-            SELECT TO_CHAR(event_date, 'YYYY-MM-DD'), event_type, description
-            FROM iron_condor_macro_calendar
-            WHERE event_date >= CAST(:td AS DATE) AND event_date <= CAST(:hz AS DATE)
-            ORDER BY event_date ASC
-            LIMIT 20
+            SELECT nxt_earning_date FROM iron_condor_universe_master
+            WHERE UPPER(TRIM(symbol)) = UPPER(TRIM(:sym))
+            LIMIT 1
             """
         ),
-        {"td": str(today), "hz": str(horizon)},
-    ).fetchall()
-    if not rows:
-        return _chip("PASS", "MACRO_EVENTS", "No macro/policy calendar hits in DB within 7 days.", {})
-    detail = [{"date": r[0], "type": r[1], "desc": r[2]} for r in rows]
-    return _chip(
-        "FAIL",
-        "MACRO_EVENTS",
-        "Major macro / policy / scheduled event within 7 days.",
-        {"events": detail},
-    )
+        {"sym": symbol.strip()},
+    ).fetchone()
+    if not row or row[0] is None:
+        return None
+    d = row[0]
+    if hasattr(d, "isoformat"):
+        return str(d.isoformat())[:10]
+    s = str(d).strip()
+    return s[:10] if s else None
+
+
+def earnings_chip_from_master(db: Session, symbol: str) -> Dict[str, Any]:
+    iso = get_nxt_earning_iso_from_master(db, symbol)
+    if not iso:
+        return _chip(
+            "WARN",
+            "EARNINGS_25D",
+            "No nxt_earning_date in iron condor universe master for this symbol.",
+            {},
+        )
+    return fetch_earnings_chip(symbol, declared_next_earnings_iso=iso)
 
 
 def sector_concentration_chip(db: Session, user_id: int, sector: str) -> Dict[str, Any]:
@@ -192,46 +198,6 @@ def sector_concentration_chip(db: Session, user_id: int, sector: str) -> Dict[st
             {"open_same_sector": int(n)},
         )
     return _chip("PASS", "SECTOR_POSITION", "No other open position in this sector.", {})
-
-
-def capital_chip(db: Session, user_id: int, trading_capital: float, new_alloc_estimate: float) -> Dict[str, Any]:
-    ensure_iron_condor_tables()
-    if trading_capital <= 0:
-        return _chip("FAIL", "CAPITAL", "Set trading capital in settings (>0).", {})
-    deployed = db.execute(
-        text(
-            """
-            SELECT COALESCE(SUM(COALESCE(suggested_capital_rupees, 0)), 0)
-            FROM iron_condor_position
-            WHERE user_id = :uid AND UPPER(status) IN ('ACTIVE', 'OPEN', 'ADJUSTED')
-            """
-        ),
-        {"uid": user_id},
-    ).scalar()
-    dep = float(deployed or 0)
-    after = dep + float(new_alloc_estimate or 0)
-    ratio = after / trading_capital if trading_capital else 0
-    if ratio > 0.85:
-        return _chip(
-            "FAIL",
-            "CAPITAL_DEPLOYED",
-            f"Deployed+new would exceed 85% of capital ({ratio*100:.1f}% of ₹{trading_capital:.0f}).",
-            {"deployed": dep, "after_est": after, "ratio": round(ratio, 4)},
-        )
-    return _chip(
-        "PASS",
-        "CAPITAL_DEPLOYED",
-        f"Estimated deploy {(ratio*100):.1f}% of capital after new position.",
-        {"deployed": dep, "after_est": after},
-    )
-
-
-def calendar_month_warn_chip(now: Optional[datetime] = None) -> Dict[str, Any]:
-    now = now or datetime.now(IST)
-    m = now.month
-    if m == 2 or m in (6, 7):
-        return _chip("WARN", "CALENDAR_MONTH", "Feb / Jun-Jul flagged as elevated event-risk months.", {"month": m})
-    return _chip("PASS", "CALENDAR_MONTH", "Outside flagged high-risk months.", {"month": m})
 
 
 def vix_chip(vix_val: Optional[float]) -> Dict[str, Any]:
@@ -305,19 +271,34 @@ def active_same_symbol_chip(db: Session, user_id: int, symbol: str) -> Dict[str,
     return _chip("PASS", "ACTIVE_SAME_STOCK", "No active position on this stock.", {})
 
 
-def run_pre_entry_checklist(
+def iter_pre_entry_checklist_events(
     db: Session,
     user_id: int,
     symbol: str,
     sector: str,
-    new_capital_estimate: float,
-    declared_next_earnings_iso: Optional[str] = None,
-) -> Dict[str, Any]:
-    api_sym = option_chain_underlying(symbol)
-    eq_key = vwap_service.get_instrument_key(api_sym)
-    chips: List[Dict[str, Any]] = []
+) -> Iterator[Dict[str, Any]]:
+    """
+    Yields NDJSON-friendly events: {"kind":"chip", ...} as each piece is ready, then {"kind":"done", ...}.
+    Earnings date comes from iron_condor_universe_master.nxt_earning_date only.
+    """
+    chips_acc: List[Dict[str, Any]] = []
+
+    def emit_chip(c: Dict[str, Any]) -> Dict[str, Any]:
+        chips_acc.append(c)
+        fails = any(x["status"] == "FAIL" for x in chips_acc)
+        warns = any(x["status"] == "WARN" for x in chips_acc)
+        return {
+            "kind": "chip",
+            "chip": c,
+            "may_proceed_blocked": fails,
+            "warnings_require_ack": warns,
+        }
 
     from backend.services.iron_condor_snapshot_cache import read_india_vix_session
+    from backend.config import settings as _settings
+
+    api_sym = option_chain_underlying(symbol)
+    eq_key = vwap_service.get_instrument_key(api_sym)
 
     td_chk = datetime.now(IST).date()
     vix_live_cache = read_india_vix_session(db, td_chk)
@@ -325,13 +306,11 @@ def run_pre_entry_checklist(
         vix, verr = vix_live_cache, None
     else:
         vix, verr = fetch_india_vix()
-    chips.append(vix_chip(vix))
+    yield emit_chip(vix_chip(vix))
+    yield emit_chip(active_same_symbol_chip(db, user_id, symbol))
+    yield emit_chip(sector_concentration_chip(db, user_id, sector))
+    yield emit_chip(earnings_chip_from_master(db, symbol))
 
-    from backend.config import settings as _settings
-
-    tc = float(getattr(_settings, "IRON_CONDOR_TRADING_CAPITAL_DEFAULT", 500_000.0))
-
-    # Single daily history bundle for gap + realised-vol (avoids sequential IV_HISTORY after pool).
     daily_bundle: List[Dict[str, Any]] = []
     iv_precached: Optional[List[Dict[str, Any]]] = None
     if eq_key:
@@ -341,76 +320,92 @@ def run_pre_entry_checklist(
 
     _pool_wall = float(getattr(_settings, "IRON_CONDOR_CHECKLIST_POOL_TIMEOUT_SEC", 72))
 
-    parallel_pack: Dict[str, Dict[str, Any]] = {}
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        f_earn = pool.submit(fetch_earnings_chip, symbol, declared_next_earnings_iso)
-        spot_fut = pool.submit(spot_change_chip, eq_key) if eq_key else None
-        gap_fallback_fut = (
-            pool.submit(fetch_gap_check, eq_key) if (eq_key and len(daily_bundle) < 6) else None
+    if eq_key:
+
+        def gap_fn() -> Dict[str, Any]:
+            if len(daily_bundle) >= 6:
+                return gap_chip_from_daily_candles(daily_bundle)
+            return fetch_gap_check(eq_key)
+
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            f_gap = pool.submit(gap_fn)
+            f_spot = pool.submit(spot_change_chip, eq_key)
+            f_iv = pool.submit(_iv_context_worker, symbol, iv_precached)
+            futures_set = {f_gap, f_spot, f_iv}
+            _done_x, pend_x = wait(futures_set, timeout=_pool_wall)
+            for xf in pend_x:
+                try:
+                    xf.cancel()
+                except Exception:
+                    pass
+            fut_code = {f_gap: "GAP_MOVE", f_spot: "SPOT_CHG", f_iv: "IV_VOL"}
+            for fut in as_completed(tuple(_done_x)):
+                code = fut_code.get(fut, "CHK")
+                try:
+                    yield emit_chip(fut.result(timeout=0))
+                except Exception as e:
+                    yield emit_chip(_chip("WARN", code, "Check interrupted: %s" % str(e)[:160], {}))
+            for fut in pend_x:
+                cd = fut_code.get(fut, "CHK")
+                yield emit_chip(_chip("WARN", cd, "Check timed out.", {}))
+    else:
+        yield emit_chip(
+            _chip("INFO", "GAP_MOVE", "N/A — no equity instrument key for quotes.", {"symbol": api_sym})
         )
-        iv_fut = pool.submit(_iv_context_worker, symbol, iv_precached)
+        yield emit_chip(
+            _chip("INFO", "SPOT_CHG", "N/A — no equity instrument key for quotes.", {"symbol": api_sym})
+        )
+        yield emit_chip(_chip("WARN", "EQUITY", "No equity key for underlying.", {"symbol": api_sym}))
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            f_iv = pool.submit(_iv_context_worker, symbol, None)
+            _done_i, pend_i = wait({f_iv}, timeout=_pool_wall)
+            for xf in pend_i:
+                try:
+                    xf.cancel()
+                except Exception:
+                    pass
+            if f_iv in _done_i:
+                try:
+                    yield emit_chip(f_iv.result(timeout=0))
+                except Exception as e:
+                    yield emit_chip(_chip("WARN", "IV_VOL", "IV/volatility check interrupted: %s" % str(e)[:160], {}))
+            else:
+                yield emit_chip(_chip("WARN", "IV_VOL", "IV check timed out.", {}))
 
-        futures_set = {f_earn, iv_fut}
-        if spot_fut is not None:
-            futures_set.add(spot_fut)
-        if gap_fallback_fut is not None:
-            futures_set.add(gap_fallback_fut)
-        _done_x, pend_x = wait(futures_set, timeout=_pool_wall)
-        for xf in pend_x:
-            try:
-                xf.cancel()
-            except Exception:
-                pass
-
-        try:
-            parallel_pack["EAR"] = f_earn.result(timeout=0)
-        except Exception as e:
-            parallel_pack["EAR"] = _chip("WARN", "EARNINGS_25D", "Earnings check interrupted: %s" % str(e)[:160], {})
-
-        if len(daily_bundle) >= 6:
-            parallel_pack["GAP"] = gap_chip_from_daily_candles(daily_bundle)
-        elif gap_fallback_fut is not None:
-            try:
-                parallel_pack["GAP"] = gap_fallback_fut.result(timeout=0)
-            except Exception as e:
-                parallel_pack["GAP"] = _chip("WARN", "GAP_MOVE", "Gap check interrupted: %s" % str(e)[:160], {})
-        else:
-            parallel_pack["GAP"] = None
-
-        if spot_fut is not None:
-            try:
-                parallel_pack["SPOT"] = spot_fut.result(timeout=0)
-            except Exception as e:
-                parallel_pack["SPOT"] = _chip("INFO", "SPOT_CHG", "Spot snapshot interrupted.", {})
-        else:
-            parallel_pack["SPOT"] = None
-
-        try:
-            parallel_pack["IV"] = iv_fut.result(timeout=0)
-        except Exception as e:
-            parallel_pack["IV"] = _chip("WARN", "IV_VOL", "IV/volatility check interrupted: %s" % str(e)[:160], {})
-
-    if eq_key and parallel_pack.get("GAP"):
-        chips.append(parallel_pack["GAP"])
-    if eq_key and parallel_pack.get("SPOT"):
-        chips.append(parallel_pack["SPOT"])
-    if not eq_key:
-        chips.append(_chip("WARN", "EQUITY", "No equity key for underlying.", {"symbol": api_sym}))
-
-    chips.append(active_same_symbol_chip(db, user_id, symbol))
-    chips.append(parallel_pack.get("EAR") or _chip("WARN", "EARNINGS_25D", "Earnings unavailable.", {}))
-    chips.append(parallel_pack.get("IV") or _chip("WARN", "IV_VOL", "IV context unavailable.", {}))
-    chips.append(macro_event_chip(db))
-    chips.append(sector_concentration_chip(db, user_id, sector))
-    chips.append(capital_chip(db, user_id, tc, new_capital_estimate))
-    chips.append(calendar_month_warn_chip())
-
-    fails = [c for c in chips if c["status"] == "FAIL"]
-    warns = [c for c in chips if c["status"] == "WARN"]
-    return {
-        "chips": chips,
-        "may_proceed_blocked": len(fails) > 0,
-        "warnings_require_ack": len(warns) > 0,
+    fails = any(x["status"] == "FAIL" for x in chips_acc)
+    warns = any(x["status"] == "WARN" for x in chips_acc)
+    yield {
+        "kind": "done",
+        "may_proceed_blocked": fails,
+        "warnings_require_ack": warns,
         "vix_value": vix,
         "vix_error": verr,
+    }
+
+
+def run_pre_entry_checklist(
+    db: Session,
+    user_id: int,
+    symbol: str,
+    sector: str,
+) -> Dict[str, Any]:
+    chips: List[Dict[str, Any]] = []
+    out: Dict[str, Any] = {}
+    for ev in iter_pre_entry_checklist_events(db, user_id, symbol, sector):
+        if ev.get("kind") == "chip":
+            chips.append(ev["chip"])
+        elif ev.get("kind") == "done":
+            out = {
+                "chips": chips,
+                "may_proceed_blocked": ev["may_proceed_blocked"],
+                "warnings_require_ack": ev["warnings_require_ack"],
+                "vix_value": ev.get("vix_value"),
+                "vix_error": ev.get("vix_error"),
+            }
+    return out or {
+        "chips": chips,
+        "may_proceed_blocked": False,
+        "warnings_require_ack": False,
+        "vix_value": None,
+        "vix_error": None,
     }
