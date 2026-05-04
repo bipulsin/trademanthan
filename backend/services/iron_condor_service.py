@@ -170,6 +170,18 @@ def _instrument_key_for_ic_equity(api_symbol: str) -> Optional[str]:
     return ik
 
 
+def warm_iron_condor_startup() -> None:
+    """
+    Run once per worker at process boot (see main.py lifespan).
+    Pays DDL/migrations off the picker path and warms equity instrument-key resolution for every
+    approved underlying so the first /universe-symbol-quote is not penalized by cold ISIN/files.
+    """
+    ensure_iron_condor_tables()
+    for sym in sorted(IRON_CONDOR_UNIVERSE.keys()):
+        api = option_chain_underlying(str(sym))
+        _instrument_key_for_ic_equity(api)
+
+
 def universe_picker_row_for_symbol(db: Session, user_id: int, symbol: str) -> Tuple[Dict[str, Any], Optional[str]]:
     """
     One picker row with live quote (single batched key). Used after user picks a symbol.

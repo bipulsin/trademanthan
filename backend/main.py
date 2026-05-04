@@ -102,6 +102,7 @@ async def lifespan(app: FastAPI):
     Lifespan context manager for startup and shutdown events
     This ensures schedulers start once and stay running
     """
+    import asyncio
     import sys
     import traceback
     
@@ -163,6 +164,16 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"❌ Iron Condor snapshot scheduler: FAILED - {e}", exc_info=True)
             logger.warning("⚠️ Continuing without Iron Condor snapshot scheduler")
+
+        # Iron Condor: run DDL + instrument-key warm once per worker before traffic (avoids ~minute first picker load)
+        try:
+            from backend.services import iron_condor_service as _ic_warm
+
+            logger.info("Warming Iron Condor tables + universe equity keys (runs once per worker)...")
+            await asyncio.to_thread(_ic_warm.warm_iron_condor_startup)
+            logger.info("✅ Iron Condor startup warm finished")
+        except Exception as e:
+            logger.warning("⚠️ Iron Condor startup warm skipped: %s", e)
 
         logger.info("=" * 60)
         logger.info("✅ STARTUP COMPLETE - All Services Active")

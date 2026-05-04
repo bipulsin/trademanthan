@@ -543,11 +543,11 @@
     var sk = document.getElementById("pickerSkeletonHost");
     var tb = document.getElementById("pickerBody");
     if (sk) {
-      sk.style.display = "block";
-      sk.innerHTML = skelBars(2);
+      sk.style.display = "none";
+      sk.innerHTML = "";
     }
-    if (tb) tb.innerHTML = "";
-    pickerShowQuoteBanner("");
+    if (tb) tb.innerHTML = renderPickerRowPending(s, sectorForPickerMeta(s));
+    pickerShowQuoteBanner("Fetching quote…");
     document.getElementById("gotoChecklistBtn").disabled = true;
     state.symbol = "";
     state.pickerSymbols = [];
@@ -608,6 +608,37 @@
         tb.innerHTML = "<tr><td colspan=\"6\" class=\"ic-muted\">" + esc(em) + "</td></tr>";
       }
     }
+  }
+
+  function sectorForPickerMeta(sym) {
+    var u = String(sym || "").trim().toUpperCase();
+    var m = state.universeMeta || [];
+    for (var i = 0; i < m.length; i++) {
+      if (String(m[i].symbol || "").trim().toUpperCase() === u) {
+        return String(m[i].sector || "").trim();
+      }
+    }
+    return "";
+  }
+
+  /** Instant feedback while GET /universe-symbol-quote runs (DDL/broker/server warm). */
+  function renderPickerRowPending(sym, sector) {
+    return (
+      "<tr data-sym=\"" +
+      esc(sym) +
+      "\" class=\"ic-picker-loading\">" +
+      "<td><strong class=\"ic-mono\">" +
+      esc(sym) +
+      "</strong></td>" +
+      "<td><span class=\"ic-chip-pass ic-chip-sector\">" +
+      esc(sector || "—") +
+      "</span></td>" +
+      "<td class=\"ic-num ic-mono\"><span class=\"ic-muted\">…</span></td>" +
+      "<td class=\"ic-num\"><span class=\"ic-muted\">…</span></td>" +
+      "<td class=\"ic-num\"><span class=\"ic-muted\">…</span></td>" +
+      "<td><span class=\"ic-muted\">—</span></td>" +
+      "</tr>"
+    );
   }
 
   function resetUniversePicker() {
