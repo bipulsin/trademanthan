@@ -73,22 +73,6 @@
     throw new Error(lastErr || "fetch failed");
   }
 
-  /** One automatic retry after gateway/proxy errors (504/502) — quote path only. */
-  async function fjWithGatewayRetry(paths, opts) {
-    try {
-      return await fj(paths, opts);
-    } catch (e) {
-      var m = String((e && e.message) || e || "");
-      if (/Gateway timeout|504|502|Bad Gateway|timed out waiting/i.test(m)) {
-        await new Promise(function (r) {
-          setTimeout(r, 2000);
-        });
-        return await fj(paths, opts);
-      }
-      throw e;
-    }
-  }
-
   /**
    * FastAPI exposes Iron Condor at /api/iron-condor/* and /iron-condor/* (see nginx-tradentical.conf proxy).
    */
@@ -121,40 +105,17 @@
     return String(detail);
   }
 
-  /**
-   * Same entries as backend/services/iron_condor_universe.py — used only if universe APIs return no rows.
-   * Keeps the picker usable during proxy/API issues without masking auth failures (those throw before fallback).
-   */
-  function icUniverseFallbackRows() {
-    return [
-      { symbol: "RELIANCE", sector: "Energy", instrument_key: "", updated_at: "", previous_day_close: null, previous_close_as_of: "" },
-      { symbol: "TCS", sector: "IT", instrument_key: "", updated_at: "", previous_day_close: null, previous_close_as_of: "" },
-      { symbol: "INFOSYS", sector: "IT", instrument_key: "", updated_at: "", previous_day_close: null, previous_close_as_of: "" },
-      { symbol: "HDFCBANK", sector: "Banking", instrument_key: "", updated_at: "", previous_day_close: null, previous_close_as_of: "" },
-      { symbol: "ICICIBANK", sector: "Banking", instrument_key: "", updated_at: "", previous_day_close: null, previous_close_as_of: "" },
-      { symbol: "SBIN", sector: "Banking", instrument_key: "", updated_at: "", previous_day_close: null, previous_close_as_of: "" },
-      { symbol: "BHARTIARTL", sector: "Telecom", instrument_key: "", updated_at: "", previous_day_close: null, previous_close_as_of: "" },
-      { symbol: "KOTAKBANK", sector: "Banking", instrument_key: "", updated_at: "", previous_day_close: null, previous_close_as_of: "" },
-      { symbol: "LT", sector: "Capital Goods", instrument_key: "", updated_at: "", previous_day_close: null, previous_close_as_of: "" },
-      { symbol: "HINDUNILVR", sector: "FMCG", instrument_key: "", updated_at: "", previous_day_close: null, previous_close_as_of: "" },
-      { symbol: "ITC", sector: "FMCG", instrument_key: "", updated_at: "", previous_day_close: null, previous_close_as_of: "" },
-      { symbol: "AXISBANK", sector: "Banking", instrument_key: "", updated_at: "", previous_day_close: null, previous_close_as_of: "" },
-      { symbol: "BAJFINANCE", sector: "Financial Services", instrument_key: "", updated_at: "", previous_day_close: null, previous_close_as_of: "" },
-    ];
-  }
-
   var state = {
     symbol: "",
     detailed: null,
     checklist: null,
     pollTimer: null,
-    pickerSymbols: [],
-    universeMeta: [],
+    universeStep1Rows: [],
+    universeStep1PickLocked: false,
     mtmSpark: [],
     soundEpoch: 0,
     mtmChartJs: null,
     equityChartJs: null,
-    pickerQuoteGen: 0,
   };
 
   function fmtPxCell(v) {
@@ -171,17 +132,16 @@
     return n.toFixed(2) + "%";
   }
 
-  /** Checklist API only needs underlying; enable once a symbol row is confirmed. */
-  function setPickerNextEnabled(rowOrSymbol) {
-    var sym =
-      typeof rowOrSymbol === "string"
-        ? rowOrSymbol
-        : rowOrSymbol && rowOrSymbol.symbol
-          ? rowOrSymbol.symbol
-          : "";
-    var ok = String(sym || "").trim().length > 0;
+  /** Step 1 Next: one eligible row (No Trade) must be selected via radio. */
+  function setUniverseNextFromRadio() {
     var btn = document.getElementById("gotoChecklistBtn");
-    if (btn) btn.disabled = !ok;
+    if (!btn) return;
+    if (state.universeStep1PickLocked) {
+      btn.disabled = true;
+      return;
+    }
+    var rad = document.querySelector('input[name="icUniversePick"]:checked');
+    btn.disabled = !rad || !String(rad.value || "").trim();
   }
 
   function pickerShowQuoteBanner(msg) {
@@ -412,17 +372,24 @@
     el.textContent = "Session line unavailable — refresh or sign in again.";
   }
 
-  function setPickerTablePlaceholder() {
+  function setUniverseTablePlaceholder(msg) {
     var tb = document.getElementById("pickerBody");
     if (!tb) return;
     tb.innerHTML =
-      "<tr><td colspan=\"6\" class=\"ic-muted\">Select a symbol above — quotes load only after you pick one.</td></tr>";
+      "<tr><td colspan=\"7\" class=\"ic-muted\">" + esc(msg || "Loading…") + "</td></tr>";
   }
 
-  /** Normalize GET /universe or /approved-underlyings payloads into [{symbol, sector, instrument_key}, ...]. */
-  function normalizeUniverseSymbolsPayload(u) {
-    if (!u || typeof u !== "object") return [];
-    var s = u.symbols;
+  function parseNumOrNull(v) {
+    if (v == null || v === "") return null;
+    if (typeof v === "number" && isFinite(v)) return v;
+    var n = parseFloat(String(v).trim());
+    return isFinite(n) ? n : null;
+  }
+
+  /** Public master shape → step-1 row (no LTP / no active until merged from auth grid). */
+  function rowsFromApprovedUnderlyingsPayload(pub) {
+    if (!pub || typeof pub !== "object") return [];
+    var s = pub.symbols;
     if (!Array.isArray(s)) return [];
     var out = [];
     for (var i = 0; i < s.length; i++) {
@@ -430,328 +397,55 @@
       if (!r || typeof r !== "object") continue;
       var sym = String(r.symbol || "").trim().toUpperCase();
       if (!sym) continue;
-      var _pdc = r.previous_day_close;
-      var pdc_ok = typeof _pdc === "number" && isFinite(_pdc) ? _pdc : _pdc != null && String(_pdc).trim() !== "" ? parseFloat(String(_pdc).trim()) : null;
+      var pdc = parseNumOrNull(r.previous_day_close);
       out.push({
         symbol: sym,
         sector: String(r.sector || "").trim(),
         instrument_key: String(r.instrument_key || "").trim(),
-        updated_at: String(r.updated_at || "").trim(),
-        previous_day_close: typeof pdc_ok === "number" && isFinite(pdc_ok) && pdc_ok > 0 ? pdc_ok : null,
+        previous_day_close: pdc !== null && pdc > 0 ? pdc : null,
         previous_close_as_of: String(r.previous_close_as_of || "").trim(),
+        ltp: null,
+        change_pct_day: null,
+        active_position: false,
       });
     }
+    out.sort(function (a, b) {
+      return String(a.symbol || "").localeCompare(String(b.symbol || ""));
+    });
     return out;
   }
 
-  /**
-   * Refresh universe master rows without wiping the <select> (no "Loading…" flash).
-   * Order: public list (no JWT) → authenticated /universe.
-   * Optional: /universe-with-quotes payload shape is accepted as a fallback for symbol list only.
-   */
-  async function loadUniverseMeta() {
-    var prev = (state.universeMeta && state.universeMeta.length) ? state.universeMeta.slice() : icUniverseFallbackRows();
-    try {
-      var list = [];
-      try {
-        var pub = await fj(["/api/iron-condor/approved-underlyings"], { cache: "no-store" });
-        list = normalizeUniverseSymbolsPayload(pub);
-      } catch (_ePub) {}
-      if (!list.length) {
-        try {
-          var u = await fj(icApiPaths("universe"), {
-            headers: authHeaders(),
-            cache: "no-store",
-          });
-          list = normalizeUniverseSymbolsPayload(u);
-        } catch (_e2) {}
-      }
-      /* Intentionally do not fallback to /universe-with-quotes here: it batches all symbols
-         through Upstox and commonly hits gateway timeouts; symbol list-only paths are enough. */
-      if (!list.length) {
-        state.universeMeta = prev;
-        populatePickerSelect();
-        return;
-      }
-      state.universeMeta = list;
-      populatePickerSelect();
-      pickerShowQuoteBanner("");
-    } catch (_e) {
-      state.universeMeta = prev;
-      populatePickerSelect();
-    }
-  }
-
-  /** Run as soon as DOM is ready — do not wait for /workspace (that was blocking the picker). */
-  function bootIronCondorUiEarly() {
-    applySavedTheme();
-    bindThemeSyncForCharts();
-    loadSessionLine();
-    setPickerTablePlaceholder();
-    wirePickerSelect();
-    state.universeMeta = icUniverseFallbackRows();
-    populatePickerSelect();
-    loadUniverseMeta();
-  }
-
-  function populatePickerSelect() {
-    var sel = document.getElementById("pickerSelect");
-    if (!sel) return;
-    var curGuess = String(state.symbol || sel.value || "").trim().toUpperCase();
-    var rows = state.universeMeta.slice().sort(function (a, b) {
-      return String(a.symbol || "").localeCompare(String(b.symbol || ""));
-    });
-    while (sel.firstChild) {
-      sel.removeChild(sel.firstChild);
-    }
-    var ph = document.createElement("option");
-    ph.value = "";
-    ph.textContent = "Choose underlying…";
-    sel.appendChild(ph);
-    for (var ri = 0; ri < rows.length; ri++) {
-      var r = rows[ri];
-      var sym = String(r.symbol || "").trim().toUpperCase();
-      if (!sym) continue;
-      var op = document.createElement("option");
-      op.value = sym;
-      op.textContent = sym + " - " + String(r.sector || "").trim();
-      sel.appendChild(op);
-    }
-    var symVal = "";
-    for (var pi = 0; pi < rows.length; pi++) {
-      if (String(rows[pi].symbol || "").trim().toUpperCase() === curGuess) {
-        symVal = String(rows[pi].symbol || "").trim().toUpperCase();
-        break;
-      }
-    }
-    sel.value = symVal;
-    if (symVal && sel.value !== symVal) {
-      for (var qi = 0; qi < sel.options.length; qi++) {
-        if (sel.options[qi].value === symVal) {
-          sel.selectedIndex = qi;
-          break;
-        }
-      }
-    }
-  }
-
-  function wirePickerSelect() {
-    var sel = document.getElementById("pickerSelect");
-    if (!sel || sel.getAttribute("data-ic-select-wired")) return;
-    sel.setAttribute("data-ic-select-wired", "1");
-    sel.addEventListener("change", function () {
-      var v = (sel.value || "").trim();
-      if (!v) {
-        state.symbol = "";
-        state.pickerSymbols = [];
-        pickerShowQuoteBanner("");
-        setPickerNextEnabled("");
-        setPickerTablePlaceholder();
-        return;
-      }
-      var vu = v.toUpperCase();
-      state.symbol = vu;
-      setPickerNextEnabled(vu);
-      selectUniverseSymbol(vu);
-    });
-  }
-
-  /** Sync select + outline after row update */
-  function applyPickerDomFromRow(sel, tb, symUpper, row) {
-    state.pickerSymbols = [row];
-    state.symbol = String(row.symbol || symUpper || "").trim().toUpperCase();
-    if (sel) {
-      sel.value = state.symbol;
-      if (sel.value !== state.symbol) {
-        for (var qj = 0; qj < sel.options.length; qj++) {
-          if (sel.options[qj].value === state.symbol) {
-            sel.selectedIndex = qj;
-            break;
-          }
-        }
-      }
-    }
-    if (tb) {
-      tb.innerHTML = renderPickerRow(row);
-      wirePicker(tb);
-      tb.querySelectorAll("tr").forEach(function (r) {
-        r.style.outline = "3px solid #1f3864";
-      });
-    }
-  }
-
-  function renderPickerRowQuoteError(sym, sector) {
-    return (
-      "<tr data-sym=\"" +
-      esc(sym) +
-      "\">" +
-      "<td class=\"ic-col-symbol\"><strong class=\"ic-mono\">" +
-      esc(sym) +
-      "</strong></td>" +
-      "<td class=\"ic-col-sector\"><span class=\"ic-chip-pass ic-chip-sector\">" +
-      esc(sector || "—") +
-      "</span></td>" +
-      "<td class=\"ic-col-ltp ic-num ic-mono\"><span class=\"ic-muted\">—</span></td>" +
-      "<td class=\"ic-col-delta ic-num\"><span class=\"ic-muted\">—</span></td>" +
-      "<td class=\"ic-col-active\">No Trade</td>" +
-      "<td class=\"ic-col-action\"><button type=\"button\" class=\"ic-btn-global ic-btn-primary pickRow\">Analyze</button></td>" +
-      "</tr>"
-    );
-  }
-
-  async function selectUniverseSymbol(sym) {
-    var s = (sym || "").trim().toUpperCase();
-    if (!s) return;
-    var gen = ++state.pickerQuoteGen;
-    var sel = document.getElementById("pickerSelect");
-    if (sel) {
-      sel.value = s;
-      if (sel.value !== s) {
-        for (var qi = 0; qi < sel.options.length; qi++) {
-          if (sel.options[qi].value === s) {
-            sel.selectedIndex = qi;
-            break;
-          }
-        }
-      }
-    }
-    var sk = document.getElementById("pickerSkeletonHost");
-    var tb = document.getElementById("pickerBody");
-    if (sk) {
-      sk.style.display = "none";
-      sk.innerHTML = "";
-    }
-    if (tb) tb.innerHTML = renderPickerRowPending(s, sectorForPickerMeta(s));
-    pickerShowQuoteBanner("");
-
-    var ikMeta = instrumentKeyForPickerMeta(s);
-    var quoteQs =
-      "universe-symbol-quote?underlying=" + encodeURIComponent(s) +
-      (ikMeta ? "&instrument_key=" + encodeURIComponent(ikMeta) : "");
-
-    var snapQs =
-      "universe-symbol-snapshot-row?underlying=" + encodeURIComponent(s);
-
-    /* Snapshot (DB-only, fast) paints LTP/% while live Upstox quote catches up. */
-    var liveQuoteDoneOk = false;
-    var snapshotRendered = false;
-    fj(icApiPaths(snapQs), { headers: authHeaders(), cache: "no-store" })
-      .then(function (snap) {
-        if (gen !== state.pickerQuoteGen || liveQuoteDoneOk) return;
-        var r0 = snap && snap.row;
-        if (!r0 || typeof r0 !== "object") return;
-        snapshotRendered = true;
-        var sh = snap.quotes_error ? snap.quotes_error + " · " : "";
-        pickerShowQuoteBanner(sh + "Refreshing live quote…");
-        applyPickerDomFromRow(sel, tb, s, r0);
-      })
-      .catch(function () {});
-
-    try {
-      var res = await fjWithGatewayRetry(icApiPaths(quoteQs), {
-        headers: authHeaders(),
-        cache: "no-store",
-      });
-      if (gen !== state.pickerQuoteGen) return;
-      liveQuoteDoneOk = true;
-      var row = res && res.row;
-      if (!row || typeof row !== "object") {
-        throw new Error("Invalid quote response (missing row).");
-      }
-      pickerShowQuoteBanner(res.quotes_error || "");
-      applyPickerDomFromRow(sel, tb, s, row);
-    } catch (e) {
-      if (gen !== state.pickerQuoteGen) return;
-      state.symbol = s;
-      setPickerNextEnabled(s);
-      var em = e.message || String(e);
-      if (snapshotRendered) {
-        pickerShowQuoteBanner(
-          (em.length > 220 ? em.slice(0, 217) + "…" : em) +
-            " · Showing cached figures above."
-        );
-      } else {
-        pickerShowQuoteBanner(em.length > 220 ? em.slice(0, 217) + "…" : em);
-        if (tb) {
-          tb.innerHTML = renderPickerRowQuoteError(s, sectorForPickerMeta(s));
-          wirePicker(tb);
-          tb.querySelectorAll("tr").forEach(function (r) {
-            r.style.outline = "3px solid #1f3864";
-          });
-        }
-      }
-    }
-  }
-
-  function instrumentKeyForPickerMeta(sym) {
-    var u = String(sym || "").trim().toUpperCase();
-    var m = state.universeMeta || [];
-    for (var iki = 0; iki < m.length; iki++) {
-      var r = m[iki];
-      if (String(r.symbol || "").trim().toUpperCase() === u) {
-        return String(r.instrument_key || "").trim();
-      }
-    }
-    return "";
-  }
-
-  function sectorForPickerMeta(sym) {
-    var u = String(sym || "").trim().toUpperCase();
-    var m = state.universeMeta || [];
-    for (var i = 0; i < m.length; i++) {
-      if (String(m[i].symbol || "").trim().toUpperCase() === u) {
-        return String(m[i].sector || "").trim();
-      }
-    }
-    return "";
-  }
-
-  /** Instant feedback while GET /universe-symbol-quote runs (DDL/broker/server warm). */
-  function renderPickerRowPending(sym, sector) {
-    return (
-      "<tr data-sym=\"" +
-      esc(sym) +
-      "\" class=\"ic-picker-loading\">" +
-      "<td class=\"ic-col-symbol\"><strong class=\"ic-mono\">" +
-      esc(sym) +
-      "</strong></td>" +
-      "<td class=\"ic-col-sector\"><span class=\"ic-chip-pass ic-chip-sector\">" +
-      esc(sector || "—") +
-      "</span></td>" +
-      "<td class=\"ic-col-ltp ic-num ic-mono\"><span class=\"ic-muted\">…</span></td>" +
-      "<td class=\"ic-col-delta ic-num\"><span class=\"ic-muted\">…</span></td>" +
-      "<td class=\"ic-col-active\"><span class=\"ic-muted\">No Trade</span></td>" +
-      "<td class=\"ic-col-action\"><button type=\"button\" class=\"ic-btn-global ic-btn-primary pickRow\" disabled title=\"Loading quote\">Analyze</button></td>" +
-      "</tr>"
-    );
-  }
-
-  function resetUniversePicker() {
-    state.symbol = "";
-    state.pickerSymbols = [];
-    var sel = document.getElementById("pickerSelect");
-    if (sel) sel.value = "";
-    pickerShowQuoteBanner("");
-    setPickerNextEnabled("");
-    setPickerTablePlaceholder();
-  }
-
-  function renderPickerRow(row) {
+  function renderUniverseStep1Row(row) {
+    var sym = String(row.symbol || "").trim().toUpperCase();
     var ap = !!row.active_position;
     var warn = ap ? '<span class="ic-chip-warn ic-chip-pass">Dup</span>' : "";
     var act = ap ? "Yes" : "No Trade";
+    var pdcHtml = fmtPxCell(row.previous_day_close);
+    var rad =
+      "<span class=\"ic-muted\">—</span>";
+    if (!ap && !state.universeStep1PickLocked) {
+      rad =
+        "<label class=\"ic-universe-radio\"><input type=\"radio\" name=\"icUniversePick\" value=\"" +
+        esc(sym) +
+        "\" aria-label=\"Select " +
+        esc(sym) +
+        " for checklist\" /></label>";
+    }
     return (
       "<tr data-sym=\"" +
-      esc(row.symbol) +
+      esc(sym) +
       "\">" +
       "<td class=\"ic-col-symbol\"><strong class=\"ic-mono\">" +
-      esc(row.symbol) +
+      esc(sym) +
       "</strong>" +
       warn +
       "</td>" +
       "<td class=\"ic-col-sector\"><span class=\"ic-chip-pass ic-chip-sector\">" +
-      esc(row.sector) +
+      esc(String(row.sector || "—")) +
       "</span></td>" +
+      "<td class=\"ic-col-prevclose ic-num ic-mono\">" +
+      pdcHtml +
+      "</td>" +
       "<td class=\"ic-col-ltp ic-num ic-mono\">" +
       fmtPxCell(row.ltp) +
       "</td>" +
@@ -759,25 +453,90 @@
       fmtPctCell(row.change_pct_day) +
       "</td>" +
       "<td class=\"ic-col-active\">" +
-      esc(act) +
+      act +
       "</td>" +
-      "<td class=\"ic-col-action\"><button type=\"button\" class=\"ic-btn-global ic-btn-primary pickRow\">Analyze</button></td>" +
+      "<td class=\"ic-col-pick\">" +
+      rad +
+      "</td>" +
       "</tr>"
     );
   }
 
-  function wirePicker(tb) {
-    tb.querySelectorAll("button.pickRow").forEach(function (b) {
-      b.onclick = function () {
-        var tr = b.closest("tr");
-        state.symbol = tr.getAttribute("data-sym") || "";
-        setPickerNextEnabled(state.symbol);
-        tr.parentElement.querySelectorAll("tr").forEach(function (r) {
-          r.style.outline = "";
-        });
-        tr.style.outline = "3px solid #1f3864";
+  function renderUniverseStep1Table(rows) {
+    var tb = document.getElementById("pickerBody");
+    if (!tb) return;
+    if (!rows.length) {
+      tb.innerHTML = "<tr><td colspan=\"7\" class=\"ic-muted\">No universe rows configured.</td></tr>";
+      return;
+    }
+    tb.innerHTML = rows.map(renderUniverseStep1Row).join("");
+    wireUniverseStep1Radios();
+    setUniverseNextFromRadio();
+  }
+
+  function wireUniverseStep1Radios() {
+    document.querySelectorAll('input[name="icUniversePick"]').forEach(function (inp) {
+      inp.onchange = function () {
+        setUniverseNextFromRadio();
       };
     });
+  }
+
+  /** Batched quotes + Active? from backend (uses Upstox for LTP); falls back read-only master if not signed in. */
+  async function loadUniverseStep1Grid() {
+    var tb = document.getElementById("pickerBody");
+    state.universeStep1PickLocked = false;
+    pickerShowQuoteBanner("");
+    state.symbol = "";
+    if (tb) tb.innerHTML = "<tr><td colspan=\"7\" class=\"ic-muted\">Loading universe…</td></tr>";
+    try {
+      var j = await fj(icApiPaths("universe-with-quotes"), {
+        headers: authHeaders(),
+        cache: "no-store",
+      });
+      pickerShowQuoteBanner(j.quotes_error || "");
+      var rows = Array.isArray(j.symbols) ? j.symbols.slice() : [];
+      rows.sort(function (a, b) {
+        return String(a.symbol || "").localeCompare(String(b.symbol || ""));
+      });
+      state.universeStep1Rows = rows;
+      renderUniverseStep1Table(rows);
+      return;
+    } catch (_eAuth) {}
+
+    pickerShowQuoteBanner(
+      "Sign in (session + broker) on this browser to load live LTP from Upstox, Active? column, and row selection."
+    );
+    try {
+      var pub = await fj(["/api/iron-condor/approved-underlyings"], { cache: "no-store" });
+      var rowsFallback = rowsFromApprovedUnderlyingsPayload(pub);
+      state.universeStep1PickLocked = true;
+      state.universeStep1Rows = rowsFallback;
+      renderUniverseStep1Table(rowsFallback);
+    } catch (_e2) {
+      state.universeStep1Rows = [];
+      setUniverseTablePlaceholder("Could not load universe — refresh or try again shortly.");
+      setUniverseNextFromRadio();
+    }
+  }
+
+  /** Run as soon as DOM is ready — step 1 table does not depend on workspace. */
+  function bootIronCondorUiEarly() {
+    applySavedTheme();
+    bindThemeSyncForCharts();
+    loadSessionLine();
+    loadUniverseStep1Grid();
+  }
+
+  function resetUniversePicker() {
+    state.symbol = "";
+    state.checklist = null;
+    state.detailed = null;
+    pickerShowQuoteBanner("");
+    document.querySelectorAll('input[name="icUniversePick"]').forEach(function (inp) {
+      inp.checked = false;
+    });
+    loadUniverseStep1Grid();
   }
 
   function chipCls(st) {
@@ -1240,6 +999,12 @@
   };
 
   document.getElementById("gotoChecklistBtn").onclick = async function () {
+    var rad = document.querySelector('input[name="icUniversePick"]:checked');
+    if (!rad || !rad.value) {
+      alert("Select one underlying (eligible rows only — no active duplicate on that symbol).");
+      return;
+    }
+    state.symbol = String(rad.value).trim().toUpperCase();
     showPane(2);
     document.getElementById("checklistArea").innerHTML = skelBars(3);
     try {

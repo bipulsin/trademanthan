@@ -94,8 +94,10 @@ body.theme-page.iron-c-page[data-theme="light"] .ic-universe-table tbody td.ic-n
   vertical-align: bottom;
   font-weight: 600;
 }
+.ic-universe-table thead th.ic-col-prevclose,
 .ic-universe-table thead th.ic-col-ltp,
-.ic-universe-table thead th.ic-col-delta {
+.ic-universe-table thead th.ic-col-delta,
+.ic-universe-table thead th.ic-col-pick {
   text-align: center;
 }
 .ic-universe-table tbody td {
@@ -104,27 +106,40 @@ body.theme-page.iron-c-page[data-theme="light"] .ic-universe-table tbody td.ic-n
   border-bottom: 1px solid var(--theme-border, rgba(148, 163, 184, 0.35));
 }
 .ic-universe-table .ic-col-symbol {
-  width: 18%;
-}
-.ic-universe-table .ic-col-sector {
   width: 16%;
 }
+.ic-universe-table .ic-col-sector {
+  width: 15%;
+}
+.ic-universe-table .ic-col-prevclose {
+  width: 13%;
+  text-align: center;
+}
 .ic-universe-table .ic-col-ltp {
-  width: 14%;
+  width: 12%;
   text-align: center;
 }
 .ic-universe-table .ic-col-delta {
-  width: 11%;
+  width: 10%;
   text-align: center;
 }
 .ic-universe-table .ic-col-active {
-  width: 14%;
+  width: 19%;
   text-align: left;
 }
-.ic-universe-table .ic-col-action {
-  width: 12%;
-  min-width: 5.5rem;
-  text-align: right;
+.ic-universe-table .ic-col-pick {
+  width: 7%;
+  text-align: center;
+}
+.ic-universe-radio {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  cursor: pointer;
+}
+.ic-universe-radio input[type="radio"] {
+  cursor: pointer;
 }
 .ic-universe-table .ic-col-symbol,
 .ic-universe-table .ic-col-sector {

@@ -107,6 +107,23 @@ def normalize_ic_universe_row_for_api(row: Dict[str, Any]) -> Dict[str, Any]:
             r["updated_at"] = str(ua)
     elif "updated_at" in r and r["updated_at"] is not None:
         r["updated_at"] = str(r["updated_at"])
+    pdc = r.get("previous_day_close")
+    pdc_o: Optional[float] = None
+    if pdc is not None:
+        try:
+            x = float(pdc)
+            pdc_o = round(x, 4) if math.isfinite(x) and x > 0 else None
+        except (TypeError, ValueError):
+            pdc_o = None
+    r["previous_day_close"] = pdc_o
+    pca = r.get("previous_close_as_of")
+    if pca is not None and hasattr(pca, "isoformat"):
+        try:
+            r["previous_close_as_of"] = pca.isoformat()
+        except Exception:
+            r["previous_close_as_of"] = str(pca)
+    else:
+        r["previous_close_as_of"] = str(pca or "").strip()
     return r
 
 

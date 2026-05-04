@@ -244,10 +244,20 @@ def universe_with_quotes(
                 base_rows, quotes_error = ic.build_universe_picker_rows_list_only(
                     "Live universe quotes timed out — select each symbol for a fresh quote, or retry shortly."
                 )
+        master_by = {
+            str(m.get("symbol") or "").strip().upper(): m
+            for m in ic.get_iron_condor_universe_master_rows()
+        }
         out = []
         for r in base_rows:
-            item = dict(r)
-            item["active_position"] = str(item.get("symbol") or "").upper() in active_set
+            item = ic.normalize_ic_universe_row_for_api(dict(r))
+            sym_u = str(item.get("symbol") or "").strip().upper()
+            item["active_position"] = sym_u in active_set
+            mb = master_by.get(sym_u)
+            if mb:
+                item["previous_day_close"] = mb.get("previous_day_close")
+                item["previous_close_as_of"] = mb.get("previous_close_as_of") or ""
+                item = ic.normalize_ic_universe_row_for_api(item)
             out.append(item)
         return {"symbols": out, "quotes_error": quotes_error}
     except Exception as e:
