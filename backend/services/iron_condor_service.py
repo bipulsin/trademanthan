@@ -439,15 +439,39 @@ def ensure_iron_condor_universe_master_ready(db: Session) -> None:
     refresh_ic_universe_master_memory(db)
 
 
+def ic_universe_master_memory_cache_ttl_sec() -> float:
+    ttl = float(os.getenv("IC_UNIVERSE_MASTER_MEMORY_TTL_SEC", "90") or "90")
+    return max(15.0, ttl)
+
+
+def _universe_master_memory_cache_is_fresh() -> bool:
+    ttl = ic_universe_master_memory_cache_ttl_sec()
+    with _ic_universe_master_lock:
+        cache_age = time.monotonic() - _ic_universe_master_cache_mono
+        return bool(_ic_universe_master_by_symbol) and cache_age <= ttl
+
+
+def refresh_ic_universe_master_into_memory_using_db_if_stale(db: Session) -> None:
+    """
+    TTL refresh using the caller's Session (GET /universe-board-base request path).
+
+    Avoids opening a second pooled connection inside _ensure_ic_universe_master_memory_loaded()
+    whenever the master cache expires — common cause of slow "Loading universe" first paint.
+    """
+    if _universe_master_memory_cache_is_fresh():
+        return
+    try:
+        ensure_iron_condor_tables()
+        iron_condor_universe_master_bootstrap_seed_if_empty(db)
+        refresh_ic_universe_master_memory(db)
+    except Exception as ex:
+        logger.warning("Iron Condor universe master load (bound session) failed: %s", ex)
+
+
 def _ensure_ic_universe_master_memory_loaded() -> None:
     if SessionLocal is None:
         return
-    ttl = float(os.getenv("IC_UNIVERSE_MASTER_MEMORY_TTL_SEC", "90") or "90")
-    ttl = max(15.0, ttl)
-    with _ic_universe_master_lock:
-        cache_age = time.monotonic() - _ic_universe_master_cache_mono
-        skip = bool(_ic_universe_master_by_symbol) and cache_age <= ttl
-    if skip:
+    if _universe_master_memory_cache_is_fresh():
         return
     db = SessionLocal()
     try:
@@ -772,26 +796,18 @@ def ic_active_underlying_symbols_upper(db: Session, user_id: int) -> set[str]:
 
 def build_universe_board_base_rows(db: Session, user_id: int) -> List[Dict[str, Any]]:
     """Step 1 skeleton: universe master (+ prev close from DB/cache) + active flags. No broker I/O."""
+    refresh_ic_universe_master_into_memory_using_db_if_stale(db)
     active_set = ic_active_underlying_symbols_upper(db, user_id)
     out: List[Dict[str, Any]] = []
     for m in get_iron_condor_universe_master_rows():
         sym_u = str(m.get("symbol") or "").strip().upper()
         if not sym_u:
             continue
-        item = normalize_ic_universe_row_for_api(
-            {
-                "symbol": sym_u,
-                "sector": str(m.get("sector") or "").strip(),
-                "instrument_key": str(m.get("instrument_key") or "").strip(),
-                "previous_day_close": m.get("previous_day_close"),
-                "previous_close_as_of": m.get("previous_close_as_of") or "",
-                "updated_at": m.get("updated_at"),
-                "ltp": None,
-                "change_pct_day": None,
-                "active_position": sym_u in active_set,
-            }
-        )
-        out.append(item)
+        merged = dict(m)
+        merged["ltp"] = None
+        merged["change_pct_day"] = None
+        merged["active_position"] = sym_u in active_set
+        out.append(normalize_ic_universe_row_for_api(merged))
     return out
 
 
