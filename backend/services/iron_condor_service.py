@@ -217,14 +217,39 @@ def universe_picker_row_for_symbol(db: Session, user_id: int, symbol: str) -> Tu
     chg: Optional[float] = None
 
     quote_source = "live"
+    snapshot_ok = False
+    # Prefill from DB snapshot first so picker returns usable LTP/% quickly when pre-market job ran,
+    # then optionally overlay live (short wait if snapshot_ok — avoids hanging on broker).
+    if closes and len(closes) >= 1:
+        try:
+            last = float(closes[-1])
+            if last > 0:
+                ltp_f = last
+                if len(closes) >= 2:
+                    prev_d = float(closes[-2])
+                    if prev_d > 0:
+                        chg = round((last - prev_d) / prev_d * 100.0, 2)
+                snapshot_ok = True
+                quote_source = "daily_cache"
+        except (TypeError, ValueError):
+            pass
+
     live_timed_out = False
+    broker_wall_s = 3.0 if snapshot_ok else 12.0
+
     if not tok:
-        quotes_error = (
-            "Upstox is not connected (no access token). Sign in to Upstox from "
-            "Settings or use the OAuth link, then retry."
-        )
+        if not snapshot_ok:
+            quotes_error = (
+                "Upstox is not connected (no access token). Sign in to Upstox from "
+                "Settings or use the OAuth link, then retry."
+            )
+        else:
+            quotes_error = None
     elif not ik:
-        quotes_error = "Could not resolve equity instrument key for this symbol."
+        if not snapshot_ok:
+            quotes_error = "Could not resolve equity instrument key for this symbol."
+        else:
+            quotes_error = None
     else:
 
         def _snap() -> Dict[str, Any]:
@@ -244,16 +269,19 @@ def universe_picker_row_for_symbol(db: Session, user_id: int, symbol: str) -> Tu
         with ThreadPoolExecutor(max_workers=1) as pool:
             fut = pool.submit(_snap)
             try:
-                batch = fut.result(timeout=12)
+                batch = fut.result(timeout=broker_wall_s)
             except FuturesTimeoutError:
                 live_timed_out = True
-                quotes_error = "Live quote timed out (broker slow or unreachable)."
+                if snapshot_ok:
+                    quotes_error = None
+                else:
+                    quotes_error = "Live quote timed out (broker slow or unreachable)."
 
         qd = _batch_lookup(batch, ik) if batch else None
         if qd:
             try:
                 lp = float(qd.get("last_price") or 0)
-                ltp_f = lp if lp > 0 else None
+                live_ltp = lp if lp > 0 else None
                 nested = qd.get("ohlc") if isinstance(qd.get("ohlc"), dict) else {}
                 prev = float(
                     nested.get("close")
@@ -261,41 +289,19 @@ def universe_picker_row_for_symbol(db: Session, user_id: int, symbol: str) -> Tu
                     or nested.get("prev_close")
                     or 0
                 )
-                if ltp_f and prev > 0:
-                    chg = round((ltp_f - prev) / prev * 100.0, 2)
-                if ltp_f is not None and ltp_f > 0:
+                if live_ltp and prev > 0:
+                    chg = round((live_ltp - prev) / prev * 100.0, 2)
+                if live_ltp is not None and live_ltp > 0:
+                    ltp_f = live_ltp
                     quotes_error = None
                     quote_source = "live"
             except (TypeError, ValueError):
                 pass
-        elif not live_timed_out:
+        elif not live_timed_out and not snapshot_ok:
             quotes_error = quotes_error or (
                 "Upstox returned no quote for this symbol (session may be expired)."
             )
-
-    # If live LTP is missing: use today's pre-market daily_closes snapshot (same job as refresh-daily-cache).
-    if ltp_f is None or (isinstance(ltp_f, float) and ltp_f <= 0):
-        if closes and len(closes) >= 1:
-            try:
-                last = float(closes[-1])
-                if last > 0:
-                    ltp_f = last
-                    if len(closes) >= 2:
-                        prev_d = float(closes[-2])
-                        if prev_d > 0:
-                            chg = round((last - prev_d) / prev_d * 100.0, 2)
-                    quote_source = "daily_cache"
-                    if quotes_error:
-                        quotes_error = (
-                            quotes_error
-                            + " Showing last cached daily close from today's pre-market snapshot."
-                        )
-                    else:
-                        quotes_error = (
-                            "Live quote unavailable — showing last cached daily close from today's snapshot."
-                        )
-            except (TypeError, ValueError):
-                pass
+        # snapshot_ok + no live payload: keep quiet — LTP/% already come from DB snapshot
 
     return (
         {
