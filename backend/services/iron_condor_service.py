@@ -34,6 +34,7 @@ IST = pytz.timezone("Asia/Kolkata")
 # Process-wide cache: batched universe quotes (symbols × one Upstox call per TTL)
 _ic_uq_cache_deadline: float = 0.0
 _ic_uq_cache_rows: List[Dict[str, Any]] = []
+_ic_uq_cache_error: Optional[str] = None
 
 # In-process cache for equity instrument_key lookups (get_instrument_key can load large instruments JSON).
 _ic_equity_ik_cache: Dict[str, str] = {}
@@ -642,12 +643,13 @@ def build_universe_picker_rows_with_quotes_cached() -> Tuple[List[Dict[str, Any]
         (rows, quotes_error). Rows omit active_position — merge in the router.
         quotes_error is human-readable when broker/auth is unavailable.
     """
-    global _ic_uq_cache_deadline, _ic_uq_cache_rows
+    global _ic_uq_cache_deadline, _ic_uq_cache_rows, _ic_uq_cache_error
 
     ttl = float(os.getenv("IRON_CONDOR_UNIVERSE_QUOTES_CACHE_SEC", "25") or "25")
     now = time.monotonic()
     if _ic_uq_cache_rows and now < _ic_uq_cache_deadline:
-        return ([copy.deepcopy(r) for r in _ic_uq_cache_rows], None)
+        # Preserve quotes_error from the cached failure path — returning None hid Upstox/broker issues client-side.
+        return ([copy.deepcopy(r) for r in _ic_uq_cache_rows], _ic_uq_cache_error)
 
     pairs_meta: List[Tuple[str, str, str, Any]] = ic_universe_ordered_pairs()
     pairs_keys: List[Tuple[str, str, str]] = [(a, b, c) for a, b, c, _ in pairs_meta]
@@ -713,6 +715,7 @@ def build_universe_picker_rows_with_quotes_cached() -> Tuple[List[Dict[str, Any]
     rows = _universe_picker_rows_from_quote_batch(pairs_meta, batch)
 
     _ic_uq_cache_rows = [copy.deepcopy(r) for r in rows]
+    _ic_uq_cache_error = quotes_error
     # Failed / empty broker responses: short TTL so the next request retries soon instead of freezing ~55s.
     err_ttl = float(os.getenv("IRON_CONDOR_UNIVERSE_QUOTES_ERROR_CACHE_SEC", "6") or "6")
     if quotes_error:

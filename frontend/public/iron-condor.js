@@ -568,8 +568,14 @@
       var sym = String(rows[i].symbol || "").trim().toUpperCase();
       var pq = q[sym];
       if (pq && typeof pq === "object") {
-        if (pq.ltp != null) rows[i].ltp = pq.ltp;
-        if (pq.change_pct_day != null) rows[i].change_pct_day = pq.change_pct_day;
+        if (pq.ltp != null && pq.ltp !== "") {
+          var lp = typeof pq.ltp === "number" ? pq.ltp : parseFloat(String(pq.ltp));
+          if (isFinite(lp) && lp > 0) rows[i].ltp = lp;
+        }
+        if (pq.change_pct_day != null && pq.change_pct_day !== "") {
+          var ch = typeof pq.change_pct_day === "number" ? pq.change_pct_day : parseFloat(String(pq.change_pct_day));
+          if (isFinite(ch)) rows[i].change_pct_day = ch;
+        }
       }
     }
   }
@@ -606,11 +612,43 @@
     });
   }
 
+  /** Retries + 65s abort so the grid never sits forever on “Loading live LTP…”. */
+  async function fetchUniverseBoardQuotesJson(maxAttempts) {
+    var n = maxAttempts == null ? 3 : maxAttempts;
+    var lastErr;
+    for (var a = 0; a < n; a++) {
+      var ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+      var tid = null;
+      if (ctrl) {
+        tid = setTimeout(function () {
+          try {
+            ctrl.abort();
+          } catch (_e) {}
+        }, 65000);
+      }
+      try {
+        if (a > 0) {
+          await new Promise(function (resolve) {
+            setTimeout(resolve, 350 + a * 450);
+          });
+        }
+        var qj = await fj(icApiPaths("universe-board-quotes"), {
+          headers: authHeaders(),
+          cache: "no-store",
+          signal: ctrl ? ctrl.signal : undefined,
+        });
+        if (tid) clearTimeout(tid);
+        return qj;
+      } catch (e) {
+        lastErr = e;
+        if (tid) clearTimeout(tid);
+      }
+    }
+    throw lastErr || new Error("Universe quotes failed");
+  }
+
   function startUniverseQuotesFetch(gen) {
-    fj(icApiPaths("universe-board-quotes"), {
-      headers: authHeaders(),
-      cache: "no-store",
-    })
+    fetchUniverseBoardQuotesJson(3)
       .then(function (qj) {
         if (gen !== state.universeStep1QuoteGen) return;
         applyUniverseQuotesPatch(state.universeStep1Rows, qj.quotes_by_symbol);
@@ -619,7 +657,9 @@
       })
       .catch(function () {
         if (gen !== state.universeStep1QuoteGen) return;
-        pickerShowQuoteBanner("Live quotes unavailable — prev close shown from database.");
+        pickerShowQuoteBanner(
+          "Live quotes unavailable — prev close from DB. Reconnect Upstox in Settings or refresh the page."
+        );
         renderUniverseStep1Table(state.universeStep1Rows);
       });
   }
@@ -630,10 +670,7 @@
     if (!state.universeStep1Rows || !state.universeStep1Rows.length) return;
     if (!(localStorage.getItem("trademanthan_token") || "").trim()) return;
     var myGen = state.universeStep1QuoteGen;
-    fj(icApiPaths("universe-board-quotes"), {
-      headers: authHeaders(),
-      cache: "no-store",
-    })
+    fetchUniverseBoardQuotesJson(2)
       .then(function (qj) {
         if (myGen !== state.universeStep1QuoteGen) return;
         applyUniverseQuotesPatch(state.universeStep1Rows, qj.quotes_by_symbol);
@@ -642,7 +679,7 @@
       })
       .catch(function () {
         if (myGen !== state.universeStep1QuoteGen) return;
-        pickerShowQuoteBanner("Live quotes unavailable — prev close from database (auto-retry every 30s).");
+        pickerShowQuoteBanner("Live quotes unavailable — auto-retry every 30s.");
         renderUniverseStep1Table(state.universeStep1Rows);
       });
   }
