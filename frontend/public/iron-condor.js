@@ -84,6 +84,11 @@
     return [p];
   }
 
+  /** Batched LTP — no JWT (server Upstox token only). */
+  function universeQuotesPublicPaths() {
+    return icApiPaths("universe-board-quotes-public");
+  }
+
   function esc(s) {
     return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
@@ -658,8 +663,7 @@
             setTimeout(resolve, 350 + a * 450);
           });
         }
-        var qj = await fj(icApiPaths("universe-board-quotes"), {
-          headers: authHeaders(),
+        var qj = await fj(universeQuotesPublicPaths(), {
           cache: "no-store",
           signal: ctrl ? ctrl.signal : undefined,
         });
@@ -692,9 +696,7 @@
 
   /** Re-fetch LTP / day % without reloading the grid (same quote-gen guard as initial fetch). */
   function refreshUniverseQuotesQuiet() {
-    if (!state.universeStep1AuthMerged) return;
     if (!state.universeStep1Rows || !state.universeStep1Rows.length) return;
-    if (!(localStorage.getItem("trademanthan_token") || "").trim()) return;
     var myGen = state.universeStep1QuoteGen;
     fetchUniverseBoardQuotesJson(2)
       .then(function (qj) {
@@ -748,9 +750,8 @@
         }
         state.universeStep1Rows = rows;
         renderUniverseStep1Table(rows);
-        if (!state.universeStep1AuthMerged) {
-          pickerShowQuoteBanner("");
-        }
+        pickerShowQuoteBanner("Loading live LTP…");
+        startUniverseQuotesFetch(gen);
       })
       .catch(function () {
         if (gen !== state.universeStep1QuoteGen) return;
@@ -782,7 +783,7 @@
         state.universeStep1AuthMerged = false;
         state.universeStep1PickLocked = true;
         pickerShowQuoteBanner(
-          "Signed-in universe unavailable (session). Refresh the page or sign in again to load live LTP, Active?, and row picks."
+          "Sign in for Active? and row radios. LTP updates use the public quote feed."
         );
         if (state.universeStep1Rows && state.universeStep1Rows.length) {
           renderUniverseStep1Table(state.universeStep1Rows);

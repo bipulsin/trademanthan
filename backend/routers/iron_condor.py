@@ -201,7 +201,8 @@ def iron_condor_universe_master_refresh(
 def iron_condor_approved_underlyings() -> Dict[str, Any]:
     """
     Approved universe rows: symbol, sector, equity instrument_key (cached server-side).
-    No auth — used to populate the picker when JWT/session is missing or slow; quotes still require broker login.
+    No auth — used to populate the picker when JWT/session is missing or slow.
+    Live LTP: use GET /universe-board-quotes-public (no JWT).
     """
     return {"symbols": ic.get_iron_condor_universe_master_rows()}
 
@@ -219,6 +220,23 @@ def universe_board_base(db: Session = Depends(get_db), user: User = Depends(_aut
     except Exception as e:
         logger.exception("universe_board_base failed: %s", e)
         raise HTTPException(status_code=503, detail="Could not load universe — try again shortly.") from e
+
+
+@router.get("/universe-board-quotes-public")
+def universe_board_quotes_public() -> Dict[str, Any]:
+    """
+    Same batched LTP / day-% as /universe-board-quotes but no JWT.
+    Server-side Upstox token only (not tied to browsing user session).
+    """
+    try:
+        by_sym, quotes_error = ic.build_universe_quotes_by_symbol_cached()
+        return {"quotes_by_symbol": by_sym, "quotes_error": quotes_error}
+    except Exception as e:
+        logger.exception("universe_board_quotes_public failed: %s", e)
+        return {
+            "quotes_by_symbol": {},
+            "quotes_error": "Quotes temporarily unavailable — try again shortly.",
+        }
 
 
 @router.get("/universe-board-quotes")
