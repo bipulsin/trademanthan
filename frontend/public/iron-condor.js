@@ -284,9 +284,7 @@
     document.querySelectorAll(".ic-step-pill").forEach(function (b) {
       b.setAttribute("data-active", b.getAttribute("data-step") === String(n) ? "1" : "0");
     });
-    if (n !== 2) {
-      stopChecklistFillPolling();
-    }
+    stopChecklistFillPolling();
     if (n === 1) {
       refreshUniverseQuotesQuiet();
     }
@@ -544,7 +542,7 @@
         esc(sym) +
         "\" aria-label=\"Select " +
         esc(sym) +
-        " for checklist\" /></label>";
+        " to continue\" /></label>";
     }
     return (
       "<tr data-sym=\"" +
@@ -992,17 +990,25 @@
     btn.disabled = false;
   }
 
-  async function runChecklistStream() {
-    if (!state.symbol) return;
+  /** Clear strike card / overrides when changing underlying (checklist stream or direct-to-strikes). */
+  function resetStrikeCardUiForNewSymbol() {
     stopChecklistFillPolling();
-    document.getElementById("strikeOverrideBox").style.display = "none";
-    document.getElementById("strikeOverrideToggle").checked = false;
+    var sob = document.getElementById("strikeOverrideBox");
+    if (sob) sob.style.display = "none";
+    var st = document.getElementById("strikeOverrideToggle");
+    if (st) st.checked = false;
     ["ovSc", "ovBc", "ovSp", "ovBp"].forEach(function (id) {
       var el = document.getElementById(id);
+      if (!el) return;
       el.disabled = true;
       el.value = "";
     });
     state.detailed = null;
+  }
+
+  async function runChecklistStream() {
+    if (!state.symbol) return;
+    resetStrikeCardUiForNewSymbol();
     state.checklist = null;
     var wa = document.getElementById("warnAck");
     if (wa) wa.checked = false;
@@ -1222,7 +1228,7 @@
         declared_next_earnings_iso: state.nxt_earning_iso || undefined,
       }),
     });
-    showPane(5);
+    showPane(4);
     refreshWorkspaceQuiet();
     loadEquityCurve();
     alert("Workbook ACTIVE. Maintain legs only through Upstox.");
@@ -1491,17 +1497,27 @@
         break;
       }
     }
+    /* Pre-entry checklist UI suspended: treat checklist as all-pass for advisory flow. */
+    resetStrikeCardUiForNewSymbol();
+    state.checklist = {
+      success: true,
+      chips: [],
+      may_proceed_blocked: false,
+      warnings_require_ack: false,
+      vix_value: null,
+      vix_error: null,
+    };
     showPane(2);
-    renderChecklistPlaceholders();
+    document.getElementById("strikeCard").textContent = "Computing…";
     try {
-      await runChecklistStream();
+      await analyzeDetailed(null);
     } catch (e) {
-      document.getElementById("checklistArea").innerHTML = "Error " + esc(e.message);
+      document.getElementById("strikeCard").textContent = "Error: " + e.message;
     }
   };
 
   document.getElementById("toStrikesBtn").onclick = async function () {
-    showPane(3);
+    showPane(2);
     document.getElementById("strikeCard").textContent = "Computing…";
     try {
       await analyzeDetailed(null);
@@ -1519,7 +1535,7 @@
     showPane(1);
   };
   document.getElementById("back2").onclick = function () {
-    showPane(2);
+    showPane(1);
   };
   document.getElementById("toConfirmBtn").onclick = function () {
     try {
@@ -1533,10 +1549,10 @@
           return alert("Override strikes incomplete.");
       }
     } catch (_) {}
-    showPane(4);
+    showPane(3);
   };
   document.getElementById("back3").onclick = function () {
-    showPane(3);
+    showPane(2);
   };
   document.getElementById("confirmEntryBtn").onclick = async function () {
     try {

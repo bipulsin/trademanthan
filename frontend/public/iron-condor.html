@@ -49,12 +49,12 @@
 
       <div class="ic-banner-stack" id="alertStack"></div>
 
+      <!-- Re-enable checklist: add pill "2 · Checklist", restore data-pane numbering 2–5 below, and toggle IC_CHECKLIST_DISABLED in iron-condor.js -->
       <div class="ic-steps" id="stepNav">
         <button type="button" class="ic-step-pill" data-step="1" data-active="1">1 · Universe</button>
-        <button type="button" class="ic-step-pill" data-step="2">2 · Checklist</button>
-        <button type="button" class="ic-step-pill" data-step="3">3 · Strikes</button>
-        <button type="button" class="ic-step-pill" data-step="4">4 · Fills</button>
-        <button type="button" class="ic-step-pill" data-step="5">5 · Book</button>
+        <button type="button" class="ic-step-pill" data-step="2">2 · Strikes</button>
+        <button type="button" class="ic-step-pill" data-step="3">3 · Fills</button>
+        <button type="button" class="ic-step-pill" data-step="4">4 · Book</button>
       </div>
 
       <section class="ic-card" data-pane="1">
@@ -77,10 +77,10 @@
             <tbody id="pickerBody"><tr><td colspan="8" class="ic-muted">Loading universe…</td></tr></tbody>
           </table>
         </div>
-        <button type="button" class="ic-btn-global ic-btn-primary" style="margin-top:12px;padding:10px 16px;font-weight:700;border-radius:8px;border:none;" id="gotoChecklistBtn" disabled>Next → checklist</button>
+        <button type="button" class="ic-btn-global ic-btn-primary" style="margin-top:12px;padding:10px 16px;font-weight:700;border-radius:8px;border:none;" id="gotoChecklistBtn" disabled>Next → strikes</button>
       </section>
 
-      <section class="ic-card" data-pane="2" style="display:none;">
+      <section class="ic-card ic-checklist-disabled" aria-hidden="true" style="display:none !important;">
         <h2 style="margin:0 0 8px 0;font-size:1rem;">Pre-entry checklist</h2>
         <div id="checklistArea" class="ic-muted" style="margin-top:12px;">Choose an underlying with the radio button in step 1, then Next.</div>
         <label style="display:flex;gap:8px;align-items:center;margin-top:12px;font-size:0.85rem;"><input type="checkbox" id="warnAck" /> I acknowledge WARN items and still want to review strikes.</label>
@@ -90,7 +90,7 @@
         </div>
       </section>
 
-      <section class="ic-card" data-pane="3" style="display:none;">
+      <section class="ic-card" data-pane="2" style="display:none;">
         <h2 style="margin:0 0 8px;font-size:1rem;">ATR &amp; strikes</h2>
 
         <div id="strikeCardSkeletonHost" style="display:none;"></div>
@@ -109,12 +109,12 @@
           <button type="button" class="ic-btn-global" style="margin-top:10px;" id="recalcStrikeBtn">Recalc quotes</button>
         </div>
 
-        <div id="strikeCard" class="ic-muted">Run checklist pass first.</div>
+        <div id="strikeCard" class="ic-muted">Choose an underlying, then Next to analyze strikes.</div>
 
         <div style="margin-top:12px;display:flex;gap:8px;"><button type="button" class="ic-btn-global" id="back2">← Back</button><button type="button" class="ic-btn-global ic-btn-primary" id="toConfirmBtn">Proceed to fills →</button></div>
       </section>
 
-      <section class="ic-card" data-pane="4" style="display:none;">
+      <section class="ic-card" data-pane="3" style="display:none;">
         <h2 style="margin:0 0 8px;font-size:1rem;">Confirm fills (manual in Upstox)</h2>
         <p class="ic-muted">Place both shorts and hedges first. Enter fills you achieved (₹).</p>
 
@@ -132,7 +132,7 @@
         <div style="margin-top:12px;"><button type="button" class="ic-btn-global" id="back3">← Back</button></div>
       </section>
 
-      <section class="ic-card" data-pane="5" style="display:none;">
+      <section class="ic-card" data-pane="4" style="display:none;">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:8px;">
           <div>
             <h2 style="margin:0;font-size:1rem;">Position book</h2>
@@ -195,6 +195,6 @@
   </div>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" crossorigin="anonymous"></script>
   <script src="left-menu.js?v=3.22"></script>
-  <script src="iron-condor.js?v=40"></script>
+  <script src="iron-condor.js?v=41"></script>
 </body>
 </html>
