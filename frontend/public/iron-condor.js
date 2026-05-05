@@ -447,7 +447,7 @@
     });
   }
 
-  /** Public master shape → step-1 row (no LTP / no active until merged from auth grid). */
+  /** Public master shape → step-1 row (LTP later; default Active?=No Trade so radios are available without JWT). */
   function rowsFromApprovedUnderlyingsPayload(pub) {
     if (!pub || typeof pub !== "object") return [];
     var s = pub.symbols;
@@ -474,7 +474,7 @@
         nxt_earning_date: String(r.nxt_earning_date || "").trim(),
         ltp: null,
         change_pct_day: null,
-        active_position: null,
+        active_position: false,
       });
     }
     out.sort(function (a, b) {
@@ -723,13 +723,14 @@
   }
 
   /**
-   * Public list paints first (no JWT). Signed-in tier upgrades Active? / radios then broker LTP batch.
+   * Public list paints first (no JWT) with default Active?=No Trade and radios enabled.
+   * Signed-in tier can still override Active? with user-specific duplicate position status.
    */
   function loadUniverseStep1Grid() {
     var tb = document.getElementById("pickerBody");
     var gen = ++state.universeStep1QuoteGen;
     state.universeStep1AuthMerged = false;
-    state.universeStep1PickLocked = true;
+    state.universeStep1PickLocked = false;
     pickerShowQuoteBanner("");
     state.symbol = "";
     if (tb) {
@@ -779,9 +780,9 @@
       .catch(function () {
         if (gen !== state.universeStep1QuoteGen) return;
         state.universeStep1AuthMerged = false;
-        state.universeStep1PickLocked = true;
+        state.universeStep1PickLocked = false;
         pickerShowQuoteBanner(
-          "Sign in for Active? and row radios. LTP updates use the public quote feed."
+          "Public mode: Active? defaults to No Trade and row radios are enabled. Sign in to load user-specific duplicate checks."
         );
         if (state.universeStep1Rows && state.universeStep1Rows.length) {
           renderUniverseStep1Table(state.universeStep1Rows);
