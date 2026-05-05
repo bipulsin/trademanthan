@@ -512,7 +512,7 @@ def enrich_leg(chain_strike_row: Dict[str, Any], ce: bool) -> Dict[str, Any]:
 
 
 def analyze_iron_condor_detailed(
-    symbol: str, db: Session, user_id: int, strike_overrides: Optional[Dict[str, Any]] = None
+    symbol: str, db: Session, user_id: Optional[int], strike_overrides: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     ic.ensure_iron_condor_tables()
     iron_condor_migrations_v2()

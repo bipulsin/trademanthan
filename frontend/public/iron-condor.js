@@ -89,6 +89,11 @@
     return icApiPaths("universe-board-quotes-public");
   }
 
+  /** Strike analysis — no JWT (public advisory computation). */
+  function analyzeDetailedPublicPaths() {
+    return icApiPaths("analyze-detailed-public");
+  }
+
   function esc(s) {
     return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
@@ -487,6 +492,11 @@
     return row.active_position === true || row.active_position === false;
   }
 
+  function universeLiveLtpKnown(row) {
+    var lp = parseNumOrNull(row && row.ltp);
+    return lp != null && lp > 0;
+  }
+
   /** Δ month = (LTP − curr_month_open) / curr_month_open × 100. Bands use signed % (direction matters). */
   function deltaMonthPctFromRow(row) {
     var mo = parseNumOrNull(row.curr_month_open);
@@ -536,7 +546,7 @@
     var pdcHtml = fmtPxCell(row.previous_day_close);
     var rad =
       "<span class=\"ic-muted\">—</span>";
-    if (apKnown && !ap && !state.universeStep1PickLocked) {
+    if (apKnown && !ap && !state.universeStep1PickLocked && universeLiveLtpKnown(row)) {
       rad =
         "<label class=\"ic-universe-radio\"><input type=\"radio\" name=\"icUniversePick\" value=\"" +
         esc(sym) +
@@ -1086,12 +1096,19 @@
     var host = document.getElementById("strikeCardSkeletonHost");
     host.style.display = "block";
     host.innerHTML = skelBars(4);
+    renderStrikeCardProgressSeed();
+    var slowTimer = setTimeout(function () {
+      var el = document.getElementById("strikeCard");
+      if (!el) return;
+      el.innerHTML += "<p class=\"ic-muted\">Still fetching live leg quotes… showing results immediately once each piece arrives.</p>";
+    }, 1800);
     try {
-      var j = await fj(icApiPaths("analyze-detailed"), {
+      var j = await fj(analyzeDetailedPublicPaths(), {
         method: "POST",
-        headers: authHeaders(),
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify(payload),
       });
+      clearTimeout(slowTimer);
       host.style.display = "none";
       state.detailed = j.analysis;
 
@@ -1182,6 +1199,7 @@
 
       syncOverrideInputs(true);
     } catch (e) {
+      clearTimeout(slowTimer);
       host.style.display = "none";
       throw e;
     }
@@ -1206,6 +1224,36 @@
       sell_put: Number(document.getElementById("ovSp").value),
       buy_put: Number(document.getElementById("ovBp").value),
     };
+  }
+
+  function selectedUniverseRow() {
+    var rows = state.universeStep1Rows || [];
+    var sym = String(state.symbol || "").trim().toUpperCase();
+    if (!sym) return null;
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i].symbol || "").trim().toUpperCase() === sym) return rows[i];
+    }
+    return null;
+  }
+
+  /** Progressive paint: show immediate context while detailed analysis computes. */
+  function renderStrikeCardProgressSeed() {
+    var r = selectedUniverseRow() || {};
+    var sym = String(state.symbol || "").trim().toUpperCase();
+    var spot = fmtPxCell(r.ltp);
+    var day = fmtPctCell(r.change_pct_day);
+    var sec = String(r.sector || "—");
+    document.getElementById("strikeCard").innerHTML =
+      "<p><strong class=\"ic-mono\">" +
+      esc(sym || "—") +
+      "</strong> · Spot <span class=\"ic-num ic-mono\">₹" +
+      esc(spot) +
+      "</span> · Day <span class=\"ic-num\">" +
+      esc(day) +
+      "</span> · Sector " +
+      esc(sec) +
+      "</p>" +
+      "<p class=\"ic-muted\">Fetching ATR, strike ladder, option quotes, and economics…</p>";
   }
 
   async function confirmEntrySave() {

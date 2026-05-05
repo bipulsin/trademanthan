@@ -453,6 +453,26 @@ def analyze_detailed(
         raise HTTPException(status_code=502, detail=str(e))
 
 
+@router.post("/analyze-detailed-public")
+def analyze_detailed_public(
+    body: AnalyzeDetailedBody,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Public strike analysis endpoint (no JWT).
+    Uses env-based sizing defaults and skips user-specific sector/duplicate checks.
+    """
+    try:
+        out = ice.analyze_iron_condor_detailed(
+            body.underlying.strip(), db, None, strike_overrides=body.strike_overrides
+        )
+        return {"success": True, "analysis": out}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 @router.post("/confirm-entry")
 def confirm_entry(
     body: ConfirmEntryBody,

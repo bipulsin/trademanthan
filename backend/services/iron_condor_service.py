@@ -1609,17 +1609,21 @@ def _open_sectors(db: Session, user_id: int) -> List[str]:
     return [r[0] for r in rows]
 
 
-def analyze_iron_condor(symbol: str, db: Session, user_id: int) -> Dict[str, Any]:
+def analyze_iron_condor(symbol: str, db: Session, user_id: Optional[int] = None) -> Dict[str, Any]:
     ensure_iron_condor_tables()
     und = (symbol or "").strip().upper()
     sec = ic_sector_for_symbol(und)
     if not sec:
         raise ValueError(f"Symbol {und} is not in the approved Iron Condor universe.")
 
-    settings = get_or_create_settings(db, user_id)
-    tc = float(settings.get("trading_capital") or 0.0)
-    target_slots = int(settings.get("target_position_slots") or 5)
-    os_secs = _open_sectors(db, user_id)
+    if user_id is not None:
+        settings = get_or_create_settings(db, user_id)
+        tc = float(settings.get("trading_capital") or 0.0)
+        target_slots = int(settings.get("target_position_slots") or 5)
+        os_secs = _open_sectors(db, user_id)
+    else:
+        tc, target_slots = _iron_condor_capital_slots_from_env()
+        os_secs = []
     alloc_pct, sizing_err = compute_position_suggestion(
         trading_capital=tc,
         target_slots=target_slots,
