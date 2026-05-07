@@ -71,6 +71,16 @@ def _try_live_exit(position, reason: str, option_contract: str):
     exit_manually=True: broker response missing/ambiguous — caller should set exit_reason to
     'Exit Manually' and keep status bought (no duplicate SELL retries).
     """
+    buy_date = getattr(position, "buy_time", None) or getattr(position, "trade_date", None)
+    if live_trading.is_scan_option_tracking_disabled(option_contract, buy_date):
+        logger.warning(
+            "🛑 LIVE scan exit suppressed for %s %s buy_date=%s — no broker SELL sent",
+            getattr(position, "stock_name", "?"),
+            option_contract,
+            buy_date,
+        )
+        return False, None, False
+
     if _should_block_algo_exit_today(position, option_contract):
         logger.warning(
             "🛡️ Algo exit blocked by override for %s (%s) contract=%s trade_date=%s",
@@ -537,6 +547,14 @@ def update_vwap_for_all_open_positions():
                 try:
                     stock_name = no_entry_trade.stock_name
                     option_type = no_entry_trade.option_type or 'PE'
+                    no_entry_date = no_entry_trade.buy_time or no_entry_trade.trade_date
+                    if live_trading.is_scan_option_tracking_disabled(no_entry_trade.option_contract, no_entry_date):
+                        logger.warning(
+                            "⏭️ Tracking disabled for %s (%s) — skipping no_entry re-evaluation",
+                            stock_name,
+                            no_entry_trade.option_contract,
+                        )
+                        continue
                     
                     # Fetch current stock LTP and VWAP
                     stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
@@ -824,6 +842,14 @@ def update_vwap_for_all_open_positions():
                 try:
                     stock_name = no_entry_trade.stock_name
                     option_type = no_entry_trade.option_type or 'PE'
+                    no_entry_date = no_entry_trade.buy_time or no_entry_trade.trade_date
+                    if live_trading.is_scan_option_tracking_disabled(no_entry_trade.option_contract, no_entry_date):
+                        logger.warning(
+                            "⏭️ Tracking disabled for %s (%s) — skipping no_entry re-evaluation",
+                            stock_name,
+                            no_entry_trade.option_contract,
+                        )
+                        continue
                     
                     # Fetch current stock LTP and VWAP
                     stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
@@ -1130,6 +1156,14 @@ def update_vwap_for_all_open_positions():
             try:
                 stock_name = position.stock_name
                 option_contract = position.option_contract
+                position_date = position.buy_time or position.trade_date
+                if live_trading.is_scan_option_tracking_disabled(option_contract, position_date):
+                    logger.warning(
+                        "⏭️ Tracking disabled for %s (%s) — skipping VWAP updater",
+                        stock_name,
+                        option_contract,
+                    )
+                    continue
                 logger.info(f"🔍 DEBUG: Processing position {idx}/{len(open_positions)}: {stock_name} (status={position.status}, sell_price={position.sell_price}, has_instrument_key={bool(position.instrument_key)})")
                 
                 # ═══════════════════════════════════════════════════════════════

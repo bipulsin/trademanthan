@@ -4728,6 +4728,13 @@ async def get_latest_webhook_data(background_tasks: BackgroundTasks, db: Session
             IntradayStockOption.trade_date >= filter_date_start,
             IntradayStockOption.trade_date < filter_date_end
         ).order_by(desc(IntradayStockOption.alert_time)).limit(200).all()
+        bullish_records = [
+            record for record in bullish_records
+            if not live_trading.is_scan_option_tracking_disabled(
+                record.option_contract,
+                record.buy_time or record.trade_date,
+            )
+        ]
         
         # Fetch Bearish alerts from database for the current trading day only
         # Use date range comparison instead of exact equality to handle timezone/time differences
@@ -4736,6 +4743,13 @@ async def get_latest_webhook_data(background_tasks: BackgroundTasks, db: Session
             IntradayStockOption.trade_date >= filter_date_start,
             IntradayStockOption.trade_date < filter_date_end
         ).order_by(desc(IntradayStockOption.alert_time)).limit(200).all()
+        bearish_records = [
+            record for record in bearish_records
+            if not live_trading.is_scan_option_tracking_disabled(
+                record.option_contract,
+                record.buy_time or record.trade_date,
+            )
+        ]
         
         # Group records by alert_time for Bullish
         bullish_alerts = []
@@ -5296,6 +5310,14 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                 # SAFETY CHECK: Skip if trade already has exit_reason (should be filtered by query, but double-check)
                 if record.exit_reason is not None:
                     logger.info(f"⚠️ Skipping {record.stock_name} - already exited with reason: {record.exit_reason}")
+                    continue
+                record_date = record.buy_time or record.trade_date
+                if live_trading.is_scan_option_tracking_disabled(record.option_contract, record_date):
+                    logger.warning(
+                        "⏭️ Tracking disabled for %s (%s) — skipping hourly refresh",
+                        record.stock_name,
+                        record.option_contract,
+                    )
                     continue
                 
                 # Load instruments JSON if needed

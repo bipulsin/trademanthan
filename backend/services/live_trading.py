@@ -3,9 +3,10 @@ import json
 import math
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Dict, Any, Optional, List
+from zoneinfo import ZoneInfo
 
 from backend.services.upstox_service import upstox_service
 
@@ -43,6 +44,16 @@ MARKET_FILL_WAIT_SEC = 45.0
 # System-wide live trading switch (default: NO)
 TRADING_LIVE_FILE = Path("/home/ubuntu/trademanthan/data/trading_live.json")
 trading_live = "NO"
+
+_SCAN_OPTION_TRACKING_DISABLED_KEYS = {
+    ("BIOCON", "420", "CE", "MAY", "26"),
+    ("DMART", "4500", "CE", "MAY", "26"),
+    ("UNIONBANK", "200", "CE", "MAY", "26"),
+}
+_SCAN_OPTION_TRACKING_DISABLED_LABELS = {
+    f"{symbol} {strike} {option_type} 26 {month} {year}"
+    for symbol, strike, option_type, month, year in _SCAN_OPTION_TRACKING_DISABLED_KEYS
+}
 
 
 def normalize_trading_live(value: str) -> str:
@@ -91,6 +102,71 @@ def set_trading_live_value(value: str) -> str:
 
 def is_trading_live_enabled() -> bool:
     return trading_live == "YES"
+
+
+def _normalize_scan_option_contract(value: Optional[str]) -> str:
+    return " ".join(str(value or "").strip().upper().split())
+
+
+def _scan_option_tracking_key(option_contract: Optional[str]) -> Optional[tuple[str, str, str, str, str]]:
+    import re
+
+    raw = str(option_contract or "").strip()
+    if not raw:
+        return None
+
+    compact = _normalize_scan_option_contract(raw)
+    space_match = re.match(
+        r"^(.+?)\s+(\d+(?:\.\d+)?)\s+(CE|PE)\s+\d{1,2}\s+([A-Z]{3})\s+(\d{2}|\d{4})$",
+        compact,
+    )
+    if space_match:
+        symbol, strike, option_type, month, year = space_match.groups()
+        year = year[-2:]
+        return (symbol.strip(), str(int(float(strike))), option_type, month, year)
+
+    hyphen_match = re.match(
+        r"^(.+?)-([A-Za-z]{3})(\d{4})-(\d+(?:\.\d+)?)-(CE|PE)$",
+        raw,
+    )
+    if hyphen_match:
+        symbol, month, year, strike, option_type = hyphen_match.groups()
+        return (
+            symbol.strip().upper(),
+            str(int(float(strike))),
+            option_type.upper(),
+            month.upper(),
+            year[-2:],
+        )
+
+    return None
+
+
+def _scan_option_tracking_date(value: Any) -> Optional[date]:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return datetime.fromisoformat(str(value)).date()
+    except (TypeError, ValueError):
+        return None
+
+
+def is_scan_option_tracking_disabled(option_contract: Optional[str], trade_date: Any = None) -> bool:
+    normalized = _normalize_scan_option_contract(option_contract)
+    key = _scan_option_tracking_key(option_contract)
+    if normalized not in _SCAN_OPTION_TRACKING_DISABLED_LABELS and key not in _SCAN_OPTION_TRACKING_DISABLED_KEYS:
+        return False
+
+    disabled_date = _scan_option_tracking_date(trade_date)
+    if not disabled_date:
+        return False
+
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
+    return disabled_date in {today, today - timedelta(days=1)}
 
 
 def _normalize_instrument_key_for_match(s: Optional[str]) -> str:
