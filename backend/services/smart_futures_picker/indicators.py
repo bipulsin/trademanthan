@@ -135,7 +135,12 @@ def _adx_column_name(adx_df, length: int) -> Optional[str]:
     for candidate in (f"ADX_{length}", f"ADX_{int(length)}"):
         if candidate in adx_df.columns:
             return candidate
-    return next((c for c in adx_df.columns if str(c).upper().startswith("ADX")), None)
+    # Fallback: pandas_ta may emit multiple ADX*-prefixed cols; skip ADXR (different indicator).
+    for c in adx_df.columns:
+        cs = str(c).upper()
+        if cs.startswith("ADX") and "ADXR" not in cs:
+            return str(c)
+    return None
 
 
 def adx_value(
@@ -149,7 +154,10 @@ def adx_value(
         if len(closes) < need:
             return None
         df = pd.DataFrame({"high": list(highs), "low": list(lows), "close": list(closes)})
-        adx_df = ta.adx(df["high"], df["low"], df["close"], length=int(length))
+        # TradingView default ADX: DI length == ADX smoothing length.
+        adx_df = ta.adx(
+            df["high"], df["low"], df["close"], length=int(length), lensig=int(length)
+        )
         if adx_df is None or adx_df.empty:
             return None
         col = _adx_column_name(adx_df, int(length))
@@ -305,7 +313,9 @@ def adx_last_two(
         if len(closes) < need:
             return None, None
         df = pd.DataFrame({"high": list(highs), "low": list(lows), "close": list(closes)})
-        adx_df = ta.adx(df["high"], df["low"], df["close"], length=int(length))
+        adx_df = ta.adx(
+            df["high"], df["low"], df["close"], length=int(length), lensig=int(length)
+        )
         if adx_df is None or adx_df.empty:
             return None, None
         col = _adx_column_name(adx_df, int(length))

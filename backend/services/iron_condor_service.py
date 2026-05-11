@@ -854,15 +854,59 @@ def merge_universe_board_quotes(
     return out
 
 
+def _ic_prepare_daily_spot_candles_for_adx(
+    candles: Optional[List[Dict[str, Any]]],
+    *,
+    now_ist: Optional[datetime] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Normalize Upstox ``days/1`` rows for ADX: parse timestamps, sort in IST, one row per session date.
+
+    By default drops the **current IST session date** before NSE regular close (+ buffer) so ADX matches
+    TradingView / industry reference on the **last fully settled daily** (TV's value while the session is
+    open often moves with the developing bar — use IRON_CONDOR_UNIVERSE_ADX_EXCLUDE_INCOMPLETE_DAILY=0 to
+    include today's partial candle instead).
+    """
+    # Local import avoids pulling heavy subgraph at module import.
+    from backend.services.upstox_service import _parse_ts_to_aware_ist
+
+    now_i = mh_ic._normalize_ist(now_ist)
+    rows: List[Tuple[datetime, Dict[str, Any]]] = []
+    for c in candles or []:
+        if not isinstance(c, dict):
+            continue
+        dt = _parse_ts_to_aware_ist(c.get("timestamp"))
+        if dt is None:
+            continue
+        rows.append((dt.astimezone(IST), c))
+
+    rows.sort(key=lambda x: x[0])
+    by_day: Dict[date, Dict[str, Any]] = {}
+    for _dt, rec in rows:
+        by_day[_dt.date()] = dict(rec)
+
+    unique = [by_day[d] for d in sorted(by_day.keys())]
+
+    flag = (os.getenv("IRON_CONDOR_UNIVERSE_ADX_EXCLUDE_INCOMPLETE_DAILY", "1") or "1").strip().lower()
+    exclude_incomplete = flag not in ("0", "false", "no", "off")
+    if unique and exclude_incomplete:
+        # Weekends / DB holidays: no intraday "today's developing daily" bar to strip.
+        if not mh_ic.should_skip_scheduled_market_jobs_ist(now_i) and now_i.time() < dt_time(15, 35):
+            last = unique[-1]
+            ltd = _parse_ts_to_aware_ist(last.get("timestamp"))
+            if ltd and ltd.astimezone(IST).date() == now_i.date():
+                unique = unique[:-1]
+    return unique
+
+
 def _ic_daily_hlc_for_adx(candles: Optional[List[Dict[str, Any]]]) -> Tuple[List[float], List[float], List[float]]:
-    """Chronologically ordered daily high/low/close for pandas_ta ADX."""
+    """High/low/close lists from **already prepared** daily candles (oldest → newest)."""
     if not candles:
         return [], [], []
-    sorted_candles = sorted(candles, key=lambda c: str(c.get("timestamp") or ""))
     highs: List[float] = []
     lows: List[float] = []
     closes: List[float] = []
-    for c in sorted_candles:
+    for c in candles:
         try:
             h = float(c.get("high") or 0)
             lo = float(c.get("low") or 0)
@@ -895,7 +939,8 @@ def _fetch_one_underlying_daily_adx(sym_upper: str, ik: str, period: int) -> Tup
         raw = vwap_service.get_historical_candles_by_instrument_key(
             ik, interval="days/1", days_back=days_back
         )
-        h, l, cl = _ic_daily_hlc_for_adx(raw)
+        prepared = _ic_prepare_daily_spot_candles_for_adx(raw, now_ist=datetime.now(IST))
+        h, l, cl = _ic_daily_hlc_for_adx(prepared)
         av = adx_value(h, l, cl, int(period))
         return sym_upper, av
     except Exception as ex:
