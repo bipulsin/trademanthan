@@ -1645,6 +1645,142 @@ def _monthly_atr_wilder_14(monthly_rows: List[Dict[str, Any]]) -> Optional[float
     return float(atr)
 
 
+def _daily_atr_wilder_last(highs: List[float], lows: List[float], closes: List[float], period: int) -> Optional[float]:
+    """Wilder ATR(period) on ordered daily H/L/C (oldest→newest); returns last smoothed ATR."""
+    if period < 1 or len(highs) != len(lows) or len(lows) != len(closes) or len(closes) < period + 1:
+        return None
+    tr: List[float] = []
+    for i in range(1, len(highs)):
+        tr.append(max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1])))
+    if len(tr) < period:
+        return None
+    atr = sum(tr[:period]) / float(period)
+    for i in range(period, len(tr)):
+        atr = (atr * (period - 1) + tr[i]) / float(period)
+    return float(atr)
+
+
+def _nearest_strike_on_ladder_abs(ladder: List[float], ref: float) -> Optional[float]:
+    if not ladder:
+        return None
+    return float(min(ladder, key=lambda s: abs(float(s) - float(ref))))
+
+
+def batch_short_suggested_leg_quotes(
+    api_sym: str, expiry_date: date, *, sell_call_strike: float, sell_put_strike: float
+) -> Dict[str, Dict[str, Any]]:
+    """Two targeted option quotes (short CE + short PE) for ATR hint row — same batch snapshot pattern as four-leg."""
+    exp_dt = IST.localize(datetime.combine(expiry_date, dt_time(12, 0)))
+    spec: List[Tuple[str, float, str]] = [
+        ("suggested_sell_call", float(sell_call_strike), "CE"),
+        ("suggested_sell_put", float(sell_put_strike), "PE"),
+    ]
+    ik_list: List[Optional[str]] = [
+        vwap_service.get_option_instrument_key(api_sym, exp_dt, st, ot) for _nm, st, ot in spec
+    ]
+    valid_keys = [k for k in ik_list if k]
+    snaps: Dict[str, Dict[str, Any]] = {}
+    if valid_keys:
+        snaps = vwap_service.get_market_quote_snapshots_batch(valid_keys, request_timeout=12, max_retries=2) or {}
+    out: Dict[str, Dict[str, Any]] = {}
+    for j, (nm, st, ot) in enumerate(spec):
+        ik = ik_list[j]
+        ce = ot.upper() == "CE"
+        qd = None
+        if ik:
+            qd = snaps.get(ik) or snaps.get(ik.replace("|", ":"))
+        leg = _leg_dict_from_quote(st, ce, qd)
+        if ik:
+            leg["instrument_key"] = ik
+        out[nm] = leg
+    return out
+
+
+def build_daily_atr10_short_suggestion_block(
+    eq_key: str, api_sym: str, spot: float, expiry_date: date
+) -> Dict[str, Any]:
+    """
+    Daily ATR(10) on NSE cash daily candles (same ``days/1`` prep semantics as universe ADX),
+    theoretical short refs at spot ± 1.5×ATR, nearest strikes on the standard ladder, and batch quotes.
+
+    ``spot`` must match ``analyze_iron_condor`` equity live reference (strike card "Spot"), not universe prev. close.
+
+    UI ack is for these **short** hints only; the Iron Condor playbook still sizes the full four legs from the
+    core monthly-ATR ladder in ``analyze_iron_condor`` (unchanged).
+    """
+    out: Dict[str, Any] = {
+        "ok": False,
+        "error": None,
+        "daily_atr_period": 10,
+        "daily_atr_10": None,
+        "atr_distance_multiplier": 1.5,
+        "spot_used": None,
+        "spot_basis": (
+            "Same as strike-card live spot: equity last_price/close from the Upstox OHLC path used in "
+            "analyze_iron_condor (not the universe table prev. close / cached picker LTP)."
+        ),
+        "theoretical_pe_short_ref": None,
+        "theoretical_ce_short_ref": None,
+        "nearest_expiry": expiry_date.isoformat(),
+        "nearest_expiry_source": "monthly_expiry_same_as_iron_condor_analyze",
+        "strike_step": None,
+        "chosen_sell_put_strike": None,
+        "chosen_sell_call_strike": None,
+        "leg_quotes": {},
+    }
+    try:
+        sp0 = float(spot)
+        if sp0 <= 0:
+            out["error"] = "invalid_spot"
+            return out
+        raw = vwap_service.get_historical_candles_by_instrument_key(eq_key, interval="days/1", days_back=120) or []
+        prepared = _ic_prepare_daily_spot_candles_for_adx(raw, now_ist=datetime.now(IST))
+        h, l, cl = _ic_daily_hlc_for_adx(prepared)
+        atr10 = _daily_atr_wilder_last(h, l, cl, 10)
+        if atr10 is None or atr10 <= 0:
+            out["error"] = "insufficient_daily_bars_for_atr10"
+            out["spot_used"] = round(sp0, 4)
+            return out
+
+        step = float(vwap_service.calculate_strike_interval(sp0))
+        if step <= 0:
+            out["error"] = "invalid_strike_step"
+            out["spot_used"] = round(sp0, 4)
+            return out
+        ladder = _strike_ladder_price_list(sp0, step)
+        mult = 1.5
+        pe_ref = sp0 - mult * float(atr10)
+        ce_ref = sp0 + mult * float(atr10)
+        sp_st = _nearest_strike_on_ladder_abs(ladder, pe_ref)
+        sc_st = _nearest_strike_on_ladder_abs(ladder, ce_ref)
+        if sp_st is None or sc_st is None:
+            out["error"] = "could_not_map_strikes"
+            out["spot_used"] = round(sp0, 4)
+            return out
+
+        legs = batch_short_suggested_leg_quotes(
+            api_sym, expiry_date, sell_call_strike=sc_st, sell_put_strike=sp_st
+        )
+        out["ok"] = True
+        out["daily_atr_10"] = round(float(atr10), 4)
+        out["spot_used"] = round(sp0, 4)
+        out["theoretical_pe_short_ref"] = round(float(pe_ref), 4)
+        out["theoretical_ce_short_ref"] = round(float(ce_ref), 4)
+        out["strike_step"] = round(step, 6)
+        out["chosen_sell_put_strike"] = sp_st
+        out["chosen_sell_call_strike"] = sc_st
+        out["leg_quotes"] = legs
+        return out
+    except Exception as ex:
+        logger.warning("build_daily_atr10_short_suggestion_block: %s", ex)
+        out["error"] = str(ex)
+        try:
+            out["spot_used"] = round(float(spot), 4)
+        except (TypeError, ValueError):
+            pass
+        return out
+
+
 def _extract_chain_strike_list(chain_payload: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
     raw = chain_payload
     strike_list = None

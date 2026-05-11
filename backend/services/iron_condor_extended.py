@@ -597,6 +597,22 @@ def analyze_iron_condor_detailed(
     }
     core_out["live"] = {"spot_ltp": core.get("spot"), "underlying_change_pct_today": pct_day}
     core_out["strike_selection_warnings"] = list(dict.fromkeys((core.get("strike_selection_warnings") or []) + ov_warn))
+
+    # Daily ATR(10) short-strike hints (same live spot as strike card; same monthly expiry + instrument resolution as core).
+    sug: Dict[str, Any] = {"ok": False, "error": "skipped"}
+    try:
+        eq_key_ic = vwap_service.get_instrument_key(api_sym)
+        if eq_key_ic:
+            sug = ic.build_daily_atr10_short_suggestion_block(
+                eq_key_ic, api_sym, float(core_out.get("spot") or 0.0), exp_d_calc
+            )
+        else:
+            sug = {"ok": False, "error": "no_equity_instrument_key"}
+    except Exception as ex:
+        logger.warning("analyze_iron_condor_detailed daily ATR suggestions: %s", ex)
+        sug = {"ok": False, "error": str(ex)}
+    core_out["daily_atr_short_suggestions"] = sug
+
     return core_out
 
 

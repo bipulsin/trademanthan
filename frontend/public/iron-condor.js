@@ -301,6 +301,9 @@
     if (n === 1) {
       refreshUniverseQuotesQuiet();
     }
+    if (n === 2) {
+      updateProceedToFillsState();
+    }
   }
 
   function skelBars(n) {
@@ -956,6 +959,10 @@
         updateToStrikesBtnState();
       };
     }
+    var atrPe = document.getElementById("icAckAtrSellPe");
+    var atrCe = document.getElementById("icAckAtrSellCe");
+    if (atrPe) atrPe.onchange = updateProceedToFillsState;
+    if (atrCe) atrCe.onchange = updateProceedToFillsState;
     startUniverseQuotePolling();
     loadUniverseStep1Grid();
   }
@@ -966,6 +973,9 @@
     state.nxt_earning_iso = "";
     state.checklist = null;
     state.detailed = null;
+    hideIcAtrSuggestPanel();
+    var tcf = document.getElementById("toConfirmBtn");
+    if (tcf) tcf.disabled = true;
     pickerShowQuoteBanner("");
     document.querySelectorAll('input[name="icUniversePick"]').forEach(function (inp) {
       inp.checked = false;
@@ -1143,6 +1153,7 @@
   /** Clear strike card / overrides when changing underlying (checklist stream or direct-to-strikes). */
   function resetStrikeCardUiForNewSymbol() {
     stopChecklistFillPolling();
+    hideIcAtrSuggestPanel();
     var sob = document.getElementById("strikeOverrideBox");
     if (sob) sob.style.display = "none";
     var st = document.getElementById("strikeOverrideToggle");
@@ -1154,6 +1165,8 @@
       el.value = "";
     });
     state.detailed = null;
+    var tcf = document.getElementById("toConfirmBtn");
+    if (tcf) tcf.disabled = true;
   }
 
   async function runChecklistStream() {
@@ -1226,6 +1239,115 @@
     var ak = l.ask != null ? Number(l.ask).toFixed(2) : "—";
     var oi = l.oi != null ? Math.round(l.oi) : "—";
     return Number(l.ltp || 0).toFixed(2) + " (Bid/Ask " + bd + "/" + ak + "; OI " + oi + ")";
+  }
+
+  function hideIcAtrSuggestPanel() {
+    var host = document.getElementById("icAtrSuggestPanel");
+    if (host) host.setAttribute("hidden", "hidden");
+    var ack = document.getElementById("icAtrSuggestAckRow");
+    if (ack) ack.style.display = "none";
+    var hint = document.getElementById("icAtrSuggestProceedHint");
+    if (hint) {
+      hint.style.display = "none";
+      hint.textContent = "";
+    }
+    var pe = document.getElementById("icAckAtrSellPe");
+    var ce = document.getElementById("icAckAtrSellCe");
+    if (pe) pe.checked = false;
+    if (ce) ce.checked = false;
+  }
+
+  /** Proceed to fills: disabled until analysis exists; if daily ATR hints ok, both short-strike ack checkboxes required. */
+  function updateProceedToFillsState() {
+    var btn = document.getElementById("toConfirmBtn");
+    if (!btn) return;
+    if (!state.detailed) {
+      btn.disabled = true;
+      return;
+    }
+    var sug = state.detailed.daily_atr_short_suggestions;
+    if (
+      sug &&
+      sug.ok &&
+      sug.chosen_sell_put_strike != null &&
+      sug.chosen_sell_call_strike != null
+    ) {
+      var pe = document.getElementById("icAckAtrSellPe");
+      var ce = document.getElementById("icAckAtrSellCe");
+      var hint = document.getElementById("icAtrSuggestProceedHint");
+      if (!pe || !ce || !pe.checked || !ce.checked) {
+        btn.disabled = true;
+        if (hint) {
+          hint.style.display = "block";
+          hint.textContent = "Check both boxes above to confirm you reviewed the ATR-based suggested short strikes.";
+        }
+        return;
+      }
+      if (hint) {
+        hint.style.display = "none";
+        hint.textContent = "";
+      }
+    }
+    btn.disabled = false;
+  }
+
+  function renderIcAtrSuggestPanel(a) {
+    var host = document.getElementById("icAtrSuggestPanel");
+    var body = document.getElementById("icAtrSuggestBody");
+    var ackRow = document.getElementById("icAtrSuggestAckRow");
+    if (!host || !body) return;
+    if (!a || !a.daily_atr_short_suggestions) {
+      hideIcAtrSuggestPanel();
+      updateProceedToFillsState();
+      return;
+    }
+    var sug = a.daily_atr_short_suggestions;
+    host.removeAttribute("hidden");
+    if (!sug.ok) {
+      body.innerHTML =
+        "<p class=\"ic-muted\">Daily ATR(10) hints unavailable" +
+        (sug.error ? ": " + esc(String(sug.error)) : ".") +
+        "</p>";
+      if (ackRow) ackRow.style.display = "none";
+      updateProceedToFillsState();
+      return;
+    }
+    if (ackRow) ackRow.style.display = "flex";
+    var lq = sug.leg_quotes || {};
+    var spL = lq.suggested_sell_put || {};
+    var scL = lq.suggested_sell_call || {};
+    body.innerHTML =
+      "<p class=\"ic-num\">Daily ATR(10): ₹<span class=\"ic-mono\">" +
+      esc(sug.daily_atr_10) +
+      "</span> · Spot used (same as strike card): ₹<span class=\"ic-mono\">" +
+      esc(sug.spot_used) +
+      "</span></p>" +
+      "<p class=\"ic-muted\" style=\"font-size:0.76rem;margin:4px 0 8px;line-height:1.45;\">" +
+      esc(sug.spot_basis || "") +
+      "</p>" +
+      "<p class=\"ic-num\">Theoretical refs · PE short (spot − 1.5×ATR): ₹<span class=\"ic-mono\">" +
+      esc(sug.theoretical_pe_short_ref) +
+      "</span> · CE short (spot + 1.5×ATR): ₹<span class=\"ic-mono\">" +
+      esc(sug.theoretical_ce_short_ref) +
+      "</span></p>" +
+      "<p class=\"ic-num\">Nearest tradable shorts — expiry <span class=\"ic-mono\">" +
+      esc(sug.nearest_expiry) +
+      "</span>, step ₹<span class=\"ic-mono\">" +
+      esc(sug.strike_step) +
+      "</span>: <strong class=\"ic-mono\">" +
+      esc(sug.chosen_sell_put_strike) +
+      " PE</strong> @ " +
+      esc(fmtLeg(spL)) +
+      " · <strong class=\"ic-mono\">" +
+      esc(sug.chosen_sell_call_strike) +
+      " CE</strong> @ " +
+      esc(fmtLeg(scL)) +
+      "</p>";
+    var peCk = document.getElementById("icAckAtrSellPe");
+    var ceCk = document.getElementById("icAckAtrSellCe");
+    if (peCk) peCk.checked = false;
+    if (ceCk) ceCk.checked = false;
+    updateProceedToFillsState();
   }
 
   async function analyzeDetailed(overrideMap) {
@@ -1337,9 +1459,13 @@
       document.getElementById("fbp").value = a.premiums.buy_put || "";
 
       syncOverrideInputs(true);
+      renderIcAtrSuggestPanel(a);
     } catch (e) {
       clearTimeout(slowTimer);
       host.style.display = "none";
+      hideIcAtrSuggestPanel();
+      var tcf = document.getElementById("toConfirmBtn");
+      if (tcf) tcf.disabled = true;
       throw e;
     }
   }
@@ -1726,6 +1852,14 @@
     showPane(1);
   };
   document.getElementById("toConfirmBtn").onclick = function () {
+    var btn = document.getElementById("toConfirmBtn");
+    if (btn && btn.disabled) {
+      var sug = state.detailed && state.detailed.daily_atr_short_suggestions;
+      if (sug && sug.ok) {
+        return alert("Check both boxes to confirm you reviewed the ATR-based suggested sell PE and sell CE strikes.");
+      }
+      return alert("Analyze strikes first, or wait for the card to finish loading.");
+    }
     try {
       if (document.getElementById("strikeOverrideToggle").checked) {
         var ems = strikeOverridePayload();
