@@ -12,7 +12,7 @@ import threading
 import time
 import copy
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, date, time as dt_time
+from datetime import datetime, date, time as dt_time, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 import pytz
@@ -879,6 +879,51 @@ def merge_universe_board_quotes(
     return out
 
 
+def _ic_nse_cash_daily_bar_settled_for_adx_ist(now_i: datetime) -> bool:
+    """
+    True when NSE cash ``days/1`` for ``now_i.date()`` should be treated as complete (not developing).
+
+    Combines IST wall clock with the same weekend + ``holiday`` calendar as
+    ``should_skip_scheduled_market_jobs_ist``: on non-session calendar dates there is no live cash bar
+    for "today". On session days, the bar is settled only at or after configurable regular close + buffer
+    (defaults: 15:30 IST + 5 minutes — same effective cutoff as the legacy 15:35 check).
+    """
+    now_i = mh_ic._normalize_ist(now_i)
+    if mh_ic.should_skip_scheduled_market_jobs_ist(now_i):
+        return True
+    raw_hhmm = (os.getenv("IRON_CONDOR_UNIVERSE_ADX_NSE_REGULAR_CLOSE_HHMM", "1530") or "1530").strip()
+    raw_buf = (os.getenv("IRON_CONDOR_UNIVERSE_ADX_DAILY_SETTLE_BUFFER_MIN", "5") or "5").strip()
+    try:
+        hhmm = int(raw_hhmm)
+    except ValueError:
+        hhmm = 1530
+    try:
+        buf_m = int(raw_buf)
+    except ValueError:
+        buf_m = 5
+    hhmm = max(900, min(hhmm, 2359))
+    ch, cm = hhmm // 100, hhmm % 100
+    if ch > 23 or cm > 59:
+        ch, cm = 15, 30
+    buf_m = max(0, min(buf_m, 120))
+    cutoff = now_i.replace(hour=ch, minute=cm, second=0, microsecond=0) + timedelta(minutes=buf_m)
+    return now_i >= cutoff
+
+
+def _ic_adx_cache_candles_bucket_ist(now_i: datetime) -> str:
+    """
+    Cache partition so ADX is recomputed when we cross from "strip today" to "keep settled today"
+    on the same IST calendar date (in-process TTL alone can otherwise serve pre-close ADX after close).
+    """
+    now_i = mh_ic._normalize_ist(now_i)
+    flag = (os.getenv("IRON_CONDOR_UNIVERSE_ADX_EXCLUDE_INCOMPLETE_DAILY", "1") or "1").strip().lower()
+    exclude_incomplete = flag not in ("0", "false", "no", "off")
+    if not exclude_incomplete:
+        return "inc"
+    settled = _ic_nse_cash_daily_bar_settled_for_adx_ist(now_i)
+    return f"{now_i.date().isoformat()}_{int(settled)}"
+
+
 def _ic_prepare_daily_spot_candles_for_adx(
     candles: Optional[List[Dict[str, Any]]],
     *,
@@ -887,10 +932,12 @@ def _ic_prepare_daily_spot_candles_for_adx(
     """
     Normalize Upstox ``days/1`` rows for ADX: parse timestamps, sort in IST, one row per session date.
 
-    By default drops the **current IST session date** before NSE regular close (+ buffer) so ADX matches
-    TradingView / industry reference on the **last fully settled daily** (TV's value while the session is
-    open often moves with the developing bar — use IRON_CONDOR_UNIVERSE_ADX_EXCLUDE_INCOMPLETE_DAILY=0 to
-    include today's partial candle instead).
+    By default drops the **current IST calendar date** row while NSE cash is still in the developing-daily
+    window (session weekday per ``holiday`` table, and IST clock before regular close + buffer). After
+    close on a session day, the last bar is kept so ADX uses the completed session including today.
+
+    Set IRON_CONDOR_UNIVERSE_ADX_EXCLUDE_INCOMPLETE_DAILY=0 to always include today's candle from the API
+    (including partials during the session).
     """
     # Local import avoids pulling heavy subgraph at module import.
     from backend.services.upstox_service import _parse_ts_to_aware_ist
@@ -915,8 +962,11 @@ def _ic_prepare_daily_spot_candles_for_adx(
     flag = (os.getenv("IRON_CONDOR_UNIVERSE_ADX_EXCLUDE_INCOMPLETE_DAILY", "1") or "1").strip().lower()
     exclude_incomplete = flag not in ("0", "false", "no", "off")
     if unique and exclude_incomplete:
-        # Weekends / DB holidays: no intraday "today's developing daily" bar to strip.
-        if not mh_ic.should_skip_scheduled_market_jobs_ist(now_i) and now_i.time() < dt_time(15, 35):
+        # Session weekdays only (IST + ``holiday``): strip today's developing bar until cash daily is settled.
+        if (
+            not mh_ic.should_skip_scheduled_market_jobs_ist(now_i)
+            and not _ic_nse_cash_daily_bar_settled_for_adx_ist(now_i)
+        ):
             last = unique[-1]
             ltd = _parse_ts_to_aware_ist(last.get("timestamp"))
             if ltd and ltd.astimezone(IST).date() == now_i.date():
@@ -987,8 +1037,14 @@ def build_universe_daily_adx_by_symbol_cached() -> Tuple[Dict[str, Dict[str, Any
     period, thr = _universe_adx_period_and_threshold()
     ttl = float(os.getenv("IRON_CONDOR_UNIVERSE_ADX_CACHE_SEC", "240") or "240")
     now = time.monotonic()
+    now_wall = mh_ic._normalize_ist(None)
+    candles_bucket = _ic_adx_cache_candles_bucket_ist(now_wall)
     if _ic_adx_cache_by_symbol and now < _ic_adx_cache_deadline:
-        if int(_ic_adx_cache_meta.get("period") or -1) == period and float(_ic_adx_cache_meta.get("threshold") or -1.0) == thr:
+        if (
+            int(_ic_adx_cache_meta.get("period") or -1) == period
+            and float(_ic_adx_cache_meta.get("threshold") or -1.0) == thr
+            and str(_ic_adx_cache_meta.get("candles_bucket") or "") == candles_bucket
+        ):
             return dict(_ic_adx_cache_by_symbol), _ic_adx_cache_meta.get("adx_error")
 
     _ensure_ic_universe_master_memory_loaded()
@@ -1039,6 +1095,7 @@ def build_universe_daily_adx_by_symbol_cached() -> Tuple[Dict[str, Dict[str, Any
         "period": period,
         "threshold": thr,
         "adx_error": adx_error,
+        "candles_bucket": candles_bucket,
     }
     err_ttl = float(os.getenv("IRON_CONDOR_UNIVERSE_ADX_ERROR_CACHE_SEC", "8") or "8")
     if adx_error and not out:
