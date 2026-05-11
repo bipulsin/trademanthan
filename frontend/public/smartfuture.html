@@ -361,7 +361,21 @@
             border-color: #3b82f6;
             color: #93c5fd;
         }
-        .sf-modal-panel.sf-modal-panel--manual { max-width: 460px; }
+        .sf-modal-panel.sf-modal-panel--manual { max-width: 560px; }
+        .sf-manual-form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px 18px;
+            margin-top: 10px;
+            align-items: start;
+        }
+        .sf-modal-panel--manual .sf-manual-field label {
+            margin-top: 0;
+            margin-bottom: 6px;
+        }
+        @media (max-width: 520px) {
+            .sf-manual-form-grid { grid-template-columns: 1fr; }
+        }
         .sf-edit-level {
             cursor: pointer;
             border-bottom: 1px dashed var(--theme-border, #94a3b8);
@@ -485,28 +499,39 @@
         <div class="sf-modal-backdrop" id="sfManualModalBackdrop"></div>
         <div class="sf-modal-panel sf-modal-panel--manual">
             <h3 id="sfManualModalTitle">Manual entry (Smart Futures)</h3>
-            <p class="sf-meta" style="margin-top:6px;line-height:1.45;">
-                Opens a bookkeeping position for today&apos;s session on the current-month future from arbitrage_master.
-                Leave SL/Target empty to set them from <strong>Wilder ATR(14)</strong> on 5‑minute session candles via Upstox (same window as picker ATR ratio).
-                Long: SL = entry − 1.1×ATR, target = entry + 1.6×ATR. Short: SL = entry + 1.1×ATR, target = entry − 1.6×ATR.
-            </p>
-            <label for="sfManualEntryTime">Time of entry (IST clock on session date)</label>
-            <input type="time" id="sfManualEntryTime" class="sf-modal-input" step="60" autocomplete="off" />
-            <label for="sfManualSymbol">Underlying symbol</label>
-            <input type="text" id="sfManualSymbol" class="sf-modal-input" placeholder="e.g. RELIANCE" maxlength="96" autocomplete="off" spellcheck="false" />
-            <label for="sfManualSide">Side</label>
-            <select id="sfManualSide" class="sf-modal-input">
-                <option value="LONG">Long</option>
-                <option value="SHORT">Short</option>
-            </select>
-            <label for="sfManualEntryPrice">Entry price (₹)</label>
-            <input type="number" id="sfManualEntryPrice" class="sf-modal-input" inputmode="decimal" step="any" min="0" placeholder="Your fill price" autocomplete="off" />
-            <label for="sfManualSl">SL (optional)</label>
-            <input type="number" id="sfManualSl" class="sf-modal-input" inputmode="decimal" step="any" min="0" placeholder="ATR-derived if blank" autocomplete="off" />
-            <label for="sfManualTarget">Target (optional)</label>
-            <input type="number" id="sfManualTarget" class="sf-modal-input" inputmode="decimal" step="any" min="0" placeholder="ATR-derived if blank" autocomplete="off" />
-            <label for="sfManualLots">Lots</label>
-            <input type="number" id="sfManualLots" class="sf-modal-input" inputmode="numeric" min="1" step="1" value="1" />
+            <div class="sf-manual-form-grid">
+                <div class="sf-manual-field">
+                    <label for="sfManualEntryTime">Time of entry (IST clock on session date)</label>
+                    <input type="time" id="sfManualEntryTime" class="sf-modal-input" step="60" autocomplete="off" />
+                </div>
+                <div class="sf-manual-field">
+                    <label for="sfManualSymbol">Underlying symbol</label>
+                    <input type="text" id="sfManualSymbol" class="sf-modal-input" placeholder="e.g. RELIANCE" maxlength="96" autocomplete="off" spellcheck="false" />
+                </div>
+                <div class="sf-manual-field">
+                    <label for="sfManualSide">Side</label>
+                    <select id="sfManualSide" class="sf-modal-input">
+                        <option value="LONG">Long</option>
+                        <option value="SHORT">Short</option>
+                    </select>
+                </div>
+                <div class="sf-manual-field">
+                    <label for="sfManualEntryPrice">Entry price (₹)</label>
+                    <input type="number" id="sfManualEntryPrice" class="sf-modal-input" inputmode="decimal" step="any" min="0" placeholder="Your fill price" autocomplete="off" />
+                </div>
+                <div class="sf-manual-field">
+                    <label for="sfManualSl">SL (optional)</label>
+                    <input type="number" id="sfManualSl" class="sf-modal-input" inputmode="decimal" step="any" min="0" placeholder="ATR-derived if blank" autocomplete="off" />
+                </div>
+                <div class="sf-manual-field">
+                    <label for="sfManualTarget">Target (optional)</label>
+                    <input type="number" id="sfManualTarget" class="sf-modal-input" inputmode="decimal" step="any" min="0" placeholder="ATR-derived if blank" autocomplete="off" />
+                </div>
+                <div class="sf-manual-field">
+                    <label for="sfManualLots">Lots</label>
+                    <input type="number" id="sfManualLots" class="sf-modal-input" inputmode="numeric" min="1" step="1" value="1" />
+                </div>
+            </div>
             <p id="sfManualModalErr" aria-live="polite"></p>
             <div class="sf-modal-actions">
                 <button type="button" class="sf-btn-modal-cancel" id="sfManualModalCancel">Cancel</button>
