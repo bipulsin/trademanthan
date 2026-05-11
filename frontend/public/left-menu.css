@@ -259,6 +259,22 @@ body[data-theme="light"] .theme-btn.active {
     font-size: 1.38rem;
 }
 
+.left-panel.collapsed .panel-nav-logout-btn {
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    min-height: 40px;
+}
+
+.left-panel.collapsed .panel-nav-logout-btn i {
+    font-size: 1.2rem;
+}
+
+/* Hidden from nav list but kept in markup for easy re-enable (remove .nav-item-menu-hidden) */
+.nav-item-menu-hidden {
+    display: none !important;
+}
+
 /* Nav */
 .panel-nav {
     flex: 1;
@@ -405,15 +421,67 @@ body[data-theme="light"] .theme-btn.active {
     outline-offset: 2px;
 }
 
+/* Logout — toolbar icon (same footprint as Telegram circle) */
+.panel-nav-logout-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 46px;
+    height: 46px;
+    min-width: 46px;
+    min-height: 46px;
+    padding: 0;
+    box-sizing: border-box;
+    border-radius: 50%;
+    aspect-ratio: 1;
+    background: rgba(148, 163, 184, 0.2);
+    color: var(--left-menu-muted);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease, color 0.15s ease;
+    border: 1px solid var(--left-menu-border);
+}
+
+.panel-nav-logout-btn i {
+    font-size: 1.25rem;
+    line-height: 1;
+}
+
+.panel-nav-logout-btn:hover {
+    transform: scale(1.05);
+    background: rgba(239, 68, 68, 0.18);
+    color: #ef4444;
+    border-color: rgba(239, 68, 68, 0.35);
+}
+
+.panel-nav-logout-btn:focus-visible {
+    outline: 2px solid var(--left-menu-accent, #3b82f6);
+    outline-offset: 2px;
+}
+
+body[data-theme="dark"] .panel-nav-logout-btn {
+    background: rgba(148, 163, 184, 0.14);
+    color: #cbd5e1;
+    border-color: rgba(148, 163, 184, 0.45);
+}
+
+body[data-theme="dark"] .panel-nav-logout-btn:hover {
+    background: rgba(239, 68, 68, 0.22);
+    color: #fca5a5;
+    border-color: rgba(248, 113, 113, 0.45);
+}
+
 /* Desktop / fine pointer: visible tooltips (below buttons — stays inside panel; avoids overflow clip) */
 .panel-nav-toolbar .theme-btn,
-.panel-nav-telegram-btn {
+.panel-nav-telegram-btn,
+.panel-nav-logout-btn {
     position: relative;
 }
 
 @media (hover: hover) and (pointer: fine) {
     .panel-nav-toolbar .theme-btn[data-tooltip]::after,
-    .panel-nav-telegram-btn[data-tooltip]::after {
+    .panel-nav-telegram-btn[data-tooltip]::after,
+    .panel-nav-logout-btn[data-tooltip]::after {
         content: attr(data-tooltip);
         position: absolute;
         z-index: 5000;
@@ -440,7 +508,8 @@ body[data-theme="light"] .theme-btn.active {
     }
 
     body[data-theme="light"] .panel-nav-toolbar .theme-btn[data-tooltip]::after,
-    body[data-theme="light"] .panel-nav-telegram-btn[data-tooltip]::after {
+    body[data-theme="light"] .panel-nav-telegram-btn[data-tooltip]::after,
+    body[data-theme="light"] .panel-nav-logout-btn[data-tooltip]::after {
         background: #0f172a;
         color: #f8fafc;
         border-color: rgba(148, 163, 184, 0.45);
@@ -449,7 +518,9 @@ body[data-theme="light"] .theme-btn.active {
     .panel-nav-toolbar .theme-btn[data-tooltip]:hover::after,
     .panel-nav-toolbar .theme-btn[data-tooltip]:focus-visible::after,
     .panel-nav-telegram-btn[data-tooltip]:hover::after,
-    .panel-nav-telegram-btn[data-tooltip]:focus-visible::after {
+    .panel-nav-telegram-btn[data-tooltip]:focus-visible::after,
+    .panel-nav-logout-btn[data-tooltip]:hover::after,
+    .panel-nav-logout-btn[data-tooltip]:focus-visible::after {
         opacity: 1;
         visibility: visible;
     }

@@ -13,7 +13,7 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html?v=3.22';
+const MENU_HTML_PATH = 'left-menu.html?v=3.23';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 const NOTIFY_TRADE_CHANNEL_SCRIPT = 'notify-trade-channel.js?v=3';
 
@@ -82,6 +82,7 @@ class LeftMenu {
                 this.syncMainContentMargin();
                 await this.setupDisclaimer();
                 await this.setupTelegramNotifyModal();
+                this.setupLogoutToolbarButton();
             } else {
                 const currentPath = window.location.pathname;
                 const isProtectedPage = currentPath.includes('dashboard') || currentPath.includes('strategy') ||
@@ -244,6 +245,7 @@ class LeftMenu {
                     <button type="button" class="theme-btn active" data-theme="dark" data-tooltip="Dark Theme" title="Dark Theme" aria-label="Dark Theme"><i class="fas fa-moon"></i></button>
                 </div>
                 <button type="button" class="panel-nav-telegram-btn" id="leftMenuTelegramBtn" data-tooltip="Support" title="Support" aria-label="Support"><i class="fab fa-telegram" aria-hidden="true"></i></button>
+                <button type="button" class="panel-nav-logout-btn" id="leftMenuLogoutBtn" data-tooltip="Logout" title="Logout" aria-label="Logout"><i class="fas fa-sign-out-alt" aria-hidden="true"></i></button>
             </div>
             <ul class="nav-list">
                 <li class="nav-item" data-page="dashboard.html"><i class="fas fa-chart-line"></i><span>Dashboard</span></li>
@@ -251,15 +253,14 @@ class LeftMenu {
                 <li class="nav-item" data-page="smartfuture.html"><img src="icons/smart-futures.png?v=3" alt="" class="nav-item-icon-img" width="33" height="33" /><span>Smart Futures</span></li>
                 <li class="nav-item" data-page="dailyfutures.html"><i class="fas fa-calendar-day"></i><span>Premium Futures</span></li>
                 <li class="nav-item" data-page="iron-condor.html"><i class="fas fa-layer-group"></i><span>Iron Condor</span></li>
-                <li class="nav-item" data-page="pivot-breakout.html"><i class="fas fa-bullseye"></i><span>Pivot Breakout</span></li>
+                <li class="nav-item nav-item-menu-hidden" data-page="pivot-breakout.html" aria-hidden="true"><i class="fas fa-bullseye"></i><span>Pivot Breakout</span></li>
                 <li class="nav-item" data-page="arbitrage.html"><i class="fas fa-shuffle"></i><span>Arbitrage Selection</span></li>
                 <li class="nav-item" data-page="cargpt.html"><i class="fas fa-chart-area"></i><span>Composite Avg</span></li>
-                <li class="nav-item" data-page="broker.html"><i class="fas fa-university"></i><span>Broker Management</span></li>
-                <li class="nav-item" data-page="strategy.html"><i class="fas fa-robot"></i><span>Strategy Management</span></li>
+                <li class="nav-item nav-item-menu-hidden" data-page="broker.html" aria-hidden="true"><i class="fas fa-university"></i><span>Broker Management</span></li>
+                <li class="nav-item nav-item-menu-hidden" data-page="strategy.html" aria-hidden="true"><i class="fas fa-robot"></i><span>Strategy Management</span></li>
                 <li class="nav-item" data-page="reports.html"><i class="fas fa-chart-bar"></i><span>Reports</span></li>
                 <li class="nav-item" data-page="settings.html"><i class="fas fa-cog"></i><span>Settings</span></li>
                 <li class="nav-item nav-item-admin" data-page="admintwc.html" style="display: none;" title="Administrator only"><i class="fas fa-user-shield"></i><span>Admin</span></li>
-                <li class="nav-item nav-item-logout" data-action="logout"><i class="fas fa-sign-out-alt"></i><span>Logout</span></li>
             </ul>
         </nav>
         <div class="panel-footer">
@@ -405,6 +406,15 @@ class LeftMenu {
         document.addEventListener('keydown', (ev) => {
             if (ev.key !== 'Escape') return;
             if (modal.classList.contains('show')) close();
+        });
+    }
+
+    setupLogoutToolbarButton() {
+        const btn = document.getElementById('leftMenuLogoutBtn');
+        if (!btn) return;
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            LeftMenu.logout();
         });
     }
 

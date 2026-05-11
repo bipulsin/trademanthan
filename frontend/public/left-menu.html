@@ -18,6 +18,9 @@
                 <button type="button" class="panel-nav-telegram-btn" id="leftMenuTelegramBtn" data-tooltip="Support" title="Support" aria-label="Support">
                     <i class="fab fa-telegram" aria-hidden="true"></i>
                 </button>
+                <button type="button" class="panel-nav-logout-btn" id="leftMenuLogoutBtn" data-tooltip="Logout" title="Logout" aria-label="Logout">
+                    <i class="fas fa-sign-out-alt" aria-hidden="true"></i>
+                </button>
             </div>
             <ul class="nav-list">
                 <li class="nav-item" data-page="dashboard.html">
@@ -40,7 +43,7 @@
                     <i class="fas fa-layer-group"></i>
                     <span>Iron Condor</span>
                 </li>
-                <li class="nav-item" data-page="pivot-breakout.html">
+                <li class="nav-item nav-item-menu-hidden" data-page="pivot-breakout.html" aria-hidden="true">
                     <i class="fas fa-bullseye"></i>
                     <span>Pivot Breakout</span>
                 </li>
@@ -52,11 +55,11 @@
                     <i class="fas fa-chart-area"></i>
                     <span>Composite Avg</span>
                 </li>
-                <li class="nav-item" data-page="broker.html">
+                <li class="nav-item nav-item-menu-hidden" data-page="broker.html" aria-hidden="true">
                     <i class="fas fa-university"></i>
                     <span>Broker Management</span>
                 </li>
-                <li class="nav-item" data-page="strategy.html">
+                <li class="nav-item nav-item-menu-hidden" data-page="strategy.html" aria-hidden="true">
                     <i class="fas fa-robot"></i>
                     <span>Strategy Management</span>
                 </li>
@@ -71,10 +74,6 @@
                 <li class="nav-item nav-item-admin" data-page="admintwc.html" style="display: none;" title="Administrator only">
                     <i class="fas fa-user-shield"></i>
                     <span>Admin</span>
-                </li>
-                <li class="nav-item nav-item-logout" data-action="logout">
-                    <i class="fas fa-sign-out-alt"></i>
-                    <span>Logout</span>
                 </li>
             </ul>
         </nav>
