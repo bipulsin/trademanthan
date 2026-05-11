@@ -304,7 +304,7 @@
             background: transparent;
             color: var(--theme-text, #0f172a);
         }
-        #sfSellModalErr, #sfOrderModalErr { min-height: 1.2em; margin-top: 8px; color: #b91c1c; font-size: 0.85rem; }
+        #sfSellModalErr, #sfOrderModalErr, #sfManualModalErr { min-height: 1.2em; margin-top: 8px; color: #b91c1c; font-size: 0.85rem; }
 
         /* Entry-gate checklist + conditional Order button + countdown + velocity chip */
         .sf-gate-block{display:flex;flex-direction:column;gap:6px;min-width:220px;}
@@ -345,6 +345,31 @@
         .sf-early-exit-reason input[type="radio"]{accent-color:#b45309;}
         .sf-btn-modal-keep{padding:8px 16px;border-radius:8px;font-weight:600;font-size:0.9rem;cursor:pointer;border:1px solid #15803d;background:#16a34a;color:#fff;}
         .sf-btn-modal-keep:hover:not(:disabled){background:#15803d;}
+        .sf-btn-manual-entry {
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            cursor: pointer;
+            border: 1px solid #2563eb;
+            background: #eff6ff;
+            color: #1d4ed8;
+        }
+        .sf-btn-manual-entry:hover { background: #dbeafe; }
+        body[data-theme="dark"] .sf-btn-manual-entry {
+            background: rgba(37, 99, 235, 0.15);
+            border-color: #3b82f6;
+            color: #93c5fd;
+        }
+        .sf-modal-panel.sf-modal-panel--manual { max-width: 460px; }
+        .sf-edit-level {
+            cursor: pointer;
+            border-bottom: 1px dashed var(--theme-border, #94a3b8);
+            color: #2563eb;
+            font-weight: 600;
+        }
+        body[data-theme="dark"] .sf-edit-level { color: #93c5fd; }
+        .sf-edit-level:focus { outline: 2px solid #2563eb; outline-offset: 2px; border-radius: 4px; }
     </style>
 </head>
 <body class="theme-page">
@@ -373,6 +398,7 @@
                     <div class="sf-card-head">
                         <h2><i class="fas fa-chart-line"></i> Today&apos;s Trend</h2>
                         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                            <button type="button" class="sf-btn-manual-entry" id="sfManualEntryOpen" title="Add an open position outside the picker">Manual Entry</button>
                             <button type="button" class="sf-btn-refresh" id="sfTrendRefresh" title="Refresh" aria-label="Refresh today&apos;s trend"><i class="fas fa-sync-alt" aria-hidden="true"></i></button>
                             <button type="button" class="sf-btn-run-picker" id="sfRunPicker" title="Run CMS picker once (refreshes OI heatmap + live feed first)">
                                 Run scan now
@@ -455,7 +481,40 @@
             </div>
         </div>
     </div>
+    <div id="sfManualModal" class="sf-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="sfManualModalTitle">
+        <div class="sf-modal-backdrop" id="sfManualModalBackdrop"></div>
+        <div class="sf-modal-panel sf-modal-panel--manual">
+            <h3 id="sfManualModalTitle">Manual entry (Smart Futures)</h3>
+            <p class="sf-meta" style="margin-top:6px;line-height:1.45;">
+                Opens a bookkeeping position for today&apos;s session on the current-month future from arbitrage_master.
+                Leave SL/Target empty to set them from <strong>Wilder ATR(14)</strong> on 5‑minute session candles via Upstox (same window as picker ATR ratio).
+                Long: SL = entry − 1.1×ATR, target = entry + 1.6×ATR. Short: SL = entry + 1.1×ATR, target = entry − 1.6×ATR.
+            </p>
+            <label for="sfManualEntryTime">Time of entry (IST clock on session date)</label>
+            <input type="time" id="sfManualEntryTime" class="sf-modal-input" step="60" autocomplete="off" />
+            <label for="sfManualSymbol">Underlying symbol</label>
+            <input type="text" id="sfManualSymbol" class="sf-modal-input" placeholder="e.g. RELIANCE" maxlength="96" autocomplete="off" spellcheck="false" />
+            <label for="sfManualSide">Side</label>
+            <select id="sfManualSide" class="sf-modal-input">
+                <option value="LONG">Long</option>
+                <option value="SHORT">Short</option>
+            </select>
+            <label for="sfManualEntryPrice">Entry price (₹)</label>
+            <input type="number" id="sfManualEntryPrice" class="sf-modal-input" inputmode="decimal" step="any" min="0" placeholder="Your fill price" autocomplete="off" />
+            <label for="sfManualSl">SL (optional)</label>
+            <input type="number" id="sfManualSl" class="sf-modal-input" inputmode="decimal" step="any" min="0" placeholder="ATR-derived if blank" autocomplete="off" />
+            <label for="sfManualTarget">Target (optional)</label>
+            <input type="number" id="sfManualTarget" class="sf-modal-input" inputmode="decimal" step="any" min="0" placeholder="ATR-derived if blank" autocomplete="off" />
+            <label for="sfManualLots">Lots</label>
+            <input type="number" id="sfManualLots" class="sf-modal-input" inputmode="numeric" min="1" step="1" value="1" />
+            <p id="sfManualModalErr" aria-live="polite"></p>
+            <div class="sf-modal-actions">
+                <button type="button" class="sf-btn-modal-cancel" id="sfManualModalCancel">Cancel</button>
+                <button type="button" class="sf-btn-order" id="sfManualModalConfirm">Save open position</button>
+            </div>
+        </div>
+    </div>
     <script src="left-menu.js?v=3.23"></script>
-    <script src="smartfuture.js?v=46"></script>
+    <script src="smartfuture.js?v=47"></script>
 </body>
 </html>

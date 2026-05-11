@@ -7,15 +7,16 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 from collections import OrderedDict
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pytz
 from fastapi import APIRouter, Body, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -32,7 +33,10 @@ from backend.services.smart_futures_exit import (
     is_entry_permitted,
 )
 from backend.services.smart_futures_session_date import effective_session_date_ist_for_trend
-from backend.services.smart_futures_session_utils import compute_atr5_14_ratio_for_session
+from backend.services.smart_futures_session_utils import (
+    compute_atr14_wilder_5m_for_session,
+    compute_atr5_14_ratio_for_session,
+)
 from backend.services.upstox_service import UpstoxService
 
 logger = logging.getLogger(__name__)
@@ -112,6 +116,68 @@ class SmartFuturesOrderBody(BaseModel):
         description="Manual buy price; if omitted, last traded price from broker is used.",
     )
     calculated_lots: int = Field(default=1, ge=1, le=10000, description="Number of lots (position size).")
+
+
+class SmartFuturesManualEntryBody(BaseModel):
+    """POST /daily/manual-entry: off-picker open row in smart_futures_daily (broker bookkeeping)."""
+
+    symbol: str = Field(..., min_length=1, max_length=96, description="NSE equity / underlier symbol in arbitrage_master.")
+    side: str = Field(..., description="LONG or SHORT.")
+    entry_price: float = Field(..., gt=0)
+    entry_time: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        description="IST clock time HH:MM or HH:MM:SS on today's session_date, or full ISO datetime.",
+    )
+    sl_price: Optional[float] = Field(default=None, description="Omit or null to derive from ATR(14)×1.1 when possible.")
+    target_price: Optional[float] = Field(
+        default=None, description="Omit or null to derive from ATR(14)×1.6 when possible."
+    )
+    calculated_lots: Optional[int] = Field(
+        default=None, ge=1, le=10000, description="Defaults to persisted admin position_size from Smart Futures stub config."
+    )
+
+    @field_validator("side")
+    @classmethod
+    def normalize_side(cls, v: str) -> str:
+        u = (v or "").strip().upper()
+        if u not in {"LONG", "SHORT"}:
+            raise ValueError("side must be LONG or SHORT")
+        return u
+
+    @field_validator("sl_price", "target_price")
+    @classmethod
+    def optional_positive_float(cls, v: Optional[float]) -> Optional[float]:
+        if v is None:
+            return None
+        fv = float(v)
+        if fv != fv or fv <= 0:
+            raise ValueError("must be a positive number when provided")
+        return fv
+
+
+class SmartFuturesLevelsPatchBody(BaseModel):
+    """PATCH /daily/{id}/levels: editable plan SL and target."""
+
+    model_config = {"extra": "forbid"}
+    sl_price: Optional[float] = Field(default=None)
+    target_price: Optional[float] = Field(default=None)
+
+    @field_validator("sl_price", "target_price")
+    @classmethod
+    def positive_when_present(cls, v: Optional[float]) -> Optional[float]:
+        if v is None:
+            return None
+        fv = float(v)
+        if fv != fv or fv <= 0:
+            raise ValueError("must be a positive number when provided")
+        return fv
+
+    @model_validator(mode="after")
+    def at_least_one(self):
+        if self.sl_price is None and self.target_price is None:
+            raise ValueError("Provide sl_price and/or target_price")
+        return self
 
 
 @router.get("/config")
@@ -388,6 +454,64 @@ def _parse_any_ts_to_ist(ts: Any) -> Optional[datetime]:
         return dt.astimezone(IST) if dt.tzinfo else IST.localize(dt)
     except Exception:
         return None
+
+
+def _resolve_currmth_future_master(db: Session, symbol_raw: str) -> Dict[str, Any]:
+    """
+    Map equity symbol to arbitrage_master current-month future (production universe).
+    """
+    sym_u = str(symbol_raw or "").strip().upper()
+    if not sym_u:
+        raise HTTPException(status_code=422, detail="symbol is empty")
+    row = db.execute(
+        text(
+            """
+            SELECT stock,
+                   COALESCE(TRIM(currmth_future_symbol), '') AS cfs,
+                   COALESCE(TRIM(currmth_future_instrument_key), '') AS cfi
+            FROM arbitrage_master
+            WHERE UPPER(TRIM(stock)) = :sym
+            LIMIT 1
+            """
+        ),
+        {"sym": sym_u},
+    ).mappings().first()
+    if not row:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown symbol {sym_u!r}: not listed in arbitrage_master",
+        )
+    ikey = str(row.get("cfi") or "").strip()
+    if not ikey:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No current‑month future key for {sym_u!r} (arbitrage_master.currmth_future_instrument_key empty)",
+        )
+    cfs = str(row.get("cfs") or "").strip()
+    stk = str(row.get("stock") or sym_u).strip()
+    fut_sym = cfs or stk
+    return {"stock": stk, "fut_symbol": fut_sym, "fut_instrument_key": ikey}
+
+
+def _manual_entry_datetime_ist(session_sd: date, entry_time_raw: Optional[str]) -> datetime:
+    if entry_time_raw is None or str(entry_time_raw).strip() == "":
+        return datetime.now(IST)
+    sraw = str(entry_time_raw).strip()
+    iso_try = _parse_any_ts_to_ist(sraw)
+    if iso_try is not None:
+        return iso_try
+    mt = re.match(r"^(\d{1,2}):(\d{2})(?::(\d{2}))?$", sraw)
+    if mt:
+        hh = int(mt.group(1))
+        mi = int(mt.group(2))
+        sec = int(mt.group(3)) if mt.group(3) else 0
+        if hh > 23 or mi > 59 or sec > 59:
+            raise HTTPException(status_code=422, detail="entry_time: invalid clock time")
+        return IST.localize(datetime(session_sd.year, session_sd.month, session_sd.day, hh, mi, sec))
+    raise HTTPException(
+        status_code=422,
+        detail="entry_time must be HH:MM or HH:MM:SS (interpreted on session_date IST), or a full ISO‑8601 datetime.",
+    )
 
 
 @router.get("/daily")
@@ -1195,6 +1319,297 @@ def post_smart_futures_daily_sell(
         "sell_price": ltp,
         "sell_time": sell_time_iso,
         "manual_exit_reason": manual_reason_in,
+    }
+
+
+@router.patch("/daily/{row_id}/levels")
+def patch_smart_futures_daily_levels(
+    row_id: int,
+    body: SmartFuturesLevelsPatchBody = Body(...),
+    user: User = Depends(_require_user),
+    db: Session = Depends(get_db),
+):
+    """Adjust plan SL and/or target_price on an open (bought) row."""
+    vals = body.model_dump(exclude_unset=True)
+    if not vals:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    sd = effective_session_date_ist_for_trend()
+    row = db.execute(
+        text(
+            """
+            SELECT session_date, order_status, sell_time, stop_stage
+            FROM smart_futures_daily WHERE id = :id
+            """
+        ),
+        {"id": row_id},
+    ).mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Row not found")
+    rsd = row.get("session_date")
+    rsd_iso = rsd.isoformat() if hasattr(rsd, "isoformat") else str(rsd)
+    if str(rsd_iso) != sd.isoformat():
+        raise HTTPException(status_code=400, detail="Row is outside the current session window")
+    if str(row.get("order_status") or "").strip().lower() != "bought":
+        raise HTTPException(status_code=400, detail="Only open positions (bought) can be edited")
+    if row.get("sell_time") is not None:
+        raise HTTPException(status_code=400, detail="Sold rows cannot be edited")
+
+    pieces: List[str] = []
+    bind: Dict[str, Any] = {"id": int(row_id), "sd": sd}
+    if "sl_price" in vals:
+        sp = round(float(vals["sl_price"]), 2)
+        pieces.append("sl_price = :sl_price")
+        bind["sl_price"] = sp
+        stg_u = str(row.get("stop_stage") or "").strip().upper()
+        if stg_u == "INITIAL" or not stg_u:
+            pieces.append("stop_loss_price = :stop_loss_price")
+            pieces.append("current_stop_price = :current_stop_price")
+            bind["stop_loss_price"] = sp
+            bind["current_stop_price"] = sp
+    if "target_price" in vals:
+        pieces.append("target_price = :target_price")
+        bind["target_price"] = round(float(vals["target_price"]), 2)
+    pieces.append("updated_at = CURRENT_TIMESTAMP")
+    try:
+        sql = (
+            "UPDATE smart_futures_daily SET "
+            + ", ".join(pieces)
+            + " WHERE id = :id AND session_date = :sd "
+            + " AND LOWER(TRIM(COALESCE(order_status, ''))) = 'bought' AND sell_time IS NULL"
+        )
+        res = db.execute(text(sql), bind)
+        if getattr(res, "rowcount", -1) == 0:
+            db.rollback()
+            raise HTTPException(
+                status_code=400,
+                detail="Nothing updated — row may have been sold already.",
+            )
+        db.commit()
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.warning("smart_futures patch levels id=%s: %s", row_id, e)
+        raise HTTPException(status_code=500, detail="Failed to update levels") from e
+    logger.info(
+        "smart_futures patch levels: user=%s row=%s fields=%s",
+        getattr(user, "id", None),
+        row_id,
+        list(vals.keys()),
+    )
+    return {"success": True, "id": row_id, **{k: vals[k] for k in vals}}
+
+
+@router.post("/daily/manual-entry")
+def post_smart_futures_manual_entry(
+    body: SmartFuturesManualEntryBody = Body(...),
+    user: User = Depends(_require_user),
+    db: Session = Depends(get_db),
+):
+    """Create or convert a day's row into an off-picker open Smart Futures position (bookkeeping)."""
+    sd = effective_session_date_ist_for_trend()
+    am = _resolve_currmth_future_master(db, body.symbol.strip())
+    stock = str(am["stock"])
+    ikey = str(am["fut_instrument_key"])
+    fut_sym = str(am["fut_symbol"])
+
+    lots = body.calculated_lots
+    if lots is None:
+        try:
+            lots = int(_read_config().get("position_size") or 1)
+        except Exception:
+            lots = 1
+    lots = int(lots)
+
+    entry_at = _manual_entry_datetime_ist(sd, body.entry_time)
+    entry_px = round(float(body.entry_price), 2)
+    side_u = str(body.side)
+    manual_sl = body.sl_price
+    manual_tgt = body.target_price
+    need_atr = manual_sl is None or manual_tgt is None
+
+    atr_val: Optional[float] = None
+    ratio_val: Optional[float] = None
+    if need_atr:
+        try:
+            us = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+            atr_val = compute_atr14_wilder_5m_for_session(us, ikey, sd)
+            ratio_val = compute_atr5_14_ratio_for_session(us, ikey, sd)
+        except Exception as e:
+            logger.warning("manual_entry ATR/upstox: %s", e)
+            atr_val = None
+        if atr_val is None or atr_val <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "ATR(14) on current-month future is unavailable from 5‑minute candles "
+                    "(Upstox history / session bars). Specify both SL and Target, or retry later."
+                ),
+            )
+
+    if side_u == "LONG":
+        sl_f = (
+            round(entry_px - 1.1 * float(atr_val), 2) if manual_sl is None else round(float(manual_sl), 2)
+        )
+        tg_f = (
+            round(entry_px + 1.6 * float(atr_val), 2) if manual_tgt is None else round(float(manual_tgt), 2)
+        )
+    else:
+        sl_f = (
+            round(entry_px + 1.1 * float(atr_val), 2) if manual_sl is None else round(float(manual_sl), 2)
+        )
+        tg_f = (
+            round(entry_px - 1.6 * float(atr_val), 2) if manual_tgt is None else round(float(manual_tgt), 2)
+        )
+
+    if not need_atr:
+        ratio_val = None
+    atr14_col: Optional[float] = atr_val if need_atr else None
+
+    ex_row = db.execute(
+        text(
+            """
+            SELECT id, order_status, sell_time
+            FROM smart_futures_daily
+            WHERE session_date = :sd AND fut_instrument_key = :ik
+            LIMIT 1
+            """
+        ),
+        {"sd": sd, "ik": ikey},
+    ).mappings().first()
+
+    base_params = {
+        "session_date": sd,
+        "stock": stock,
+        "fut_symbol": fut_sym,
+        "fut_instrument_key": ikey,
+        "side": side_u,
+        "atr_14": atr14_col,
+        "atr5_14_ratio": ratio_val,
+        "entry_price": entry_px,
+        "sl_price": sl_f,
+        "target_price": tg_f,
+        "hold_type": "intraday",
+        "entry_at": entry_at,
+        "calculated_lots": lots,
+        "stop_loss_price": sl_f,
+        "current_stop_price": sl_f,
+        "buy_price": entry_px,
+    }
+
+    new_id: int
+    if ex_row:
+        ost = str(ex_row.get("order_status") or "").strip().lower()
+        if ost == "bought" and ex_row.get("sell_time") is None:
+            raise HTTPException(
+                status_code=400,
+                detail="An open bought position already exists for this contract today.",
+            )
+        if ex_row.get("sell_time") is not None or ost == "sold":
+            raise HTTPException(
+                status_code=400,
+                detail="A closed row already exists for this contract today; cannot add a second via manual entry.",
+            )
+        rid = int(ex_row["id"])
+        db.execute(
+            text(
+                """
+                UPDATE smart_futures_daily SET
+                    stock = :stock,
+                    fut_symbol = :fut_symbol,
+                    fut_instrument_key = :fut_instrument_key,
+                    side = :side,
+                    atr_14 = :atr_14,
+                    atr5_14_ratio = :atr5_14_ratio,
+                    entry_price = :entry_price,
+                    sl_price = :sl_price,
+                    target_price = :target_price,
+                    hold_type = :hold_type,
+                    entry_at = :entry_at,
+                    scan_trigger = 'MANUAL',
+                    signal_tier = 'MANUAL',
+                    calculated_lots = :calculated_lots,
+                    stop_loss_price = :stop_loss_price,
+                    stop_stage = 'INITIAL',
+                    current_stop_price = :current_stop_price,
+                    order_status = 'bought',
+                    buy_price = :buy_price,
+                    sell_price = NULL,
+                    sell_time = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = :rid AND session_date = :session_date
+                """
+            ),
+            {**base_params, "rid": rid},
+        )
+        new_id = rid
+    else:
+        ins = db.execute(
+            text(
+                """
+                INSERT INTO smart_futures_daily (
+                    session_date, stock, fut_symbol, fut_instrument_key, side,
+                    obv_slope, volume_surge, adx_14, atr_14, atr5_14_ratio,
+                    renko_momentum, ha_trend, macd_div, rsi_div, stoch_div,
+                    cms, final_cms, sector_score, combined_sentiment,
+                    entry_price, sl_price, target_price, hold_type,
+                    entry_at, trend_continuation, scan_trigger, vix_at_scan,
+                    signal_tier, tier_multiplier, sizing_tier_mult, calculated_lots,
+                    stop_loss_price, stop_stage, current_stop_price,
+                    time_filter_passed, regime_filter_passed, regime_filter_reason,
+                    oi_value, oi_change, oi_signal, oi_gate_passed, oi_gate_reason,
+                    ema_slope_norm, cms_score_raw, cms_final, reentry_consumed,
+                    premkt_rank, oi_heat_rank,
+                    order_status, buy_price
+                ) VALUES (
+                    :session_date, :stock, :fut_symbol, :fut_instrument_key, :side,
+                    NULL, NULL, NULL, :atr_14, :atr5_14_ratio,
+                    NULL, NULL, NULL, NULL, NULL,
+                    NULL, NULL, NULL, NULL,
+                    :entry_price, :sl_price, :target_price, :hold_type,
+                    :entry_at, NULL, 'MANUAL', NULL,
+                    'MANUAL', NULL, NULL, :calculated_lots,
+                    :stop_loss_price, 'INITIAL', :current_stop_price,
+                    NULL, NULL, NULL,
+                    NULL, NULL, NULL, NULL, NULL,
+                    NULL, NULL, NULL, FALSE,
+                    NULL, NULL,
+                    'bought', :buy_price
+                )
+                RETURNING id
+                """
+            ),
+            base_params,
+        )
+        got = ins.mappings().first()
+        if not got:
+            db.rollback()
+            raise HTTPException(status_code=500, detail="Insert failed")
+        new_id = int(got["id"])
+    db.commit()
+    logger.info(
+        "smart_futures manual_entry: user=%s id=%s stock=%s ikey=%s side=%s entry=%s",
+        getattr(user, "id", None),
+        new_id,
+        stock,
+        ikey,
+        side_u,
+        entry_px,
+    )
+    return {
+        "success": True,
+        "id": new_id,
+        "fut_symbol": fut_sym,
+        "fut_instrument_key": ikey,
+        "side": side_u,
+        "entry_price": entry_px,
+        "buy_price": entry_px,
+        "sl_price": sl_f,
+        "target_price": tg_f,
+        "calculated_lots": lots,
+        "atr_14": atr14_col,
+        "atr5_14_ratio": ratio_val,
+        "entry_at": entry_at.isoformat(),
     }
 
 

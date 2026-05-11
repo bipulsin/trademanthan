@@ -2,6 +2,9 @@
  * Smart Futures — Today's Trend + Open Positions from smart_futures_daily.
  */
 (function () {
+    let _sfLastCfg = null;
+    let _sfLevelBusy = false;
+
     const API_BASE =
         window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
             ? 'http://localhost:8000'
@@ -893,8 +896,189 @@
         );
     }
 
-    function openTableRowHtml(r) {
+    function istTimeInputHHMMForNow() {
+        const formatter = new Intl.DateTimeFormat('en-GB', {
+            timeZone: 'Asia/Kolkata',
+            hour: '2-digit',
+            minute: '2-digit',
+            hourCycle: 'h23',
+        });
+        const parts = formatter.formatToParts(new Date());
+        let hh = '';
+        let mm = '';
+        parts.forEach(function (pt) {
+            if (pt.type === 'hour') hh = pt.value;
+            if (pt.type === 'minute') mm = pt.value;
+        });
+        if (!hh || !mm) return '';
+        return String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
+    }
+
+    function fmtOpenSlEditableCell(r) {
+        const id = r.id;
+        const lbl = fmtNum(r.sl_price, 2);
+        return (
+            '<span tabindex="0" role="button" class="sf-edit-level" data-sf-edit-level="1" data-level-field="sl" data-row-id="' +
+            id +
+            '" title="Plan SL (persisted)—click to edit">' +
+            lbl +
+            '</span>'
+        );
+    }
+
+    function fmtOpenTargetEditableCell(r) {
         const dispTarget = deriveOpenDisplayTarget(r);
+        const buyPx =
+            r && r.buy_price != null && r.buy_price !== '' ? Number(r.buy_price) : NaN;
+        const entryPx =
+            r && r.entry_price != null && r.entry_price !== ''
+                ? Number(r.entry_price)
+                : NaN;
+        const v = Number.isFinite(dispTarget) ? fmtNum(dispTarget, 2) : '—';
+        const db = Number.isFinite(buyPx) ? String(buyPx) : '';
+        const de = Number.isFinite(entryPx) ? String(entryPx) : '';
+        const id = r.id;
+        return (
+            '<span tabindex="0" role="button" class="sf-edit-level" data-sf-edit-level="1" data-level-field="target" data-row-id="' +
+            id +
+            '" data-buy-price="' +
+            escapeAttr(db) +
+            '" data-entry-price="' +
+            escapeAttr(de) +
+            '" title="Target (rebased vs entry when buy≠entry)—click to edit">' +
+            v +
+            '</span>'
+        );
+    }
+
+    async function patchSfLevels(rowId, payload) {
+        const paths = [
+            '/api/smart-futures/daily/' + rowId + '/levels',
+            '/smart-futures/daily/' + rowId + '/levels',
+        ];
+        let lastErr = '';
+        for (const p of paths) {
+            try {
+                const res = await fetch(API_BASE + p, {
+                    method: 'PATCH',
+                    headers: authHeaders(),
+                    body: JSON.stringify(payload),
+                });
+                const resText = await res.text();
+                let data = null;
+                try {
+                    data = JSON.parse(resText);
+                } catch (e) {
+                    data = null;
+                }
+                if (res.ok && data && data.success) {
+                    return { ok: true, data: data };
+                }
+                if (isTokenExpiredResponse(res, resText, data)) {
+                    redirectToLoginExpired();
+                    return { ok: false, err: 'Session expired', expired: true };
+                }
+                lastErr =
+                    (data && (data.detail || data.message)) ||
+                    resText ||
+                    res.statusText ||
+                    String(res.status);
+            } catch (e) {
+                lastErr = String(e.message || e);
+            }
+        }
+        return { ok: false, err: lastErr || 'PATCH failed', expired: false };
+    }
+
+    function startSfLevelEdit(spanEl) {
+        if (_sfLevelBusy) return;
+        const td = spanEl.closest('td');
+        if (!td || td.querySelector('.sf-level-input')) return;
+        const field = spanEl.getAttribute('data-level-field');
+        const rowId = spanEl.getAttribute('data-row-id');
+        if (!field || !rowId) return;
+        const rawText = (spanEl.textContent || '')
+            .replace(/[₹,]/g, '')
+            .replace(/—/g, '')
+            .trim();
+        const inp = document.createElement('input');
+        inp.type = 'number';
+        inp.className = 'sf-modal-input sf-level-input';
+        inp.style.maxWidth = '110px';
+        inp.style.padding = '4px 8px';
+        inp.style.fontSize = '0.88rem';
+        inp.step = 'any';
+        inp.min = '0';
+        inp.value = rawText || '';
+        spanEl.style.display = 'none';
+        td.insertBefore(inp, spanEl);
+        inp.focus();
+        inp.select();
+
+        let done = false;
+
+        function cleanup() {
+            if (inp.parentNode) inp.remove();
+            spanEl.style.display = '';
+        }
+
+        async function finish(save) {
+            if (done) return;
+            done = true;
+            inp.removeEventListener('keydown', onKey);
+            inp.removeEventListener('blur', onBlur);
+            if (!save) {
+                cleanup();
+                return;
+            }
+            const v = parseFloat(String(inp.value || '').replace(/,/g, ''));
+            if (!Number.isFinite(v) || v <= 0) {
+                cleanup();
+                return;
+            }
+            const payload = {};
+            if (field === 'sl') {
+                payload.sl_price = v;
+            } else if (field === 'target') {
+                const buy = Number(spanEl.getAttribute('data-buy-price'));
+                const entry = Number(spanEl.getAttribute('data-entry-price'));
+                if (Number.isFinite(buy) && Number.isFinite(entry)) {
+                    payload.target_price = v - buy + entry;
+                } else {
+                    payload.target_price = v;
+                }
+            } else {
+                cleanup();
+                return;
+            }
+            _sfLevelBusy = true;
+            const res = await patchSfLevels(rowId, payload);
+            _sfLevelBusy = false;
+            cleanup();
+            if (!res.ok) {
+                if (!res.expired) alert(res.err || 'Update failed');
+                return;
+            }
+            await loadTrend(true);
+        }
+
+        function onKey(ev) {
+            if (ev.key === 'Enter') {
+                ev.preventDefault();
+                finish(true);
+            } else if (ev.key === 'Escape') {
+                ev.preventDefault();
+                finish(false);
+            }
+        }
+        function onBlur() {
+            finish(true);
+        }
+        inp.addEventListener('keydown', onKey);
+        inp.addEventListener('blur', onBlur);
+    }
+
+    function openTableRowHtml(r) {
         const activeStop = r.current_active_stop_loss_level != null ? fmtNum(r.current_active_stop_loss_level, 2) : '—';
         const trailStop = r.current_trailing_stop_level != null ? fmtNum(r.current_trailing_stop_level, 2) : '—';
         const exitReason = r.exit_reason ? escapeHtml(String(r.exit_reason)) : '—';
@@ -928,7 +1112,10 @@
             fmtNum(r.buy_price, 2) +
             '</td>' +
             '<td>' +
-            fmtNum(dispTarget, 2) +
+            fmtOpenSlEditableCell(r) +
+            '</td>' +
+            '<td>' +
+            fmtOpenTargetEditableCell(r) +
             '</td>' +
             '<td>' +
             fmtNum(r.current_ltp, 2) +
@@ -1185,14 +1372,14 @@
 
         if (!bought.length) {
             host.innerHTML =
-                '<div class="sf-table-wrap"><table class="sf-table"><tbody><tr><td colspan="16" style="padding:14px;">No open positions</td></tr></tbody></table></div>';
+                '<div class="sf-table-wrap"><table class="sf-table"><tbody><tr><td colspan="17" style="padding:14px;">No open positions</td></tr></tbody></table></div>';
             return;
         }
 
         const thead =
             '<thead><tr>' +
             '<th>Symbol</th><th>Side</th><th>Tier</th><th>OI</th><th>Stop</th><th>Lots</th><th>CMS</th>' +
-            '<th>Entry</th><th title="Displayed target rebased from buy_price">Target</th><th>LTP</th><th>15m VWAP</th>' +
+            '<th>Entry</th><th title="Plan stop loss (editable)">SL</th><th title="Displayed target rebased from buy_price">Target</th><th>LTP</th><th>15m VWAP</th>' +
             '<th>Active SL</th><th>Trail SL</th><th>Exit Reason</th>' +
             '<th title="Approx. (LTP − Entry) × lot size × lots; SHORT uses (Entry − LTP)">Unrealized PnL</th><th>Action</th>' +
             '</tr></thead>';
@@ -1217,7 +1404,7 @@
                 : '—';
         const foot =
             '<tfoot><tr class="sf-open-footer-row">' +
-            '<td colspan="14"><strong>Total unrealized PnL</strong></td>' +
+            '<td colspan="15"><strong>Total unrealized PnL</strong></td>' +
             '<td>' +
             totalUnStr +
             '</td><td></td></tr></tfoot>';
@@ -1231,6 +1418,15 @@
             '</table></div>';
 
         host.onclick = function (ev) {
+            const editEl =
+                ev.target && ev.target.closest
+                    ? ev.target.closest('[data-sf-edit-level="1"]')
+                    : null;
+            if (editEl) {
+                ev.preventDefault();
+                startSfLevelEdit(editEl);
+                return;
+            }
             const sb = ev.target && ev.target.closest ? ev.target.closest('.sf-btn-sell[data-open-sell]') : null;
             if (sb) onSellClick(ev);
         };
@@ -1350,6 +1546,140 @@
             return;
         }
         closeOrderModal();
+        await loadTrend(true);
+    }
+
+    function openManualEntryModal() {
+        const modal = document.getElementById('sfManualModal');
+        const timeInp = document.getElementById('sfManualEntryTime');
+        const symInp = document.getElementById('sfManualSymbol');
+        const priceInp = document.getElementById('sfManualEntryPrice');
+        const slInp = document.getElementById('sfManualSl');
+        const tgtInp = document.getElementById('sfManualTarget');
+        const lotsInp = document.getElementById('sfManualLots');
+        const errEl = document.getElementById('sfManualModalErr');
+        const sideSel = document.getElementById('sfManualSide');
+        if (!modal || !symInp || !priceInp || !lotsInp) return;
+        if (errEl) errEl.textContent = '';
+        if (timeInp) timeInp.value = istTimeInputHHMMForNow();
+        symInp.value = '';
+        priceInp.value = '';
+        if (slInp) slInp.value = '';
+        if (tgtInp) tgtInp.value = '';
+        if (sideSel) sideSel.value = 'LONG';
+        let defLots = '1';
+        if (_sfLastCfg != null && _sfLastCfg.position_size != null) {
+            defLots = String(_sfLastCfg.position_size);
+        }
+        lotsInp.value = defLots;
+        const cBtn = document.getElementById('sfManualModalConfirm');
+        if (cBtn) cBtn.disabled = false;
+        modal.classList.add('sf-modal--open');
+        modal.setAttribute('aria-hidden', 'false');
+        setTimeout(function () {
+            symInp.focus();
+        }, 30);
+    }
+
+    function closeManualEntryModal() {
+        const modal = document.getElementById('sfManualModal');
+        if (!modal) return;
+        modal.classList.remove('sf-modal--open');
+        modal.setAttribute('aria-hidden', 'true');
+        const c = document.getElementById('sfManualModalConfirm');
+        if (c) c.disabled = false;
+    }
+
+    async function submitManualEntryModal() {
+        const timeInp = document.getElementById('sfManualEntryTime');
+        const symInp = document.getElementById('sfManualSymbol');
+        const priceInp = document.getElementById('sfManualEntryPrice');
+        const slInp = document.getElementById('sfManualSl');
+        const tgtInp = document.getElementById('sfManualTarget');
+        const lotsInp = document.getElementById('sfManualLots');
+        const sideSel = document.getElementById('sfManualSide');
+        const errEl = document.getElementById('sfManualModalErr');
+        const confirmBtn = document.getElementById('sfManualModalConfirm');
+        if (!symInp || !priceInp || !lotsInp || !sideSel) return;
+
+        const symRaw = String(symInp.value || '').trim().toUpperCase();
+        if (!symRaw) {
+            if (errEl) errEl.textContent = 'Enter an underlying symbol.';
+            return;
+        }
+        const entryPx = parseFloat(String(priceInp.value || '').replace(/,/g, '').trim());
+        if (!Number.isFinite(entryPx) || entryPx <= 0) {
+            if (errEl) errEl.textContent = 'Enter a valid entry price.';
+            return;
+        }
+        const lots = parseInt(String(lotsInp.value || '').trim(), 10);
+        if (!Number.isFinite(lots) || lots < 1) {
+            if (errEl) errEl.textContent = 'Lots must be an integer at least 1.';
+            return;
+        }
+
+        const slRaw = String(slInp ? slInp.value : '').trim().replace(/,/g, '');
+        const tgRaw = String(tgtInp ? tgtInp.value : '').trim().replace(/,/g, '');
+        const slNum = parseFloat(slRaw);
+        const tgNum = parseFloat(tgRaw);
+        const payload = {
+            symbol: symRaw,
+            side: String(sideSel.value || 'LONG').toUpperCase(),
+            entry_price: entryPx,
+            calculated_lots: lots,
+        };
+        const timeVal = timeInp ? String(timeInp.value || '').trim() : '';
+        if (timeVal) {
+            payload.entry_time = timeVal.length === 5 ? timeVal + ':00' : timeVal;
+        }
+        payload.sl_price = Number.isFinite(slNum) && slNum > 0 ? slNum : null;
+        payload.target_price = Number.isFinite(tgNum) && tgNum > 0 ? tgNum : null;
+
+        if (errEl) errEl.textContent = '';
+        if (confirmBtn) confirmBtn.disabled = true;
+
+        const paths = ['/api/smart-futures/daily/manual-entry', '/smart-futures/daily/manual-entry'];
+        let ok = false;
+        let errText = '';
+        const bodyStr = JSON.stringify(payload);
+        for (const p of paths) {
+            try {
+                const res = await fetch(API_BASE + p, {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    body: bodyStr,
+                });
+                const resText = await res.text();
+                let data = null;
+                try {
+                    data = JSON.parse(resText);
+                } catch (e) {
+                    data = null;
+                }
+                if (res.ok && data && data.success) {
+                    ok = true;
+                    break;
+                }
+                if (isTokenExpiredResponse(res, resText, data)) {
+                    redirectToLoginExpired();
+                    if (confirmBtn) confirmBtn.disabled = false;
+                    return;
+                }
+                errText =
+                    (data && (data.detail || data.message)) ||
+                    resText ||
+                    res.statusText;
+            } catch (e) {
+                errText = String(e.message || e);
+            }
+        }
+        if (!ok) {
+            if (errEl) errEl.textContent = errText || 'Save failed';
+            else alert(errText || 'Save failed');
+            if (confirmBtn) confirmBtn.disabled = false;
+            return;
+        }
+        closeManualEntryModal();
         await loadTrend(true);
     }
 
@@ -1718,6 +2048,7 @@
             } catch (ce) {
                 cfg = null;
             }
+            _sfLastCfg = cfg || null;
             applyPickSelectionNote(cfg);
             try {
                 const wl = await fetchWatchlistJson();
@@ -1743,6 +2074,16 @@
     }
 
     document.addEventListener('DOMContentLoaded', function () {
+        const manualOpen = document.getElementById('sfManualEntryOpen');
+        if (manualOpen) manualOpen.addEventListener('click', function () { openManualEntryModal(); });
+        const manualModal = document.getElementById('sfManualModal');
+        const manualBackdrop = document.getElementById('sfManualModalBackdrop');
+        const manualCancel = document.getElementById('sfManualModalCancel');
+        const manualConfirm = document.getElementById('sfManualModalConfirm');
+        if (manualCancel) manualCancel.addEventListener('click', closeManualEntryModal);
+        if (manualBackdrop) manualBackdrop.addEventListener('click', closeManualEntryModal);
+        if (manualConfirm) manualConfirm.addEventListener('click', function () { submitManualEntryModal(); });
+
         const ref = document.getElementById('sfTrendRefresh');
         if (ref) ref.addEventListener('click', function () { loadTrend(false); });
         const runPicker = document.getElementById('sfRunPicker');
@@ -1801,6 +2142,10 @@
             if (ev.key !== 'Escape') return;
             if (earlyModal && earlyModal.classList.contains('sf-modal--open')) {
                 closeEarlyExitModal();
+                return;
+            }
+            if (manualModal && manualModal.classList.contains('sf-modal--open')) {
+                closeManualEntryModal();
                 return;
             }
             if (orderModal && orderModal.classList.contains('sf-modal--open')) {
