@@ -239,6 +239,24 @@ def universe_board_quotes_public() -> Dict[str, Any]:
         }
 
 
+@router.get("/universe-daily-adx-public")
+def universe_daily_adx_public() -> Dict[str, Any]:
+    """
+    Daily-bar ADX(period) per underlying for step-1 range gate (no JWT; server Upstox token).
+    ``adx_ok`` is True when ADX is computed and strictly below ``adx_threshold_lt``.
+    """
+    try:
+        return ic.universe_daily_adx_api_payload()
+    except Exception as e:
+        logger.exception("universe_daily_adx_public failed: %s", e)
+        return {
+            "adx_by_symbol": {},
+            "adx_period": 10,
+            "adx_threshold_lt": 20.0,
+            "adx_error": "ADX temporarily unavailable — try again shortly.",
+        }
+
+
 @router.get("/universe-board-quotes")
 def universe_board_quotes(_user: User = Depends(_auth)) -> Dict[str, Any]:
     """Step 1 tier 2: single batched broker quote pass for all universe symbols (merge on client)."""
@@ -250,6 +268,21 @@ def universe_board_quotes(_user: User = Depends(_auth)) -> Dict[str, Any]:
         return {
             "quotes_by_symbol": {},
             "quotes_error": "Quotes temporarily unavailable — try again shortly.",
+        }
+
+
+@router.get("/universe-daily-adx")
+def universe_daily_adx(_user: User = Depends(_auth)) -> Dict[str, Any]:
+    """Same as /universe-daily-adx-public; JWT present for consistency with /universe-board-quotes."""
+    try:
+        return ic.universe_daily_adx_api_payload()
+    except Exception as e:
+        logger.exception("universe_daily_adx failed: %s", e)
+        return {
+            "adx_by_symbol": {},
+            "adx_period": 10,
+            "adx_threshold_lt": 20.0,
+            "adx_error": "ADX temporarily unavailable — try again shortly.",
         }
 
 

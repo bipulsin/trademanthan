@@ -11,6 +11,7 @@ import os
 import threading
 import time
 import copy
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, date, time as dt_time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -30,6 +31,11 @@ from backend.services import market_holiday as mh_ic
 logger = logging.getLogger(__name__)
 
 IST = pytz.timezone("Asia/Kolkata")
+
+# Universe step-1: daily ADX (Wilder via pandas_ta) for range gate (< threshold → selectable radio).
+_ic_adx_cache_deadline: float = 0.0
+_ic_adx_cache_by_symbol: Dict[str, Dict[str, Any]] = {}
+_ic_adx_cache_meta: Dict[str, Any] = {}
 
 # Process-wide cache: batched universe quotes (symbols × one Upstox call per TTL)
 _ic_uq_cache_deadline: float = 0.0
@@ -846,6 +852,145 @@ def merge_universe_board_quotes(
             it["change_pct_day"] = pq.get("change_pct_day")
         out.append(normalize_ic_universe_row_for_api(it))
     return out
+
+
+def _ic_daily_hlc_for_adx(candles: Optional[List[Dict[str, Any]]]) -> Tuple[List[float], List[float], List[float]]:
+    """Chronologically ordered daily high/low/close for pandas_ta ADX."""
+    if not candles:
+        return [], [], []
+    sorted_candles = sorted(candles, key=lambda c: str(c.get("timestamp") or ""))
+    highs: List[float] = []
+    lows: List[float] = []
+    closes: List[float] = []
+    for c in sorted_candles:
+        try:
+            h = float(c.get("high") or 0)
+            lo = float(c.get("low") or 0)
+            cl = float(c.get("close") or 0)
+        except (TypeError, ValueError):
+            continue
+        if h <= 0 or lo <= 0 or cl <= 0:
+            continue
+        highs.append(h)
+        lows.append(lo)
+        closes.append(cl)
+    return highs, lows, closes
+
+
+def _universe_adx_period_and_threshold() -> Tuple[int, float]:
+    period = int(os.getenv("IRON_CONDOR_UNIVERSE_ADX_PERIOD", "10") or "10")
+    period = max(2, min(period, 30))
+    thr = float(os.getenv("IRON_CONDOR_UNIVERSE_ADX_GATE_LT", "20") or "20")
+    return period, thr
+
+
+def _fetch_one_underlying_daily_adx(sym_upper: str, ik: str, period: int) -> Tuple[str, Optional[float]]:
+    if not ik:
+        return sym_upper, None
+    try:
+        from backend.services.smart_futures_picker.indicators import adx_value
+
+        days_back = int(os.getenv("IRON_CONDOR_UNIVERSE_ADX_DAYS_BACK", "72") or "72")
+        days_back = max(45, min(days_back, 400))
+        raw = vwap_service.get_historical_candles_by_instrument_key(
+            ik, interval="days/1", days_back=days_back
+        )
+        h, l, cl = _ic_daily_hlc_for_adx(raw)
+        av = adx_value(h, l, cl, int(period))
+        return sym_upper, av
+    except Exception as ex:
+        logger.debug("universe daily ADX %s failed: %s", sym_upper, ex)
+        return sym_upper, None
+
+
+def build_universe_daily_adx_by_symbol_cached() -> Tuple[Dict[str, Dict[str, Any]], Optional[str]]:
+    """
+    Latest daily-bar ADX(period) per approved underlying (pandas_ta / Wilder).
+    Cached briefly — same Upstox token as batch quotes.
+
+    ``adx_ok`` True when ADX computed and strictly below threshold (IC range gate).
+
+    UX contract: callers treat missing ``adx_value`` / ``adx_ok`` false as not selectable.
+    """
+    global _ic_adx_cache_deadline, _ic_adx_cache_by_symbol, _ic_adx_cache_meta
+
+    period, thr = _universe_adx_period_and_threshold()
+    ttl = float(os.getenv("IRON_CONDOR_UNIVERSE_ADX_CACHE_SEC", "240") or "240")
+    now = time.monotonic()
+    if _ic_adx_cache_by_symbol and now < _ic_adx_cache_deadline:
+        if int(_ic_adx_cache_meta.get("period") or -1) == period and float(_ic_adx_cache_meta.get("threshold") or -1.0) == thr:
+            return dict(_ic_adx_cache_by_symbol), _ic_adx_cache_meta.get("adx_error")
+
+    _ensure_ic_universe_master_memory_loaded()
+    pairs = ic_universe_ordered_pairs()
+    tok = (getattr(vwap_service, "access_token", None) or "").strip()
+    adx_error: Optional[str] = None
+    out: Dict[str, Dict[str, Any]] = {}
+
+    if not tok:
+        adx_error = (
+            "Upstox not connected — ADX unavailable (N/A). Reconnect broker to evaluate range gate."
+        )
+    elif not pairs:
+        adx_error = "Universe list empty — ADX unavailable."
+    else:
+        workers = max(1, min(int(os.getenv("IRON_CONDOR_UNIVERSE_ADX_MAX_WORKERS", "6") or "6"), len(pairs)))
+        results: Dict[str, Optional[float]] = {}
+
+        try:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futs = {
+                    pool.submit(_fetch_one_underlying_daily_adx, sym, ik, period): sym
+                    for sym, _sec, ik, _uat in pairs
+                }
+                for fut in as_completed(futs):
+                    sym_key, av = fut.result()
+                    results[sym_key] = av
+        except Exception as ex:
+            logger.warning("Iron Condor universe ADX batch failed: %s", ex)
+            adx_error = "ADX batch failed — try again shortly."
+
+        for sym, _sec, ik, _uat in pairs:
+            av = results.get(sym)
+            if av is None or not math.isfinite(float(av)):
+                out[sym] = {
+                    "adx_value": None,
+                    "adx_ok": False,
+                }
+            else:
+                fv = round(float(av), 4)
+                out[sym] = {
+                    "adx_value": fv,
+                    "adx_ok": fv < thr,
+                }
+
+    _ic_adx_cache_by_symbol = dict(out)
+    _ic_adx_cache_meta = {
+        "period": period,
+        "threshold": thr,
+        "adx_error": adx_error,
+    }
+    err_ttl = float(os.getenv("IRON_CONDOR_UNIVERSE_ADX_ERROR_CACHE_SEC", "8") or "8")
+    if adx_error and not out:
+        _ic_adx_cache_deadline = now + max(2.0, err_ttl)
+    elif adx_error:
+        _ic_adx_cache_deadline = now + max(15.0, min(ttl, 90.0))
+    else:
+        _ic_adx_cache_deadline = now + max(5.0, ttl)
+
+    return (dict(out), adx_error)
+
+
+def universe_daily_adx_api_payload() -> Dict[str, Any]:
+    """JSON shape for GET /iron-condor/universe-daily-adx(-public)."""
+    by_sym, adx_err = build_universe_daily_adx_by_symbol_cached()
+    period, thr = _universe_adx_period_and_threshold()
+    return {
+        "adx_by_symbol": by_sym,
+        "adx_period": period,
+        "adx_threshold_lt": thr,
+        "adx_error": adx_err,
+    }
 
 
 def universe_picker_snapshot_row_only(db: Session, user_id: int, symbol: str) -> Tuple[Dict[str, Any], Optional[str]]:

@@ -89,6 +89,11 @@
     return icApiPaths("universe-board-quotes-public");
   }
 
+  /** Daily ADX batch — same no-JWT pattern as universe quotes. */
+  function universeDailyAdxPublicPaths() {
+    return icApiPaths("universe-daily-adx-public");
+  }
+
   /** Strike analysis — no JWT (public advisory computation). */
   function analyzeDetailedPublicPaths() {
     return icApiPaths("analyze-detailed-public");
@@ -125,6 +130,9 @@
     universeStep1PickLocked: false,
     universeStep1AuthMerged: false,
     universeStep1QuoteGen: 0,
+    universeAdxFetchGen: 0,
+    universeAdxLoaded: false,
+    universeAdxError: null,
     universeQuoteTimer: null,
     checklistFillPollTimer: null,
     checklistPollRounds: 0,
@@ -417,7 +425,7 @@
     var tb = document.getElementById("pickerBody");
     if (!tb) return;
     tb.innerHTML =
-      "<tr><td colspan=\"8\" class=\"ic-muted\">" + esc(msg || "Loading…") + "</td></tr>";
+      "<tr><td colspan=\"9\" class=\"ic-muted\">" + esc(msg || "Loading…") + "</td></tr>";
   }
 
   function parseNumOrNull(v) {
@@ -544,15 +552,28 @@
     var warn = apKnown && ap ? '<span class="ic-chip-warn ic-chip-pass">Dup</span>' : "";
     var act = !apKnown ? "—" : ap ? "Yes" : "No Trade";
     var pdcHtml = fmtPxCell(row.previous_day_close);
-    var rad =
-      "<span class=\"ic-muted\">—</span>";
-    if (apKnown && !ap && !state.universeStep1PickLocked && universeLiveLtpKnown(row)) {
-      rad =
-        "<label class=\"ic-universe-radio\"><input type=\"radio\" name=\"icUniversePick\" value=\"" +
-        esc(sym) +
-        "\" aria-label=\"Select " +
-        esc(sym) +
-        " to continue\" /></label>";
+    var baseEligible =
+      apKnown && !ap && !state.universeStep1PickLocked && universeLiveLtpKnown(row);
+    var rad = "<span class=\"ic-muted\">—</span>";
+    if (baseEligible) {
+      if (!state.universeAdxLoaded) {
+        rad = "<span class=\"ic-muted\" aria-busy=\"true\">…</span>";
+      } else if (row.adx_ok === true) {
+        rad =
+          "<label class=\"ic-universe-radio\"><input type=\"radio\" name=\"icUniversePick\" value=\"" +
+          esc(sym) +
+          "\" aria-label=\"Select " +
+          esc(sym) +
+          " to continue\" /></label>";
+      } else {
+        var vAdx = row.adx_value;
+        var numAdx = vAdx != null && vAdx !== "" ? parseFloat(String(vAdx)) : NaN;
+        if (isFinite(numAdx)) {
+          rad = "<span class=\"ic-muted\">Not in Range</span>";
+        } else {
+          rad = "<span class=\"ic-muted\" title=\"ADX unavailable — not selectable\">N/A</span>";
+        }
+      }
     }
     return (
       "<tr data-sym=\"" +
@@ -577,6 +598,9 @@
       "</td>" +
       "<td class=\"ic-col-deltam ic-num\">" +
       deltaMonthChipHtml(row) +
+      "</td>" +
+      "<td class=\"ic-col-adx ic-num\">" +
+      universeAdxCellHtml(row) +
       "</td>" +
       "<td class=\"ic-col-active\">" +
       act +
@@ -619,19 +643,58 @@
     }
   }
 
+  /** Server: adx_value + adx_ok (strictly below threshold). Missing ADX ⇒ not selectable (N/A). */
+  function applyUniverseAdxPatch(rows, payload) {
+    var by =
+      payload && payload.adx_by_symbol && typeof payload.adx_by_symbol === "object"
+        ? payload.adx_by_symbol
+        : {};
+    var src = rows || [];
+    for (var i = 0; i < src.length; i++) {
+      var symU = String(src[i].symbol || "").trim().toUpperCase();
+      var e = by[symU];
+      if (e && typeof e === "object") {
+        if (e.adx_value != null && e.adx_value !== "") {
+          var n = typeof e.adx_value === "number" ? e.adx_value : parseFloat(String(e.adx_value));
+          src[i].adx_value = isFinite(n) ? n : null;
+        } else {
+          src[i].adx_value = null;
+        }
+        src[i].adx_ok = e.adx_ok === true;
+      } else {
+        src[i].adx_value = null;
+        src[i].adx_ok = false;
+      }
+    }
+  }
+
+  function universeAdxCellHtml(row) {
+    if (!state.universeAdxLoaded) {
+      return "<span class=\"ic-muted\" aria-busy=\"true\">…</span>";
+    }
+    var v = row && row.adx_value;
+    if (v != null && v !== "") {
+      var num = typeof v === "number" ? v : parseFloat(String(v));
+      if (isFinite(num)) {
+        return "<span class=\"ic-num ic-mono\">" + esc(num.toFixed(2)) + "</span>";
+      }
+    }
+    return "<span class=\"ic-muted\" title=\"ADX could not be computed — row not selectable\">N/A</span>";
+  }
+
   function renderUniverseStep1Table(rows) {
     var tb = document.getElementById("pickerBody");
     if (!tb) return;
     var src = Array.isArray(rows) ? rows : [];
     if (!src.length) {
-      tb.innerHTML = "<tr><td colspan=\"8\" class=\"ic-muted\">No universe rows configured.</td></tr>";
+      tb.innerHTML = "<tr><td colspan=\"9\" class=\"ic-muted\">No universe rows configured.</td></tr>";
       setUniverseNextFromRadio();
       return;
     }
     var vis = filterUniverseRowsForStep1EarningsWindow(src);
     if (!vis.length) {
       tb.innerHTML =
-        "<tr><td colspan=\"8\" class=\"ic-muted\">No symbols to show — next earnings falls between the previous and current monthly F&amp;O expiries for every underlying (see master sheet).</td></tr>";
+        "<tr><td colspan=\"9\" class=\"ic-muted\">No symbols to show — next earnings falls between the previous and current monthly F&amp;O expiries for every underlying (see master sheet).</td></tr>";
       wireUniverseStep1Radios();
       setUniverseNextFromRadio();
       return;
@@ -649,6 +712,77 @@
         setUniverseNextFromRadio();
       };
     });
+  }
+
+  /** Retries + 120s abort — server fetches many daily histories in parallel. */
+  async function fetchUniverseDailyAdxJson(maxAttempts) {
+    var n = maxAttempts == null ? 2 : maxAttempts;
+    var lastErr;
+    for (var a = 0; a < n; a++) {
+      var ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+      var tid = null;
+      if (ctrl) {
+        tid = setTimeout(function () {
+          try {
+            ctrl.abort();
+          } catch (_e) {}
+        }, 120000);
+      }
+      try {
+        if (a > 0) {
+          await new Promise(function (resolve) {
+            setTimeout(resolve, 400 + a * 500);
+          });
+        }
+        var j = await fj(universeDailyAdxPublicPaths(), {
+          cache: "no-store",
+          signal: ctrl ? ctrl.signal : undefined,
+        });
+        if (tid) clearTimeout(tid);
+        return j;
+      } catch (e) {
+        lastErr = e;
+        if (tid) clearTimeout(tid);
+      }
+    }
+    throw lastErr || new Error("ADX fetch failed");
+  }
+
+  function startUniverseAdxFetch(adxg) {
+    if (!state.universeStep1Rows || !state.universeStep1Rows.length) return;
+    fetchUniverseDailyAdxJson(2)
+      .then(function (j) {
+        if (adxg !== state.universeAdxFetchGen) return;
+        state.universeAdxLoaded = true;
+        if (j && typeof j.adx_error === "string" && j.adx_error.trim()) {
+          state.universeAdxError = j.adx_error.trim();
+        } else {
+          state.universeAdxError = null;
+        }
+        applyUniverseAdxPatch(state.universeStep1Rows, j || {});
+        renderUniverseStep1Table(state.universeStep1Rows);
+      })
+      .catch(function () {
+        if (adxg !== state.universeAdxFetchGen) return;
+        state.universeAdxLoaded = true;
+        state.universeAdxError = "Could not load ADX — try refreshing.";
+        applyUniverseAdxPatch(state.universeStep1Rows, {});
+        renderUniverseStep1Table(state.universeStep1Rows);
+      });
+  }
+
+  /**
+   * New row set (public or auth merge): reset ADX gate and refetch.
+   * Stale completes are dropped via universeAdxFetchGen.
+   */
+  function bumpUniverseAdxAndFetch() {
+    if (!state.universeStep1Rows || !state.universeStep1Rows.length) return;
+    state.universeAdxLoaded = false;
+    state.universeAdxError = null;
+    state.universeAdxFetchGen = (state.universeAdxFetchGen || 0) + 1;
+    var adxg = state.universeAdxFetchGen;
+    renderUniverseStep1Table(state.universeStep1Rows);
+    startUniverseAdxFetch(adxg);
   }
 
   /** Retries + 65s abort so the grid never sits forever on “Loading live LTP…”. */
@@ -741,10 +875,13 @@
     var gen = ++state.universeStep1QuoteGen;
     state.universeStep1AuthMerged = false;
     state.universeStep1PickLocked = false;
+    state.universeAdxLoaded = false;
+    state.universeAdxError = null;
+    state.universeAdxFetchGen = 0;
     pickerShowQuoteBanner("");
     state.symbol = "";
     if (tb) {
-      tb.innerHTML = "<tr><td colspan=\"8\" class=\"ic-muted\">Loading approved list…</td></tr>";
+      tb.innerHTML = "<tr><td colspan=\"9\" class=\"ic-muted\">Loading approved list…</td></tr>";
     }
 
     fj(["/api/iron-condor/approved-underlyings"], { cache: "no-store" })
@@ -761,6 +898,7 @@
         renderUniverseStep1Table(rows);
         pickerShowQuoteBanner("Loading live LTP…");
         startUniverseQuotesFetch(gen);
+        bumpUniverseAdxAndFetch();
       })
       .catch(function () {
         if (gen !== state.universeStep1QuoteGen) return;
@@ -786,6 +924,7 @@
         renderUniverseStep1Table(rows);
         pickerShowQuoteBanner("Loading live LTP from Upstox…");
         startUniverseQuotesFetch(gen);
+        bumpUniverseAdxAndFetch();
       })
       .catch(function () {
         if (gen !== state.universeStep1QuoteGen) return;

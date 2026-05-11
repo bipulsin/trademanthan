@@ -98,6 +98,7 @@ body.theme-page.iron-c-page[data-theme="light"] .ic-universe-table tbody td.ic-n
 .ic-universe-table thead th.ic-col-ltp,
 .ic-universe-table thead th.ic-col-delta,
 .ic-universe-table thead th.ic-col-deltam,
+.ic-universe-table thead th.ic-col-adx,
 .ic-universe-table thead th.ic-col-pick {
   text-align: center;
 }
@@ -107,7 +108,7 @@ body.theme-page.iron-c-page[data-theme="light"] .ic-universe-table tbody td.ic-n
   border-bottom: 1px solid var(--theme-border, rgba(148, 163, 184, 0.35));
 }
 .ic-universe-table .ic-col-symbol {
-  width: 16%;
+  width: 14%;
 }
 .ic-universe-table .ic-col-sector {
   width: 15%;
@@ -125,15 +126,19 @@ body.theme-page.iron-c-page[data-theme="light"] .ic-universe-table tbody td.ic-n
   text-align: center;
 }
 .ic-universe-table .ic-col-deltam {
-  width: 10%;
+  width: 9%;
+  text-align: center;
+}
+.ic-universe-table .ic-col-adx {
+  width: 8%;
   text-align: center;
 }
 .ic-universe-table .ic-col-active {
-  width: 16%;
+  width: 15%;
   text-align: left;
 }
 .ic-universe-table .ic-col-pick {
-  width: 7%;
+  width: 14%;
   text-align: center;
 }
 .ic-universe-radio {
