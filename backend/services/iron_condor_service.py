@@ -352,6 +352,21 @@ def _previous_session_close_px_from_quote_sn(sn: Optional[Dict[str, Any]]) -> Op
         px = _ic_prev_day_close_from_ohlc(blob)
         if px and px > 0:
             return float(px)
+    # Match daily_futures_service._prev_close_from_snapshot: some quote rows omit OHLC.close
+    # but expose net_change vs last_price (also covers sparse camelCase-only payloads).
+    try:
+        lp = float(sn.get("last_price") or 0)
+        nc_raw = sn.get("net_change")
+        if nc_raw is None:
+            nc_raw = sn.get("netChange")
+        if lp > 0 and nc_raw is not None and nc_raw != "":
+            nc = float(nc_raw)
+            if math.isfinite(nc):
+                d = lp - nc
+                if d > 0:
+                    return float(d)
+    except (TypeError, ValueError):
+        pass
     return None
 
 
@@ -537,10 +552,20 @@ def get_iron_condor_universe_master_rows() -> List[Dict[str, Any]]:
 
 
 def _ic_prev_day_close_from_ohlc(nested: Any) -> float:
-    """Prefer previous session close keys from Upstox ohlc; fall back to close."""
+    """Prefer previous session close keys from Upstox ohlc / quote; fall back to close."""
     if not isinstance(nested, dict):
         return 0.0
-    for key in ("previous_close", "prev_close", "close"):
+    # Upstox v2 is usually snake_case; some feeds / paths use camelCase (see oi_integration).
+    for key in (
+        "previous_close",
+        "previousClose",
+        "prev_close",
+        "prevClose",
+        "close_price",
+        "closePrice",
+        "pClose",
+        "close",
+    ):
         v = nested.get(key)
         if v is not None and v != "":
             try:
