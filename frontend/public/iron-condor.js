@@ -872,6 +872,28 @@
     }, UNIVERSE_QUOTE_POLL_MS);
   }
 
+  function fetchUniverseBoardBaseOnce() {
+    return fj(icApiPaths("universe-board-base"), {
+      headers: authHeaders(),
+      cache: "no-store",
+    });
+  }
+
+  /** One retry — transient 503/timeouts after deploy should not show the wrong banner forever. */
+  function fetchUniverseBoardBaseMaybeRetry(gen) {
+    return fetchUniverseBoardBaseOnce().catch(function (firstErr) {
+      return new Promise(function (resolve, reject) {
+        setTimeout(function () {
+          if (gen !== state.universeStep1QuoteGen) {
+            reject(firstErr);
+            return;
+          }
+          fetchUniverseBoardBaseOnce().then(resolve).catch(reject);
+        }, 900);
+      });
+    });
+  }
+
   /**
    * Public list paints first (no JWT) with default Active?=No Trade and radios enabled.
    * Signed-in tier can still override Active? with user-specific duplicate position status.
@@ -914,10 +936,7 @@
         setUniverseNextFromRadio();
       });
 
-    fj(icApiPaths("universe-board-base"), {
-      headers: authHeaders(),
-      cache: "no-store",
-    })
+    fetchUniverseBoardBaseMaybeRetry(gen)
       .then(function (baseResp) {
         if (gen !== state.universeStep1QuoteGen) return;
         var rows = Array.isArray(baseResp.symbols) ? baseResp.symbols.slice() : [];
@@ -937,7 +956,7 @@
         state.universeStep1AuthMerged = false;
         state.universeStep1PickLocked = false;
         pickerShowQuoteBanner(
-          "Public mode: Active? defaults to No Trade and row radios are enabled. Sign in to load user-specific duplicate checks."
+          "Could not load your Active? / duplicate checks — showing the approved list. Refresh the page or try again shortly."
         );
         if (state.universeStep1Rows && state.universeStep1Rows.length) {
           renderUniverseStep1Table(state.universeStep1Rows);
