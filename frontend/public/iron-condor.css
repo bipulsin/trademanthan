@@ -687,3 +687,11 @@ body.theme-page.iron-c-page .ic-atr-suggest-hint {
   margin: 8px 0 0;
   font-size: 0.76rem;
 }
+
+/* Step 2: OTM ladder + ATR reference stars */
+body.theme-page.iron-c-page .ic-simple-strike-table tbody tr:hover {
+  background: var(--theme-card-alt);
+}
+body.theme-page.iron-c-page .ic-simple-strike-summary p {
+  font-size: 0.84rem;
+}

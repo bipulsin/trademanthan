@@ -613,6 +613,19 @@ def analyze_iron_condor_detailed(
         sug = {"ok": False, "error": str(ex)}
     core_out["daily_atr_short_suggestions"] = sug
 
+    simple_panel: Dict[str, Any] = {}
+    try:
+        eq_k_simple = vwap_service.get_instrument_key(api_sym)
+        sp_simple = float(core_out.get("spot") or 0.0)
+        if eq_k_simple and sp_simple > 0:
+            simple_panel = ic.build_simple_strike_otm_panel(api_sym, und, exp_d_calc, sp_simple, eq_k_simple)
+        else:
+            simple_panel = {"chain_error": "no_equity_instrument_key_or_spot"}
+    except Exception as ex:
+        logger.warning("analyze_iron_condor_detailed simple_strike_panel: %s", ex)
+        simple_panel = {"chain_error": str(ex)}
+    core_out["simple_strike_panel"] = simple_panel
+
     return core_out
 
 

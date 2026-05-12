@@ -1827,6 +1827,118 @@ def _build_strike_aggregate(strike_list: List[Dict[str, Any]]) -> Dict[float, Di
     return out
 
 
+def build_simple_strike_otm_panel(
+    api_sym: str,
+    underlying: str,
+    expiry_date: date,
+    spot: float,
+    eq_key: Optional[str],
+) -> Dict[str, Any]:
+    """
+    Advisory grid: current monthly expiry, daily ATR(10), six OTM CE strikes above spot and six OTM PE strikes
+    below spot with chain LTPs. Stars mark strikes nearest to reference_close ± daily_atr_10 (same close basis as ATR).
+    """
+    out: Dict[str, Any] = {
+        "underlying": underlying,
+        "expiry_date": expiry_date.isoformat(),
+        "spot": None,
+        "reference_close": None,
+        "daily_atr_10": None,
+        "daily_atr_error": None,
+        "ce_ref_plus_atr": None,
+        "pe_ref_minus_atr": None,
+        "ce_star_strike": None,
+        "pe_star_strike": None,
+        "ce_otm": [],
+        "pe_otm": [],
+        "chain_error": None,
+    }
+    try:
+        sp = float(spot)
+    except (TypeError, ValueError):
+        sp = 0.0
+    if sp <= 0:
+        out["chain_error"] = "invalid_spot"
+        return out
+    out["spot"] = round(sp, 4)
+
+    prev_close = sp
+    if eq_key:
+        ohlc_live = vwap_service.get_ohlc_data(eq_key) or {}
+        nested_lc = ohlc_live.get("ohlc") if isinstance(ohlc_live.get("ohlc"), dict) else {}
+        try:
+            pc = float(
+                nested_lc.get("close")
+                or ohlc_live.get("close_price")
+                or nested_lc.get("previous_close")
+                or 0.0
+            )
+            if pc > 0:
+                prev_close = pc
+        except (TypeError, ValueError):
+            prev_close = sp
+    out["reference_close"] = round(float(prev_close), 4)
+
+    atr_block: Dict[str, Any] = {"ok": False, "error": "no_eq_key"}
+    if eq_key:
+        atr_block = build_daily_atr10_short_suggestion_block(eq_key, api_sym, sp, expiry_date)
+    if atr_block.get("ok") and atr_block.get("daily_atr_10") is not None:
+        try:
+            atr10 = float(atr_block["daily_atr_10"])
+            if atr10 > 0:
+                out["daily_atr_10"] = round(atr10, 4)
+                cref = float(prev_close)
+                out["ce_ref_plus_atr"] = round(cref + atr10, 4)
+                out["pe_ref_minus_atr"] = round(cref - atr10, 4)
+        except (TypeError, ValueError):
+            out["daily_atr_error"] = "invalid_atr"
+    else:
+        out["daily_atr_error"] = str(atr_block.get("error") or "atr_unavailable")
+
+    chain_raw = vwap_service.get_option_chain(api_sym, expiry_date=expiry_date)
+    sl = _extract_chain_strike_list(chain_raw or {})
+    if not sl:
+        out["chain_error"] = out.get("chain_error") or "option_chain_unavailable"
+        return out
+    agg = _build_strike_aggregate(sl)
+    sorted_all = sorted(agg.keys())
+
+    ce_candidates = [float(k) for k in sorted_all if float(k) > sp][:6]
+    pe_candidates = [float(k) for k in reversed(sorted_all) if float(k) < sp][:6]
+
+    def mk_row(side: str, strike: float, use_ce_ltp: bool) -> Dict[str, Any]:
+        row_a = agg.get(strike) or {}
+        ltp = float(row_a.get("ce_ltp") if use_ce_ltp else row_a.get("pe_ltp") or 0.0)
+        return {"side": side, "strike": round(float(strike), 4), "ltp": round(ltp, 4), "star": False}
+
+    ce_rows = [mk_row("CE", x, True) for x in ce_candidates]
+    pe_rows = [mk_row("PE", x, False) for x in pe_candidates]
+
+    atr_v = out.get("daily_atr_10")
+    if atr_v is not None and prev_close > 0:
+        try:
+            cref = float(prev_close)
+            atrf = float(atr_v)
+            t_ce = cref + atrf
+            t_pe = cref - atrf
+            if ce_candidates:
+                ns_ce = min(ce_candidates, key=lambda s: abs(float(s) - t_ce))
+                out["ce_star_strike"] = round(float(ns_ce), 4)
+                for row in ce_rows:
+                    row["star"] = abs(float(row["strike"]) - float(ns_ce)) < 0.01
+            if pe_candidates:
+                ns_pe = min(pe_candidates, key=lambda s: abs(float(s) - t_pe))
+                out["pe_star_strike"] = round(float(ns_pe), 4)
+                for row in pe_rows:
+                    row["star"] = abs(float(row["strike"]) - float(ns_pe)) < 0.01
+        except (TypeError, ValueError):
+            pass
+
+    out["ce_otm"] = ce_rows
+    out["pe_otm"] = pe_rows
+    return out
+
+
 def _nearest_strike_ge(sorted_strikes: List[float], threshold: float) -> Optional[float]:
     for sp in sorted_strikes:
         if sp >= threshold:

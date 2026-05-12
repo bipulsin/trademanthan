@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
   <link rel="stylesheet" href="left-menu.css?v=3.24" />
   <link rel="stylesheet" href="theme.css?v=1.3" />
-  <link rel="stylesheet" href="iron-condor.css?v=15" />
+  <link rel="stylesheet" href="iron-condor.css?v=16" />
   <link rel="stylesheet" href="settings.css" />
 </head>
 <body class="theme-page iron-c-page" data-theme="light">
@@ -92,37 +92,16 @@
       </section>
 
       <section class="ic-card" data-pane="2" style="display:none;">
-        <h2 style="margin:0 0 8px;font-size:1rem;">ATR &amp; strikes</h2>
+        <h2 style="margin:0 0 8px;font-size:1rem;">Expiry · daily ATR · OTM strikes</h2>
 
         <div id="strikeCardSkeletonHost" style="display:none;"></div>
 
-        <div id="icAtrSuggestPanel" class="ic-atr-suggest-panel" hidden>
-          <h3 class="ic-atr-suggest-title">Daily ATR(10) · short strike hints</h3>
-          <div id="icAtrSuggestBody" class="ic-atr-suggest-body"></div>
-          <div id="icAtrSuggestAckRow" class="ic-atr-suggest-ack" style="display:none;">
-            <label class="ic-atr-suggest-label"><input type="checkbox" id="icAckAtrSellPe" autocomplete="off" /> Reviewed suggested <strong>sell PE</strong> (ATR hint)</label>
-            <label class="ic-atr-suggest-label"><input type="checkbox" id="icAckAtrSellCe" autocomplete="off" /> Reviewed suggested <strong>sell CE</strong> (ATR hint)</label>
-          </div>
-          <p id="icAtrSuggestProceedHint" class="ic-muted ic-atr-suggest-hint" style="display:none;" role="status"></p>
+        <div id="strikeCard" class="ic-muted">Choose an underlying in step 1, then Next → strikes.</div>
+
+        <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" class="ic-btn-global" id="back2">← Back</button>
+          <button type="button" class="ic-btn-global ic-btn-primary" id="toConfirmBtn" disabled>Proceed to fills →</button>
         </div>
-
-        <div id="strikeOverrideBox" style="margin:14px 0;padding:12px;border:1px dashed var(--theme-border);border-radius:10px;display:none;">
-          <label style="display:flex;align-items:center;gap:8px;font-weight:700;">
-            <input type="checkbox" id="strikeOverrideToggle" /> Override strikes from chain defaults
-          </label>
-          <p class="ic-muted" style="font-size:0.78rem;margin:6px 0 8px;">Pull fresh quotes server-side using your overrides. Hedge ratio may fall outside playbook — discretionary.</p>
-          <div class="ic-num ic-grid-strike-ov" style="margin-top:8px;">
-            <label>Sell CE <input id="ovSc" type="number" step="any" disabled class="ic-strike-field theme-input-like" /></label>
-            <label>Buy CE <input id="ovBc" type="number" step="any" disabled class="ic-strike-field theme-input-like" /></label>
-            <label>Sell PE <input id="ovSp" type="number" step="any" disabled class="ic-strike-field theme-input-like" /></label>
-            <label>Buy PE <input id="ovBp" type="number" step="any" disabled class="ic-strike-field theme-input-like" /></label>
-          </div>
-          <button type="button" class="ic-btn-global" style="margin-top:10px;" id="recalcStrikeBtn">Recalc quotes</button>
-        </div>
-
-        <div id="strikeCard" class="ic-muted">Choose an underlying, then Next to analyze strikes.</div>
-
-        <div style="margin-top:12px;display:flex;gap:8px;"><button type="button" class="ic-btn-global" id="back2">← Back</button><button type="button" class="ic-btn-global ic-btn-primary" id="toConfirmBtn" disabled>Proceed to fills →</button></div>
       </section>
 
       <section class="ic-card" data-pane="3" style="display:none;">
@@ -206,6 +185,6 @@
   </div>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" crossorigin="anonymous"></script>
   <script src="left-menu.js?v=3.23"></script>
-  <script src="iron-condor.js?v=47"></script>
+  <script src="iron-condor.js?v=48"></script>
 </body>
 </html>

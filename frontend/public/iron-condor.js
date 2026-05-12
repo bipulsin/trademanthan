@@ -962,10 +962,6 @@
         updateToStrikesBtnState();
       };
     }
-    var atrPe = document.getElementById("icAckAtrSellPe");
-    var atrCe = document.getElementById("icAckAtrSellCe");
-    if (atrPe) atrPe.onchange = updateProceedToFillsState;
-    if (atrCe) atrCe.onchange = updateProceedToFillsState;
     startUniverseQuotePolling();
     loadUniverseStep1Grid();
   }
@@ -1153,20 +1149,10 @@
     btn.disabled = false;
   }
 
-  /** Clear strike card / overrides when changing underlying (checklist stream or direct-to-strikes). */
+  /** Clear strike analysis when changing underlying (checklist stream or direct-to-strikes). */
   function resetStrikeCardUiForNewSymbol() {
     stopChecklistFillPolling();
     hideIcAtrSuggestPanel();
-    var sob = document.getElementById("strikeOverrideBox");
-    if (sob) sob.style.display = "none";
-    var st = document.getElementById("strikeOverrideToggle");
-    if (st) st.checked = false;
-    ["ovSc", "ovBc", "ovSp", "ovBp"].forEach(function (id) {
-      var el = document.getElementById(id);
-      if (!el) return;
-      el.disabled = true;
-      el.value = "";
-    });
     state.detailed = null;
     var tcf = document.getElementById("toConfirmBtn");
     if (tcf) tcf.disabled = true;
@@ -1236,121 +1222,121 @@
     startChecklistFillPolling();
   }
 
-  function fmtLeg(l) {
-    if (!l) return "—";
-    var bd = l.bid != null ? Number(l.bid).toFixed(2) : "—";
-    var ak = l.ask != null ? Number(l.ask).toFixed(2) : "—";
-    var oi = l.oi != null ? Math.round(l.oi) : "—";
-    return Number(l.ltp || 0).toFixed(2) + " (Bid/Ask " + bd + "/" + ak + "; OI " + oi + ")";
-  }
+  function hideIcAtrSuggestPanel() {}
 
-  function hideIcAtrSuggestPanel() {
-    var host = document.getElementById("icAtrSuggestPanel");
-    if (host) host.setAttribute("hidden", "hidden");
-    var ack = document.getElementById("icAtrSuggestAckRow");
-    if (ack) ack.style.display = "none";
-    var hint = document.getElementById("icAtrSuggestProceedHint");
-    if (hint) {
-      hint.style.display = "none";
-      hint.textContent = "";
-    }
-    var pe = document.getElementById("icAckAtrSellPe");
-    var ce = document.getElementById("icAckAtrSellCe");
-    if (pe) pe.checked = false;
-    if (ce) ce.checked = false;
-  }
-
-  /** Proceed to fills: disabled until analysis exists; if daily ATR hints ok, both short-strike ack checkboxes required. */
+  /** Proceed to fills once strike analysis payload exists (legacy ATR ack panels removed). */
   function updateProceedToFillsState() {
     var btn = document.getElementById("toConfirmBtn");
     if (!btn) return;
-    if (!state.detailed) {
-      btn.disabled = true;
-      return;
-    }
-    var sug = state.detailed.daily_atr_short_suggestions;
-    if (
-      sug &&
-      sug.ok &&
-      sug.chosen_sell_put_strike != null &&
-      sug.chosen_sell_call_strike != null
-    ) {
-      var pe = document.getElementById("icAckAtrSellPe");
-      var ce = document.getElementById("icAckAtrSellCe");
-      var hint = document.getElementById("icAtrSuggestProceedHint");
-      if (!pe || !ce || !pe.checked || !ce.checked) {
-        btn.disabled = true;
-        if (hint) {
-          hint.style.display = "block";
-          hint.textContent = "Check both boxes above to confirm you reviewed the ATR-based suggested short strikes.";
-        }
-        return;
-      }
-      if (hint) {
-        hint.style.display = "none";
-        hint.textContent = "";
-      }
-    }
-    btn.disabled = false;
+    btn.disabled = !state.detailed;
   }
 
-  function renderIcAtrSuggestPanel(a) {
-    var host = document.getElementById("icAtrSuggestPanel");
-    var body = document.getElementById("icAtrSuggestBody");
-    var ackRow = document.getElementById("icAtrSuggestAckRow");
-    if (!host || !body) return;
-    if (!a || !a.daily_atr_short_suggestions) {
-      hideIcAtrSuggestPanel();
-      updateProceedToFillsState();
-      return;
+  function renderIronCondorSimpleStrikesHtml(a) {
+    var p = (a && a.simple_strike_panel) || {};
+    var parts = [];
+    parts.push('<div class="ic-simple-strike-summary ic-num">');
+    parts.push('<p style="margin:0 0 10px;line-height:1.45;">');
+    parts.push('<strong class="ic-mono">' + esc(a.underlying || "") + "</strong>");
+    parts.push(
+      ' · Expiry <span class="ic-mono">' + esc(p.expiry_date != null ? String(p.expiry_date) : "—") + "</span>"
+    );
+    parts.push(' · Spot ₹<span class="ic-mono">' + esc(p.spot != null ? p.spot : "—") + "</span>");
+    parts.push(
+      ' · Ref close ₹<span class="ic-mono">' +
+        esc(p.reference_close != null ? p.reference_close : "—") +
+        "</span>"
+    );
+    if (p.daily_atr_10 != null) {
+      parts.push(
+        ' · Daily ATR(10) ₹<span class="ic-mono">' + esc(p.daily_atr_10) + "</span>"
+      );
+    } else {
+      parts.push(
+        ' · Daily ATR(10) <span class="ic-muted">' + esc(p.daily_atr_error || "—") + "</span>"
+      );
     }
-    var sug = a.daily_atr_short_suggestions;
-    host.removeAttribute("hidden");
-    if (!sug.ok) {
-      body.innerHTML =
-        "<p class=\"ic-muted\">Daily ATR(10) hints unavailable" +
-        (sug.error ? ": " + esc(String(sug.error)) : ".") +
-        "</p>";
-      if (ackRow) ackRow.style.display = "none";
-      updateProceedToFillsState();
-      return;
+    if (p.ce_ref_plus_atr != null) {
+      parts.push(
+        ' · Close+ATR ₹<span class="ic-mono">' + esc(p.ce_ref_plus_atr) + "</span> → ★ CE"
+      );
     }
-    if (ackRow) ackRow.style.display = "flex";
-    var lq = sug.leg_quotes || {};
-    var spL = lq.suggested_sell_put || {};
-    var scL = lq.suggested_sell_call || {};
-    body.innerHTML =
-      "<p class=\"ic-num\">Daily ATR(10): ₹<span class=\"ic-mono\">" +
-      esc(sug.daily_atr_10) +
-      "</span> · Spot used (same as strike card): ₹<span class=\"ic-mono\">" +
-      esc(sug.spot_used) +
-      "</span></p>" +
-      "<p class=\"ic-muted\" style=\"font-size:0.76rem;margin:4px 0 8px;line-height:1.45;\">" +
-      esc(sug.spot_basis || "") +
-      "</p>" +
-      "<p class=\"ic-num\">Theoretical refs · PE short (spot − 1.5×ATR): ₹<span class=\"ic-mono\">" +
-      esc(sug.theoretical_pe_short_ref) +
-      "</span> · CE short (spot + 1.5×ATR): ₹<span class=\"ic-mono\">" +
-      esc(sug.theoretical_ce_short_ref) +
-      "</span></p>" +
-      "<p class=\"ic-num\">Nearest tradable shorts — expiry <span class=\"ic-mono\">" +
-      esc(sug.nearest_expiry) +
-      "</span>, step ₹<span class=\"ic-mono\">" +
-      esc(sug.strike_step) +
-      "</span>: <strong class=\"ic-mono\">" +
-      esc(sug.chosen_sell_put_strike) +
-      " PE</strong> @ " +
-      esc(fmtLeg(spL)) +
-      " · <strong class=\"ic-mono\">" +
-      esc(sug.chosen_sell_call_strike) +
-      " CE</strong> @ " +
-      esc(fmtLeg(scL)) +
-      "</p>";
-    var peCk = document.getElementById("icAckAtrSellPe");
-    var ceCk = document.getElementById("icAckAtrSellCe");
-    if (peCk) peCk.checked = false;
-    if (ceCk) ceCk.checked = false;
-    updateProceedToFillsState();
+    if (p.pe_ref_minus_atr != null) {
+      parts.push(
+        ' · Close−ATR ₹<span class="ic-mono">' + esc(p.pe_ref_minus_atr) + "</span> → ★ PE"
+      );
+    }
+    parts.push("</p></div>");
+
+    if (p.chain_error && !(p.ce_otm && p.ce_otm.length) && !(p.pe_otm && p.pe_otm.length)) {
+      parts.push('<p class="ic-muted">' + esc(p.chain_error) + "</p>");
+    }
+
+    function tableRows(rows) {
+      if (!rows || !rows.length)
+        return '<tr><td colspan="5" class="ic-muted">No strikes</td></tr>';
+      return rows
+        .map(function (r) {
+          return (
+            "<tr>" +
+            "<td>" +
+            esc(r.side) +
+            '</td><td class="ic-num ic-mono">' +
+            esc(r.strike) +
+            '</td><td class="ic-num ic-mono">' +
+            esc(r.ltp != null ? r.ltp : "—") +
+            '</td><td class="ic-num">' +
+            (r.star
+              ? '<span title="Nearest listed OTM strike to close ± ATR(10)" aria-label="ATR reference">★</span>'
+              : "—") +
+            '</td><td><label style="font-size:0.78rem;"><input type="checkbox" class="ic-strike-review-cb" /> Track</label></td>' +
+            "</tr>"
+          );
+        })
+        .join("");
+    }
+
+    parts.push('<h3 style="margin:14px 0 6px;font-size:0.9rem;">OTM calls (above spot)</h3>');
+    parts.push(
+      '<table class="ic-t ic-simple-strike-table theme-table-like" style="width:100%;font-size:0.82rem;"><thead><tr>' +
+        "<th>Side</th><th class=\"ic-num\">Strike</th><th class=\"ic-num\">LTP</th><th>★</th><th>Track</th>" +
+        "</tr></thead><tbody>"
+    );
+    parts.push(tableRows(p.ce_otm));
+    parts.push("</tbody></table>");
+
+    parts.push('<h3 style="margin:14px 0 6px;font-size:0.9rem;">OTM puts (below spot)</h3>');
+    parts.push(
+      '<table class="ic-t ic-simple-strike-table theme-table-like" style="width:100%;font-size:0.82rem;"><thead><tr>' +
+        "<th>Side</th><th class=\"ic-num\">Strike</th><th class=\"ic-num\">LTP</th><th>★</th><th>Track</th>" +
+        "</tr></thead><tbody>"
+    );
+    parts.push(tableRows(p.pe_otm));
+    parts.push("</tbody></table>");
+
+    var st = a.strikes || {};
+    var wl = (a.strike_selection_warnings || []).map(function (w) {
+      return "<li class=\"ic-muted\">" + esc(w) + "</li>";
+    });
+    var wblock =
+      wl.length > 0
+        ? "<ul style=\"margin:8px 0 0;padding-left:20px;color:#e65100;\">" + wl.join("") + "</ul>"
+        : "";
+    parts.push(wblock);
+    parts.push(
+      '<p class="ic-muted" style="margin-top:12px;font-size:0.76rem;line-height:1.45;">★ = listed OTM strike closest to <strong>reference close ± daily ATR(10)</strong>. Step 3 still records fills for the playbook four-leg structure below (server-selected shorts/hedges).</p>'
+    );
+    parts.push(
+      '<p class="ic-num" style="margin-top:10px;font-size:0.8rem;">Playbook four-leg strikes: SC ' +
+        esc(st.sell_call) +
+        " CE · SP " +
+        esc(st.sell_put) +
+        " PE · BC " +
+        esc(st.buy_call) +
+        " CE · BP " +
+        esc(st.buy_put) +
+        " PE</p>"
+    );
+    return parts.join("");
   }
 
   async function analyzeDetailed(overrideMap) {
@@ -1358,13 +1344,15 @@
     var payload = { underlying: state.symbol };
     if (overrideMap) payload.strike_overrides = overrideMap;
     var host = document.getElementById("strikeCardSkeletonHost");
-    host.style.display = "block";
-    host.innerHTML = skelBars(4);
+    if (host) {
+      host.style.display = "block";
+      host.innerHTML = skelBars(4);
+    }
     renderStrikeCardProgressSeed();
     var slowTimer = setTimeout(function () {
       var el = document.getElementById("strikeCard");
       if (!el) return;
-      el.innerHTML += "<p class=\"ic-muted\">Still fetching live leg quotes… showing results immediately once each piece arrives.</p>";
+      el.innerHTML += "<p class=\"ic-muted\">Still fetching chain and playbook economics…</p>";
     }, 1800);
     try {
       var j = await fj(analyzeDetailedPublicPaths(), {
@@ -1373,125 +1361,27 @@
         body: JSON.stringify(payload),
       });
       clearTimeout(slowTimer);
-      host.style.display = "none";
+      if (host) host.style.display = "none";
       state.detailed = j.analysis;
 
-      document.getElementById("strikeOverrideBox").style.display = "block";
-      syncOverrideInputs(false);
-
       var a = state.detailed;
-      var econ = a.economics || {};
-      var lq = a.legs_quote || {};
-      var hk =
-        econ.hedge_gate_color === "GREEN" ? "#2e7d32" : econ.hedge_gate_color === "YELLOW" ? "#e65100" : "#c00000";
-      var warns = (a.strike_selection_warnings || []).map(function (w) {
-        return "<li class=\"ic-muted\">" + esc(w) + "</li>";
-      });
-      var wl = warns.length ? "<ul style=\"margin:8px 0 0;padding-left:20px;color:#e65100;\">" + warns.join("") + "</ul>" : "";
-
-      document.getElementById("strikeCard").innerHTML =
-        "<p><strong class=\"ic-mono\">" +
-        esc(a.underlying) +
-        "</strong> · Spot <span class=\"ic-num ic-mono\">₹" +
-        esc(a.live && a.live.spot_ltp) +
-        "</span>" +
-        (a.live && a.live.underlying_change_pct_today != null
-          ? " · Day <span class=\"ic-num\">" + esc(a.live.underlying_change_pct_today) + "%</span>"
-          : "") +
-        " · Sector " +
-        esc(a.sector) +
-        "</p>" +
-        "<p class=\"ic-num\">Monthly ATR(14): ₹<span class=\"ic-mono\">" +
-        esc(a.monthly_atr_14) +
-        "</span> · Strike gap: ₹<span class=\"ic-mono\">" +
-        esc(a.strike_distance) +
-        "</span></p>" +
-        wl +
-        "<hr style=\"border-color:var(--theme-border)\">" +
-        "<p style=\"margin:12px 0 6px;font-weight:700;\">SHORT strangle</p>" +
-        "<p><span class=\"ic-mono\">" +
-        a.strikes.sell_call +
-        " CE</span> @ <span class=\"ic-mono\">" +
-        fmtLeg(lq.sell_call) +
-        "</span></p>" +
-        "<p><span class=\"ic-mono\">" +
-        a.strikes.sell_put +
-        " PE</span> @ <span class=\"ic-mono\">" +
-        fmtLeg(lq.sell_put) +
-        "</span></p>" +
-        "<p style=\"margin:12px 0 6px;font-weight:700;\">HEDGE</p>" +
-        "<p><span class=\"ic-mono\">" +
-        a.strikes.buy_call +
-        " CE</span> @ <span class=\"ic-mono\">" +
-        fmtLeg(lq.buy_call) +
-        "</span></p>" +
-        "<p><span class=\"ic-mono\">" +
-        a.strikes.buy_put +
-        " PE</span> @ <span class=\"ic-mono\">" +
-        fmtLeg(lq.buy_put) +
-        "</span></p>" +
-        "<p style=\"margin:14px 0 6px;font-weight:700;\">Economics · lot qty</p>" +
-        "<p class=\"ic-num\"><span>Premium ₹pts</span> " +
-        esc(econ.premium_collected_pts) +
-        " · Hedge " +
-        esc(econ.hedge_cost_pts) +
-        " · Net " +
-        esc(econ.net_credit_pts) +
-        "</p>" +
-        "<p class=\"ic-num\"><span>Hedge ratio</span> " +
-        Number(a.hedge_ratio).toFixed(3) +
-        " · <strong style=\"color:" +
-        hk +
-        "\">" +
-        esc(a.hedge_gate) +
-        "</strong></p>" +
-        "<p class=\"ic-num\"><span>MPE ₹</span> " +
-        esc(econ.max_profit_rupees_est) +
-        " · Max loss ₹" +
-        esc(econ.max_loss_rupees_est) +
-        "</p>" +
-        "<p class=\"ic-num\">Breakevens ₹<span class=\"ic-mono\">" +
-        econ.breakeven_lower +
-        " ↔ " +
-        econ.breakeven_upper +
-        "</span></p>";
+      var sc = document.getElementById("strikeCard");
+      if (sc) sc.innerHTML = renderIronCondorSimpleStrikesHtml(a);
 
       document.getElementById("fsc").value = a.premiums.sell_call || "";
       document.getElementById("fbc").value = a.premiums.buy_call || "";
       document.getElementById("fsp").value = a.premiums.sell_put || "";
       document.getElementById("fbp").value = a.premiums.buy_put || "";
 
-      syncOverrideInputs(true);
-      renderIcAtrSuggestPanel(a);
+      updateProceedToFillsState();
     } catch (e) {
       clearTimeout(slowTimer);
-      host.style.display = "none";
+      if (host) host.style.display = "none";
       hideIcAtrSuggestPanel();
       var tcf = document.getElementById("toConfirmBtn");
       if (tcf) tcf.disabled = true;
       throw e;
     }
-  }
-
-  function syncOverrideInputs(fromAnalysis) {
-    var a = state.detailed;
-    if (!a || !fromAnalysis) return;
-    if (!document.getElementById("strikeOverrideToggle").checked) {
-      document.getElementById("ovSc").value = a.strikes.sell_call;
-      document.getElementById("ovBc").value = a.strikes.buy_call;
-      document.getElementById("ovSp").value = a.strikes.sell_put;
-      document.getElementById("ovBp").value = a.strikes.buy_put;
-    }
-  }
-
-  function strikeOverridePayload() {
-    if (!document.getElementById("strikeOverrideToggle").checked) return null;
-    return {
-      sell_call: Number(document.getElementById("ovSc").value),
-      buy_call: Number(document.getElementById("ovBc").value),
-      sell_put: Number(document.getElementById("ovSp").value),
-      buy_put: Number(document.getElementById("ovBp").value),
-    };
   }
 
   function selectedUniverseRow() {
@@ -1521,7 +1411,7 @@
       "</span> · Sector " +
       esc(sec) +
       "</p>" +
-      "<p class=\"ic-muted\">Fetching ATR, strike ladder, option quotes, and economics…</p>";
+      "<p class=\"ic-muted\">Fetching daily ATR, option chain, and playbook economics…</p>";
   }
 
   async function confirmEntrySave() {
@@ -1779,23 +1669,6 @@
   });
 
 
-  document.getElementById("strikeOverrideToggle").onchange = function () {
-    var on = document.getElementById("strikeOverrideToggle").checked;
-    ["ovSc", "ovBc", "ovSp", "ovBp"].forEach(function (id) {
-      document.getElementById(id).disabled = !on;
-    });
-    syncOverrideInputs(!!state.detailed);
-  };
-
-  document.getElementById("recalcStrikeBtn").onclick = async function () {
-    if (!state.symbol) return;
-    try {
-      await analyzeDetailed(strikeOverridePayload());
-    } catch (e) {
-      alert(e.message);
-    }
-  };
-
   document.getElementById("gotoChecklistBtn").onclick = async function () {
     var rad = document.querySelector('input[name="icUniversePick"]:checked');
     if (!rad || !rad.value) {
@@ -1857,23 +1730,8 @@
   document.getElementById("toConfirmBtn").onclick = function () {
     var btn = document.getElementById("toConfirmBtn");
     if (btn && btn.disabled) {
-      var sug = state.detailed && state.detailed.daily_atr_short_suggestions;
-      if (sug && sug.ok) {
-        return alert("Check both boxes to confirm you reviewed the ATR-based suggested sell PE and sell CE strikes.");
-      }
-      return alert("Analyze strikes first, or wait for the card to finish loading.");
+      return alert("Wait for strike analysis to finish loading.");
     }
-    try {
-      if (document.getElementById("strikeOverrideToggle").checked) {
-        var ems = strikeOverridePayload();
-        if (
-          ![ems.sell_call, ems.buy_call, ems.sell_put, ems.buy_put].every(function (x) {
-            return Number.isFinite(x) && x > 0;
-          })
-        )
-          return alert("Override strikes incomplete.");
-      }
-    } catch (_) {}
     showPane(3);
   };
   document.getElementById("back3").onclick = function () {
