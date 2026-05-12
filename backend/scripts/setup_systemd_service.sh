@@ -41,6 +41,7 @@ Environment="PYTHONUNBUFFERED=1"
 ExecStart=${BACKEND_DIR}/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=10
+TimeoutStopSec=180
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=${SERVICE_NAME}

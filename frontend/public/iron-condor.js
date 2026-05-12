@@ -1349,18 +1349,12 @@
       host.innerHTML = skelBars(4);
     }
     renderStrikeCardProgressSeed();
-    var slowTimer = setTimeout(function () {
-      var el = document.getElementById("strikeCard");
-      if (!el) return;
-      el.innerHTML += "<p class=\"ic-muted\">Still fetching chain and playbook economics…</p>";
-    }, 1800);
     try {
       var j = await fj(analyzeDetailedPublicPaths(), {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify(payload),
       });
-      clearTimeout(slowTimer);
       if (host) host.style.display = "none";
       state.detailed = j.analysis;
 
@@ -1375,7 +1369,6 @@
 
       updateProceedToFillsState();
     } catch (e) {
-      clearTimeout(slowTimer);
       if (host) host.style.display = "none";
       hideIcAtrSuggestPanel();
       var tcf = document.getElementById("toConfirmBtn");
@@ -1411,7 +1404,7 @@
       "</span> · Sector " +
       esc(sec) +
       "</p>" +
-      "<p class=\"ic-muted\">Fetching daily ATR, option chain, and playbook economics…</p>";
+      "<p class=\"ic-muted\">Loading strike analysis (chain + ATR + playbook)…</p>";
   }
 
   async function confirmEntrySave() {
