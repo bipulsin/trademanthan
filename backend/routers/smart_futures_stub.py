@@ -98,6 +98,14 @@ class SmartFuturesSellBody(BaseModel):
     """POST /daily/{id}/sell: optional manual price; if omitted, broker LTP is used."""
 
     sell_price: Optional[float] = Field(default=None, description="Manual square-off price (bookkeeping)")
+    sell_time: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        description=(
+            "IST exit clock HH:MM or HH:MM:SS on the row's session_date, or full ISO datetime. "
+            "Omitted = server time at sell."
+        ),
+    )
     manual_exit_reason: Optional[str] = Field(
         default=None,
         max_length=32,
@@ -493,7 +501,12 @@ def _resolve_currmth_future_master(db: Session, symbol_raw: str) -> Dict[str, An
     return {"stock": stk, "fut_symbol": fut_sym, "fut_instrument_key": ikey}
 
 
-def _manual_entry_datetime_ist(session_sd: date, entry_time_raw: Optional[str]) -> datetime:
+def _manual_entry_datetime_ist(
+    session_sd: date,
+    entry_time_raw: Optional[str],
+    *,
+    field_name: str = "entry_time",
+) -> datetime:
     if entry_time_raw is None or str(entry_time_raw).strip() == "":
         return datetime.now(IST)
     sraw = str(entry_time_raw).strip()
@@ -506,11 +519,14 @@ def _manual_entry_datetime_ist(session_sd: date, entry_time_raw: Optional[str]) 
         mi = int(mt.group(2))
         sec = int(mt.group(3)) if mt.group(3) else 0
         if hh > 23 or mi > 59 or sec > 59:
-            raise HTTPException(status_code=422, detail="entry_time: invalid clock time")
+            raise HTTPException(status_code=422, detail=f"{field_name}: invalid clock time")
         return IST.localize(datetime(session_sd.year, session_sd.month, session_sd.day, hh, mi, sec))
     raise HTTPException(
         status_code=422,
-        detail="entry_time must be HH:MM or HH:MM:SS (interpreted on session_date IST), or a full ISO‑8601 datetime.",
+        detail=(
+            f"{field_name} must be HH:MM or HH:MM:SS (interpreted on session_date IST), "
+            "or a full ISO‑8601 datetime."
+        ),
     )
 
 
@@ -1152,11 +1168,16 @@ def post_smart_futures_daily_sell(
     ).mappings().first()
     if not row:
         raise HTTPException(status_code=404, detail="Row not found")
-    rsd = row.get("session_date")
-    if hasattr(rsd, "isoformat"):
-        rsd = rsd.isoformat()
-    if str(rsd) != sd.isoformat():
+    rsd_raw = row.get("session_date")
+    rsd_iso = rsd_raw.isoformat() if hasattr(rsd_raw, "isoformat") else str(rsd_raw)
+    if str(rsd_iso) != sd.isoformat():
         raise HTTPException(status_code=400, detail="Pick is outside the current session window")
+    if isinstance(rsd_raw, datetime):
+        session_sd = rsd_raw.date()
+    elif isinstance(rsd_raw, date):
+        session_sd = rsd_raw
+    else:
+        session_sd = date.fromisoformat(str(rsd_iso)[:10])
     ost = str(row.get("order_status") or "").strip().lower()
     if ost != "bought":
         raise HTTPException(status_code=400, detail="Sell only after position is marked bought")
@@ -1185,24 +1206,34 @@ def post_smart_futures_daily_sell(
         if ltp <= 0:
             raise HTTPException(status_code=502, detail="Could not read last price from broker")
 
+    parsed_sell_dt: Optional[datetime] = None
+    st_raw = body.sell_time
+    if st_raw is not None and str(st_raw).strip() != "":
+        parsed_sell_dt = _manual_entry_datetime_ist(session_sd, str(st_raw).strip(), field_name="sell_time")
+
     sell_time_iso: Optional[str] = None
     manual_reason_in = (body.manual_exit_reason or "").strip().lower() or None
     if manual_reason_in is not None and manual_reason_in not in {"rules", "emotion"}:
         manual_reason_in = manual_reason_in[:32]
+    sell_bind = {"id": row_id, "ltp": ltp, "mer": manual_reason_in, "sell_ts": parsed_sell_dt}
     try:
         res = db.execute(
             text(
                 """
                 UPDATE smart_futures_daily
-                SET order_status = 'sold', sell_price = :ltp, sell_time = CURRENT_TIMESTAMP,
+                SET order_status = 'sold', sell_price = :ltp,
+                    sell_time = COALESCE(CAST(:sell_ts AS TIMESTAMP WITH TIME ZONE), CURRENT_TIMESTAMP),
                     manual_exit_reason = :mer,
-                    manual_exit_at = CASE WHEN :mer IS NULL THEN manual_exit_at ELSE CURRENT_TIMESTAMP END,
+                    manual_exit_at = CASE
+                        WHEN :mer IS NULL THEN manual_exit_at
+                        ELSE COALESCE(CAST(:sell_ts AS TIMESTAMP WITH TIME ZONE), CURRENT_TIMESTAMP)
+                    END,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = :id AND LOWER(TRIM(order_status)) = 'bought'
                 RETURNING sell_price, sell_time
                 """
             ),
-            {"id": row_id, "ltp": ltp, "mer": manual_reason_in},
+            sell_bind,
         )
         upd = res.mappings().first()
         if not upd:
@@ -1228,13 +1259,14 @@ def post_smart_futures_daily_sell(
                 text(
                     """
                     UPDATE smart_futures_daily
-                    SET order_status = 'sold', sell_price = :ltp, sell_time = CURRENT_TIMESTAMP,
+                    SET order_status = 'sold', sell_price = :ltp,
+                        sell_time = COALESCE(CAST(:sell_ts AS TIMESTAMP WITH TIME ZONE), CURRENT_TIMESTAMP),
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = :id AND LOWER(TRIM(order_status)) = 'bought'
                     RETURNING sell_price, sell_time
                     """
                 ),
-                {"id": row_id, "ltp": ltp},
+                {"id": row_id, "ltp": ltp, "sell_ts": parsed_sell_dt},
             )
             upd_legacy = res_legacy.mappings().first()
             if not upd_legacy:
@@ -1305,12 +1337,13 @@ def post_smart_futures_daily_sell(
             raise
     db.commit()
     logger.info(
-        "smart_futures sell: user=%s row=%s sell_price=%s sell_time=%s manual=%s",
+        "smart_futures sell: user=%s row=%s sell_price=%s sell_time=%s manual=%s custom_exit_time=%s",
         getattr(user, "id", None),
         row_id,
         ltp,
         sell_time_iso,
         manual,
+        parsed_sell_dt is not None,
     )
     return {
         "success": True,

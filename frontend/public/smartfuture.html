@@ -304,7 +304,7 @@
             background: transparent;
             color: var(--theme-text, #0f172a);
         }
-        #sfSellModalErr, #sfOrderModalErr, #sfManualModalErr { min-height: 1.2em; margin-top: 8px; color: #b91c1c; font-size: 0.85rem; }
+        #sfSellModalErr, #sfOrderModalErr, #sfManualModalErr, #sfEarlyExitModalErr { min-height: 1.2em; margin-top: 8px; color: #b91c1c; font-size: 0.85rem; }
 
         /* Entry-gate checklist + conditional Order button + countdown + velocity chip */
         .sf-gate-block{display:flex;flex-direction:column;gap:6px;min-width:220px;}
@@ -430,7 +430,7 @@
                 <div class="sf-card">
                     <div class="sf-card-head">
                         <h2><i class="fas fa-briefcase"></i> Open Positions</h2>
-                        <p class="sf-meta" style="margin:0;">Bought picks — Sell anytime for manual square-off (enter price). The Sell button highlights when the algo suggests exit.</p>
+                        <p class="sf-meta" style="margin:0;">Bought picks — Square-off: enter exit price and IST exit time in the dialog. Exit highlights when the algo suggests exit.</p>
                     </div>
                     <p class="sf-meta" id="sfOpenMsg"></p>
                     <div id="sfOpenPositions"></div>
@@ -451,8 +451,10 @@
         <div class="sf-modal-panel">
             <h3 id="sfSellModalTitle">Manual square-off</h3>
             <p class="sf-meta" id="sfSellModalSymbol"></p>
-            <label for="sfSellPriceInput">Sell price (₹)</label>
+            <label for="sfSellPriceInput">Exit price (₹)</label>
             <input type="number" id="sfSellPriceInput" class="sf-modal-input" inputmode="decimal" step="any" min="0" placeholder="Execution price" autocomplete="off" />
+            <label for="sfSellTimeInput" style="margin-top:12px;">Exit time (IST)</label>
+            <input type="time" id="sfSellTimeInput" class="sf-modal-input" step="60" autocomplete="off" />
             <p id="sfSellModalErr" aria-live="polite"></p>
             <div class="sf-modal-actions">
                 <button type="button" class="sf-btn-modal-cancel" id="sfSellModalCancel">Cancel</button>
@@ -540,6 +542,6 @@
         </div>
     </div>
     <script src="left-menu.js?v=3.23"></script>
-    <script src="smartfuture.js?v=47"></script>
+    <script src="smartfuture.js?v=48"></script>
 </body>
 </html>

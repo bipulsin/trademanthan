@@ -1747,6 +1747,7 @@
         const modal = document.getElementById('sfSellModal');
         const symEl = document.getElementById('sfSellModalSymbol');
         const inp = document.getElementById('sfSellPriceInput');
+        const timeInp = document.getElementById('sfSellTimeInput');
         const errEl = document.getElementById('sfSellModalErr');
         if (!modal || !inp) return;
         _sfSellModalTriggerBtn = btn;
@@ -1762,6 +1763,7 @@
         if (buyPriceHint != null && buyPriceHint !== '' && Number.isFinite(n) && n > 0) {
             inp.value = String(n);
         }
+        if (timeInp) timeInp.value = istTimeInputHHMMForNow();
         modal.classList.add('sf-modal--open');
         modal.setAttribute('aria-hidden', 'false');
         setTimeout(function () {
@@ -1778,6 +1780,8 @@
         delete modal.dataset.sellRowId;
         _sfSellModalTriggerBtn = null;
         _sfSellPendingReason = null;
+        const tInp = document.getElementById('sfSellTimeInput');
+        if (tInp) tInp.value = '';
         const c = document.getElementById('sfSellModalConfirm');
         if (c) c.disabled = false;
     }
@@ -1785,6 +1789,7 @@
     async function submitSellPriceModal() {
         const modal = document.getElementById('sfSellModal');
         const inp = document.getElementById('sfSellPriceInput');
+        const timeInp = document.getElementById('sfSellTimeInput');
         const errEl = document.getElementById('sfSellModalErr');
         const confirmBtn = document.getElementById('sfSellModalConfirm');
         const id = modal && modal.dataset.sellRowId;
@@ -1792,7 +1797,12 @@
         const raw = String(inp.value || '').trim().replace(/,/g, '');
         const price = parseFloat(raw);
         if (!Number.isFinite(price) || price <= 0) {
-            if (errEl) errEl.textContent = 'Enter a valid sell price greater than zero.';
+            if (errEl) errEl.textContent = 'Enter a valid exit price greater than zero.';
+            return;
+        }
+        const timeVal = timeInp ? String(timeInp.value || '').trim() : '';
+        if (!timeVal) {
+            if (errEl) errEl.textContent = 'Select exit time (IST) on the session date.';
             return;
         }
         if (errEl) errEl.textContent = '';
@@ -1804,6 +1814,7 @@
         let ok = false;
         let errText = '';
         const payloadObj = { sell_price: price };
+        payloadObj.sell_time = timeVal.length === 5 ? timeVal + ':00' : timeVal;
         if (_sfSellPendingReason) {
             payloadObj.manual_exit_reason = _sfSellPendingReason;
         }
@@ -2101,17 +2112,18 @@
         const sellCancel = document.getElementById('sfSellModalCancel');
         const sellConfirm = document.getElementById('sfSellModalConfirm');
         const sellInp = document.getElementById('sfSellPriceInput');
+        const sellTimeInp = document.getElementById('sfSellTimeInput');
         if (sellCancel) sellCancel.addEventListener('click', closeSellPriceModal);
         if (sellBackdrop) sellBackdrop.addEventListener('click', closeSellPriceModal);
         if (sellConfirm) sellConfirm.addEventListener('click', function () { submitSellPriceModal(); });
-        if (sellInp) {
-            sellInp.addEventListener('keydown', function (ev) {
-                if (ev.key === 'Enter') {
-                    ev.preventDefault();
-                    submitSellPriceModal();
-                }
-            });
+        function sellModalSubmitOnEnter(ev) {
+            if (ev.key === 'Enter') {
+                ev.preventDefault();
+                submitSellPriceModal();
+            }
         }
+        if (sellInp) sellInp.addEventListener('keydown', sellModalSubmitOnEnter);
+        if (sellTimeInp) sellTimeInp.addEventListener('keydown', sellModalSubmitOnEnter);
         const orderModal = document.getElementById('sfOrderModal');
         const orderBackdrop = document.getElementById('sfOrderModalBackdrop');
         const orderCancel = document.getElementById('sfOrderModalCancel');
