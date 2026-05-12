@@ -561,18 +561,21 @@
     if (baseEligible) {
       if (!state.universeAdxLoaded) {
         rad = "<span class=\"ic-muted\" aria-busy=\"true\">…</span>";
-      } else if (row.adx_ok === true) {
-        rad =
-          "<label class=\"ic-universe-radio\"><input type=\"radio\" name=\"icUniversePick\" value=\"" +
-          esc(sym) +
-          "\" aria-label=\"Select " +
-          esc(sym) +
-          " to continue\" /></label>";
       } else {
-        var vAdx = row.adx_value;
-        var numAdx = vAdx != null && vAdx !== "" ? parseFloat(String(vAdx)) : NaN;
-        if (isFinite(numAdx)) {
-          rad = "<span class=\"ic-muted\">Not in Range</span>";
+        var vAdxPick = row.adx_value;
+        var numAdxPick =
+          vAdxPick != null && vAdxPick !== "" ? parseFloat(String(vAdxPick)) : NaN;
+        if (isFinite(numAdxPick)) {
+          if (numAdxPick < 25) {
+            rad =
+              "<label class=\"ic-universe-radio\"><input type=\"radio\" name=\"icUniversePick\" value=\"" +
+              esc(sym) +
+              "\" aria-label=\"Select " +
+              esc(sym) +
+              " to continue\" /></label>";
+          } else {
+            rad = "<span class=\"ic-muted\">Not in Range</span>";
+          }
         } else {
           rad = "<span class=\"ic-muted\" title=\"ADX unavailable — not selectable\">N/A</span>";
         }
@@ -646,7 +649,7 @@
     }
   }
 
-  /** Server: adx_value + adx_ok (strictly below threshold). Missing ADX ⇒ not selectable (N/A). */
+  /** Server supplies adx_value per symbol; UI enables pick when ADX < 25 (see renderUniverseStep1Row). */
   function applyUniverseAdxPatch(rows, payload) {
     var by =
       payload && payload.adx_by_symbol && typeof payload.adx_by_symbol === "object"
