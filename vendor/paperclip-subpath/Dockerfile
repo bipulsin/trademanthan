@@ -33,6 +33,7 @@ RUN usermod -u $USER_UID --non-unique node \
 FROM base AS deps
 WORKDIR /app
 COPY --from=patched-source /src/ /app/
+ENV NODE_OPTIONS=--max-old-space-size=4096
 RUN pnpm install --frozen-lockfile
 
 FROM base AS build
@@ -40,6 +41,7 @@ WORKDIR /app
 COPY --from=deps /app /app
 ARG PAPERCLIP_UI_BASE_PATH=/
 ENV PAPERCLIP_UI_BASE_PATH=${PAPERCLIP_UI_BASE_PATH}
+ENV NODE_OPTIONS=--max-old-space-size=4096
 RUN pnpm --filter @paperclipai/ui build
 RUN pnpm --filter @paperclipai/plugin-sdk build
 RUN pnpm --filter @paperclipai/server build

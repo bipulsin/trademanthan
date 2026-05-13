@@ -48,6 +48,8 @@ If the running image is upstream `ghcr.io/paperclipai/paperclip:latest`, the ser
 
 ### 1. Sync repo and build on the server
 
+If the EC2 root volume is nearly full, the image build can fail with **ENOSPC** during `pnpm install` (or with a Node **heap out of memory** during linking). Free a few gigabytes first (for example `docker builder prune -af` and remove any stuck intermediate containers from failed builds). The Dockerfile sets `NODE_OPTIONS=--max-old-space-size=4096` for install and UI/server builds to reduce V8 OOM risk on small instances.
+
 Run from the workspace root on your laptop:
 
 ```bash
