@@ -1,0 +1,289 @@
+diff --git a/ui/src/adapters/dynamic-loader.ts b/ui/src/adapters/dynamic-loader.ts
+index daaedf4..6ce59f8 100644
+--- a/ui/src/adapters/dynamic-loader.ts
++++ b/ui/src/adapters/dynamic-loader.ts
+@@ -29,6 +29,7 @@
+ 
+ import type { TranscriptEntry } from "@paperclipai/adapter-utils";
+ import type { StdoutLineParser, StdoutParserFactory } from "./types";
++import { getApiRoot } from "../lib/api-base";
+ import { createSandboxedWorker } from "./sandboxed-parser-worker";
+ import type { SandboxRequest, SandboxResponse } from "./sandboxed-parser-worker";
+ 
+@@ -229,7 +230,7 @@ export async function loadDynamicParser(adapterType: string): Promise<DynamicPar
+ 
+   const loadPromise = (async (): Promise<DynamicParserModule | null> => {
+     try {
+-      const response = await fetch(`/api/adapters/${encodeURIComponent(adapterType)}/ui-parser.js`);
++      const response = await fetch(`${getApiRoot()}/adapters/${encodeURIComponent(adapterType)}/ui-parser.js`);
+       if (!response.ok) {
+         failedLoads.add(adapterType);
+         return null;
+diff --git a/ui/src/adapters/schema-config-fields.tsx b/ui/src/adapters/schema-config-fields.tsx
+index 08a3e52..57cd07b 100644
+--- a/ui/src/adapters/schema-config-fields.tsx
++++ b/ui/src/adapters/schema-config-fields.tsx
+@@ -12,6 +12,7 @@ import {
+ } from "../components/agent-config-primitives";
+ import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
+ import { ChevronDown } from "lucide-react";
++import { getApiRoot } from "../lib/api-base";
+ 
+ // ── Select field (extracted to keep hooks at component top level) ──────
+ function SelectField({
+@@ -217,7 +218,7 @@ async function fetchConfigSchema(adapterType: string): Promise<AdapterConfigSche
+ 
+   const promise = (async () => {
+     try {
+-      const res = await fetch(`/api/adapters/${encodeURIComponent(adapterType)}/config-schema`);
++      const res = await fetch(`${getApiRoot()}/adapters/${encodeURIComponent(adapterType)}/config-schema`);
+       if (!res.ok) {
+         failedSchemaTypes.add(adapterType);
+         return null;
+diff --git a/ui/src/api/auth.ts b/ui/src/api/auth.ts
+index b0da516..e43165f 100644
+--- a/ui/src/api/auth.ts
++++ b/ui/src/api/auth.ts
+@@ -6,6 +6,8 @@ import {
+   type UpdateCurrentUserProfile,
+ } from "@paperclipai/shared";
+ 
++import { getApiRoot } from "../lib/api-base";
++
+ type AuthErrorBody =
+   | {
+     code?: string;
+@@ -61,7 +63,7 @@ function extractAuthError(payload: AuthErrorBody, status: number) {
+ }
+ 
+ async function authPost(path: string, body: Record<string, unknown>) {
+-  const res = await fetch(`/api/auth${path}`, {
++  const res = await fetch(`${getApiRoot()}/auth${path}`, {
+     method: "POST",
+     credentials: "include",
+     headers: { "Content-Type": "application/json" },
+@@ -75,7 +77,7 @@ async function authPost(path: string, body: Record<string, unknown>) {
+ }
+ 
+ async function authPatch<T>(path: string, body: Record<string, unknown>, parse: (value: unknown) => T): Promise<T> {
+-  const res = await fetch(`/api/auth${path}`, {
++  const res = await fetch(`${getApiRoot()}/auth${path}`, {
+     method: "PATCH",
+     credentials: "include",
+     headers: { "Content-Type": "application/json", Accept: "application/json" },
+@@ -90,7 +92,7 @@ async function authPatch<T>(path: string, body: Record<string, unknown>, parse:
+ 
+ export const authApi = {
+   getSession: async (): Promise<AuthSession | null> => {
+-    const res = await fetch("/api/auth/get-session", {
++    const res = await fetch(`${getApiRoot()}/auth/get-session`, {
+       credentials: "include",
+       headers: { Accept: "application/json" },
+     });
+@@ -114,7 +116,7 @@ export const authApi = {
+   },
+ 
+   getProfile: async (): Promise<CurrentUserProfile> => {
+-    const res = await fetch("/api/auth/profile", {
++    const res = await fetch(`${getApiRoot()}/auth/profile`, {
+       credentials: "include",
+       headers: { Accept: "application/json" },
+     });
+diff --git a/ui/src/api/client.ts b/ui/src/api/client.ts
+index d3bf0a5..538b5bf 100644
+--- a/ui/src/api/client.ts
++++ b/ui/src/api/client.ts
+@@ -1,4 +1,6 @@
+-const BASE = "/api";
++import { getApiRoot } from "../lib/api-base";
++
++const BASE = getApiRoot();
+ 
+ export class ApiError extends Error {
+   status: number;
+diff --git a/ui/src/api/health.ts b/ui/src/api/health.ts
+index e2725b2..5e41ac5 100644
+--- a/ui/src/api/health.ts
++++ b/ui/src/api/health.ts
+@@ -1,3 +1,5 @@
++import { getApiRoot } from "../lib/api-base";
++
+ export type DevServerHealthStatus = {
+   enabled: true;
+   restartRequired: boolean;
+@@ -28,7 +30,7 @@ export type HealthStatus = {
+ 
+ export const healthApi = {
+   get: async (): Promise<HealthStatus> => {
+-    const res = await fetch("/api/health", {
++    const res = await fetch(`${getApiRoot()}/health`, {
+       credentials: "include",
+       headers: { Accept: "application/json" },
+     });
+diff --git a/ui/src/components/transcript/useLiveRunTranscripts.ts b/ui/src/components/transcript/useLiveRunTranscripts.ts
+index 74f9425..3113b2b 100644
+--- a/ui/src/components/transcript/useLiveRunTranscripts.ts
++++ b/ui/src/components/transcript/useLiveRunTranscripts.ts
+@@ -6,6 +6,7 @@ import { instanceSettingsApi } from "../../api/instanceSettings";
+ import { heartbeatsApi } from "../../api/heartbeats";
+ import { buildTranscript, getUIAdapter, onAdapterChange, type RunLogChunk, type TranscriptEntry } from "../../adapters";
+ import { queryKeys } from "../../lib/queryKeys";
++import { getApiRoot } from "../../lib/api-base";
+ 
+ const LOG_POLL_INTERVAL_MS = 2000;
+ const LOG_READ_LIMIT_BYTES = 256_000;
+@@ -280,7 +281,7 @@ export function useLiveRunTranscripts({
+     const connect = () => {
+       if (closed) return;
+       const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+-      const url = `${protocol}://${window.location.host}/api/companies/${encodeURIComponent(companyId)}/events/ws`;
++      const url = `${protocol}://${window.location.host}${getApiRoot()}/companies/${encodeURIComponent(companyId)}/events/ws`;
+       socket = new WebSocket(url);
+ 
+       socket.onmessage = (message) => {
+diff --git a/ui/src/context/LiveUpdatesProvider.tsx b/ui/src/context/LiveUpdatesProvider.tsx
+index 99f3a2f..8c6fc1d 100644
+--- a/ui/src/context/LiveUpdatesProvider.tsx
++++ b/ui/src/context/LiveUpdatesProvider.tsx
+@@ -12,6 +12,7 @@ import { useToastActions } from "./ToastContext";
+ import { upsertIssueCommentInPages } from "../lib/optimistic-issue-comments";
+ import { clearIssueExecutionRun, removeLiveRunById } from "../lib/optimistic-issue-runs";
+ import { queryKeys } from "../lib/queryKeys";
++import { getApiRoot } from "../lib/api-base";
+ import { toCompanyRelativePath } from "../lib/company-routes";
+ import { useLocation } from "../lib/router";
+ 
+@@ -963,7 +964,7 @@ export function LiveUpdatesProvider({ children }: { children: ReactNode }) {
+     const connect = () => {
+       if (closed) return;
+       const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+-      const url = `${protocol}://${window.location.host}/api/companies/${encodeURIComponent(liveCompanyId)}/events/ws`;
++      const url = `${protocol}://${window.location.host}${getApiRoot()}/companies/${encodeURIComponent(liveCompanyId)}/events/ws`;
+       const nextSocket = new WebSocket(url);
+       socket = nextSocket;
+ 
+diff --git a/ui/src/lib/api-base.ts b/ui/src/lib/api-base.ts
+new file mode 100644
+index 0000000..06059e8
+--- /dev/null
++++ b/ui/src/lib/api-base.ts
+@@ -0,0 +1,10 @@
++/**
++ * REST API root for same-origin Paperclip backend, respecting Vite `base` / `BASE_URL`.
++ * Root hosting: `/api`. Subpath hosting (e.g. `/paperclip/`): `/paperclip/api`.
++ */
++export function getApiRoot(): string {
++  const raw = import.meta.env.BASE_URL ?? "/";
++  const trimmedBase = raw.replace(/\/+$/, "") || "/";
++  if (trimmedBase === "/") return "/api";
++  return `${trimmedBase}/api`;
++}
+diff --git a/ui/src/pages/AgentDetail.tsx b/ui/src/pages/AgentDetail.tsx
+index 004a0a7..b8268b5 100644
+--- a/ui/src/pages/AgentDetail.tsx
++++ b/ui/src/pages/AgentDetail.tsx
+@@ -22,6 +22,7 @@ import { useToastActions } from "../context/ToastContext";
+ import { useDialogActions } from "../context/DialogContext";
+ import { useBreadcrumbs } from "../context/BreadcrumbContext";
+ import { queryKeys } from "../lib/queryKeys";
++import { getApiRoot } from "../lib/api-base";
+ import { AgentConfigForm } from "../components/AgentConfigForm";
+ import { PageTabBar } from "../components/PageTabBar";
+ import { adapterLabels, roleLabels, help } from "../components/agent-config-primitives";
+@@ -3757,7 +3758,7 @@ function LogViewer({ run, adapterType }: { run: HeartbeatRun; adapterType: strin
+     const connect = () => {
+       if (closed) return;
+       const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+-      const url = `${protocol}://${window.location.host}/api/companies/${encodeURIComponent(run.companyId)}/events/ws`;
++      const url = `${protocol}://${window.location.host}${getApiRoot()}/companies/${encodeURIComponent(run.companyId)}/events/ws`;
+       socket = new WebSocket(url);
+ 
+       socket.onopen = () => {
+diff --git a/ui/src/pages/Auth.tsx b/ui/src/pages/Auth.tsx
+index 56e67fc..21e8d0e 100644
+--- a/ui/src/pages/Auth.tsx
++++ b/ui/src/pages/Auth.tsx
+@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+ import { useNavigate, useSearchParams } from "@/lib/router";
+ import { authApi } from "../api/auth";
+ import { queryKeys } from "../lib/queryKeys";
++import { getApiRoot } from "../lib/api-base";
+ import { getRememberedInvitePath } from "../lib/invite-memory";
+ import { Button } from "@/components/ui/button";
+ import { AsciiArtAnimation } from "@/components/AsciiArtAnimation";
+@@ -94,7 +95,7 @@ export function AuthPage() {
+           <form
+             className="mt-6 space-y-4"
+             method="post"
+-            action={mode === "sign_up" ? "/api/auth/sign-up/email" : "/api/auth/sign-in/email"}
++            action={mode === "sign_up" ? `${getApiRoot()}/auth/sign-up/email` : `${getApiRoot()}/auth/sign-in/email`}
+             onSubmit={(event) => {
+               event.preventDefault();
+               if (mutation.isPending) return;
+diff --git a/ui/src/pages/CompanySettings.tsx b/ui/src/pages/CompanySettings.tsx
+index 0deecb2..41cd3a7 100644
+--- a/ui/src/pages/CompanySettings.tsx
++++ b/ui/src/pages/CompanySettings.tsx
+@@ -10,6 +10,7 @@ import { companiesApi } from "../api/companies";
+ import { accessApi } from "../api/access";
+ import { assetsApi } from "../api/assets";
+ import { queryKeys } from "../lib/queryKeys";
++import { getApiRoot } from "../lib/api-base";
+ import { Button } from "@/components/ui/button";
+ import { Settings, Check, Download, Upload } from "lucide-react";
+ import { CompanyPatternIcon } from "../components/CompanyPatternIcon";
+@@ -104,7 +105,7 @@ export function CompanySettings() {
+       const onboardingTextLink =
+         invite.onboardingTextUrl ??
+         invite.onboardingTextPath ??
+-        `/api/invites/${invite.token}/onboarding.txt`;
++        `${getApiRoot()}/invites/${invite.token}/onboarding.txt`;
+       const absoluteUrl = onboardingTextLink.startsWith("http")
+         ? onboardingTextLink
+         : `${base}${onboardingTextLink}`;
+diff --git a/ui/src/pages/InviteLanding.tsx b/ui/src/pages/InviteLanding.tsx
+index 7dcef62..cc9cca6 100644
+--- a/ui/src/pages/InviteLanding.tsx
++++ b/ui/src/pages/InviteLanding.tsx
+@@ -13,6 +13,7 @@ import { healthApi } from "../api/health";
+ import { getAdapterLabel } from "../adapters/adapter-display-registry";
+ import { clearPendingInviteToken, rememberPendingInviteToken } from "../lib/invite-memory";
+ import { queryKeys } from "../lib/queryKeys";
++import { getApiRoot } from "../lib/api-base";
+ import { formatDate } from "../lib/utils";
+ 
+ type AuthMode = "sign_in" | "sign_up";
+@@ -697,7 +698,11 @@ export function InviteLandingPage() {
+                 <form
+                   className="space-y-4"
+                   method="post"
+-                  action={authMode === "sign_up" ? "/api/auth/sign-up/email" : "/api/auth/sign-in/email"}
++                  action={
++                    authMode === "sign_up"
++                      ? `${getApiRoot()}/auth/sign-up/email`
++                      : `${getApiRoot()}/auth/sign-in/email`
++                  }
+                   onSubmit={(event) => {
+                     event.preventDefault();
+                     if (authMutation.isPending) return;
+diff --git a/ui/src/plugins/bridge.ts b/ui/src/plugins/bridge.ts
+index e8a9d13..056b98e 100644
+--- a/ui/src/plugins/bridge.ts
++++ b/ui/src/plugins/bridge.ts
+@@ -38,6 +38,7 @@ import { ApiError } from "@/api/client";
+ import { useToastActions, type ToastInput } from "@/context/ToastContext";
+ import { useSidebar } from "@/context/SidebarContext";
+ import { isGlobalPath, normalizeCompanyPrefix } from "@/lib/company-routes";
++import { getApiRoot } from "@/lib/api-base";
+ 
+ // ---------------------------------------------------------------------------
+ // Bridge error type (mirrors the SDK's PluginBridgeError)
+@@ -604,7 +605,7 @@ export function usePluginStream<T = unknown>(
+ 
+     const params = new URLSearchParams({ companyId: effectiveCompanyId });
+     const source = new EventSource(
+-      `/api/plugins/${encodeURIComponent(pluginId)}/bridge/stream/${encodeURIComponent(channel)}?${params.toString()}`,
++      `${getApiRoot()}/plugins/${encodeURIComponent(pluginId)}/bridge/stream/${encodeURIComponent(channel)}?${params.toString()}`,
+       { withCredentials: true },
+     );
+     sourceRef.current = source;

@@ -15,7 +15,9 @@ RUN git init \
   && git fetch --depth 1 origin "${PAPERCLIP_UPSTREAM_REF}" \
   && git checkout FETCH_HEAD
 COPY patches/0001-spa-subpath.patch /tmp/0001-spa-subpath.patch
-RUN git apply /tmp/0001-spa-subpath.patch
+COPY patches/0002-spa-api-base.patch /tmp/0002-spa-api-base.patch
+RUN git apply /tmp/0001-spa-subpath.patch \
+  && git apply /tmp/0002-spa-api-base.patch
 
 FROM node:lts-trixie-slim AS base
 ARG USER_UID=1000

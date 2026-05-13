@@ -2,7 +2,7 @@
 
 Upstream [paperclipai/paperclip](https://github.com/paperclipai/paperclip) defaults to hosting the Vite UI at `/`. This folder holds a **minimal patch** so the SPA respects a configurable base path (for example behind nginx at `https://www.tradentical.com/paperclip/`).
 
-**Pinned upstream commit:** `b947a7d76c331b3ce4069d3be0ade25cc89b1b90` (matches `0001-spa-subpath.patch`; bump when you upgrade Paperclip).
+**Pinned upstream commit:** `b947a7d76c331b3ce4069d3be0ade25cc89b1b90` (matches `0001-spa-subpath.patch` and `0002-spa-api-base.patch`; bump when you upgrade Paperclip).
 
 ## What the patch changes
 
@@ -20,6 +20,7 @@ cd paperclip
 git fetch --depth 1 origin b947a7d76c331b3ce4069d3be0ade25cc89b1b90
 git checkout FETCH_HEAD
 git apply /path/to/TradeManthan/vendor/paperclip-subpath/patches/0001-spa-subpath.patch
+git apply /path/to/TradeManthan/vendor/paperclip-subpath/patches/0002-spa-api-base.patch
 docker build --build-arg PAPERCLIP_UI_BASE_PATH=/paperclip/ -t paperclip:subpath .
 ```
 
@@ -112,13 +113,17 @@ Pinned upstream commit `b947a7d`:
 - `ui/src/App.tsx` declares `<Route path="invite/:token" element={<InviteLandingPage />} />` **above** the `<Route element={<CloudAccessGate />}>` wrapper, so the invite landing is **not** gated by `CloudAccessGate` (it is `CloudAccessGate.tsx → BootstrapPendingPage` that renders "Instance setup required" when `health.bootstrapStatus === "bootstrap_pending"`).
 - With the patch, `BrowserRouter` uses `basename="/paperclip"` (derived from `import.meta.env.BASE_URL`). React Router strips the basename from `window.location.pathname`, so `/paperclip/invite/<token>` matches the top-level `invite/:token` route directly. No further patch is needed to render the invite UI.
 - Asset and `sw.js` paths are emitted by Vite under the same base (`/paperclip/assets/...`, `/paperclip/sw.js`). Nginx's `^~ /paperclip/` location wins by longest-prefix match and forwards to the container after stripping the prefix, so Express's existing `app.use("/assets", ...)` and SPA fallback continue to serve the right files.
-- API and auth calls (`/api/...`, `/api/auth/...`) are root-relative in the UI; they are handled by the dedicated `^~ /api/` location in `scripts/nginx-tradentical.conf` and do **not** need to be rewritten under `/paperclip/`.
+- With `0002-spa-api-base.patch`, the SPA calls the REST API under **`/paperclip/api`** when the Vite base is `/paperclip/` (via `getApiRoot()` in `ui/src/lib/api-base.ts`). Nginx should use `location ^~ /paperclip/` to proxy those requests to the container’s **`/api`** path (strip the `/paperclip` prefix so Express still mounts at `/api`). At root base (`/`), the UI continues to use `/api`.
 
 ## Verify patch before upgrading
 
 ```bash
 git checkout FETCH_HEAD   # pinned commit
 git apply --check vendor/paperclip-subpath/patches/0001-spa-subpath.patch
+git apply vendor/paperclip-subpath/patches/0001-spa-subpath.patch
+git apply --check vendor/paperclip-subpath/patches/0002-spa-api-base.patch
 ```
 
 If the check fails, regenerate the diff against the new upstream tree and update `PAPERCLIP_UPSTREAM_REF` in this README and in `Dockerfile` defaults.
+
+**Upstream upgrades:** re-run `git apply --check` (and regenerate) for both `0001-spa-subpath.patch` and `0002-spa-api-base.patch` after bumping the pinned commit.
