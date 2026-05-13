@@ -39,20 +39,80 @@ docker build -f vendor/paperclip-subpath/Dockerfile \
 
 `PAPERCLIP_UPSTREAM_REF` can be any commit SHA or tag on the upstream repo; re-test `git apply` after changing it (line numbers may drift).
 
-## EC2 deploy (outline)
+## EC2 deploy (this project)
 
-1. **Build** the image on the server (or in CI), with `PAPERCLIP_UI_BASE_PATH=/paperclip/` if nginx serves the app under that prefix.
-2. **Run** the container (example only — set real volumes and env for your deployment):
+The production container on `3.6.199.247` is named `paperclip`, listens on `127.0.0.1:3100`, and bind-mounts data from `/home/ubuntu/paperclip-docker/paperclip/data/docker-paperclip` → `/paperclip`. Nginx (`scripts/nginx-tradentical.conf`) proxies `https://www.tradentical.com/paperclip/` to it after stripping the `/paperclip/` prefix, and also forwards root-level `/api/`, `/assets/`, `/invite/`, `/sw.js`, and favicons to the same container.
 
-   ```bash
-   docker run -d --name paperclip -p 127.0.0.1:3101:3100 \
-     -v paperclip-data:/paperclip \
-     paperclip:subpath
-   ```
+If the running image is upstream `ghcr.io/paperclipai/paperclip:latest`, the served `index.html` references `/assets/...` (root-relative) and the SPA's `BrowserRouter` has no basename. Any visit to `https://www.tradentical.com/paperclip/invite/<token>` then falls through React Router's catch-all inside `CloudAccessGate` and renders the **"Instance setup required"** bootstrap page instead of the invite landing. The fix is to build and run the patched image below.
 
-3. **Nginx** should `proxy_pass` `/paperclip/` to the Paperclip HTTP port (see your existing vhost). Keep TLS certificates and API keys out of this repo; use env files or a secrets manager on the host — **do not** commit `.env` with credentials.
+### 1. Sync repo and build on the server
 
-4. **Backend URL**: Paperclip’s UI still expects its API where configured for your instance; subpath deployment does not replace Paperclip server configuration.
+Run from the workspace root on your laptop:
+
+```bash
+ssh -i ./TradeM.pem -o ConnectTimeout=20 ubuntu@3.6.199.247 '
+  set -euo pipefail
+  cd /home/ubuntu/trademanthan
+  git fetch --quiet origin main
+  git checkout main
+  git pull --ff-only origin main
+  docker build \
+    -f vendor/paperclip-subpath/Dockerfile \
+    --build-arg PAPERCLIP_UPSTREAM_REF=b947a7d76c331b3ce4069d3be0ade25cc89b1b90 \
+    --build-arg PAPERCLIP_UI_BASE_PATH=/paperclip/ \
+    -t paperclip:subpath \
+    vendor/paperclip-subpath
+'
+```
+
+### 2. Replace the running container
+
+`PAPERCLIP_PUBLIC_URL`, `PAPERCLIP_BIND`, deployment mode, and the data bind mount must match the existing container so signed URLs, sessions, and the embedded database are preserved. Token is **not** rotated.
+
+```bash
+ssh -i ./TradeM.pem -o ConnectTimeout=20 ubuntu@3.6.199.247 '
+  set -euo pipefail
+  docker rm -f paperclip 2>/dev/null || true
+  docker run -d --name paperclip --restart unless-stopped \
+    -p 127.0.0.1:3100:3100 \
+    -v /home/ubuntu/paperclip-docker/paperclip/data/docker-paperclip:/paperclip \
+    -e PAPERCLIP_PUBLIC_URL=https://www.tradentical.com/paperclip \
+    -e PAPERCLIP_BIND=lan \
+    -e PAPERCLIP_DEPLOYMENT_MODE=authenticated \
+    -e PAPERCLIP_DEPLOYMENT_EXPOSURE=private \
+    -e PAPERCLIP_DATA_DIR=/home/ubuntu/paperclip-docker/paperclip/data/docker-paperclip \
+    -e SERVE_UI=true \
+    -e HOST=0.0.0.0 \
+    -e PORT=3100 \
+    paperclip:subpath
+'
+```
+
+### 3. Verify
+
+```bash
+# Expect: /paperclip/assets/index-<hash>.js (NOT /assets/index-...).
+curl -sS --max-time 10 https://www.tradentical.com/paperclip/ \
+  | grep -Eo '(href|src)="/(paperclip/)?assets/[^"]+"' | head -5
+
+# Expect: HTTP/2 200 (SPA fallback returns index.html for the invite URL).
+curl -sSI --max-time 10 https://www.tradentical.com/paperclip/invite/YOUR_INVITE_TOKEN | head -3
+```
+
+Then open the invite URL in a browser; the InviteLanding panel ("Set up Paperclip" or "Join …") should render. If you still see "Instance setup required", reload with cache disabled — the previous image's `index.html` is served with `Cache-Control: no-cache` and the assets under `/assets/*` have a 1y `immutable` cache, so a stale service worker or asset can pin the old bundle in some browsers.
+
+### 4. Keep secrets out of the repo
+
+Token, TLS certs, and any `.env` with credentials must stay on the host. `*.pem` is already gitignored; do not paste invite tokens, session cookies, or API keys into commit messages or this README.
+
+## Why the patch is sufficient (route audit)
+
+Pinned upstream commit `b947a7d`:
+
+- `ui/src/App.tsx` declares `<Route path="invite/:token" element={<InviteLandingPage />} />` **above** the `<Route element={<CloudAccessGate />}>` wrapper, so the invite landing is **not** gated by `CloudAccessGate` (it is `CloudAccessGate.tsx → BootstrapPendingPage` that renders "Instance setup required" when `health.bootstrapStatus === "bootstrap_pending"`).
+- With the patch, `BrowserRouter` uses `basename="/paperclip"` (derived from `import.meta.env.BASE_URL`). React Router strips the basename from `window.location.pathname`, so `/paperclip/invite/<token>` matches the top-level `invite/:token` route directly. No further patch is needed to render the invite UI.
+- Asset and `sw.js` paths are emitted by Vite under the same base (`/paperclip/assets/...`, `/paperclip/sw.js`). Nginx's `^~ /paperclip/` location wins by longest-prefix match and forwards to the container after stripping the prefix, so Express's existing `app.use("/assets", ...)` and SPA fallback continue to serve the right files.
+- API and auth calls (`/api/...`, `/api/auth/...`) are root-relative in the UI; they are handled by the dedicated `^~ /api/` location in `scripts/nginx-tradentical.conf` and do **not** need to be rewritten under `/paperclip/`.
 
 ## Verify patch before upgrading
 
