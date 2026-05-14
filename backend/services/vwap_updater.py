@@ -101,6 +101,7 @@ def _try_live_exit(position, reason: str, option_contract: str):
         buy_order_id=buy_order_id,
         tag=f"vwap_exit_{reason}:{buy_order_id}",
         existing_sell_order_id=existing_sell,
+        trade_id=getattr(position, "id", None),
     )
     if result.get("skipped"):
         logger.warning(

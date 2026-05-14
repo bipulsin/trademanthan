@@ -45,6 +45,56 @@ MARKET_FILL_WAIT_SEC = 45.0
 TRADING_LIVE_FILE = Path("/home/ubuntu/trademanthan/data/trading_live.json")
 trading_live = "NO"
 
+# Per intraday_stock_options.id: when id is listed here, broker MARKET SELL (auto live exit) is suppressed
+# for that row only. LTP/VWAP updates and other scan logic continue. Default = not listed = exits allowed.
+SCAN_LIVE_EXIT_DISABLED_FILE = TRADING_LIVE_FILE.parent / "scan_live_exit_disabled.json"
+
+
+def _read_scan_live_exit_disabled_ids() -> set[int]:
+    try:
+        if not SCAN_LIVE_EXIT_DISABLED_FILE.exists():
+            return set()
+        with open(SCAN_LIVE_EXIT_DISABLED_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        raw = data.get("disabled_trade_ids") or data.get("disabled_ids") or []
+        out: set[int] = set()
+        for x in raw:
+            try:
+                out.add(int(x))
+            except (TypeError, ValueError):
+                continue
+        return out
+    except Exception as e:
+        logger.warning("Failed to read scan live-exit disabled ids: %s", e)
+        return set()
+
+
+def _write_scan_live_exit_disabled_ids(ids: set[int]) -> None:
+    SCAN_LIVE_EXIT_DISABLED_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(SCAN_LIVE_EXIT_DISABLED_FILE, "w", encoding="utf-8") as f:
+        json.dump({"disabled_trade_ids": sorted(ids)}, f, indent=2)
+
+
+def is_scan_trade_live_exit_enabled(trade_id: Optional[int]) -> bool:
+    """When False, place_live_upstox_exit must not send a broker SELL for this intraday row."""
+    if trade_id is None:
+        return True
+    return int(trade_id) not in _read_scan_live_exit_disabled_ids()
+
+
+def set_scan_trade_live_exit_enabled(trade_id: int, live_exit_enabled: bool) -> None:
+    """
+    live_exit_enabled True  -> allow broker auto-exit for this trade_id.
+    live_exit_enabled False -> disable broker MARKET SELL for this trade_id (scan toggle off).
+    """
+    tid = int(trade_id)
+    ids = _read_scan_live_exit_disabled_ids()
+    if live_exit_enabled:
+        ids.discard(tid)
+    else:
+        ids.add(tid)
+    _write_scan_live_exit_disabled_ids(ids)
+
 _SCAN_OPTION_TRACKING_DISABLED_KEYS = {
     ("UNIONBANK", "200", "CE", "MAY", "26"),
     # User request: hide live execution for ADANIPOWER 230 CE (May 2026 series) on scan.html
@@ -1867,6 +1917,7 @@ def place_live_upstox_exit(
     buy_order_id: Optional[str],
     tag: Optional[str] = None,
     existing_sell_order_id: Optional[str] = None,
+    trade_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Exit: always use a MARKET SELL at the broker for the open option qty.
@@ -1879,6 +1930,18 @@ def place_live_upstox_exit(
     """
     if not is_trading_live_enabled():
         return {"success": False, "skipped": True, "error": "Live trading disabled"}
+    if trade_id is not None and not is_scan_trade_live_exit_enabled(trade_id):
+        logger.warning(
+            "⏭️ LIVE EXIT skipped — per-trade broker exit disabled (trade_id=%s) | %s %s",
+            trade_id,
+            stock_name,
+            option_contract,
+        )
+        return {
+            "success": False,
+            "skipped": True,
+            "error": "Live exit disabled for this trade (scan.html toggle)",
+        }
     if not upstox_service:
         return {"success": False, "error": "Upstox service unavailable"}
 

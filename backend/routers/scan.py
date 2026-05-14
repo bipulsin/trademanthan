@@ -3757,6 +3757,42 @@ async def set_trading_live(toggle: TradingLiveToggle):
     }
 
 
+@router.post("/trade-live-exit-toggle")
+async def trade_live_exit_toggle(
+    payload: Dict[str, Any],
+    db: Session = Depends(get_db),
+):
+    """
+    Per-row scan.html toggle: when live_exit_enabled is false, broker MARKET SELL (auto live exit)
+    is not sent for that intraday_stock_options.id. Other live refresh / VWAP updates continue.
+    """
+    from backend.models.trading import IntradayStockOption
+
+    trade_id = payload.get("trade_id")
+    if trade_id is None:
+        raise HTTPException(status_code=400, detail="trade_id is required")
+    try:
+        trade_id_int = int(trade_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="trade_id must be an integer")
+    if "live_exit_enabled" not in payload:
+        raise HTTPException(status_code=400, detail="live_exit_enabled is required")
+    live_exit_enabled = bool(payload.get("live_exit_enabled"))
+
+    row = db.query(IntradayStockOption).filter(IntradayStockOption.id == trade_id_int).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Trade not found")
+
+    live_trading.set_scan_trade_live_exit_enabled(trade_id_int, live_exit_enabled)
+    logger.info(
+        "scan trade live_exit toggle: id=%s live_exit_enabled=%s stock=%s",
+        trade_id_int,
+        live_exit_enabled,
+        row.stock_name,
+    )
+    return {"success": True, "trade_id": trade_id_int, "live_exit_enabled": live_exit_enabled}
+
+
 @router.post("/run-final-reconciliation")
 async def run_final_reconciliation_manual(
     force: bool = Query(False),
@@ -4916,6 +4952,8 @@ async def get_latest_webhook_data(background_tasks: BackgroundTasks, db: Session
                     "no_entry_reason": record.no_entry_reason or None,  # Reason for no entry if status is no_entry
                     "buy_order_id": record.buy_order_id or None,
                     "buy_time": record.buy_time.isoformat() if record.buy_time else None,
+                    "trade_id": record.id,
+                    "live_exit_enabled": live_trading.is_scan_trade_live_exit_enabled(record.id),
                 })
             
             bullish_alerts = list(grouped_bullish.values())
@@ -5085,6 +5123,8 @@ async def get_latest_webhook_data(background_tasks: BackgroundTasks, db: Session
                     "no_entry_reason": record.no_entry_reason or None,  # Reason for no entry if status is no_entry
                     "buy_order_id": record.buy_order_id or None,
                     "buy_time": record.buy_time.isoformat() if record.buy_time else None,
+                    "trade_id": record.id,
+                    "live_exit_enabled": live_trading.is_scan_trade_live_exit_enabled(record.id),
                 })
             
             bearish_alerts = list(grouped_bearish.values())
@@ -5492,6 +5532,7 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                             buy_order_id=record.buy_order_id,
                                             tag=f"smart_future_exit_stop_loss:{record.buy_order_id or 'no_buy_id'}",
                                             existing_sell_order_id=record.sell_order_id,
+                                            trade_id=record.id,
                                         )
                                         if live_exit_result.get("success") or live_exit_result.get("skipped_duplicate"):
                                             record.sell_price = new_option_ltp
@@ -5528,6 +5569,7 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                             buy_order_id=record.buy_order_id,
                                             tag=f"smart_future_exit_vwap:{record.buy_order_id or 'no_buy_id'}",
                                             existing_sell_order_id=record.sell_order_id,
+                                            trade_id=record.id,
                                         )
                                         if live_exit_result.get("success") or live_exit_result.get("skipped_duplicate"):
                                             record.sell_price = new_option_ltp
@@ -5564,6 +5606,7 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                             buy_order_id=record.buy_order_id,
                                             tag=f"smart_future_exit_target:{record.buy_order_id or 'no_buy_id'}",
                                             existing_sell_order_id=record.sell_order_id,
+                                            trade_id=record.id,
                                         )
                                         if live_exit_result.get("success") or live_exit_result.get("skipped_duplicate"):
                                             record.sell_price = new_option_ltp
@@ -5634,6 +5677,7 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                                 buy_order_id=record.buy_order_id,
                                                 tag=f"smart_future_exit_time:{record.buy_order_id or 'no_buy_id'}",
                                                 existing_sell_order_id=record.sell_order_id,
+                                                trade_id=record.id,
                                             )
                                             if live_exit_result.get("success") or live_exit_result.get("skipped_duplicate"):
                                                 record.sell_price = new_option_ltp

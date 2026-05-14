@@ -10,6 +10,47 @@ const API_BASE_URL = (function () {
     return window.location.origin;
 })();
 
+window.setScanLiveExitToggle = async function (tradeId, enabled) {
+    const el = document.getElementById('live-exit-chk-' + tradeId);
+    try {
+        const res = await fetch(API_BASE_URL + '/scan/trade-live-exit-toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ trade_id: tradeId, live_exit_enabled: enabled }),
+        });
+        let data = {};
+        try {
+            data = await res.json();
+        } catch (_) {
+            data = {};
+        }
+        if (!res.ok) {
+            const msg = (data && (data.detail || data.error)) || res.statusText || 'Request failed';
+            throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+        }
+    } catch (e) {
+        console.error('live exit toggle failed', e);
+        if (el) {
+            el.checked = !enabled;
+        }
+        alert('Could not update live exit toggle: ' + (e && e.message ? e.message : String(e)));
+    }
+};
+
+function liveExitToggleHtml(stock) {
+    if (stock.trade_id === undefined || stock.trade_id === null) {
+        return '';
+    }
+    var tid = stock.trade_id;
+    var on = stock.live_exit_enabled !== false;
+    return (
+        '<label style="font-size:11px;color:#94a3b8;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;margin-top:4px;">' +
+        '<input type="checkbox" id="live-exit-chk-' + tid + '" ' + (on ? 'checked' : '') +
+        ' onchange="window.setScanLiveExitToggle(' + tid + ', this.checked)" />' +
+        '<span>Live exit</span></label>'
+    );
+}
+
 /** Set on intraoption.html — hide Upstox token banner/popup and OAuth refresh UX */
 const SCAN_SKIP_TOKEN_UI = typeof window !== 'undefined' && window.__INTRAOPTION_PAGE === true;
 
@@ -731,7 +772,7 @@ function renderGroupTableHeader() {
                     <th>Stock Name</th>
                     <th>Stock LTP / VWAP</th>
                     <th>Slope/Size</th>
-                    <th>Option Contract (OTM-1)</th>
+                    <th>Option (OTM-1) + live exit</th>
                     <th>Qty</th>
                     <th>Buy Price</th>
                     <th>Stop Loss</th>
@@ -772,7 +813,7 @@ function renderAlertGroup(alert, type, omitTableHeader = false) {
                         <th>Stock Name</th>
                         <th>Stock LTP / VWAP</th>
                         <th>Slope/Size</th>
-                        <th>Option Contract (OTM-1)</th>
+                        <th>Option (OTM-1) + live exit</th>
                         <th>Qty</th>
                         <th>Buy Price</th>
                         <th>Stop Loss</th>
@@ -931,7 +972,7 @@ function renderAlertGroup(alert, type, omitTableHeader = false) {
                             '<td class="stock-name">' + escapeHtml(stock.stock_name) + '</td>' +
                             '<td class="stock-ltp-vwap-col">' + stockLtpVwapDisplay + '</td>' +
                             '<td class="vwap-slope-col">' + combinedFilterDisplay + '</td>' +
-                            '<td class="option-contract">' + escapeHtml(stock.option_contract || 'N/A') + '</td>' +
+                            '<td class="option-contract">' + escapeHtml(stock.option_contract || 'N/A') + '<br/>' + liveExitToggleHtml(stock) + '</td>' +
                             '<td class="qty">' + (stock.qty || 0) + '</td>' +
                             '<td class="buy-price">' + buyPriceDisplay + '</td>' +
                             '<td class="stop-loss" style="color: #dc2626; font-weight: 600;">' + stopLossDisplay + '</td>' +
@@ -1065,6 +1106,7 @@ function renderAlertGroup(alert, type, omitTableHeader = false) {
                             <div class="stock-card-row">
                                 <div style="flex: 2;">
                                     <div class="stock-card-value" style="font-size: 12px;">${escapeHtml(stock.option_contract || 'N/A')}</div>
+                                    ${liveExitToggleHtml(stock)}
                                 </div>
                                 <div style="flex: 1;">
                                     <div class="stock-card-value">Q:${stock.qty || 0}</div>
