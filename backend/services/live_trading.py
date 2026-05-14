@@ -49,6 +49,7 @@ _SCAN_OPTION_TRACKING_DISABLED_KEYS = {
     ("UNIONBANK", "200", "CE", "MAY", "26"),
     # User request: hide live execution for ADANIPOWER 230 CE (May 2026 series) on scan.html
     ("ADANIPOWER", "230", "CE", "MAY", "26"),
+    ("VEDL", "340", "CE", "MAY", "26"),
 }
 _SCAN_OPTION_TRACKING_DISABLED_LABELS = {
     f"{symbol} {strike} {option_type} 26 {month} {year}"
