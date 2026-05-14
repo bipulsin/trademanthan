@@ -46,8 +46,6 @@ TRADING_LIVE_FILE = Path("/home/ubuntu/trademanthan/data/trading_live.json")
 trading_live = "NO"
 
 _SCAN_OPTION_TRACKING_DISABLED_KEYS = {
-    ("BIOCON", "420", "CE", "MAY", "26"),
-    ("DMART", "4500", "CE", "MAY", "26"),
     ("UNIONBANK", "200", "CE", "MAY", "26"),
     # User request: hide live execution for ADANIPOWER 230 CE (May 2026 series) on scan.html
     ("ADANIPOWER", "230", "CE", "MAY", "26"),
