@@ -1794,7 +1794,9 @@
     setInterval(refresh, 120 * 1000);
     if (window.VajraFuturesRatings) {
       window.VajraFuturesRatings.init({
-        tableElId: 'dfVajraTable',
+        prefix: 'df',
+        listElId: 'dfVajraTable',
+        moreBtnId: 'dfVajraMoreBtn',
         metaElId: 'dfVajraMeta',
         msgElId: 'dfVajraMsg',
         pollMs: 120000,

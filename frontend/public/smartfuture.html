@@ -99,6 +99,67 @@
         .vajra-rev-high { color: #b91c1c; font-weight: 700; }
         .vajra-rev-med { color: #b45309; font-weight: 600; }
         .vajra-rev-low { color: #15803d; font-weight: 600; }
+        .vajra-card-head.df-pick-card-head { margin-bottom: 6px; }
+        .vajra-card-head.df-pick-card-head h2 { margin: 0; flex: 1 1 auto; }
+        .vajra-top-list { display: flex; flex-direction: column; gap: 12px; }
+        .vajra-row-card {
+            border: 1px solid var(--theme-border, #e2e8f0);
+            border-radius: 10px;
+            padding: 10px 12px;
+            background: var(--theme-input-readonly, rgba(0,0,0,0.02));
+        }
+        .vajra-row-security { font-weight: 700; font-size: 0.92rem; margin-bottom: 8px; color: var(--theme-text, #0f172a); }
+        .vajra-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+        .vajra-chip {
+            display: inline-flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 1px;
+            padding: 4px 8px;
+            border-radius: 8px;
+            font-size: 0.72rem;
+            line-height: 1.25;
+            background: var(--theme-card, #f1f5f9);
+            border: 1px solid var(--theme-border, #e2e8f0);
+            max-width: 100%;
+        }
+        .vajra-chip-lbl { font-size: 0.65rem; font-weight: 600; color: var(--theme-muted, #64748b); text-transform: uppercase; letter-spacing: 0.02em; }
+        .vajra-chip-val { font-weight: 600; color: var(--theme-text, #0f172a); }
+        .vajra-chip.vajra-tt-long .vajra-chip-val { color: #1d4ed8; }
+        .vajra-chip.vajra-tt-short .vajra-chip-val { color: #b91c1c; }
+        .vajra-chip.vajra-pass .vajra-chip-val { color: #15803d; }
+        .vajra-chip.vajra-fail .vajra-chip-val { color: #b91c1c; }
+        .vajra-modal { position: fixed; inset: 0; z-index: 2100; display: none; align-items: center; justify-content: center; padding: 12px; }
+        .vajra-modal.vajra-modal--open { display: flex; }
+        .vajra-modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.45); }
+        .vajra-modal-panel {
+            position: relative; z-index: 1;
+            background: var(--theme-card, #fff);
+            border: 1px solid var(--theme-border, #e2e8f0);
+            border-radius: 12px;
+            padding: 16px 18px;
+            min-width: min(96vw, 920px);
+            max-width: 96vw;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .vajra-modal-title { margin: 0 0 4px; font-size: 1.1rem; }
+        .vajra-modal-sub { margin: 0 0 10px; }
+        .vajra-modal-body { overflow: auto; flex: 1 1 auto; min-height: 0; }
+        .vajra-modal-table-wrap { overflow-x: auto; }
+        .vajra-modal-table .vajra-td-chip { vertical-align: top; min-width: 7rem; }
+        .vajra-modal-table .vajra-td-security { font-weight: 600; white-space: nowrap; }
+        .vajra-sort-th { cursor: pointer; user-select: none; white-space: nowrap; }
+        .vajra-sort-th:hover { color: var(--theme-text, #0f172a); }
+        .vajra-sort-ind { margin-left: 4px; font-size: 0.7rem; opacity: 0.45; }
+        .vajra-sort-ind--active { opacity: 1; color: var(--theme-accent, #2563eb); }
+        .vajra-modal-actions { display: flex; justify-content: flex-end; margin-top: 12px; flex-shrink: 0; }
+        .vajra-modal-close-btn {
+            padding: 8px 16px; border-radius: 8px; border: none;
+            background: #2563eb; color: #fff; font-weight: 600; cursor: pointer;
+        }
         body[data-theme="dark"] .sf-order-status { color: #93c5fd; }
         .sf-exit-hint {
             display: inline-block;
@@ -433,11 +494,11 @@
                     <div class="vajra-card-head">
                         <h2><i class="fas fa-bolt" style="color:#2563eb;"></i> TWCTO Vajra — Futures Rating</h2>
                         <span class="vajra-meta" id="sfVajraMeta">—</span>
-                    </div>
+                    </motion>
                     <p class="vajra-meta">15m trade qualification for current-month futures. Volume score uses traded value (LTP × volume). Sorted by trade type, then confidence.</p>
                     <p class="vajra-meta" id="sfVajraMsg"></p>
-                    <div id="sfVajraTable"></div>
-                </div>
+                    <div id="sfVajraTable"></motion>
+                </motion>
 
                 <div class="sf-card">
                     <div class="sf-card-head">
@@ -573,7 +634,7 @@
         </div>
     </div>
     <script src="left-menu.js?v=3.23"></script>
-    <script src="vajra-futures-ratings.js?v=1"></script>
-    <script src="smartfuture.js?v=49"></script>
+    <script src="vajra-futures-ratings.js?v=2"></script>
+    <script src="smartfuture.js?v=50"></script>
 </body>
 </html>

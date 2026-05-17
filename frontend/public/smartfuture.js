@@ -2175,7 +2175,9 @@
         window.setInterval(refreshCountdownPills, 1000);
         if (window.VajraFuturesRatings) {
             window.VajraFuturesRatings.init({
-                tableElId: 'sfVajraTable',
+                prefix: 'sf',
+                listElId: 'sfVajraTable',
+                moreBtnId: 'sfVajraMoreBtn',
                 metaElId: 'sfVajraMeta',
                 msgElId: 'sfVajraMsg',
                 pollMs: 120000,
