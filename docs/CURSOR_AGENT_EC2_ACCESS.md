@@ -87,7 +87,15 @@ Recommendation: use **Option 1** (public backend + `GET /scan/logs?lines=...&gre
 
 ---
 
-## EC2 public IP change and HTTPS (GitHub Actions)
+## Release flow (push to GitHub, deploy on EC2)
 
-- **GitHub Actions deploy:** Set repository secret `EC2_HOST` to the current public IP (e.g. `3.6.199.247`). In the repo: **Settings → Secrets and variables → Actions**, or with the GitHub CLI: `gh secret set EC2_HOST --body "3.6.199.247"` (after `gh auth login`).
+GitHub **does not** SSH to EC2. Workflow:
+
+1. Commit and `git push origin main` from the local **TradeManthan** workspace.
+2. Trigger deploy on the server: `./scripts/trigger-ec2-deploy.sh` (calls `POST /scan/deploy-backend` on the public site). The server `git pull`s `origin/main` and restarts systemd/nginx via `backend/scripts/deploy_backend.sh`.
+
+Remove any old GitHub Actions workflow that used `EC2_HOST` / `EC2_SSH_KEY` — those secrets are not required.
+
+## EC2 public IP change and HTTPS
+
 - **SSL certificates:** Certs from Let's Encrypt (used in `scripts/nginx-tradentical.conf` under `/etc/letsencrypt/live/tradentical.com/`) are tied to **domain names**, not to the EC2 IP. You do **not** need a new certificate merely because the instance IP changed. Point DNS (A records) for your domains at the new IP, then on the new server either run `scripts/setup_ssl_tradentical.sh` / certbot again, or migrate `/etc/letsencrypt` from the old host with care. Browsing by **IP** over HTTPS may still show a certificate warning; use `https://your-domain.com` for a valid chain.

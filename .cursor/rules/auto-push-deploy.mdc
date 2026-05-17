@@ -5,13 +5,19 @@ alwaysApply: true
 
 # Auto Push + EC2 Deploy Workflow (Default Process)
 
-**Commit to GitHub and deploy to EC2 is the default process always.** After any code changes that affect the running app (backend or frontend), run the full release flow unless the user explicitly says not to deploy:
+**GitHub only stores code** (`bipulsin/trademanthan`, branch `main`). **Do not** put EC2 host, SSH keys, or deploy credentials in GitHub Actions secrets. EC2 pulls from GitHub when you tell the server to deploy.
+
+After app-affecting changes in the local workspace `/Users/bipulsahay/TradeManthan`, unless the user says not to deploy:
 
 1. Stage and commit relevant changes with a clear message.
-2. Push to `origin main`.
-3. Trigger backend deployment via `POST https://www.tradewithcto.com/scan/deploy-backend`.
-4. Optionally verify via `/scan/deployment-status` and report.
+2. Push to `origin main` (`git push origin main`).
+3. Trigger EC2 pull + restart (server runs `backend/scripts/deploy_backend.sh`):
+   - **Preferred:** `./scripts/trigger-ec2-deploy.sh` (POST `https://www.tradewithcto.com/scan/deploy-backend`)
+   - **Or one step:** `./scripts/release-push-and-deploy.sh -m "commit message"`
+   - **Or SSH:** `./scripts/ec2-ssh.sh 'cd /home/ubuntu/trademanthan && git pull origin main && sudo systemctl restart trademanthan-backend'` (and nginx copy if needed)
 
-Use the API-based deploy endpoint; the EC2 server pulls from GitHub on deploy. Frontend is served from the same server, so one deploy updates both.
+Verify via `GET https://www.tradewithcto.com/scan/deployment-status` or `./scripts/trigger-ec2-deploy.sh` log output.
+
+Frontend is served from the same EC2 tree as the backend; one deploy updates both.
 
 If deployment fails, surface the exact failure and next remediation step.
