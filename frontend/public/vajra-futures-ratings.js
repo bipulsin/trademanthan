@@ -109,33 +109,33 @@
         const raw = cellValue(row, col);
         if (col.key === 'reversal_risk') {
             const u = String(row.reversal_risk || raw || '').toUpperCase();
-            if (u === 'HIGH') return 'vajra-chip--rev-high';
-            if (u === 'MEDIUM') return 'vajra-chip--rev-med';
-            return 'vajra-chip--rev-low';
+            if (u === 'HIGH') return 'df-dir-short';
+            if (u === 'MEDIUM') return 'vajra-rev-med';
+            return 'df-dir-long';
         }
         if (col.key === 'trade_type') {
             const s = String(row.trade_type || '');
-            if (s.indexOf('SHORT') === 0) return 'vajra-chip--bear';
-            if (s.indexOf('LONG') === 0) return 'vajra-chip--bull';
-            return 'vajra-chip--neutral';
+            if (s.indexOf('SHORT') === 0) return 'df-dir-short';
+            if (s.indexOf('LONG') === 0) return 'df-dir-long';
+            return 'df-dir-neutral';
         }
         if (col.key === 'structure' || col.key === 'momentum' || col.key === 'trend' || col.key === 'volume') {
-            return isPassText(raw) ? 'vajra-chip--bull' : 'vajra-chip--bear';
+            return isPassText(raw) ? 'df-dir-long' : 'df-dir-short';
         }
         if (col.key === 'obv') {
             const o = String(row.obv || raw || '').toUpperCase();
-            if (o.indexOf('BELOW') >= 0 || o.indexOf('FALLING') >= 0) return 'vajra-chip--bear';
-            if (o.indexOf('ABOVE') >= 0 || o.indexOf('RISING') >= 0) return 'vajra-chip--bull';
-            return 'vajra-chip--neutral';
+            if (o.indexOf('BELOW') >= 0 || o.indexOf('FALLING') >= 0) return 'df-dir-short';
+            if (o.indexOf('ABOVE') >= 0 || o.indexOf('RISING') >= 0) return 'df-dir-long';
+            return 'df-dir-neutral';
         }
-        return 'vajra-chip--neutral';
+        return 'df-dir-neutral';
     }
 
     function renderChip(col, row) {
         const tone = chipToneClass(col, row);
         const text = chipDisplayValue(col, row);
         return (
-            '<span class="vajra-chip ' +
+            '<span class="df-dir-pill ' +
             tone +
             '" title="' +
             escapeHtml(col.label) +
@@ -175,11 +175,11 @@
         }
         const top = rows.slice(0, TOP_N);
         return (
-            '<div class="vajra-table-wrap"><table class="vajra-table vajra-top-table">' +
+            '<motion class="vajra-table-wrap"><table class="vajra-table vajra-top-table">' +
             renderTableHead() +
             '<tbody>' +
             renderTableBodyRows(top) +
-            '</tbody></table></div>'
+            '</tbody></table></motion>'
         );
     }
 
@@ -256,7 +256,7 @@
         const modalId = prefix + 'VajraMoreModal';
         let modal = document.getElementById(modalId);
         if (modal) return modal;
-        modal = document.createElement('div');
+        modal = document.createElement('motion');
         modal.id = modalId;
         modal.className = 'vajra-modal';
         modal.setAttribute('aria-hidden', 'true');
@@ -266,9 +266,37 @@
         modal.innerHTML =
             '<div class="vajra-modal-backdrop" data-vajra-close="1"></div>' +
             '<div class="vajra-modal-panel">' +
-            '<h3 id="' + prefix + 'VajraMoreTitle" class="vajra-modal-title">Vajra ratings</h3>' +
-            '<p class="vajra-meta vajra-modal-sub" id="' + prefix + 'VajraMoreSub"></p>' +
-            '<div id="' + prefix + 'VajraMoreTable" class="vajra-modal-body"></div>' +
+            '<h3 id="' +
+            prefix +
+            'VajraMoreTitle" class="vajra-modal-title">Vajra ratings</h3>' +
+            '<p class="vajra-meta vajra-modal-sub" id="' +
+            prefix +
+            'VajraMoreSub"></p>' +
+            '<div id="' +
+            prefix +
+            'VajraMoreTable" class="vajra-modal-body"></motion>' +
+            '<div class="vajra-modal-actions">' +
+            '<button type="button" class="vajra-modal-close-btn" data-vajra-close="1">Close</button>' +
+            '</div></div>';
+        modal = document.createElement('motion');
+        modal.id = modalId;
+        modal.className = 'vajra-modal';
+        modal.setAttribute('aria-hidden', 'true');
+        modal.setAttribute('role', 'dialog');
+        modal.setAttribute('aria-modal', 'true');
+        modal.setAttribute('aria-labelledby', prefix + 'VajraMoreTitle');
+        modal.innerHTML =
+            '<div class="vajra-modal-backdrop" data-vajra-close="1"></motion>' +
+            '<div class="vajra-modal-panel">' +
+            '<h3 id="' +
+            prefix +
+            'VajraMoreTitle" class="vajra-modal-title">Vajra ratings</h3>' +
+            '<p class="vajra-meta vajra-modal-sub" id="' +
+            prefix +
+            'VajraMoreSub"></p>' +
+            '<div id="' +
+            prefix +
+            'VajraMoreTable" class="vajra-modal-body"></motion>' +
             '<div class="vajra-modal-actions">' +
             '<button type="button" class="vajra-modal-close-btn" data-vajra-close="1">Close</button>' +
             '</div></div>';
