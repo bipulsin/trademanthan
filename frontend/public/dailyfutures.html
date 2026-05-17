@@ -72,6 +72,27 @@
         table.df-table th.df-th-rs, table.df-table td.df-rs-cell { text-align: right; min-width: 7.5rem; }
         .df-wl-win { color: #16a34a; font-weight: 700; }
         .df-wl-loss { color: #b91c1c; font-weight: 700; }
+        .vajra-card h2 { margin: 0; font-size: 1.12rem; display: flex; align-items: center; gap: 8px; }
+        .vajra-card-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+        .vajra-meta { font-size: 0.85rem; color: var(--theme-muted, #64748b); margin: 0 0 8px; }
+        .vajra-table-wrap { overflow-x: auto; }
+        table.vajra-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+        table.vajra-table th, table.vajra-table td {
+            border-bottom: 1px solid var(--theme-border, #e2e8f0);
+            text-align: left;
+            padding: 7px 5px;
+        }
+        table.vajra-table th { color: var(--theme-muted, #64748b); font-weight: 600; }
+        table.vajra-table td.num, table.vajra-table th.num { text-align: right; }
+        .vajra-tt-long { color: #1d4ed8; font-weight: 700; }
+        .vajra-tt-short { color: #b91c1c; font-weight: 700; }
+        .vajra-tt-watch { color: #b45309; font-weight: 600; }
+        .vajra-tt-reject { color: var(--theme-muted, #64748b); }
+        .vajra-pass { color: #15803d; font-weight: 600; }
+        .vajra-fail { color: #b91c1c; font-weight: 600; }
+        .vajra-rev-high { color: #b91c1c; font-weight: 700; }
+        .vajra-rev-med { color: #b45309; font-weight: 600; }
+        .vajra-rev-low { color: #15803d; font-weight: 600; }
         .df-modal { position: fixed; inset: 0; z-index: 2000; display: none; align-items: center; justify-content: center; }
         .df-modal[aria-hidden="false"] { display: flex; }
         .df-modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.45); }
@@ -355,6 +376,16 @@
             <div class="settings-content df-wrap">
                 <p id="dfBanner">Loading workspace…</p>
 
+                <div class="df-card vajra-card" id="dfVajraCard">
+                    <div class="vajra-card-head">
+                        <h2><i class="fas fa-bolt" style="color:#2563eb;"></i> TWCTO Vajra — Futures Rating</h2>
+                        <span class="vajra-meta" id="dfVajraMeta">—</span>
+                    </div>
+                    <p class="vajra-meta">15m trade qualification for current-month futures (arbitrage_master). Volume score uses traded value (LTP × volume). Sorted by trade type, then confidence.</p>
+                    <p class="vajra-meta" id="dfVajraMsg"></p>
+                    <div id="dfVajraTable"></div>
+                </div>
+
                 <div class="df-card" id="dfBullPicksCard">
                     <div class="df-pick-card-head">
                         <h2>
@@ -501,6 +532,7 @@
 
     <script src="left-menu.js?v=3.23"></script>
     <script src="notify-trade-channel.js?v=1"></script>
-    <script src="dailyfutures.js?v=59"></script>
+    <script src="vajra-futures-ratings.js?v=1"></script>
+    <script src="dailyfutures.js?v=60"></script>
 </body>
 </html>

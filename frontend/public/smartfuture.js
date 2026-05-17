@@ -2173,5 +2173,13 @@
         window.setInterval(function () { loadTrend(true); }, 15 * 60 * 1000);
         refreshCountdownPills();
         window.setInterval(refreshCountdownPills, 1000);
+        if (window.VajraFuturesRatings) {
+            window.VajraFuturesRatings.init({
+                tableElId: 'sfVajraTable',
+                metaElId: 'sfVajraMeta',
+                msgElId: 'sfVajraMsg',
+                pollMs: 120000,
+            });
+        }
     });
 })();

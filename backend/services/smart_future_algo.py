@@ -88,6 +88,7 @@ from backend.services.car_nifty200_updater import run_car_nifty200_update_job
 from backend.services.entry_slip_monitor import run_entry_slip_monitor
 from backend.services.fin_sentiment_job import run_fin_sentiment_job
 from backend.services.smart_futures_picker.job import run_smart_futures_picker_job
+from backend.services.vajra.job import run_vajra_futures_rating_job
 from backend.services.premarket_watchlist_job import (
     premarket_incomplete_for_session_date,
     run_premarket_watchlist_job_with_lock,
@@ -923,6 +924,47 @@ class SmartFutureAlgoScheduler:
                 )
             logger.info(
                 "✅ Scheduled: Smart Futures picker (%s weekday slots, every 15 min 9:30–15:00 IST)",
+                len(_sf_picker_slots),
+            )
+
+            # Vajra futures rating — same 15-min slots as Smart Futures picker (9:30–15:00 IST)
+            def _create_vajra_wrapper(_hh: int, _mm: int):
+                _label = f"{_hh:02d}:{_mm:02d}"
+
+                def _run_vajra():
+                    if not is_allowed_scheduler_window_ist():
+                        logger.debug("Outside 08:30–21:00 IST — skip Vajra rating %s", _label)
+                        return
+                    ist = pytz.timezone("Asia/Kolkata")
+                    if _skip_ist_non_trading_job(f"Vajra rating {_label}", datetime.now(ist)):
+                        return
+                    logger.info("🔧 Vajra futures rating (%s IST)...", _label)
+                    try:
+                        run_vajra_futures_rating_job(scan_trigger=_label)
+                        logger.info("✅ Vajra futures rating (%s) completed", _label)
+                    except Exception as e:
+                        logger.error("❌ Vajra futures rating (%s) failed: %s", _label, e, exc_info=True)
+
+                return _run_vajra
+
+            for _hh, _mm in _sf_picker_slots:
+                self.scheduler.add_job(
+                    _create_vajra_wrapper(_hh, _mm),
+                    trigger=CronTrigger(
+                        day_of_week="mon-fri",
+                        hour=_hh,
+                        minute=_mm,
+                        timezone="Asia/Kolkata",
+                    ),
+                    id=f"smart_future_vajra_rating_{_hh}_{_mm:02d}",
+                    name=f"Vajra futures rating ({_hh:02d}:{_mm:02d} IST)",
+                    replace_existing=True,
+                    max_instances=1,
+                    misfire_grace_time=300,
+                    coalesce=True,
+                )
+            logger.info(
+                "✅ Scheduled: Vajra futures rating (%s weekday slots, every 15 min 9:30–15:00 IST)",
                 len(_sf_picker_slots),
             )
 
