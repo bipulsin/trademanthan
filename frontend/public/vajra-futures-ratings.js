@@ -175,11 +175,11 @@
         }
         const top = rows.slice(0, TOP_N);
         return (
-            '<motion class="vajra-table-wrap"><table class="vajra-table vajra-top-table">' +
+            '<div class="vajra-table-wrap"><table class="vajra-table vajra-top-table">' +
             renderTableHead() +
             '<tbody>' +
             renderTableBodyRows(top) +
-            '</tbody></table></motion>'
+            '</tbody></table></div>'
         );
     }
 
@@ -256,7 +256,7 @@
         const modalId = prefix + 'VajraMoreModal';
         let modal = document.getElementById(modalId);
         if (modal) return modal;
-        modal = document.createElement('motion');
+        modal = document.createElement('div');
         modal.id = modalId;
         modal.className = 'vajra-modal';
         modal.setAttribute('aria-hidden', 'true');
@@ -266,37 +266,9 @@
         modal.innerHTML =
             '<div class="vajra-modal-backdrop" data-vajra-close="1"></div>' +
             '<div class="vajra-modal-panel">' +
-            '<h3 id="' +
-            prefix +
-            'VajraMoreTitle" class="vajra-modal-title">Vajra ratings</h3>' +
-            '<p class="vajra-meta vajra-modal-sub" id="' +
-            prefix +
-            'VajraMoreSub"></p>' +
-            '<div id="' +
-            prefix +
-            'VajraMoreTable" class="vajra-modal-body"></motion>' +
-            '<div class="vajra-modal-actions">' +
-            '<button type="button" class="vajra-modal-close-btn" data-vajra-close="1">Close</button>' +
-            '</div></div>';
-        modal = document.createElement('motion');
-        modal.id = modalId;
-        modal.className = 'vajra-modal';
-        modal.setAttribute('aria-hidden', 'true');
-        modal.setAttribute('role', 'dialog');
-        modal.setAttribute('aria-modal', 'true');
-        modal.setAttribute('aria-labelledby', prefix + 'VajraMoreTitle');
-        modal.innerHTML =
-            '<div class="vajra-modal-backdrop" data-vajra-close="1"></motion>' +
-            '<div class="vajra-modal-panel">' +
-            '<h3 id="' +
-            prefix +
-            'VajraMoreTitle" class="vajra-modal-title">Vajra ratings</h3>' +
-            '<p class="vajra-meta vajra-modal-sub" id="' +
-            prefix +
-            'VajraMoreSub"></p>' +
-            '<div id="' +
-            prefix +
-            'VajraMoreTable" class="vajra-modal-body"></motion>' +
+            '<h3 id="' + prefix + 'VajraMoreTitle" class="vajra-modal-title">Vajra ratings</h3>' +
+            '<p class="vajra-meta vajra-modal-sub" id="' + prefix + 'VajraMoreSub"></p>' +
+            '<div id="' + prefix + 'VajraMoreTable" class="vajra-modal-body"></div>' +
             '<div class="vajra-modal-actions">' +
             '<button type="button" class="vajra-modal-close-btn" data-vajra-close="1">Close</button>' +
             '</div></div>';
