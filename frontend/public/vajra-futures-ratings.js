@@ -1,6 +1,6 @@
 /**
  * TWCTO Vajra — futures trade qualification (Daily + Smart Futures).
- * Top 5 as security + chips; "more…" modal for remainder with sortable columns.
+ * Top 5 table with column headers once; value-only chips; modal for the rest.
  */
 (function (global) {
     const API_BASE =
@@ -22,15 +22,15 @@
 
     const MODAL_COLUMNS = [
         { key: 'security', label: 'Security', chip: false },
-        { key: 'trade_type', label: 'Trade Type', chip: true, chipClass: tradeTypeClass },
-        { key: 'confidence', label: 'Confidence', chip: true, numeric: true },
-        { key: 'structure', label: 'Structure', chip: true, chipClass: passClass },
-        { key: 'momentum', label: 'Momentum', chip: true, chipClass: passClass },
-        { key: 'trend', label: 'Trend', chip: true, chipClass: passClass },
-        { key: 'volume', label: 'Volume', chip: true, chipClass: passClass },
+        { key: 'trade_type', label: 'Trade Type', chip: true },
+        { key: 'confidence', label: 'Confidence', chip: true },
+        { key: 'structure', label: 'Structure', chip: true },
+        { key: 'momentum', label: 'Momentum', chip: true },
+        { key: 'trend', label: 'Trend', chip: true },
+        { key: 'volume', label: 'Volume', chip: true },
         { key: 'obv', label: 'OBV', chip: true },
         { key: 'market_phase', label: 'Market Phase', chip: true },
-        { key: 'reversal_risk', label: 'Reversal Risk', chip: true, chipClass: revRiskClass },
+        { key: 'reversal_risk', label: 'Reversal Risk', chip: true },
     ];
 
     const CHIP_COLUMNS = MODAL_COLUMNS.filter(function (c) {
@@ -61,25 +61,6 @@
         return String(iso);
     }
 
-    function tradeTypeClass(tt) {
-        const s = String(tt || '');
-        if (s.indexOf('LONG') === 0) return 'vajra-tt-long';
-        if (s.indexOf('SHORT') === 0) return 'vajra-tt-short';
-        if (s === 'REJECT') return 'vajra-tt-reject';
-        return 'vajra-tt-watch';
-    }
-
-    function revRiskClass(r) {
-        const u = String(r || '').toUpperCase();
-        if (u === 'HIGH') return 'vajra-rev-high';
-        if (u === 'MEDIUM') return 'vajra-rev-med';
-        return 'vajra-rev-low';
-    }
-
-    function passClass(cell) {
-        return String(cell || '').indexOf('PASS') >= 0 ? 'vajra-pass' : 'vajra-fail';
-    }
-
     function escapeHtml(s) {
         return String(s)
             .replace(/&/g, '&amp;')
@@ -96,58 +77,110 @@
         return r[col.key] != null && r[col.key] !== '' ? String(r[col.key]) : '—';
     }
 
-    function chipExtraClass(col, value, row) {
-        if (col.chipClass) return col.chipClass(col.key === 'trade_type' ? row.trade_type : value);
-        if (col.key === 'trade_type') return tradeTypeClass(row.trade_type);
-        return '';
+    function isPassText(val) {
+        const s = String(val || '').toUpperCase();
+        return s.indexOf('PASS') >= 0;
+    }
+
+    function chipDisplayValue(col, row) {
+        const raw = cellValue(row, col);
+        if (col.key === 'structure' || col.key === 'momentum' || col.key === 'trend' || col.key === 'volume') {
+            return isPassText(raw) ? 'PASS' : 'FAIL';
+        }
+        if (col.key === 'trade_type') {
+            return String(row.trade_type || raw || '—')
+                .replace(/\s+/g, ' ')
+                .replace('LONG  [A+]', 'LONG (A+)')
+                .trim();
+        }
+        if (col.key === 'obv') {
+            const o = String(row.obv || raw || '').toUpperCase();
+            if (o.indexOf('ABOVE') >= 0 && o.indexOf('RISING') >= 0) return 'Above MA';
+            if (o.indexOf('BELOW') >= 0 && o.indexOf('FALLING') >= 0) return 'Below MA-Falling';
+            if (o.indexOf('ABOVE') >= 0) return 'Above MA';
+            if (o.indexOf('BELOW') >= 0) return 'Below MA-Falling';
+            if (o.indexOf('FLAT') >= 0) return 'Flat';
+            return String(row.obv || raw || '—').trim();
+        }
+        return raw;
+    }
+
+    function chipToneClass(col, row) {
+        const raw = cellValue(row, col);
+        if (col.key === 'reversal_risk') {
+            const u = String(row.reversal_risk || raw || '').toUpperCase();
+            if (u === 'HIGH') return 'vajra-chip--rev-high';
+            if (u === 'MEDIUM') return 'vajra-chip--rev-med';
+            return 'vajra-chip--rev-low';
+        }
+        if (col.key === 'trade_type') {
+            const s = String(row.trade_type || '');
+            if (s.indexOf('SHORT') === 0) return 'vajra-chip--bear';
+            if (s.indexOf('LONG') === 0) return 'vajra-chip--bull';
+            return 'vajra-chip--neutral';
+        }
+        if (col.key === 'structure' || col.key === 'momentum' || col.key === 'trend' || col.key === 'volume') {
+            return isPassText(raw) ? 'vajra-chip--bull' : 'vajra-chip--bear';
+        }
+        if (col.key === 'obv') {
+            const o = String(row.obv || raw || '').toUpperCase();
+            if (o.indexOf('BELOW') >= 0 || o.indexOf('FALLING') >= 0) return 'vajra-chip--bear';
+            if (o.indexOf('ABOVE') >= 0 || o.indexOf('RISING') >= 0) return 'vajra-chip--bull';
+            return 'vajra-chip--neutral';
+        }
+        return 'vajra-chip--neutral';
     }
 
     function renderChip(col, row) {
-        const val = cellValue(row, col);
-        const extra = chipExtraClass(col, val, row);
+        const tone = chipToneClass(col, row);
+        const text = chipDisplayValue(col, row);
         return (
-            '<span class="vajra-chip' +
-            (extra ? ' ' + escapeHtml(extra) : '') +
+            '<span class="vajra-chip ' +
+            tone +
             '" title="' +
             escapeHtml(col.label) +
             '">' +
-            '<span class="vajra-chip-lbl">' +
-            escapeHtml(col.label) +
-            '</span>' +
-            '<span class="vajra-chip-val">' +
-            escapeHtml(val) +
-            '</span></span>'
+            escapeHtml(text) +
+            '</span>'
         );
     }
 
-    function renderRowCard(row) {
-        let chips = '';
-        CHIP_COLUMNS.forEach(function (col) {
-            chips += renderChip(col, row);
+    function renderTableBodyRows(rows) {
+        let tbody = '';
+        rows.forEach(function (r) {
+            tbody += '<tr>';
+            tbody += '<td class="vajra-td-security">' + escapeHtml(cellValue(r, { key: 'security' })) + '</td>';
+            CHIP_COLUMNS.forEach(function (col) {
+                const tdClass = col.key === 'confidence' ? 'vajra-td-chip num' : 'vajra-td-chip';
+                tbody += '<td class="' + tdClass + '">' + renderChip(col, r) + '</td>';
+            });
+            tbody += '</tr>';
         });
-        return (
-            '<article class="vajra-row-card">' +
-            '<div class="vajra-row-security">' +
-            escapeHtml(row.security || row.stock || '—') +
-            '</div>' +
-            '<div class="vajra-chips">' +
-            chips +
-            '</div>' +
-            '</article>'
-        );
+        return tbody;
     }
 
-    function renderTopList(rows) {
+    function renderTableHead() {
+        let head = '<thead><tr><th scope="col">Security</th>';
+        CHIP_COLUMNS.forEach(function (col) {
+            const thClass = col.key === 'confidence' ? 'num' : '';
+            head += '<th scope="col" class="' + thClass + '">' + escapeHtml(col.label) + '</th>';
+        });
+        head += '</tr></thead>';
+        return head;
+    }
+
+    function renderTopTable(rows) {
         if (!rows || !rows.length) {
             return '<p class="vajra-meta">No Vajra ratings yet for this session. The engine runs every 15 minutes (9:30–15:00 IST).</p>';
         }
         const top = rows.slice(0, TOP_N);
-        let html = '<div class="vajra-top-list">';
-        top.forEach(function (r) {
-            html += renderRowCard(r);
-        });
-        html += '</div>';
-        return html;
+        return (
+            '<div class="vajra-table-wrap"><table class="vajra-table vajra-top-table">' +
+            renderTableHead() +
+            '<tbody>' +
+            renderTableBodyRows(top) +
+            '</tbody></table></div>'
+        );
     }
 
     function sortRows(rows, sortKey, sortDir) {
@@ -156,27 +189,24 @@
             return c.key === sortKey;
         });
         return rows.slice().sort(function (a, b) {
-            let av;
-            let bv;
             if (sortKey === 'security') {
-                av = String(a.security || a.stock || '');
-                bv = String(b.security || b.stock || '');
-            } else if (sortKey === 'confidence') {
-                av = Number(a.confidence);
-                bv = Number(b.confidence);
-                if (!Number.isFinite(av)) av = -1;
-                if (!Number.isFinite(bv)) bv = -1;
-                return (av - bv) * dir;
-            } else if (sortKey === 'trade_type') {
-                av = TRADE_TYPE_ORDER[String(a.trade_type || '')] ?? 99;
-                bv = TRADE_TYPE_ORDER[String(b.trade_type || '')] ?? 99;
-                return (av - bv) * dir;
-            } else {
-                av = cellValue(a, col || { key: sortKey });
-                bv = cellValue(b, col || { key: sortKey });
+                const av = String(a.security || a.stock || '');
+                const bv = String(b.security || b.stock || '');
+                return av.localeCompare(bv, undefined, { numeric: true }) * dir;
             }
-            const cmp = String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' });
-            return cmp * dir;
+            if (sortKey === 'confidence') {
+                const av = Number(a.confidence);
+                const bv = Number(b.confidence);
+                return ((Number.isFinite(av) ? av : -1) - (Number.isFinite(bv) ? bv : -1)) * dir;
+            }
+            if (sortKey === 'trade_type') {
+                const av = TRADE_TYPE_ORDER[String(a.trade_type || '')] ?? 99;
+                const bv = TRADE_TYPE_ORDER[String(b.trade_type || '')] ?? 99;
+                return (av - bv) * dir;
+            }
+            const av = chipDisplayValue(col || { key: sortKey }, a);
+            const bv = chipDisplayValue(col || { key: sortKey }, b);
+            return String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' }) * dir;
         });
     }
 
@@ -190,8 +220,11 @@
     function renderModalTable(rows, sortKey, sortDir) {
         let thead = '<thead><tr>';
         MODAL_COLUMNS.forEach(function (col) {
+            const thNum = col.key === 'confidence' ? ' num' : '';
             thead +=
-                '<th scope="col" class="vajra-sort-th" data-sort-key="' +
+                '<th scope="col" class="vajra-sort-th' +
+                thNum +
+                '" data-sort-key="' +
                 escapeHtml(col.key) +
                 '" role="columnheader" aria-sort="' +
                 (sortKey === col.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none') +
@@ -200,26 +233,20 @@
                 sortIndicator(sortKey, sortDir, col.key) +
                 '</th>';
         });
-        thead += '</tr></thead><tbody>';
+        thead += '</tr></thead>';
         let tbody = '';
         if (!rows.length) {
-            tbody = '<tr><td colspan="' + MODAL_COLUMNS.length + '" class="vajra-meta">No additional ratings.</td></tr>';
+            tbody =
+                '<tr><td colspan="' +
+                MODAL_COLUMNS.length +
+                '" class="vajra-meta">No additional ratings.</td></tr>';
         } else {
-            rows.forEach(function (r) {
-                tbody += '<tr>';
-                MODAL_COLUMNS.forEach(function (col) {
-                    if (col.key === 'security') {
-                        tbody += '<td class="vajra-td-security">' + escapeHtml(cellValue(r, col)) + '</td>';
-                    } else {
-                        tbody += '<td class="vajra-td-chip">' + renderChip(col, r) + '</td>';
-                    }
-                });
-                tbody += '</tr>';
-            });
+            tbody = renderTableBodyRows(rows).replace(/<\/?tbody>/g, '');
         }
         return (
-            '<div class="vajra-modal-table-wrap"><table class="vajra-table vajra-modal-table">' +
+            '<div class="vajra-table-wrap"><table class="vajra-table vajra-modal-table">' +
             thead +
+            '<tbody>' +
             tbody +
             '</tbody></table></div>'
         );
@@ -268,15 +295,6 @@
         throw new Error(lastErr || 'Failed to load Vajra ratings');
     }
 
-    /**
-     * @param {object} opts
-     * @param {string} opts.prefix — 'df' or 'sf' for unique modal/button ids
-     * @param {string} opts.listElId — container for top-5 list
-     * @param {string} [opts.moreBtnId]
-     * @param {string} [opts.metaElId]
-     * @param {string} [opts.msgElId]
-     * @param {number} [opts.pollMs]
-     */
     function init(opts) {
         const prefix = opts.prefix || 'df';
         const listEl = document.getElementById(opts.listElId || prefix + 'VajraTable');
@@ -317,15 +335,13 @@
 
         function renderModal() {
             if (!modalTableEl) return;
-            const sorted = sortRows(modalRows, sortKey, sortDir);
-            modalTableEl.innerHTML = renderModalTable(sorted, sortKey, sortDir);
+            modalTableEl.innerHTML = renderModalTable(sortRows(modalRows, sortKey, sortDir), sortKey, sortDir);
             modalTableEl.querySelectorAll('.vajra-sort-th').forEach(function (th) {
                 th.addEventListener('click', function () {
                     const key = th.getAttribute('data-sort-key');
                     if (!key) return;
-                    if (sortKey === key) {
-                        sortDir = sortDir === 'asc' ? 'desc' : 'asc';
-                    } else {
+                    if (sortKey === key) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+                    else {
                         sortKey = key;
                         sortDir = key === 'confidence' || key === 'trade_type' ? 'desc' : 'asc';
                     }
@@ -358,7 +374,7 @@
             try {
                 const data = await fetchRatings();
                 allRows = (data && data.rows) || [];
-                if (listEl) listEl.innerHTML = renderTopList(allRows);
+                if (listEl) listEl.innerHTML = renderTopTable(allRows);
                 if (moreBtn) {
                     const rest = Math.max(0, allRows.length - TOP_N);
                     moreBtn.hidden = rest <= 0;
