@@ -1,0 +1,196 @@
+/* Vajra discretionary trade workflow */
+.vajra-wf-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 2500;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+}
+.vajra-wf-modal--open {
+    display: flex;
+}
+.vajra-wf-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+}
+.vajra-wf-panel {
+    position: relative;
+    width: min(920px, 100%);
+    max-height: 92vh;
+    overflow: auto;
+    background: var(--theme-card, #0f172a);
+    border: 1px solid var(--theme-border, #334155);
+    border-radius: 12px;
+    padding: 16px 18px;
+    color: var(--theme-text, #e2e8f0);
+}
+.vajra-wf-title {
+    margin: 0 0 8px;
+    font-size: 1.15rem;
+}
+.vajra-wf-step {
+    display: none;
+}
+.vajra-wf-step--active {
+    display: block;
+}
+.vajra-wf-grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 12px;
+    font-size: 0.78rem;
+}
+.vajra-wf-grid-2 label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    padding: 2px 0;
+}
+.vajra-wf-grid-2 input[type='checkbox'] {
+    margin: 0;
+}
+.vajra-wf-field {
+    margin-bottom: 10px;
+}
+.vajra-wf-field label {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--theme-muted, #94a3b8);
+    margin-bottom: 4px;
+}
+.vajra-wf-field input,
+.vajra-wf-field select {
+    width: 100%;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--theme-border, #475569);
+    background: var(--theme-bg, #1e293b);
+    color: inherit;
+}
+.vajra-wf-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin: 10px 0;
+}
+.vajra-wf-metric {
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 8px;
+    padding: 8px;
+    font-size: 0.75rem;
+}
+.vajra-wf-metric strong {
+    display: block;
+    font-size: 1rem;
+}
+.vajra-wf-warn {
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    color: #fecaca;
+    padding: 8px 10px;
+    border-radius: 8px;
+    margin: 8px 0;
+    font-size: 0.8rem;
+}
+.vajra-wf-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 14px;
+}
+.vajra-wf-btn {
+    padding: 8px 14px;
+    border-radius: 8px;
+    border: none;
+    font-weight: 700;
+    cursor: pointer;
+    font-size: 0.82rem;
+}
+.vajra-wf-btn-primary {
+    background: #2563eb;
+    color: #fff;
+}
+.vajra-wf-btn-ghost {
+    background: transparent;
+    color: var(--theme-muted, #94a3b8);
+    border: 1px solid var(--theme-border, #475569);
+}
+.vajra-wf-btn-danger {
+    background: #7f1d1d;
+    color: #fff;
+}
+.vajra-enter-btn {
+    padding: 4px 10px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    border-radius: 6px;
+    border: 1px solid #2563eb;
+    background: #1d4ed8;
+    color: #fff;
+    cursor: pointer;
+}
+.vajra-active-block {
+    margin-bottom: 14px;
+}
+.vajra-active-block h3 {
+    margin: 0 0 8px;
+    font-size: 0.95rem;
+    color: var(--theme-muted, #94a3b8);
+}
+.vajra-active-card {
+    border: 1px solid var(--theme-border, #334155);
+    border-radius: 10px;
+    margin-bottom: 8px;
+    background: rgba(15, 23, 42, 0.6);
+}
+.vajra-active-card summary {
+    cursor: pointer;
+    padding: 10px 12px;
+    font-weight: 700;
+    list-style: none;
+}
+.vajra-active-card summary::-webkit-details-marker {
+    display: none;
+}
+.vajra-active-body {
+    padding: 0 12px 12px;
+    font-size: 0.78rem;
+}
+.vajra-active-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 6px;
+}
+.vajra-health-strong {
+    color: #22c55e;
+}
+.vajra-health-warn {
+    color: #f59e0b;
+}
+.vajra-health-risk {
+    color: #ef4444;
+}
+.vajra-alert-pos {
+    color: #22c55e;
+}
+.vajra-alert-warn {
+    color: #f59e0b;
+}
+.vajra-alert-risk {
+    color: #ef4444;
+}
+table.vajra-active-table {
+    width: 100%;
+    font-size: 0.75rem;
+    border-collapse: collapse;
+}
+table.vajra-active-table th,
+table.vajra-active-table td {
+    border-bottom: 1px solid var(--theme-border, #334155);
+    padding: 6px 4px;
+    text-align: left;
+}

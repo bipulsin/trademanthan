@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import logging
-from datetime import date
-from typing import Optional
+from datetime import date, datetime
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Body, Depends, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -21,6 +21,7 @@ from backend.services.vajra.timeframes import (
     valid_htf_for_scan,
 )
 from backend.services.vajra.job import run_vajra_futures_rating_job
+from backend.services.vajra import trade_service as vajra_trade_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/vajra-futures", tags=["vajra-futures"])
@@ -146,3 +147,97 @@ def run_vajra_ratings_now(user: User = Depends(_require_user)):
     except Exception as e:
         logger.exception("vajra_run: %s", e)
         return JSONResponse(status_code=500, content={"success": False, "message": str(e)})
+
+
+@router.get("/trades")
+def list_vajra_trades(
+    status: str = Query("active", description="active or closed"),
+    platform: Optional[str] = Query(None),
+    user: User = Depends(_require_user),
+):
+    rows = vajra_trade_service.list_trades(user.id, status=status, platform=platform)
+    return JSONResponse(status_code=200, content={"success": True, "rows": rows, "count": len(rows)})
+
+
+@router.post("/trades/validate-preview")
+def vajra_trade_validate_preview(
+    body: Dict[str, Any] = Body(...),
+    user: User = Depends(_require_user),
+):
+    preview = vajra_trade_service.validation_preview(
+        user.id,
+        stock=str(body.get("stock") or ""),
+        direction=str(body.get("direction") or "LONG"),
+        instrument_key=str(body.get("instrument_key") or ""),
+        discovery_row=body.get("discovery_row") or {},
+    )
+    return JSONResponse(status_code=200, content={"success": True, **preview})
+
+
+@router.post("/trades")
+def vajra_trade_activate(
+    body: Dict[str, Any] = Body(...),
+    user: User = Depends(_require_user),
+):
+    try:
+        et_raw = body.get("entry_time")
+        if et_raw:
+            entry_time = datetime.fromisoformat(str(et_raw).replace("Z", "+00:00"))
+        else:
+            entry_time = datetime.now()
+        trade = vajra_trade_service.activate_trade(
+            user.id,
+            platform=str(body.get("platform") or "daily_futures"),
+            stock=str(body.get("stock") or ""),
+            future_symbol=str(body.get("future_symbol") or body.get("security") or ""),
+            instrument_key=str(body.get("instrument_key") or ""),
+            direction=str(body.get("direction") or "LONG"),
+            entry_price=float(body.get("entry_price") or 0),
+            lots=int(body.get("lots") or 1),
+            entry_time=entry_time,
+            discovery_row=body.get("discovery_row") or {},
+            checklist=body.get("checklist") or {},
+            metrics=body.get("metrics") or {},
+            warnings=body.get("warnings") or [],
+        )
+        refreshed = vajra_trade_service.persist_refresh(user.id, int(trade["id"]))
+        return JSONResponse(status_code=200, content={"success": True, "trade": refreshed})
+    except Exception as e:
+        logger.exception("vajra_trade_activate: %s", e)
+        return JSONResponse(status_code=500, content={"success": False, "message": str(e)})
+
+
+@router.post("/trades/{trade_id}/close")
+def vajra_trade_close(
+    trade_id: int,
+    body: Dict[str, Any] = Body(...),
+    user: User = Depends(_require_user),
+):
+    try:
+        xt_raw = body.get("exit_time")
+        exit_time = (
+            datetime.fromisoformat(str(xt_raw).replace("Z", "+00:00"))
+            if xt_raw
+            else datetime.now()
+        )
+        trade = vajra_trade_service.close_trade(
+            user.id,
+            trade_id,
+            exit_price=float(body.get("exit_price") or 0),
+            exit_time=exit_time,
+            exit_reasons=list(body.get("exit_reasons") or []),
+        )
+        if not trade:
+            return JSONResponse(status_code=404, content={"success": False, "message": "Trade not found"})
+        return JSONResponse(status_code=200, content={"success": True, "trade": trade})
+    except Exception as e:
+        logger.exception("vajra_trade_close: %s", e)
+        return JSONResponse(status_code=500, content={"success": False, "message": str(e)})
+
+
+@router.post("/trades/{trade_id}/refresh")
+def vajra_trade_refresh(trade_id: int, user: User = Depends(_require_user)):
+    trade = vajra_trade_service.persist_refresh(user.id, trade_id)
+    if not trade:
+        return JSONResponse(status_code=404, content={"success": False, "message": "Trade not found"})
+    return JSONResponse(status_code=200, content={"success": True, "trade": trade})

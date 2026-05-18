@@ -84,6 +84,21 @@ table.vajra-table td.num { text-align: center; }
     margin-bottom: 6px;
     font-size: 0.78rem;
 }
+.vajra-th-enter,
+.vajra-td-enter {
+    text-align: center;
+    width: 4.5rem;
+}
+.vajra-enter-btn {
+    padding: 4px 10px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    border-radius: 6px;
+    border: 1px solid #2563eb;
+    background: #1d4ed8;
+    color: #fff;
+    cursor: pointer;
+}
 .vajra-rev-med {
     background: #f59e0b !important;
     color: #111827 !important;

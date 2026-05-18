@@ -954,6 +954,29 @@ class SmartFutureAlgoScheduler:
             )
             logger.info("✅ Scheduled: Vajra futures rating (every 5 min, IST trading window)")
 
+            def _run_vajra_disc_refresh():
+                if not is_allowed_scheduler_window_ist():
+                    return
+                try:
+                    from backend.services.vajra.trade_service import refresh_all_active_trades
+
+                    n = refresh_all_active_trades()
+                    if n:
+                        logger.info("✅ Vajra discretionary refresh: %s active trades", n)
+                except Exception as e:
+                    logger.error("❌ Vajra discretionary refresh failed: %s", e)
+
+            self.scheduler.add_job(
+                _run_vajra_disc_refresh,
+                trigger=IntervalTrigger(minutes=5),
+                id="vajra_discretionary_refresh_5m",
+                name="Vajra discretionary trade refresh (5m)",
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=120,
+                coalesce=True,
+            )
+
             # 6. CAR NIFTY200 Updater - Every 3 hours (Yahoo first, Upstox fallback)
             def run_car_nifty200_update():
                 if not is_allowed_scheduler_window_ist():

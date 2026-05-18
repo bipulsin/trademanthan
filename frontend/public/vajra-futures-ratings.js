@@ -8,7 +8,7 @@
             ? 'http://localhost:8000'
             : global.location.origin;
 
-    const TOP_N = 5;
+    const TOP_N = 8;
     const DEFAULT_SCAN_TF = '30m';
     const DEFAULT_HTF = '1hr';
     const HTF_OPTIONS = ['1hr', '1d', '1w'];
@@ -212,30 +212,46 @@
         );
     }
 
-    function renderTableBodyRows(rows, columns) {
+    function renderTableBodyRows(rows, columns, showEnter) {
         const cols = columns || CHIP_COLUMNS;
         let tbody = '';
-        rows.forEach(function (r) {
+        rows.forEach(function (r, idx) {
             tbody += '<tr>';
             tbody += '<td class="vajra-td-security">' + escapeHtml(cellValue(r, { key: 'security' })) + '</td>';
             cols.forEach(function (col) {
                 const tdClass = col.num ? 'vajra-td-chip num' : 'vajra-td-chip';
                 tbody += '<td class="' + tdClass + '">' + renderChip(col, r) + '</td>';
             });
+            if (showEnter) {
+                tbody +=
+                    '<td class="vajra-td-enter"><button type="button" class="vajra-enter-btn" data-vajra-enter="1" data-vajra-idx="' +
+                    idx +
+                    '">ENTER</button></td>';
+            }
             tbody += '</tr>';
         });
         return tbody;
     }
 
-    function renderTableHead(columns) {
+    function renderTableHead(columns, showEnter) {
         const cols = columns || CHIP_COLUMNS;
         let head = '<thead><tr><th scope="col">Security</th>';
         cols.forEach(function (col) {
             const thClass = col.num ? 'num' : '';
             head += '<th scope="col" class="' + thClass + '">' + escapeHtml(col.label) + '</th>';
         });
+        if (showEnter) head += '<th scope="col" class="vajra-th-enter">Action</th>';
         head += '</tr></thead>';
         return head;
+    }
+
+    function prioritizeRows(rows) {
+        return rows.slice().sort(function (a, b) {
+            const av = TRADE_TYPE_ORDER[String(a.trade_type || '')] ?? 99;
+            const bv = TRADE_TYPE_ORDER[String(b.trade_type || '')] ?? 99;
+            if (av !== bv) return av - bv;
+            return (Number(b.tps_score) || 0) - (Number(a.tps_score) || 0);
+        });
     }
 
     function renderTopTable(rows) {
@@ -246,19 +262,13 @@
                 'If this persists after market open, use Refresh or wait for the next scan.</p>'
             );
         }
-        const prioritized = rows.slice().sort(function (a, b) {
-            const av = TRADE_TYPE_ORDER[String(a.trade_type || '')] ?? 99;
-            const bv = TRADE_TYPE_ORDER[String(b.trade_type || '')] ?? 99;
-            if (av !== bv) return av - bv;
-            return (Number(b.tps_score) || 0) - (Number(a.tps_score) || 0);
-        });
-        const top = prioritized.slice(0, TOP_N);
+        const top = rows;
         return (
             '<p class="vajra-meta vajra-pipeline-note">30m discovery · 5m validation on shortlist</p>' +
             '<div class="vajra-table-wrap"><table class="vajra-table vajra-top-table">' +
-            renderTableHead(TOP_COLUMNS) +
+            renderTableHead(TOP_COLUMNS, true) +
             '<tbody>' +
-            renderTableBodyRows(top, TOP_COLUMNS) +
+            renderTableBodyRows(top, TOP_COLUMNS, true) +
             '</tbody></table></div>'
         );
     }
@@ -501,7 +511,20 @@
             try {
                 const data = await fetchRatings(DEFAULT_SCAN_TF, DEFAULT_HTF);
                 allRows = (data && data.rows) || [];
-                if (listEl) listEl.innerHTML = renderTopTable(allRows);
+                if (listEl) {
+                    const topRows = prioritizeRows(allRows).slice(0, TOP_N);
+                    listEl._vajraTopRows = topRows;
+                    listEl.innerHTML = renderTopTable(topRows);
+                    listEl.querySelectorAll('[data-vajra-enter]').forEach(function (btn) {
+                        btn.addEventListener('click', function (ev) {
+                            const idx = parseInt(ev.currentTarget.getAttribute('data-vajra-idx'), 10);
+                            const row = (listEl._vajraTopRows || [])[idx];
+                            if (row && global.VajraTradeWorkflow && global.VajraTradeWorkflow.openEntry) {
+                                global.VajraTradeWorkflow.openEntry(row);
+                            }
+                        });
+                    });
+                }
                 if (moreBtn) {
                     const rest = Math.max(0, allRows.length - TOP_N);
                     moreBtn.hidden = rest <= 0;

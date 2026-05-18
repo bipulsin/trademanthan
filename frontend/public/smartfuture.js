@@ -2183,5 +2183,12 @@
                 pollMs: 300000,
             });
         }
+        if (window.VajraTradeWorkflow) {
+            window.VajraTradeWorkflow.init({
+                platform: 'smart_futures',
+                runningElId: 'sfVajraActiveTrades',
+                closedElId: 'sfVajraClosedTrades',
+            });
+        }
     });
 })();

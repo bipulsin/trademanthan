@@ -1802,5 +1802,12 @@
         pollMs: 300000,
       });
     }
+    if (window.VajraTradeWorkflow) {
+      window.VajraTradeWorkflow.init({
+        platform: 'daily_futures',
+        runningElId: 'dfVajraActiveTrades',
+        closedElId: 'dfVajraClosedTrades',
+      });
+    }
   });
 })();

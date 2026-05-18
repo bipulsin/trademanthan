@@ -34,6 +34,7 @@ def _build_row(
     *,
     stock: str,
     fut_sym: str,
+    instrument_key: str = "",
     ecs_rating,
     tps,
     early_type: Optional[str],
@@ -59,6 +60,7 @@ def _build_row(
     return {
         "security": fut_sym or stock,
         "stock": stock,
+        "instrument_key": instrument_key,
         "trade_type": trade_type,
         "confidence": ecs["confidence"],
         "ecs_score": ecs.get("ecs_score", ecs["confidence"]),
@@ -123,6 +125,7 @@ def rate_symbol_transition(
     *,
     stock: str,
     fut_sym: str,
+    instrument_key: str = "",
     candles_30m: Sequence[Dict[str, Any]],
     candles_1hr: Optional[Sequence[Dict[str, Any]]],
     candles_5m: Optional[Sequence[Dict[str, Any]]] = None,
@@ -153,6 +156,7 @@ def rate_symbol_transition(
     return _build_row(
         stock=stock,
         fut_sym=fut_sym,
+        instrument_key=instrument_key,
         ecs_rating=ecs,
         tps=tps,
         early_type=early,
@@ -185,6 +189,7 @@ def run_transition_pipeline(
             row = rate_symbol_transition(
                 stock=stock,
                 fut_sym=fut_sym,
+                instrument_key=fut_key,
                 candles_30m=c30,
                 candles_1hr=c1h,
                 computed_at=ts,
@@ -223,6 +228,7 @@ def run_transition_pipeline(
             row = rate_symbol_transition(
                 stock=stock,
                 fut_sym=item["future_symbol"],
+                instrument_key=fut_key,
                 candles_30m=c30,
                 candles_1hr=c1h,
                 candles_5m=c5,
