@@ -4,13 +4,14 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Tuple
 
 # UI token -> config
-SCAN_TF_IDS = ("15m", "30m", "1hr", "1d")
+SCAN_TF_IDS = ("5m", "15m", "30m", "1hr", "1d")
 HTF_IDS = ("1hr", "1d", "1w")
 
 DEFAULT_SCAN_TF = "30m"
 DEFAULT_HTF = "1d"
 
 _TF_MINUTES: Dict[str, int] = {
+    "5m": 5,
     "15m": 15,
     "30m": 30,
     "1hr": 60,
@@ -20,6 +21,7 @@ _TF_MINUTES: Dict[str, int] = {
 
 # Upstox interval + history depth for stable indicators (~80+ bars)
 _TF_FETCH: Dict[str, Dict[str, object]] = {
+    "5m": {"interval": "minutes/5", "days_back": 8},
     "15m": {"interval": "minutes/15", "days_back": 12},
     "30m": {"interval": "minutes/30", "days_back": 20},
     "1hr": {"interval": "hours/1", "days_back": 92},

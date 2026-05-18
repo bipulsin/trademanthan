@@ -12,7 +12,7 @@
     const DEFAULT_SCAN_TF = '30m';
     const DEFAULT_HTF = '1d';
     const HTF_OPTIONS = ['1hr', '1d', '1w'];
-    const TF_MINUTES = { '15m': 15, '30m': 30, '1hr': 60, '1d': 1440, '1w': 10080 };
+    const TF_MINUTES = { '5m': 5, '15m': 15, '30m': 30, '1hr': 60, '1d': 1440, '1w': 10080 };
 
     function validHtfForScan(scanTf) {
         const sm = TF_MINUTES[scanTf] || 0;

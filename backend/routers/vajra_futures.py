@@ -50,7 +50,7 @@ def get_vajra_timeframes(user: User = Depends(_require_user)):
 @router.get("/ratings")
 def get_vajra_ratings(
     session_date: Optional[date] = Query(None, description="IST session date; default today"),
-    scan_tf: str = Query(DEFAULT_SCAN_TF, description="Scan timeframe: 15m, 30m, 1hr, 1d"),
+    scan_tf: str = Query(DEFAULT_SCAN_TF, description="Scan timeframe: 5m, 15m, 30m, 1hr, 1d"),
     htf: str = Query(DEFAULT_HTF, description="Higher timeframe: 1hr, 1d, 1w (must be > scan_tf)"),
     user: User = Depends(_require_user),
 ):
