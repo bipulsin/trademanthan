@@ -245,12 +245,17 @@
         return head;
     }
 
-    function prioritizeRows(rows) {
+    function sortByTpsDesc(rows) {
         return rows.slice().sort(function (a, b) {
-            const av = TRADE_TYPE_ORDER[String(a.trade_type || '')] ?? 99;
-            const bv = TRADE_TYPE_ORDER[String(b.trade_type || '')] ?? 99;
-            if (av !== bv) return av - bv;
-            return (Number(b.tps_score) || 0) - (Number(a.tps_score) || 0);
+            const av = Number(a.tps_score);
+            const bv = Number(b.tps_score);
+            const tpsDiff = (Number.isFinite(bv) ? bv : -1) - (Number.isFinite(av) ? av : -1);
+            if (tpsDiff !== 0) return tpsDiff;
+            return String(a.security || a.stock || '').localeCompare(
+                String(b.security || b.stock || ''),
+                undefined,
+                { numeric: true }
+            );
         });
     }
 
@@ -264,7 +269,7 @@
         }
         const top = rows;
         return (
-            '<p class="vajra-meta vajra-pipeline-note">30m discovery · 5m validation on shortlist</p>' +
+            '<p class="vajra-meta vajra-pipeline-note">30m discovery · 5m validation on shortlist · sorted by TPS (high → low)</p>' +
             '<div class="vajra-table-wrap"><table class="vajra-table vajra-top-table">' +
             renderTableHead(TOP_COLUMNS, true) +
             '<tbody>' +
@@ -451,7 +456,7 @@
         const seenAlertKeys = {};
 
         function openModal() {
-            modalRows = allRows.slice(TOP_N);
+            modalRows = sortByTpsDesc(allRows).slice(TOP_N);
             sortKey = 'tps_score';
             sortDir = 'desc';
             renderModal();
@@ -510,9 +515,9 @@
             if (msgEl) msgEl.textContent = 'Loading transition scan (30m + 5m)…';
             try {
                 const data = await fetchRatings(DEFAULT_SCAN_TF, DEFAULT_HTF);
-                allRows = (data && data.rows) || [];
+                allRows = sortByTpsDesc((data && data.rows) || []);
                 if (listEl) {
-                    const topRows = prioritizeRows(allRows).slice(0, TOP_N);
+                    const topRows = allRows.slice(0, TOP_N);
                     listEl._vajraTopRows = topRows;
                     listEl.innerHTML = renderTopTable(topRows);
                     listEl.querySelectorAll('[data-vajra-enter]').forEach(function (btn) {

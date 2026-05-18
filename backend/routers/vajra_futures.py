@@ -74,6 +74,11 @@ def get_vajra_ratings(
             rows = db_first or compute_vajra_ratings_live(
                 mode="transition", session_date=sd, use_cache=True
             )
+            rows = sorted(
+                rows,
+                key=lambda r: float(r.get("tps_score") or 0),
+                reverse=True,
+            )
             computed_at = rows[0].get("computed_at") if rows else None
             alerts = [r for r in rows if r.get("alertable")]
             return JSONResponse(
