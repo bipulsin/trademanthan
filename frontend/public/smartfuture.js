@@ -2180,7 +2180,7 @@
                 moreBtnId: 'sfVajraMoreBtn',
                 metaElId: 'sfVajraMeta',
                 msgElId: 'sfVajraMsg',
-                pollMs: 120000,
+                pollMs: 300000,
             });
         }
     });

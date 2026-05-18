@@ -16,7 +16,8 @@ from backend.config import settings
 from backend.database import SessionLocal
 from backend.services.smart_futures_session_date import effective_session_date_ist_for_trend
 from backend.services.upstox_service import UpstoxService
-from backend.services.vajra.engine import compute_vajra_rating, sort_vajra_rows
+from backend.services.vajra.engine import compute_ecs_rating, compute_vajra_rating, sort_vajra_rows
+from backend.services.vajra.pipeline import run_transition_pipeline
 from backend.services.vajra.tables import ensure_vajra_futures_rating_table
 from backend.services.vajra.timeframes import (
     DEFAULT_HTF,
@@ -81,7 +82,11 @@ def fetch_vajra_ratings_for_session(session_date: Optional[date] = None) -> List
                 """
                 SELECT stock, future_symbol, trade_type, confidence,
                        structure_pass, momentum_pass, trend_pass, volume_pass,
-                       obv_label, market_phase, reversal_risk, computed_at
+                       obv_label, market_phase, reversal_risk, computed_at,
+                       tps_score, ecs_score, transition_state,
+                       vwap_reclaim_status, ema_reclaim_status, rsi_transition_status,
+                       pullback_quality_score, extension_risk_score,
+                       execution_validated, execution_step, pipeline_stage, alertable
                 FROM vajra_futures_rating
                 WHERE session_date = :sd
                 ORDER BY trade_type, confidence DESC, stock
@@ -105,6 +110,18 @@ def fetch_vajra_ratings_for_session(session_date: Optional[date] = None) -> List
                     "market_phase": r[9],
                     "reversal_risk": r[10],
                     "computed_at": r[11].isoformat() if r[11] else None,
+                    "tps_score": float(r[12]) if r[12] is not None else None,
+                    "ecs_score": float(r[13]) if r[13] is not None else None,
+                    "transition_state": r[14],
+                    "vwap_reclaim_status": r[15],
+                    "ema_reclaim_status": r[16],
+                    "rsi_transition_status": r[17],
+                    "pullback_quality_score": float(r[18]) if r[18] is not None else None,
+                    "extension_risk_score": float(r[19]) if r[19] is not None else None,
+                    "execution_validated": bool(r[20]) if r[20] is not None else False,
+                    "execution_step": r[21],
+                    "pipeline_stage": r[22],
+                    "alertable": bool(r[23]) if r[23] is not None else False,
                 }
             )
         return sort_vajra_rows(out)
@@ -152,23 +169,39 @@ def compute_vajra_ratings_live(
     session_date: Optional[date] = None,
     *,
     use_cache: bool = True,
+    mode: str = "transition",
 ) -> List[Dict[str, Any]]:
-    """Compute Vajra ratings for all curr-month futures at the given scan + HTF."""
-    scan_id, htf_id = validate_tf_pair(scan_tf, htf)
+    """Compute Vajra ratings. Default mode: 30m TPS discovery + 5m shortlist validation."""
     sd = session_date or effective_session_date_ist_for_trend()
-    cache_key = f"{sd.isoformat()}:{scan_id}:{htf_id}"
+    mode_norm = (mode or "transition").strip().lower()
+
+    if mode_norm == "transition":
+        cache_key = f"{sd.isoformat()}:transition"
+        now = time.time()
+        if use_cache and cache_key in _LIVE_CACHE:
+            ts, rows = _LIVE_CACHE[cache_key]
+            if now - ts < _LIVE_CACHE_TTL_SEC:
+                return rows
+        universe = load_arbitrage_curr_mth_universe()
+        if not universe:
+            return []
+        upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+
+        def _fetch(key: str, tf: str) -> List[dict]:
+            return _fetch_candles_for_tf(upstox, key, tf)
+
+        rows = run_transition_pipeline(universe, _fetch, computed_at=datetime.now(IST))
+        if use_cache:
+            _LIVE_CACHE[cache_key] = (now, rows)
+        return rows
+
+    scan_id, htf_id = validate_tf_pair(scan_tf, htf)
+    cache_key = f"{sd.isoformat()}:{scan_id}:{htf_id}:legacy"
     now = time.time()
     if use_cache and cache_key in _LIVE_CACHE:
         ts, rows = _LIVE_CACHE[cache_key]
         if now - ts < _LIVE_CACHE_TTL_SEC:
             return rows
-
-    if scan_id == "15m" and htf_id == "1hr":
-        cached = fetch_vajra_ratings_for_session(sd)
-        if cached:
-            if use_cache:
-                _LIVE_CACHE[cache_key] = (now, cached)
-            return cached
 
     universe = load_arbitrage_curr_mth_universe()
     if not universe:
@@ -187,21 +220,21 @@ def compute_vajra_ratings_live(
             if len(c_scan) < MIN_SCAN_BARS:
                 continue
             c_htf = _fetch_candles_for_tf(upstox, fut_key, htf_id)
-            rating = compute_vajra_rating(c_scan, c_htf)
+            rating = compute_ecs_rating(c_scan, c_htf)
             if rating is None:
                 continue
-            rows.append(
-                _rating_to_api_row(
-                    rating,
-                    stock=stock,
-                    fut_sym=fut_sym,
-                    computed_at=computed_at,
-                )
+            row = _rating_to_api_row(
+                rating,
+                stock=stock,
+                fut_sym=fut_sym,
+                computed_at=computed_at,
             )
+            row["ecs_score"] = row["confidence"]
+            rows.append(row)
         except Exception as e:
             logger.debug("vajra_live: skip %s (%s/%s): %s", stock, scan_id, htf_id, e)
 
-    rows = sort_vajra_rows(rows)
+    rows = sort_vajra_rows(rows, discovery_first=False)
     if use_cache:
         _LIVE_CACHE[cache_key] = (now, rows)
     return rows
@@ -236,33 +269,38 @@ def run_vajra_futures_rating_job(scan_trigger: str = "manual") -> Dict[str, Any]
     errors = 0
     persist_rows: List[Dict[str, Any]] = []
 
-    for item in universe:
-        stock = item["stock"]
-        fut_sym = item["future_symbol"]
+    def _fetch(key: str, tf: str) -> List[dict]:
+        return _fetch_candles_for_tf(upstox, key, tf)
+
+    pipeline_rows = run_transition_pipeline(universe, _fetch, computed_at=computed_at)
+    key_by_stock = {u["stock"]: u for u in universe}
+
+    for prow in pipeline_rows:
+        stock = prow.get("stock") or ""
+        item = key_by_stock.get(stock)
+        if not item:
+            continue
         fut_key = item["instrument_key"]
-        try:
-            m15 = _fetch_candles_for_tf(upstox, fut_key, "15m")
-            m60 = _fetch_candles_for_tf(upstox, fut_key, "1hr")
-            rating = compute_vajra_rating(m15, m60)
-            if rating is None:
-                skipped += 1
-                continue
-            row = rating.to_row_dict()
-            row.update(
-                {
-                    "session_date": session_date,
-                    "stock": stock,
-                    "future_symbol": fut_sym,
-                    "instrument_key": fut_key,
-                    "security": fut_sym or stock,
-                    "computed_at": computed_at,
-                }
-            )
-            persist_rows.append(row)
-            rated += 1
-        except Exception as e:
-            errors += 1
-            logger.debug("vajra_rating: skip %s: %s", stock, e)
+        fut_sym = item["future_symbol"]
+        row = dict(prow)
+        row.update(
+            {
+                "session_date": session_date,
+                "stock": stock,
+                "future_symbol": fut_sym,
+                "instrument_key": fut_key,
+                "security": fut_sym or stock,
+                "computed_at": computed_at,
+                "structure_pass": "PASS" in str(prow.get("structure") or ""),
+                "momentum_pass": "PASS" in str(prow.get("momentum") or ""),
+                "trend_pass": "PASS" in str(prow.get("trend") or ""),
+                "volume_pass": "PASS" in str(prow.get("volume") or ""),
+                "obv_label": prow.get("obv"),
+                "ecs_score": prow.get("ecs_score") or prow.get("confidence"),
+            }
+        )
+        persist_rows.append(row)
+        rated += 1
 
     db = SessionLocal()
     try:
@@ -279,12 +317,20 @@ def run_vajra_futures_rating_job(scan_trigger: str = "manual") -> Dict[str, Any]
                         session_date, stock, future_symbol, instrument_key,
                         trade_type, confidence, bull_score, bear_score,
                         structure_pass, momentum_pass, trend_pass, volume_pass,
-                        obv_label, market_phase, reversal_risk, computed_at
+                        obv_label, market_phase, reversal_risk, computed_at,
+                        tps_score, ecs_score, transition_state,
+                        vwap_reclaim_status, ema_reclaim_status, rsi_transition_status,
+                        pullback_quality_score, extension_risk_score,
+                        execution_validated, execution_step, pipeline_stage, alertable
                     ) VALUES (
                         :session_date, :stock, :future_symbol, :instrument_key,
                         :trade_type, :confidence, :bull_score, :bear_score,
                         :structure_pass, :momentum_pass, :trend_pass, :volume_pass,
-                        :obv_label, :market_phase, :reversal_risk, :computed_at
+                        :obv_label, :market_phase, :reversal_risk, :computed_at,
+                        :tps_score, :ecs_score, :transition_state,
+                        :vwap_reclaim_status, :ema_reclaim_status, :rsi_transition_status,
+                        :pullback_quality_score, :extension_risk_score,
+                        :execution_validated, :execution_step, :pipeline_stage, :alertable
                     )
                     ON CONFLICT (session_date, instrument_key) DO UPDATE SET
                         stock = EXCLUDED.stock,
@@ -300,7 +346,19 @@ def run_vajra_futures_rating_job(scan_trigger: str = "manual") -> Dict[str, Any]
                         obv_label = EXCLUDED.obv_label,
                         market_phase = EXCLUDED.market_phase,
                         reversal_risk = EXCLUDED.reversal_risk,
-                        computed_at = EXCLUDED.computed_at
+                        computed_at = EXCLUDED.computed_at,
+                        tps_score = EXCLUDED.tps_score,
+                        ecs_score = EXCLUDED.ecs_score,
+                        transition_state = EXCLUDED.transition_state,
+                        vwap_reclaim_status = EXCLUDED.vwap_reclaim_status,
+                        ema_reclaim_status = EXCLUDED.ema_reclaim_status,
+                        rsi_transition_status = EXCLUDED.rsi_transition_status,
+                        pullback_quality_score = EXCLUDED.pullback_quality_score,
+                        extension_risk_score = EXCLUDED.extension_risk_score,
+                        execution_validated = EXCLUDED.execution_validated,
+                        execution_step = EXCLUDED.execution_step,
+                        pipeline_stage = EXCLUDED.pipeline_stage,
+                        alertable = EXCLUDED.alertable
                     """
                 ),
                 {
@@ -320,6 +378,18 @@ def run_vajra_futures_rating_job(scan_trigger: str = "manual") -> Dict[str, Any]
                     "market_phase": row["market_phase"],
                     "reversal_risk": row["reversal_risk"],
                     "computed_at": row["computed_at"],
+                    "tps_score": row.get("tps_score"),
+                    "ecs_score": row.get("ecs_score"),
+                    "transition_state": row.get("transition_state"),
+                    "vwap_reclaim_status": row.get("vwap_reclaim_status"),
+                    "ema_reclaim_status": row.get("ema_reclaim_status"),
+                    "rsi_transition_status": row.get("rsi_transition_status"),
+                    "pullback_quality_score": row.get("pullback_quality_score"),
+                    "extension_risk_score": row.get("extension_risk_score"),
+                    "execution_validated": row.get("execution_validated", False),
+                    "execution_step": row.get("execution_step"),
+                    "pipeline_stage": row.get("pipeline_stage"),
+                    "alertable": row.get("alertable", False),
                 },
             )
         db.commit()

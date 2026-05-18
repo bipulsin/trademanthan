@@ -50,31 +50,59 @@ def get_vajra_timeframes(user: User = Depends(_require_user)):
 @router.get("/ratings")
 def get_vajra_ratings(
     session_date: Optional[date] = Query(None, description="IST session date; default today"),
-    scan_tf: str = Query(DEFAULT_SCAN_TF, description="Scan timeframe: 5m, 15m, 30m, 1hr, 1d"),
-    htf: str = Query(DEFAULT_HTF, description="Higher timeframe: 1hr, 1d, 1w (must be > scan_tf)"),
+    scan_tf: str = Query(DEFAULT_SCAN_TF, description="Legacy mode scan TF (ignored when mode=transition)"),
+    htf: str = Query(DEFAULT_HTF, description="Legacy mode HTF (ignored when mode=transition)"),
+    mode: str = Query(
+        "transition",
+        description="transition = 30m TPS discovery + 5m shortlist validation; legacy = single TF ECS",
+    ),
     user: User = Depends(_require_user),
 ):
-    """Vajra ratings for current-month futures at the selected scan + HTF."""
+    """Vajra ratings for current-month futures (transition pipeline or legacy ECS)."""
     del user
     try:
         from backend.services.smart_futures_session_date import effective_session_date_ist_for_trend
+        from backend.services.vajra.pipeline import DISCOVERY_TF, EXECUTION_TF, HTF_BIAS_TF
         from backend.services.vajra.timeframes import validate_tf_pair
 
         sd = session_date or effective_session_date_ist_for_trend()
+        mode_norm = (mode or "transition").strip().lower()
+        if mode_norm == "transition":
+            rows = compute_vajra_ratings_live(mode="transition", session_date=sd)
+            computed_at = rows[0].get("computed_at") if rows else None
+            alerts = [r for r in rows if r.get("alertable")]
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "success": True,
+                    "session_date": sd.isoformat(),
+                    "mode": "transition",
+                    "discovery_tf": DISCOVERY_TF,
+                    "execution_tf": EXECUTION_TF,
+                    "htf_bias_tf": HTF_BIAS_TF,
+                    "scan_tf": DISCOVERY_TF,
+                    "htf": HTF_BIAS_TF,
+                    "source": "live_pipeline",
+                    "count": len(rows),
+                    "alert_count": len(alerts),
+                    "alerts": alerts,
+                    "computed_at": computed_at,
+                    "rows": rows,
+                },
+            )
+
         scan_id, htf_id = validate_tf_pair(scan_tf, htf)
-        rows = compute_vajra_ratings_live(scan_id, htf_id, sd)
+        rows = compute_vajra_ratings_live(scan_id, htf_id, sd, mode="legacy")
         computed_at = rows[0].get("computed_at") if rows else None
-        source = "live"
-        if scan_id == "15m" and htf_id == "1hr" and rows:
-            source = "db_or_live"
         return JSONResponse(
             status_code=200,
             content={
                 "success": True,
                 "session_date": sd.isoformat(),
+                "mode": "legacy",
                 "scan_tf": scan_id,
                 "htf": htf_id,
-                "source": source,
+                "source": "live",
                 "count": len(rows),
                 "computed_at": computed_at,
                 "rows": rows,

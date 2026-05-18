@@ -1799,7 +1799,7 @@
         moreBtnId: 'dfVajraMoreBtn',
         metaElId: 'dfVajraMeta',
         msgElId: 'dfVajraMsg',
-        pollMs: 120000,
+        pollMs: 300000,
       });
     }
   });

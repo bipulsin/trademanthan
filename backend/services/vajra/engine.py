@@ -242,11 +242,15 @@ class VajraRating:
     obv_label: str
     market_phase: str
     reversal_risk: str
+    ecs_score: float = 0.0
+    breakout_pass: bool = False
 
     def to_row_dict(self) -> Dict[str, Any]:
+        ecs = self.ecs_score if self.ecs_score else self.confidence
         return {
             "trade_type": self.trade_type,
             "confidence": round(self.confidence, 1),
+            "ecs_score": round(ecs, 1),
             "bull_score": round(self.bull_score, 1),
             "bear_score": round(self.bear_score, 1),
             "structure": _pass_fail(self.structure_pass),
@@ -501,6 +505,8 @@ def compute_vajra_rating(
     p_mom = bull_momentum if bull_dir else bear_momentum
     p_trend = trend_bull if bull_dir else trend_bear
     p_vol = vol_bull if bull_dir else vol_bear
+    p_brk = bull_breakout if bull_dir else bear_breakout
+    ecs_score = float(confidence)
 
     return VajraRating(
         trade_type=trade_type,
@@ -514,25 +520,44 @@ def compute_vajra_rating(
         obv_label=_obv_label(obv_bull, obv_bear),
         market_phase=phase,
         reversal_risk=rev_risk,
+        ecs_score=ecs_score,
+        breakout_pass=bool(p_brk),
     )
 
 
+def compute_ecs_rating(
+    candles_scan: Sequence[Dict[str, Any]],
+    candles_htf: Optional[Sequence[Dict[str, Any]]] = None,
+    **kwargs: Any,
+) -> Optional[VajraRating]:
+    """Expansion Confirmation Score — mature trend / continuation (legacy Vajra logic)."""
+    return compute_vajra_rating(candles_scan, candles_htf, **kwargs)
+
+
 TRADE_TYPE_SORT_ORDER = {
-    "LONG  [A+]": 0,
-    "LONG": 1,
-    "SHORT [A+]": 2,
-    "SHORT": 3,
-    "LONG WATCH": 4,
-    "SHORT WATCH": 5,
-    "REJECT": 6,
+    "EARLY LONG TRANSITION": 0,
+    "EARLY SHORT TRANSITION": 1,
+    "LONG  [A+]": 2,
+    "LONG": 3,
+    "SHORT [A+]": 4,
+    "SHORT": 5,
+    "LONG WATCH": 6,
+    "SHORT WATCH": 7,
+    "REJECT": 8,
 }
 
 
-def sort_vajra_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    def _key(r: Dict[str, Any]) -> Tuple[int, float, str]:
+def sort_vajra_rows(rows: List[Dict[str, Any]], *, discovery_first: bool = True) -> List[Dict[str, Any]]:
+    def _key(r: Dict[str, Any]) -> Tuple[int, float, float, str]:
         tt = str(r.get("trade_type") or "REJECT")
-        conf = float(r.get("confidence") or 0)
+        tps = float(r.get("tps_score") or 0)
+        conf = float(r.get("confidence") or r.get("ecs_score") or 0)
         sec = str(r.get("security") or r.get("stock") or "")
-        return (TRADE_TYPE_SORT_ORDER.get(tt, 99), -conf, sec)
+        type_rank = TRADE_TYPE_SORT_ORDER.get(tt, 99)
+        if discovery_first and tt.startswith("EARLY"):
+            return (type_rank, -tps, -conf, sec)
+        if discovery_first and tps > 0:
+            return (type_rank, -tps, -conf, sec)
+        return (type_rank, -conf, -tps, sec)
 
     return sorted(rows, key=_key)

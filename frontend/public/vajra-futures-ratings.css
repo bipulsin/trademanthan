@@ -77,6 +77,13 @@ table.vajra-table td.num { text-align: center; }
 .df-dir-long { background: #22c55e; color: #000000 !important; }
 .df-dir-short { background: #7f1d1d !important; color: #ffffff !important; }
 .df-dir-neutral { background: #e2e8f0; color: #334155 !important; }
+.vajra-early-pill {
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.35);
+}
+.vajra-pipeline-note {
+    margin-bottom: 6px;
+    font-size: 0.78rem;
+}
 .vajra-rev-med {
     background: #f59e0b !important;
     color: #111827 !important;
