@@ -1,6 +1,37 @@
 /* TWCTO Vajra — shared styles (Daily + Smart Futures) */
-.vajra-card-head.df-pick-card-head { margin-bottom: 6px; }
-.vajra-card-head.df-pick-card-head h2 { margin: 0; flex: 1 1 auto; }
+.vajra-card-head.df-pick-card-head {
+    margin-bottom: 6px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 14px;
+}
+.vajra-card-head.df-pick-card-head h2 { margin: 0; flex: 1 1 auto; min-width: 12rem; }
+.vajra-tf-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 14px;
+}
+.vajra-tf-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--theme-muted, #64748b);
+    white-space: nowrap;
+}
+.vajra-tf-select {
+    font-size: 0.82rem;
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--theme-border, #e2e8f0);
+    background: var(--theme-card, #fff);
+    color: var(--theme-text, #0f172a);
+    min-width: 4.5rem;
+}
 .vajra-meta { font-size: 0.85rem; color: var(--theme-muted, #64748b); margin: 0 0 8px; }
 .vajra-table-wrap { overflow-x: auto; margin-top: 4px; }
 table.vajra-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }

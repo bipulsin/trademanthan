@@ -264,21 +264,29 @@ class VajraRating:
 
 
 def compute_vajra_rating(
-    candles_15m: Sequence[Dict[str, Any]],
+    candles_scan: Sequence[Dict[str, Any]],
+    candles_htf: Optional[Sequence[Dict[str, Any]]] = None,
+    *,
+    candles_15m: Optional[Sequence[Dict[str, Any]]] = None,
     candles_60m: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> Optional[VajraRating]:
     """
     Compute Vajra rating from OHLCV candles (oldest → newest).
-    Requires at least ~80 completed 15m bars for stable indicators.
+    Requires at least ~60 completed scan-timeframe bars for stable indicators.
     """
-    if not candles_15m or len(candles_15m) < 60:
+    if candles_scan is None or not candles_scan:
+        candles_scan = candles_15m or []
+    if candles_htf is None:
+        candles_htf = candles_60m
+
+    if not candles_scan or len(candles_scan) < 60:
         return None
 
-    opens = [float(c.get("open") or 0) for c in candles_15m]
-    highs = [float(c.get("high") or 0) for c in candles_15m]
-    lows = [float(c.get("low") or 0) for c in candles_15m]
-    closes = [float(c.get("close") or 0) for c in candles_15m]
-    volumes = [float(c.get("volume") or 0) for c in candles_15m]
+    opens = [float(c.get("open") or 0) for c in candles_scan]
+    highs = [float(c.get("high") or 0) for c in candles_scan]
+    lows = [float(c.get("low") or 0) for c in candles_scan]
+    closes = [float(c.get("close") or 0) for c in candles_scan]
+    volumes = [float(c.get("volume") or 0) for c in candles_scan]
     traded_values = [closes[i] * volumes[i] for i in range(len(closes))]
 
     n = len(closes)
@@ -367,8 +375,8 @@ def compute_vajra_rating(
 
     htf_bullish = False
     htf_bearish = False
-    if candles_60m and len(candles_60m) >= EMA_SLOW_LEN + 5:
-        htf_closes = [float(c.get("close") or 0) for c in candles_60m]
+    if candles_htf and len(candles_htf) >= EMA_SLOW_LEN + 5:
+        htf_closes = [float(c.get("close") or 0) for c in candles_htf]
         htf_ema = _ema_series(htf_closes, EMA_SLOW_LEN)
         htf_bullish = htf_closes[-1] > htf_ema[-1]
         htf_bearish = htf_closes[-1] < htf_ema[-1]

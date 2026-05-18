@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pytz
 from sqlalchemy import text
@@ -17,9 +18,19 @@ from backend.services.smart_futures_session_date import effective_session_date_i
 from backend.services.upstox_service import UpstoxService
 from backend.services.vajra.engine import compute_vajra_rating, sort_vajra_rows
 from backend.services.vajra.tables import ensure_vajra_futures_rating_table
+from backend.services.vajra.timeframes import (
+    DEFAULT_HTF,
+    DEFAULT_SCAN_TF,
+    MIN_SCAN_BARS,
+    fetch_config,
+    validate_tf_pair,
+)
 
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
+
+_LIVE_CACHE: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
+_LIVE_CACHE_TTL_SEC = 300
 
 
 def _sort_candles(raw: Optional[List[dict]]) -> List[dict]:
@@ -101,6 +112,101 @@ def fetch_vajra_ratings_for_session(session_date: Optional[date] = None) -> List
         db.close()
 
 
+def _fetch_candles_for_tf(upstox: UpstoxService, instrument_key: str, tf_id: str) -> List[dict]:
+    cfg = fetch_config(tf_id)
+    raw = upstox.get_historical_candles_by_instrument_key(
+        instrument_key,
+        interval=str(cfg["interval"]),
+        days_back=int(cfg["days_back"]),
+    )
+    return _sort_candles(raw)
+
+
+def _rating_to_api_row(
+    rating,
+    *,
+    stock: str,
+    fut_sym: str,
+    computed_at: datetime,
+) -> Dict[str, Any]:
+    d = rating.to_row_dict()
+    return {
+        "security": fut_sym or stock,
+        "stock": stock,
+        "trade_type": d["trade_type"],
+        "confidence": d["confidence"],
+        "structure": d["structure"],
+        "momentum": d["momentum"],
+        "trend": d["trend"],
+        "volume": d["volume"],
+        "obv": d["obv"],
+        "market_phase": d["market_phase"],
+        "reversal_risk": d["reversal_risk"],
+        "computed_at": computed_at.isoformat(),
+    }
+
+
+def compute_vajra_ratings_live(
+    scan_tf: str = DEFAULT_SCAN_TF,
+    htf: str = DEFAULT_HTF,
+    session_date: Optional[date] = None,
+    *,
+    use_cache: bool = True,
+) -> List[Dict[str, Any]]:
+    """Compute Vajra ratings for all curr-month futures at the given scan + HTF."""
+    scan_id, htf_id = validate_tf_pair(scan_tf, htf)
+    sd = session_date or effective_session_date_ist_for_trend()
+    cache_key = f"{sd.isoformat()}:{scan_id}:{htf_id}"
+    now = time.time()
+    if use_cache and cache_key in _LIVE_CACHE:
+        ts, rows = _LIVE_CACHE[cache_key]
+        if now - ts < _LIVE_CACHE_TTL_SEC:
+            return rows
+
+    if scan_id == "15m" and htf_id == "1hr":
+        cached = fetch_vajra_ratings_for_session(sd)
+        if cached:
+            if use_cache:
+                _LIVE_CACHE[cache_key] = (now, cached)
+            return cached
+
+    universe = load_arbitrage_curr_mth_universe()
+    if not universe:
+        return []
+
+    upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+    computed_at = datetime.now(IST)
+    rows: List[Dict[str, Any]] = []
+
+    for item in universe:
+        stock = item["stock"]
+        fut_sym = item["future_symbol"]
+        fut_key = item["instrument_key"]
+        try:
+            c_scan = _fetch_candles_for_tf(upstox, fut_key, scan_id)
+            if len(c_scan) < MIN_SCAN_BARS:
+                continue
+            c_htf = _fetch_candles_for_tf(upstox, fut_key, htf_id)
+            rating = compute_vajra_rating(c_scan, c_htf)
+            if rating is None:
+                continue
+            rows.append(
+                _rating_to_api_row(
+                    rating,
+                    stock=stock,
+                    fut_sym=fut_sym,
+                    computed_at=computed_at,
+                )
+            )
+        except Exception as e:
+            logger.debug("vajra_live: skip %s (%s/%s): %s", stock, scan_id, htf_id, e)
+
+    rows = sort_vajra_rows(rows)
+    if use_cache:
+        _LIVE_CACHE[cache_key] = (now, rows)
+    return rows
+
+
 def run_vajra_futures_rating_job(scan_trigger: str = "manual") -> Dict[str, Any]:
     """
     Rate all current-month futures from arbitrage_master and persist for today's session.
@@ -135,16 +241,8 @@ def run_vajra_futures_rating_job(scan_trigger: str = "manual") -> Dict[str, Any]
         fut_sym = item["future_symbol"]
         fut_key = item["instrument_key"]
         try:
-            m15 = _sort_candles(
-                upstox.get_historical_candles_by_instrument_key(
-                    fut_key, interval="minutes/15", days_back=12
-                )
-            )
-            m60 = _sort_candles(
-                upstox.get_historical_candles_by_instrument_key(
-                    fut_key, interval="hours/1", days_back=45
-                )
-            )
+            m15 = _fetch_candles_for_tf(upstox, fut_key, "15m")
+            m60 = _fetch_candles_for_tf(upstox, fut_key, "1hr")
             rating = compute_vajra_rating(m15, m60)
             if rating is None:
                 skipped += 1

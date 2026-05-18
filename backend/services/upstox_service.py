@@ -1419,6 +1419,11 @@ class UpstoxService:
                     if one:
                         return _aggregate_1m_to_n_minute(one, 15)
                     return None
+                if iv == "minutes/30":
+                    one = self._fetch_historical_v2_candles(instrument_key, "1minute", to_date, from_date)
+                    if one:
+                        return _aggregate_1m_to_n_minute(one, 30)
+                    return None
                 v2_tok = _v3_interval_to_v2_token(interval)
                 if v2_tok:
                     return self._fetch_historical_v2_candles(instrument_key, v2_tok, to_date, from_date)

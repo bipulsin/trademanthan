@@ -9,6 +9,31 @@
             : global.location.origin;
 
     const TOP_N = 5;
+    const DEFAULT_SCAN_TF = '30m';
+    const DEFAULT_HTF = '1d';
+    const HTF_OPTIONS = ['1hr', '1d', '1w'];
+    const TF_MINUTES = { '15m': 15, '30m': 30, '1hr': 60, '1d': 1440, '1w': 10080 };
+
+    function validHtfForScan(scanTf) {
+        const sm = TF_MINUTES[scanTf] || 0;
+        return HTF_OPTIONS.filter(function (h) {
+            return TF_MINUTES[h] > sm;
+        });
+    }
+
+    function syncHtfSelect(scanSel, htfSel) {
+        if (!scanSel || !htfSel) return;
+        const allowed = validHtfForScan(scanSel.value);
+        const prev = htfSel.value;
+        htfSel.innerHTML = allowed
+            .map(function (h) {
+                return '<option value="' + h + '">' + h + '</option>';
+            })
+            .join('');
+        if (allowed.indexOf(prev) >= 0) htfSel.value = prev;
+        else if (allowed.indexOf(DEFAULT_HTF) >= 0) htfSel.value = DEFAULT_HTF;
+        else if (allowed.length) htfSel.value = allowed[allowed.length - 1];
+    }
 
     const TRADE_TYPE_ORDER = {
         'LONG  [A+]': 0,
@@ -276,8 +301,14 @@
         return modal;
     }
 
-    async function fetchRatings() {
-        const paths = [API_BASE + '/api/vajra-futures/ratings', API_BASE + '/vajra-futures/ratings'];
+    async function fetchRatings(scanTf, htf) {
+        const scan = scanTf || DEFAULT_SCAN_TF;
+        const ht = htf || DEFAULT_HTF;
+        const q = '?scan_tf=' + encodeURIComponent(scan) + '&htf=' + encodeURIComponent(ht);
+        const paths = [
+            API_BASE + '/api/vajra-futures/ratings' + q,
+            API_BASE + '/vajra-futures/ratings' + q,
+        ];
         let lastErr = null;
         for (let i = 0; i < paths.length; i++) {
             try {
@@ -301,6 +332,20 @@
         const moreBtn = document.getElementById(opts.moreBtnId || prefix + 'VajraMoreBtn');
         const metaEl = opts.metaElId ? document.getElementById(opts.metaElId) : null;
         const msgEl = opts.msgElId ? document.getElementById(opts.msgElId) : null;
+        const scanTfEl = document.getElementById(prefix + 'VajraScanTf');
+        const htfEl = document.getElementById(prefix + 'VajraHtf');
+        syncHtfSelect(scanTfEl, htfEl);
+        if (scanTfEl) {
+            scanTfEl.addEventListener('change', function () {
+                syncHtfSelect(scanTfEl, htfEl);
+                load();
+            });
+        }
+        if (htfEl) {
+            htfEl.addEventListener('change', function () {
+                load();
+            });
+        }
         const modal = ensureModal(prefix);
         const modalTableEl = document.getElementById(prefix + 'VajraMoreTable');
         const modalSubEl = document.getElementById(prefix + 'VajraMoreSub');
@@ -370,9 +415,11 @@
         });
 
         async function load() {
-            if (msgEl) msgEl.textContent = 'Loading Vajra ratings…';
+            const scanVal = scanTfEl ? scanTfEl.value : DEFAULT_SCAN_TF;
+            const htfVal = htfEl ? htfEl.value : DEFAULT_HTF;
+            if (msgEl) msgEl.textContent = 'Loading Vajra ratings (' + scanVal + ' / ' + htfVal + ')…';
             try {
-                const data = await fetchRatings();
+                const data = await fetchRatings(scanVal, htfVal);
                 allRows = (data && data.rows) || [];
                 if (listEl) listEl.innerHTML = renderTopTable(allRows);
                 if (moreBtn) {
@@ -388,7 +435,10 @@
                         fmtUpdated(data.computed_at || (allRows[0] && allRows[0].computed_at)) +
                         ' · ' +
                         allRows.length +
-                        ' symbols';
+                        ' symbols · Scan ' +
+                        (data.scan_tf || scanVal) +
+                        ' · HTF ' +
+                        (data.htf || htfVal);
                 }
                 if (msgEl) msgEl.textContent = '';
                 if (modal.classList.contains('vajra-modal--open')) {
