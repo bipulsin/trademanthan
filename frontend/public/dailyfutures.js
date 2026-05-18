@@ -1809,5 +1809,8 @@
         closedElId: 'dfVajraClosedTrades',
       });
     }
+    if (window.VajraHelpGuide) {
+      window.VajraHelpGuide.init({ prefix: 'df' });
+    }
   });
 })();

@@ -2190,5 +2190,8 @@
                 closedElId: 'sfVajraClosedTrades',
             });
         }
+        if (window.VajraHelpGuide) {
+            window.VajraHelpGuide.init({ prefix: 'sf' });
+        }
     });
 })();

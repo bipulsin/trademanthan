@@ -1,0 +1,132 @@
+/* Vajra help guide — callout + modal */
+.vajra-title-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.vajra-help-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.65rem;
+    height: 1.65rem;
+    padding: 0;
+    border: 1px solid var(--theme-border, #475569);
+    border-radius: 50%;
+    background: rgba(37, 99, 235, 0.12);
+    color: #60a5fa;
+    cursor: pointer;
+    vertical-align: middle;
+    line-height: 1;
+    flex-shrink: 0;
+}
+.vajra-help-btn:hover {
+    background: rgba(37, 99, 235, 0.28);
+    color: #93c5fd;
+}
+.vajra-help-btn i {
+    font-size: 0.95rem;
+}
+.vajra-help-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 2600;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+}
+.vajra-help-modal--open {
+    display: flex;
+}
+.vajra-help-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+}
+.vajra-help-panel {
+    position: relative;
+    width: min(720px, 100%);
+    max-height: 90vh;
+    overflow: auto;
+    background: var(--theme-card, #0f172a);
+    border: 1px solid var(--theme-border, #334155);
+    border-radius: 12px;
+    padding: 18px 20px 20px;
+    color: var(--theme-text, #e2e8f0);
+}
+.vajra-help-panel h2 {
+    margin: 0 0 4px;
+    font-size: 1.2rem;
+}
+.vajra-help-panel h3 {
+    margin: 18px 0 8px;
+    font-size: 0.95rem;
+    color: #93c5fd;
+}
+.vajra-help-panel h4 {
+    margin: 12px 0 6px;
+    font-size: 0.85rem;
+    color: var(--theme-muted, #94a3b8);
+}
+.vajra-help-lead {
+    font-size: 0.88rem;
+    color: var(--theme-muted, #94a3b8);
+    margin: 0 0 12px;
+    line-height: 1.45;
+}
+.vajra-help-panel p,
+.vajra-help-panel li {
+    font-size: 0.84rem;
+    line-height: 1.5;
+    margin: 0 0 8px;
+}
+.vajra-help-panel ul {
+    margin: 0 0 10px;
+    padding-left: 1.2rem;
+}
+.vajra-help-callout {
+    border-left: 3px solid #2563eb;
+    padding: 8px 10px;
+    margin: 10px 0;
+    background: rgba(37, 99, 235, 0.08);
+    border-radius: 0 8px 8px 0;
+    font-size: 0.82rem;
+}
+.vajra-help-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+    margin: 8px 0 12px;
+}
+.vajra-help-table th,
+.vajra-help-table td {
+    border: 1px solid var(--theme-border, #334155);
+    padding: 6px 8px;
+    text-align: left;
+    vertical-align: top;
+}
+.vajra-help-table th {
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--theme-muted, #94a3b8);
+}
+.vajra-help-close-row {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 16px;
+    position: sticky;
+    bottom: 0;
+    padding-top: 8px;
+    background: linear-gradient(transparent, var(--theme-card, #0f172a) 40%);
+}
+.vajra-help-close-btn {
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: none;
+    background: #2563eb;
+    color: #fff;
+    font-weight: 700;
+    cursor: pointer;
+    font-size: 0.85rem;
+}
