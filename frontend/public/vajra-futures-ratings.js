@@ -240,7 +240,11 @@
 
     function renderTopTable(rows) {
         if (!rows || !rows.length) {
-            return '<p class="vajra-meta">No Vajra ratings yet. Transition scan runs every 5 minutes on 30m bars (9:30–15:00 IST).</p>';
+            return (
+                '<p class="vajra-meta">No Vajra ratings for this session yet. ' +
+                'The engine runs every 5 minutes (9:30–15:00 IST). ' +
+                'If this persists after market open, use Refresh or wait for the next scan.</p>'
+            );
         }
         const prioritized = rows.slice().sort(function (a, b) {
             const av = TRADE_TYPE_ORDER[String(a.trade_type || '')] ?? 99;
@@ -418,8 +422,14 @@
         const msgEl = opts.msgElId ? document.getElementById(opts.msgElId) : null;
         const scanTfEl = document.getElementById(prefix + 'VajraScanTf');
         const htfEl = document.getElementById(prefix + 'VajraHtf');
-        if (scanTfEl) scanTfEl.closest('.vajra-tf-label').style.display = 'none';
-        if (htfEl) htfEl.closest('.vajra-tf-label').style.display = 'none';
+        if (scanTfEl) {
+            const scanLbl = scanTfEl.closest('.vajra-tf-label');
+            if (scanLbl) scanLbl.style.display = 'none';
+        }
+        if (htfEl) {
+            const htfLbl = htfEl.closest('.vajra-tf-label');
+            if (htfLbl) htfLbl.style.display = 'none';
+        }
         const modal = ensureModal(prefix);
         const modalTableEl = document.getElementById(prefix + 'VajraMoreTable');
         const modalSubEl = document.getElementById(prefix + 'VajraMoreSub');
@@ -491,7 +501,6 @@
             try {
                 const data = await fetchRatings(DEFAULT_SCAN_TF, DEFAULT_HTF);
                 allRows = (data && data.rows) || [];
-                if (listEl) {
                 if (listEl) listEl.innerHTML = renderTopTable(allRows);
                 if (moreBtn) {
                     const rest = Math.max(0, allRows.length - TOP_N);

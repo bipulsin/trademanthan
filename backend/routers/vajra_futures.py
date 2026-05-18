@@ -68,7 +68,11 @@ def get_vajra_ratings(
         sd = session_date or effective_session_date_ist_for_trend()
         mode_norm = (mode or "transition").strip().lower()
         if mode_norm == "transition":
-            rows = compute_vajra_ratings_live(mode="transition", session_date=sd)
+            db_first = fetch_vajra_ratings_for_session(sd)
+            source = "db" if db_first else "live_pipeline"
+            rows = db_first or compute_vajra_ratings_live(
+                mode="transition", session_date=sd, use_cache=True
+            )
             computed_at = rows[0].get("computed_at") if rows else None
             alerts = [r for r in rows if r.get("alertable")]
             return JSONResponse(
@@ -82,7 +86,7 @@ def get_vajra_ratings(
                     "htf_bias_tf": HTF_BIAS_TF,
                     "scan_tf": DISCOVERY_TF,
                     "htf": HTF_BIAS_TF,
-                    "source": "live_pipeline",
+                    "source": source,
                     "count": len(rows),
                     "alert_count": len(alerts),
                     "alerts": alerts,
@@ -133,7 +137,7 @@ def run_vajra_ratings_now(user: User = Depends(_require_user)):
             content={
                 "success": True,
                 **result,
-                "scan_tf": "15m",
+                "scan_tf": "30m",
                 "htf": "1hr",
                 "count": len(rows),
                 "rows": rows,

@@ -182,6 +182,11 @@ def compute_vajra_ratings_live(
             ts, rows = _LIVE_CACHE[cache_key]
             if now - ts < _LIVE_CACHE_TTL_SEC:
                 return rows
+        db_rows = fetch_vajra_ratings_for_session(sd)
+        if db_rows:
+            if use_cache:
+                _LIVE_CACHE[cache_key] = (now, db_rows)
+            return db_rows
         universe = load_arbitrage_curr_mth_universe()
         if not universe:
             return []

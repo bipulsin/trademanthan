@@ -927,46 +927,32 @@ class SmartFutureAlgoScheduler:
                 len(_sf_picker_slots),
             )
 
-            # Vajra futures rating — same 15-min slots as Smart Futures picker (9:30–15:00 IST)
-            def _create_vajra_wrapper(_hh: int, _mm: int):
-                _label = f"{_hh:02d}:{_mm:02d}"
+            # Vajra futures rating — every 5 min (IST window + holiday checks inside job)
+            def _run_vajra_5m():
+                if not is_allowed_scheduler_window_ist():
+                    logger.debug("Outside 08:30–21:00 IST — skip Vajra rating 5m tick")
+                    return
+                ist = pytz.timezone("Asia/Kolkata")
+                if _skip_ist_non_trading_job("Vajra rating 5m", datetime.now(ist)):
+                    return
+                logger.info("🔧 Vajra futures rating (5m interval)...")
+                try:
+                    run_vajra_futures_rating_job(scan_trigger="5m_interval")
+                    logger.info("✅ Vajra futures rating (5m interval) completed")
+                except Exception as e:
+                    logger.error("❌ Vajra futures rating (5m interval) failed: %s", e, exc_info=True)
 
-                def _run_vajra():
-                    if not is_allowed_scheduler_window_ist():
-                        logger.debug("Outside 08:30–21:00 IST — skip Vajra rating %s", _label)
-                        return
-                    ist = pytz.timezone("Asia/Kolkata")
-                    if _skip_ist_non_trading_job(f"Vajra rating {_label}", datetime.now(ist)):
-                        return
-                    logger.info("🔧 Vajra futures rating (%s IST)...", _label)
-                    try:
-                        run_vajra_futures_rating_job(scan_trigger=_label)
-                        logger.info("✅ Vajra futures rating (%s) completed", _label)
-                    except Exception as e:
-                        logger.error("❌ Vajra futures rating (%s) failed: %s", _label, e, exc_info=True)
-
-                return _run_vajra
-
-            for _hh, _mm in _sf_picker_slots:
-                self.scheduler.add_job(
-                    _create_vajra_wrapper(_hh, _mm),
-                    trigger=CronTrigger(
-                        day_of_week="mon-fri",
-                        hour=_hh,
-                        minute=_mm,
-                        timezone="Asia/Kolkata",
-                    ),
-                    id=f"smart_future_vajra_rating_{_hh}_{_mm:02d}",
-                    name=f"Vajra futures rating ({_hh:02d}:{_mm:02d} IST)",
-                    replace_existing=True,
-                    max_instances=1,
-                    misfire_grace_time=300,
-                    coalesce=True,
-                )
-            logger.info(
-                "✅ Scheduled: Vajra futures rating (%s weekday slots, every 15 min 9:30–15:00 IST)",
-                len(_sf_picker_slots),
+            self.scheduler.add_job(
+                _run_vajra_5m,
+                trigger=IntervalTrigger(minutes=5),
+                id="smart_future_vajra_rating_5m",
+                name="Vajra futures rating (every 5 min)",
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=120,
+                coalesce=True,
             )
+            logger.info("✅ Scheduled: Vajra futures rating (every 5 min, IST trading window)")
 
             # 6. CAR NIFTY200 Updater - Every 3 hours (Yahoo first, Upstox fallback)
             def run_car_nifty200_update():
