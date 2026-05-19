@@ -130,6 +130,15 @@ class SettingsManager {
 
         // Notification type checkboxes
         this.setupNotificationTypeListeners();
+        const vajraEnterEl = document.getElementById('telegramVajraEnter');
+        if (vajraEnterEl) {
+            vajraEnterEl.addEventListener('change', (e) => {
+                if (!this.settings.notifications.telegram.types) {
+                    this.settings.notifications.telegram.types = {};
+                }
+                this.updateSetting('telegram.types.vajraEnter', e.target.checked);
+            });
+        }
     }
 
     setupNotificationTypeListeners() {
@@ -166,6 +175,14 @@ class SettingsManager {
         if (savedSettings) {
             try {
                 this.settings = JSON.parse(savedSettings);
+                if (
+                    this.settings.notifications &&
+                    this.settings.notifications.telegram &&
+                    this.settings.notifications.telegram.types &&
+                    this.settings.notifications.telegram.types.vajraEnter === undefined
+                ) {
+                    this.settings.notifications.telegram.types.vajraEnter = false;
+                }
                 console.log('Settings: Loaded saved settings:', this.settings);
             } catch (error) {
                 console.error('Settings: Error parsing saved settings:', error);
@@ -201,7 +218,8 @@ class SettingsManager {
                         strategy: false,
                         broker: false,
                         reports: false,
-                        trades: false
+                        trades: false,
+                        vajraEnter: false
                     }
                 },
                 whatsapp: {
@@ -269,6 +287,10 @@ class SettingsManager {
         document.getElementById('telegramBroker').checked = telegram.types.broker;
         document.getElementById('telegramReports').checked = telegram.types.reports;
         document.getElementById('telegramTrades').checked = telegram.types.trades;
+        const vajraEnterEl = document.getElementById('telegramVajraEnter');
+        if (vajraEnterEl) {
+            vajraEnterEl.checked = !!(telegram.types && telegram.types.vajraEnter);
+        }
 
         // WhatsApp settings
         document.getElementById('whatsappEnabled').checked = whatsapp.enabled;

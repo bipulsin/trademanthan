@@ -61,28 +61,7 @@
         { key: 'extension_risk_score', label: 'Extension', chip: true, num: true },
     ];
 
-    const MODAL_COLUMNS = [
-        { key: 'security', label: 'Security', chip: false },
-        { key: 'trade_type', label: 'Status', chip: true },
-        { key: 'tps_score', label: 'TPS', chip: true, num: true },
-        { key: 'ees_score', label: 'EES', chip: true, num: true },
-        { key: 'entry_state', label: 'Entry State', chip: true },
-        { key: 'ecs_score', label: 'ECS', chip: true, num: true },
-        { key: 'transition_state', label: 'Transition State', chip: true },
-        { key: 'vwap_reclaim_status', label: 'VWAP Reclaim', chip: true },
-        { key: 'ema_reclaim_status', label: 'EMA Reclaim', chip: true },
-        { key: 'rsi_transition_status', label: 'RSI Transition', chip: true },
-        { key: 'pullback_quality_score', label: 'Pullback Q', chip: true, num: true },
-        { key: 'extension_risk_score', label: 'Extension Risk', chip: true, num: true },
-        { key: 'execution_step', label: '5m Step', chip: true },
-        { key: 'structure', label: 'Structure', chip: true },
-        { key: 'momentum', label: 'Momentum', chip: true },
-        { key: 'trend', label: 'Trend', chip: true },
-        { key: 'volume', label: 'Volume', chip: true },
-        { key: 'obv', label: 'OBV', chip: true },
-        { key: 'market_phase', label: 'Phase', chip: true },
-        { key: 'reversal_risk', label: 'Rev Risk', chip: true },
-    ];
+    const VAJRA_ENTER_SEEN_KEY = 'vajra_enter_telegram_seen';
 
     const CHIP_COLUMNS = TOP_COLUMNS.filter(function (c) {
         return c.chip;
@@ -374,7 +353,7 @@
         return lines.line1;
     }
 
-    function renderTopTableBodyRows(rows) {
+    function renderScoreBandBodyRows(rows, showEnter) {
         let tbody = '';
         rows.forEach(function (r, idx) {
             tbody += '<tr class="vajra-top-data-row">';
@@ -405,10 +384,14 @@
                 let tdClass = col.num ? 'vajra-td-chip num' : 'vajra-td-chip';
                 tbody += '<td class="' + tdClass + '">' + renderChip(col, r) + '</td>';
             }
-            tbody += renderEnterCell(r, idx, false);
+            if (showEnter) tbody += renderEnterCell(r, idx, false);
             tbody += '</tr>';
         });
         return tbody;
+    }
+
+    function renderTopTableBodyRows(rows) {
+        return renderScoreBandBodyRows(rows, true);
     }
 
     function renderTopTable(rows) {
@@ -437,7 +420,7 @@
 
     function sortRows(rows, sortKey, sortDir) {
         const dir = sortDir === 'asc' ? 1 : -1;
-        const col = MODAL_COLUMNS.find(function (c) {
+        const col = TOP_COLUMNS.find(function (c) {
             return c.key === sortKey;
         });
         return rows.slice().sort(function (a, b) {
@@ -446,7 +429,12 @@
                 const bv = String(b.security || b.stock || '');
                 return av.localeCompare(bv, undefined, { numeric: true }) * dir;
             }
-            if (sortKey === 'tps_score' || sortKey === 'ecs_score' || sortKey === 'confidence') {
+            if (
+                sortKey === 'tps_score' ||
+                sortKey === 'ees_score' ||
+                sortKey === 'ecs_score' ||
+                sortKey === 'confidence'
+            ) {
                 const av = Number(a[sortKey] != null ? a[sortKey] : a.confidence);
                 const bv = Number(b[sortKey] != null ? b[sortKey] : b.confidence);
                 return ((Number.isFinite(av) ? av : -1) - (Number.isFinite(bv) ? bv : -1)) * dir;
@@ -470,8 +458,15 @@
     }
 
     function renderModalTable(rows, sortKey, sortDir) {
-        let thead = '<thead><tr>';
-        MODAL_COLUMNS.forEach(function (col) {
+        const colCount = 1 + TOP_COLUMNS.length;
+        let thead =
+            '<thead><tr>' +
+            '<th scope="col" class="vajra-sort-th" data-sort-key="security" role="columnheader" aria-sort="' +
+            (sortKey === 'security' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none') +
+            '" tabindex="0">Security' +
+            sortIndicator(sortKey, sortDir, 'security') +
+            '</th>';
+        TOP_COLUMNS.forEach(function (col) {
             const thNum = col.num ? ' num' : '';
             thead +=
                 '<th scope="col" class="vajra-sort-th' +
@@ -490,28 +485,23 @@
         if (!rows.length) {
             tbody =
                 '<tr><td colspan="' +
-                MODAL_COLUMNS.length +
+                colCount +
                 '" class="vajra-meta">No additional ratings.</td></tr>';
         } else {
-            let body = '';
-            rows.forEach(function (r) {
-                body += '<tr><td class="vajra-td-security">' + escapeHtml(cellValue(r, { key: 'security' })) + '</td>';
-                MODAL_COLUMNS.filter(function (c) {
-                    return c.chip;
-                }).forEach(function (col) {
-                    const tdClass = col.num ? 'vajra-td-chip num' : 'vajra-td-chip';
-                    body += '<td class="' + tdClass + '">' + renderChip(col, r) + '</td>';
-                });
-                body += '</tr>';
-            });
-            tbody = body;
+            tbody = renderScoreBandBodyRows(rows, false);
         }
         return (
-            '<div class="vajra-table-wrap"><table class="vajra-table vajra-modal-table">' +
+            '<p class="vajra-meta vajra-pipeline-note">Sorted by TPS+EES+ECS · same layout as top table</p>' +
+            '<div class="vajra-table-wrap"><table class="vajra-table vajra-top-table vajra-modal-table">' +
             thead +
             '<tbody>' +
             tbody +
-            '</tbody></table></div>'
+            '</tbody></table></div>' +
+            '<p class="vajra-score-footnote">' +
+            '<strong>TPS</strong> = Transition Potential Score (30m discovery) · ' +
+            '<strong>EES</strong> = Executable Entry Score (5m timing) · ' +
+            '<strong>ECS</strong> = Expansion Confirmation Score' +
+            '</p>'
         );
     }
 
@@ -563,52 +553,68 @@
         throw new Error(lastErr || 'Failed to load Vajra ratings');
     }
 
-    function processAlerts(alerts, seenKeys) {
-        if (!alerts || !alerts.length) return;
-        alerts.forEach(function (r) {
-            const key = (r.stock || r.security || '') + '|' + (r.trade_type || '');
-            if (seenKeys[key]) return;
-            seenKeys[key] = true;
-            const tt = String(r.trade_type || '');
-            const eesMsgs = r.ees_alerts || [];
-            if (eesMsgs.length) {
-                eesMsgs.forEach(function (alertText) {
-                    const ekey = key + '|ees|' + alertText;
-                    if (seenKeys[ekey]) return;
-                    seenKeys[ekey] = true;
-                    const msg =
-                        'Vajra EES · ' +
-                        alertText +
-                        ': ' +
-                        (r.security || r.stock) +
-                        ' · TPS ' +
-                        fmtNum(r.tps_score) +
-                        ' · EES ' +
-                        fmtNum(r.ees_score) +
-                        ' · ' +
-                        (r.entry_state || '');
-                    if (typeof global.notifyTelegramUserMessage === 'function') {
-                        global.notifyTelegramUserMessage(msg).catch(function () {});
-                    }
-                });
-                return;
-            }
-            if (tt.indexOf('EARLY') !== 0) return;
-            const msg =
-                'Vajra ' +
-                tt +
-                ': ' +
-                (r.security || r.stock) +
-                ' · TPS ' +
-                fmtNum(r.tps_score) +
-                ' · EES ' +
-                fmtNum(r.ees_score) +
-                ' · ' +
-                (r.transition_state || '');
-            if (typeof global.notifyTelegramUserMessage === 'function') {
-                global.notifyTelegramUserMessage(msg).catch(function () {});
-            }
+    function isVajraTelegramEnabled() {
+        try {
+            const raw = global.localStorage.getItem('trademanthan_settings');
+            if (!raw) return false;
+            const settings = JSON.parse(raw);
+            const tg = settings && settings.notifications && settings.notifications.telegram;
+            if (!tg || !tg.enabled) return false;
+            const types = tg.types || {};
+            return types.vajraEnter === true;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function loadEnterSeenForSession(sessionDate) {
+        const day = String(sessionDate || 'unknown');
+        try {
+            const raw = global.sessionStorage.getItem(VAJRA_ENTER_SEEN_KEY);
+            const all = raw ? JSON.parse(raw) : {};
+            return all[day] || {};
+        } catch (e) {
+            return {};
+        }
+    }
+
+    function saveEnterSeenForSession(sessionDate, seen) {
+        const day = String(sessionDate || 'unknown');
+        try {
+            const raw = global.sessionStorage.getItem(VAJRA_ENTER_SEEN_KEY);
+            const all = raw ? JSON.parse(raw) : {};
+            all[day] = seen;
+            global.sessionStorage.setItem(VAJRA_ENTER_SEEN_KEY, JSON.stringify(all));
+        } catch (e) {
+            /* ignore */
+        }
+    }
+
+    /** One Telegram message when ENTER becomes enabled for symbols (first time per session). */
+    function processEnterTelegramAlerts(rows, sessionDate) {
+        if (!isVajraTelegramEnabled()) return;
+        if (typeof global.notifyTelegramUserMessage !== 'function') return;
+        const seen = loadEnterSeenForSession(sessionDate);
+        const newly = [];
+        (rows || []).forEach(function (r) {
+            if (!isEnterRow(r)) return;
+            const sym = String(r.security || r.stock || '').trim();
+            if (!sym || seen[sym]) return;
+            seen[sym] = true;
+            newly.push(sym);
         });
+        if (!newly.length) return;
+        saveEnterSeenForSession(sessionDate, seen);
+        const msg =
+            'Vajra ENTER ready (' +
+            newly.length +
+            '):\n' +
+            newly
+                .map(function (s, i) {
+                    return i + 1 + '. ' + s;
+                })
+                .join('\n');
+        global.notifyTelegramUserMessage(msg).catch(function () {});
     }
 
     function init(opts) {
@@ -732,14 +738,7 @@
                         (data.alert_count != null ? ' · Alerts: ' + data.alert_count : '');
                 }
                 if (msgEl) msgEl.textContent = '';
-                const alertRows = (data.alerts || []).concat(data.ees_alert_rows || []);
-                const mergedAlerts =
-                    alertRows.length > 0
-                        ? alertRows
-                        : allRows.filter(function (r) {
-                              return r.alertable || (r.ees_alerts && r.ees_alerts.length);
-                          });
-                processAlerts(mergedAlerts, seenAlertKeys);
+                processEnterTelegramAlerts(allRows, data.session_date);
                 if (modal.classList.contains('vajra-modal--open')) {
                     modalRows = allRows.slice(TOP_N);
                     renderModal();
