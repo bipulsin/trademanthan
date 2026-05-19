@@ -192,8 +192,7 @@
                 .trim();
         }
         if (col.key === 'transition_state') {
-            const t = String(row.transition_state || raw || '—');
-            return t.length > 28 ? t.slice(0, 26) + '…' : t;
+            return String(row.transition_state || raw || '—').trim();
         }
         if (col.key === 'obv') {
             const o = String(row.obv || raw || '').toUpperCase();
@@ -245,8 +244,37 @@
         return 'df-dir-neutral';
     }
 
+    function transitionTwoLines(raw) {
+        const s = String(raw || '—').trim();
+        if (!s || s === '—') return { line1: '—', line2: '' };
+        const words = s.split(/\s+/);
+        if (words.length >= 2) {
+            const mid = Math.ceil(words.length / 2);
+            return { line1: words.slice(0, mid).join(' '), line2: words.slice(mid).join(' ') };
+        }
+        if (s.length > 9) {
+            const mid = Math.ceil(s.length / 2);
+            return { line1: s.slice(0, mid), line2: s.slice(mid) };
+        }
+        return { line1: s, line2: '' };
+    }
+
     function renderChip(col, row) {
         const tone = chipToneClass(col, row);
+        if (col.key === 'transition_state') {
+            const lines = transitionTwoLines(row.transition_state);
+            const full = String(row.transition_state || '—');
+            return (
+                '<span class="df-dir-pill vajra-transition-pill ' +
+                tone +
+                '" title="' +
+                escapeHtml(col.label + ': ' + full) +
+                '">' +
+                escapeHtml(lines.line1) +
+                (lines.line2 ? '<br>' + escapeHtml(lines.line2) : '') +
+                '</span>'
+            );
+        }
         const text = chipDisplayValue(col, row);
         return (
             '<span class="df-dir-pill ' +
@@ -266,7 +294,8 @@
             tbody += '<tr>';
             tbody += '<td class="vajra-td-security">' + escapeHtml(cellValue(r, { key: 'security' })) + '</td>';
             cols.forEach(function (col) {
-                const tdClass = col.num ? 'vajra-td-chip num' : 'vajra-td-chip';
+                let tdClass = col.num ? 'vajra-td-chip num' : 'vajra-td-chip';
+                if (col.key === 'transition_state') tdClass += ' vajra-td-transition';
                 tbody += '<td class="' + tdClass + '">' + renderChip(col, r) + '</td>';
             });
             if (showEnter) {
@@ -281,16 +310,31 @@
         const cols = columns || CHIP_COLUMNS;
         let head = '<thead><tr><th scope="col">Security</th>';
         cols.forEach(function (col) {
-            const thClass = col.num ? 'num' : '';
-            head += '<th scope="col" class="' + thClass + '">' + escapeHtml(col.label) + '</th>';
+            let thClass = col.num ? 'num' : '';
+            if (col.key === 'transition_state') {
+                thClass += ' vajra-th-transition';
+                head += '<th scope="col" class="' + thClass + '">Trans<br>ition</th>';
+            } else {
+                head += '<th scope="col" class="' + thClass + '">' + escapeHtml(col.label) + '</th>';
+            }
         });
         if (showEnter) head += '<th scope="col" class="vajra-th-enter">Action</th>';
         head += '</tr></thead>';
         return head;
     }
 
-    function sortByTpsDesc(rows) {
+    function isEnterRow(r) {
+        return r.enter_enabled === true || String(r.enter_action || '').toUpperCase() === 'ENTER';
+    }
+
+    function sortForDisplay(rows) {
         return rows.slice().sort(function (a, b) {
+            const aEnter = isEnterRow(a) ? 1 : 0;
+            const bEnter = isEnterRow(b) ? 1 : 0;
+            if (bEnter !== aEnter) return bEnter - aEnter;
+            const ae = Number(a.ees_score);
+            const be = Number(b.ees_score);
+            if (Number.isFinite(be) && Number.isFinite(ae) && be !== ae) return be - ae;
             const av = Number(a.tps_score);
             const bv = Number(b.tps_score);
             const tpsDiff = (Number.isFinite(bv) ? bv : -1) - (Number.isFinite(av) ? av : -1);
@@ -313,7 +357,7 @@
         }
         const top = rows;
         return (
-            '<p class="vajra-meta vajra-pipeline-note">30m TPS discovery · 5m EES execution quality · sorted by TPS (high → low)</p>' +
+            '<p class="vajra-meta vajra-pipeline-note">30m TPS · 5m Entry State (EES) every 5 min · sorted ENTER first, then EES/TPS</p>' +
             '<div class="vajra-table-wrap"><table class="vajra-table vajra-top-table">' +
             renderTableHead(TOP_COLUMNS, true) +
             '<tbody>' +
@@ -525,7 +569,7 @@
         const seenAlertKeys = {};
 
         function openModal() {
-            modalRows = sortByTpsDesc(allRows).slice(TOP_N);
+            modalRows = sortForDisplay(allRows).slice(TOP_N);
             sortKey = 'tps_score';
             sortDir = 'desc';
             renderModal();
@@ -612,7 +656,9 @@
                         fmtUpdated(data.computed_at || (allRows[0] && allRows[0].computed_at)) +
                         ' · ' +
                         allRows.length +
-                        ' symbols · 30m TPS · 5m exec · HTF ' +
+                        ' symbols · 30m TPS · EES/Entry every ' +
+                        (data.ees_refresh_minutes || 5) +
+                        'm · HTF ' +
                         (data.htf_bias_tf || '1hr') +
                         (data.alert_count != null ? ' · Alerts: ' + data.alert_count : '');
                 }

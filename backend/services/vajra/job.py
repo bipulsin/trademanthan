@@ -73,6 +73,24 @@ def load_arbitrage_curr_mth_universe() -> List[Dict[str, str]]:
         db.close()
 
 
+def sort_vajra_rows_for_display(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Sort for UI: ENTER-enabled first, then EES, then TPS."""
+
+    def _sort_key(r: Dict[str, Any]) -> tuple:
+        enter = (
+            1
+            if r.get("enter_enabled")
+            or str(r.get("enter_action") or "").upper() == "ENTER"
+            else 0
+        )
+        ees = float(r["ees_score"]) if r.get("ees_score") is not None else -1.0
+        tps = float(r.get("tps_score") or 0)
+        sym = str(r.get("security") or r.get("stock") or "")
+        return (-enter, -ees, -tps, sym)
+
+    return sorted(rows, key=_sort_key)
+
+
 def fetch_vajra_ratings_for_session(session_date: Optional[date] = None) -> List[Dict[str, Any]]:
     sd = session_date or effective_session_date_ist_for_trend()
     db = SessionLocal()
@@ -142,7 +160,7 @@ def fetch_vajra_ratings_for_session(session_date: Optional[date] = None) -> List
                     "ees_alerts": ees_alerts,
                 }
             )
-        return sort_vajra_rows(out)
+        return sort_vajra_rows_for_display(out)
     finally:
         db.close()
 
@@ -213,7 +231,9 @@ def compute_vajra_ratings_live(
         def _fetch(key: str, tf: str) -> List[dict]:
             return _fetch_candles_for_tf(upstox, key, tf)
 
-        rows = run_transition_pipeline(universe, _fetch, computed_at=datetime.now(IST))
+        rows = sort_vajra_rows_for_display(
+            run_transition_pipeline(universe, _fetch, computed_at=datetime.now(IST))
+        )
         if use_cache:
             _LIVE_CACHE[cache_key] = (now, rows)
         return rows

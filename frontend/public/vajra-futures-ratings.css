@@ -87,7 +87,25 @@ table.vajra-table td.num { text-align: center; }
 .vajra-th-enter,
 .vajra-td-enter {
     text-align: center;
-    width: 4.5rem;
+    width: 5.25rem;
+    min-width: 5.25rem;
+}
+table.vajra-table th.vajra-th-transition,
+table.vajra-table td.vajra-td-transition {
+    max-width: 3.75rem;
+    min-width: 3.5rem;
+    padding-left: 3px;
+    padding-right: 3px;
+}
+.df-dir-pill.vajra-transition-pill {
+    white-space: normal;
+    line-height: 1.12;
+    font-size: 0.6rem;
+    max-width: 3.65rem;
+    padding: 2px 3px;
+    display: inline-block;
+    text-align: center;
+    word-break: break-word;
 }
 .vajra-enter-btn {
     padding: 4px 10px;

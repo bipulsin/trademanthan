@@ -12,7 +12,11 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
-from backend.services.vajra.job import compute_vajra_ratings_live, fetch_vajra_ratings_for_session
+from backend.services.vajra.job import (
+    compute_vajra_ratings_live,
+    fetch_vajra_ratings_for_session,
+    sort_vajra_rows_for_display,
+)
 from backend.services.vajra.timeframes import (
     DEFAULT_HTF,
     DEFAULT_SCAN_TF,
@@ -74,11 +78,7 @@ def get_vajra_ratings(
             rows = db_first or compute_vajra_ratings_live(
                 mode="transition", session_date=sd, use_cache=True
             )
-            rows = sorted(
-                rows,
-                key=lambda r: float(r.get("tps_score") or 0),
-                reverse=True,
-            )
+            rows = sort_vajra_rows_for_display(rows)
             computed_at = rows[0].get("computed_at") if rows else None
             alerts = [r for r in rows if r.get("alertable")]
             ees_alert_rows = [
@@ -101,6 +101,7 @@ def get_vajra_ratings(
                     "alerts": alerts,
                     "ees_alert_rows": ees_alert_rows,
                     "computed_at": computed_at,
+                    "ees_refresh_minutes": 5,
                     "rows": rows,
                 },
             )
