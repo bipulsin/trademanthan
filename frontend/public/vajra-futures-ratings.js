@@ -51,7 +51,7 @@
     const TOP_TRANSITION_COLSPAN = 4;
 
     const TOP_COLUMNS = [
-        { key: 'trade_type', label: 'Status', chip: true },
+        { key: 'trade_type', label: 'Transition', chip: true },
         { key: 'tps_score', label: 'TPS', chip: true, num: true },
         { key: 'ees_score', label: 'EES', chip: true, num: true },
         { key: 'entry_state', label: 'Entry State', chip: true },
@@ -219,6 +219,7 @@
         if (col.key === 'entry_state') {
             const st = String(row.entry_state || '').toUpperCase();
             if (st === 'EXECUTABLE') return 'df-dir-long';
+            if (st.indexOf('REJECT') >= 0) return 'df-dir-short';
             if (st.indexOf('PULLBACK') >= 0) return 'vajra-rev-med';
             if (st.indexOf('WATCHLIST') >= 0) return 'df-dir-neutral';
             if (st.indexOf('AVOID') >= 0) return 'df-dir-short';
@@ -360,6 +361,18 @@
         return 0;
     }
 
+    function isRejectRow(row) {
+        const st = String((row && row.entry_state) || '').toUpperCase();
+        return st === 'REJECT' || st.indexOf('REJECT') >= 0;
+    }
+
+    function rowsForTopTable(rows) {
+        const pool = (rows || []).filter(function (r) {
+            return !isRejectRow(r);
+        });
+        return sortForDisplay(pool.length ? pool : rows || []);
+    }
+
     function sortForDisplay(rows) {
         return rows.slice().sort(function (a, b) {
             const stateDiff = entryStateSortRank(b.entry_state) - entryStateSortRank(a.entry_state);
@@ -431,7 +444,7 @@
         }
         const top = rows;
         return (
-            '<p class="vajra-meta vajra-pipeline-note">Trade quality engine · sorted EXECUTABLE → WATCHLIST → REJECT, then quality score</p>' +
+            '<p class="vajra-meta vajra-pipeline-note">Top 8: best non-REJECT setups · sorted EXECUTABLE → WATCHLIST, then quality score</p>' +
             '<div class="vajra-table-wrap"><table class="vajra-table vajra-top-table">' +
             renderTableHead(TOP_COLUMNS, true) +
             '<tbody>' +
@@ -767,13 +780,14 @@
             try {
                 const data = await fetchRatings(DEFAULT_SCAN_TF, DEFAULT_HTF);
                 allRows = sortForDisplay((data && data.rows) || []);
+                const topPool = rowsForTopTable(allRows);
                 const computedIso =
                     (data && data.computed_at) || (allRows[0] && allRows[0].computed_at) || null;
                 const ep = tsEpoch(computedIso);
                 if (ep != null) lastComputedEpoch = ep;
                 lastFullLoadMs = Date.now();
                 if (listEl) {
-                    const topRows = allRows.slice(0, TOP_N);
+                    const topRows = topPool.slice(0, TOP_N);
                     listEl._vajraTopRows = topRows;
                     listEl.innerHTML = renderTopTable(topRows);
                     listEl.querySelectorAll('[data-vajra-enter]').forEach(function (btn) {

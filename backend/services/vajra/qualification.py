@@ -36,6 +36,7 @@ def apply_trade_qualification(
         momentum_pass="PASS" in str(row.get("momentum") or ""),
         trend_pass="PASS" in str(row.get("trend") or ""),
         volume_pass="PASS" in str(row.get("volume") or ""),
+        tps_score=row.get("tps_score"),
     )
     if tq is None:
         return row

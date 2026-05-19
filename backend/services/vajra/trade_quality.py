@@ -515,6 +515,8 @@ def _classify_state(
     market_phase: str,
     reject_reasons: List[str],
     hard_reject: bool,
+    tps_score: Optional[float] = None,
+    ees_score: Optional[float] = None,
 ) -> str:
     phase = (market_phase or "").upper()
     if hard_reject:
@@ -528,11 +530,17 @@ def _classify_state(
     if extension_quality < 28:
         reject_reasons.append("over_extended")
         return STATE_REJECT
+    tps = float(tps_score) if tps_score is not None else 0.0
+    if tps > 0 and tps < 52:
+        reject_reasons.append("low_tps_discovery")
+        if structure < 55 or momentum < 52:
+            return STATE_REJECT
     if (
         confidence >= EXECUTABLE_CONFIDENCE_MIN
         and structure >= 62
         and momentum >= 58
         and extension_quality >= 45
+        and (tps <= 0 or tps >= 52)
     ):
         return STATE_EXECUTABLE
     if confidence < 42 or (structure < 48 and momentum < 45):
@@ -555,6 +563,7 @@ def compute_trade_quality(
     momentum_pass: bool = False,
     trend_pass: bool = False,
     volume_pass: bool = False,
+    tps_score: Optional[float] = None,
 ) -> Optional[TradeQualityResult]:
     """Qualification layer: scores + EXECUTABLE / WATCHLIST / REJECT."""
     primary = candles_5m if candles_5m and len(candles_5m) >= 30 else candles_30m
@@ -630,6 +639,8 @@ def compute_trade_quality(
         market_phase=market_phase,
         reject_reasons=reject_reasons,
         hard_reject=hard_reject,
+        tps_score=tps_score,
+        ees_score=ees_score,
     )
 
     return TradeQualityResult(
