@@ -21,7 +21,8 @@
     width: min(920px, 100%);
     max-height: 92vh;
     overflow: auto;
-    background: color-mix(in srgb, var(--theme-card, #0f172a) 95%, transparent);
+    background: var(--theme-card, #ffffff);
+    opacity: 1;
     border: 1px solid var(--theme-border, #334155);
     border-radius: 12px;
     padding: 16px 18px;

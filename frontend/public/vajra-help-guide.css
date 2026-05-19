@@ -50,7 +50,8 @@
     width: min(720px, 100%);
     max-height: 90vh;
     overflow: auto;
-    background: color-mix(in srgb, var(--theme-card, #0f172a) 95%, transparent);
+    background: var(--theme-card, #ffffff);
+    opacity: 1;
     border: 1px solid var(--theme-border, #334155);
     border-radius: 12px;
     padding: 18px 20px 20px;
@@ -118,7 +119,7 @@
     position: sticky;
     bottom: 0;
     padding-top: 8px;
-    background: linear-gradient(transparent, var(--theme-card, #0f172a) 40%);
+    background: var(--theme-card, #ffffff);
 }
 .vajra-help-close-btn {
     padding: 8px 16px;
