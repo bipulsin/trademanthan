@@ -19,6 +19,7 @@ from backend.services.smart_futures_session_date import effective_session_date_i
 from backend.services.upstox_service import UpstoxService
 from backend.services.vajra.engine import compute_ecs_rating, compute_vajra_rating, sort_vajra_rows
 from backend.services.vajra.pipeline import run_transition_pipeline
+from backend.services.vajra.ranking import sort_vajra_rows_for_display
 from backend.services.vajra.tables import ensure_vajra_futures_rating_table
 from backend.services.vajra.timeframes import (
     DEFAULT_HTF,
@@ -82,53 +83,6 @@ def load_arbitrage_curr_mth_universe() -> List[Dict[str, str]]:
         db.close()
 
 
-_ENTRY_STATE_SORT_RANK = {
-    "EXECUTABLE": 4,
-    "PULLBACK PREFERRED": 3,
-    "WATCHLIST ONLY": 2,
-    "AVOID CHASING": 1,
-}
-
-
-def entry_state_sort_rank(entry_state: Optional[str]) -> int:
-    """Higher rank = shown first (EXECUTABLE → PULLBACK → WATCHLIST → AVOID)."""
-    s = (entry_state or "").strip().upper()
-    if not s:
-        return 0
-    if s in _ENTRY_STATE_SORT_RANK:
-        return _ENTRY_STATE_SORT_RANK[s]
-    if "EXECUTABLE" in s:
-        return 4
-    if "PULLBACK" in s:
-        return 3
-    if "WATCHLIST" in s:
-        return 2
-    if "AVOID" in s:
-        return 1
-    return 0
-
-
-def sort_vajra_rows_for_display(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Sort for UI: Entry State band, then descending TPS + EES, then symbol."""
-
-    def _score(r: Dict[str, Any], key: str) -> float:
-        v = r.get(key)
-        if v is None:
-            return 0.0
-        try:
-            return float(v)
-        except (TypeError, ValueError):
-            return 0.0
-
-    def _sort_key(r: Dict[str, Any]) -> tuple:
-        state_rank = entry_state_sort_rank(r.get("entry_state"))
-        combined = _score(r, "tps_score") + _score(r, "ees_score")
-        sym = str(r.get("security") or r.get("stock") or "")
-        return (-state_rank, -combined, sym)
-
-    return sorted(rows, key=_sort_key)
-
-
 def fetch_vajra_ratings_for_session(session_date: Optional[date] = None) -> List[Dict[str, Any]]:
     sd = session_date or effective_session_date_ist_for_trend()
     db = SessionLocal()
@@ -144,7 +98,8 @@ def fetch_vajra_ratings_for_session(session_date: Optional[date] = None) -> List
                        vwap_reclaim_status, ema_reclaim_status, rsi_transition_status,
                        pullback_quality_score, extension_risk_score,
                        execution_validated, execution_step, pipeline_stage, alertable,
-                       ees_score, entry_state, enter_action, enter_enabled, ees_alerts
+                       ees_score, entry_state, enter_action, enter_enabled, ees_alerts,
+                       trade_quality_score
                 FROM vajra_futures_rating
                 WHERE session_date = :sd
                 ORDER BY trade_type, confidence DESC, stock
@@ -196,6 +151,7 @@ def fetch_vajra_ratings_for_session(session_date: Optional[date] = None) -> List
                     "enter_action": r[27],
                     "enter_enabled": bool(r[28]) if r[28] is not None else False,
                     "ees_alerts": ees_alerts,
+                    "trade_quality_score": float(r[30]) if len(r) > 30 and r[30] is not None else None,
                 }
             )
         return sort_vajra_rows_for_display(out)
@@ -426,7 +382,8 @@ def run_vajra_futures_rating_job(scan_trigger: str = "manual") -> Dict[str, Any]
                         vwap_reclaim_status, ema_reclaim_status, rsi_transition_status,
                         pullback_quality_score, extension_risk_score,
                         execution_validated, execution_step, pipeline_stage, alertable,
-                        ees_score, entry_state, enter_action, enter_enabled, ees_alerts
+                        ees_score, entry_state, enter_action, enter_enabled, ees_alerts,
+                        trade_quality_score
                     ) VALUES (
                         :session_date, :stock, :future_symbol, :instrument_key,
                         :trade_type, :confidence, :bull_score, :bear_score,
@@ -436,7 +393,8 @@ def run_vajra_futures_rating_job(scan_trigger: str = "manual") -> Dict[str, Any]
                         :vwap_reclaim_status, :ema_reclaim_status, :rsi_transition_status,
                         :pullback_quality_score, :extension_risk_score,
                         :execution_validated, :execution_step, :pipeline_stage, :alertable,
-                        :ees_score, :entry_state, :enter_action, :enter_enabled, :ees_alerts
+                        :ees_score, :entry_state, :enter_action, :enter_enabled, :ees_alerts,
+                        :trade_quality_score
                     )
                     ON CONFLICT (session_date, instrument_key) DO UPDATE SET
                         stock = EXCLUDED.stock,
@@ -469,7 +427,8 @@ def run_vajra_futures_rating_job(scan_trigger: str = "manual") -> Dict[str, Any]
                         entry_state = EXCLUDED.entry_state,
                         enter_action = EXCLUDED.enter_action,
                         enter_enabled = EXCLUDED.enter_enabled,
-                        ees_alerts = EXCLUDED.ees_alerts
+                        ees_alerts = EXCLUDED.ees_alerts,
+                        trade_quality_score = EXCLUDED.trade_quality_score
                     """
                 ),
                 {
@@ -506,6 +465,7 @@ def run_vajra_futures_rating_job(scan_trigger: str = "manual") -> Dict[str, Any]
                     "enter_action": row.get("enter_action"),
                     "enter_enabled": row.get("enter_enabled", False),
                     "ees_alerts": json.dumps(row.get("ees_alerts") or []),
+                    "trade_quality_score": row.get("trade_quality_score"),
                 },
             )
         db.commit()

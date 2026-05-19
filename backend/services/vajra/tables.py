@@ -22,6 +22,7 @@ _EXTRA_COLUMNS = (
     ("enter_action", "TEXT"),
     ("enter_enabled", "BOOLEAN DEFAULT FALSE"),
     ("ees_alerts", "JSONB DEFAULT '[]'"),
+    ("trade_quality_score", "DOUBLE PRECISION"),
 )
 
 

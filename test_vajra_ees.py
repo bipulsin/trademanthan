@@ -36,14 +36,14 @@ def test_enter_action_requires_tps_and_ees():
     assert low["action"] in ("EXTENDED", "WATCH")
 
 
-def test_sort_vajra_rows_for_display_entry_state_then_tps_ees():
-    from backend.services.vajra.job import sort_vajra_rows_for_display
+def test_sort_vajra_rows_for_display_entry_state_then_quality():
+    from backend.services.vajra.ranking import sort_vajra_rows_for_display
 
     rows = [
-        {"stock": "A", "entry_state": "WATCHLIST ONLY", "tps_score": 90, "ees_score": 90},
-        {"stock": "B", "entry_state": "EXECUTABLE", "tps_score": 50, "ees_score": 50},
-        {"stock": "C", "entry_state": "EXECUTABLE", "tps_score": 80, "ees_score": 80},
-        {"stock": "D", "entry_state": "AVOID CHASING", "tps_score": 99, "ees_score": 99},
+        {"stock": "A", "entry_state": "WATCHLIST", "trade_quality_score": 90},
+        {"stock": "B", "entry_state": "EXECUTABLE", "trade_quality_score": 50},
+        {"stock": "C", "entry_state": "EXECUTABLE", "trade_quality_score": 80},
+        {"stock": "D", "entry_state": "REJECT", "trade_quality_score": 99},
     ]
     out = sort_vajra_rows_for_display(rows)
     assert [r["stock"] for r in out] == ["C", "B", "A", "D"]

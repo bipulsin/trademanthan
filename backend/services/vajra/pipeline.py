@@ -12,8 +12,10 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import pytz
 
-from backend.services.vajra.engine import compute_ecs_rating, sort_vajra_rows
-from backend.services.vajra.ees import compute_ees, enter_action_label
+from backend.services.vajra.engine import compute_ecs_rating
+from backend.services.vajra.ees import compute_ees
+from backend.services.vajra.qualification import apply_trade_qualification
+from backend.services.vajra.ranking import shortlist_by_trade_quality, sort_vajra_rows_for_display
 from backend.services.vajra.transition import (
     TPS_SHORTLIST_MAX,
     TPS_SHORTLIST_MIN,
@@ -60,11 +62,6 @@ def _build_row(
     )
 
     ees_d: Dict[str, Any] = ees_result.to_dict() if ees_result is not None else {}
-    enter_action = enter_action_label(
-        tps_score=tps_d.get("tps_score"),
-        ees_score=ees_d.get("ees_score"),
-        entry_state=ees_d.get("entry_state"),
-    )
 
     return {
         "security": fut_sym or stock,
@@ -75,9 +72,9 @@ def _build_row(
         "ecs_score": ecs.get("ecs_score", ecs["confidence"]),
         "tps_score": tps_d["tps_score"],
         **ees_d,
-        "enter_action": enter_action.get("action"),
-        "enter_enabled": enter_action.get("enabled", False),
-        "enter_reason": enter_action.get("reason"),
+        "enter_action": "WATCH",
+        "enter_enabled": False,
+        "enter_reason": "Pending qualification",
         "structure": ecs["structure"],
         "momentum": ecs["momentum"],
         "trend": ecs["trend"],
@@ -174,7 +171,7 @@ def rate_symbol_transition(
         )
 
     ts = computed_at or datetime.now(IST)
-    return _build_row(
+    row = _build_row(
         stock=stock,
         fut_sym=fut_sym,
         instrument_key=instrument_key,
@@ -184,6 +181,12 @@ def rate_symbol_transition(
         execution=execution,
         computed_at=ts,
         ees_result=ees_result,
+    )
+    return apply_trade_qualification(
+        row,
+        candles_30m=candles_30m,
+        candles_5m=candles_5m,
+        candles_1hr=candles_1hr,
     )
 
 
@@ -226,7 +229,7 @@ def run_transition_pipeline(
             discovery.append(
                 {
                     **row,
-                    "_tps_sort": tps_val - float(row.get("extension_risk_score") or 0) * 0.2,
+                    "_tq_sort": float(row.get("trade_quality_score") or 0),
                     "_early": early,
                     "_instrument_key": fut_key,
                 }
@@ -234,7 +237,7 @@ def run_transition_pipeline(
         except Exception as e:
             logger.debug("vajra_pipeline discovery skip %s: %s", stock, e)
 
-    shortlist = shortlist_by_tps(discovery)
+    shortlist = shortlist_by_trade_quality(discovery)
     shortlist_keys = {r.get("_instrument_key") for r in shortlist}
 
     final_rows: List[Dict[str, Any]] = []
@@ -277,4 +280,4 @@ def run_transition_pipeline(
         clean["execution_step"] = "—"
         final_rows.append(clean)
 
-    return sort_vajra_rows(final_rows, discovery_first=True)
+    return sort_vajra_rows_for_display(final_rows)
