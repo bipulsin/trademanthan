@@ -11,9 +11,9 @@
     <link rel="stylesheet" href="settings.css">
     <link rel="stylesheet" href="left-menu.css?v=3.24">
     <link rel="stylesheet" href="theme.css?v=1.3">
-    <link rel="stylesheet" href="vajra-futures-ratings.css?v=10">
-    <link rel="stylesheet" href="vajra-trade-workflow.css?v=5">
-    <link rel="stylesheet" href="vajra-help-guide.css?v=3">
+    <link rel="stylesheet" href="vajra-futures-ratings.css?v=11">
+    <link rel="stylesheet" href="vajra-trade-workflow.css?v=6">
+    <link rel="stylesheet" href="vajra-help-guide.css?v=4">
     <style>
         .vf-wrap { max-width: 1100px; margin: 0 auto; }
         .vf-card {
@@ -36,6 +36,57 @@
         .vf-brand-icon { width: 56px; height: 56px; vertical-align: middle; margin-right: 8px; }
         .vajra-card-head.df-pick-card-head { margin-bottom: 6px; }
         .vajra-card-head.df-pick-card-head h2 { margin: 0; flex: 1 1 auto; }
+
+        /* Modals: solid surfaces only (--theme-card is rgba and bleeds the page through) */
+        .vajra-modal,
+        .vajra-wf-modal,
+        .vajra-help-modal {
+            z-index: 100050 !important;
+        }
+        .vajra-modal-backdrop,
+        .vajra-wf-backdrop,
+        .vajra-help-backdrop {
+            background: #020617 !important;
+            opacity: 1 !important;
+        }
+        body[data-theme="light"] .vajra-modal-backdrop,
+        body[data-theme="light"] .vajra-wf-backdrop,
+        body[data-theme="light"] .vajra-help-backdrop {
+            background: #cbd5e1 !important;
+        }
+        .vajra-modal-panel,
+        .vajra-modal-body,
+        .vajra-wf-panel,
+        .vajra-help-panel,
+        .vajra-help-close-row {
+            background-color: #1e293b !important;
+            background-image: none !important;
+            opacity: 1 !important;
+            box-shadow: 0 24px 48px rgba(0, 0, 0, 0.55);
+        }
+        body[data-theme="light"] .vajra-modal-panel,
+        body[data-theme="light"] .vajra-modal-body,
+        body[data-theme="light"] .vajra-wf-panel,
+        body[data-theme="light"] .vajra-help-panel,
+        body[data-theme="light"] .vajra-help-close-row {
+            background-color: #ffffff !important;
+        }
+        .vajra-modal-panel .vajra-table-wrap,
+        .vajra-modal-panel table.vajra-table th,
+        .vajra-modal-panel table.vajra-table td,
+        .vajra-modal-panel .vajra-score-band,
+        .vajra-modal-panel .vajra-pipeline-note,
+        .vajra-modal-panel .vajra-score-footnote {
+            background-color: #1e293b !important;
+        }
+        body[data-theme="light"] .vajra-modal-panel .vajra-table-wrap,
+        body[data-theme="light"] .vajra-modal-panel table.vajra-table th,
+        body[data-theme="light"] .vajra-modal-panel table.vajra-table td,
+        body[data-theme="light"] .vajra-modal-panel .vajra-score-band,
+        body[data-theme="light"] .vajra-modal-panel .vajra-pipeline-note,
+        body[data-theme="light"] .vajra-modal-panel .vajra-score-footnote {
+            background-color: #ffffff !important;
+        }
     </style>
 </head>
 <body class="theme-page">

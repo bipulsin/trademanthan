@@ -31,7 +31,7 @@
 .vajra-help-modal {
     position: fixed;
     inset: 0;
-    z-index: 2600;
+    z-index: 100050;
     display: none;
     align-items: center;
     justify-content: center;
@@ -43,14 +43,16 @@
 .vajra-help-backdrop {
     position: absolute;
     inset: 0;
-    background: rgba(0, 0, 0, 0.55);
+    background: #020617;
+    opacity: 1;
 }
 .vajra-help-panel {
     position: relative;
     width: min(720px, 100%);
     max-height: 90vh;
     overflow: auto;
-    background: var(--theme-card, #ffffff);
+    background-color: #1e293b;
+    background-image: none;
     opacity: 1;
     border: 1px solid var(--theme-border, #334155);
     border-radius: 12px;
@@ -119,7 +121,12 @@
     position: sticky;
     bottom: 0;
     padding-top: 8px;
-    background: var(--theme-card, #ffffff);
+    background-color: #1e293b;
+}
+body[data-theme="light"] .vajra-help-backdrop { background: #cbd5e1; }
+body[data-theme="light"] .vajra-help-panel,
+body[data-theme="light"] .vajra-help-close-row {
+    background-color: #ffffff;
 }
 .vajra-help-close-btn {
     padding: 8px 16px;
