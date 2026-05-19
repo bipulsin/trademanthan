@@ -82,8 +82,34 @@ def load_arbitrage_curr_mth_universe() -> List[Dict[str, str]]:
         db.close()
 
 
+_ENTRY_STATE_SORT_RANK = {
+    "EXECUTABLE": 4,
+    "PULLBACK PREFERRED": 3,
+    "WATCHLIST ONLY": 2,
+    "AVOID CHASING": 1,
+}
+
+
+def entry_state_sort_rank(entry_state: Optional[str]) -> int:
+    """Higher rank = shown first (EXECUTABLE → PULLBACK → WATCHLIST → AVOID)."""
+    s = (entry_state or "").strip().upper()
+    if not s:
+        return 0
+    if s in _ENTRY_STATE_SORT_RANK:
+        return _ENTRY_STATE_SORT_RANK[s]
+    if "EXECUTABLE" in s:
+        return 4
+    if "PULLBACK" in s:
+        return 3
+    if "WATCHLIST" in s:
+        return 2
+    if "AVOID" in s:
+        return 1
+    return 0
+
+
 def sort_vajra_rows_for_display(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Sort for UI: descending TPS + EES + ECS, then symbol."""
+    """Sort for UI: Entry State band, then descending TPS + EES, then symbol."""
 
     def _score(r: Dict[str, Any], key: str) -> float:
         v = r.get(key)
@@ -95,9 +121,10 @@ def sort_vajra_rows_for_display(rows: List[Dict[str, Any]]) -> List[Dict[str, An
             return 0.0
 
     def _sort_key(r: Dict[str, Any]) -> tuple:
-        combined = _score(r, "tps_score") + _score(r, "ees_score") + _score(r, "ecs_score")
+        state_rank = entry_state_sort_rank(r.get("entry_state"))
+        combined = _score(r, "tps_score") + _score(r, "ees_score")
         sym = str(r.get("security") or r.get("stock") or "")
-        return (-combined, sym)
+        return (-state_rank, -combined, sym)
 
     return sorted(rows, key=_sort_key)
 

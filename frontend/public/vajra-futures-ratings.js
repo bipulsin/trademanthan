@@ -342,14 +342,28 @@
         return Number.isFinite(n) ? n : 0;
     }
 
-    function combinedTpsEesEcs(row) {
-        return scoreNum(row, 'tps_score') + scoreNum(row, 'ees_score') + scoreNum(row, 'ecs_score');
+    function combinedTpsEes(row) {
+        return scoreNum(row, 'tps_score') + scoreNum(row, 'ees_score');
+    }
+
+    function entryStateSortRank(entryState) {
+        const s = String(entryState || '')
+            .trim()
+            .toUpperCase();
+        if (!s) return 0;
+        if (s === 'EXECUTABLE') return 4;
+        if (s.indexOf('PULLBACK') >= 0) return 3;
+        if (s.indexOf('WATCHLIST') >= 0) return 2;
+        if (s.indexOf('AVOID') >= 0) return 1;
+        return 0;
     }
 
     function sortForDisplay(rows) {
         return rows.slice().sort(function (a, b) {
-            const diff = combinedTpsEesEcs(b) - combinedTpsEesEcs(a);
-            if (diff !== 0) return diff;
+            const stateDiff = entryStateSortRank(b.entry_state) - entryStateSortRank(a.entry_state);
+            if (stateDiff !== 0) return stateDiff;
+            const scoreDiff = combinedTpsEes(b) - combinedTpsEes(a);
+            if (scoreDiff !== 0) return scoreDiff;
             return String(a.security || a.stock || '').localeCompare(
                 String(b.security || b.stock || ''),
                 undefined,
@@ -415,7 +429,7 @@
         }
         const top = rows;
         return (
-            '<p class="vajra-meta vajra-pipeline-note">30m TPS · 5m Entry State (EES) every 5 min · sorted by TPS+EES+ECS</p>' +
+            '<p class="vajra-meta vajra-pipeline-note">30m TPS · 5m Entry State (EES) every 5 min · sorted by Entry State, then TPS+EES</p>' +
             '<div class="vajra-table-wrap"><table class="vajra-table vajra-top-table">' +
             renderTableHead(TOP_COLUMNS, true) +
             '<tbody>' +

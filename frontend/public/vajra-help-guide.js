@@ -28,7 +28,7 @@
             '<tr><td><strong>ECS</strong><br>Expansion Confirmation</td><td>30m + 1hr</td>' +
             '<td>Classic Vajra confirmation: structure, breakout, OBV, volume, trend. Mature / continuation context.</td></tr>' +
             '</tbody></table>' +
-            '<p>Sorted by <strong>TPS + EES + ECS</strong> (highest combined first).</p>' +
+            '<p>Sorted by <strong>Entry State</strong> (EXECUTABLE &rarr; PULLBACK &rarr; WATCHLIST &rarr; AVOID), then <strong>TPS + EES</strong> within each band.</p>' +
             '<h3>Discovery table (top 8)</h3>' +
             '<ul>' +
             '<li><strong>Symbol</strong> — current-month future.</li>' +
