@@ -52,10 +52,26 @@ def _fetch_merged_sold_rows(
                 COALESCE(t.future_symbol, t.underlying)::text AS symbol,
                 COALESCE(t.direction_type, s.direction_type, 'LONG')::text AS direction_type,
                 t.lot_size::integer AS qty,
-                t.entry_time::text AS entry_time,
-                t.entry_price::numeric AS entry_price,
-                t.exit_time::text AS exit_time,
-                t.exit_price::numeric AS exit_price,
+                CASE
+                    WHEN UPPER(TRIM(COALESCE(t.direction_type, s.direction_type, 'LONG'))) = 'SHORT'
+                    THEN t.sell_time::text
+                    ELSE t.entry_time::text
+                END AS entry_time,
+                CASE
+                    WHEN UPPER(TRIM(COALESCE(t.direction_type, s.direction_type, 'LONG'))) = 'SHORT'
+                    THEN t.sell_price::numeric
+                    ELSE t.entry_price::numeric
+                END AS entry_price,
+                CASE
+                    WHEN UPPER(TRIM(COALESCE(t.direction_type, s.direction_type, 'LONG'))) = 'SHORT'
+                    THEN t.buy_time::text
+                    ELSE t.exit_time::text
+                END AS exit_time,
+                CASE
+                    WHEN UPPER(TRIM(COALESCE(t.direction_type, s.direction_type, 'LONG'))) = 'SHORT'
+                    THEN t.buy_price::numeric
+                    ELSE t.exit_price::numeric
+                END AS exit_price,
                 t.pnl_rupees::numeric AS pnl
             FROM daily_futures_user_trade t
             JOIN daily_futures_screening s ON s.id = t.screening_id
