@@ -2173,25 +2173,5 @@
         window.setInterval(function () { loadTrend(true); }, 15 * 60 * 1000);
         refreshCountdownPills();
         window.setInterval(refreshCountdownPills, 1000);
-        if (window.VajraFuturesRatings) {
-            window.VajraFuturesRatings.init({
-                prefix: 'sf',
-                listElId: 'sfVajraTable',
-                moreBtnId: 'sfVajraMoreBtn',
-                metaElId: 'sfVajraMeta',
-                msgElId: 'sfVajraMsg',
-                pollMs: 300000,
-            });
-        }
-        if (window.VajraTradeWorkflow) {
-            window.VajraTradeWorkflow.init({
-                platform: 'smart_futures',
-                runningElId: 'sfVajraActiveTrades',
-                closedElId: 'sfVajraClosedTrades',
-            });
-        }
-        if (window.VajraHelpGuide) {
-            window.VajraHelpGuide.init({ prefix: 'sf' });
-        }
     });
 })();

@@ -27,6 +27,10 @@
     let _platform = 'daily_futures';
     let _runningElId = 'dfVajraActiveTrades';
     let _closedElId = 'dfVajraClosedTrades';
+    let _compactSections = false;
+    let _emptyOpenHtml = '';
+    let _emptyClosedHtml = '';
+    let _listAllPlatforms = false;
     let _discoveryRow = null;
     let _preview = null;
     let _entryDraft = {};
@@ -379,10 +383,12 @@
         const el = document.getElementById(_runningElId);
         if (!el) return;
         if (!rows.length) {
-            el.innerHTML = '';
+            el.innerHTML = _emptyOpenHtml || '';
             return;
         }
-        let h = '<div class="vajra-active-block"><h3>Vajra managed (discretionary)</h3>';
+        let h = _compactSections
+            ? '<div class="vajra-active-block">'
+            : '<div class="vajra-active-block"><h3>Vajra managed (discretionary)</h3>';
         rows.forEach(function (t) {
             const pnl = t.unrealized_pnl != null ? Number(t.unrealized_pnl).toFixed(2) : '—';
             const health = t.trade_health != null ? Number(t.trade_health).toFixed(0) : '—';
@@ -441,13 +447,20 @@
 
     function renderClosedTrades(rows) {
         const el = document.getElementById(_closedElId);
-        if (!el || !rows.length) return;
-        let h = '<div class="vajra-active-block"><h3>Vajra journal (closed)</h3><table class="vajra-active-table"><thead><tr>' +
+        if (!el) return;
+        if (!rows.length) {
+            el.innerHTML = _emptyClosedHtml || '';
+            return;
+        }
+        let h = _compactSections
+            ? '<div class="vajra-active-block"><table class="vajra-active-table"><thead><tr>'
+            : '<div class="vajra-active-block"><h3>Vajra journal (closed)</h3><table class="vajra-active-table"><thead><tr>';
+        h +=
             '<th>Symbol</th><th>Dir</th><th>Entry</th><th>Exit</th><th>P&amp;L</th><th>Lifecycle</th></tr></thead><tbody>';
         rows.forEach(function (t) {
             h +=
                 '<tr><td>' +
-                esc(t.stock) +
+                esc(t.future_symbol || t.stock) +
                 '</td><td>' +
                 esc(t.direction) +
                 '</td><td>' +
@@ -461,7 +474,7 @@
                 '</td></tr>';
         });
         h += '</tbody></table></div>';
-        el.innerHTML = h.replace(/<div /g, '<div ').replace(/<\/motion>/g, '</div>').replace(/<div /g, '<div ').replace(/<\/motion>/g, '</div>');
+        el.innerHTML = h;
     }
 
     function openCloseModal(tradeId) {
@@ -509,11 +522,17 @@
         });
     }
 
+    function tradesQuery(status) {
+        let q = '/trades?status=' + encodeURIComponent(status);
+        if (!_listAllPlatforms) q += '&platform=' + encodeURIComponent(_platform);
+        return q;
+    }
+
     async function refreshCockpit() {
         try {
-            const active = await api('/trades?status=active&platform=' + encodeURIComponent(_platform));
+            const active = await api(tradesQuery('active'));
             renderActiveTrades(active.rows || []);
-            const closed = await api('/trades?status=closed&platform=' + encodeURIComponent(_platform));
+            const closed = await api(tradesQuery('closed'));
             renderClosedTrades(closed.rows || []);
         } catch (e) {
             console.warn('Vajra cockpit refresh', e);
@@ -521,9 +540,14 @@
     }
 
     function init(opts) {
+        opts = opts || {};
         _platform = opts.platform || 'daily_futures';
         _runningElId = opts.runningElId || 'dfVajraActiveTrades';
         _closedElId = opts.closedElId || 'dfVajraClosedTrades';
+        _compactSections = opts.compactSections === true;
+        _emptyOpenHtml = opts.emptyOpenHtml || '';
+        _emptyClosedHtml = opts.emptyClosedHtml || '';
+        _listAllPlatforms = opts.listAllPlatforms === true;
         refreshCockpit();
         setInterval(refreshCockpit, 300000);
     }

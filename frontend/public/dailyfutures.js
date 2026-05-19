@@ -1792,25 +1792,5 @@
     bindModals();
     refresh();
     setInterval(refresh, 120 * 1000);
-    if (window.VajraFuturesRatings) {
-      window.VajraFuturesRatings.init({
-        prefix: 'df',
-        listElId: 'dfVajraTable',
-        moreBtnId: 'dfVajraMoreBtn',
-        metaElId: 'dfVajraMeta',
-        msgElId: 'dfVajraMsg',
-        pollMs: 300000,
-      });
-    }
-    if (window.VajraTradeWorkflow) {
-      window.VajraTradeWorkflow.init({
-        platform: 'daily_futures',
-        runningElId: 'dfVajraActiveTrades',
-        closedElId: 'dfVajraClosedTrades',
-      });
-    }
-    if (window.VajraHelpGuide) {
-      window.VajraHelpGuide.init({ prefix: 'df' });
-    }
   });
 })();

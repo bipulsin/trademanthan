@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <title>Vajra Futures - TradeWithCTO</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
+    <script src="auth-check.js?v=1"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="settings.css">
+    <link rel="stylesheet" href="left-menu.css?v=3.24">
+    <link rel="stylesheet" href="theme.css?v=1.3">
+    <link rel="stylesheet" href="vajra-futures-ratings.css?v=9">
+    <link rel="stylesheet" href="vajra-trade-workflow.css?v=4">
+    <link rel="stylesheet" href="vajra-help-guide.css?v=2">
+    <style>
+        .vf-wrap { max-width: 1100px; margin: 0 auto; }
+        .vf-card {
+            background: var(--theme-card, rgba(255,255,255,0.95));
+            border: 1px solid var(--theme-border, #e2e8f0);
+            border-radius: 12px;
+            padding: 16px 18px;
+            margin-bottom: 18px;
+        }
+        .vf-card h2 { margin: 0; font-size: 1.15rem; }
+        .vf-card-head {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .vf-meta { font-size: 0.88rem; color: var(--theme-muted, #64748b); margin: 0 0 8px; }
+        .vf-brand-icon { width: 56px; height: 56px; vertical-align: middle; margin-right: 8px; }
+        .vajra-card-head.df-pick-card-head { margin-bottom: 6px; }
+        .vajra-card-head.df-pick-card-head h2 { margin: 0; flex: 1 1 auto; }
+    </style>
+</head>
+<body class="theme-page">
+    <div class="mobile-title-bar">
+        <button class="mobile-menu-toggle" id="mobileMenuToggle" type="button" aria-label="Menu"><i class="fas fa-bars"></i></button>
+        <div class="mobile-title-content">
+            <img src="tradewithcto-logo.png" alt="TradeWithCTO" class="mobile-logo">
+            <h1 class="mobile-title">Vajra Futures</h1>
+        </div>
+    </div>
+    <div class="app-container app-with-left-menu">
+        <div id="left-menu-container"></div>
+        <main class="right-panel main-content-area">
+            <div class="settings-header">
+                <div class="settings-title-section">
+                    <h1 class="settings-title">
+                        <i class="fas fa-bolt vf-brand-icon" style="color:#2563eb;width:1.15em;height:1.15em;" aria-hidden="true"></i>
+                        Vajra Futures
+                    </h1>
+                    <p class="settings-subtitle">TWCTO Vajra — transition discovery (30m TPS), 5m entry timing (EES), discretionary ENTER workflow, and trade journal.</p>
+                </div>
+            </div>
+            <div class="settings-content vf-wrap">
+                <div class="vf-card vajra-card" id="vfVajraCard">
+                    <div class="vajra-card-head df-pick-card-head">
+                        <h2 class="vajra-title-wrap">
+                            <span><i class="fas fa-bolt" style="color:#2563eb;"></i> Screen — Futures Rating</span>
+                            <button type="button" class="vajra-help-btn" id="vfVajraHelpBtn" aria-label="Open Vajra help guide" title="Help — how Vajra works">
+                                <i class="fas fa-circle-question" aria-hidden="true"></i>
+                            </button>
+                        </h2>
+                        <div class="vajra-tf-controls">
+                            <label class="vajra-tf-label">Scan TF
+                                <select class="vajra-tf-select" id="vfVajraScanTf" aria-label="Scan timeframe">
+                                    <option value="5m">5m</option>
+                                    <option value="15m">15m</option>
+                                    <option value="30m" selected>30m</option>
+                                    <option value="1hr">1hr</option>
+                                    <option value="1d">1d</option>
+                                </select>
+                            </label>
+                            <label class="vajra-tf-label">HTF
+                                <select class="vajra-tf-select" id="vfVajraHtf" aria-label="Higher timeframe">
+                                    <option value="1hr">1hr</option>
+                                    <option value="1d" selected>1d</option>
+                                    <option value="1w">1w</option>
+                                </select>
+                            </label>
+                        </div>
+                        <button type="button" class="df-more-link" id="vfVajraMoreBtn" hidden>more…</button>
+                    </div>
+                    <p class="vajra-meta" id="vfVajraMeta">—</p>
+                    <p class="vajra-meta" id="vfVajraMsg"></p>
+                    <div id="vfVajraTable"></div>
+                </div>
+
+                <div class="vf-card">
+                    <div class="vf-card-head">
+                        <h2><i class="fas fa-briefcase"></i> Open Position</h2>
+                        <p class="vf-meta" style="margin:0;">Trades activated from ENTER — health, lifecycle, and close from here.</p>
+                    </div>
+                    <p class="vf-meta" id="vfOpenMsg"></p>
+                    <div id="vfVajraActiveTrades"></div>
+                </div>
+
+                <div class="vf-card">
+                    <div class="vf-card-head">
+                        <h2><i class="fas fa-archive"></i> Closed Trades</h2>
+                        <p class="vf-meta" style="margin:0;">Square-offs recorded from the Vajra workflow this session.</p>
+                    </div>
+                    <p class="vf-meta" id="vfClosedMsg"></p>
+                    <div id="vfVajraClosedTrades"></div>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script src="left-menu.js?v=3.24"></script>
+    <script src="notify-trade-channel.js?v=1"></script>
+    <script src="vajra-futures-ratings.js?v=18"></script>
+    <script src="vajra-trade-workflow.js?v=4"></script>
+    <script src="vajra-help-guide.js?v=1"></script>
+    <script src="vajrafutures.js?v=1"></script>
+</body>
+</html>

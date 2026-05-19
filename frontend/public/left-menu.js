@@ -34,7 +34,7 @@ class LeftMenu {
 
     isThemePage() {
         const path = window.location.pathname;
-        return /dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|smartfuture|dailyfutures|admintwc/.test(path);
+        return /dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|smartfuture|vajrafutures|dailyfutures|admintwc/.test(path);
     }
 
     getCurrentPage() {
@@ -48,6 +48,7 @@ class LeftMenu {
         if (path.includes('reports')) return 'reports';
         if (path.includes('intraoption')) return 'intraoption';
         if (path.includes('smartfuture')) return 'smartfuture';
+        if (path.includes('vajrafutures')) return 'vajrafutures';
         if (path.includes('dailyfutures')) return 'dailyfutures';
         if (path.includes('pivot-breakout')) return 'pivot-breakout';
         if (path.includes('arbitrage')) return 'arbitrage';
@@ -251,6 +252,7 @@ class LeftMenu {
                 <li class="nav-item" data-page="dashboard.html"><i class="fas fa-chart-line"></i><span>Dashboard</span></li>
                 <li class="nav-item" data-page="intraoption.html"><img src="icons/intraday-option.png?v=1" alt="" class="nav-item-icon-img" width="33" height="33" /><span>Intraday Option</span></li>
                 <li class="nav-item" data-page="smartfuture.html"><img src="icons/smart-futures.png?v=3" alt="" class="nav-item-icon-img" width="33" height="33" /><span>Smart Futures</span></li>
+                <li class="nav-item" data-page="vajrafutures.html"><i class="fas fa-bolt" style="color:#2563eb;"></i><span>Vajra Futures</span></li>
                 <li class="nav-item" data-page="dailyfutures.html"><i class="fas fa-calendar-day"></i><span>Premium Futures</span></li>
                 <li class="nav-item" data-page="iron-condor.html"><i class="fas fa-layer-group"></i><span>Iron Condor</span></li>
                 <li class="nav-item nav-item-menu-hidden" data-page="pivot-breakout.html" aria-hidden="true"><i class="fas fa-bullseye"></i><span>Pivot Breakout</span></li>
@@ -750,6 +752,7 @@ class LeftMenu {
             case 'reports': return 'reports.html';
             case 'intraoption': return 'intraoption.html';
             case 'smartfuture': return 'smartfuture.html';
+            case 'vajrafutures': return 'vajrafutures.html';
             case 'dailyfutures': return 'dailyfutures.html';
             case 'pivot-breakout': return 'pivot-breakout.html';
             case 'arbitrage': return 'arbitrage.html';

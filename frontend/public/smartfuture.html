@@ -11,9 +11,6 @@
     <link rel="stylesheet" href="settings.css">
     <link rel="stylesheet" href="left-menu.css?v=3.24">
     <link rel="stylesheet" href="theme.css?v=1.3">
-    <link rel="stylesheet" href="vajra-futures-ratings.css?v=9">
-    <link rel="stylesheet" href="vajra-trade-workflow.css?v=3">
-    <link rel="stylesheet" href="vajra-help-guide.css?v=2">
     <style>
         .sf-wrap { max-width: 1100px; margin: 0 auto; }
         .sf-card {
@@ -81,21 +78,6 @@
             50% { opacity: 0.92; box-shadow: 0 0 14px 3px rgba(180, 83, 9, 0.85); }
         }
         .sf-order-status { font-weight: 700; color: #1d4ed8; }
-        .vajra-card h2 { margin: 0; font-size: 1.15rem; }
-        .vajra-card-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
-        .vajra-meta { font-size: 0.85rem; color: var(--theme-muted, #64748b); margin: 0 0 8px; }
-        .vajra-table-wrap { overflow-x: auto; }
-        table.vajra-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
-        table.vajra-table th, table.vajra-table td {
-            border-bottom: 1px solid var(--theme-border, #e2e8f0);
-            text-align: left;
-            padding: 7px 5px;
-        }
-        table.vajra-table th { color: var(--theme-muted, #64748b); font-weight: 600; }
-        table.vajra-table td.num, table.vajra-table th.num { text-align: right; }
-        .vajra-card-head.df-pick-card-head { margin-bottom: 6px; }
-        .vajra-card-head.df-pick-card-head h2 { margin: 0; flex: 1 1 auto; }
-        table.vajra-table .df-dir-pill { margin-left: 0; }
         body[data-theme="dark"] .sf-order-status { color: #93c5fd; }
         .sf-exit-hint {
             display: inline-block;
@@ -426,39 +408,6 @@
                 </div>
             </div>
             <div class="settings-content sf-wrap">
-                                <div class="sf-card vajra-card" id="sfVajraCard">
-                    <div class="vajra-card-head df-pick-card-head">
-                        <h2 class="vajra-title-wrap">
-                            <span><i class="fas fa-bolt" style="color:#2563eb;"></i> TWCTO Vajra — Futures Rating</span>
-                            <button type="button" class="vajra-help-btn" id="sfVajraHelpBtn" aria-label="Open Vajra help guide" title="Help — how Vajra works">
-                                <i class="fas fa-circle-question" aria-hidden="true"></i>
-                            </button>
-                        </h2>
-                        <div class="vajra-tf-controls">
-                            <label class="vajra-tf-label">Scan TF
-                                <select class="vajra-tf-select" id="sfVajraScanTf" aria-label="Scan timeframe">
-                                    <option value="5m">5m</option>
-                                    <option value="15m">15m</option>
-                                    <option value="30m" selected>30m</option>
-                                    <option value="1hr">1hr</option>
-                                    <option value="1d">1d</option>
-                                </select>
-                            </label>
-                            <label class="vajra-tf-label">HTF
-                                <select class="vajra-tf-select" id="sfVajraHtf" aria-label="Higher timeframe">
-                                    <option value="1hr">1hr</option>
-                                    <option value="1d" selected>1d</option>
-                                    <option value="1w">1w</option>
-                                </select>
-                            </label>
-                        </div>
-                        <button type="button" class="df-more-link" id="sfVajraMoreBtn" hidden>more…</button>
-                    </div>
-                    <p class="vajra-meta" id="sfVajraMeta">—</p>
-                    <p class="vajra-meta" id="sfVajraMsg"></p>
-                    <div id="sfVajraTable"></div>
-                </div>
-
                 <div class="sf-card">
                     <div class="sf-card-head">
                         <h2><i class="fas fa-chart-line"></i> Today&apos;s Trend</h2>
@@ -484,7 +433,6 @@
                         <p class="sf-meta" style="margin:0;">Bought picks — Square-off: enter exit price and IST exit time in the dialog. Exit highlights when the algo suggests exit.</p>
                     </div>
                     <p class="sf-meta" id="sfOpenMsg"></p>
-                    <div id="sfVajraActiveTrades"></div>
                     <div id="sfOpenPositions"></div>
                 </div>
                 <div class="sf-card">
@@ -493,7 +441,6 @@
                         <p class="sf-meta" style="margin:0;">Square-offs this session. PnL uses lot size from instruments × lots (see API).</p>
                     </div>
                     <p class="sf-meta" id="sfClosedMsg"></p>
-                    <div id="sfVajraClosedTrades"></div>
                     <div id="sfClosedPositions"></div>
                 </div>
             </div>
@@ -594,10 +541,7 @@
             </div>
         </div>
     </div>
-    <script src="left-menu.js?v=3.23"></script>
-    <script src="vajra-futures-ratings.js?v=18"></script>
-    <script src="vajra-trade-workflow.js?v=2"></script>
-    <script src="vajra-help-guide.js?v=1"></script>
-    <script src="smartfuture.js?v=50"></script>
+    <script src="left-menu.js?v=3.24"></script>
+    <script src="smartfuture.js?v=51"></script>
 </body>
 </html>
