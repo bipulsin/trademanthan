@@ -59,15 +59,12 @@ def _build_row(
         and (exec_ok or not execution)
     )
 
-    ees_d: Dict[str, Any] = {}
-    enter_action: Dict[str, Any] = {}
-    if ees_result is not None:
-        ees_d = ees_result.to_dict()
-        enter_action = enter_action_label(
-            tps_score=tps_d.get("tps_score"),
-            ees_score=ees_d.get("ees_score"),
-            entry_state=ees_d.get("entry_state"),
-        )
+    ees_d: Dict[str, Any] = ees_result.to_dict() if ees_result is not None else {}
+    enter_action = enter_action_label(
+        tps_score=tps_d.get("tps_score"),
+        ees_score=ees_d.get("ees_score"),
+        entry_state=ees_d.get("entry_state"),
+    )
 
     return {
         "security": fut_sym or stock,
@@ -168,6 +165,14 @@ def rate_symbol_transition(
         require_execution=False,
     )
 
+    ees_result = None
+    if candles_5m:
+        ees_result = compute_ees(
+            candles_5m,
+            bull_dir=tps.bull_dir,
+            tps_score=tps.tps_score,
+        )
+
     ts = computed_at or datetime.now(IST)
     return _build_row(
         stock=stock,
@@ -178,6 +183,7 @@ def rate_symbol_transition(
         early_type=early,
         execution=execution,
         computed_at=ts,
+        ees_result=ees_result,
     )
 
 

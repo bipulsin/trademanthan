@@ -403,7 +403,12 @@ def run_vajra_futures_rating_job(scan_trigger: str = "manual") -> Dict[str, Any]
                         execution_validated = EXCLUDED.execution_validated,
                         execution_step = EXCLUDED.execution_step,
                         pipeline_stage = EXCLUDED.pipeline_stage,
-                        alertable = EXCLUDED.alertable
+                        alertable = EXCLUDED.alertable,
+                        ees_score = EXCLUDED.ees_score,
+                        entry_state = EXCLUDED.entry_state,
+                        enter_action = EXCLUDED.enter_action,
+                        enter_enabled = EXCLUDED.enter_enabled,
+                        ees_alerts = EXCLUDED.ees_alerts
                     """
                 ),
                 {
