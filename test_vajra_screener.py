@@ -53,6 +53,13 @@ def test_top_picks_executable_first_no_reject():
     assert "A" in symbols
 
 
+def test_direction_from_scores_when_trade_type_reject():
+    row = finalize_screener_row(
+        {"stock": "NHPC", "trade_type": "REJECT", "bull_score": 55.0, "bear_score": 15.0}
+    )
+    assert row["direction"] == "LONG"
+
+
 def test_build_screener_display_groups():
     rows = [
         {"stock": "E", "entry_state": STATE_EXECUTABLE, "confidence": 80},

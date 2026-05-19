@@ -92,6 +92,7 @@ def fetch_vajra_ratings_for_session(session_date: Optional[date] = None) -> List
             text(
                 """
                 SELECT stock, future_symbol, instrument_key, trade_type, confidence,
+                       bull_score, bear_score,
                        structure_pass, momentum_pass, trend_pass, volume_pass,
                        obv_label, market_phase, reversal_risk, computed_at,
                        tps_score, ecs_score, transition_state,
@@ -109,7 +110,7 @@ def fetch_vajra_ratings_for_session(session_date: Optional[date] = None) -> List
         ).fetchall()
         out: List[Dict[str, Any]] = []
         for r in rows:
-            raw_alerts = r[29]
+            raw_alerts = r[31]
             if isinstance(raw_alerts, str):
                 try:
                     ees_alerts = json.loads(raw_alerts) if raw_alerts else []
@@ -126,32 +127,34 @@ def fetch_vajra_ratings_for_session(session_date: Optional[date] = None) -> List
                     "instrument_key": r[2],
                     "trade_type": r[3],
                     "confidence": float(r[4]) if r[4] is not None else 0.0,
-                    "structure": "✔ PASS" if r[5] else "✘ FAIL",
-                    "momentum": "✔ PASS" if r[6] else "✘ FAIL",
-                    "trend": "✔ PASS" if r[7] else "✘ FAIL",
-                    "volume": "✔ PASS" if r[8] else "✘ FAIL",
-                    "obv": r[9],
-                    "market_phase": r[10],
-                    "reversal_risk": r[11],
-                    "computed_at": r[12].isoformat() if r[12] else None,
-                    "tps_score": float(r[13]) if r[13] is not None else None,
-                    "ecs_score": float(r[14]) if r[14] is not None else None,
-                    "transition_state": r[15],
-                    "vwap_reclaim_status": r[16],
-                    "ema_reclaim_status": r[17],
-                    "rsi_transition_status": r[18],
-                    "pullback_quality_score": float(r[19]) if r[19] is not None else None,
-                    "extension_risk_score": float(r[20]) if r[20] is not None else None,
-                    "execution_validated": bool(r[21]) if r[21] is not None else False,
-                    "execution_step": r[22],
-                    "pipeline_stage": r[23],
-                    "alertable": bool(r[24]) if r[24] is not None else False,
-                    "ees_score": float(r[25]) if r[25] is not None else None,
-                    "entry_state": r[26],
-                    "enter_action": r[27],
-                    "enter_enabled": bool(r[28]) if r[28] is not None else False,
+                    "bull_score": float(r[5]) if r[5] is not None else None,
+                    "bear_score": float(r[6]) if r[6] is not None else None,
+                    "structure": "✔ PASS" if r[7] else "✘ FAIL",
+                    "momentum": "✔ PASS" if r[8] else "✘ FAIL",
+                    "trend": "✔ PASS" if r[9] else "✘ FAIL",
+                    "volume": "✔ PASS" if r[10] else "✘ FAIL",
+                    "obv": r[11],
+                    "market_phase": r[12],
+                    "reversal_risk": r[13],
+                    "computed_at": r[14].isoformat() if r[14] else None,
+                    "tps_score": float(r[15]) if r[15] is not None else None,
+                    "ecs_score": float(r[16]) if r[16] is not None else None,
+                    "transition_state": r[17],
+                    "vwap_reclaim_status": r[18],
+                    "ema_reclaim_status": r[19],
+                    "rsi_transition_status": r[20],
+                    "pullback_quality_score": float(r[21]) if r[21] is not None else None,
+                    "extension_risk_score": float(r[22]) if r[22] is not None else None,
+                    "execution_validated": bool(r[23]) if r[23] is not None else False,
+                    "execution_step": r[24],
+                    "pipeline_stage": r[25],
+                    "alertable": bool(r[26]) if r[26] is not None else False,
+                    "ees_score": float(r[27]) if r[27] is not None else None,
+                    "entry_state": r[28],
+                    "enter_action": r[29],
+                    "enter_enabled": bool(r[30]) if r[30] is not None else False,
                     "ees_alerts": ees_alerts,
-                    "trade_quality_score": float(r[30]) if len(r) > 30 and r[30] is not None else None,
+                    "trade_quality_score": float(r[32]) if len(r) > 32 and r[32] is not None else None,
                 }
             )
         from backend.services.vajra.ui_mapping import finalize_screener_rows

@@ -21,17 +21,20 @@ _REASON_LABELS = {
 
 
 def derive_direction(row: Dict[str, Any]) -> str:
-    tt = str(row.get("trade_type") or "").upper()
-    if "SHORT" in tt:
+    """Trade direction for the screener — always LONG or SHORT when ECS scores exist."""
+    tt = str(row.get("trade_type") or "").upper().strip()
+    if tt.startswith("EARLY SHORT") or tt.startswith("SHORT"):
         return "SHORT"
-    if "LONG" in tt:
+    if tt.startswith("EARLY LONG") or tt.startswith("LONG"):
         return "LONG"
-    bull = float(row.get("bull_score") or 0)
-    bear = float(row.get("bear_score") or 0)
-    if bull > bear + 3:
-        return "LONG"
-    if bear > bull + 3:
-        return "SHORT"
+
+    bull_raw = row.get("bull_score")
+    bear_raw = row.get("bear_score")
+    if bull_raw is not None or bear_raw is not None:
+        bull = float(bull_raw or 0)
+        bear = float(bear_raw or 0)
+        return "LONG" if bull >= bear else "SHORT"
+
     return "NEUTRAL"
 
 
