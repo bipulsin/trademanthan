@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Sequence
 import pytz
 
 from backend.services.vajra.engine import compute_ecs_rating, sort_vajra_rows
+from backend.services.vajra.ees import compute_ees, enter_action_label
 from backend.services.vajra.transition import (
     TPS_SHORTLIST_MAX,
     TPS_SHORTLIST_MIN,
@@ -40,6 +41,7 @@ def _build_row(
     early_type: Optional[str],
     execution,
     computed_at: datetime,
+    ees_result=None,
 ) -> Dict[str, Any]:
     ecs = ecs_rating.to_row_dict()
     trade_type = merge_trade_type(ecs["trade_type"], early_type)
@@ -57,6 +59,16 @@ def _build_row(
         and (exec_ok or not execution)
     )
 
+    ees_d: Dict[str, Any] = {}
+    enter_action: Dict[str, Any] = {}
+    if ees_result is not None:
+        ees_d = ees_result.to_dict()
+        enter_action = enter_action_label(
+            tps_score=tps_d.get("tps_score"),
+            ees_score=ees_d.get("ees_score"),
+            entry_state=ees_d.get("entry_state"),
+        )
+
     return {
         "security": fut_sym or stock,
         "stock": stock,
@@ -65,6 +77,10 @@ def _build_row(
         "confidence": ecs["confidence"],
         "ecs_score": ecs.get("ecs_score", ecs["confidence"]),
         "tps_score": tps_d["tps_score"],
+        **ees_d,
+        "enter_action": enter_action.get("action"),
+        "enter_enabled": enter_action.get("enabled", False),
+        "enter_reason": enter_action.get("reason"),
         "structure": ecs["structure"],
         "momentum": ecs["momentum"],
         "trend": ecs["trend"],
@@ -186,12 +202,14 @@ def run_transition_pipeline(
         try:
             c30 = fetch_candles(fut_key, DISCOVERY_TF)
             c1h = fetch_candles(fut_key, HTF_BIAS_TF)
+            c5 = fetch_candles(fut_key, EXECUTION_TF)
             row = rate_symbol_transition(
                 stock=stock,
                 fut_sym=fut_sym,
                 instrument_key=fut_key,
                 candles_30m=c30,
                 candles_1hr=c1h,
+                candles_5m=c5,
                 computed_at=ts,
                 run_execution=False,
             )

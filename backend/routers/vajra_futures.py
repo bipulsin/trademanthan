@@ -81,6 +81,9 @@ def get_vajra_ratings(
             )
             computed_at = rows[0].get("computed_at") if rows else None
             alerts = [r for r in rows if r.get("alertable")]
+            ees_alert_rows = [
+                r for r in rows if (r.get("ees_alerts") or []) and not r.get("alertable")
+            ]
             return JSONResponse(
                 status_code=200,
                 content={
@@ -94,8 +97,9 @@ def get_vajra_ratings(
                     "htf": HTF_BIAS_TF,
                     "source": source,
                     "count": len(rows),
-                    "alert_count": len(alerts),
+                    "alert_count": len(alerts) + len(ees_alert_rows),
                     "alerts": alerts,
+                    "ees_alert_rows": ees_alert_rows,
                     "computed_at": computed_at,
                     "rows": rows,
                 },

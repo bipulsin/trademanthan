@@ -17,6 +17,11 @@ _EXTRA_COLUMNS = (
     ("execution_step", "TEXT"),
     ("pipeline_stage", "TEXT"),
     ("alertable", "BOOLEAN DEFAULT FALSE"),
+    ("ees_score", "DOUBLE PRECISION"),
+    ("entry_state", "TEXT"),
+    ("enter_action", "TEXT"),
+    ("enter_enabled", "BOOLEAN DEFAULT FALSE"),
+    ("ees_alerts", "JSONB DEFAULT '[]'"),
 )
 
 

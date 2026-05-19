@@ -3,6 +3,7 @@ Batch Vajra rating job: arbitrage_master current-month futures, every 15 minutes
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
@@ -80,13 +81,14 @@ def fetch_vajra_ratings_for_session(session_date: Optional[date] = None) -> List
         rows = db.execute(
             text(
                 """
-                SELECT stock, future_symbol, trade_type, confidence,
+                SELECT stock, future_symbol, instrument_key, trade_type, confidence,
                        structure_pass, momentum_pass, trend_pass, volume_pass,
                        obv_label, market_phase, reversal_risk, computed_at,
                        tps_score, ecs_score, transition_state,
                        vwap_reclaim_status, ema_reclaim_status, rsi_transition_status,
                        pullback_quality_score, extension_risk_score,
-                       execution_validated, execution_step, pipeline_stage, alertable
+                       execution_validated, execution_step, pipeline_stage, alertable,
+                       ees_score, entry_state, enter_action, enter_enabled, ees_alerts
                 FROM vajra_futures_rating
                 WHERE session_date = :sd
                 ORDER BY trade_type, confidence DESC, stock
@@ -96,32 +98,48 @@ def fetch_vajra_ratings_for_session(session_date: Optional[date] = None) -> List
         ).fetchall()
         out: List[Dict[str, Any]] = []
         for r in rows:
+            raw_alerts = r[29]
+            if isinstance(raw_alerts, str):
+                try:
+                    ees_alerts = json.loads(raw_alerts) if raw_alerts else []
+                except json.JSONDecodeError:
+                    ees_alerts = []
+            elif isinstance(raw_alerts, list):
+                ees_alerts = raw_alerts
+            else:
+                ees_alerts = []
             out.append(
                 {
                     "security": r[1] or r[0],
                     "stock": r[0],
-                    "trade_type": r[2],
-                    "confidence": float(r[3]) if r[3] is not None else 0.0,
-                    "structure": "✔ PASS" if r[4] else "✘ FAIL",
-                    "momentum": "✔ PASS" if r[5] else "✘ FAIL",
-                    "trend": "✔ PASS" if r[6] else "✘ FAIL",
-                    "volume": "✔ PASS" if r[7] else "✘ FAIL",
-                    "obv": r[8],
-                    "market_phase": r[9],
-                    "reversal_risk": r[10],
-                    "computed_at": r[11].isoformat() if r[11] else None,
-                    "tps_score": float(r[12]) if r[12] is not None else None,
-                    "ecs_score": float(r[13]) if r[13] is not None else None,
-                    "transition_state": r[14],
-                    "vwap_reclaim_status": r[15],
-                    "ema_reclaim_status": r[16],
-                    "rsi_transition_status": r[17],
-                    "pullback_quality_score": float(r[18]) if r[18] is not None else None,
-                    "extension_risk_score": float(r[19]) if r[19] is not None else None,
-                    "execution_validated": bool(r[20]) if r[20] is not None else False,
-                    "execution_step": r[21],
-                    "pipeline_stage": r[22],
-                    "alertable": bool(r[23]) if r[23] is not None else False,
+                    "instrument_key": r[2],
+                    "trade_type": r[3],
+                    "confidence": float(r[4]) if r[4] is not None else 0.0,
+                    "structure": "✔ PASS" if r[5] else "✘ FAIL",
+                    "momentum": "✔ PASS" if r[6] else "✘ FAIL",
+                    "trend": "✔ PASS" if r[7] else "✘ FAIL",
+                    "volume": "✔ PASS" if r[8] else "✘ FAIL",
+                    "obv": r[9],
+                    "market_phase": r[10],
+                    "reversal_risk": r[11],
+                    "computed_at": r[12].isoformat() if r[12] else None,
+                    "tps_score": float(r[13]) if r[13] is not None else None,
+                    "ecs_score": float(r[14]) if r[14] is not None else None,
+                    "transition_state": r[15],
+                    "vwap_reclaim_status": r[16],
+                    "ema_reclaim_status": r[17],
+                    "rsi_transition_status": r[18],
+                    "pullback_quality_score": float(r[19]) if r[19] is not None else None,
+                    "extension_risk_score": float(r[20]) if r[20] is not None else None,
+                    "execution_validated": bool(r[21]) if r[21] is not None else False,
+                    "execution_step": r[22],
+                    "pipeline_stage": r[23],
+                    "alertable": bool(r[24]) if r[24] is not None else False,
+                    "ees_score": float(r[25]) if r[25] is not None else None,
+                    "entry_state": r[26],
+                    "enter_action": r[27],
+                    "enter_enabled": bool(r[28]) if r[28] is not None else False,
+                    "ees_alerts": ees_alerts,
                 }
             )
         return sort_vajra_rows(out)
@@ -326,7 +344,8 @@ def run_vajra_futures_rating_job(scan_trigger: str = "manual") -> Dict[str, Any]
                         tps_score, ecs_score, transition_state,
                         vwap_reclaim_status, ema_reclaim_status, rsi_transition_status,
                         pullback_quality_score, extension_risk_score,
-                        execution_validated, execution_step, pipeline_stage, alertable
+                        execution_validated, execution_step, pipeline_stage, alertable,
+                        ees_score, entry_state, enter_action, enter_enabled, ees_alerts
                     ) VALUES (
                         :session_date, :stock, :future_symbol, :instrument_key,
                         :trade_type, :confidence, :bull_score, :bear_score,
@@ -335,7 +354,8 @@ def run_vajra_futures_rating_job(scan_trigger: str = "manual") -> Dict[str, Any]
                         :tps_score, :ecs_score, :transition_state,
                         :vwap_reclaim_status, :ema_reclaim_status, :rsi_transition_status,
                         :pullback_quality_score, :extension_risk_score,
-                        :execution_validated, :execution_step, :pipeline_stage, :alertable
+                        :execution_validated, :execution_step, :pipeline_stage, :alertable,
+                        :ees_score, :entry_state, :enter_action, :enter_enabled, :ees_alerts
                     )
                     ON CONFLICT (session_date, instrument_key) DO UPDATE SET
                         stock = EXCLUDED.stock,
@@ -395,6 +415,11 @@ def run_vajra_futures_rating_job(scan_trigger: str = "manual") -> Dict[str, Any]
                     "execution_step": row.get("execution_step"),
                     "pipeline_stage": row.get("pipeline_stage"),
                     "alertable": row.get("alertable", False),
+                    "ees_score": row.get("ees_score"),
+                    "entry_state": row.get("entry_state"),
+                    "enter_action": row.get("enter_action"),
+                    "enter_enabled": row.get("enter_enabled", False),
+                    "ees_alerts": json.dumps(row.get("ees_alerts") or []),
                 },
             )
         db.commit()

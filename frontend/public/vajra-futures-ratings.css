@@ -99,6 +99,42 @@ table.vajra-table td.num { text-align: center; }
     color: #fff;
     cursor: pointer;
 }
+.vajra-enter-btn[disabled] {
+    cursor: not-allowed;
+    opacity: 0.92;
+    font-size: 0.65rem;
+    letter-spacing: 0.02em;
+}
+.vajra-enter-btn-wait {
+    border-color: #ca8a04;
+    background: #854d0e;
+    color: #fef9c3;
+}
+.vajra-enter-btn-watch {
+    border-color: #64748b;
+    background: #334155;
+    color: #e2e8f0;
+}
+.vajra-enter-btn-extended {
+    border-color: #991b1b;
+    background: #7f1d1d;
+    color: #fecaca;
+}
+.vajra-ees-high {
+    background: #16a34a !important;
+    color: #000000 !important;
+    box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.45);
+}
+.vajra-ees-mid {
+    background: #ea580c !important;
+    color: #000000 !important;
+}
+body.theme-page .vajra-ees-high {
+    color: #000000 !important;
+}
+body.theme-page .vajra-ees-mid {
+    color: #000000 !important;
+}
 .vajra-rev-med {
     background: #f59e0b !important;
     color: #111827 !important;

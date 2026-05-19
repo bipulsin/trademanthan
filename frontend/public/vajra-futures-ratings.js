@@ -50,6 +50,8 @@
     const TOP_COLUMNS = [
         { key: 'trade_type', label: 'Status', chip: true },
         { key: 'tps_score', label: 'TPS', chip: true, num: true },
+        { key: 'ees_score', label: 'EES', chip: true, num: true },
+        { key: 'entry_state', label: 'Entry State', chip: true },
         { key: 'ecs_score', label: 'ECS', chip: true, num: true },
         { key: 'transition_state', label: 'Transition', chip: true },
         { key: 'vwap_reclaim_status', label: 'VWAP', chip: true },
@@ -61,6 +63,8 @@
         { key: 'security', label: 'Security', chip: false },
         { key: 'trade_type', label: 'Status', chip: true },
         { key: 'tps_score', label: 'TPS', chip: true, num: true },
+        { key: 'ees_score', label: 'EES', chip: true, num: true },
+        { key: 'entry_state', label: 'Entry State', chip: true },
         { key: 'ecs_score', label: 'ECS', chip: true, num: true },
         { key: 'transition_state', label: 'Transition State', chip: true },
         { key: 'vwap_reclaim_status', label: 'VWAP Reclaim', chip: true },
@@ -122,10 +126,53 @@
 
     function cellValue(r, col) {
         if (col.key === 'security') return r.security || r.stock || '—';
-        if (col.num || col.key === 'confidence' || col.key === 'tps_score' || col.key === 'ecs_score') {
+        if (
+            col.num ||
+            col.key === 'confidence' ||
+            col.key === 'tps_score' ||
+            col.key === 'ecs_score' ||
+            col.key === 'ees_score'
+        ) {
             return fmtNum(r[col.key] != null ? r[col.key] : r.confidence);
         }
+        if (col.key === 'entry_state') {
+            const st = String(r.entry_state || '—');
+            if (st === 'PULLBACK PREFERRED') return 'PULLBACK';
+            if (st === 'WATCHLIST ONLY') return 'WATCHLIST';
+            if (st === 'AVOID CHASING') return 'AVOID';
+            return st;
+        }
         return r[col.key] != null && r[col.key] !== '' ? String(r[col.key]) : '—';
+    }
+
+    function renderEnterCell(row, idx) {
+        const action = String(row.enter_action || 'WATCH');
+        const enabled = row.enter_enabled === true;
+        const title = escapeHtml(row.enter_reason || action);
+        if (enabled) {
+            return (
+                '<td class="vajra-td-enter"><button type="button" class="vajra-enter-btn" data-vajra-enter="1" data-vajra-idx="' +
+                idx +
+                '" title="' +
+                title +
+                '">ENTER</button></td>'
+            );
+        }
+        const btnClass =
+            action === 'EXTENDED'
+                ? 'vajra-enter-btn vajra-enter-btn-extended'
+                : action === 'WAIT PULLBACK'
+                  ? 'vajra-enter-btn vajra-enter-btn-wait'
+                  : 'vajra-enter-btn vajra-enter-btn-watch';
+        return (
+            '<td class="vajra-td-enter"><button type="button" class="' +
+            btnClass +
+            '" disabled title="' +
+            title +
+            '">' +
+            escapeHtml(action) +
+            '</button></td>'
+        );
     }
 
     function isPassText(val) {
@@ -223,10 +270,7 @@
                 tbody += '<td class="' + tdClass + '">' + renderChip(col, r) + '</td>';
             });
             if (showEnter) {
-                tbody +=
-                    '<td class="vajra-td-enter"><button type="button" class="vajra-enter-btn" data-vajra-enter="1" data-vajra-idx="' +
-                    idx +
-                    '">ENTER</button></td>';
+                tbody += renderEnterCell(r, idx);
             }
             tbody += '</tr>';
         });
@@ -269,7 +313,7 @@
         }
         const top = rows;
         return (
-            '<p class="vajra-meta vajra-pipeline-note">30m discovery · 5m validation on shortlist · sorted by TPS (high → low)</p>' +
+            '<p class="vajra-meta vajra-pipeline-note">30m TPS discovery · 5m EES execution quality · sorted by TPS (high → low)</p>' +
             '<div class="vajra-table-wrap"><table class="vajra-table vajra-top-table">' +
             renderTableHead(TOP_COLUMNS, true) +
             '<tbody>' +
@@ -413,6 +457,29 @@
             if (seenKeys[key]) return;
             seenKeys[key] = true;
             const tt = String(r.trade_type || '');
+            const eesMsgs = r.ees_alerts || [];
+            if (eesMsgs.length) {
+                eesMsgs.forEach(function (alertText) {
+                    const ekey = key + '|ees|' + alertText;
+                    if (seenKeys[ekey]) return;
+                    seenKeys[ekey] = true;
+                    const msg =
+                        'Vajra EES · ' +
+                        alertText +
+                        ': ' +
+                        (r.security || r.stock) +
+                        ' · TPS ' +
+                        fmtNum(r.tps_score) +
+                        ' · EES ' +
+                        fmtNum(r.ees_score) +
+                        ' · ' +
+                        (r.entry_state || '');
+                    if (typeof global.notifyTelegramUserMessage === 'function') {
+                        global.notifyTelegramUserMessage(msg).catch(function () {});
+                    }
+                });
+                return;
+            }
             if (tt.indexOf('EARLY') !== 0) return;
             const msg =
                 'Vajra ' +
@@ -421,6 +488,8 @@
                 (r.security || r.stock) +
                 ' · TPS ' +
                 fmtNum(r.tps_score) +
+                ' · EES ' +
+                fmtNum(r.ees_score) +
                 ' · ' +
                 (r.transition_state || '');
             if (typeof global.notifyTelegramUserMessage === 'function') {
@@ -548,9 +617,14 @@
                         (data.alert_count != null ? ' · Alerts: ' + data.alert_count : '');
                 }
                 if (msgEl) msgEl.textContent = '';
-                processAlerts(data.alerts || allRows.filter(function (r) {
-                    return r.alertable;
-                }), seenAlertKeys);
+                const alertRows = (data.alerts || []).concat(data.ees_alert_rows || []);
+                const mergedAlerts =
+                    alertRows.length > 0
+                        ? alertRows
+                        : allRows.filter(function (r) {
+                              return r.alertable || (r.ees_alerts && r.ees_alerts.length);
+                          });
+                processAlerts(mergedAlerts, seenAlertKeys);
                 if (modal.classList.contains('vajra-modal--open')) {
                     modalRows = allRows.slice(TOP_N);
                     renderModal();
