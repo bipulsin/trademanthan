@@ -44,7 +44,19 @@ def _top8_eligible(row: Dict[str, Any]) -> bool:
     if _qual(row) == STATE_REJECT:
         return False
     phase = str(row.get("market_phase") or row.get("market_context") or "")
-    return phase not in TOP8_EXCLUDED_PHASES
+    if phase in TOP8_EXCLUDED_PHASES:
+        return False
+    bias = str(row.get("execution_bias") or row.get("direction") or "").upper()
+    if bias == "NEUTRAL":
+        return False
+    if row.get("directional_conviction") is False:
+        return False
+    from backend.services.vajra.trade_state import has_directional_conviction, resolve_market_phase
+
+    if not row.get("directional_conviction"):
+        if not has_directional_conviction(row, resolve_market_phase(row)):
+            return False
+    return True
 
 
 def _sort_pool(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -132,10 +144,20 @@ def enrich_execution_scores(row: Dict[str, Any]) -> Dict[str, Any]:
         ),
         2,
     )
-    if not row.get("execution_bias"):
-        from backend.services.vajra.trade_state import derive_execution_bias, derive_structural_bias
+    from backend.services.vajra.trade_state import (
+        compute_directional_scores,
+        derive_structural_bias,
+        directional_confidence_label,
+        has_directional_conviction,
+        resolve_execution_direction,
+    )
 
-        row["structural_bias"] = derive_structural_bias(row)
-        row["execution_bias"] = derive_execution_bias(row, mp)
-        row["direction"] = row["execution_bias"]
+    row["structural_bias"] = derive_structural_bias(row)
+    row["execution_bias"] = resolve_execution_direction(row, mp, allow_neutral=False)
+    row["direction"] = row["execution_bias"]
+    ls, ss = compute_directional_scores(row, mp)
+    row["directional_long_score"] = round(ls, 2)
+    row["directional_short_score"] = round(ss, 2)
+    row["directional_confidence"] = directional_confidence_label(row["execution_bias"], ls, ss)
+    row["directional_conviction"] = has_directional_conviction(row, mp)
     return row

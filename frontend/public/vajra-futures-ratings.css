@@ -310,3 +310,7 @@ tr.vajra-adv-row td {
 .vajra-ctx-rotational { background: #f59e0b !important; color: #111827 !important; font-weight: 700; }
 .vajra-ctx-weakening { background: #ea580c !important; color: #111827 !important; font-weight: 700; }
 .vajra-ctx-compression { background: #94a3b8 !important; color: #1e293b !important; font-weight: 700; }
+
+.vajra-dir-strong { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.45); font-weight: 800; }
+.vajra-dir-moderate { opacity: 0.95; }
+.vajra-dir-weak { opacity: 0.78; font-weight: 600; }

@@ -121,14 +121,36 @@ def test_top8_excludes_compression():
     assert picks[0]["stock"] == "GOOD"
 
 
-def test_execution_bias_neutral_when_below_vwap_for_long():
+def test_below_vwap_can_still_resolve_long_when_bullish_dominant():
+    from backend.services.vajra.trade_state import (
+        compute_directional_scores,
+        resolve_execution_direction,
+    )
+
     row = {
         "vwap_reclaim_status": "BELOW VWAP",
         "structure": "PASS",
         "momentum": "PASS",
-        "breakout_score": 60,
-        "bull_score": 70,
-        "bear_score": 30,
-        "market_phase": "ROTATIONAL",
+        "trend": "PASS",
+        "breakout_score": 62,
+        "bull_score": 72,
+        "bear_score": 28,
+        "trade_type": "LONG WATCH",
     }
-    assert derive_execution_bias(row, PHASE_ROTATIONAL) in ("NEUTRAL", "SHORT")
+    ls, ss = compute_directional_scores(row, PHASE_ROTATIONAL)
+    assert ls > ss
+    assert resolve_execution_direction(row, PHASE_ROTATIONAL) == "LONG"
+
+
+def test_execution_direction_never_neutral_for_watchlist():
+    from backend.services.vajra.trade_state import resolve_execution_direction
+
+    row = {
+        "vwap_reclaim_status": "NEAR VWAP",
+        "structure": "FAIL",
+        "momentum": "FAIL",
+        "bull_score": 50,
+        "bear_score": 49,
+    }
+    d = resolve_execution_direction(row, PHASE_ROTATIONAL, allow_neutral=False)
+    assert d in ("LONG", "SHORT")

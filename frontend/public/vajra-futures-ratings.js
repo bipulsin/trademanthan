@@ -40,7 +40,7 @@
     const QUAL_REJECT = 'REJECT';
 
     const TOP_COLUMNS = [
-        { key: 'execution_bias', label: 'Execution Bias' },
+        { key: 'execution_bias', label: 'Direction' },
         { key: 'qualification', label: 'Qualification' },
         { key: 'confidence', label: 'Confidence', num: true },
         { key: 'setup_quality_score', label: 'Setup Quality', num: true },
@@ -118,7 +118,8 @@
     function cellValue(r, col) {
         if (col.key === 'security') return r.security || r.stock || '—';
         if (col.key === 'execution_bias') {
-            return String(r.execution_bias || r.direction || '—').toUpperCase();
+            const d = String(r.execution_bias || r.direction || 'LONG').toUpperCase();
+            return d === 'NEUTRAL' ? 'LONG' : d;
         }
         if (col.key === 'qualification') return qualificationOf(r);
         if (col.key === 'market_context') {
@@ -243,10 +244,16 @@
     function chipToneClass(col, row) {
         const raw = cellValue(row, col);
         if (col.key === 'execution_bias') {
-            const d = String(row.execution_bias || row.direction || '').toUpperCase();
-            if (d === 'LONG') return 'df-dir-long';
-            if (d === 'SHORT') return 'df-dir-short';
-            return 'df-dir-neutral';
+            let d = String(row.execution_bias || row.direction || 'LONG').toUpperCase();
+            if (d === 'NEUTRAL') d = 'LONG';
+            const conf = String(row.directional_confidence || '').toLowerCase();
+            let extra = '';
+            if (conf.indexOf('weak') >= 0) extra = ' vajra-dir-weak';
+            else if (conf.indexOf('strong') >= 0) extra = ' vajra-dir-strong';
+            else if (conf.indexOf('moderate') >= 0) extra = ' vajra-dir-moderate';
+            if (d === 'LONG') return 'df-dir-long' + extra;
+            if (d === 'SHORT') return 'df-dir-short' + extra;
+            return 'df-dir-long' + extra;
         }
         if (col.key === 'qualification') {
             return qualTone(qualificationOf(row));
@@ -362,11 +369,15 @@
             );
         }
         const text = chipDisplayValue(col, row);
+        let tip = col.label + ': ' + text;
+        if (col.key === 'execution_bias' && row.directional_confidence) {
+            tip = String(row.directional_confidence);
+        }
         return (
             '<span class="df-dir-pill ' +
             tone +
             '" title="' +
-            escapeHtml(col.label + ': ' + (row[col.key] || '')) +
+            escapeHtml(tip) +
             '">' +
             escapeHtml(text) +
             '</span>'

@@ -89,19 +89,14 @@ def resolve_market_phase(row: Dict[str, Any]) -> str:
 
 
 def derive_structural_bias(row: Dict[str, Any]) -> str:
-    """ECS structural tendency (can be stale vs current execution)."""
-    tt = str(row.get("trade_type") or "").upper()
-    if tt.startswith("SHORT") or "EARLY SHORT" in tt:
-        return "SHORT"
-    if tt.startswith("LONG") or "EARLY LONG" in tt:
-        return "LONG"
+    """ECS structural tendency — internal layer (not shown as NEUTRAL in Top 8)."""
     bull = _f(row.get("bull_score"))
     bear = _f(row.get("bear_score"))
-    if bull > bear + 3:
-        return "LONG"
-    if bear > bull + 3:
-        return "SHORT"
-    return "NEUTRAL"
+    if bull > bear + 5:
+        return "BULLISH"
+    if bear > bull + 5:
+        return "BEARISH"
+    return "MIXED"
 
 
 def _price_above_vwap(row: Dict[str, Any]) -> bool:
@@ -114,63 +109,130 @@ def _price_below_vwap(row: Dict[str, Any]) -> bool:
     return v == "BELOW VWAP" or ("BELOW" in v and "ABOVE" not in v)
 
 
-def derive_execution_bias(row: Dict[str, Any], market_phase: str) -> str:
+def compute_directional_scores(row: Dict[str, Any], market_phase: str) -> tuple[float, float]:
     """
-    Executable trade direction now — not legacy structural bias alone.
+    Factor-sum model: higher-probability execution side right now.
+    VWAP influences but does not veto pullback/reclaim longs or shorts.
     """
-    struct_ok = _pass(row.get("structure"))
-    mom_ok = _pass(row.get("momentum"))
+    struct = _f(row.get("structure_score"))
+    mom = _f(row.get("momentum_score"))
+    trend = _f(row.get("trend_score"))
     brk = _f(row.get("breakout_score"))
+    htf = _f(row.get("htf_alignment_score"))
     bull = _f(row.get("bull_score"))
     bear = _f(row.get("bear_score"))
-    htf = _f(row.get("htf_alignment_score"))
-    above = _price_above_vwap(row)
-    below = _price_below_vwap(row)
 
-    phase = market_phase
-    expansion_ok = phase in EXPANSION_PHASES or phase == PHASE_TREND_CONTINUATION
-    not_compression = phase not in (PHASE_COMPRESSION, PHASE_WEAKENING)
+    long_s = 0.0
+    short_s = 0.0
 
-    long_core = (
-        above
-        and struct_ok
-        and mom_ok
-        and brk >= 52
-        and bull >= bear
-        and not_compression
-        and phase not in (PHASE_BEAR_EXPANSION, PHASE_EARLY_BEAR)
-    )
-    short_core = (
-        below
-        and struct_ok
-        and mom_ok
-        and brk >= 52
-        and bear >= bull
-        and not_compression
-        and phase not in (PHASE_BULL_EXPANSION, PHASE_EARLY_BULL)
-    )
+    if _pass(row.get("structure")):
+        long_s += 1.0 + struct / 100.0
+        short_s += 1.0 + struct / 100.0
+    long_s += bull / 45.0
+    short_s += bear / 45.0
 
-    if long_core and expansion_ok:
+    if _pass(row.get("momentum")):
+        long_s += 0.9 + mom / 110.0
+        short_s += 0.9 + mom / 110.0
+    if mom >= 52:
+        long_s += (mom - 50) / 40.0
+    if mom <= 48:
+        short_s += (50 - mom) / 40.0
+
+    if _pass(row.get("trend")):
+        long_s += 0.7 + trend / 130.0
+        short_s += 0.7 + trend / 130.0
+
+    if _price_above_vwap(row):
+        long_s += 1.0
+        short_s += 0.35
+    elif _price_below_vwap(row):
+        short_s += 1.0
+        long_s += 0.55
+        if bull > bear + 12:
+            long_s += 0.85
+    else:
+        long_s += 0.45
+        short_s += 0.45
+
+    obv = str(row.get("obv") or "").upper()
+    if "RISING" in obv or ("ABOVE" in obv and "FALLING" not in obv):
+        long_s += 0.75
+    if "FALLING" in obv or ("BELOW" in obv and "RISING" not in obv):
+        short_s += 0.75
+
+    long_s += brk / 85.0
+    short_s += brk / 85.0
+    long_s += htf / 120.0
+    short_s += max(0.0, (62.0 - htf) / 90.0)
+
+    if market_phase in (PHASE_BULL_EXPANSION, PHASE_EARLY_BULL):
+        long_s += 1.6
+    elif market_phase in (PHASE_BEAR_EXPANSION, PHASE_EARLY_BEAR):
+        short_s += 1.6
+    elif market_phase == PHASE_TREND_CONTINUATION:
+        if bull >= bear:
+            long_s += 0.8
+        else:
+            short_s += 0.8
+
+    tt = str(row.get("trade_type") or "").upper()
+    if "EARLY LONG" in tt or tt.startswith("LONG"):
+        long_s += 0.6
+    if "EARLY SHORT" in tt or tt.startswith("SHORT"):
+        short_s += 0.6
+
+    return long_s, short_s
+
+
+def directional_conviction_margin(long_s: float, short_s: float) -> float:
+    total = long_s + short_s
+    if total <= 0:
+        return 0.0
+    return abs(long_s - short_s) / total
+
+
+def resolve_execution_direction(
+    row: Dict[str, Any],
+    market_phase: str,
+    *,
+    allow_neutral: bool = False,
+) -> str:
+    """Always LONG or SHORT for trader-facing lists unless allow_neutral (REJECT only)."""
+    long_s, short_s = compute_directional_scores(row, market_phase)
+    if long_s > short_s:
         return "LONG"
-    if short_core and expansion_ok:
+    if short_s > long_s:
         return "SHORT"
-
-    if long_core and phase == PHASE_ROTATIONAL and brk >= 58:
+    bull = _f(row.get("bull_score"))
+    bear = _f(row.get("bear_score"))
+    if bull >= bear:
         return "LONG"
-    if short_core and phase == PHASE_ROTATIONAL and brk >= 58:
-        return "SHORT"
+    if allow_neutral and bull == bear and bull == 0:
+        return "NEUTRAL"
+    return "SHORT" if bear > bull else "LONG"
 
-    if above and bull > bear + 8 and struct_ok and not_compression:
-        return "LONG"
-    if below and bear > bull + 8 and struct_ok and not_compression:
-        return "SHORT"
 
-    if htf >= 62 and bull > bear + 5 and above:
-        return "LONG"
-    if htf >= 62 and bear > bull + 5 and below:
-        return "SHORT"
+def directional_confidence_label(direction: str, long_s: float, short_s: float) -> str:
+    margin = directional_conviction_margin(long_s, short_s)
+    if margin >= 0.20:
+        strength = "Strong"
+    elif margin >= 0.09:
+        strength = "Moderate"
+    else:
+        strength = "Weak"
+    return f"{strength} {direction}"
 
-    return "NEUTRAL"
+
+def has_directional_conviction(row: Dict[str, Any], market_phase: str) -> bool:
+    """Exclude unresolved chop from Top 8."""
+    long_s, short_s = compute_directional_scores(row, market_phase)
+    return directional_conviction_margin(long_s, short_s) >= 0.05
+
+
+def derive_execution_bias(row: Dict[str, Any], market_phase: str) -> str:
+    """Trader-facing execution side — never NEUTRAL for ranked setups."""
+    return resolve_execution_direction(row, market_phase, allow_neutral=False)
 
 
 def _extension_quality_score(row: Dict[str, Any]) -> float:
@@ -361,6 +423,10 @@ def build_trade_state_dict(
         confidence=tq.confidence,
         reject_reasons=reasons,
     )
+    long_s, short_s = compute_directional_scores(row, market_phase)
+    dir_conf = directional_confidence_label(execution_bias, long_s, short_s)
+    conviction = has_directional_conviction(row, market_phase)
+
     tags = build_reason_tags(
         qualification_state=qual,
         market_phase=market_phase,
@@ -373,6 +439,11 @@ def build_trade_state_dict(
         "symbol": row.get("stock") or row.get("security"),
         "structural_bias": structural_bias,
         "execution_bias": execution_bias,
+        "direction": execution_bias,
+        "directional_confidence": dir_conf,
+        "directional_conviction": conviction,
+        "directional_long_score": round(long_s, 2),
+        "directional_short_score": round(short_s, 2),
         "qualification_state": qual,
         "qualification": qual,
         "entry_state": qual,
@@ -414,11 +485,10 @@ def apply_trade_state(
     """Full qualification pipeline → unified trade state on row."""
     market_phase = resolve_market_phase(row)
     structural_bias = derive_structural_bias(row)
-    execution_bias = derive_execution_bias(row, market_phase)
+    long_s, short_s = compute_directional_scores(row, market_phase)
+    execution_bias = resolve_execution_direction(row, market_phase, allow_neutral=False)
 
-    bull_dir = execution_bias == "LONG" or (
-        execution_bias == "NEUTRAL" and structural_bias == "LONG"
-    )
+    bull_dir = execution_bias == "LONG"
 
     tq = compute_trade_quality(
         candles_30m=candles_30m,
@@ -453,8 +523,13 @@ def apply_trade_state(
     )
     row.update(tq.to_dict())
     row.update(state)
-    row["direction"] = execution_bias
-  # API alias
+    if state["qualification_state"] == STATE_REJECT:
+        row["execution_bias"] = resolve_execution_direction(
+            row, market_phase, allow_neutral=True
+        )
+        if row["execution_bias"] == "NEUTRAL":
+            row["execution_bias"] = "LONG" if _f(row.get("bull_score")) >= _f(row.get("bear_score")) else "SHORT"
+        row["direction"] = row["execution_bias"]
     if state["qualification_state"] == STATE_EXECUTABLE:
         row["enter_action"] = "ENTER"
         row["enter_enabled"] = True
