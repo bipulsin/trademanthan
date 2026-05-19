@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional, Sequence
 
 from backend.services.vajra.actions import resolve_enter_action
 from backend.services.vajra.trade_quality import compute_trade_quality
+from backend.services.vajra.ui_mapping import finalize_screener_row
 
 
 def apply_trade_qualification(
@@ -49,4 +50,4 @@ def apply_trade_qualification(
         reject_reasons=tq.reject_reasons,
     )
     row.update(action)
-    return row
+    return finalize_screener_row(row)

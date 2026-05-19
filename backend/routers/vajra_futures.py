@@ -18,6 +18,7 @@ from backend.services.vajra.job import (
     fetch_vajra_ratings_updated_at,
     sort_vajra_rows_for_display,
 )
+from backend.services.vajra.ranking import build_screener_display
 from backend.services.vajra.timeframes import (
     DEFAULT_HTF,
     DEFAULT_SCAN_TF,
@@ -120,7 +121,8 @@ def get_vajra_ratings(
             rows = db_first or compute_vajra_ratings_live(
                 mode="transition", session_date=sd, use_cache=True
             )
-            rows = sort_vajra_rows_for_display(rows)
+            display = build_screener_display(rows)
+            rows = display["rows"]
             updated_dt = fetch_vajra_ratings_updated_at(sd)
             computed_at = (
                 updated_dt.isoformat()
@@ -157,6 +159,14 @@ def get_vajra_ratings(
                     "data_age_sec": data_age_sec,
                     "ees_refresh_minutes": 5,
                     "rows": rows,
+                    "top_picks": display["top_picks"],
+                    "top_sections": display["top_sections"],
+                    "groups": {
+                        "EXECUTABLE": display["groups"].get("EXECUTABLE", []),
+                        "WATCHLIST": display["groups"].get("WATCHLIST", []),
+                        "REJECT": display["groups"].get("REJECT", []),
+                    },
+                    "remainder": display["remainder"],
                 },
                 headers={
                     "Cache-Control": "no-store, no-cache, must-revalidate",

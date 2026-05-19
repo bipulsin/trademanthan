@@ -21,17 +21,17 @@ def resolve_enter_action(
     conf = float(confidence) if confidence is not None else 0.0
     reasons = reject_reasons or []
 
-    if state == STATE_EXECUTABLE and conf >= EXECUTABLE_CONFIDENCE_MIN:
+    if state == STATE_EXECUTABLE:
         return {
             "enter_action": "ENTER",
             "enter_enabled": True,
-            "enter_reason": f"Trade quality {conf:.0f} — structure & momentum aligned",
+            "enter_reason": f"Executable — trade quality {conf:.0f}",
         }
 
     if state == STATE_REJECT:
         hint = reasons[0].replace("_", " ") if reasons else "low quality setup"
         return {
-            "enter_action": "REJECT",
+            "enter_action": "",
             "enter_enabled": False,
             "enter_reason": f"Rejected: {hint}",
         }
@@ -39,5 +39,5 @@ def resolve_enter_action(
     return {
         "enter_action": "WATCH",
         "enter_enabled": False,
-        "enter_reason": "Watchlist — awaiting stronger confirmation",
+        "enter_reason": "Watchlist — setup forming, not executable yet",
     }

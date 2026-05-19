@@ -25,9 +25,9 @@ def test_resolve_enter_only_executable_high_confidence():
 
     reject = resolve_enter_action(entry_state=STATE_REJECT, confidence=90)
     assert reject["enter_enabled"] is False
-    assert reject["enter_action"] == "REJECT"
+    assert reject["enter_action"] == ""
 
-    low = resolve_enter_action(entry_state=STATE_EXECUTABLE, confidence=EXECUTABLE_CONFIDENCE_MIN - 1)
+    low = resolve_enter_action(entry_state=STATE_WATCHLIST, confidence=EXECUTABLE_CONFIDENCE_MIN - 1)
     assert low["enter_enabled"] is False
 
 

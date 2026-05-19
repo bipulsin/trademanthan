@@ -531,18 +531,22 @@ def _classify_state(
         reject_reasons.append("over_extended")
         return STATE_REJECT
     tps = float(tps_score) if tps_score is not None else 0.0
+    discovery_ok = tps <= 0 or tps >= 52
     if tps > 0 and tps < 52:
         reject_reasons.append("low_tps_discovery")
         if structure < 55 or momentum < 52:
             return STATE_REJECT
-    if (
-        confidence >= EXECUTABLE_CONFIDENCE_MIN
-        and structure >= 62
+    executable_core = (
+        structure >= 62
         and momentum >= 58
         and extension_quality >= 45
-        and (tps <= 0 or tps >= 52)
-    ):
+        and discovery_ok
+    )
+    if executable_core and confidence >= EXECUTABLE_CONFIDENCE_MIN:
         return STATE_EXECUTABLE
+    if executable_core and confidence >= 58:
+        reject_reasons.append("awaiting_discovery_confirm")
+        return STATE_WATCHLIST
     if confidence < 42 or (structure < 48 and momentum < 45):
         return STATE_REJECT
     return STATE_WATCHLIST

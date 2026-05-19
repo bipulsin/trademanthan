@@ -154,7 +154,9 @@ def fetch_vajra_ratings_for_session(session_date: Optional[date] = None) -> List
                     "trade_quality_score": float(r[30]) if len(r) > 30 and r[30] is not None else None,
                 }
             )
-        return sort_vajra_rows_for_display(out)
+        from backend.services.vajra.ui_mapping import finalize_screener_rows
+
+        return finalize_screener_rows(sort_vajra_rows_for_display(out))
     finally:
         db.close()
 

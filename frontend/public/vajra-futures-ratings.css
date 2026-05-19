@@ -251,3 +251,53 @@ body[data-theme="light"] .vajra-modal-body {
     font-weight: 600;
     cursor: pointer;
 }
+
+.vajra-qual-exec { background: #16a34a !important; color: #000 !important; }
+.vajra-qual-watch { background: #f59e0b !important; color: #111827 !important; }
+.vajra-qual-reject { background: #94a3b8 !important; color: #1e293b !important; }
+.vajra-qual-cell { text-align: left; min-width: 7.5rem; }
+.vajra-qual-tags { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 3px; justify-content: flex-start; }
+.vajra-qual-tag {
+    font-size: 0.58rem;
+    line-height: 1.2;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: rgba(148, 163, 184, 0.25);
+    color: #334155;
+    font-weight: 600;
+}
+.vajra-conf-wrap { display: flex; align-items: center; gap: 6px; min-width: 5.5rem; }
+.vajra-conf-bar {
+    flex: 1;
+    height: 6px;
+    border-radius: 999px;
+    background: #e2e8f0;
+    overflow: hidden;
+}
+.vajra-conf-fill { display: block; height: 100%; border-radius: 999px; background: #64748b; }
+.vajra-conf-bar--weak .vajra-conf-fill { background: #94a3b8; }
+.vajra-conf-bar--developing .vajra-conf-fill { background: #f59e0b; }
+.vajra-conf-bar--executable .vajra-conf-fill { background: #16a34a; }
+.vajra-conf-num { font-size: 0.72rem; font-weight: 700; min-width: 1.6rem; text-align: right; }
+.vajra-section-head td {
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 10px 6px 6px;
+    border-bottom: none;
+    background: transparent;
+}
+.vajra-section-exec td { color: #15803d; border-top: 2px solid #22c55e; }
+.vajra-section-watch td { color: #b45309; border-top: 2px solid #f59e0b; }
+tr.vajra-row-reject { opacity: 0.72; }
+tr.vajra-row-reject td { color: #64748b; }
+tr.vajra-adv-row td {
+    padding: 2px 6px 8px 6px;
+    border-bottom: 1px solid var(--theme-border, #e2e8f0);
+    background: rgba(248, 250, 252, 0.65);
+}
+.vajra-adv-item { display: inline-block; margin-right: 10px; font-size: 0.62rem; color: #64748b; }
+.vajra-adv-item em { font-style: normal; font-weight: 700; color: #475569; }
+.vajra-action-none { color: #94a3b8; font-weight: 600; }
+.vajra-enter-btn-watch { border-color: #ca8a04 !important; background: #eab308 !important; color: #422006 !important; }

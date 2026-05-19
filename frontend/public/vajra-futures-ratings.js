@@ -35,37 +35,30 @@
         else if (allowed.length) htfSel.value = allowed[allowed.length - 1];
     }
 
-    const TRADE_TYPE_ORDER = {
-        'EARLY LONG TRANSITION': 0,
-        'EARLY SHORT TRANSITION': 1,
-        'LONG  [A+]': 2,
-        LONG: 3,
-        'SHORT [A+]': 4,
-        SHORT: 5,
-        'LONG WATCH': 6,
-        'SHORT WATCH': 7,
-        REJECT: 8,
-    };
-
-    /** Status → Entry State inclusive (transition sub-row band). */
-    const TOP_TRANSITION_COLSPAN = 4;
+    const QUAL_EXECUTABLE = 'EXECUTABLE';
+    const QUAL_WATCHLIST = 'WATCHLIST';
+    const QUAL_REJECT = 'REJECT';
 
     const TOP_COLUMNS = [
-        { key: 'trade_type', label: 'Transition', chip: true },
-        { key: 'tps_score', label: 'TPS', chip: true, num: true },
-        { key: 'ees_score', label: 'EES', chip: true, num: true },
-        { key: 'entry_state', label: 'Entry State', chip: true },
-        { key: 'ecs_score', label: 'ECS', chip: true, num: true },
-        { key: 'vwap_reclaim_status', label: 'VWAP', chip: true },
-        { key: 'pullback_quality_score', label: 'Pullback', chip: true, num: true },
-        { key: 'extension_risk_score', label: 'Extension', chip: true, num: true },
+        { key: 'direction', label: 'Direction' },
+        { key: 'qualification', label: 'Qualification' },
+        { key: 'confidence', label: 'Confidence', num: true },
+        { key: 'setup_quality_score', label: 'Setup Quality', num: true },
+        { key: 'market_context', label: 'Market Context' },
+        { key: 'pullback_quality_score', label: 'Pullback', num: true },
+        { key: 'extension_risk_score', label: 'Extension Risk', num: true },
+    ];
+
+    const ADVANCED_COLUMNS = [
+        { key: 'tps_score', label: 'TPS' },
+        { key: 'setup_potential_score', label: 'Setup Potential' },
+        { key: 'ecs_score', label: 'ECS' },
+        { key: 'vwap_reclaim_status', label: 'VWAP' },
+        { key: 'obv', label: 'OBV' },
+        { key: 'htf_alignment_score', label: 'HTF' },
     ];
 
     const VAJRA_ENTER_SEEN_KEY = 'vajra_enter_telegram_seen';
-
-    const CHIP_COLUMNS = TOP_COLUMNS.filter(function (c) {
-        return c.chip;
-    });
 
     function authHeaders() {
         const t = global.localStorage.getItem('trademanthan_token') || '';
@@ -116,50 +109,87 @@
         return Number.isFinite(n) ? n.toFixed(1) : '—';
     }
 
+    function qualificationOf(row) {
+        return String((row && (row.qualification || row.entry_state)) || QUAL_WATCHLIST)
+            .trim()
+            .toUpperCase();
+    }
+
     function cellValue(r, col) {
         if (col.key === 'security') return r.security || r.stock || '—';
+        if (col.key === 'direction') return String(r.direction || '—').toUpperCase();
+        if (col.key === 'qualification') return qualificationOf(r);
+        if (col.key === 'market_context') {
+            return String(r.market_context || r.market_phase || '—');
+        }
+        if (col.key === 'setup_quality_score') {
+            const v = r.setup_quality_score != null ? r.setup_quality_score : r.trade_quality_score;
+            return fmtNum(v != null ? v : r.confidence);
+        }
+        if (col.key === 'setup_potential_score') {
+            const v = r.setup_potential_score != null ? r.setup_potential_score : r.ees_score;
+            return fmtNum(v);
+        }
         if (
             col.num ||
             col.key === 'confidence' ||
             col.key === 'tps_score' ||
-            col.key === 'ecs_score' ||
-            col.key === 'ees_score'
+            col.key === 'ecs_score'
         ) {
             return fmtNum(r[col.key] != null ? r[col.key] : r.confidence);
-        }
-        if (col.key === 'entry_state') {
-            const st = String(r.entry_state || '—').toUpperCase();
-            if (st === 'PULLBACK PREFERRED') return 'PULLBACK';
-            if (st === 'WATCHLIST ONLY') return 'WATCHLIST';
-            if (st === 'AVOID CHASING') return 'AVOID';
-            if (st === 'REJECT') return 'REJECT';
-            return st;
         }
         return r[col.key] != null && r[col.key] !== '' ? String(r[col.key]) : '—';
     }
 
+    function confidenceTier(conf) {
+        const n = Number(conf);
+        if (!Number.isFinite(n)) return 'weak';
+        if (n >= 70) return 'executable';
+        if (n >= 40) return 'developing';
+        return 'weak';
+    }
+
+    function renderConfidenceMeter(row) {
+        const conf = Number(row.confidence);
+        const n = Number.isFinite(conf) ? Math.max(0, Math.min(100, conf)) : 0;
+        const tier = confidenceTier(n);
+        return (
+            '<div class="vajra-conf-wrap" title="Confidence ' +
+            n.toFixed(0) +
+            ' — 0–40 weak · 40–70 developing · 70+ executable">' +
+            '<div class="vajra-conf-bar vajra-conf-bar--' +
+            tier +
+            '"><span class="vajra-conf-fill" style="width:' +
+            n +
+            '%"></span></div>' +
+            '<span class="vajra-conf-num">' +
+            n.toFixed(0) +
+            '</span></div>'
+        );
+    }
+
     function renderEnterCell(row, idx, rowspan2) {
-        const action = String(row.enter_action || 'WATCH');
-        const enabled = row.enter_enabled === true;
-        const title = escapeHtml(row.enter_reason || action);
+        const qual = qualificationOf(row);
+        const action = String(row.enter_action || '').toUpperCase();
+        const enabled = row.enter_enabled === true && qual === QUAL_EXECUTABLE;
+        const title = escapeHtml(row.enter_reason || action || qual);
+        const sym = escapeHtml(row.stock || row.security || '');
         const rs = rowspan2 ? ' rowspan="2"' : '';
+        if (qual === QUAL_REJECT || !action) {
+            return '<td class="vajra-td-enter' + rs + '"><span class="vajra-action-none">—</span></td>';
+        }
         if (enabled) {
             return (
                 '<td class="vajra-td-enter"' +
                 rs +
-                '><button type="button" class="vajra-enter-btn" data-vajra-enter="1" data-vajra-idx="' +
-                idx +
+                '><button type="button" class="vajra-enter-btn" data-vajra-enter="1" data-vajra-stock="' +
+                sym +
                 '" title="' +
                 title +
                 '">ENTER</button></td>'
             );
         }
-        const btnClass =
-            action === 'REJECT' || action === 'EXTENDED'
-                ? 'vajra-enter-btn vajra-enter-btn-extended'
-                : action === 'WAIT PULLBACK'
-                  ? 'vajra-enter-btn vajra-enter-btn-wait'
-                  : 'vajra-enter-btn vajra-enter-btn-watch';
+        const btnClass = 'vajra-enter-btn vajra-enter-btn-watch';
         return (
             '<td class="vajra-td-enter"' +
             rs +
@@ -202,27 +232,38 @@
         return raw;
     }
 
+    function qualTone(qual) {
+        if (qual === QUAL_EXECUTABLE) return 'vajra-qual-exec';
+        if (qual === QUAL_REJECT) return 'vajra-qual-reject';
+        return 'vajra-qual-watch';
+    }
+
     function chipToneClass(col, row) {
         const raw = cellValue(row, col);
+        if (col.key === 'direction') {
+            const d = String(row.direction || '').toUpperCase();
+            if (d === 'LONG') return 'df-dir-long';
+            if (d === 'SHORT') return 'df-dir-short';
+            return 'df-dir-neutral';
+        }
+        if (col.key === 'qualification') {
+            return qualTone(qualificationOf(row));
+        }
         if (col.key === 'extension_risk_score') {
             const n = Number(row.extension_risk_score);
             if (n >= 65) return 'df-dir-short';
             if (n >= 40) return 'vajra-rev-med';
             return 'df-dir-long';
         }
-        if (col.key === 'pullback_quality_score' || col.key === 'tps_score' || col.key === 'ees_score') {
-            const n = Number(row[col.key]);
+        if (
+            col.key === 'pullback_quality_score' ||
+            col.key === 'tps_score' ||
+            col.key === 'setup_potential_score' ||
+            col.key === 'setup_quality_score'
+        ) {
+            const n = Number(row[col.key] || row.setup_quality_score || row.ees_score);
             if (n >= 60) return 'df-dir-long';
             if (n >= 45) return 'vajra-rev-med';
-            return 'df-dir-neutral';
-        }
-        if (col.key === 'entry_state') {
-            const st = String(row.entry_state || '').toUpperCase();
-            if (st === 'EXECUTABLE') return 'df-dir-long';
-            if (st.indexOf('REJECT') >= 0) return 'df-dir-short';
-            if (st.indexOf('PULLBACK') >= 0) return 'vajra-rev-med';
-            if (st.indexOf('WATCHLIST') >= 0) return 'df-dir-neutral';
-            if (st.indexOf('AVOID') >= 0) return 'df-dir-short';
             return 'df-dir-neutral';
         }
         if (col.key === 'reversal_risk') {
@@ -230,14 +271,6 @@
             if (u === 'HIGH') return 'df-dir-short';
             if (u === 'MEDIUM') return 'vajra-rev-med';
             return 'df-dir-long';
-        }
-        if (col.key === 'trade_type') {
-            const s = String(row.trade_type || '');
-            if (s.indexOf('EARLY SHORT') === 0) return 'df-dir-short vajra-early-pill';
-            if (s.indexOf('EARLY LONG') === 0) return 'df-dir-long vajra-early-pill';
-            if (s.indexOf('SHORT') === 0) return 'df-dir-short';
-            if (s.indexOf('LONG') === 0) return 'df-dir-long';
-            return 'df-dir-neutral';
         }
         if (col.key === 'structure' || col.key === 'momentum' || col.key === 'trend' || col.key === 'volume') {
             return isPassText(raw) ? 'df-dir-long' : 'df-dir-short';
@@ -266,7 +299,39 @@
         return { line1: s, line2: '' };
     }
 
+    function renderQualificationCell(row) {
+        const qual = qualificationOf(row);
+        const tags = row.qualification_tags || [];
+        let tagsHtml = '';
+        if (tags.length) {
+            tagsHtml =
+                '<div class="vajra-qual-tags">' +
+                tags
+                    .map(function (t) {
+                        return '<span class="vajra-qual-tag">' + escapeHtml(t) + '</span>';
+                    })
+                    .join('') +
+                '</div>';
+        }
+        return (
+            '<div class="vajra-qual-cell">' +
+            '<span class="df-dir-pill ' +
+            qualTone(qual) +
+            '">' +
+            escapeHtml(qual) +
+            '</span>' +
+            tagsHtml +
+            '</div>'
+        );
+    }
+
     function renderChip(col, row) {
+        if (col.key === 'qualification') {
+            return renderQualificationCell(row);
+        }
+        if (col.key === 'confidence') {
+            return renderConfidenceMeter(row);
+        }
         const tone = chipToneClass(col, row);
         if (col.key === 'transition_state') {
             const lines = transitionTwoLines(row.transition_state);
@@ -294,36 +359,65 @@
         );
     }
 
+    function rowQualClass(row) {
+        const q = qualificationOf(row);
+        if (q === QUAL_REJECT) return ' vajra-row-reject';
+        if (q === QUAL_WATCHLIST) return ' vajra-row-watch';
+        return ' vajra-row-exec';
+    }
+
+    function renderAdvancedRow(row) {
+        let cells = '';
+        ADVANCED_COLUMNS.forEach(function (col) {
+            let tip = col.label + ': ' + cellValue(row, col);
+            if (col.key === 'setup_potential_score') {
+                tip =
+                    'Setup Potential — attractiveness of emerging setup, not execution approval. ' +
+                    cellValue(row, col);
+            }
+            cells +=
+                '<span class="vajra-adv-item" title="' +
+                escapeHtml(tip) +
+                '"><em>' +
+                escapeHtml(col.label) +
+                '</em> ' +
+                escapeHtml(cellValue(row, col)) +
+                '</span>';
+        });
+        return '<tr class="vajra-adv-row"><td colspan="99">' + cells + '</td></tr>';
+    }
+
     function renderTableBodyRows(rows, columns, showEnter) {
-        const cols = columns || CHIP_COLUMNS;
+        const cols = columns || TOP_COLUMNS;
         let tbody = '';
         rows.forEach(function (r, idx) {
-            tbody += '<tr>';
-            tbody += '<td class="vajra-td-security">' + escapeHtml(cellValue(r, { key: 'security' })) + '</td>';
+            tbody += '<tr class="vajra-screener-row' + rowQualClass(r) + '">';
+            tbody +=
+                '<td class="vajra-td-security">' + escapeHtml(cellValue(r, { key: 'security' })) + '</td>';
             cols.forEach(function (col) {
                 let tdClass = col.num ? 'vajra-td-chip num' : 'vajra-td-chip';
-                if (col.key === 'transition_state') tdClass += ' vajra-td-transition';
+                if (col.key === 'qualification') tdClass += ' vajra-td-qual';
+                if (col.key === 'confidence') tdClass += ' vajra-td-conf';
                 tbody += '<td class="' + tdClass + '">' + renderChip(col, r) + '</td>';
             });
-            if (showEnter) {
-                tbody += renderEnterCell(r, idx);
-            }
+            if (showEnter) tbody += renderEnterCell(r, idx);
             tbody += '</tr>';
+            tbody += renderAdvancedRow(r);
         });
         return tbody;
     }
 
     function renderTableHead(columns, showEnter) {
-        const cols = columns || CHIP_COLUMNS;
-        let head = '<thead><tr><th scope="col">Security</th>';
+        const cols = columns || TOP_COLUMNS;
+        let head = '<thead><tr><th scope="col">Symbol</th>';
         cols.forEach(function (col) {
-            let thClass = col.num ? 'num' : '';
-            if (col.key === 'transition_state') {
-                thClass += ' vajra-th-transition';
-                head += '<th scope="col" class="' + thClass + '">Trans<br>ition</th>';
-            } else {
-                head += '<th scope="col" class="' + thClass + '">' + escapeHtml(col.label) + '</th>';
-            }
+            const thClass = col.num ? 'num' : '';
+            head +=
+                '<th scope="col" class="' +
+                thClass +
+                '">' +
+                escapeHtml(col.label) +
+                '</th>';
         });
         if (showEnter) head += '<th scope="col" class="vajra-th-enter">Action</th>';
         head += '</tr></thead>';
@@ -387,75 +481,71 @@
         });
     }
 
-    function transitionBandText(row) {
-        const lines = transitionTwoLines(row.transition_state);
-        if (lines.line2) return lines.line1 + ' · ' + lines.line2;
-        return lines.line1;
+
+    function renderSectionHeader(title, cssClass) {
+        const colSpan = TOP_COLUMNS.length + 2;
+        return (
+            '<tr class="vajra-section-head ' +
+            (cssClass || '') +
+            '"><td colspan="' +
+            colSpan +
+            '">' +
+            escapeHtml(title) +
+            '</td></tr>'
+        );
     }
 
-    function renderScoreBandBodyRows(rows, showEnter) {
-        let tbody = '';
-        rows.forEach(function (r, idx) {
-            tbody += '<tr class="vajra-top-data-row">';
-            tbody +=
-                '<td class="vajra-td-security">' +
-                escapeHtml(cellValue(r, { key: 'security' })) +
-                '</td>';
-            tbody += '<td colspan="' + TOP_TRANSITION_COLSPAN + '" class="vajra-score-band">';
-            tbody += '<div class="vajra-score-band-cells">';
-            for (let i = 0; i < TOP_TRANSITION_COLSPAN; i++) {
-                const col = TOP_COLUMNS[i];
-                let cellClass = 'vajra-score-band-cell';
-                if (col.num) cellClass += ' num';
-                tbody += '<div class="' + cellClass + '">' + renderChip(col, r) + '</div>';
-            }
-            tbody += '</div>';
-            const full = String(r.transition_state || '—');
-            tbody +=
-                '<div class="vajra-transition-band">' +
-                '<span class="vajra-transition-band-text" title="' +
-                escapeHtml('Transition: ' + full) +
-                '">' +
-                escapeHtml(transitionBandText(r)) +
-                '</span></div>';
-            tbody += '</td>';
-            for (let i = TOP_TRANSITION_COLSPAN; i < TOP_COLUMNS.length; i++) {
-                const col = TOP_COLUMNS[i];
-                let tdClass = col.num ? 'vajra-td-chip num' : 'vajra-td-chip';
-                tbody += '<td class="' + tdClass + '">' + renderChip(col, r) + '</td>';
-            }
-            if (showEnter) tbody += renderEnterCell(r, idx, false);
-            tbody += '</tr>';
-        });
-        return tbody;
-    }
-
-    function renderTopTableBodyRows(rows) {
-        return renderScoreBandBodyRows(rows, true);
-    }
-
-    function renderTopTable(rows) {
-        if (!rows || !rows.length) {
+    function renderTopTableFromPayload(data) {
+        const picks = (data && data.top_picks) || [];
+        const sections = (data && data.top_sections) || {};
+        if (!picks.length) {
             return (
                 '<p class="vajra-meta">No Vajra ratings for this session yet. ' +
                 'The engine runs every 5 minutes (9:30–15:00 IST). ' +
                 'If this persists after market open, use Refresh or wait for the next scan.</p>'
             );
         }
-        const top = rows;
+        const execRows = sections.EXECUTABLE || [];
+        const watchRows = sections.WATCHLIST || [];
+        let tbody = '';
+        if (execRows.length) {
+            tbody += renderSectionHeader('Top executable setups', 'vajra-section-exec');
+            tbody += renderTableBodyRows(execRows, TOP_COLUMNS, true);
+        }
+        if (watchRows.length) {
+            tbody += renderSectionHeader('Watchlist — forming setups', 'vajra-section-watch');
+            tbody += renderTableBodyRows(watchRows, TOP_COLUMNS, true);
+        }
+        const shown = {};
+        execRows.concat(watchRows).forEach(function (r) {
+            shown[r.stock || r.security] = true;
+        });
+        picks.filter(function (r) {
+            return !shown[r.stock || r.security];
+        }).forEach(function (r) {
+            tbody += renderTableBodyRows([r], TOP_COLUMNS, true);
+        });
         return (
-            '<p class="vajra-meta vajra-pipeline-note">Top 8: best non-REJECT setups · sorted EXECUTABLE → WATCHLIST, then quality score</p>' +
+            '<p class="vajra-meta vajra-pipeline-note">Execution screener — EXECUTABLE first, WATCHLIST fills top ' +
+            TOP_N +
+            '. REJECT excluded.</p>' +
             '<div class="vajra-table-wrap"><table class="vajra-table vajra-top-table">' +
             renderTableHead(TOP_COLUMNS, true) +
             '<tbody>' +
-            renderTopTableBodyRows(top) +
+            tbody +
             '</tbody></table></div>' +
-            '<p class="vajra-score-footnote">' +
-            '<strong>TPS</strong> = Transition Potential Score (30m discovery) · ' +
-            '<strong>EES</strong> = Executable Entry Score (5m timing) · ' +
-            '<strong>ECS</strong> = Expansion Confirmation Score' +
-            '</p>'
+            '<p class="vajra-score-footnote">Advanced row: TPS, Setup Potential, ECS, VWAP, OBV, HTF.</p>'
         );
+    }
+
+    function renderTopTable(rows, data) {
+        if (data && data.top_picks && data.top_picks.length) {
+            return renderTopTableFromPayload(data);
+        }
+        if (!rows || !rows.length) {
+            return renderTopTableFromPayload({ top_picks: [] });
+        }
+        return renderTopTableFromPayload({ top_picks: rows.slice(0, TOP_N), top_sections: {} });
     }
 
     function sortRows(rows, sortKey, sortDir) {
@@ -479,9 +569,9 @@
                 const bv = Number(b[sortKey] != null ? b[sortKey] : b.confidence);
                 return ((Number.isFinite(av) ? av : -1) - (Number.isFinite(bv) ? bv : -1)) * dir;
             }
-            if (sortKey === 'trade_type') {
-                const av = TRADE_TYPE_ORDER[String(a.trade_type || '')] ?? 99;
-                const bv = TRADE_TYPE_ORDER[String(b.trade_type || '')] ?? 99;
+            if (sortKey === 'qualification') {
+                const av = entryStateSortRank(a.qualification || a.entry_state);
+                const bv = entryStateSortRank(b.qualification || b.entry_state);
                 return (av - bv) * dir;
             }
             const av = chipDisplayValue(col || { key: sortKey }, a);
@@ -528,10 +618,10 @@
                 colCount +
                 '" class="vajra-meta">No additional ratings.</td></tr>';
         } else {
-            tbody = renderScoreBandBodyRows(rows, false);
+            tbody = renderTableBodyRows(rows, TOP_COLUMNS, false);
         }
         return (
-            '<p class="vajra-meta vajra-pipeline-note">Sorted by TPS+EES+ECS · same layout as top table</p>' +
+            '<p class="vajra-meta vajra-pipeline-note">Full universe — qualification-sorted</p>' +
             '<div class="vajra-table-wrap"><table class="vajra-table vajra-top-table vajra-modal-table">' +
             thead +
             '<tbody>' +
@@ -713,14 +803,14 @@
         const FORCE_RELOAD_MS = 300000;
 
         function openModal() {
-            modalRows = sortForDisplay(allRows).slice(TOP_N);
+            modalRows = (window._vajraRemainder || allRows).slice();
             sortKey = 'tps_score';
             sortDir = 'desc';
             renderModal();
             if (modalSubEl) {
                 modalSubEl.textContent =
                     modalRows.length +
-                    ' symbols · TPS discovery (30m) + 5m validation on shortlist. Click headers to sort.';
+                    ' symbols · grouped REJECT / WATCHLIST / EXECUTABLE. Click headers to sort.';
             }
             modal.setAttribute('aria-hidden', 'false');
             modal.classList.add('vajra-modal--open');
@@ -779,21 +869,22 @@
             if (msgEl) msgEl.textContent = 'Loading transition scan (30m + 5m)…';
             try {
                 const data = await fetchRatings(DEFAULT_SCAN_TF, DEFAULT_HTF);
-                allRows = sortForDisplay((data && data.rows) || []);
-                const topPool = rowsForTopTable(allRows);
+                allRows = (data && data.rows) || [];
+                global._vajraRemainder = (data && data.remainder) || allRows.slice(TOP_N);
                 const computedIso =
                     (data && data.computed_at) || (allRows[0] && allRows[0].computed_at) || null;
                 const ep = tsEpoch(computedIso);
                 if (ep != null) lastComputedEpoch = ep;
                 lastFullLoadMs = Date.now();
                 if (listEl) {
-                    const topRows = topPool.slice(0, TOP_N);
-                    listEl._vajraTopRows = topRows;
-                    listEl.innerHTML = renderTopTable(topRows);
+                    listEl._vajraTopRows = (data && data.top_picks) || [];
+                    listEl.innerHTML = renderTopTable(null, data);
                     listEl.querySelectorAll('[data-vajra-enter]').forEach(function (btn) {
                         btn.addEventListener('click', function (ev) {
-                            const idx = parseInt(ev.currentTarget.getAttribute('data-vajra-idx'), 10);
-                            const row = (listEl._vajraTopRows || [])[idx];
+                            const sym = ev.currentTarget.getAttribute('data-vajra-stock');
+                            const row = (listEl._vajraTopRows || []).find(function (r) {
+                                return String(r.stock || r.security) === sym;
+                            });
                             if (row && global.VajraTradeWorkflow && global.VajraTradeWorkflow.openEntry) {
                                 global.VajraTradeWorkflow.openEntry(row);
                             }
@@ -801,7 +892,7 @@
                     });
                 }
                 if (moreBtn) {
-                    const rest = Math.max(0, allRows.length - TOP_N);
+                    const rest = ((data && data.remainder) || allRows).length;
                     moreBtn.hidden = rest <= 0;
                     moreBtn.textContent = rest > 0 ? 'more… (' + rest + ')' : 'more…';
                 }
@@ -826,7 +917,7 @@
                 if (msgEl) msgEl.textContent = '';
                 processEnterTelegramAlerts(allRows, data.session_date);
                 if (modal.classList.contains('vajra-modal--open')) {
-                    modalRows = allRows.slice(TOP_N);
+                    modalRows = global._vajraRemainder || allRows.slice(TOP_N);
                     renderModal();
                 }
             } catch (e) {

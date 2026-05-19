@@ -1,7 +1,7 @@
-"""Ranking layer — sort by trade quality state then execution score."""
+"""Ranking layer — qualification-first sort and top-pick selection."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Tuple
 
 from backend.services.vajra.trade_quality import STATE_EXECUTABLE, STATE_REJECT, STATE_WATCHLIST
 
@@ -12,8 +12,8 @@ _STATE_RANK = {
 }
 
 
-def entry_state_sort_rank(entry_state: Optional[str]) -> int:
-    s = (entry_state or "").strip().upper()
+def entry_state_sort_rank(entry_state: Any) -> int:
+    s = (entry_state or "").strip().upper() if entry_state else ""
     if s in _STATE_RANK:
         return _STATE_RANK[s]
     if "EXECUTABLE" in s:
@@ -25,24 +25,105 @@ def entry_state_sort_rank(entry_state: Optional[str]) -> int:
     return 0
 
 
-def sort_vajra_rows_for_display(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """EXECUTABLE → WATCHLIST → REJECT; within band by trade_quality_score desc."""
+def _qualification(row: Dict[str, Any]) -> str:
+    return str(row.get("qualification") or row.get("entry_state") or "").strip().upper()
 
-    def _f(r: Dict[str, Any], key: str) -> float:
-        v = r.get(key)
-        if v is None:
-            return 0.0
-        try:
-            return float(v)
-        except (TypeError, ValueError):
-            return 0.0
+
+def _f(r: Dict[str, Any], key: str) -> float:
+    v = r.get(key)
+    if v is None:
+        return 0.0
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def sort_vajra_rows_for_display(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+  Qualification → confidence → momentum → structure → breakout → pullback → HTF → extension risk.
+    """
 
     def _key(r: Dict[str, Any]) -> tuple:
-        tq = _f(r, "trade_quality_score") or _f(r, "confidence")
         sym = str(r.get("security") or r.get("stock") or "")
-        return (-entry_state_sort_rank(r.get("entry_state")), -tq, sym)
+        ext = _f(r, "extension_risk_score")
+        return (
+            -entry_state_sort_rank(_qualification(r)),
+            -_f(r, "confidence"),
+            -_f(r, "momentum_score"),
+            -_f(r, "structure_score"),
+            -_f(r, "breakout_score"),
+            -_f(r, "pullback_score"),
+            -_f(r, "htf_alignment_score"),
+            ext,
+            sym,
+        )
 
     return sorted(rows, key=_key)
+
+
+def group_by_qualification(rows: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    ranked = sort_vajra_rows_for_display(rows)
+    groups: Dict[str, List[Dict[str, Any]]] = {
+        STATE_EXECUTABLE: [],
+        STATE_WATCHLIST: [],
+        STATE_REJECT: [],
+    }
+    for r in ranked:
+        q = _qualification(r)
+        if q == STATE_EXECUTABLE:
+            groups[STATE_EXECUTABLE].append(r)
+        elif q == STATE_REJECT:
+            groups[STATE_REJECT].append(r)
+        else:
+            groups[STATE_WATCHLIST].append(r)
+    return groups
+
+
+def select_top_picks(rows: List[Dict[str, Any]], n: int = 8) -> Tuple[List[Dict[str, Any]], Dict[str, List[Dict[str, Any]]]]:
+    """
+    Top n: all EXECUTABLE first (by rank), then WATCHLIST to fill. REJECT never included.
+    """
+    groups = group_by_qualification(rows)
+    executable = groups[STATE_EXECUTABLE]
+    watchlist = groups[STATE_WATCHLIST]
+    if len(executable) >= n:
+        picks = executable[:n]
+        sections = {STATE_EXECUTABLE: picks, STATE_WATCHLIST: []}
+        return picks, sections
+    picks = executable + watchlist
+    picks = picks[:n]
+    watch_in_top = picks[len(executable) :]
+    sections = {
+        STATE_EXECUTABLE: executable,
+        STATE_WATCHLIST: watch_in_top,
+    }
+    return picks, sections
+
+
+def build_screener_display(rows: List[Dict[str, Any]], top_n: int = 8) -> Dict[str, Any]:
+    from backend.services.vajra.ui_mapping import finalize_screener_rows
+
+    finalized = finalize_screener_rows(rows)
+    sorted_rows = sort_vajra_rows_for_display(finalized)
+    groups = group_by_qualification(sorted_rows)
+    top_picks, top_sections = select_top_picks(sorted_rows, n=top_n)
+    top_keys = {
+        (r.get("stock") or r.get("security"))
+        for r in top_picks
+    }
+    remainder = [
+        r
+        for r in sorted_rows
+        if (r.get("stock") or r.get("security")) not in top_keys
+    ]
+    return {
+        "rows": sorted_rows,
+        "groups": groups,
+        "top_picks": top_picks,
+        "top_sections": top_sections,
+        "remainder": remainder,
+    }
 
 
 def shortlist_by_trade_quality(
@@ -55,7 +136,7 @@ def shortlist_by_trade_quality(
     if not candidates:
         return []
     ranked = sort_vajra_rows_for_display(candidates)
-    non_reject = [r for r in ranked if entry_state_sort_rank(r.get("entry_state")) >= 2]
+    non_reject = [r for r in ranked if entry_state_sort_rank(_qualification(r)) >= 2]
     pool = non_reject if len(non_reject) >= min_count else ranked
     alert_rows = [r for r in pool if r.get("_early") or r.get("alertable")]
     core = [r for r in pool if r not in alert_rows]
