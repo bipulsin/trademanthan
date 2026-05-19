@@ -123,7 +123,7 @@ body.theme-page table.vajra-table .vajra-rev-med { color: #111827 !important; }
 .vajra-modal-panel {
     position: relative;
     z-index: 1;
-    background: var(--theme-card, #fff);
+    background: color-mix(in srgb, var(--theme-card, #0f172a) 95%, transparent);
     border: 1px solid var(--theme-border, #e2e8f0);
     border-radius: 12px;
     padding: 16px 18px;

@@ -16,7 +16,8 @@ from backend.services.sector_movers import get_sector_movers_cached
 from backend.services.upstox_service import UpstoxService
 from backend.services.vajra.indicators import cumulative_vwap, ema_series
 from backend.services.vajra.job import _fetch_candles_for_tf
-from backend.services.vajra.transition import compute_pullback_quality, compute_extension_risk
+from backend.services.vajra.transition import compute_pullback_quality
+from backend.services.vajra.validation_engine import evaluate_checklist, extension_risk_level
 
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
@@ -58,6 +59,40 @@ def _ltp(upstox: UpstoxService, instrument_key: str) -> Optional[float]:
     return None
 
 
+def _sector_alignment_label(stock: str, bull: bool) -> str:
+    try:
+        movers = get_sector_movers_cached(3)
+        gainers = {str(x.get("symbol") or "").upper() for x in (movers.get("top_gainers") or [])}
+        losers = {str(x.get("symbol") or "").upper() for x in (movers.get("top_losers") or [])}
+        sym = stock.upper().replace(".NS", "")
+        if bull:
+            if sym in gainers:
+                return "aligned"
+            if sym in losers:
+                return "conflicting"
+        else:
+            if sym in losers:
+                return "aligned"
+            if sym in gainers:
+                return "conflicting"
+        return "neutral"
+    except Exception:
+        return "neutral"
+
+
+def _market_index_pct() -> Dict[str, float]:
+    try:
+        u = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+        rows = build_dial_rows(u, basis="today")
+        by_id = {str(r.get("id") or ""): r for r in rows}
+        return {
+            "nifty_pct": float((by_id.get("nifty50") or {}).get("pct_change") or 0),
+            "bank_pct": float((by_id.get("banknifty") or {}).get("pct_change") or 0),
+        }
+    except Exception:
+        return {"nifty_pct": 0.0, "bank_pct": 0.0}
+
+
 def build_validation_preview(
     *,
     stock: str,
@@ -65,10 +100,9 @@ def build_validation_preview(
     instrument_key: str,
     discovery_row: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Auto-checks and warnings for Section B/C/D."""
+    """Auto-checks and warnings for Trade Validation & Entry (Section B/C/D)."""
     bull = _dir_bull(direction)
     candles = _fetch_5m(instrument_key)
-    checklist: Dict[str, bool] = {}
     warnings: List[str] = []
 
     metrics = {
@@ -84,118 +118,84 @@ def build_validation_preview(
 
     if len(candles) < 30:
         return {
-            "checklist": checklist,
+            "checklist": {},
+            "checklist_eval": [],
             "warnings": ["Insufficient 5m candle data for auto-validation."],
             "metrics": metrics,
             "auto_available": False,
         }
 
-    opens = [float(c.get("open") or 0) for c in candles]
-    highs = [float(c.get("high") or 0) for c in candles]
-    lows = [float(c.get("low") or 0) for c in candles]
-    closes = [float(c.get("close") or 0) for c in candles]
-    volumes = [float(c.get("volume") or 0) for c in candles]
-    i = len(closes) - 1
-    close = closes[i]
-    vwap_s = cumulative_vwap(highs, lows, closes, volumes)
-    vwap = vwap_s[i]
-    ema5 = ema_series(closes, 5)
-    atr = max(1e-6, sum(highs[j] - lows[j] for j in range(max(0, i - 13), i + 1)) / min(14, i + 1))
-
-    checklist["vwap_reclaimed"] = (close > vwap) if bull else (close < vwap)
-    checklist["ema_reclaimed"] = (close > ema5[i]) if bull else (close < ema5[i])
-
-    pb_q = compute_pullback_quality(opens, highs, lows, closes, ema5, atr, bull_dir=bull)
-    impulse_hi = max(highs[max(0, i - 12) : i + 1])
-    impulse_lo = min(lows[max(0, i - 12) : i + 1])
-    impulse_rng = max(impulse_hi - impulse_lo, atr)
-    pullback_depth = (impulse_hi - lows[i]) / impulse_rng if bull else (highs[i] - impulse_lo) / impulse_rng
-    checklist["pullback_shallow"] = pullback_depth < 0.4
-
-    recent = list(range(max(0, i - 4), i + 1))
-    strong_bull = sum(1 for j in recent if closes[j] > opens[j] and (closes[j] - opens[j]) > atr * 0.35)
-    upper_wicks = sum(
-        1
-        for j in recent
-        if (highs[j] - max(closes[j], opens[j])) / max(highs[j] - lows[j], 1e-6) > 0.45
+    sector_align = _sector_alignment_label(stock, bull)
+    market_idx = _market_index_pct()
+    evaluated = evaluate_checklist(
+        candles,
+        direction=direction,
+        market_index=market_idx,
+        sector_alignment=sector_align,
     )
-    checklist["no_vertical_exhaustion"] = not (strong_bull >= 3 and upper_wicks >= 2) if bull else True
 
-    bodies = [abs(closes[j] - opens[j]) for j in recent]
-    wicks = [max(highs[j] - lows[j] - abs(closes[j] - opens[j]), 0) for j in recent]
-    avg_body = sum(bodies) / len(bodies) if bodies else 0
-    checklist["candle_spread_healthy"] = bodies[-1] > wicks[-1] and bodies[-1] >= avg_body * 0.85
-
-    nearest_res = min(
-        abs(close - impulse_hi),
-        abs(close - max(highs)),
-        abs(close - round(close / 50) * 50),
+    checklist = evaluated.get("checklist") or {}
+    items = evaluated.get("items") or []
+    ext_score = float(
+        evaluated.get("extension_risk_score")
+        or discovery_row.get("extension_risk_score")
+        or 50
     )
-    risk_unit = max(atr, close * 0.002)
-    checklist["not_into_major_level"] = nearest_res > 0.7 * risk_unit
+    ext_level = evaluated.get("extension_risk_level") or extension_risk_level(ext_score)
+    vwap_dist_pct = float(evaluated.get("vwap_distance_pct") or 0)
+    pullback_depth = float(evaluated.get("pullback_depth") or 0)
 
-    if bull:
-        checklist["reclaim_candle_strong"] = close > vwap and close >= highs[i] - (highs[i] - lows[i]) * 0.35
-    else:
-        checklist["reclaim_candle_strong"] = close < vwap and close <= lows[i] + (highs[i] - lows[i]) * 0.35
+    metrics["extension_risk_score"] = ext_score
+    metrics["extension_risk_level"] = ext_level
+    metrics["pullback_quality_score"] = evaluated.get("pullback_quality_score") or metrics.get(
+        "pullback_quality_score"
+    )
+    metrics["vwap_distance_pct"] = vwap_dist_pct
+    metrics["pullback_depth_pct"] = round(pullback_depth * 100, 1)
 
-    vol_ma = sum(volumes[max(0, i - 19) : i + 1]) / min(20, i + 1)
-    checklist["volume_acceptable"] = volumes[i] > vol_ma * 1.2 if vol_ma > 0 else False
-    vwap_dist_pct = abs(close - vwap) / close * 100 if close else 99
-    checklist["not_extended_vwap"] = vwap_dist_pct < 1.5
+    pass_n = sum(1 for it in items if it.get("status") == "pass")
+    warn_n = sum(1 for it in items if it.get("status") == "warn")
+    fail_n = sum(1 for it in items if it.get("status") == "fail")
+    metrics["validation_pass_count"] = pass_n
+    metrics["validation_warn_count"] = warn_n
+    metrics["validation_fail_count"] = fail_n
 
-    try:
-        u = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
-        rows = build_dial_rows(u, basis="today")
-        by_id = {str(r.get("id") or ""): r for r in rows}
-        nifty_pct = float((by_id.get("nifty50") or {}).get("pct_change") or 0)
-        bank_pct = float((by_id.get("banknifty") or {}).get("pct_change") or 0)
-        if bull:
-            checklist["market_structure_supportive"] = nifty_pct >= 0 and bank_pct >= 0
-        else:
-            checklist["market_structure_supportive"] = nifty_pct <= 0 and bank_pct <= 0
-    except Exception:
-        checklist["market_structure_supportive"] = False
+    for it in items:
+        if it.get("status") == "fail":
+            warnings.append(f"{it.get('label')}: {it.get('metric')}")
+        elif it.get("status") == "warn" and it.get("key") in (
+            "no_vertical_exhaustion",
+            "not_into_major_level",
+            "not_extended_vwap",
+        ):
+            warnings.append(f"{it.get('label')}: {it.get('metric')}")
 
-    checklist["sector_not_conflicting"] = _sector_aligned(stock, bull)
+    if ext_level == "HIGH":
+        warnings.append("Extension risk is HIGH — late entry risk.")
+    elif ext_level == "MEDIUM" and "Extension risk is HIGH" not in " ".join(warnings):
+        warnings.append("Extension risk is elevated — monitor for chasing.")
 
-    ext = float(discovery_row.get("extension_risk_score") or compute_extension_risk(
-        close, vwap, ema5[i], atr, 50, highs, lows, closes, opens, bull_dir=bull
-    ))
-    if ext >= 65:
-        warnings.append("Extension risk is elevated — late entry risk.")
-    if vwap_dist_pct >= 1.5:
-        warnings.append("Price is extended from VWAP.")
-    if strong_bull >= 3 and bull:
-        warnings.append("Large vertical move may already be in progress.")
-    if not checklist.get("not_into_major_level"):
-        warnings.append("Entry is close to major resistance/support.")
-    if not checklist.get("ema_reclaimed"):
-        warnings.append("EMA reclaim is weak or not confirmed.")
-    if not checklist.get("pullback_shallow"):
-        warnings.append("Pullback depth is deeper than ideal.")
+    seen = set()
+    deduped: List[str] = []
+    for w in warnings:
+        if w not in seen:
+            seen.add(w)
+            deduped.append(w)
 
     return {
         "checklist": checklist,
-        "warnings": warnings,
+        "checklist_eval": items,
+        "warnings": deduped[:12],
         "metrics": metrics,
         "auto_available": True,
-        "pullback_depth": round(pullback_depth, 3),
-        "vwap_distance_pct": round(vwap_dist_pct, 3),
+        "extension_risk_level": ext_level,
+        "pullback_depth": pullback_depth,
+        "vwap_distance_pct": vwap_dist_pct,
     }
 
 
 def _sector_aligned(stock: str, bull: bool) -> bool:
-    try:
-        movers = get_sector_movers_cached(3)
-        gainers = {str(x.get("symbol") or "").upper() for x in (movers.get("top_gainers") or [])}
-        losers = {str(x.get("symbol") or "").upper() for x in (movers.get("top_losers") or [])}
-        sym = stock.upper().replace(".NS", "")
-        if bull:
-            return sym in gainers or sym not in losers
-        return sym in losers or sym not in gainers
-    except Exception:
-        return True
+    return _sector_alignment_label(stock, bull) != "conflicting"
 
 
 def classify_lifecycle(

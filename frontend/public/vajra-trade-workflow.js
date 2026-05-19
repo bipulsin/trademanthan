@@ -7,22 +7,6 @@
             ? 'http://localhost:8000'
             : global.location.origin;
 
-    const STRUCTURE_CHECKS = [
-        ['vwap_reclaimed', 'VWAP reclaimed'],
-        ['ema_reclaimed', 'EMA reclaimed'],
-        ['hilega_milega', 'Hilega-Milega forming'],
-        ['pullback_shallow', 'Pullback shallow'],
-        ['no_vertical_exhaustion', 'No vertical exhaustion'],
-        ['candle_spread_healthy', 'Candle spread healthy'],
-        ['not_into_major_level', 'Not entering into major resistance/support'],
-        ['reclaim_candle_strong', 'Reclaim candle closed strong'],
-    ];
-    const MARKET_CHECKS = [
-        ['market_structure_supportive', 'Market structure supportive'],
-        ['sector_not_conflicting', 'Sector not conflicting'],
-        ['volume_acceptable', 'Volume acceptable'],
-        ['not_extended_vwap', 'Not extended from VWAP'],
-    ];
     const PSYCH_CHECKS = [
         ['not_fomo', 'Not FOMO entry'],
         ['risk_accepted', 'Risk accepted beforehand'],
@@ -121,22 +105,60 @@
         }
     }
 
-    function renderCheckGrid(items, prefix, autoKeys) {
+    function statusIcon(status) {
+        if (status === 'pass') {
+            return '<span class="vajra-wf-st vajra-wf-st-pass" aria-label="Pass">✅</span>';
+        }
+        if (status === 'warn') {
+            return '<span class="vajra-wf-st vajra-wf-st-warn" aria-label="Warning">⚠️</span>';
+        }
+        return '<span class="vajra-wf-st vajra-wf-st-fail" aria-label="Fail">❌</span>';
+    }
+
+    function renderEvalTable(items) {
+        if (!items || !items.length) {
+            return '<p class="vajra-meta">Auto-validation unavailable.</p>';
+        }
+        let h =
+            '<table class="vajra-wf-check-table"><thead><tr>' +
+            '<th>Condition</th><th>Status</th><th>Confidence</th><th>Metric</th>' +
+            '</tr></thead><tbody>';
+        items.forEach(function (it) {
+            const tip = esc(it.tooltip || '');
+            const st = esc(it.status || 'fail');
+            h +=
+                '<tr class="vajra-wf-check-row vajra-wf-check-' +
+                st +
+                '">' +
+                '<td class="vajra-wf-check-label" title="' +
+                tip +
+                '">' +
+                esc(it.label || it.key) +
+                '</td>' +
+                '<td class="vajra-wf-check-icon">' +
+                statusIcon(it.status) +
+                '</td>' +
+                '<td class="vajra-wf-conf">' +
+                esc(it.confidence != null ? it.confidence : '—') +
+                '%</td>' +
+                '<td class="vajra-wf-met" title="' +
+                tip +
+                '">' +
+                esc(it.metric || '—') +
+                '</td></tr>';
+        });
+        h += '</tbody></table>';
+        return h;
+    }
+
+    function renderPsychGrid() {
         let h = '<div class="vajra-wf-grid-2">';
-        items.forEach(function (pair) {
-            const key = prefix + pair[0];
-            const auto = autoKeys && autoKeys[pair[0]];
-            const checked = auto ? ' checked' : '';
-            const dis = auto ? ' disabled' : '';
+        PSYCH_CHECKS.forEach(function (pair) {
             h +=
                 '<label><input type="checkbox" data-chk="' +
-                esc(key) +
-                '"' +
-                checked +
-                dis +
-                '> ' +
+                esc(pair[0]) +
+                '"> ' +
                 esc(pair[1]) +
-                (auto ? ' (auto)' : '') +
                 '</label>';
         });
         h += '</div>';
@@ -167,13 +189,10 @@
     }
 
     function renderStepB() {
-        const auto = (_preview && _preview.checklist) || {};
-        const psych = {};
         let warns = '';
         ((_preview && _preview.warnings) || []).forEach(function (w) {
             warns += '<div class="vajra-wf-warn">' + esc(w) + '</div>';
         });
-        warns = warns.replace(/<\/motion>/g, '</div>');
         const metrics = (_preview && _preview.metrics) || {};
         let met =
             '<div class="vajra-wf-metrics">' +
@@ -193,31 +212,71 @@
             esc(metrics.trend_strength || '—') +
             ' · Phase: ' +
             esc(metrics.market_phase || _discoveryRow.market_phase || '—') +
+            (metrics.vwap_distance_pct != null
+                ? ' · VWAP dist ' + esc(metrics.vwap_distance_pct) + '%'
+                : '') +
+            (metrics.pullback_depth_pct != null ? ' · Pullback ' + esc(metrics.pullback_depth_pct) + '%' : '') +
             '</p>';
 
-        const structItems = STRUCTURE_CHECKS.slice();
-        structItems[2] = ['hilega_milega', 'Hilega-Milega forming'];
+        const evalAll = (_preview && _preview.checklist_eval) || [];
+        const structure = evalAll.filter(function (it) {
+            return it.section === 'structure';
+        });
+        const market = evalAll.filter(function (it) {
+            return it.section === 'market';
+        });
+        const extLevel = (_preview && _preview.extension_risk_level) || metrics.extension_risk_level || '—';
+        const passN = metrics.validation_pass_count;
+        const warnN = metrics.validation_warn_count;
+        const failN = metrics.validation_fail_count;
+        const summary =
+            '<p class="vajra-wf-eval-summary">Automated checks: ' +
+            '<span class="vajra-wf-sum-pass">' +
+            esc(passN != null ? passN : '—') +
+            ' pass</span> · ' +
+            '<span class="vajra-wf-sum-warn">' +
+            esc(warnN != null ? warnN : '—') +
+            ' warn</span> · ' +
+            '<span class="vajra-wf-sum-fail">' +
+            esc(failN != null ? failN : '—') +
+            ' fail</span> · Extension risk <strong>' +
+            esc(extLevel) +
+            '</strong></p>' +
+            '<p class="vajra-meta vajra-wf-eval-note">Hover a row for the rule explanation. Failed checks do not block activation.</p>';
 
         return (
             '<div class="vajra-wf-step vajra-wf-step--active" data-step="b">' +
-            '<h3>Structure (5m)</h3>' +
-            renderCheckGrid(structItems, '', auto) +
-            '<h3>Market context</h3>' +
-            renderCheckGrid(MARKET_CHECKS, '', auto) +
-            '<h3>Psychology</h3>' +
-            renderCheckGrid(PSYCH_CHECKS, '', psych) +
-            '<h3>Auto-calculated metrics</h3>' +
+            summary +
+            '<h3>Structure (5m) — automated</h3>' +
+            renderEvalTable(structure) +
+            '<h3>Market context — automated</h3>' +
+            renderEvalTable(market) +
+            '<h3>Psychology — confirm manually</h3>' +
+            renderPsychGrid() +
+            '<h3>Discovery metrics</h3>' +
             met +
             (warns ? '<h3>Pre-entry warnings</h3>' + warns : '') +
             '<div class="vajra-wf-actions">' +
             '<button type="button" class="vajra-wf-btn vajra-wf-btn-ghost" id="vajraWfBackB">Back</button>' +
             '<button type="button" class="vajra-wf-btn vajra-wf-btn-primary" id="vajraWfActivate">ACTIVATE TRADE</button>' +
             '</div></div>'
-        ).replace(/<div /g, '<div ').replace(/<\/motion>/g, '</div>').replace(/<\/motion>/g, '</div>');
+        );
     }
 
     function collectChecklist() {
         const out = {};
+        const auto = (_preview && _preview.checklist) || {};
+        Object.keys(auto).forEach(function (k) {
+            out[k] = !!auto[k];
+        });
+        const evalSnap = (_preview && _preview.checklist_eval) || [];
+        evalSnap.forEach(function (it) {
+            if (it && it.key) {
+                out[it.key + '_status'] = it.status;
+                out[it.key + '_confidence'] = it.confidence;
+                out[it.key + '_metric'] = it.metric;
+            }
+        });
         document.querySelectorAll('#vajraWfBody input[data-chk]').forEach(function (inp) {
             out[inp.getAttribute('data-chk')] = inp.checked;
         });
@@ -301,7 +360,10 @@
             entry_time: _entryDraft.entry_time,
             discovery_row: _discoveryRow,
             checklist: collectChecklist(),
-            metrics: (_preview && _preview.metrics) || {},
+            metrics: Object.assign({}, (_preview && _preview.metrics) || {}, {
+                checklist_eval: (_preview && _preview.checklist_eval) || [],
+                extension_risk_level: (_preview && _preview.extension_risk_level) || null,
+            }),
             warnings: (_preview && _preview.warnings) || [],
         };
         try {

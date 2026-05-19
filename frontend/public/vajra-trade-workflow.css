@@ -21,7 +21,7 @@
     width: min(920px, 100%);
     max-height: 92vh;
     overflow: auto;
-    background: var(--theme-card, #0f172a);
+    background: color-mix(in srgb, var(--theme-card, #0f172a) 95%, transparent);
     border: 1px solid var(--theme-border, #334155);
     border-radius: 12px;
     padding: 16px 18px;
@@ -36,6 +36,64 @@
 }
 .vajra-wf-step--active {
     display: block;
+}
+.vajra-wf-eval-summary {
+    font-size: 0.82rem;
+    margin: 0 0 6px;
+}
+.vajra-wf-eval-note {
+    margin: 0 0 12px;
+}
+.vajra-wf-sum-pass {
+    color: #22c55e;
+}
+.vajra-wf-sum-warn {
+    color: #f59e0b;
+}
+.vajra-wf-sum-fail {
+    color: #ef4444;
+}
+table.vajra-wf-check-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.76rem;
+    margin-bottom: 14px;
+}
+table.vajra-wf-check-table th,
+table.vajra-wf-check-table td {
+    border-bottom: 1px solid var(--theme-border, #334155);
+    padding: 6px 8px;
+    text-align: left;
+    vertical-align: middle;
+}
+table.vajra-wf-check-table th {
+    color: var(--theme-muted, #94a3b8);
+    font-weight: 600;
+}
+.vajra-wf-check-row.vajra-wf-check-pass .vajra-wf-check-label {
+    color: #bbf7d0;
+}
+.vajra-wf-check-row.vajra-wf-check-warn .vajra-wf-check-label {
+    color: #fde68a;
+}
+.vajra-wf-check-row.vajra-wf-check-fail .vajra-wf-check-label {
+    color: #fecaca;
+}
+.vajra-wf-check-icon {
+    text-align: center;
+    width: 3rem;
+}
+.vajra-wf-conf {
+    width: 5.5rem;
+    font-variant-numeric: tabular-nums;
+}
+.vajra-wf-met {
+    color: var(--theme-muted, #cbd5e1);
+    max-width: 14rem;
+}
+.vajra-wf-st {
+    font-size: 1rem;
+    line-height: 1;
 }
 .vajra-wf-grid-2 {
     display: grid;
