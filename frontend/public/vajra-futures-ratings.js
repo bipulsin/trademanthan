@@ -327,6 +327,11 @@
         return r.enter_enabled === true || String(r.enter_action || '').toUpperCase() === 'ENTER';
     }
 
+    /** @deprecated use sortForDisplay — kept for cached old script compatibility */
+    function sortByTpsDesc(rows) {
+        return sortForDisplay(rows);
+    }
+
     function sortForDisplay(rows) {
         return rows.slice().sort(function (a, b) {
             const aEnter = isEnterRow(a) ? 1 : 0;
@@ -628,7 +633,7 @@
             if (msgEl) msgEl.textContent = 'Loading transition scan (30m + 5m)…';
             try {
                 const data = await fetchRatings(DEFAULT_SCAN_TF, DEFAULT_HTF);
-                allRows = sortByTpsDesc((data && data.rows) || []);
+                allRows = sortForDisplay((data && data.rows) || []);
                 if (listEl) {
                     const topRows = allRows.slice(0, TOP_N);
                     listEl._vajraTopRows = topRows;
