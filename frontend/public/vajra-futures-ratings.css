@@ -90,19 +90,31 @@ table.vajra-table td.num { text-align: center; }
     line-height: 1.35;
     color: #64748b;
 }
-.vajra-top-table tr.vajra-row-transition td {
-    border-top: 1px dashed rgba(148, 163, 184, 0.55);
-    padding-top: 2px;
-    padding-bottom: 5px;
+table.vajra-top-table td.vajra-score-band {
+    padding: 6px 4px;
     vertical-align: top;
 }
-.vajra-transition-band {
+.vajra-score-band-cells {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px 6px;
+    align-items: center;
+    justify-items: center;
+}
+.vajra-score-band-cell {
+    min-width: 0;
+    text-align: center;
+}
+.vajra-score-band .vajra-transition-band {
+    margin-top: 5px;
+    padding-top: 4px;
+    border-top: 1px dashed rgba(148, 163, 184, 0.55);
     text-align: left;
 }
 .vajra-transition-band-text {
     display: block;
     font-size: 0.62rem;
-    line-height: 1.2;
+    line-height: 1.25;
     color: #475569;
     word-break: break-word;
 }

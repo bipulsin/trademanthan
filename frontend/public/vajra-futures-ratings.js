@@ -377,35 +377,35 @@
     function renderTopTableBodyRows(rows) {
         let tbody = '';
         rows.forEach(function (r, idx) {
-            tbody += '<tr class="vajra-row-main">';
+            tbody += '<tr class="vajra-top-data-row">';
             tbody +=
-                '<td rowspan="2" class="vajra-td-security">' +
+                '<td class="vajra-td-security">' +
                 escapeHtml(cellValue(r, { key: 'security' })) +
                 '</td>';
+            tbody += '<td colspan="' + TOP_TRANSITION_COLSPAN + '" class="vajra-score-band">';
+            tbody += '<div class="vajra-score-band-cells">';
             for (let i = 0; i < TOP_TRANSITION_COLSPAN; i++) {
                 const col = TOP_COLUMNS[i];
-                let tdClass = col.num ? 'vajra-td-chip num' : 'vajra-td-chip';
-                tbody += '<td class="' + tdClass + '">' + renderChip(col, r) + '</td>';
+                let cellClass = 'vajra-score-band-cell';
+                if (col.num) cellClass += ' num';
+                tbody += '<div class="' + cellClass + '">' + renderChip(col, r) + '</div>';
             }
-            for (let i = TOP_TRANSITION_COLSPAN; i < TOP_COLUMNS.length; i++) {
-                const col = TOP_COLUMNS[i];
-                let tdClass = col.num ? 'vajra-td-chip num' : 'vajra-td-chip';
-                tbody +=
-                    '<td rowspan="2" class="' + tdClass + '">' + renderChip(col, r) + '</td>';
-            }
-            tbody += renderEnterCell(r, idx, true);
-            tbody += '</tr>';
-            tbody += '<tr class="vajra-row-transition">';
+            tbody += '</div>';
             const full = String(r.transition_state || '—');
             tbody +=
-                '<td colspan="' +
-                TOP_TRANSITION_COLSPAN +
-                '" class="vajra-transition-band">' +
+                '<div class="vajra-transition-band">' +
                 '<span class="vajra-transition-band-text" title="' +
                 escapeHtml('Transition: ' + full) +
                 '">' +
                 escapeHtml(transitionBandText(r)) +
-                '</span></td>';
+                '</span></div>';
+            tbody += '</td>';
+            for (let i = TOP_TRANSITION_COLSPAN; i < TOP_COLUMNS.length; i++) {
+                const col = TOP_COLUMNS[i];
+                let tdClass = col.num ? 'vajra-td-chip num' : 'vajra-td-chip';
+                tbody += '<td class="' + tdClass + '">' + renderChip(col, r) + '</td>';
+            }
+            tbody += renderEnterCell(r, idx, false);
             tbody += '</tr>';
         });
         return tbody;
