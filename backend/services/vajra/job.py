@@ -74,19 +74,21 @@ def load_arbitrage_curr_mth_universe() -> List[Dict[str, str]]:
 
 
 def sort_vajra_rows_for_display(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Sort for UI: ENTER-enabled first, then EES, then TPS."""
+    """Sort for UI: descending TPS + EES + ECS, then symbol."""
+
+    def _score(r: Dict[str, Any], key: str) -> float:
+        v = r.get(key)
+        if v is None:
+            return 0.0
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return 0.0
 
     def _sort_key(r: Dict[str, Any]) -> tuple:
-        enter = (
-            1
-            if r.get("enter_enabled")
-            or str(r.get("enter_action") or "").upper() == "ENTER"
-            else 0
-        )
-        ees = float(r["ees_score"]) if r.get("ees_score") is not None else -1.0
-        tps = float(r.get("tps_score") or 0)
+        combined = _score(r, "tps_score") + _score(r, "ees_score") + _score(r, "ecs_score")
         sym = str(r.get("security") or r.get("stock") or "")
-        return (-enter, -ees, -tps, sym)
+        return (-combined, sym)
 
     return sorted(rows, key=_sort_key)
 

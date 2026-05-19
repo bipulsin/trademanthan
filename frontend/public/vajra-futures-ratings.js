@@ -47,13 +47,15 @@
         REJECT: 8,
     };
 
+    /** Status → Entry State inclusive (transition sub-row band). */
+    const TOP_TRANSITION_COLSPAN = 4;
+
     const TOP_COLUMNS = [
         { key: 'trade_type', label: 'Status', chip: true },
         { key: 'tps_score', label: 'TPS', chip: true, num: true },
         { key: 'ees_score', label: 'EES', chip: true, num: true },
         { key: 'entry_state', label: 'Entry State', chip: true },
         { key: 'ecs_score', label: 'ECS', chip: true, num: true },
-        { key: 'transition_state', label: 'Transition', chip: true },
         { key: 'vwap_reclaim_status', label: 'VWAP', chip: true },
         { key: 'pullback_quality_score', label: 'Pullback', chip: true, num: true },
         { key: 'extension_risk_score', label: 'Extension', chip: true, num: true },
@@ -145,13 +147,16 @@
         return r[col.key] != null && r[col.key] !== '' ? String(r[col.key]) : '—';
     }
 
-    function renderEnterCell(row, idx) {
+    function renderEnterCell(row, idx, rowspan2) {
         const action = String(row.enter_action || 'WATCH');
         const enabled = row.enter_enabled === true;
         const title = escapeHtml(row.enter_reason || action);
+        const rs = rowspan2 ? ' rowspan="2"' : '';
         if (enabled) {
             return (
-                '<td class="vajra-td-enter"><button type="button" class="vajra-enter-btn" data-vajra-enter="1" data-vajra-idx="' +
+                '<td class="vajra-td-enter"' +
+                rs +
+                '><button type="button" class="vajra-enter-btn" data-vajra-enter="1" data-vajra-idx="' +
                 idx +
                 '" title="' +
                 title +
@@ -165,7 +170,9 @@
                   ? 'vajra-enter-btn vajra-enter-btn-wait'
                   : 'vajra-enter-btn vajra-enter-btn-watch';
         return (
-            '<td class="vajra-td-enter"><button type="button" class="' +
+            '<td class="vajra-td-enter"' +
+            rs +
+            '><button type="button" class="' +
             btnClass +
             '" disabled title="' +
             title +
@@ -212,10 +219,18 @@
             if (n >= 40) return 'vajra-rev-med';
             return 'df-dir-long';
         }
-        if (col.key === 'pullback_quality_score' || col.key === 'tps_score') {
+        if (col.key === 'pullback_quality_score' || col.key === 'tps_score' || col.key === 'ees_score') {
             const n = Number(row[col.key]);
             if (n >= 60) return 'df-dir-long';
             if (n >= 45) return 'vajra-rev-med';
+            return 'df-dir-neutral';
+        }
+        if (col.key === 'entry_state') {
+            const st = String(row.entry_state || '').toUpperCase();
+            if (st === 'EXECUTABLE') return 'df-dir-long';
+            if (st.indexOf('PULLBACK') >= 0) return 'vajra-rev-med';
+            if (st.indexOf('WATCHLIST') >= 0) return 'df-dir-neutral';
+            if (st.indexOf('AVOID') >= 0) return 'df-dir-short';
             return 'df-dir-neutral';
         }
         if (col.key === 'reversal_risk') {
@@ -332,24 +347,68 @@
         return sortForDisplay(rows);
     }
 
+    function scoreNum(row, key) {
+        const n = Number(row[key]);
+        return Number.isFinite(n) ? n : 0;
+    }
+
+    function combinedTpsEesEcs(row) {
+        return scoreNum(row, 'tps_score') + scoreNum(row, 'ees_score') + scoreNum(row, 'ecs_score');
+    }
+
     function sortForDisplay(rows) {
         return rows.slice().sort(function (a, b) {
-            const aEnter = isEnterRow(a) ? 1 : 0;
-            const bEnter = isEnterRow(b) ? 1 : 0;
-            if (bEnter !== aEnter) return bEnter - aEnter;
-            const ae = Number(a.ees_score);
-            const be = Number(b.ees_score);
-            if (Number.isFinite(be) && Number.isFinite(ae) && be !== ae) return be - ae;
-            const av = Number(a.tps_score);
-            const bv = Number(b.tps_score);
-            const tpsDiff = (Number.isFinite(bv) ? bv : -1) - (Number.isFinite(av) ? av : -1);
-            if (tpsDiff !== 0) return tpsDiff;
+            const diff = combinedTpsEesEcs(b) - combinedTpsEesEcs(a);
+            if (diff !== 0) return diff;
             return String(a.security || a.stock || '').localeCompare(
                 String(b.security || b.stock || ''),
                 undefined,
                 { numeric: true }
             );
         });
+    }
+
+    function transitionBandText(row) {
+        const lines = transitionTwoLines(row.transition_state);
+        if (lines.line2) return lines.line1 + ' · ' + lines.line2;
+        return lines.line1;
+    }
+
+    function renderTopTableBodyRows(rows) {
+        let tbody = '';
+        rows.forEach(function (r, idx) {
+            tbody += '<tr class="vajra-row-main">';
+            tbody +=
+                '<td rowspan="2" class="vajra-td-security">' +
+                escapeHtml(cellValue(r, { key: 'security' })) +
+                '</td>';
+            for (let i = 0; i < TOP_TRANSITION_COLSPAN; i++) {
+                const col = TOP_COLUMNS[i];
+                let tdClass = col.num ? 'vajra-td-chip num' : 'vajra-td-chip';
+                tbody += '<td class="' + tdClass + '">' + renderChip(col, r) + '</td>';
+            }
+            for (let i = TOP_TRANSITION_COLSPAN; i < TOP_COLUMNS.length; i++) {
+                const col = TOP_COLUMNS[i];
+                let tdClass = col.num ? 'vajra-td-chip num' : 'vajra-td-chip';
+                tbody +=
+                    '<td rowspan="2" class="' + tdClass + '">' + renderChip(col, r) + '</td>';
+            }
+            tbody += renderEnterCell(r, idx, true);
+            tbody += '</tr>';
+            tbody += '<tr class="vajra-row-transition">';
+            const full = String(r.transition_state || '—');
+            tbody +=
+                '<td colspan="' +
+                TOP_TRANSITION_COLSPAN +
+                '" class="vajra-transition-band">' +
+                '<span class="vajra-transition-band-text" title="' +
+                escapeHtml('Transition: ' + full) +
+                '">' +
+                escapeHtml(transitionBandText(r)) +
+                '</span></td>';
+            tbody += '</tr>';
+        });
+        return tbody;
     }
 
     function renderTopTable(rows) {
@@ -362,12 +421,17 @@
         }
         const top = rows;
         return (
-            '<p class="vajra-meta vajra-pipeline-note">30m TPS · 5m Entry State (EES) every 5 min · sorted ENTER first, then EES/TPS</p>' +
+            '<p class="vajra-meta vajra-pipeline-note">30m TPS · 5m Entry State (EES) every 5 min · sorted by TPS+EES+ECS</p>' +
             '<div class="vajra-table-wrap"><table class="vajra-table vajra-top-table">' +
             renderTableHead(TOP_COLUMNS, true) +
             '<tbody>' +
-            renderTableBodyRows(top, TOP_COLUMNS, true) +
-            '</tbody></table></div>'
+            renderTopTableBodyRows(top) +
+            '</tbody></table></div>' +
+            '<p class="vajra-score-footnote">' +
+            '<strong>TPS</strong> = Transition Potential Score (30m discovery) · ' +
+            '<strong>EES</strong> = Executable Entry Score (5m timing) · ' +
+            '<strong>ECS</strong> = Expansion Confirmation Score' +
+            '</p>'
         );
     }
 

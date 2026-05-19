@@ -84,6 +84,28 @@ table.vajra-table td.num { text-align: center; }
     margin-bottom: 6px;
     font-size: 0.78rem;
 }
+.vajra-score-footnote {
+    margin: 8px 0 0;
+    font-size: 0.68rem;
+    line-height: 1.35;
+    color: #64748b;
+}
+.vajra-top-table tr.vajra-row-transition td {
+    border-top: 1px dashed rgba(148, 163, 184, 0.55);
+    padding-top: 2px;
+    padding-bottom: 5px;
+    vertical-align: top;
+}
+.vajra-transition-band {
+    text-align: left;
+}
+.vajra-transition-band-text {
+    display: block;
+    font-size: 0.62rem;
+    line-height: 1.2;
+    color: #475569;
+    word-break: break-word;
+}
 .vajra-th-enter,
 .vajra-td-enter {
     text-align: center;
