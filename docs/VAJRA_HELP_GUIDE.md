@@ -1,66 +1,88 @@
 # TWCTO Vajra — Futures Rating (User Guide)
 
-In the app, click the **?** icon next to the section title to open this guide.
+In the app, open **Vajra Futures** from the left menu and click the **?** icon next to **Screen — Futures Rating**.
 
 ## What Vajra is
 
 Vajra is a **discretionary trade operating system** for current-month F&O futures. It helps you:
 
-1. Find **early transitions** before trends are obvious  
-2. **Validate** entries with a structured checklist  
-3. **Track** open trades with lifecycle and health  
-4. **Journal** closed trades with reasons  
+1. Find **early transitions** on 30m bars (TPS)  
+2. Time entries on 5m bars (EES / Entry State)  
+3. **Validate** entries with a structured checklist  
+4. **Track** open trades (Open Position) and **journal** closes (Closed Trades)  
 
 It does **not** place broker orders. You execute in your terminal; Vajra scores, checks, and monitors.
 
-## Architecture at a glance
+## Page layout
+
+| Section | Purpose |
+|--------|---------|
+| Screen — Futures Rating | Top 8 table + **more…** for full list |
+| Open Position | Activated trades — lifecycle, health, close |
+| Closed Trades | Square-offs this session with reasons |
+
+## How the engine runs
 
 | Stage | Timeframe | What happens |
 |--------|-----------|--------------|
-| Discovery | 30m | TPS + ECS computed for ~200 symbols; list sorted by **TPS (high → low)** |
-| Shortlist validation | 5m | Top names get extra execution-structure checks |
+| Discovery | 30m | TPS + ECS + transition for ~200 symbols; every 5 min (9:30–15:00 IST) |
+| Shortlist validation | 5m | Top TPS names get extra execution-structure checks |
+| EES refresh | 5m | Executable Entry Score + Entry State on each run |
 | Your workflow | — | ENTER → checklist → ACTIVATE |
-| Management | 5m refresh | Lifecycle, health, alerts while trade is open |
 
-## TPS vs ECS
+The screen **auto-refreshes shortly after each scheduled run** (see **Updated** in the meta line).
 
-- **TPS (Transition Potential Score)** — early discovery: reclaim, compression, momentum, shallow pullback, low extension. Does not require LONG A+ or structure PASS.  
-- **ECS (Expansion Confirmation Score)** — mature Vajra logic: structure, breakout, OBV, volume, trend. Use for continuation context.
+## TPS vs EES vs ECS
 
-## Discovery table
+- **TPS (Transition Potential Score, 30m)** — early discovery: reclaim, compression, momentum, shallow pullback, low extension. Does not require LONG A+.  
+- **EES (Executable Entry Score, 5m)** — “Can I enter right now?” Timing, extension, reclaim quality. Refreshes every 5 minutes.  
+- **ECS (Expansion Confirmation Score, 30m + 1hr)** — mature Vajra: structure, breakout, OBV, volume, trend.
 
-Top **8** symbols by TPS. **ENTER** opens validation (no auto-trade).
+Table sort: **TPS + EES + ECS** (highest combined first).
 
-## Entry checklist (summary)
+## Discovery table (top 8)
 
-### Section A
-Symbol, direction, entry price, lots, entry time.
+- **Status → Entry State band** — Status, TPS, EES, Entry State; second line = transition detail  
+- **ECS, VWAP, Pullback, Extension** — context and risk  
+- **Action** — ENTER workflow  
 
-### Section B — Structure (5m)
-Auto-checked where noted; psychology items are **manual only**.
+### Entry State (EES)
 
-**Structure:** VWAP/EMA reclaim, Hilega-Milega, shallow pullback, no exhaustion, healthy candles, not into major level, strong reclaim close.
+| EES | State | Meaning |
+|-----|--------|---------|
+| ≥ 75 | EXECUTABLE | Good 5m timing when TPS supports entry |
+| 60–74 | PULLBACK | Prefer shallow pullback |
+| 45–59 | WATCHLIST | Monitor; don’t chase |
+| < 45 | AVOID | Extended — avoid chasing |
 
-**Market:** NIFTY/BankNIFTY alignment, sector movers, volume > 1.2× average, not extended from VWAP.
+### Action buttons
 
-**Psychology:** Not FOMO, risk accepted, not revenge, comfortable exit, structure valid after pullback.
+- **ENTER** — TPS ≥ 52 and EES ≥ 65  
+- **WAIT PULLBACK / WATCH / EXTENDED** — disabled (hover for reason)
 
-### Section C
-Read-only: TPS, ECS, extension risk, pullback quality, phase, trend.
+## Telegram (optional)
 
-### Section D
-Warnings for extension, VWAP distance, vertical move, levels, weak reclaim, deep pullback.
+Settings → Telegram ON → **Vajra ENTER alerts (Futures)**. One message per symbol per session when ENTER first becomes available.
+
+## Trade Validation & Entry
+
+### Step A
+Symbol, direction, entry price, lots, entry time. **Cancel** closes the modal.
+
+### Step B — Checklist
+Structure + Market (automated from 5m; verify yourself). Psychology (**manual only**).
+
+**ACTIVATE TRADE** is disabled if more than **70%** of Structure + Market checks are not PASS.
 
 ### ACTIVATE
-Saves to **Running order** (Daily Futures) or **Open Positions** (Smart Futures) as “Vajra managed”.
+Saves to **Vajra Futures → Open Position**. 5m monitoring while open. No broker execution.
 
-## Running cockpit
+## Open Position
 
 - **Lifecycle:** Early Transition → Expansion → Consolidation / Rotation → Exhaustion → Breakdown Risk → Failed Structure  
 - **Health 0–100:** Strong / Healthy / Weakening / High Risk / Failure Risk  
-- **Alerts:** Interpretation only (not buy/sell)  
-- **CLOSE TRADE:** Exit price + reasons → journal  
+- **CLOSE TRADE** → Closed Trades  
 
 ## Recommended workflow
 
-**Scan by TPS → ENTER → tick psychology → ACTIVATE → monitor Running → CLOSE with reasons → review journal.**
+**Watch Updated → scan TPS+EES+ECS → ENTER → psychology → ACTIVATE → manage Open Position → CLOSE → review Closed Trades.**
