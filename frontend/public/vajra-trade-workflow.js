@@ -155,6 +155,28 @@
         return h;
     }
 
+    /** Structure + Market automated checks; activation blocked if &gt;70% are not pass. */
+    function structureMarketEvalSummary(evalAll) {
+        const items = (evalAll || []).filter(function (it) {
+            return it.section === 'structure' || it.section === 'market';
+        });
+        if (!items.length) {
+            return { total: 0, passCount: 0, notPassCount: 0, notPassPct: 0, canActivate: true };
+        }
+        const passCount = items.filter(function (it) {
+            return it.status === 'pass';
+        }).length;
+        const notPassCount = items.length - passCount;
+        const notPassPct = (notPassCount / items.length) * 100;
+        return {
+            total: items.length,
+            passCount: passCount,
+            notPassCount: notPassCount,
+            notPassPct: notPassPct,
+            canActivate: notPassPct <= 70,
+        };
+    }
+
     function renderPsychGrid() {
         let h = '<div class="vajra-wf-grid-2">';
         PSYCH_CHECKS.forEach(function (pair) {
@@ -229,6 +251,8 @@
         const market = evalAll.filter(function (it) {
             return it.section === 'market';
         });
+        const smSummary = structureMarketEvalSummary(evalAll);
+        const canActivate = smSummary.canActivate;
         const extLevel = (_preview && _preview.extension_risk_level) || metrics.extension_risk_level || '—';
         const passN = metrics.validation_pass_count;
         const warnN = metrics.validation_warn_count;
@@ -246,7 +270,21 @@
             ' fail</span> · Extension risk <strong>' +
             esc(extLevel) +
             '</strong></p>' +
-            '<p class="vajra-meta vajra-wf-eval-note">Hover a row for the rule explanation. Failed checks do not block activation.</p>';
+            '<p class="vajra-meta vajra-wf-eval-note">Structure &amp; Market: ' +
+            esc(smSummary.passCount) +
+            '/' +
+            esc(smSummary.total) +
+            ' pass (' +
+            esc(Math.round(smSummary.notPassPct)) +
+            '% not pass). Activation requires ≤70% not pass.</p>' +
+            (canActivate
+                ? ''
+                : '<p class="vajra-wf-block-msg" role="alert">More than 70% of Structure &amp; Market checks did not pass. Activate Trade is disabled — use Cancel or Back to exit.</p>');
+
+        const activateBtn =
+            '<button type="button" class="vajra-wf-btn vajra-wf-btn-primary" id="vajraWfActivate"' +
+            (canActivate ? '' : ' disabled aria-disabled="true"') +
+            '>ACTIVATE TRADE</button>';
 
         return (
             '<div class="vajra-wf-step vajra-wf-step--active" data-step="b">' +
@@ -262,9 +300,59 @@
             (warns ? '<h3>Pre-entry warnings</h3>' + warns : '') +
             '<div class="vajra-wf-actions">' +
             '<button type="button" class="vajra-wf-btn vajra-wf-btn-ghost" id="vajraWfBackB">Back</button>' +
-            '<button type="button" class="vajra-wf-btn vajra-wf-btn-primary" id="vajraWfActivate">ACTIVATE TRADE</button>' +
+            '<button type="button" class="vajra-wf-btn vajra-wf-btn-ghost" data-vajra-wf-close="1">Cancel</button>' +
+            activateBtn +
             '</div></div>'
         );
+    }
+
+    function wireStepB(body) {
+        body.querySelectorAll('[data-vajra-wf-close]').forEach(function (el) {
+            el.addEventListener('click', closeModal);
+        });
+        document.getElementById('vajraWfBackB').addEventListener('click', function () {
+            body.innerHTML = renderStepA();
+            wireStepA(body);
+        });
+        const activateBtn = document.getElementById('vajraWfActivate');
+        if (activateBtn && !activateBtn.disabled) {
+            activateBtn.addEventListener('click', activateTrade);
+        }
+    }
+
+    async function onStepANext() {
+        const body = document.getElementById('vajraWfBody');
+        const row = _discoveryRow;
+        const dir = document.getElementById('vajraWfDir').value;
+        _entryDraft = {
+            direction: dir,
+            entry_price: document.getElementById('vajraWfEntryPrice').value,
+            lots: document.getElementById('vajraWfLots').value,
+            entry_time: document.getElementById('vajraWfEntryTime').value,
+        };
+        try {
+            _preview = await api('/trades/validate-preview', {
+                method: 'POST',
+                body: JSON.stringify({
+                    stock: row.stock || row.security,
+                    direction: dir,
+                    instrument_key: row.instrument_key || '',
+                    discovery_row: row,
+                }),
+            });
+        } catch (e) {
+            alert('Validation preview failed: ' + e.message);
+            return;
+        }
+        body.innerHTML = renderStepB();
+        wireStepB(body);
+    }
+
+    function wireStepA(body) {
+        body.querySelectorAll('[data-vajra-wf-close]').forEach(function (el) {
+            el.addEventListener('click', closeModal);
+        });
+        document.getElementById('vajraWfNextA').addEventListener('click', onStepANext);
     }
 
     function collectChecklist() {
@@ -304,46 +392,21 @@
         body.innerHTML = renderStepA();
         m.classList.add('vajra-wf-modal--open');
         m.setAttribute('aria-hidden', 'false');
-        body.querySelector('[data-vajra-wf-close]') &&
-            body.querySelector('[data-vajra-wf-close]').addEventListener('click', closeModal);
-        document.getElementById('vajraWfNextA').addEventListener('click', async function () {
-            const dir = document.getElementById('vajraWfDir').value;
-            _entryDraft = {
-                direction: dir,
-                entry_price: document.getElementById('vajraWfEntryPrice').value,
-                lots: document.getElementById('vajraWfLots').value,
-                entry_time: document.getElementById('vajraWfEntryTime').value,
-            };
-            try {
-                _preview = await api('/trades/validate-preview', {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        stock: row.stock || row.security,
-                        direction: dir,
-                        instrument_key: row.instrument_key || '',
-                        discovery_row: row,
-                    }),
-                });
-            } catch (e) {
-                alert('Validation preview failed: ' + e.message);
-                return;
-            }
-            body.innerHTML = renderStepB();
-            document.getElementById('vajraWfBackB').addEventListener('click', function () {
-                body.innerHTML = renderStepA();
-                wireStepA();
-            });
-            document.getElementById('vajraWfActivate').addEventListener('click', activateTrade);
-        });
-    }
-
-    function wireStepA() {
-        document.getElementById('vajraWfNextA').addEventListener('click', function () {
-            openEntry(_discoveryRow);
-        });
+        wireStepA(body);
     }
 
     async function activateTrade() {
+        const smSummary = structureMarketEvalSummary((_preview && _preview.checklist_eval) || []);
+        if (!smSummary.canActivate) {
+            alert(
+                'More than 70% of Structure & Market checks did not pass (' +
+                    smSummary.notPassCount +
+                    '/' +
+                    smSummary.total +
+                    '). Activation is not allowed.'
+            );
+            return;
+        }
         if (!allPsychChecked()) {
             alert('Please confirm all psychology checklist items.');
             return;

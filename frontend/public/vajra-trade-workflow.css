@@ -177,6 +177,24 @@ table.vajra-wf-check-table th {
     background: #2563eb;
     color: #fff;
 }
+.vajra-wf-btn-primary:disabled,
+.vajra-wf-btn-primary[aria-disabled="true"] {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: #64748b;
+    border: 1px solid #475569;
+}
+.vajra-wf-block-msg {
+    margin: 10px 0 4px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: rgba(127, 29, 29, 0.35);
+    border: 1px solid #b91c1c;
+    color: #fecaca;
+    font-size: 0.85rem;
+    font-weight: 600;
+    line-height: 1.4;
+}
 .vajra-wf-btn-ghost {
     background: transparent;
     color: var(--theme-muted, #94a3b8);
