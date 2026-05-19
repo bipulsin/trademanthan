@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional, Sequence
 
 from backend.services.vajra.actions import resolve_enter_action
 from backend.services.vajra.trade_quality import compute_trade_quality
+from backend.services.vajra.market_phase_scoring import enrich_execution_scores
 from backend.services.vajra.ui_mapping import finalize_screener_row
 
 
@@ -38,6 +39,7 @@ def apply_trade_qualification(
         trend_pass="PASS" in str(row.get("trend") or ""),
         volume_pass="PASS" in str(row.get("volume") or ""),
         tps_score=row.get("tps_score"),
+        trade_type=str(row.get("trade_type") or ""),
     )
     if tq is None:
         return row
@@ -50,4 +52,5 @@ def apply_trade_qualification(
         reject_reasons=tq.reject_reasons,
     )
     row.update(action)
+    enrich_execution_scores(row)
     return finalize_screener_row(row)

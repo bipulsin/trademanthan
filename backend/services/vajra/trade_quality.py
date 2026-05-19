@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from backend.services.vajra.engine import ADX_LEN, _dmi_adx, _rsi_wilder
 from backend.services.vajra.indicators import cumulative_vwap, ema_series
+from backend.services.vajra.market_phase_scoring import apply_phase_executable_cap
 from backend.services.vajra.transition import IMPULSE_LB, PULLBACK_LB
 
 STATE_EXECUTABLE = "EXECUTABLE"
@@ -63,6 +64,7 @@ class TradeQualityResult:
             "execution_score": round(self.execution_score, 1),
             "confidence": round(self.confidence, 1),
             "trade_quality_score": round(self.trade_quality_score, 1),
+            "trend_score": round(self.trend_score, 1),
             "entry_state": self.state,
             "trade_quality_state": self.state,
             "reject_reasons": self.reject_reasons,
@@ -517,6 +519,11 @@ def _classify_state(
     hard_reject: bool,
     tps_score: Optional[float] = None,
     ees_score: Optional[float] = None,
+    trade_type: str = "",
+    breakout: float = 0.0,
+    volume_score: float = 0.0,
+    htf: float = 0.0,
+    trend_score: float = 0.0,
 ) -> str:
     phase = (market_phase or "").upper()
     if hard_reject:
@@ -543,13 +550,27 @@ def _classify_state(
         and discovery_ok
     )
     if executable_core and confidence >= EXECUTABLE_CONFIDENCE_MIN:
-        return STATE_EXECUTABLE
-    if executable_core and confidence >= 58:
+        state = STATE_EXECUTABLE
+    elif executable_core and confidence >= 58:
         reject_reasons.append("awaiting_discovery_confirm")
-        return STATE_WATCHLIST
-    if confidence < 42 or (structure < 48 and momentum < 45):
-        return STATE_REJECT
-    return STATE_WATCHLIST
+        state = STATE_WATCHLIST
+    elif confidence < 42 or (structure < 48 and momentum < 45):
+        state = STATE_REJECT
+    else:
+        state = STATE_WATCHLIST
+
+    return apply_phase_executable_cap(
+        state,
+        market_phase=market_phase,
+        trade_type=trade_type,
+        structure=structure,
+        momentum=momentum,
+        breakout=breakout,
+        volume_score=volume_score,
+        htf=htf,
+        confidence=confidence,
+        reject_reasons=reject_reasons,
+    )
 
 
 def compute_trade_quality(
@@ -568,6 +589,7 @@ def compute_trade_quality(
     trend_pass: bool = False,
     volume_pass: bool = False,
     tps_score: Optional[float] = None,
+    trade_type: str = "",
 ) -> Optional[TradeQualityResult]:
     """Qualification layer: scores + EXECUTABLE / WATCHLIST / REJECT."""
     primary = candles_5m if candles_5m and len(candles_5m) >= 30 else candles_30m
@@ -645,6 +667,11 @@ def compute_trade_quality(
         hard_reject=hard_reject,
         tps_score=tps_score,
         ees_score=ees_score,
+        trade_type=trade_type,
+        breakout=brk,
+        volume_score=vol_score,
+        htf=htf,
+        trend_score=trend,
     )
 
     return TradeQualityResult(

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
+from backend.services.vajra.market_phase_scoring import enrich_execution_scores
 from backend.services.vajra.trade_quality import (
     STATE_EXECUTABLE,
     STATE_REJECT,
@@ -114,6 +115,8 @@ def build_qualification_tags(
 
 def finalize_screener_row(row: Dict[str, Any]) -> Dict[str, Any]:
     """Canonical fields for UI — qualification is the only primary state."""
+    if row.get("execution_rank_score") is None:
+        enrich_execution_scores(row)
     qual = normalize_qualification(row.get("entry_state") or row.get("qualification"))
     row["qualification"] = qual
     row["entry_state"] = qual
@@ -137,7 +140,8 @@ def finalize_screener_row(row: Dict[str, Any]) -> Dict[str, Any]:
     row["qualification_tags"] = tags
 
     conf = row.get("confidence")
-    row["market_context"] = str(row.get("market_phase") or "—").replace("_", " ").title() or "—"
+    tier = str(row.get("market_phase_tier") or row.get("market_phase") or "")
+    row["market_context"] = tier.replace("_", " ").title() if tier else "—"
     tq = row.get("trade_quality_score")
     row["setup_quality_score"] = tq if tq is not None else conf
 

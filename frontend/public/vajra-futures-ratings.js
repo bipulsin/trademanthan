@@ -249,6 +249,22 @@
         if (col.key === 'qualification') {
             return qualTone(qualificationOf(row));
         }
+        if (col.key === 'market_context') {
+            const ctx = String(row.market_context || row.market_phase || '').toUpperCase();
+            if (ctx.indexOf('BULL EXPANSION') >= 0) return 'vajra-ctx-bull-exp';
+            if (ctx.indexOf('BEAR EXPANSION') >= 0) return 'vajra-ctx-bear-exp';
+            if (ctx.indexOf('ROTATIONAL') >= 0) return 'vajra-ctx-rotational';
+            if (ctx.indexOf('WEAKENING') >= 0 || ctx.indexOf('EXHAUSTION') >= 0) {
+                return 'vajra-ctx-weakening';
+            }
+            if (ctx.indexOf('COMPRESSION') >= 0 || ctx.indexOf('FAILURE') >= 0) {
+                return 'vajra-ctx-compression';
+            }
+            if (ctx.indexOf('EXPANSION') >= 0 || ctx.indexOf('CONTINUATION') >= 0) {
+                return 'vajra-ctx-bull-exp';
+            }
+            return 'df-dir-neutral';
+        }
         if (col.key === 'extension_risk_score') {
             const n = Number(row.extension_risk_score);
             if (n >= 65) return 'df-dir-short';

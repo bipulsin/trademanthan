@@ -301,3 +301,9 @@ tr.vajra-adv-row td {
 .vajra-adv-item em { font-style: normal; font-weight: 700; color: #475569; }
 .vajra-action-none { color: #94a3b8; font-weight: 600; }
 .vajra-enter-btn-watch { border-color: #ca8a04 !important; background: #eab308 !important; color: #422006 !important; }
+
+.vajra-ctx-bull-exp { background: #16a34a !important; color: #000 !important; font-weight: 700; }
+.vajra-ctx-bear-exp { background: #dc2626 !important; color: #fff !important; font-weight: 700; }
+.vajra-ctx-rotational { background: #f59e0b !important; color: #111827 !important; font-weight: 700; }
+.vajra-ctx-weakening { background: #ea580c !important; color: #111827 !important; font-weight: 700; }
+.vajra-ctx-compression { background: #94a3b8 !important; color: #1e293b !important; font-weight: 700; }
