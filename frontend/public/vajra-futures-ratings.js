@@ -91,6 +91,17 @@
         return String(iso);
     }
 
+    /** Normalize API timestamps for reliable change detection. */
+    function tsEpoch(iso) {
+        if (!iso) return null;
+        const t = new Date(iso).getTime();
+        return Number.isFinite(t) ? t : null;
+    }
+
+    function cacheBustQ() {
+        return '&_=' + Date.now();
+    }
+
     function escapeHtml(s) {
         return String(s)
             .replace(/&/g, '&amp;')
@@ -534,7 +545,8 @@
             '?mode=transition&scan_tf=' +
             encodeURIComponent(scanTf || DEFAULT_SCAN_TF) +
             '&htf=' +
-            encodeURIComponent(htf || DEFAULT_HTF);
+            encodeURIComponent(htf || DEFAULT_HTF) +
+            cacheBustQ();
         const paths = [API_BASE + '/api/vajra-futures/ratings' + q, API_BASE + '/vajra-futures/ratings' + q];
         let lastErr = null;
         for (let i = 0; i < paths.length; i++) {
@@ -555,8 +567,8 @@
 
     async function fetchRatingsStatus() {
         const paths = [
-            API_BASE + '/api/vajra-futures/ratings-status',
-            API_BASE + '/vajra-futures/ratings-status',
+            API_BASE + '/api/vajra-futures/ratings-status' + cacheBustQ(),
+            API_BASE + '/vajra-futures/ratings-status' + cacheBustQ(),
         ];
         let lastErr = null;
         for (let i = 0; i < paths.length; i++) {
@@ -643,6 +655,7 @@
         const prefix = opts.prefix || 'df';
         const listEl = document.getElementById(opts.listElId || prefix + 'VajraTable');
         const moreBtn = document.getElementById(opts.moreBtnId || prefix + 'VajraMoreBtn');
+        const refreshBtn = document.getElementById(opts.refreshBtnId || prefix + 'VajraRefreshBtn');
         const metaEl = opts.metaElId ? document.getElementById(opts.metaElId) : null;
         const msgEl = opts.msgElId ? document.getElementById(opts.msgElId) : null;
         const scanTfEl = document.getElementById(prefix + 'VajraScanTf');
@@ -664,8 +677,11 @@
         let sortKey = 'tps_score';
         let sortDir = 'desc';
         const seenAlertKeys = {};
-        let lastComputedAt = null;
+        let lastComputedEpoch = null;
+        let lastFullLoadMs = 0;
         let loadInFlight = false;
+        const STALE_DATA_SEC = 420;
+        const FORCE_RELOAD_MS = 300000;
 
         function openModal() {
             modalRows = sortForDisplay(allRows).slice(TOP_N);
@@ -715,6 +731,11 @@
                 if (!moreBtn.hidden) openModal();
             });
         }
+        if (refreshBtn) {
+            refreshBtn.addEventListener('click', function () {
+                load();
+            });
+        }
 
         modal.querySelectorAll('[data-vajra-close]').forEach(function (el) {
             el.addEventListener('click', closeModal);
@@ -730,10 +751,11 @@
             try {
                 const data = await fetchRatings(DEFAULT_SCAN_TF, DEFAULT_HTF);
                 allRows = sortForDisplay((data && data.rows) || []);
-                lastComputedAt =
-                    (data && data.computed_at) ||
-                    (allRows[0] && allRows[0].computed_at) ||
-                    lastComputedAt;
+                const computedIso =
+                    (data && data.computed_at) || (allRows[0] && allRows[0].computed_at) || null;
+                const ep = tsEpoch(computedIso);
+                if (ep != null) lastComputedEpoch = ep;
+                lastFullLoadMs = Date.now();
                 if (listEl) {
                     const topRows = allRows.slice(0, TOP_N);
                     listEl._vajraTopRows = topRows;
@@ -754,7 +776,7 @@
                     moreBtn.textContent = rest > 0 ? 'more… (' + rest + ')' : 'more…';
                 }
                 if (metaEl) {
-                    metaEl.textContent =
+                    let meta =
                         'Session: ' +
                         (data.session_date || '—') +
                         ' · Updated: ' +
@@ -766,6 +788,10 @@
                         'm · HTF ' +
                         (data.htf_bias_tf || '1hr') +
                         (data.alert_count != null ? ' · Alerts: ' + data.alert_count : '');
+                    if (data.data_age_sec != null && data.data_age_sec > STALE_DATA_SEC) {
+                        meta += ' · ⚠ data ' + Math.round(data.data_age_sec / 60) + 'm old — refreshing…';
+                    }
+                    metaEl.textContent = meta;
                 }
                 if (msgEl) msgEl.textContent = '';
                 processEnterTelegramAlerts(allRows, data.session_date);
@@ -784,25 +810,35 @@
 
         async function checkForScheduledUpdate() {
             if (loadInFlight) return;
+            const nowMs = Date.now();
+            if (lastFullLoadMs && nowMs - lastFullLoadMs >= FORCE_RELOAD_MS) {
+                await load();
+                return;
+            }
             try {
                 const st = await fetchRatingsStatus();
-                const ts = st && st.computed_at;
-                if (!ts) return;
-                if (lastComputedAt == null) {
-                    lastComputedAt = ts;
+                const ep = tsEpoch(st && st.computed_at);
+                if (ep == null) return;
+                const ageSec = st && st.data_age_sec != null ? Number(st.data_age_sec) : null;
+                if (lastComputedEpoch == null) {
+                    lastComputedEpoch = ep;
                     return;
                 }
-                if (ts !== lastComputedAt) {
+                if (ep !== lastComputedEpoch || (ageSec != null && ageSec > STALE_DATA_SEC)) {
                     await load();
                 }
             } catch (e) {
-                /* status poll is best-effort */
+                /* status poll is best-effort; force reload still runs on interval */
             }
         }
 
         load();
         const watchMs = opts.watchMs != null ? Number(opts.watchMs) : 20000;
         if (watchMs > 0) setInterval(checkForScheduledUpdate, watchMs);
+        setInterval(load, FORCE_RELOAD_MS);
+        document.addEventListener('visibilitychange', function () {
+            if (document.visibilityState === 'visible') checkForScheduledUpdate();
+        });
         const poll = opts.pollMs != null ? Number(opts.pollMs) : 0;
         if (poll > 0) setInterval(load, poll);
         return { refresh: load, openModal: openModal, closeModal: closeModal };

@@ -66,13 +66,24 @@ def get_vajra_ratings_status(
         sd = session_date or effective_session_date_ist_for_trend()
         updated = fetch_vajra_ratings_updated_at(sd)
         computed_at = updated.isoformat() if updated else None
+        data_age_sec = None
+        if updated:
+            data_age_sec = max(
+                0,
+                int((datetime.now(updated.tzinfo) - updated).total_seconds()),
+            )
         return JSONResponse(
             status_code=200,
             content={
                 "success": True,
                 "session_date": sd.isoformat(),
                 "computed_at": computed_at,
+                "data_age_sec": data_age_sec,
                 "ees_refresh_minutes": 5,
+            },
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate",
+                "Pragma": "no-cache",
             },
         )
     except Exception as e:
@@ -110,7 +121,18 @@ def get_vajra_ratings(
                 mode="transition", session_date=sd, use_cache=True
             )
             rows = sort_vajra_rows_for_display(rows)
-            computed_at = rows[0].get("computed_at") if rows else None
+            updated_dt = fetch_vajra_ratings_updated_at(sd)
+            computed_at = (
+                updated_dt.isoformat()
+                if updated_dt
+                else (rows[0].get("computed_at") if rows else None)
+            )
+            data_age_sec = None
+            if updated_dt:
+                data_age_sec = max(
+                    0,
+                    int((datetime.now(updated_dt.tzinfo) - updated_dt).total_seconds()),
+                )
             alerts = [r for r in rows if r.get("alertable")]
             ees_alert_rows = [
                 r for r in rows if (r.get("ees_alerts") or []) and not r.get("alertable")
@@ -132,8 +154,13 @@ def get_vajra_ratings(
                     "alerts": alerts,
                     "ees_alert_rows": ees_alert_rows,
                     "computed_at": computed_at,
+                    "data_age_sec": data_age_sec,
                     "ees_refresh_minutes": 5,
                     "rows": rows,
+                },
+                headers={
+                    "Cache-Control": "no-store, no-cache, must-revalidate",
+                    "Pragma": "no-cache",
                 },
             )
 

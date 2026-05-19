@@ -35,6 +35,15 @@ _LIVE_CACHE: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
 _LIVE_CACHE_TTL_SEC = 300
 
 
+def clear_vajra_live_cache(session_date: Optional[date] = None) -> None:
+    """Drop in-process rating cache after a successful DB persist."""
+    if session_date is None:
+        session_date = effective_session_date_ist_for_trend()
+    for k in list(_LIVE_CACHE.keys()):
+        if k.startswith(f"{session_date.isoformat()}:"):
+            _LIVE_CACHE.pop(k, None)
+
+
 def _sort_candles(raw: Optional[List[dict]]) -> List[dict]:
     if not raw:
         return []
@@ -331,7 +340,6 @@ def run_vajra_futures_rating_job(scan_trigger: str = "manual") -> Dict[str, Any]
         logger.error("vajra_rating: Upstox init failed: %s", e)
         return {"error": str(e), "scan_trigger": scan_trigger}
 
-    computed_at = datetime.now(IST)
     rated = 0
     skipped = 0
     errors = 0
@@ -340,7 +348,8 @@ def run_vajra_futures_rating_job(scan_trigger: str = "manual") -> Dict[str, Any]
     def _fetch(key: str, tf: str) -> List[dict]:
         return _fetch_candles_for_tf(upstox, key, tf)
 
-    pipeline_rows = run_transition_pipeline(universe, _fetch, computed_at=computed_at)
+    pipeline_rows = run_transition_pipeline(universe, _fetch)
+    computed_at = datetime.now(IST)
     key_by_stock = {u["stock"]: u for u in universe}
 
     for prow in pipeline_rows:
@@ -473,6 +482,7 @@ def run_vajra_futures_rating_job(scan_trigger: str = "manual") -> Dict[str, Any]
                 },
             )
         db.commit()
+        clear_vajra_live_cache(session_date)
     except Exception as e:
         db.rollback()
         logger.exception("vajra_rating: persist failed: %s", e)
