@@ -1,13 +1,11 @@
-"""Ranking layer — execution priority with heavy market-phase weighting."""
+"""Ranking layer — execution rank + Top 8 tiers from trade_state."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
-from backend.services.vajra.market_phase_scoring import (
-    compute_execution_rank_score,
-    enrich_execution_scores,
-)
-from backend.services.vajra.trade_quality import STATE_EXECUTABLE, STATE_REJECT, STATE_WATCHLIST
+from backend.services.vajra.market_phase_scoring import enrich_execution_scores, select_top_picks
+from backend.services.vajra.trade_state import STATE_EXECUTABLE, STATE_REJECT, STATE_WATCHLIST
+from backend.services.vajra.ui_mapping import finalize_screener_rows
 
 _STATE_RANK = {
     STATE_EXECUTABLE: 3,
@@ -30,38 +28,16 @@ def entry_state_sort_rank(entry_state: Any) -> int:
 
 
 def _qualification(row: Dict[str, Any]) -> str:
-    return str(row.get("qualification") or row.get("entry_state") or "").strip().upper()
-
-
-def _f(r: Dict[str, Any], key: str) -> float:
-    v = r.get(key)
-    if v is None:
-        return 0.0
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _rank_score(r: Dict[str, Any]) -> float:
-    sc = r.get("execution_rank_score")
-    if sc is not None:
-        try:
-            return float(sc)
-        except (TypeError, ValueError):
-            pass
-    return compute_execution_rank_score(enrich_execution_scores(dict(r)))
+    return str(row.get("qualification_state") or row.get("qualification") or "").strip().upper()
 
 
 def sort_vajra_rows_for_display(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Sort by execution_rank_score (phase-weighted), then market phase, then symbol."""
-
     def _key(r: Dict[str, Any]) -> tuple:
         sym = str(r.get("security") or r.get("stock") or "")
         return (
-            -_rank_score(r),
-            -_f(r, "market_phase_score"),
+            -float(r.get("execution_rank_score") or 0),
             -entry_state_sort_rank(_qualification(r)),
+            -float(r.get("market_phase_score") or 0),
             sym,
         )
 
@@ -86,30 +62,7 @@ def group_by_qualification(rows: List[Dict[str, Any]]) -> Dict[str, List[Dict[st
     return groups
 
 
-def select_top_picks(rows: List[Dict[str, Any]], n: int = 8) -> Tuple[List[Dict[str, Any]], Dict[str, List[Dict[str, Any]]]]:
-    """
-    Top n: EXECUTABLE by execution rank (expansion first), then WATCHLIST. REJECT excluded.
-    """
-    groups = group_by_qualification(rows)
-    executable = groups[STATE_EXECUTABLE]
-    watchlist = groups[STATE_WATCHLIST]
-    if len(executable) >= n:
-        picks = executable[:n]
-        sections = {STATE_EXECUTABLE: picks, STATE_WATCHLIST: []}
-        return picks, sections
-    picks = executable + watchlist
-    picks = picks[:n]
-    watch_in_top = picks[len(executable) :]
-    sections = {
-        STATE_EXECUTABLE: executable,
-        STATE_WATCHLIST: watch_in_top,
-    }
-    return picks, sections
-
-
 def build_screener_display(rows: List[Dict[str, Any]], top_n: int = 8) -> Dict[str, Any]:
-    from backend.services.vajra.ui_mapping import finalize_screener_rows
-
     enriched = [enrich_execution_scores(dict(r)) for r in rows]
     finalized = finalize_screener_rows(enriched)
     sorted_rows = sort_vajra_rows_for_display(finalized)
@@ -134,7 +87,6 @@ def shortlist_by_trade_quality(
     min_count: int = 5,
     max_count: int = 15,
 ) -> List[Dict[str, Any]]:
-    """Shortlist strongest setups for 5m validation (execution rank, not TPS-only)."""
     if not candidates:
         return []
     ranked = sort_vajra_rows_for_display(candidates)

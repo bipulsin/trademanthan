@@ -1,45 +1,20 @@
-"""Screener UI mapping — single qualification state, no contradictory labels."""
+"""UI mapping — thin layer; all logic lives in trade_state."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List
 
 from backend.services.vajra.market_phase_scoring import enrich_execution_scores
-from backend.services.vajra.trade_quality import (
+from backend.services.vajra.trade_state import (
     STATE_EXECUTABLE,
     STATE_REJECT,
     STATE_WATCHLIST,
+    derive_execution_bias,
+    derive_structural_bias,
+    resolve_market_phase,
 )
 
-_REASON_LABELS = {
-    "low_tps_discovery": "Awaiting discovery confirm",
-    "compression_chop": "Compression",
-    "weak_core_scores": "Weak structure/momentum",
-    "over_extended": "Over-extended",
-    "awaiting_discovery_confirm": "Discovery unconfirmed",
-    "failed_reclaim": "Failed reclaim",
-    "weak_volume": "Weak volume",
-}
 
-
-def derive_direction(row: Dict[str, Any]) -> str:
-    """Trade direction for the screener — always LONG or SHORT when ECS scores exist."""
-    tt = str(row.get("trade_type") or "").upper().strip()
-    if tt.startswith("EARLY SHORT") or tt.startswith("SHORT"):
-        return "SHORT"
-    if tt.startswith("EARLY LONG") or tt.startswith("LONG"):
-        return "LONG"
-
-    bull_raw = row.get("bull_score")
-    bear_raw = row.get("bear_score")
-    if bull_raw is not None or bear_raw is not None:
-        bull = float(bull_raw or 0)
-        bear = float(bear_raw or 0)
-        return "LONG" if bull >= bear else "SHORT"
-
-    return "NEUTRAL"
-
-
-def normalize_qualification(entry_state: Optional[str]) -> str:
+def normalize_qualification(entry_state: str | None) -> str:
     s = (entry_state or STATE_WATCHLIST).strip().upper()
     if s == STATE_EXECUTABLE or "EXECUTABLE" in s:
         return STATE_EXECUTABLE
@@ -48,125 +23,46 @@ def normalize_qualification(entry_state: Optional[str]) -> str:
     return STATE_WATCHLIST
 
 
-def build_qualification_tags(
-    qualification: str,
-    *,
-    reject_reasons: Optional[List[str]] = None,
-    structure_score: Optional[float] = None,
-    momentum_score: Optional[float] = None,
-    breakout_score: Optional[float] = None,
-    pullback_score: Optional[float] = None,
-    market_phase: str = "",
-    tps_score: Optional[float] = None,
-) -> List[str]:
-    reasons = list(reject_reasons or [])
-    tags: List[str] = []
-    struct = float(structure_score or 0)
-    mom = float(momentum_score or 0)
-    brk = float(breakout_score or 0)
-    pb = float(pullback_score or 0)
-    tps = float(tps_score) if tps_score is not None else 0.0
-    phase = (market_phase or "").upper()
-
-    if qualification == STATE_EXECUTABLE:
-        if mom >= 58:
-            tags.append("Momentum expanding")
-        if pb >= 52:
-            tags.append("Pullback healthy")
-        if brk >= 58:
-            tags.append("Breakout confirmed")
-        if struct >= 62:
-            tags.append("Structure aligned")
-        if not tags:
-            tags.append("Setup confirmed")
-        return tags[:3]
-
-    if qualification == STATE_WATCHLIST:
-        if tps > 0 and tps < 52:
-            tags.append("Awaiting discovery confirm")
-        elif brk < 52:
-            tags.append("Waiting breakout")
-        if mom < 52 and mom > 0:
-            tags.append("Momentum weakening")
-        if struct < 55 and struct > 0:
-            tags.append("Structure forming")
-        if phase in ("ROTATIONAL", "COMPRESSION"):
-            tags.append("Market rotational")
-        for code in reasons:
-            label = _REASON_LABELS.get(code)
-            if label and label not in tags:
-                tags.append(label)
-        if not tags:
-            tags.append("Setup forming")
-        return tags[:3]
-
-    for code in reasons:
-        label = _REASON_LABELS.get(code)
-        if label:
-            tags.append(label)
-    if phase == "COMPRESSION":
-        tags.append("Compression")
-    if struct < 45 and struct > 0:
-        tags.append("Weak structure")
-    if not tags:
-        tags.append("Low quality setup")
-    return tags[:3]
-
-
 def finalize_screener_row(row: Dict[str, Any]) -> Dict[str, Any]:
-    """Canonical fields for UI — qualification is the only primary state."""
-    if row.get("execution_rank_score") is None:
-        enrich_execution_scores(row)
-    qual = normalize_qualification(row.get("entry_state") or row.get("qualification"))
-    row["qualification"] = qual
-    row["entry_state"] = qual
-    row["trade_quality_state"] = qual
-
-    row["direction"] = derive_direction(row)
-    ees = row.get("ees_score")
-    if ees is not None:
-        row["setup_potential_score"] = ees
-
-    tags = build_qualification_tags(
-        qual,
-        reject_reasons=row.get("reject_reasons"),
-        structure_score=row.get("structure_score"),
-        momentum_score=row.get("momentum_score"),
-        breakout_score=row.get("breakout_score"),
-        pullback_score=row.get("pullback_score"),
-        market_phase=str(row.get("market_phase") or ""),
-        tps_score=row.get("tps_score"),
+    """Ensure unified trade-state fields exist for API/UI consumption."""
+    enrich_execution_scores(row)
+    if row.get("ees_score") is not None:
+        row["setup_potential_score"] = row["ees_score"]
+    qual = normalize_qualification(
+        row.get("qualification_state") or row.get("qualification") or row.get("entry_state")
     )
-    row["qualification_tags"] = tags
-
-    conf = row.get("confidence")
-    tier = str(row.get("market_phase_tier") or row.get("market_phase") or "")
-    row["market_context"] = tier.replace("_", " ").title() if tier else "—"
-    tq = row.get("trade_quality_score")
-    row["setup_quality_score"] = tq if tq is not None else conf
-
-    action = str(row.get("enter_action") or "").upper()
-    if qual == STATE_REJECT:
-        row["enter_action"] = ""
-        row["enter_enabled"] = False
-    elif qual == STATE_EXECUTABLE:
+    row["qualification"] = qual
+    row["qualification_state"] = qual
+    row["entry_state"] = qual
+    mp = row.get("market_phase") or row.get("market_context")
+    if mp:
+        row["market_context"] = mp
+        row["market_phase"] = mp
+    eb = row.get("execution_bias") or row.get("direction")
+    if eb:
+        row["execution_bias"] = eb
+        row["direction"] = eb
+    tags = row.get("reason_tags") or row.get("qualification_tags")
+    if tags:
+        row["qualification_tags"] = tags
+        row["reason_tags"] = tags
+    if qual == STATE_EXECUTABLE:
         row["enter_action"] = "ENTER"
         row["enter_enabled"] = True
-    else:
+        row["action"] = "ENTER"
+    elif qual == STATE_WATCHLIST:
         row["enter_action"] = "WATCH"
         row["enter_enabled"] = False
-
-    if qual == STATE_EXECUTABLE and not row.get("enter_reason"):
-        row["enter_reason"] = "Executable now — structure and momentum aligned"
-    elif qual == STATE_WATCHLIST and not row.get("enter_reason"):
-        row["enter_reason"] = "Watchlist — awaiting full confirmation"
-    elif qual == STATE_REJECT and not row.get("enter_reason"):
-        row["enter_reason"] = "Not qualified for execution"
-
-    # Legacy transition label kept for advanced panel only (not main columns).
-    row["lifecycle_hint"] = row.get("trade_type") or "—"
-    if action == "REJECT" and qual != STATE_REJECT:
-        pass  # action already normalized above
+        row["action"] = "WATCH"
+    else:
+        row["enter_action"] = ""
+        row["enter_enabled"] = False
+        row["action"] = ""
+    if not row.get("execution_bias"):
+        mp = row.get("market_phase") or resolve_market_phase(row)
+        row["execution_bias"] = derive_execution_bias(row, mp)
+        row["structural_bias"] = derive_structural_bias(row)
+        row["direction"] = row["execution_bias"]
     return row
 
 

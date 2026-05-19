@@ -304,6 +304,9 @@ tr.vajra-adv-row td {
 
 .vajra-ctx-bull-exp { background: #16a34a !important; color: #000 !important; font-weight: 700; }
 .vajra-ctx-bear-exp { background: #dc2626 !important; color: #fff !important; font-weight: 700; }
+.vajra-ctx-early-bull { background: #4ade80 !important; color: #14532d !important; font-weight: 700; }
+.vajra-ctx-early-bear { background: #f87171 !important; color: #450a0a !important; font-weight: 700; }
+.vajra-ctx-continuation { background: #22d3ee !important; color: #083344 !important; font-weight: 700; }
 .vajra-ctx-rotational { background: #f59e0b !important; color: #111827 !important; font-weight: 700; }
 .vajra-ctx-weakening { background: #ea580c !important; color: #111827 !important; font-weight: 700; }
 .vajra-ctx-compression { background: #94a3b8 !important; color: #1e293b !important; font-weight: 700; }

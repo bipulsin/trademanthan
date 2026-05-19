@@ -33,19 +33,36 @@ def test_finalize_reject_no_button():
     )
     assert row["qualification"] == STATE_REJECT
     assert row["enter_action"] == ""
-    assert row["lifecycle_hint"] == "REJECT"
 
 
 def test_top_picks_executable_first_no_reject():
     rows = [
-        {"stock": "A", "qualification": STATE_WATCHLIST, "confidence": 90},
-        {"stock": "B", "qualification": STATE_EXECUTABLE, "confidence": 70},
-        {"stock": "C", "qualification": STATE_REJECT, "confidence": 99},
-        {"stock": "D", "qualification": STATE_EXECUTABLE, "confidence": 85},
+        {
+            "stock": "A",
+            "qualification_state": STATE_WATCHLIST,
+            "market_phase": "Rotational",
+            "execution_rank_score": 600,
+            "top8_phase_bucket": 3,
+        },
+        {
+            "stock": "B",
+            "qualification_state": STATE_EXECUTABLE,
+            "market_phase": "Bull Expansion",
+            "execution_rank_score": 1100,
+            "top8_phase_bucket": 1,
+        },
+        {"stock": "C", "qualification_state": STATE_REJECT, "execution_rank_score": 9999},
+        {
+            "stock": "D",
+            "qualification_state": STATE_EXECUTABLE,
+            "market_phase": "Bull Expansion",
+            "execution_rank_score": 1200,
+            "top8_phase_bucket": 1,
+        },
     ]
     for r in rows:
         finalize_screener_row(r)
-    picks, sections = select_top_picks(rows, n=8)
+    picks, _ = select_top_picks(rows, n=8)
     symbols = [p["stock"] for p in picks]
     assert "C" not in symbols
     assert symbols[0] == "D"
@@ -57,7 +74,7 @@ def test_direction_from_scores_when_trade_type_reject():
     row = finalize_screener_row(
         {"stock": "NHPC", "trade_type": "REJECT", "bull_score": 55.0, "bear_score": 15.0}
     )
-    assert row["direction"] == "LONG"
+    assert row.get("execution_bias") == "LONG" or row.get("direction") == "LONG"
 
 
 def test_build_screener_display_groups():

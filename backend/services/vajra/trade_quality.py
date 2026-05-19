@@ -11,7 +11,6 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from backend.services.vajra.engine import ADX_LEN, _dmi_adx, _rsi_wilder
 from backend.services.vajra.indicators import cumulative_vwap, ema_series
-from backend.services.vajra.market_phase_scoring import apply_phase_executable_cap
 from backend.services.vajra.transition import IMPULSE_LB, PULLBACK_LB
 
 STATE_EXECUTABLE = "EXECUTABLE"
@@ -559,10 +558,14 @@ def _classify_state(
     else:
         state = STATE_WATCHLIST
 
-    return apply_phase_executable_cap(
+    from backend.services.vajra.trade_state import apply_phase_qualification_cap, resolve_market_phase
+
+    resolved_phase = resolve_market_phase(
+        {"market_phase": market_phase, "trade_type": trade_type}
+    )
+    return apply_phase_qualification_cap(
         state,
-        market_phase=market_phase,
-        trade_type=trade_type,
+        market_phase=resolved_phase,
         structure=structure,
         momentum=momentum,
         breakout=breakout,

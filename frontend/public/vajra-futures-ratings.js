@@ -40,7 +40,7 @@
     const QUAL_REJECT = 'REJECT';
 
     const TOP_COLUMNS = [
-        { key: 'direction', label: 'Direction' },
+        { key: 'execution_bias', label: 'Execution Bias' },
         { key: 'qualification', label: 'Qualification' },
         { key: 'confidence', label: 'Confidence', num: true },
         { key: 'setup_quality_score', label: 'Setup Quality', num: true },
@@ -117,7 +117,9 @@
 
     function cellValue(r, col) {
         if (col.key === 'security') return r.security || r.stock || '—';
-        if (col.key === 'direction') return String(r.direction || '—').toUpperCase();
+        if (col.key === 'execution_bias') {
+            return String(r.execution_bias || r.direction || '—').toUpperCase();
+        }
         if (col.key === 'qualification') return qualificationOf(r);
         if (col.key === 'market_context') {
             return String(r.market_context || r.market_phase || '—');
@@ -240,8 +242,8 @@
 
     function chipToneClass(col, row) {
         const raw = cellValue(row, col);
-        if (col.key === 'direction') {
-            const d = String(row.direction || '').toUpperCase();
+        if (col.key === 'execution_bias') {
+            const d = String(row.execution_bias || row.direction || '').toUpperCase();
             if (d === 'LONG') return 'df-dir-long';
             if (d === 'SHORT') return 'df-dir-short';
             return 'df-dir-neutral';
@@ -251,18 +253,14 @@
         }
         if (col.key === 'market_context') {
             const ctx = String(row.market_context || row.market_phase || '').toUpperCase();
+            if (ctx.indexOf('EARLY BULL') >= 0) return 'vajra-ctx-early-bull';
+            if (ctx.indexOf('EARLY BEAR') >= 0) return 'vajra-ctx-early-bear';
             if (ctx.indexOf('BULL EXPANSION') >= 0) return 'vajra-ctx-bull-exp';
             if (ctx.indexOf('BEAR EXPANSION') >= 0) return 'vajra-ctx-bear-exp';
+            if (ctx.indexOf('TREND CONTINUATION') >= 0) return 'vajra-ctx-continuation';
             if (ctx.indexOf('ROTATIONAL') >= 0) return 'vajra-ctx-rotational';
-            if (ctx.indexOf('WEAKENING') >= 0 || ctx.indexOf('EXHAUSTION') >= 0) {
-                return 'vajra-ctx-weakening';
-            }
-            if (ctx.indexOf('COMPRESSION') >= 0 || ctx.indexOf('FAILURE') >= 0) {
-                return 'vajra-ctx-compression';
-            }
-            if (ctx.indexOf('EXPANSION') >= 0 || ctx.indexOf('CONTINUATION') >= 0) {
-                return 'vajra-ctx-bull-exp';
-            }
+            if (ctx.indexOf('WEAKENING') >= 0) return 'vajra-ctx-weakening';
+            if (ctx.indexOf('COMPRESSION') >= 0) return 'vajra-ctx-compression';
             return 'df-dir-neutral';
         }
         if (col.key === 'extension_risk_score') {
