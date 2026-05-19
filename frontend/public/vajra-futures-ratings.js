@@ -553,6 +553,28 @@
         throw new Error(lastErr || 'Failed to load Vajra ratings');
     }
 
+    async function fetchRatingsStatus() {
+        const paths = [
+            API_BASE + '/api/vajra-futures/ratings-status',
+            API_BASE + '/vajra-futures/ratings-status',
+        ];
+        let lastErr = null;
+        for (let i = 0; i < paths.length; i++) {
+            try {
+                const res = await fetch(paths[i], { headers: authHeaders(), cache: 'no-store' });
+                const data = await res.json();
+                if (!res.ok) {
+                    lastErr = data && data.message ? data.message : res.statusText;
+                    continue;
+                }
+                return data;
+            } catch (e) {
+                lastErr = e.message || String(e);
+            }
+        }
+        throw new Error(lastErr || 'Failed to load Vajra ratings status');
+    }
+
     function isVajraTelegramEnabled() {
         try {
             const raw = global.localStorage.getItem('trademanthan_settings');
@@ -642,6 +664,8 @@
         let sortKey = 'tps_score';
         let sortDir = 'desc';
         const seenAlertKeys = {};
+        let lastComputedAt = null;
+        let loadInFlight = false;
 
         function openModal() {
             modalRows = sortForDisplay(allRows).slice(TOP_N);
@@ -700,10 +724,16 @@
         });
 
         async function load() {
+            if (loadInFlight) return;
+            loadInFlight = true;
             if (msgEl) msgEl.textContent = 'Loading transition scan (30m + 5m)…';
             try {
                 const data = await fetchRatings(DEFAULT_SCAN_TF, DEFAULT_HTF);
                 allRows = sortForDisplay((data && data.rows) || []);
+                lastComputedAt =
+                    (data && data.computed_at) ||
+                    (allRows[0] && allRows[0].computed_at) ||
+                    lastComputedAt;
                 if (listEl) {
                     const topRows = allRows.slice(0, TOP_N);
                     listEl._vajraTopRows = topRows;
@@ -747,14 +777,41 @@
                 if (listEl) listEl.innerHTML = '';
                 if (moreBtn) moreBtn.hidden = true;
                 if (msgEl) msgEl.textContent = 'Vajra: ' + (e.message || String(e));
+            } finally {
+                loadInFlight = false;
+            }
+        }
+
+        async function checkForScheduledUpdate() {
+            if (loadInFlight) return;
+            try {
+                const st = await fetchRatingsStatus();
+                const ts = st && st.computed_at;
+                if (!ts) return;
+                if (lastComputedAt == null) {
+                    lastComputedAt = ts;
+                    return;
+                }
+                if (ts !== lastComputedAt) {
+                    await load();
+                }
+            } catch (e) {
+                /* status poll is best-effort */
             }
         }
 
         load();
-        const poll = opts.pollMs != null ? Number(opts.pollMs) : 300000;
+        const watchMs = opts.watchMs != null ? Number(opts.watchMs) : 20000;
+        if (watchMs > 0) setInterval(checkForScheduledUpdate, watchMs);
+        const poll = opts.pollMs != null ? Number(opts.pollMs) : 0;
         if (poll > 0) setInterval(load, poll);
         return { refresh: load, openModal: openModal, closeModal: closeModal };
     }
 
-    global.VajraFuturesRatings = { init: init, fetchRatings: fetchRatings, TOP_N: TOP_N };
+    global.VajraFuturesRatings = {
+        init: init,
+        fetchRatings: fetchRatings,
+        fetchRatingsStatus: fetchRatingsStatus,
+        TOP_N: TOP_N,
+    };
 })(window);

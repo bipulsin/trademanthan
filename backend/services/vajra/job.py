@@ -167,6 +167,29 @@ def fetch_vajra_ratings_for_session(session_date: Optional[date] = None) -> List
         db.close()
 
 
+def fetch_vajra_ratings_updated_at(session_date: Optional[date] = None) -> Optional[datetime]:
+    """Latest computed_at for the session (set when the 5m rating job finishes)."""
+    sd = session_date or effective_session_date_ist_for_trend()
+    db = SessionLocal()
+    try:
+        ensure_vajra_futures_rating_table(db)
+        row = db.execute(
+            text(
+                """
+                SELECT MAX(computed_at)
+                FROM vajra_futures_rating
+                WHERE session_date = :sd
+                """
+            ),
+            {"sd": sd},
+        ).fetchone()
+        if not row or row[0] is None:
+            return None
+        return row[0]
+    finally:
+        db.close()
+
+
 def _fetch_candles_for_tf(upstox: UpstoxService, instrument_key: str, tf_id: str) -> List[dict]:
     cfg = fetch_config(tf_id)
     raw = upstox.get_historical_candles_by_instrument_key(
@@ -473,4 +496,5 @@ def run_vajra_futures_rating_job(scan_trigger: str = "manual") -> Dict[str, Any]
         "rated": rated,
         "skipped": skipped,
         "errors": errors,
+        "computed_at": computed_at.isoformat(),
     }

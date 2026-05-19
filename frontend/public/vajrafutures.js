@@ -10,7 +10,7 @@
                 moreBtnId: 'vfVajraMoreBtn',
                 metaElId: 'vfVajraMeta',
                 msgElId: 'vfVajraMsg',
-                pollMs: 300000,
+                watchMs: 20000,
             });
         }
         if (window.VajraTradeWorkflow) {

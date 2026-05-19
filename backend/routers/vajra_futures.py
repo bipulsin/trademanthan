@@ -15,6 +15,7 @@ from backend.routers.auth import get_user_from_token, oauth2_scheme
 from backend.services.vajra.job import (
     compute_vajra_ratings_live,
     fetch_vajra_ratings_for_session,
+    fetch_vajra_ratings_updated_at,
     sort_vajra_rows_for_display,
 )
 from backend.services.vajra.timeframes import (
@@ -50,6 +51,36 @@ def get_vajra_timeframes(user: User = Depends(_require_user)):
             "valid_htf_by_scan": {s: valid_htf_for_scan(s) for s in SCAN_TF_IDS},
         },
     )
+
+
+@router.get("/ratings-status")
+def get_vajra_ratings_status(
+    session_date: Optional[date] = Query(None, description="IST session date; default today"),
+    user: User = Depends(_require_user),
+):
+    """Lightweight poll target: when computed_at changes, the 5m rating job has finished."""
+    del user
+    try:
+        from backend.services.smart_futures_session_date import effective_session_date_ist_for_trend
+
+        sd = session_date or effective_session_date_ist_for_trend()
+        updated = fetch_vajra_ratings_updated_at(sd)
+        computed_at = updated.isoformat() if updated else None
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "session_date": sd.isoformat(),
+                "computed_at": computed_at,
+                "ees_refresh_minutes": 5,
+            },
+        )
+    except Exception as e:
+        logger.exception("vajra_ratings_status: %s", e)
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "message": str(e), "computed_at": None},
+        )
 
 
 @router.get("/ratings")
