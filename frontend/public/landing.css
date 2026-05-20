@@ -489,6 +489,13 @@ body.landing-page #app {
 
 /* ========== Mobile Responsive (per reference layout) ========== */
 @media (max-width: 768px) {
+  body.landing-page #app {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+
   /* Nav: logo + Tradentical text, search + hamburger only */
   .landing-nav {
     padding: 0.75rem 1rem;
@@ -516,22 +523,29 @@ body.landing-page #app {
     justify-content: center;
   }
 
-  /* Hero: vertical stack, tagline → title → description → CTA → graphic */
+  /* Hero: headline mid-page → CTA → blank gap; features pinned below */
   .landing-hero {
     display: flex;
     flex-direction: column;
     align-items: center;
-    min-height: auto;
+    justify-content: center;
+    flex: 1 1 auto;
+    min-height: 0;
     height: auto;
-    padding: 5.5rem 1.25rem 2rem;
+    padding: 5.25rem 1.25rem 0;
     text-align: center;
     overflow: visible;
+    box-sizing: border-box;
   }
 
   .landing-hero .hero-content {
-    order: 0;
     width: 100%;
-    min-height: auto;
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: min(52vh, 480px);
+    max-height: 58vh;
   }
 
   .landing-hero .hero-text {
@@ -539,8 +553,11 @@ body.landing-page #app {
     flex-direction: column;
     align-items: center;
     text-align: center;
-    padding: 0;
+    padding: 10vh 0 0;
+    margin: 0;
     min-height: auto;
+    width: 100%;
+    max-width: 360px;
   }
 
   .landing-hero .hero-tagline {
@@ -551,10 +568,11 @@ body.landing-page #app {
     font-weight: 400;
   }
 
-  .landing-hero .hero-text h1 {
+  .landing-hero .hero-text h1,
+  .landing-hero .hero-headline {
     font-size: clamp(1.75rem, 7vw, 2.25rem);
     text-align: center;
-    margin-bottom: 1rem;
+    margin-bottom: 1.25rem;
     text-shadow: 0 2px 16px rgba(0, 0, 0, 0.65);
   }
 
@@ -568,40 +586,28 @@ body.landing-page #app {
   }
 
   .landing-hero .btn-cta {
-    margin: 0 auto 0.5rem;
+    margin: 0 auto 5.5rem;
     padding: 0.9rem 1.75rem;
     font-size: 1rem;
     box-shadow: 0 4px 20px rgba(59, 130, 246, 0.4);
   }
 
-  .landing-hero .hero-visual {
-    order: 1;
-    position: static;
-    width: 100vw;
-    margin: 0.25rem 0 0;
-    margin-left: calc(-50vw + 50%);
-    padding: 0;
-    height: auto;
-    display: flex;
-    justify-content: center;
-    overflow: visible;
-  }
-
+  .landing-hero .hero-visual,
   .landing-hero .hero-visual-img {
-    width: 150vw;
-    min-width: 150vw;
-    height: auto;
-    max-width: none;
-    max-height: none;
-    object-fit: contain;
-    object-position: center;
-    padding: 0;
-    margin-left: -25vw;
+    display: none !important;
   }
 
-  /* Features: single column, icon left + title/desc right */
+  /* Features: stack at bottom of viewport */
   .landing-features {
-    padding: 0 1.25rem 3rem;
+    flex: 0 0 auto;
+    margin-top: auto;
+    padding: 0 1.25rem 1.5rem;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .landing-footer {
+    flex-shrink: 0;
     margin-top: 0;
   }
 
