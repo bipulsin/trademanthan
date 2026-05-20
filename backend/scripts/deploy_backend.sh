@@ -42,11 +42,13 @@ if [ "${1:-}" != "--post-pull" ]; then
     }
 
     log_message "Fetching and resetting to origin/main..."
-    if timeout 15 bash -c 'cd /home/ubuntu/trademanthan && git fetch origin && git reset --hard origin/main' >> "$LOG_FILE" 2>&1; then
+    # Slow networks or large fetches need >15s; on failure prefer hard reset after fetch (avoid pull on dirty trees / scp leftovers).
+    if timeout 120 bash -c 'cd /home/ubuntu/trademanthan && git fetch origin && git reset --hard origin/main' >> "$LOG_FILE" 2>&1; then
         log_message "✅ Git reset successful"
     else
-        log_message "⚠️ Git fetch/reset had issues (trying pull...)"
-        timeout 10 git pull origin main >> "$LOG_FILE" 2>&1 || true
+        log_message "⚠️ Git timed out or fetch failed — retry fetch + hard reset origin/main..."
+        timeout 180 git fetch origin >> "$LOG_FILE" 2>&1 || true
+        git reset --hard origin/main >> "$LOG_FILE" 2>&1 || true
     fi
     find /home/ubuntu/trademanthan -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
