@@ -32,7 +32,8 @@ def _upstox_v3_max_calendar_span_days(interval: str) -> Optional[int]:
             return 31
         return 92
     if unit == "hours":
-        return 92
+        # V3 hours/1 rejects ~92-day windows (UDAPI1148); 60d is reliable for F&O.
+        return 60
     return None
 
 
@@ -141,6 +142,46 @@ def _aggregate_1m_to_n_minute(candles: List[Dict[str, Any]], n: int) -> List[Dic
             except (TypeError, ValueError):
                 pass
         out.append(rec)
+    return out
+
+
+# V3 intraday endpoint has today's session; historical minute/hour bars lag for F&O.
+_INTRADAY_MERGE_INTERVALS = frozenset({"minutes/5", "minutes/15", "minutes/30", "hours/1"})
+
+
+def _merge_historical_with_intraday(
+    historical: Optional[List[Dict[str, Any]]],
+    intraday: Optional[List[Dict[str, Any]]],
+    *,
+    session_date: date,
+) -> List[Dict[str, Any]]:
+    """
+    Append today's intraday candles and drop same-day rows from historical (often stale).
+    """
+    merged: Dict[str, Dict[str, Any]] = {}
+    for c in historical or []:
+        dt = _parse_ts_to_aware_ist(c.get("timestamp"))
+        if dt is not None and dt.date() >= session_date:
+            continue
+        ts_key = str(c.get("timestamp") or "")
+        if ts_key:
+            merged[ts_key] = c
+    added = 0
+    for c in intraday or []:
+        ts_key = str(c.get("timestamp") or "")
+        if not ts_key:
+            continue
+        merged[ts_key] = c
+        added += 1
+    out = list(merged.values())
+    out.sort(key=lambda x: str(x.get("timestamp") or ""))
+    if added:
+        logger.debug(
+            "Merged %s intraday candles for session %s (total %s bars)",
+            added,
+            session_date,
+            len(out),
+        )
     return out
 
 
@@ -1358,6 +1399,30 @@ class UpstoxService:
         logger.warning(f"⚠️ V3 No candle data for {instrument_key}")
         return None
 
+    def _fetch_intraday_candles_v3(
+        self, instrument_key: str, interval: str
+    ) -> Optional[List[Dict]]:
+        """Today's session candles from V3 intraday endpoint (live ratings)."""
+        iv = (interval or "").strip().lower()
+        if iv not in _INTRADAY_MERGE_INTERVALS:
+            return None
+        key_enc = quote(instrument_key, safe="")
+        url = f"{self.base_url}/historical-candle/intraday/{key_enc}/{iv}"
+        data = self.make_api_request(url, method="GET", timeout=15, max_retries=2)
+        if data and data.get("status") == "success" and "data" in data:
+            raw = data["data"].get("candles", [])
+            structured = _candles_rows_to_structured(raw)
+            if structured:
+                logger.info(
+                    "✅ V3 intraday %s: %s bars for %s (latest %s)",
+                    iv,
+                    len(structured),
+                    instrument_key,
+                    structured[-1].get("timestamp"),
+                )
+            return structured
+        return None
+
     def get_historical_candles_by_instrument_key(
         self,
         instrument_key: str,
@@ -1408,27 +1473,35 @@ class UpstoxService:
 
             iv = (interval or "").strip().lower()
 
+            candles: Optional[List[Dict]] = None
             if use_v2:
                 if iv == "minutes/5":
                     one = self._fetch_historical_v2_candles(instrument_key, "1minute", to_date, from_date)
-                    if one:
-                        return _aggregate_1m_to_n_minute(one, 5)
-                    return None
-                if iv == "minutes/15":
+                    candles = _aggregate_1m_to_n_minute(one, 5) if one else None
+                elif iv == "minutes/15":
                     one = self._fetch_historical_v2_candles(instrument_key, "1minute", to_date, from_date)
-                    if one:
-                        return _aggregate_1m_to_n_minute(one, 15)
-                    return None
-                if iv == "minutes/30":
+                    candles = _aggregate_1m_to_n_minute(one, 15) if one else None
+                elif iv == "minutes/30":
                     one = self._fetch_historical_v2_candles(instrument_key, "1minute", to_date, from_date)
-                    if one:
-                        return _aggregate_1m_to_n_minute(one, 30)
-                    return None
-                v2_tok = _v3_interval_to_v2_token(interval)
-                if v2_tok:
-                    return self._fetch_historical_v2_candles(instrument_key, v2_tok, to_date, from_date)
+                    candles = _aggregate_1m_to_n_minute(one, 30) if one else None
+                else:
+                    v2_tok = _v3_interval_to_v2_token(interval)
+                    if v2_tok:
+                        candles = self._fetch_historical_v2_candles(
+                            instrument_key, v2_tok, to_date, from_date
+                        )
+            if candles is None:
+                candles = self._fetch_historical_v3_candles(
+                    instrument_key, interval, to_date, from_date
+                )
 
-            return self._fetch_historical_v3_candles(instrument_key, interval, to_date, from_date)
+            if range_end_date is None and iv in _INTRADAY_MERGE_INTERVALS:
+                intra = self._fetch_intraday_candles_v3(instrument_key, iv)
+                if intra:
+                    candles = _merge_historical_with_intraday(
+                        candles, intra, session_date=end_d
+                    )
+            return candles
 
         except Exception as e:
             logger.error(f"❌ Error fetching candles for {instrument_key}: {str(e)}")
