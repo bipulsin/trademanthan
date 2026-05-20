@@ -26,6 +26,49 @@ body.landing-page {
   overflow-x: hidden;
 }
 
+body.landing-page #app {
+  position: relative;
+  z-index: 1;
+}
+
+/* Full-viewport video wallpaper (index.html) */
+.landing-wallpaper {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.landing-wallpaper-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center center;
+}
+
+.landing-wallpaper-scrim {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(10, 15, 26, 0.55) 0%, rgba(15, 23, 42, 0.72) 45%, rgba(15, 25, 44, 0.92) 100%),
+    linear-gradient(90deg, rgba(10, 15, 26, 0.82) 0%, rgba(10, 15, 26, 0.35) 42%, rgba(10, 15, 26, 0.5) 100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-wallpaper-video {
+    display: none;
+  }
+
+  .landing-wallpaper-scrim {
+    background:
+      url('hero-visual.png') center right / cover no-repeat,
+      linear-gradient(90deg, rgba(10, 15, 26, 0.92) 0%, rgba(10, 15, 26, 0.45) 50%, rgba(10, 15, 26, 0.75) 100%);
+  }
+}
+
 /* ========== Top Navigation Bar ========== */
 .landing-nav {
   position: fixed;
@@ -160,9 +203,10 @@ body.landing-page {
   padding-right: 3px;
   position: relative;
   overflow: hidden;
+  background: transparent;
 }
 
-/* Glowing data stream / network lines in background */
+/* Subtle tint over video wallpaper */
 .landing-hero::before {
   content: '';
   position: absolute;
@@ -170,24 +214,15 @@ body.landing-page {
   left: 0;
   right: 0;
   bottom: 0;
-  background: 
-    radial-gradient(ellipse 100% 60% at 75% 50%, rgba(59, 130, 246, 0.15) 0%, transparent 55%),
-    radial-gradient(ellipse 80% 40% at 25% 70%, rgba(34, 211, 238, 0.08) 0%, transparent 50%),
-    radial-gradient(ellipse 60% 50% at 50% 90%, rgba(139, 92, 246, 0.06) 0%, transparent 45%);
+  background:
+    radial-gradient(ellipse 100% 60% at 75% 50%, rgba(59, 130, 246, 0.12) 0%, transparent 55%),
+    radial-gradient(ellipse 80% 40% at 25% 70%, rgba(34, 211, 238, 0.06) 0%, transparent 50%);
   pointer-events: none;
+  z-index: 0;
 }
 
-/* Abstract glowing lines - data streams */
 .landing-hero::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background-image: 
-    linear-gradient(105deg, transparent 40%, rgba(59, 130, 246, 0.03) 50%, transparent 60%),
-    linear-gradient(75deg, transparent 30%, rgba(34, 211, 238, 0.04) 45%, transparent 55%),
-    linear-gradient(165deg, transparent 50%, rgba(139, 92, 246, 0.03) 60%, transparent 70%);
-  background-size: 100% 100%;
-  pointer-events: none;
+  display: none;
 }
 
 .landing-hero .hero-content {
@@ -196,30 +231,13 @@ body.landing-page {
   position: relative;
   width: 100%;
   min-height: 70vh;
+  z-index: 2;
 }
 
-/* Hero visual - right-aligned, 3px from right, 5px margin above */
-.landing-hero .hero-visual {
-  position: absolute;
-  top: 5px;
-  bottom: 0;
-  right: 3px;
-  height: calc(100% - 5px);
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  z-index: 1;
-  pointer-events: none;
-}
-
+/* Legacy hero image removed — video wallpaper fills viewport */
+.landing-hero .hero-visual,
 .landing-hero .hero-visual-img {
-  height: 100%;
-  width: auto;
-  max-width: 70vw;
-  object-fit: contain;
-  object-position: right center;
-  transform: scale(1.2);
-  transform-origin: right center;
+  display: none !important;
 }
 
 /* Hero text overlays on the image */

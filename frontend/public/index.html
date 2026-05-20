@@ -8,12 +8,26 @@
     <title>Tradentical - AI-Powered Trading Intelligence</title>
     <meta name="description" content="Trading Identical. AI-based Algo platform by Trade With CTO. Harness the power of advanced AI to automate your trading strategies.">
     <link rel="stylesheet" href="styles.css?v=1.7">
-    <link rel="stylesheet" href="landing.css?v=25">
+    <link rel="stylesheet" href="landing.css?v=26">
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
 </head>
 <body class="landing-page">
+    <div class="landing-wallpaper" aria-hidden="true">
+        <video
+            class="landing-wallpaper-video"
+            autoplay
+            muted
+            loop
+            playsinline
+            preload="auto"
+            poster="hero-visual.png"
+        >
+            <source src="landing-wallpaper.mp4?v=1" type="video/mp4">
+        </video>
+        <div class="landing-wallpaper-scrim"></div>
+    </div>
     <div id="app">
         <!-- Top Navigation Bar -->
         <nav class="landing-nav">
@@ -47,9 +61,6 @@
 
         <!-- Hero Section -->
         <section class="landing-hero">
-            <div class="hero-visual">
-                <img src="hero-visual.png" alt="AI trading globe and candlestick visualization" class="hero-visual-img">
-            </div>
             <div class="hero-content">
                 <div class="hero-text">
                     <div class="hero-market-closed" id="heroMarketClosed" role="status" aria-live="polite" hidden>
