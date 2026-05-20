@@ -13,6 +13,7 @@ import logging
 
 from backend.config import get_instruments_file_path
 from backend.database import engine
+from backend.utils.json_safe import json_safe_row
 from backend.services.upstox_service import UpstoxService
 from backend.config import settings
 
@@ -289,7 +290,7 @@ def _arbitrage_selection_rows_live() -> tuple[list[dict[str, Any]], Optional[str
         d["currmth_future_ltp"] = cl
         d["nextmth_future_ltp"] = nl
         d["has_open_order"] = sk in open_keys
-        out.append(d)
+        out.append(json_safe_row(d))
 
     return out, None
 
@@ -330,7 +331,7 @@ def _arbitrage_selection_rows_db_only() -> list[dict[str, Any]]:
                 """
             )
         ).mappings().all()
-    return [dict(row) for row in rows]
+    return [json_safe_row(dict(row)) for row in rows]
 
 
 @router.get("/selection")
@@ -1434,12 +1435,20 @@ async def get_arbitrage_orders(trade_status: str):
                 {"trade_status": status},
             ).mappings().all()
 
-        return {
-            "success": True,
-            "trade_status": status,
-            "count": len(rows),
-            "rows": [dict(row) for row in rows],
-        }
+        safe_rows = [json_safe_row(dict(row)) for row in rows]
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "trade_status": status,
+                "count": len(safe_rows),
+                "rows": safe_rows,
+            },
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate",
+                "Pragma": "no-cache",
+            },
+        )
     except HTTPException:
         raise
     except Exception as exc:
