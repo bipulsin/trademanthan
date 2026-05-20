@@ -8,7 +8,7 @@
     <title>Tradentical - AI-Powered Trading Intelligence</title>
     <meta name="description" content="Trading Identical. AI-based Algo platform by Trade With CTO. Harness the power of advanced AI to automate your trading strategies.">
     <link rel="stylesheet" href="styles.css?v=1.7">
-    <link rel="stylesheet" href="landing.css?v=27">
+    <link rel="stylesheet" href="landing.css?v=28">
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
@@ -16,7 +16,7 @@
 <body class="landing-page">
     <div class="landing-wallpaper" aria-hidden="true">
         <video
-            class="landing-wallpaper-video"
+            class="landing-wallpaper-video landing-wallpaper-video--desktop"
             autoplay
             muted
             loop
@@ -25,6 +25,17 @@
             poster="hero-visual.png"
         >
             <source src="landing-wallpaper.mp4?v=1" type="video/mp4">
+        </video>
+        <video
+            class="landing-wallpaper-video landing-wallpaper-video--portrait"
+            autoplay
+            muted
+            loop
+            playsinline
+            preload="metadata"
+            poster="hero-visual.png"
+        >
+            <source src="landing-wallpaper-mobile.mp4?v=1" type="video/mp4">
         </video>
         <div class="landing-wallpaper-scrim"></div>
     </div>
@@ -193,6 +204,29 @@
                 .catch(function () {
                     // Ignore silently; banner stays hidden on fetch errors.
                 });
+        })();
+
+        (function initLandingWallpaperVideos() {
+            var desktop = document.querySelector('.landing-wallpaper-video--desktop');
+            var portrait = document.querySelector('.landing-wallpaper-video--portrait');
+            if (!desktop || !portrait) return;
+            var mq = window.matchMedia('(max-width: 768px) and (orientation: portrait)');
+            function sync() {
+                if (mq.matches) {
+                    desktop.pause();
+                    portrait.play().catch(function () {});
+                } else {
+                    portrait.pause();
+                    desktop.play().catch(function () {});
+                }
+            }
+            sync();
+            if (mq.addEventListener) {
+                mq.addEventListener('change', sync);
+            } else if (mq.addListener) {
+                mq.addListener(sync);
+            }
+            window.addEventListener('orientationchange', sync);
         })();
 
         (function initHeroHeadlineRotation() {
