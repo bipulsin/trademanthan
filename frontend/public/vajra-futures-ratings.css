@@ -320,6 +320,12 @@ body[data-theme="light"] .vajra-modal-body {
     border: 1px solid #93c5fd;
     color: #1e3a8a;
 }
+body[data-theme="dark"] .vajra-banner,
+body.theme-page:not([data-theme="light"]) .vajra-banner {
+    background: rgba(232, 238, 248, 0.96);
+    border: 1px solid #1e40af;
+    color: #1e3a8a !important;
+}
 .vajra-enter-btn-armed,
 button.vajra-enter-btn.vajra-enter-btn-armed {
     border-color: #ca8a04 !important;
