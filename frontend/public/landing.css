@@ -526,15 +526,14 @@ body.landing-page #app {
     justify-content: center;
   }
 
-  /* Hero: headline mid-page → CTA → blank gap; features pinned below */
+  /* Hero fills first screen minus a peek of the first feature card */
   .landing-hero {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    flex: 1 1 auto;
-    min-height: 0;
-    height: auto;
+    min-height: calc(100dvh - var(--landing-feature-peek));
+    min-height: calc(100vh - var(--landing-feature-peek));
     padding: 5.25rem 1.25rem 0;
     text-align: center;
     overflow: visible;
@@ -547,8 +546,7 @@ body.landing-page #app {
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: min(52vh, 480px);
-    max-height: 58vh;
+    min-height: min(48vh, 440px);
   }
 
   .landing-hero .hero-text {
@@ -600,17 +598,15 @@ body.landing-page #app {
     display: none !important;
   }
 
-  /* Features: stack at bottom of viewport */
+  /* Features: start below fold — only top of first card on screen 1 */
   .landing-features {
-    flex: 0 0 auto;
-    margin-top: auto;
+    margin-top: 0;
     padding: 0 1.25rem 1.5rem;
     width: 100%;
     box-sizing: border-box;
   }
 
   .landing-footer {
-    flex-shrink: 0;
     margin-top: 0;
   }
 

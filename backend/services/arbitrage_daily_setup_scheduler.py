@@ -4,16 +4,19 @@ Arbitrage Daily Setup Scheduler
 Scheduled (Asia/Kolkata, Mon–Fri, not NSE holidays / weekends):
 - 09:10 — primary daily run. Updates instruments + LTPs.
 - 09:20 — only if 09:10 did not complete successfully the same day (safety backstop).
+- 09:15–15:30 every 30 minutes — intraday LTP refresh only (arbitrage_master LTP columns).
 
 On-demand: POST /scan/arbitrage/daily-setup/run (and helper scripts) — does not
 set the 09:10 success flag, so 09:20 logic is unchanged.
 
-Tasks:
+Tasks (full daily setup):
 1) Updates instrument/symbol fields in arbitrage_master from instruments JSON.
 2) After IST calendar day > 21 and until the front contract's expiry in that month,
    currmth_* / nextmth_* use the 2nd and 3rd upcoming expiries (roll window);
    otherwise the 1st and 2nd. Missing contracts leave those columns NULL.
 3) Updates LTP columns using Upstox API by instrument key.
+
+Intraday LTP refresh: step 3 only (keeps DB fallback fresh for /scan/arbitrage/selection).
 """
 
 import json
@@ -45,7 +48,14 @@ logger = logging.getLogger(__name__)
 _PROJ_LOGS = Path(__file__).resolve().parents[2] / "logs"
 MORNING_STATE_FILE = _PROJ_LOGS / "arbitrage_daily_setup_morning_state.json"
 
-_Execution = Optional[Literal["morning_910", "morning_920"]]
+_Execution = Optional[Literal["morning_910", "morning_920", "intraday_ltp"]]
+
+# Mon–Fri IST: 09:15, 09:45, …, 15:15, 15:30 (no 15:45 — after cash close).
+INTRADAY_LTP_CRON_SLOTS: Tuple[Tuple[int, int], ...] = tuple(
+    (h, m)
+    for h in range(9, 15)
+    for m in (15, 45)
+) + ((15, 15), (15, 30))
 
 
 def _morning_state_path() -> Path:
@@ -143,10 +153,27 @@ class ArbitrageDailySetupScheduler:
             max_instances=1,
             coalesce=True,
         )
+        for hour, minute in INTRADAY_LTP_CRON_SLOTS:
+            self.scheduler.add_job(
+                self._run_intraday_ltp_refresh,
+                trigger=CronTrigger(
+                    day_of_week="mon-fri",
+                    hour=hour,
+                    minute=minute,
+                    timezone="Asia/Kolkata",
+                ),
+                id=f"arbitrage_ltp_refresh_{hour:02d}{minute:02d}",
+                name=f"Arbitrage LTP refresh {hour:02d}:{minute:02d}",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
         self.scheduler.start()
         self.is_running = True
         logger.info(
-            "Arbitrage daily setup scheduler started (09:10 primary, 09:20 backstop, Asia/Kolkata, Mon–Fri)"
+            "Arbitrage daily setup scheduler started (09:10 primary, 09:20 backstop, "
+            "intraday LTP %s slots 09:15–15:30, Asia/Kolkata, Mon–Fri)",
+            len(INTRADAY_LTP_CRON_SLOTS),
         )
 
     def stop(self) -> None:
@@ -455,47 +482,7 @@ def _run_arbitrage_daily_setup_impl(execution: _Execution = None) -> Dict:
             )
 
         upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
-        price_cache: Dict[str, Optional[float]] = {}
-        price_updates: List[Dict] = []
-
-        refreshed_rows = conn.execute(
-            text(
-                """
-                SELECT
-                    stock,
-                    stock_instrument_key,
-                    currmth_future_instrument_key,
-                    nextmth_future_instrement_key
-                FROM arbitrage_master
-                ORDER BY stock
-                """
-            )
-        ).fetchall()
-
-        for stock, stock_key, cm_key, nm_key in refreshed_rows:
-            price_updates.append(
-                {
-                    "stock": stock,
-                    "stock_ltp": _get_close_price(upstox, stock_key, price_cache),
-                    "cm_ltp": _get_close_price(upstox, cm_key, price_cache),
-                    "nm_ltp": _get_close_price(upstox, nm_key, price_cache),
-                }
-            )
-
-        if price_updates:
-            conn.execute(
-                text(
-                    """
-                    UPDATE arbitrage_master
-                    SET
-                        stock_ltp = :stock_ltp,
-                        currmth_future_ltp = :cm_ltp,
-                        nextmth_future_ltp = :nm_ltp
-                    WHERE stock = :stock
-                    """
-                ),
-                price_updates,
-            )
+        ltp_updated = _refresh_arbitrage_master_ltps(conn, upstox)
 
         total_rows = conn.execute(text('SELECT COUNT(*) FROM arbitrage_master')).scalar() or 0
         populated_stock_key = conn.execute(
@@ -524,6 +511,7 @@ def _run_arbitrage_daily_setup_impl(execution: _Execution = None) -> Dict:
         "success": True,
         "job_name": "arbitrage_dailySetup",
         "execution": execution,
+        "ltp_rows_updated": int(ltp_updated),
         "updated_at_ist": datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S"),
         "total_rows": int(total_rows),
         "populated": {
@@ -536,6 +524,77 @@ def _run_arbitrage_daily_setup_impl(execution: _Execution = None) -> Dict:
             "Sector_Index": int(populated_sector_index),
         },
     }
+
+
+def _refresh_arbitrage_master_ltps(conn, upstox: UpstoxService) -> int:
+    """Update stock / curr / next LTP columns for all arbitrage_master rows."""
+    price_cache: Dict[str, Optional[float]] = {}
+    price_updates: List[Dict] = []
+
+    refreshed_rows = conn.execute(
+        text(
+            """
+            SELECT
+                stock,
+                stock_instrument_key,
+                currmth_future_instrument_key,
+                nextmth_future_instrement_key
+            FROM arbitrage_master
+            ORDER BY stock
+            """
+        )
+    ).fetchall()
+
+    for stock, stock_key, cm_key, nm_key in refreshed_rows:
+        price_updates.append(
+            {
+                "stock": stock,
+                "stock_ltp": _get_close_price(upstox, stock_key, price_cache),
+                "cm_ltp": _get_close_price(upstox, cm_key, price_cache),
+                "nm_ltp": _get_close_price(upstox, nm_key, price_cache),
+            }
+        )
+
+    if price_updates:
+        conn.execute(
+            text(
+                """
+                UPDATE arbitrage_master
+                SET
+                    stock_ltp = :stock_ltp,
+                    currmth_future_ltp = :cm_ltp,
+                    nextmth_future_ltp = :nm_ltp
+                WHERE stock = :stock
+                """
+            ),
+            price_updates,
+        )
+    return len(price_updates)
+
+
+def run_arbitrage_ltp_refresh(execution: _Execution = "intraday_ltp") -> Dict:
+    """Intraday: refresh LTP columns only (no instrument metadata / roll-window changes)."""
+    try:
+        _ensure_arbitrage_table()
+        upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+        with engine.begin() as conn:
+            updated = _refresh_arbitrage_master_ltps(conn, upstox)
+        return {
+            "success": True,
+            "job_name": "arbitrage_ltpRefresh",
+            "execution": execution,
+            "ltp_rows_updated": int(updated),
+            "updated_at_ist": datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S"),
+        }
+    except Exception as e:
+        logger.error("run_arbitrage_ltp_refresh failed: %s", e, exc_info=True)
+        return {
+            "success": False,
+            "job_name": "arbitrage_ltpRefresh",
+            "execution": execution,
+            "error": str(e),
+            "updated_at_ist": datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S"),
+        }
 
 
 def get_morning_state_summary() -> Dict:
@@ -562,4 +621,9 @@ def stop_arbitrage_daily_setup_scheduler() -> None:
 def run_arbitrage_daily_setup_now() -> Dict:
     """On-demand run; does not participate in morning-state success tracking."""
     return run_arbitrage_daily_setup(execution=None)
+
+
+def run_arbitrage_ltp_refresh_now() -> Dict:
+    """On-demand intraday LTP refresh."""
+    return run_arbitrage_ltp_refresh(execution=None)
 

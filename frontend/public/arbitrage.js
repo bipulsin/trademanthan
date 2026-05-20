@@ -258,6 +258,39 @@
         }
     }
 
+    const AUTO_REFRESH_MS = 30 * 60 * 1000;
+
+    function getIstClock() {
+        const parts = new Intl.DateTimeFormat("en-GB", {
+            timeZone: "Asia/Kolkata",
+            hour: "2-digit",
+            minute: "2-digit",
+            weekday: "short",
+            hour12: false,
+        }).formatToParts(new Date());
+        const pick = (type) => parts.find((p) => p.type === type)?.value || "";
+        const hour = parseInt(pick("hour"), 10);
+        const minute = parseInt(pick("minute"), 10);
+        const weekday = pick("weekday");
+        return { hour, minute, weekday, minutes: hour * 60 + minute };
+    }
+
+    function isArbitrageSessionIST() {
+        const { weekday, minutes } = getIstClock();
+        if (weekday === "Sat" || weekday === "Sun") return false;
+        return minutes >= 9 * 60 + 15 && minutes <= 15 * 60 + 30;
+    }
+
+    function scheduleAutoRefresh() {
+        setInterval(() => {
+            if (!isArbitrageSessionIST()) return;
+            loadData();
+        }, AUTO_REFRESH_MS);
+    }
+
     refreshBtn.addEventListener("click", loadData);
-    document.addEventListener("DOMContentLoaded", loadData);
+    document.addEventListener("DOMContentLoaded", () => {
+        loadData();
+        scheduleAutoRefresh();
+    });
 })();

@@ -18,9 +18,11 @@ from backend.services.upstox_service import UpstoxService
 from backend.config import settings
 
 from backend.services.arbitrage_daily_setup_scheduler import (
+    INTRADAY_LTP_CRON_SLOTS,
     arbitrage_daily_setup_scheduler,
     get_morning_state_summary,
     run_arbitrage_daily_setup_now,
+    run_arbitrage_ltp_refresh_now,
 )
 
 router = APIRouter(prefix="/scan/arbitrage", tags=["arbitrage"])
@@ -165,6 +167,15 @@ async def run_daily_setup_now():
         raise HTTPException(status_code=500, detail=f"Failed to run arbitrage_dailySetup: {exc}")
 
 
+@router.post("/ltp-refresh/run")
+async def run_ltp_refresh_now():
+    """On-demand intraday LTP refresh (arbitrage_master LTP columns only)."""
+    try:
+        return run_arbitrage_ltp_refresh_now()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to run arbitrage LTP refresh: {exc}")
+
+
 @router.get("/daily-setup/status")
 async def get_daily_setup_status():
     """
@@ -176,8 +187,12 @@ async def get_daily_setup_status():
         status["schedule"] = (
             "09:10 IST (primary) and 09:20 IST (only if 09:10 did not complete successfully that day), "
             "Mon–Fri, excluding NSE holidays. "
-            "Other runs: on-demand POST /scan/arbitrage/daily-setup/run"
+            "Intraday LTP refresh every 30m 09:15–15:30 IST (14 slots). "
+            "On-demand: POST /scan/arbitrage/daily-setup/run, POST /scan/arbitrage/ltp-refresh/run"
         )
+        status["intraday_ltp_slots"] = [
+            f"{h:02d}:{m:02d}" for h, m in INTRADAY_LTP_CRON_SLOTS
+        ]
         status["morning_state"] = get_morning_state_summary()
         return status
     except Exception as exc:
