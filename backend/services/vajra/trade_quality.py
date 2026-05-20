@@ -507,75 +507,6 @@ def _execution_score(
     return _clamp(base)
 
 
-def _classify_state(
-    *,
-    confidence: float,
-    structure: float,
-    momentum: float,
-    extension_quality: float,
-    market_phase: str,
-    reject_reasons: List[str],
-    hard_reject: bool,
-    tps_score: Optional[float] = None,
-    ees_score: Optional[float] = None,
-    trade_type: str = "",
-    breakout: float = 0.0,
-    volume_score: float = 0.0,
-    htf: float = 0.0,
-    trend_score: float = 0.0,
-) -> str:
-    phase = (market_phase or "").upper()
-    if hard_reject:
-        return STATE_REJECT
-    if phase == "COMPRESSION" and momentum < 50 and structure < 55:
-        reject_reasons.append("compression_chop")
-        return STATE_REJECT
-    if structure < 38 or momentum < 32:
-        reject_reasons.append("weak_core_scores")
-        return STATE_REJECT
-    if extension_quality < 28:
-        reject_reasons.append("over_extended")
-        return STATE_REJECT
-    tps = float(tps_score) if tps_score is not None else 0.0
-    discovery_ok = tps <= 0 or tps >= 52
-    if tps > 0 and tps < 52:
-        reject_reasons.append("low_tps_discovery")
-        if structure < 55 or momentum < 52:
-            return STATE_REJECT
-    executable_core = (
-        structure >= 62
-        and momentum >= 58
-        and extension_quality >= 45
-        and discovery_ok
-    )
-    if executable_core and confidence >= EXECUTABLE_CONFIDENCE_MIN:
-        state = STATE_EXECUTABLE
-    elif executable_core and confidence >= 58:
-        reject_reasons.append("awaiting_discovery_confirm")
-        state = STATE_WATCHLIST
-    elif confidence < 42 or (structure < 48 and momentum < 45):
-        state = STATE_REJECT
-    else:
-        state = STATE_WATCHLIST
-
-    from backend.services.vajra.trade_state import apply_phase_qualification_cap, resolve_market_phase
-
-    resolved_phase = resolve_market_phase(
-        {"market_phase": market_phase, "trade_type": trade_type}
-    )
-    return apply_phase_qualification_cap(
-        state,
-        market_phase=resolved_phase,
-        structure=structure,
-        momentum=momentum,
-        breakout=breakout,
-        volume_score=volume_score,
-        htf=htf,
-        confidence=confidence,
-        reject_reasons=reject_reasons,
-    )
-
-
 def compute_trade_quality(
     *,
     candles_30m: Sequence[Dict[str, Any]],
@@ -660,22 +591,9 @@ def compute_trade_quality(
     confidence = trade_quality_score
     if hard_reject:
         confidence = min(confidence, 40)
-    state = _classify_state(
-        confidence=confidence,
-        structure=struct,
-        momentum=mom,
-        extension_quality=ext_q,
-        market_phase=market_phase,
-        reject_reasons=reject_reasons,
-        hard_reject=hard_reject,
-        tps_score=tps_score,
-        ees_score=ees_score,
-        trade_type=trade_type,
-        breakout=brk,
-        volume_score=vol_score,
-        htf=htf,
-        trend_score=trend,
-    )
+        reject_reasons.append("hard_reject_flag")
+    # Final DISCOVERY / ARMED / EXECUTABLE / REJECT assigned in trade_state (v2 engine).
+    state = STATE_REJECT if hard_reject else STATE_WATCHLIST
 
     return TradeQualityResult(
         trend_score=trend,

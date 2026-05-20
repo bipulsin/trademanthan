@@ -1,25 +1,34 @@
-"""UI mapping — thin layer; all logic lives in trade_state."""
+"""UI mapping — v2 DISCOVERY / ARMED / EXECUTABLE / REJECT."""
 from __future__ import annotations
 
 from typing import Any, Dict, List
 
 from backend.services.vajra.market_phase_scoring import enrich_execution_scores
-from backend.services.vajra.trade_state import (
+from backend.services.vajra.qualification_config import (
+    STATE_ARMED,
+    STATE_DISCOVERY,
     STATE_EXECUTABLE,
     STATE_REJECT,
     STATE_WATCHLIST,
-    derive_structural_bias,
-    resolve_market_phase,
 )
+from backend.services.vajra.trade_state import derive_structural_bias, resolve_market_phase
 
 
 def normalize_qualification(entry_state: str | None) -> str:
-    s = (entry_state or STATE_WATCHLIST).strip().upper()
-    if s == STATE_EXECUTABLE or "EXECUTABLE" in s:
+    s = (entry_state or STATE_DISCOVERY).strip().upper()
+    if s in (STATE_EXECUTABLE, STATE_ARMED, STATE_DISCOVERY, STATE_REJECT):
+        return s
+    if "EXECUTABLE" in s:
         return STATE_EXECUTABLE
+    if "ARMED" in s:
+        return STATE_ARMED
+    if "DISCOVERY" in s or "MONITOR" in s:
+        return STATE_DISCOVERY
     if s == STATE_REJECT or "REJECT" in s or "AVOID" in s:
         return STATE_REJECT
-    return STATE_WATCHLIST
+    if s == STATE_WATCHLIST or "WATCH" in s or "PULLBACK" in s:
+        return STATE_ARMED
+    return STATE_DISCOVERY
 
 
 def finalize_screener_row(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -32,6 +41,7 @@ def finalize_screener_row(row: Dict[str, Any]) -> Dict[str, Any]:
     )
     row["qualification"] = qual
     row["qualification_state"] = qual
+    row["qualification_stage"] = qual.lower()
     row["entry_state"] = qual
     mp = row.get("market_phase") or row.get("market_context")
     if mp:
@@ -49,10 +59,14 @@ def finalize_screener_row(row: Dict[str, Any]) -> Dict[str, Any]:
         row["enter_action"] = "ENTER"
         row["enter_enabled"] = True
         row["action"] = "ENTER"
-    elif qual == STATE_WATCHLIST:
-        row["enter_action"] = "WATCH"
+    elif qual == STATE_ARMED:
+        row["enter_action"] = row.get("enter_action") or "ARMED"
         row["enter_enabled"] = False
-        row["action"] = "WATCH"
+        row["action"] = "ARMED"
+    elif qual == STATE_DISCOVERY:
+        row["enter_action"] = row.get("enter_action") or "MONITOR"
+        row["enter_enabled"] = False
+        row["action"] = "MONITOR"
     else:
         row["enter_action"] = ""
         row["enter_enabled"] = False
@@ -71,12 +85,16 @@ def finalize_screener_row(row: Dict[str, Any]) -> Dict[str, Any]:
     )
     allow_neutral = qual_pre == STATE_REJECT
     row["execution_bias"] = resolve_execution_direction(row, mp, allow_neutral=allow_neutral)
-    if row["execution_bias"] == "NEUTRAL" and not allow_neutral:
-        row["execution_bias"] = "LONG"
+    if row["execution_bias"] == "NEUTRAL":
+        from backend.services.vajra.trade_state import _f
+
+        row["execution_bias"] = "LONG" if _f(row.get("bull_score")) >= _f(row.get("bear_score")) else "SHORT"
     row["direction"] = row["execution_bias"]
     ls, ss = compute_directional_scores(row, mp)
     row["directional_confidence"] = directional_confidence_label(row["execution_bias"], ls, ss)
     row["directional_conviction"] = has_directional_conviction(row, mp)
+    if row.get("conviction_score") is None and row.get("confidence") is not None:
+        row["conviction_score"] = row["confidence"]
     return row
 
 

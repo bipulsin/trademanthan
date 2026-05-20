@@ -14,6 +14,12 @@ from backend.services.vajra.trade_quality import (
     TradeQualityResult,
     compute_trade_quality,
 )
+from backend.services.vajra.qualification_config import (
+    STATE_ARMED,
+    STATE_DISCOVERY,
+)
+from backend.services.vajra.score_layers import compute_score_layers
+from backend.services.vajra.qualification_engine import qualify_trade
 
 # Canonical market phases (display labels — used everywhere)
 PHASE_BULL_EXPANSION = "Bull Expansion"
@@ -254,22 +260,32 @@ def compute_execution_rank_score(
     pullback_score: float,
     htf_alignment_score: float,
     extension_quality_score: float,
+    execution_score: float = 0.0,
+    conviction_score: float = 0.0,
+    discovery_score: float = 0.0,
+    risk_efficiency_score: float = 0.0,
 ) -> float:
     phase_w = PHASE_SCORES.get(market_phase, 30.0)
-    qual_bonus = 200.0 if qualification_state == STATE_EXECUTABLE else (
-        80.0 if qualification_state == STATE_WATCHLIST else 0.0
-    )
-    return qual_bonus + (
-        phase_w * 0.25
-        + structure_score * 0.18
-        + momentum_score * 0.18
-        + breakout_score * 0.15
-        + trend_strength_score * 0.10
-        + volume_score * 0.05
-        + pullback_score * 0.04
-        + htf_alignment_score * 0.03
-        + extension_quality_score * 0.02
-    )
+    qual = qualification_state.upper()
+    if qual == STATE_EXECUTABLE:
+        return (
+            execution_score * 0.40
+            + conviction_score * 0.30
+            + risk_efficiency_score * 0.15
+            + volume_score * 0.08
+            + phase_w * 0.07
+        )
+    if qual == STATE_ARMED:
+        return (
+            execution_score * 0.35
+            + structure_score * 0.20
+            + momentum_score * 0.20
+            + breakout_score * 0.15
+            + phase_w * 0.10
+        )
+    if qual == STATE_DISCOVERY:
+        return discovery_score * 0.55 + volume_score * 0.25 + phase_w * 0.20
+    return phase_w * 0.10 + structure_score * 0.05
 
 
 def apply_phase_qualification_cap(
@@ -334,21 +350,41 @@ def build_reason_tags(
             tags.append("Execution ready")
         return tags[:3]
 
-    if qualification_state == STATE_WATCHLIST:
+    if qualification_state == STATE_ARMED:
         if brk < 52:
             tags.append("Waiting breakout")
         if not _price_above_vwap(row) and not _price_below_vwap(row):
             tags.append("Waiting VWAP reclaim")
         elif _price_below_vwap(row) and execution_bias == "LONG":
             tags.append("Needs reclaim")
+        if market_phase in (PHASE_EARLY_BULL, PHASE_EARLY_BEAR):
+            tags.append("Early expansion")
+        elif market_phase == PHASE_COMPRESSION:
+            tags.append("Compression ready")
+        elif market_phase == PHASE_ROTATIONAL:
+            tags.append("Rotational phase")
+        if mom < 58 and mom >= 50:
+            tags.append("Momentum confirmation pending")
+        if not tags:
+            tags.append("Setup forming")
+        return tags[:3]
+
+    if qualification_state == STATE_DISCOVERY:
+        if market_phase in (PHASE_EARLY_BULL, PHASE_EARLY_BEAR):
+            tags.append("Early expansion")
+        elif market_phase == PHASE_ROTATIONAL:
+            tags.append("Institutional rotation")
+        if mom < 52 and mom > 0:
+            tags.append("Participation building")
+        if not tags:
+            tags.append("Monitoring")
+        return tags[:3]
+
+    if qualification_state == STATE_WATCHLIST:
+        if brk < 52:
+            tags.append("Waiting breakout")
         if market_phase == PHASE_ROTATIONAL:
             tags.append("Rotational phase")
-        elif market_phase in (PHASE_EARLY_BULL, PHASE_EARLY_BEAR):
-            tags.append("Early expansion")
-        elif market_phase == PHASE_TREND_CONTINUATION:
-            tags.append("Trend forming")
-        if mom < 52 and mom > 0:
-            tags.append("Momentum building")
         if not tags:
             tags.append("Setup forming")
         return tags[:3]
@@ -389,20 +425,24 @@ def build_trade_state_dict(
     execution_bias: str,
     structural_bias: str,
 ) -> Dict[str, Any]:
-    reasons = list(tq.reject_reasons)
-    qual = apply_phase_qualification_cap(
-        tq.state,
-        market_phase=market_phase,
-        structure=tq.structure_score,
-        momentum=tq.momentum_score,
-        breakout=tq.breakout_score,
-        volume_score=tq.volume_score,
-        htf=tq.htf_alignment_score,
-        confidence=tq.confidence,
-        reject_reasons=reasons,
-    )
-
     ext_q = _extension_quality_score(row)
+    merged = dict(row)
+    merged.setdefault("structure_score", tq.structure_score)
+    merged.setdefault("momentum_score", tq.momentum_score)
+    merged.setdefault("breakout_score", tq.breakout_score)
+    merged.setdefault("extension_quality_score", ext_q)
+
+    layers = compute_score_layers(merged, tq, market_phase=market_phase, extension_quality=ext_q)
+    qual_result = qualify_trade(
+        merged,
+        layers,
+        market_phase=market_phase,
+        reject_reasons=list(tq.reject_reasons),
+        session_date=row.get("session_date"),
+    )
+    qual = qual_result.qualification_state
+    reasons = qual_result.reject_reasons
+
     rank = compute_execution_rank_score(
         qualification_state=qual,
         market_phase=market_phase,
@@ -414,20 +454,25 @@ def build_trade_state_dict(
         pullback_score=tq.pullback_score,
         htf_alignment_score=tq.htf_alignment_score,
         extension_quality_score=ext_q,
+        execution_score=layers.execution_score,
+        conviction_score=layers.conviction_score,
+        discovery_score=layers.discovery_score,
+        risk_efficiency_score=layers.risk_efficiency_score,
     )
 
     from backend.services.vajra.actions import resolve_enter_action
 
     action = resolve_enter_action(
         entry_state=qual,
-        confidence=tq.confidence,
+        confidence=layers.conviction_score,
         reject_reasons=reasons,
+        blocker_label=qual_result.blocker_label,
     )
     long_s, short_s = compute_directional_scores(row, market_phase)
     dir_conf = directional_confidence_label(execution_bias, long_s, short_s)
     conviction = has_directional_conviction(row, market_phase)
 
-    tags = build_reason_tags(
+    tags = qual_result.reason_tags or build_reason_tags(
         qualification_state=qual,
         market_phase=market_phase,
         execution_bias=execution_bias,
@@ -435,7 +480,7 @@ def build_trade_state_dict(
         reject_reasons=reasons,
     )
 
-    return {
+    out = {
         "symbol": row.get("stock") or row.get("security"),
         "structural_bias": structural_bias,
         "execution_bias": execution_bias,
@@ -445,12 +490,17 @@ def build_trade_state_dict(
         "directional_long_score": round(long_s, 2),
         "directional_short_score": round(short_s, 2),
         "qualification_state": qual,
+        "qualification_stage": qual.lower(),
         "qualification": qual,
         "entry_state": qual,
         "market_phase": market_phase,
         "market_context": market_phase,
         "market_phase_score": PHASE_SCORES.get(market_phase, 0.0),
-        "confidence": round(tq.confidence, 1),
+        "confidence": round(layers.conviction_score, 1),
+        "conviction_score": round(layers.conviction_score, 1),
+        "discovery_score": round(layers.discovery_score, 1),
+        "execution_score": round(layers.execution_score, 1),
+        "risk_efficiency_score": round(layers.risk_efficiency_score, 1),
         "execution_rank_score": round(rank, 2),
         "structure_score": round(tq.structure_score, 1),
         "momentum_score": round(tq.momentum_score, 1),
@@ -462,17 +512,23 @@ def build_trade_state_dict(
         "extension_risk_score": round(tq.extension_risk_score, 1),
         "extension_quality_score": round(ext_q, 1),
         "htf_alignment_score": round(tq.htf_alignment_score, 1),
-        "trade_quality_score": round(tq.trade_quality_score, 1),
-        "setup_quality_score": round(tq.trade_quality_score, 1),
+        "trade_quality_score": round(layers.conviction_score, 1),
+        "setup_quality_score": round(layers.conviction_score, 1),
         "reason_tags": tags,
         "qualification_tags": tags,
         "reject_reasons": reasons,
+        "primary_blocker": qual_result.primary_blocker,
+        "blocker_label": qual_result.blocker_label,
+        "nearest_trigger": qual_result.nearest_trigger,
+        "raw_stage": qual_result.raw_stage,
+        "hysteresis_applied": qual_result.hysteresis_applied,
         "action": action.get("enter_action") or "",
         "enter_action": action.get("enter_action") or "",
         "enter_enabled": action.get("enter_enabled", False),
         "enter_reason": action.get("enter_reason") or "",
         "top8_phase_bucket": _phase_bucket_for_top8(market_phase),
     }
+    return out
 
 
 def apply_trade_state(
@@ -530,16 +586,4 @@ def apply_trade_state(
         if row["execution_bias"] == "NEUTRAL":
             row["execution_bias"] = "LONG" if _f(row.get("bull_score")) >= _f(row.get("bear_score")) else "SHORT"
         row["direction"] = row["execution_bias"]
-    if state["qualification_state"] == STATE_EXECUTABLE:
-        row["enter_action"] = "ENTER"
-        row["enter_enabled"] = True
-        row["action"] = "ENTER"
-    elif state["qualification_state"] == STATE_WATCHLIST:
-        row["enter_action"] = "WATCH"
-        row["enter_enabled"] = False
-        row["action"] = "WATCH"
-    else:
-        row["enter_action"] = ""
-        row["enter_enabled"] = False
-        row["action"] = ""
     return row

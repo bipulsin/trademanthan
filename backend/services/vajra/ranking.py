@@ -1,14 +1,23 @@
-"""Ranking layer — execution rank + Top 8 tiers from trade_state."""
+"""Ranking layer — sectional screener + tier-aware sort."""
 from __future__ import annotations
 
 from typing import Any, Dict, List
 
 from backend.services.vajra.market_phase_scoring import enrich_execution_scores, select_top_picks
-from backend.services.vajra.trade_state import STATE_EXECUTABLE, STATE_REJECT, STATE_WATCHLIST
+from backend.services.vajra.qualification_config import (
+    STATE_ARMED,
+    STATE_DISCOVERY,
+    STATE_EXECUTABLE,
+    STATE_REJECT,
+    STATE_WATCHLIST,
+)
+from backend.services.vajra.screener_sections import build_screener_sections
 from backend.services.vajra.ui_mapping import finalize_screener_rows
 
 _STATE_RANK = {
-    STATE_EXECUTABLE: 3,
+    STATE_EXECUTABLE: 4,
+    STATE_ARMED: 3,
+    STATE_DISCOVERY: 2,
     STATE_WATCHLIST: 2,
     STATE_REJECT: 1,
 }
@@ -19,8 +28,10 @@ def entry_state_sort_rank(entry_state: Any) -> int:
     if s in _STATE_RANK:
         return _STATE_RANK[s]
     if "EXECUTABLE" in s:
+        return 4
+    if "ARMED" in s:
         return 3
-    if "WATCH" in s:
+    if "DISCOVERY" in s or "WATCH" in s or "MONITOR" in s:
         return 2
     if "REJECT" in s or "AVOID" in s:
         return 1
@@ -28,7 +39,9 @@ def entry_state_sort_rank(entry_state: Any) -> int:
 
 
 def _qualification(row: Dict[str, Any]) -> str:
-    return str(row.get("qualification_state") or row.get("qualification") or "").strip().upper()
+    return str(
+        row.get("qualification_state") or row.get("qualification") or row.get("entry_state") or ""
+    ).strip().upper()
 
 
 def sort_vajra_rows_for_display(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -48,6 +61,8 @@ def group_by_qualification(rows: List[Dict[str, Any]]) -> Dict[str, List[Dict[st
     ranked = sort_vajra_rows_for_display(rows)
     groups: Dict[str, List[Dict[str, Any]]] = {
         STATE_EXECUTABLE: [],
+        STATE_ARMED: [],
+        STATE_DISCOVERY: [],
         STATE_WATCHLIST: [],
         STATE_REJECT: [],
     }
@@ -55,10 +70,17 @@ def group_by_qualification(rows: List[Dict[str, Any]]) -> Dict[str, List[Dict[st
         q = _qualification(r)
         if q == STATE_EXECUTABLE:
             groups[STATE_EXECUTABLE].append(r)
+        elif q == STATE_ARMED:
+            groups[STATE_ARMED].append(r)
+        elif q == STATE_DISCOVERY:
+            groups[STATE_DISCOVERY].append(r)
         elif q == STATE_REJECT:
             groups[STATE_REJECT].append(r)
-        else:
+        elif q == STATE_WATCHLIST:
             groups[STATE_WATCHLIST].append(r)
+            groups[STATE_ARMED].append(r)
+        else:
+            groups[STATE_DISCOVERY].append(r)
     return groups
 
 
@@ -67,8 +89,19 @@ def build_screener_display(rows: List[Dict[str, Any]], top_n: int = 8) -> Dict[s
     finalized = finalize_screener_rows(enriched)
     sorted_rows = sort_vajra_rows_for_display(finalized)
     groups = group_by_qualification(sorted_rows)
-    top_picks, top_sections = select_top_picks(sorted_rows, n=top_n)
+    section_out = build_screener_sections(sorted_rows, limits={
+        STATE_EXECUTABLE: top_n,
+        STATE_ARMED: top_n,
+        STATE_DISCOVERY: top_n,
+    })
+    top_picks = section_out["top_picks"]
+    top_sections = section_out["top_sections"]
     top_keys = {(r.get("stock") or r.get("security")) for r in top_picks}
+    top_keys.update(
+        (r.get("stock") or r.get("security"))
+        for tier in (STATE_ARMED, STATE_DISCOVERY)
+        for r in top_sections.get(tier, [])
+    )
     remainder = [
         r for r in sorted_rows if (r.get("stock") or r.get("security")) not in top_keys
     ]
@@ -77,6 +110,8 @@ def build_screener_display(rows: List[Dict[str, Any]], top_n: int = 8) -> Dict[s
         "groups": groups,
         "top_picks": top_picks,
         "top_sections": top_sections,
+        "sections": section_out["sections"],
+        "banner": section_out["banner"],
         "remainder": remainder,
     }
 

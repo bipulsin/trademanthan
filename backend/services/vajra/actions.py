@@ -1,9 +1,15 @@
-"""UI action layer — ENTER only for qualified EXECUTABLE setups."""
+"""UI action layer — MONITOR / ARMED / ENTER by qualification state."""
 from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from backend.services.vajra.trade_quality import EXECUTABLE_CONFIDENCE_MIN, STATE_EXECUTABLE, STATE_REJECT, STATE_WATCHLIST
+from backend.services.vajra.qualification_config import (
+    STATE_ARMED,
+    STATE_DISCOVERY,
+    STATE_EXECUTABLE,
+    STATE_REJECT,
+    STATE_WATCHLIST,
+)
 
 
 def resolve_enter_action(
@@ -11,13 +17,9 @@ def resolve_enter_action(
     entry_state: Optional[str],
     confidence: Optional[float],
     reject_reasons: Optional[list] = None,
+    blocker_label: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """
-    ENTER enabled only when state == EXECUTABLE and confidence >= 75.
-    REJECT → no button label (disabled EXTENDED-style).
-    WATCHLIST → WATCH.
-    """
-    state = (entry_state or STATE_WATCHLIST).strip().upper()
+    state = (entry_state or STATE_DISCOVERY).strip().upper()
     conf = float(confidence) if confidence is not None else 0.0
     reasons = reject_reasons or []
 
@@ -25,7 +27,7 @@ def resolve_enter_action(
         return {
             "enter_action": "ENTER",
             "enter_enabled": True,
-            "enter_reason": f"Executable — trade quality {conf:.0f}",
+            "enter_reason": f"Executable — conviction {conf:.0f}",
         }
 
     if state == STATE_REJECT:
@@ -36,8 +38,30 @@ def resolve_enter_action(
             "enter_reason": f"Rejected: {hint}",
         }
 
+    if state == STATE_ARMED:
+        hint = blocker_label or "One trigger away from execution"
+        return {
+            "enter_action": "ARMED",
+            "enter_enabled": False,
+            "enter_reason": f"Armed — {hint}",
+        }
+
+    if state == STATE_DISCOVERY:
+        return {
+            "enter_action": "MONITOR",
+            "enter_enabled": False,
+            "enter_reason": "Discovery — institutional attention, not near trigger",
+        }
+
+    if state == STATE_WATCHLIST:
+        return {
+            "enter_action": "ARMED",
+            "enter_enabled": False,
+            "enter_reason": "Watchlist — setup forming, not executable yet",
+        }
+
     return {
-        "enter_action": "WATCH",
+        "enter_action": "MONITOR",
         "enter_enabled": False,
-        "enter_reason": "Watchlist — setup forming, not executable yet",
+        "enter_reason": "Monitoring",
     }

@@ -55,6 +55,10 @@ def test_bull_expansion_ranks_above_rotational():
         "volume_score": 55,
         "htf_alignment_score": 58,
         "extension_risk_score": 40,
+        "execution_score": 78,
+        "conviction_score": 80,
+        "discovery_score": 62,
+        "risk_efficiency_score": 70,
         "execution_rank_score": compute_execution_rank_score(
             qualification_state=STATE_EXECUTABLE,
             market_phase=PHASE_BULL_EXPANSION,
@@ -66,6 +70,10 @@ def test_bull_expansion_ranks_above_rotational():
             pullback_score=55,
             htf_alignment_score=58,
             extension_quality_score=60,
+            execution_score=78,
+            conviction_score=80,
+            discovery_score=62,
+            risk_efficiency_score=70,
         ),
     }
     rotational = {
@@ -82,6 +90,10 @@ def test_bull_expansion_ranks_above_rotational():
         "volume_score": 62,
         "htf_alignment_score": 55,
         "extension_risk_score": 38,
+        "execution_score": 74,
+        "conviction_score": 76,
+        "discovery_score": 58,
+        "risk_efficiency_score": 65,
         "execution_rank_score": compute_execution_rank_score(
             qualification_state=STATE_EXECUTABLE,
             market_phase=PHASE_ROTATIONAL,
@@ -93,6 +105,10 @@ def test_bull_expansion_ranks_above_rotational():
             pullback_score=72,
             htf_alignment_score=55,
             extension_quality_score=62,
+            execution_score=74,
+            conviction_score=76,
+            discovery_score=58,
+            risk_efficiency_score=65,
         ),
     }
     out = sort_vajra_rows_for_display([rotational, expansion])

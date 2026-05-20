@@ -36,6 +36,8 @@
     }
 
     const QUAL_EXECUTABLE = 'EXECUTABLE';
+    const QUAL_ARMED = 'ARMED';
+    const QUAL_DISCOVERY = 'DISCOVERY';
     const QUAL_WATCHLIST = 'WATCHLIST';
     const QUAL_REJECT = 'REJECT';
 
@@ -110,7 +112,7 @@
     }
 
     function qualificationOf(row) {
-        return String((row && (row.qualification || row.entry_state)) || QUAL_WATCHLIST)
+        return String((row && (row.qualification || row.entry_state)) || QUAL_DISCOVERY)
             .trim()
             .toUpperCase();
     }
@@ -192,7 +194,15 @@
                 '">ENTER</button></td>'
             );
         }
-        const btnClass = 'vajra-enter-btn vajra-enter-btn-watch';
+        let btnClass = 'vajra-enter-btn';
+        if (action === 'ARMED' || qual === QUAL_ARMED || qual === QUAL_WATCHLIST) {
+            btnClass += ' vajra-enter-btn-armed';
+        } else if (action === 'MONITOR' || qual === QUAL_DISCOVERY) {
+            btnClass += ' vajra-enter-btn-discovery';
+        } else {
+            btnClass += ' vajra-enter-btn-watch';
+        }
+        const label = action === 'MONITOR' ? 'MONITOR' : action || qual;
         return (
             '<td class="vajra-td-enter"' +
             rs +
@@ -201,7 +211,7 @@
             '" disabled title="' +
             title +
             '">' +
-            escapeHtml(action) +
+            escapeHtml(label) +
             '</button></td>'
         );
     }
@@ -237,6 +247,8 @@
 
     function qualTone(qual) {
         if (qual === QUAL_EXECUTABLE) return 'vajra-qual-exec';
+        if (qual === QUAL_ARMED || qual === QUAL_WATCHLIST) return 'vajra-qual-armed';
+        if (qual === QUAL_DISCOVERY) return 'vajra-qual-discovery';
         if (qual === QUAL_REJECT) return 'vajra-qual-reject';
         return 'vajra-qual-watch';
     }
@@ -387,8 +399,10 @@
     function rowQualClass(row) {
         const q = qualificationOf(row);
         if (q === QUAL_REJECT) return ' vajra-row-reject';
-        if (q === QUAL_WATCHLIST) return ' vajra-row-watch';
-        return ' vajra-row-exec';
+        if (q === QUAL_ARMED || q === QUAL_WATCHLIST) return ' vajra-row-armed';
+        if (q === QUAL_DISCOVERY) return ' vajra-row-discovery';
+        if (q === QUAL_EXECUTABLE) return ' vajra-row-exec';
+        return '';
     }
 
     function renderAdvancedRow(row) {
@@ -474,8 +488,9 @@
             .trim()
             .toUpperCase();
         if (!s) return 0;
-        if (s === 'EXECUTABLE') return 3;
-        if (s.indexOf('WATCHLIST') >= 0 || s.indexOf('PULLBACK') >= 0) return 2;
+        if (s === 'EXECUTABLE') return 4;
+        if (s === 'ARMED' || s.indexOf('WATCHLIST') >= 0 || s.indexOf('PULLBACK') >= 0) return 3;
+        if (s === 'DISCOVERY' || s.indexOf('MONITOR') >= 0) return 2;
         if (s.indexOf('REJECT') >= 0 || s.indexOf('AVOID') >= 0) return 1;
         return 0;
     }
@@ -523,48 +538,58 @@
     function renderTopTableFromPayload(data) {
         const picks = (data && data.top_picks) || [];
         const sections = (data && data.top_sections) || {};
-        if (!picks.length) {
+        const banner = data && data.banner;
+        const execRows = sections.EXECUTABLE || picks || [];
+        const armedRows = sections.ARMED || [];
+        const discRows = sections.DISCOVERY || [];
+        const hasAny = execRows.length || armedRows.length || discRows.length;
+
+        if (!hasAny && !picks.length) {
             return (
                 '<p class="vajra-meta">No Vajra ratings for this session yet. ' +
                 'The engine runs every 5 minutes (9:30–15:00 IST). ' +
                 'If this persists after market open, use Refresh or wait for the next scan.</p>'
             );
         }
-        const execRows = sections.EXECUTABLE || [];
-        const watchRows = sections.WATCHLIST || [];
+
+        let bannerHtml = '';
+        if (banner && banner.message) {
+            bannerHtml =
+                '<p class="vajra-banner vajra-banner-' +
+                escapeHtml(banner.type || 'info') +
+                '">' +
+                escapeHtml(banner.message) +
+                '</p>';
+        }
+
         let tbody = '';
         if (execRows.length) {
-            tbody += renderSectionHeader('Top executable setups', 'vajra-section-exec');
+            tbody += renderSectionHeader('Executable Now', 'vajra-section-exec');
             tbody += renderTableBodyRows(execRows, TOP_COLUMNS, true);
         }
-        if (watchRows.length) {
-            tbody += renderSectionHeader('Watchlist — forming setups', 'vajra-section-watch');
-            tbody += renderTableBodyRows(watchRows, TOP_COLUMNS, true);
+        if (armedRows.length) {
+            tbody += renderSectionHeader('Armed — One Trigger Away', 'vajra-section-armed');
+            tbody += renderTableBodyRows(armedRows, TOP_COLUMNS, true);
         }
-        const shown = {};
-        execRows.concat(watchRows).forEach(function (r) {
-            shown[r.stock || r.security] = true;
-        });
-        picks.filter(function (r) {
-            return !shown[r.stock || r.security];
-        }).forEach(function (r) {
-            tbody += renderTableBodyRows([r], TOP_COLUMNS, true);
-        });
+        if (discRows.length) {
+            tbody += renderSectionHeader('Discovery — Institutional Attention', 'vajra-section-discovery');
+            tbody += renderTableBodyRows(discRows, TOP_COLUMNS, true);
+        }
+
         return (
-            '<p class="vajra-meta vajra-pipeline-note">Execution screener — EXECUTABLE first, WATCHLIST fills top ' +
-            TOP_N +
-            '. REJECT excluded.</p>' +
+            bannerHtml +
+            '<p class="vajra-meta vajra-pipeline-note">Execution screener — EXECUTABLE / ARMED / DISCOVERY sections. No watchlist padding.</p>' +
             '<div class="vajra-table-wrap"><table class="vajra-table vajra-top-table">' +
             renderTableHead(TOP_COLUMNS, true) +
             '<tbody>' +
             tbody +
             '</tbody></table></div>' +
-            '<p class="vajra-score-footnote">Advanced row: TPS, Setup Potential, ECS, VWAP, OBV, HTF.</p>'
+            '<p class="vajra-score-footnote">Advanced row: TPS, Setup Potential, ECS, VWAP, OBV, HTF. Blocker shown in Action tooltip.</p>'
         );
     }
 
     function renderTopTable(rows, data) {
-        if (data && data.top_picks && data.top_picks.length) {
+        if (data && (data.top_sections || data.sections || data.top_picks)) {
             return renderTopTableFromPayload(data);
         }
         if (!rows || !rows.length) {

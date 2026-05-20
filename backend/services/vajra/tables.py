@@ -23,6 +23,12 @@ _EXTRA_COLUMNS = (
     ("enter_enabled", "BOOLEAN DEFAULT FALSE"),
     ("ees_alerts", "JSONB DEFAULT '[]'"),
     ("trade_quality_score", "DOUBLE PRECISION"),
+    ("discovery_score", "DOUBLE PRECISION"),
+    ("conviction_score", "DOUBLE PRECISION"),
+    ("risk_efficiency_score", "DOUBLE PRECISION"),
+    ("primary_blocker", "TEXT"),
+    ("qualification_stage", "TEXT"),
+    ("execution_score", "DOUBLE PRECISION"),
 )
 
 

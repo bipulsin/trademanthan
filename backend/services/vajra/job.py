@@ -388,7 +388,8 @@ def run_vajra_futures_rating_job(scan_trigger: str = "manual") -> Dict[str, Any]
                         pullback_quality_score, extension_risk_score,
                         execution_validated, execution_step, pipeline_stage, alertable,
                         ees_score, entry_state, enter_action, enter_enabled, ees_alerts,
-                        trade_quality_score
+                        trade_quality_score, discovery_score, conviction_score,
+                        risk_efficiency_score, primary_blocker, qualification_stage, execution_score
                     ) VALUES (
                         :session_date, :stock, :future_symbol, :instrument_key,
                         :trade_type, :confidence, :bull_score, :bear_score,
@@ -399,7 +400,8 @@ def run_vajra_futures_rating_job(scan_trigger: str = "manual") -> Dict[str, Any]
                         :pullback_quality_score, :extension_risk_score,
                         :execution_validated, :execution_step, :pipeline_stage, :alertable,
                         :ees_score, :entry_state, :enter_action, :enter_enabled, :ees_alerts,
-                        :trade_quality_score
+                        :trade_quality_score, :discovery_score, :conviction_score,
+                        :risk_efficiency_score, :primary_blocker, :qualification_stage, :execution_score
                     )
                     ON CONFLICT (session_date, instrument_key) DO UPDATE SET
                         stock = EXCLUDED.stock,
@@ -433,7 +435,13 @@ def run_vajra_futures_rating_job(scan_trigger: str = "manual") -> Dict[str, Any]
                         enter_action = EXCLUDED.enter_action,
                         enter_enabled = EXCLUDED.enter_enabled,
                         ees_alerts = EXCLUDED.ees_alerts,
-                        trade_quality_score = EXCLUDED.trade_quality_score
+                        trade_quality_score = EXCLUDED.trade_quality_score,
+                        discovery_score = EXCLUDED.discovery_score,
+                        conviction_score = EXCLUDED.conviction_score,
+                        risk_efficiency_score = EXCLUDED.risk_efficiency_score,
+                        primary_blocker = EXCLUDED.primary_blocker,
+                        qualification_stage = EXCLUDED.qualification_stage,
+                        execution_score = EXCLUDED.execution_score
                     """
                 ),
                 {
@@ -471,6 +479,12 @@ def run_vajra_futures_rating_job(scan_trigger: str = "manual") -> Dict[str, Any]
                     "enter_enabled": row.get("enter_enabled", False),
                     "ees_alerts": json.dumps(row.get("ees_alerts") or []),
                     "trade_quality_score": row.get("trade_quality_score"),
+                    "discovery_score": row.get("discovery_score"),
+                    "conviction_score": row.get("conviction_score") or row.get("confidence"),
+                    "risk_efficiency_score": row.get("risk_efficiency_score"),
+                    "primary_blocker": row.get("primary_blocker"),
+                    "qualification_stage": row.get("qualification_stage"),
+                    "execution_score": row.get("execution_score"),
                 },
             )
         db.commit()

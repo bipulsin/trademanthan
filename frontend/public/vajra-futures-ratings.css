@@ -308,7 +308,37 @@ body[data-theme="light"] .vajra-modal-body {
     background: transparent;
 }
 .vajra-section-exec td { color: #15803d; border-top: 2px solid #22c55e; }
+.vajra-section-armed td { color: #b45309; border-top: 2px solid #f59e0b; }
+.vajra-section-discovery td { color: #64748b; border-top: 2px solid #94a3b8; }
 .vajra-section-watch td { color: #b45309; border-top: 2px solid #f59e0b; }
+.vajra-banner {
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 0.88rem;
+    margin: 0 0 10px;
+    background: #eff6ff;
+    border: 1px solid #93c5fd;
+    color: #1e3a8a;
+}
+.vajra-enter-btn-armed,
+button.vajra-enter-btn.vajra-enter-btn-armed {
+    border-color: #ca8a04 !important;
+    background: #fbbf24 !important;
+    color: #422006 !important;
+    font-weight: 700;
+}
+.vajra-enter-btn-discovery,
+button.vajra-enter-btn.vajra-enter-btn-discovery {
+    border-color: #94a3b8 !important;
+    background: #e2e8f0 !important;
+    color: #334155 !important;
+    font-weight: 600;
+}
+.vajra-qual-armed { background: #fef3c7 !important; color: #92400e !important; }
+.vajra-qual-discovery { background: #f1f5f9 !important; color: #475569 !important; }
+tr.vajra-row-armed td { background: rgba(251, 191, 36, 0.06); }
+tr.vajra-row-discovery td { background: rgba(148, 163, 184, 0.08); opacity: 0.95; }
+tr.vajra-row-exec td { background: rgba(34, 197, 94, 0.05); }
 tr.vajra-row-reject { opacity: 0.72; }
 tr.vajra-row-reject td { color: #64748b; }
 tr.vajra-adv-row td {

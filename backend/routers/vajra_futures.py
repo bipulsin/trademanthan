@@ -163,9 +163,13 @@ def get_vajra_ratings(
                     "top_sections": display["top_sections"],
                     "groups": {
                         "EXECUTABLE": display["groups"].get("EXECUTABLE", []),
+                        "ARMED": display["groups"].get("ARMED", []),
+                        "DISCOVERY": display["groups"].get("DISCOVERY", []),
                         "WATCHLIST": display["groups"].get("WATCHLIST", []),
                         "REJECT": display["groups"].get("REJECT", []),
                     },
+                    "sections": display.get("sections", {}),
+                    "banner": display.get("banner"),
                     "remainder": display["remainder"],
                 },
                 headers={
