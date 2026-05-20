@@ -38,7 +38,7 @@ Group=ubuntu
 WorkingDirectory=${PROJECT_DIR}
 Environment="PATH=${BACKEND_DIR}/venv/bin"
 Environment="PYTHONUNBUFFERED=1"
-ExecStart=${BACKEND_DIR}/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
+ExecStart=${BACKEND_DIR}/venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 90
 Restart=always
 RestartSec=10
 TimeoutStopSec=180

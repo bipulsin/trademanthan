@@ -3076,8 +3076,8 @@ async def manually_update_no_entry_trades(db: Session = Depends(get_db)):
         
         logger.info("🔄 Manual trigger: Updating all 'no_entry' trades from today")
         
-        # Call the update function which handles no_entry trades
-        await update_vwap_for_all_open_positions()
+        # Call the sync update in a thread pool so we do not block the event loop
+        await asyncio.to_thread(update_vwap_for_all_open_positions)
         
         # Count updated records
         import pytz

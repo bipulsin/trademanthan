@@ -220,6 +220,8 @@ def run_smart_future_vwap_update_gated() -> None:
     on weekdays between 09:15 and 15:35 so open-position VWAP / SL / VWAP-exit checks stay aligned
     with scan.html signals (previously hourly-only, so UI showed EXIT VWAP long before broker exit).
     """
+    if not smart_future_algo_scheduler.is_running:
+        return
     ist = pytz.timezone("Asia/Kolkata")
     now = datetime.now(ist)
     if _skip_ist_non_trading_job("VWAP update (5-min)", now):
@@ -1068,14 +1070,16 @@ class SmartFutureAlgoScheduler:
             raise
     
     def stop(self):
-        """Stop all scheduled jobs"""
+        """Stop all scheduled jobs (do not wait for in-flight jobs — avoids multi-minute deploy 502s)."""
         if not self.is_running:
             logger.warning("⚠️ Smart Future Algo Scheduler is not running")
             return
-        
+
         try:
-            self.scheduler.shutdown()
             self.is_running = False
+            if self.scheduler is not None:
+                # wait=False: avoid blocking uvicorn SIGTERM/shutdown while a VWAP cycle is running
+                self.scheduler.shutdown(wait=False)
             logger.info("✅ Smart Future Algo Scheduler Controller STOPPED")
         except Exception as e:
             logger.error(f"❌ Error stopping Smart Future Algo Scheduler: {e}", exc_info=True)

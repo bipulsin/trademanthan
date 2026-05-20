@@ -185,7 +185,7 @@
             return (
                 '<td class="vajra-td-enter"' +
                 rs +
-                '><button type="button" class="vajra-enter-btn" data-vajra-enter="1" data-vajra-stock="' +
+                '><button type="button" class="vajra-enter-btn vajra-enter-btn-enter" data-vajra-enter="1" data-vajra-stock="' +
                 sym +
                 '" title="' +
                 title +

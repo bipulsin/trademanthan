@@ -153,9 +153,9 @@ class ArbitrageDailySetupScheduler:
         if not self.is_running:
             return
         try:
-            self.scheduler.shutdown()
-        finally:
             self.is_running = False
+            self.scheduler.shutdown(wait=False)
+        finally:
             logger.info("Arbitrage daily setup scheduler stopped")
 
     def run_now(self) -> Dict:

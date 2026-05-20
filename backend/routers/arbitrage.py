@@ -5,6 +5,7 @@ from typing import Dict, Optional, Any
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import JSONResponse
 from fastapi.responses import StreamingResponse
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import text
@@ -182,6 +183,156 @@ async def get_daily_setup_status():
         raise HTTPException(status_code=500, detail=f"Failed to get scheduler status: {exc}")
 
 
+def _num_or_none(v: Any) -> Optional[float]:
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _arbitrage_selection_rows_live() -> tuple[list[dict[str, Any]], Optional[str]]:
+    """
+    Load arbitrage_master candidates, fetch live LTPs from Upstox (batch quotes),
+    apply the same numeric filter as the old SQL, attach has_open_order.
+
+    Returns (rows, error_message). error_message is set when Upstox is unavailable —
+    caller may fall back to DB-only selection.
+    """
+    _ensure_arbitrage_order_table()
+    upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+    with engine.begin() as conn:
+        candidates = conn.execute(
+            text(
+                """
+                SELECT
+                    stock,
+                    stock_instrument_key,
+                    stock_ltp,
+                    currmth_future_symbol,
+                    currmth_future_instrument_key,
+                    currmth_future_ltp,
+                    nextmth_future_symbol,
+                    nextmth_future_instrement_key,
+                    nextmth_future_ltp,
+                    sector_index
+                FROM arbitrage_master
+                WHERE TRIM(COALESCE(stock_instrument_key, '')) <> ''
+                  AND TRIM(COALESCE(currmth_future_instrument_key, '')) <> ''
+                  AND TRIM(COALESCE(nextmth_future_instrement_key, '')) <> ''
+                ORDER BY stock ASC
+                """
+            )
+        ).mappings().all()
+
+        open_keys = {
+            str(r[0])
+            for r in conn.execute(
+                text(
+                    "SELECT stock_instrument_key FROM arbitrage_order WHERE trade_status = 'OPEN'"
+                )
+            ).fetchall()
+            if r[0]
+        }
+
+    all_keys: list[str] = []
+    seen: set[str] = set()
+    for row in candidates:
+        for k in (
+            row["stock_instrument_key"],
+            row["currmth_future_instrument_key"],
+            row["nextmth_future_instrement_key"],
+        ):
+            ks = (k or "").strip()
+            if ks and ks not in seen:
+                seen.add(ks)
+                all_keys.append(ks)
+
+    ltp_map: dict[str, float] = {}
+    if all_keys:
+        chunk_size = 450
+        for i in range(0, len(all_keys), chunk_size):
+            chunk = all_keys[i : i + chunk_size]
+            part = upstox.get_market_quotes_batch_by_keys(chunk)
+            if part:
+                ltp_map.update(part)
+
+    if not ltp_map and all_keys:
+        return [], "live_quotes_unavailable"
+
+    out: list[dict[str, Any]] = []
+    for row in candidates:
+        d = dict(row)
+        sk = (d.get("stock_instrument_key") or "").strip()
+        ck = (d.get("currmth_future_instrument_key") or "").strip()
+        nk = (d.get("nextmth_future_instrement_key") or "").strip()
+
+        sl = upstox._lookup_batch_ltp_fuzzy(ltp_map, sk)
+        if sl is None:
+            sl = _num_or_none(d.get("stock_ltp"))
+
+        cl = upstox._lookup_batch_ltp_fuzzy(ltp_map, ck)
+        if cl is None:
+            cl = _num_or_none(d.get("currmth_future_ltp"))
+
+        nl = upstox._lookup_batch_ltp_fuzzy(ltp_map, nk)
+        if nl is None:
+            nl = _num_or_none(d.get("nextmth_future_ltp"))
+
+        if sl is None or cl is None or nl is None:
+            continue
+        if not (cl < sl and nl <= cl and nl >= (cl - 3.0)):
+            continue
+
+        d["stock_ltp"] = sl
+        d["currmth_future_ltp"] = cl
+        d["nextmth_future_ltp"] = nl
+        d["has_open_order"] = sk in open_keys
+        out.append(d)
+
+    return out, None
+
+
+def _arbitrage_selection_rows_db_only() -> list[dict[str, Any]]:
+    """Previous behaviour: filtered rows from DB only (no live quotes)."""
+    _ensure_arbitrage_order_table()
+    with engine.begin() as conn:
+        rows = conn.execute(
+            text(
+                """
+                SELECT
+                    stock,
+                    stock_instrument_key,
+                    stock_ltp,
+                    currmth_future_symbol,
+                    currmth_future_instrument_key,
+                    currmth_future_ltp,
+                    nextmth_future_symbol,
+                    nextmth_future_instrement_key,
+                    nextmth_future_ltp,
+                    sector_index,
+                    EXISTS (
+                        SELECT 1
+                        FROM arbitrage_order ao
+                        WHERE ao.stock_instrument_key = arbitrage_master.stock_instrument_key
+                          AND ao.trade_status = 'OPEN'
+                    ) AS has_open_order
+                FROM arbitrage_master
+                WHERE
+                    stock_ltp IS NOT NULL
+                    AND currmth_future_ltp IS NOT NULL
+                    AND nextmth_future_ltp IS NOT NULL
+                    AND currmth_future_ltp < stock_ltp
+                    AND nextmth_future_ltp <= currmth_future_ltp
+                    AND nextmth_future_ltp >= (currmth_future_ltp - 3)
+                ORDER BY stock ASC
+                """
+            )
+        ).mappings().all()
+    return [dict(row) for row in rows]
+
+
 @router.get("/selection")
 async def get_arbitrage_selection():
     """
@@ -189,48 +340,31 @@ async def get_arbitrage_selection():
     - currmth_future_ltp < stock_ltp
     - nextmth_future_ltp <= currmth_future_ltp
     - nextmth_future_ltp within 3 points below currmth_future_ltp
+
+    Uses live Upstox LTPs (batch) so Refresh always shows current prices; falls back to
+    DB-stored LTPs per field when a quote is missing; if the live batch fails entirely,
+    falls back to the legacy DB-only query.
     """
     try:
-        _ensure_arbitrage_order_table()
-        with engine.begin() as conn:
-            rows = conn.execute(
-                text(
-                    """
-                    SELECT
-                        stock,
-                        stock_instrument_key,
-                        stock_ltp,
-                        currmth_future_symbol,
-                        currmth_future_instrument_key,
-                        currmth_future_ltp,
-                        nextmth_future_symbol,
-                        nextmth_future_instrement_key,
-                        nextmth_future_ltp,
-                        sector_index,
-                        EXISTS (
-                            SELECT 1
-                            FROM arbitrage_order ao
-                            WHERE ao.stock_instrument_key = arbitrage_master.stock_instrument_key
-                              AND ao.trade_status = 'OPEN'
-                        ) AS has_open_order
-                    FROM arbitrage_master
-                    WHERE
-                        stock_ltp IS NOT NULL
-                        AND currmth_future_ltp IS NOT NULL
-                        AND nextmth_future_ltp IS NOT NULL
-                        AND currmth_future_ltp < stock_ltp
-                        AND nextmth_future_ltp <= currmth_future_ltp
-                        AND nextmth_future_ltp >= (currmth_future_ltp - 3)
-                    ORDER BY stock ASC
-                    """
-                )
-            ).mappings().all()
+        rows, err = _arbitrage_selection_rows_live()
+        ltp_source = "live"
+        if err == "live_quotes_unavailable":
+            rows = _arbitrage_selection_rows_db_only()
+            ltp_source = "db_fallback"
 
-        return {
-            "success": True,
-            "count": len(rows),
-            "rows": [dict(row) for row in rows],
-        }
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "count": len(rows),
+                "rows": rows,
+                "ltp_source": ltp_source,
+            },
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate",
+                "Pragma": "no-cache",
+            },
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to fetch arbitrage selection: {exc}")
 

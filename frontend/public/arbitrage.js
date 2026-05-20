@@ -237,7 +237,10 @@
         openCardsEl.innerHTML = '<div class="arbitrage-card-state">Loading...</div>';
         openSummaryEl.textContent = "Loading data...";
         try {
-            const res = await fetch(SELECTION_API, { cache: "no-store" });
+            const res = await fetch(SELECTION_API + '?t=' + String(Date.now()), {
+                cache: 'no-store',
+                headers: { Pragma: 'no-cache', 'Cache-Control': 'no-cache' },
+            });
             const data = await res.json();
             if (!res.ok || !data.success) {
                 throw new Error(data.detail || "Failed to fetch data");
