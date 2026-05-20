@@ -64,6 +64,18 @@ DEFAULT_PHASE_PROFILES: Dict[str, PhaseThresholdProfile] = {
 
 
 @dataclass(frozen=True)
+class IgnitionArmedConfig:
+    """Ignition-stage ARMED — institutional expansion beginning (not mature trend)."""
+    evs_min: float = 55.0
+    structure_min: float = 52.0
+    momentum_min: float = 52.0
+    extension_min: float = 35.0
+    conviction_min: float = 58.0
+    execution_score_min: float = 52.0
+    tps_min: float = 42.0
+
+
+@dataclass(frozen=True)
 class QualificationConfig:
     discovery: TierThresholds = field(
         default_factory=lambda: TierThresholds(
@@ -92,6 +104,7 @@ class QualificationConfig:
         )
     )
     hysteresis: HysteresisBands = field(default_factory=HysteresisBands)
+    ignition: IgnitionArmedConfig = field(default_factory=IgnitionArmedConfig)
     phase_profiles: Dict[str, PhaseThresholdProfile] = field(
         default_factory=lambda: dict(DEFAULT_PHASE_PROFILES)
     )

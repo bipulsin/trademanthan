@@ -133,12 +133,14 @@ def compute_score_layers(
     ees = row.get("ees_score")
     ees_f = _f(ees) if ees is not None else None
 
+    evs = _f(row.get("evs_score"))
     discovery = _weighted_mean(
         [
-            (tps if tps > 0 else tq.volume_score, 0.35),
-            (tq.volume_score, 0.20),
-            (_phase_discovery_boost(market_phase), 0.15),
-            (_obv_participation_score(row), 0.15),
+            (tps if tps > 0 else tq.volume_score, 0.30),
+            (evs if evs > 0 else tps, 0.15),
+            (tq.volume_score, 0.15),
+            (_phase_discovery_boost(market_phase), 0.12),
+            (_obv_participation_score(row), 0.13),
             (_early_transition_boost(row), 0.15),
         ]
     )
@@ -149,9 +151,10 @@ def compute_score_layers(
 
     execution = _weighted_mean(
         [
-            (tq.breakout_score, 0.30),
-            (_vwap_reclaim_score(row), 0.25),
-            (exec_component, 0.25),
+            (tq.breakout_score, 0.24),
+            (_vwap_reclaim_score(row), 0.22),
+            (exec_component, 0.22),
+            (_f(row.get("evs_score")) if row.get("evs_score") is not None else exec_component, 0.12),
             (100.0 if row.get("execution_validated") else 40.0, 0.10),
             (tq.pullback_score, 0.10),
         ]

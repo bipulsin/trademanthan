@@ -100,7 +100,9 @@ def fetch_vajra_ratings_for_session(session_date: Optional[date] = None) -> List
                        pullback_quality_score, extension_risk_score,
                        execution_validated, execution_step, pipeline_stage, alertable,
                        ees_score, entry_state, enter_action, enter_enabled, ees_alerts,
-                       trade_quality_score
+                       trade_quality_score, discovery_score, conviction_score,
+                       risk_efficiency_score, primary_blocker, qualification_stage,
+                       execution_score, evs_score, breakout_phase
                 FROM vajra_futures_rating
                 WHERE session_date = :sd
                 ORDER BY trade_type, confidence DESC, stock
@@ -155,6 +157,15 @@ def fetch_vajra_ratings_for_session(session_date: Optional[date] = None) -> List
                     "enter_enabled": bool(r[30]) if r[30] is not None else False,
                     "ees_alerts": ees_alerts,
                     "trade_quality_score": float(r[32]) if len(r) > 32 and r[32] is not None else None,
+                    "discovery_score": float(r[33]) if len(r) > 33 and r[33] is not None else None,
+                    "conviction_score": float(r[34]) if len(r) > 34 and r[34] is not None else None,
+                    "risk_efficiency_score": float(r[35]) if len(r) > 35 and r[35] is not None else None,
+                    "primary_blocker": r[36] if len(r) > 36 else None,
+                    "qualification_stage": r[37] if len(r) > 37 else None,
+                    "execution_score": float(r[38]) if len(r) > 38 and r[38] is not None else None,
+                    "evs_score": float(r[39]) if len(r) > 39 and r[39] is not None else None,
+                    "breakout_phase": r[40] if len(r) > 40 else None,
+                    "qualification_state": (r[37] or r[28] or "").upper() if len(r) > 37 else None,
                 }
             )
         from backend.services.vajra.ui_mapping import finalize_screener_rows
@@ -389,7 +400,8 @@ def run_vajra_futures_rating_job(scan_trigger: str = "manual") -> Dict[str, Any]
                         execution_validated, execution_step, pipeline_stage, alertable,
                         ees_score, entry_state, enter_action, enter_enabled, ees_alerts,
                         trade_quality_score, discovery_score, conviction_score,
-                        risk_efficiency_score, primary_blocker, qualification_stage, execution_score
+                        risk_efficiency_score, primary_blocker, qualification_stage, execution_score,
+                        evs_score, breakout_phase
                     ) VALUES (
                         :session_date, :stock, :future_symbol, :instrument_key,
                         :trade_type, :confidence, :bull_score, :bear_score,
@@ -401,7 +413,8 @@ def run_vajra_futures_rating_job(scan_trigger: str = "manual") -> Dict[str, Any]
                         :execution_validated, :execution_step, :pipeline_stage, :alertable,
                         :ees_score, :entry_state, :enter_action, :enter_enabled, :ees_alerts,
                         :trade_quality_score, :discovery_score, :conviction_score,
-                        :risk_efficiency_score, :primary_blocker, :qualification_stage, :execution_score
+                        :risk_efficiency_score, :primary_blocker, :qualification_stage, :execution_score,
+                        :evs_score, :breakout_phase
                     )
                     ON CONFLICT (session_date, instrument_key) DO UPDATE SET
                         stock = EXCLUDED.stock,
@@ -485,6 +498,8 @@ def run_vajra_futures_rating_job(scan_trigger: str = "manual") -> Dict[str, Any]
                     "primary_blocker": row.get("primary_blocker"),
                     "qualification_stage": row.get("qualification_stage"),
                     "execution_score": row.get("execution_score"),
+                    "evs_score": row.get("evs_score"),
+                    "breakout_phase": row.get("breakout_phase"),
                 },
             )
         db.commit()

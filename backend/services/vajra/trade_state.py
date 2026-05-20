@@ -14,6 +14,8 @@ from backend.services.vajra.trade_quality import (
     TradeQualityResult,
     compute_trade_quality,
 )
+from backend.services.vajra.breakout_phase import classify_breakout_phase
+from backend.services.vajra.expansion_velocity import compute_expansion_velocity
 from backend.services.vajra.qualification_config import (
     STATE_ARMED,
     STATE_DISCOVERY,
@@ -431,6 +433,17 @@ def build_trade_state_dict(
     merged.setdefault("momentum_score", tq.momentum_score)
     merged.setdefault("breakout_score", tq.breakout_score)
     merged.setdefault("extension_quality_score", ext_q)
+    merged["breakout_phase"] = classify_breakout_phase(
+        evs_score=_f(row.get("evs_score")),
+        breakout_score=tq.breakout_score,
+        extension_risk=_f(row.get("extension_risk_score") or tq.extension_risk_score),
+        extension_quality=ext_q,
+        compression_broken=bool(row.get("compression_broken")),
+        vwap_accepted=_price_above_vwap(row) or _price_below_vwap(row),
+        execution_validated=bool(row.get("execution_validated")),
+        adx_accelerating=bool(row.get("adx_accelerating")),
+        momentum_score=tq.momentum_score,
+    )
 
     layers = compute_score_layers(merged, tq, market_phase=market_phase, extension_quality=ext_q)
     qual_result = qualify_trade(
@@ -522,6 +535,12 @@ def build_trade_state_dict(
         "nearest_trigger": qual_result.nearest_trigger,
         "raw_stage": qual_result.raw_stage,
         "hysteresis_applied": qual_result.hysteresis_applied,
+        "evs_score": row.get("evs_score"),
+        "breakout_phase": merged.get("breakout_phase"),
+        "breakout_lifecycle": merged.get("breakout_phase"),
+        "compression_broken": row.get("compression_broken"),
+        "adx_accelerating": row.get("adx_accelerating"),
+        "range_expanding": row.get("range_expanding"),
         "action": action.get("enter_action") or "",
         "enter_action": action.get("enter_action") or "",
         "enter_enabled": action.get("enter_enabled", False),
@@ -546,6 +565,11 @@ def apply_trade_state(
 
     bull_dir = execution_bias == "LONG"
 
+    ev_primary = candles_5m if candles_5m and len(candles_5m) >= 30 else candles_30m
+    evr = compute_expansion_velocity(ev_primary, bull_dir=bull_dir)
+    if evr:
+        row.update(evr.to_dict())
+
     tq = compute_trade_quality(
         candles_30m=candles_30m,
         candles_5m=candles_5m,
@@ -562,6 +586,7 @@ def apply_trade_state(
         volume_pass=_pass(row.get("volume")),
         tps_score=row.get("tps_score"),
         trade_type=str(row.get("trade_type") or ""),
+        evs_score=row.get("evs_score"),
     )
     if tq is None:
         row["market_phase"] = market_phase

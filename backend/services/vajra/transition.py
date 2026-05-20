@@ -17,6 +17,7 @@ from backend.services.vajra.engine import (
     _rsi_wilder,
     _wilder_atr,
 )
+from backend.services.vajra.expansion_velocity import compute_expansion_velocity
 from backend.services.vajra.indicators import cumulative_vwap, ema_series, sma_at, wma_series
 
 EMA_EXEC_LEN = 5
@@ -347,6 +348,18 @@ def compute_tps(
         bear_pts += pb_q * 0.12
         bear_pts -= ext_r * 0.18
 
+    evs_result = compute_expansion_velocity(candles, bull_dir=bull_dir)
+    if evs_result:
+        accel = max(0.0, (evs_result.evs_score - 48.0) * 0.22)
+        if evs_result.compression_broken:
+            accel += 6.0
+        if evs_result.adx_accelerating and evs_result.range_expanding:
+            accel += 5.0
+        if bull_dir:
+            bull_pts += accel
+        else:
+            bear_pts += accel
+
     bull_pts = max(0.0, min(100.0, bull_pts))
     bear_pts = max(0.0, min(100.0, bear_pts))
 
@@ -360,6 +373,8 @@ def compute_tps(
             steps.append("MOMENTUM SHIFT")
         if pb_q >= 55:
             steps.append("PULLBACK OK")
+        if evs_result and evs_result.compression_broken and evs_result.evs_score >= 52:
+            steps.append("IGNITION")
     else:
         if vwap_reclaim_bear:
             steps.append("VWAP RECLAIM")
@@ -369,6 +384,8 @@ def compute_tps(
             steps.append("MOMENTUM SHIFT")
         if pb_q >= 55:
             steps.append("PULLBACK OK")
+        if evs_result and evs_result.compression_broken and evs_result.evs_score >= 52:
+            steps.append("IGNITION")
 
     transition_state = " · ".join(steps) if steps else "SCANNING"
 

@@ -6,12 +6,18 @@ from typing import Any, Dict, List, Optional
 
 from backend.services.vajra.qualification_config import (
     DEFAULT_QUALIFICATION_CONFIG,
+    IgnitionArmedConfig,
     QualificationConfig,
     STATE_ARMED,
     STATE_DISCOVERY,
     STATE_EXECUTABLE,
     STATE_REJECT,
     TierThresholds,
+)
+from backend.services.vajra.breakout_phase import (
+    PHASE_BREAKOUT_INITIATED,
+    PHASE_BREAKOUT_VALIDATED,
+    PHASE_EXPANSION,
 )
 from backend.services.vajra.score_layers import ScoreLayers, momentum_improving, structure_improving
 from backend.services.vajra.state_persistence import PriorQualificationState, load_prior_state, save_prior_state
@@ -47,6 +53,8 @@ BLOCKER_LABELS = {
     "momentum_confirmation_pending": "Momentum confirmation pending",
     "volume_expansion_pending": "Volume expansion pending",
     "breakout_confirmation_pending": "Breakout confirmation pending",
+    "breakout_initiated": "Breakout initiated — expansion ignition",
+    "expansion_ignition": "Institutional expansion ignition",
     "conviction_below_threshold": "Conviction below execution threshold",
     "execution_readiness_low": "Execution readiness insufficient",
 }
@@ -116,6 +124,60 @@ def _hard_reject(
     return False
 
 
+def _evs(row: Dict[str, Any]) -> float:
+    return _f(row.get("evs_score"))
+
+
+def _breakout_phase(row: Dict[str, Any]) -> str:
+    return str(row.get("breakout_phase") or row.get("breakout_lifecycle") or "").lower()
+
+
+def _vwap_accepted(row: Dict[str, Any]) -> bool:
+    return _price_above_vwap(row) or _price_below_vwap(row)
+
+
+def is_ignition_armed(
+    layers: ScoreLayers,
+    row: Dict[str, Any],
+    *,
+    cfg: QualificationConfig = DEFAULT_QUALIFICATION_CONFIG,
+) -> bool:
+    """ARMED on expansion ignition — before mature breakout confirmation."""
+    ign = cfg.ignition
+    evs = _evs(row)
+    phase = _breakout_phase(row)
+    if evs < ign.evs_min:
+        return False
+    if not _vwap_accepted(row):
+        return False
+    if not row.get("compression_broken") and phase not in (
+        PHASE_BREAKOUT_INITIATED,
+        PHASE_EXPANSION,
+        PHASE_BREAKOUT_VALIDATED,
+    ):
+        return False
+    if layers.structure_score < ign.structure_min:
+        return False
+    if layers.momentum_score < ign.momentum_min:
+        return False
+    if layers.extension_quality_score < ign.extension_min:
+        return False
+    if layers.conviction_score < ign.conviction_min:
+        return False
+    if layers.execution_score < ign.execution_score_min:
+        return False
+    tps = layers.tps_score
+    if tps > 0 and tps < ign.tps_min:
+        return False
+    if not (structure_improving(row) or momentum_improving(row) or row.get("adx_accelerating")):
+        return False
+    return phase in (
+        PHASE_BREAKOUT_INITIATED,
+        PHASE_EXPANSION,
+        PHASE_BREAKOUT_VALIDATED,
+    ) or (evs >= ign.evs_min + 5 and bool(row.get("compression_broken")))
+
+
 def breakout_confirmation_present(
     row: Dict[str, Any],
     layers: ScoreLayers,
@@ -129,6 +191,14 @@ def breakout_confirmation_present(
         return False
     if row.get("execution_validated"):
         return True
+    phase = _breakout_phase(row)
+    evs = _evs(row)
+    if phase in (PHASE_BREAKOUT_VALIDATED, PHASE_EXPANSION) and evs >= 50:
+        if layers.breakout_score >= brk_min:
+            return True
+    if phase == PHASE_BREAKOUT_INITIATED and evs >= cfg.ignition.evs_min + 8:
+        if layers.breakout_score >= brk_min - 4 and _vwap_accepted(row):
+            return True
     if _price_above_vwap(row) or _price_below_vwap(row):
         if layers.breakout_score >= brk_min + 4:
             return True
@@ -138,28 +208,37 @@ def breakout_confirmation_present(
 def derive_trigger_tags(row: Dict[str, Any], layers: ScoreLayers, market_phase: str) -> List[str]:
     tags: List[str] = []
     brk = layers.breakout_score
-    if brk < 52:
+    phase = _breakout_phase(row)
+    evs = _evs(row)
+
+    if phase == PHASE_BREAKOUT_INITIATED or (
+        evs >= 55 and row.get("compression_broken") and _vwap_accepted(row)
+    ):
+        tags.append("breakout_initiated")
+    elif brk < 52 and evs < 50:
         tags.append("waiting_breakout")
-    elif brk < 58 and not row.get("execution_validated"):
+    elif brk < 58 and not row.get("execution_validated") and phase not in (
+        PHASE_BREAKOUT_INITIATED,
+        PHASE_EXPANSION,
+    ):
         tags.append("breakout_confirmation_pending")
 
-    if not _price_above_vwap(row) and not _price_below_vwap(row):
-        tags.append("needs_vwap_reclaim")
-    elif _price_below_vwap(row):
+    if not _vwap_accepted(row):
         tags.append("needs_vwap_reclaim")
 
     mp = (market_phase or "").lower()
-    if "early" in mp and "expansion" in mp:
+    if phase in (PHASE_BREAKOUT_INITIATED, PHASE_EXPANSION):
+        tags.append("expansion_ignition")
+    elif "early" in mp and "expansion" in mp:
         tags.append("early_expansion")
     elif market_phase == PHASE_COMPRESSION:
         tags.append("compression_ready")
-    elif market_phase == PHASE_ROTATIONAL:
-        if "early_expansion" not in tags:
-            tags.append("early_expansion")
+    elif market_phase == PHASE_ROTATIONAL and "breakout_initiated" not in tags:
+        tags.append("early_expansion")
 
-    if layers.momentum_score < 58 and layers.momentum_score >= 50:
+    if layers.momentum_score < 58 and layers.momentum_score >= 50 and "breakout_initiated" not in tags:
         tags.append("momentum_confirmation_pending")
-    if layers.volume_score < 60 and layers.tps_score >= 50:
+    if layers.volume_score < 60 and layers.tps_score >= 50 and phase != PHASE_BREAKOUT_INITIATED:
         tags.append("volume_expansion_pending")
     return list(dict.fromkeys(tags))
 
@@ -197,6 +276,9 @@ def classify_raw_stage(
     if _meets_tier(layers, exec_th) and breakout_confirmation_present(row, layers, phase=market_phase, cfg=cfg):
         return STATE_EXECUTABLE
 
+    if is_ignition_armed(layers, row, cfg=cfg):
+        return STATE_ARMED
+
     armed_th = cfg.armed_thresholds(market_phase)
     tags = derive_trigger_tags(row, layers, market_phase)
     if _meets_tier(layers, armed_th) and tags:
@@ -222,6 +304,8 @@ def _pick_primary_blocker(tags: List[str], layers: ScoreLayers, th: TierThreshol
     priority = [
         "waiting_breakout",
         "needs_vwap_reclaim",
+        "breakout_initiated",
+        "expansion_ignition",
         "breakout_confirmation_pending",
         "momentum_confirmation_pending",
         "volume_expansion_pending",
@@ -314,6 +398,8 @@ def apply_hysteresis(
     if raw_stage == STATE_ARMED or prev == STATE_ARMED:
         if prev == STATE_ARMED and _holds_armed(layers, cfg):
             return STATE_ARMED, True
+        if is_ignition_armed(layers, row, cfg=cfg):
+            return STATE_ARMED, applied
         if _meets_armed_enter(layers, cfg, market_phase):
             tags = derive_trigger_tags(row, layers, market_phase)
             if tags:

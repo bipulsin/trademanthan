@@ -29,6 +29,8 @@ _EXTRA_COLUMNS = (
     ("primary_blocker", "TEXT"),
     ("qualification_stage", "TEXT"),
     ("execution_score", "DOUBLE PRECISION"),
+    ("evs_score", "DOUBLE PRECISION"),
+    ("breakout_phase", "TEXT"),
 )
 
 

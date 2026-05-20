@@ -524,6 +524,7 @@ def compute_trade_quality(
     volume_pass: bool = False,
     tps_score: Optional[float] = None,
     trade_type: str = "",
+    evs_score: Optional[float] = None,
 ) -> Optional[TradeQualityResult]:
     """Qualification layer: scores + EXECUTABLE / WATCHLIST / REJECT."""
     primary = candles_5m if candles_5m and len(candles_5m) >= 30 else candles_30m
@@ -537,6 +538,9 @@ def compute_trade_quality(
     mom, mom_reasons = _momentum_score(h30, l30, c30, bull_dir=bull_dir)
     pb = _pullback_score(o, h, l, c, v, bull_dir=bull_dir, existing_pb=pullback_quality)
     brk = _breakout_score(o, h, l, c, v, bull_dir=bull_dir)
+    if evs_score is not None and float(evs_score) >= 50:
+        evs_f = float(evs_score)
+        brk = min(100.0, max(brk, brk * 0.55 + evs_f * 0.35))
     ext_q, ext_risk = _extension_quality(
         o, h, l, c, v, bull_dir=bull_dir, extension_risk=extension_risk
     )
