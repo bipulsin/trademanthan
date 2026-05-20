@@ -12,6 +12,11 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import pytz
 
+from backend.services.vajra.candles import (
+    has_sufficient_bars,
+    min_bars_for_tf,
+    opening_session_skip_5m_validation,
+)
 from backend.services.vajra.engine import compute_ecs_rating
 from backend.services.vajra.ees import compute_ees
 from backend.services.vajra.qualification import apply_trade_qualification
@@ -142,10 +147,11 @@ def rate_symbol_transition(
     computed_at: Optional[datetime] = None,
     run_execution: bool = False,
 ) -> Optional[Dict[str, Any]]:
-    ecs = compute_ecs_rating(candles_30m, candles_1hr)
+    min_30 = min_bars_for_tf(DISCOVERY_TF, opening_session=opening_session_skip_5m_validation())
+    ecs = compute_ecs_rating(candles_30m, candles_1hr, min_bars=min_30)
     if ecs is None:
         return None
-    tps = compute_tps(candles_30m, market_phase=ecs.market_phase)
+    tps = compute_tps(candles_30m, market_phase=ecs.market_phase, min_bars=min_30)
     if tps is None:
         return None
 
@@ -212,6 +218,8 @@ def run_transition_pipeline(
             c30 = fetch_candles(fut_key, DISCOVERY_TF)
             c1h = fetch_candles(fut_key, HTF_BIAS_TF)
             c5 = fetch_candles(fut_key, EXECUTION_TF)
+            if not has_sufficient_bars(c30, DISCOVERY_TF):
+                continue
             row = rate_symbol_transition(
                 stock=stock,
                 fut_sym=fut_sym,
@@ -252,6 +260,9 @@ def run_transition_pipeline(
             c5 = fetch_candles(fut_key, EXECUTION_TF)
             c30 = fetch_candles(fut_key, DISCOVERY_TF)
             c1h = fetch_candles(fut_key, HTF_BIAS_TF)
+            run_exec = not opening_session_skip_5m_validation()
+            if run_exec and not has_sufficient_bars(c5, EXECUTION_TF):
+                run_exec = False
             row = rate_symbol_transition(
                 stock=stock,
                 fut_sym=item["future_symbol"],
@@ -260,7 +271,7 @@ def run_transition_pipeline(
                 candles_1hr=c1h,
                 candles_5m=c5,
                 computed_at=ts,
-                run_execution=True,
+                run_execution=run_exec,
             )
             if row:
                 final_rows.append(row)

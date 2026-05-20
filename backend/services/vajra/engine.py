@@ -273,6 +273,7 @@ def compute_vajra_rating(
     *,
     candles_15m: Optional[Sequence[Dict[str, Any]]] = None,
     candles_60m: Optional[Sequence[Dict[str, Any]]] = None,
+    min_bars: int = 60,
 ) -> Optional[VajraRating]:
     """
     Compute Vajra rating from OHLCV candles (oldest → newest).
@@ -283,7 +284,8 @@ def compute_vajra_rating(
     if candles_htf is None:
         candles_htf = candles_60m
 
-    if not candles_scan or len(candles_scan) < 60:
+    need = max(30, int(min_bars))
+    if not candles_scan or len(candles_scan) < need:
         return None
 
     opens = [float(c.get("open") or 0) for c in candles_scan]

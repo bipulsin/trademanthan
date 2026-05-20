@@ -228,9 +228,11 @@ def compute_tps(
     candles: Sequence[Dict[str, Any]],
     *,
     market_phase: str = "",
+    min_bars: int = 60,
 ) -> Optional[TransitionScores]:
     """TPS on discovery timeframe (30m)."""
-    if not candles or len(candles) < 60:
+    need = max(30, int(min_bars))
+    if not candles or len(candles) < need:
         return None
 
     opens = [float(c.get("open") or 0) for c in candles]

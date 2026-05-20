@@ -22,6 +22,7 @@ from backend.services.vajra.pipeline import run_transition_pipeline
 from backend.services.vajra.ranking import sort_vajra_rows_for_display
 from backend.services.vajra.staleness import is_vajra_db_snapshot_stale, is_vajra_ratings_stale
 from backend.services.vajra.tables import ensure_vajra_futures_rating_table
+from backend.services.vajra.candles import has_sufficient_bars, prepare_vajra_candles
 from backend.services.vajra.timeframes import (
     DEFAULT_HTF,
     DEFAULT_SCAN_TF,
@@ -206,7 +207,15 @@ def _fetch_candles_for_tf(upstox: UpstoxService, instrument_key: str, tf_id: str
         interval=str(cfg["interval"]),
         days_back=int(cfg["days_back"]),
     )
-    return _sort_candles(raw)
+    prepared = prepare_vajra_candles(_sort_candles(raw), tf_id)
+    if not has_sufficient_bars(prepared, tf_id):
+        logger.debug(
+            "vajra candles: insufficient %s bars (%s) for %s",
+            tf_id,
+            len(prepared),
+            instrument_key,
+        )
+    return prepared
 
 
 def _rating_to_api_row(
@@ -424,6 +433,31 @@ def run_vajra_futures_rating_job(scan_trigger: str = "manual") -> Dict[str, Any]
     pipeline_rows = run_transition_pipeline(universe, _fetch)
     computed_at = datetime.now(IST)
     key_by_stock = {u["stock"]: u for u in universe}
+
+    if not pipeline_rows:
+        db_chk = SessionLocal()
+        try:
+            existing = int(
+                db_chk.execute(
+                    text("SELECT COUNT(*) FROM vajra_futures_rating WHERE session_date = :sd"),
+                    {"sd": session_date},
+                ).scalar()
+                or 0
+            )
+        finally:
+            db_chk.close()
+        if existing > 0:
+            logger.warning(
+                "vajra_rating [%s]: empty pipeline — keeping %s existing rows (likely opening-session candle gap)",
+                scan_trigger,
+                existing,
+            )
+            return {
+                "skipped": "empty_pipeline_keep_db",
+                "scan_trigger": scan_trigger,
+                "session_date": session_date.isoformat(),
+                "existing_rows": existing,
+            }
 
     for prow in pipeline_rows:
         stock = prow.get("stock") or ""

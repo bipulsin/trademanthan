@@ -956,6 +956,45 @@ class SmartFutureAlgoScheduler:
             )
             logger.info("✅ Scheduled: Vajra futures rating (every 5 min, IST trading window)")
 
+            def _run_vajra_open_920():
+                ist = pytz.timezone("Asia/Kolkata")
+                if _skip_ist_non_trading_job("Vajra open 09:20", datetime.now(ist)):
+                    return
+                from backend.services.vajra.candles import is_vajra_screening_ready_ist
+
+                if not is_vajra_screening_ready_ist():
+                    logger.debug("Before 09:20 IST — skip Vajra open refresh")
+                    return
+                logger.info("🔧 Vajra futures rating (09:20 open refresh)...")
+                try:
+                    run_vajra_futures_rating_job(scan_trigger="open_0920")
+                    logger.info("✅ Vajra futures rating (09:20 open refresh) completed")
+                except Exception as e:
+                    logger.error(
+                        "❌ Vajra futures rating (09:20 open refresh) failed: %s",
+                        e,
+                        exc_info=True,
+                    )
+
+            self.scheduler.add_job(
+                _run_vajra_open_920,
+                trigger=CronTrigger(
+                    day_of_week="mon-fri",
+                    hour=9,
+                    minute=20,
+                    timezone="Asia/Kolkata",
+                ),
+                id="smart_future_vajra_rating_open_920",
+                name="Vajra futures rating (09:20 open)",
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=300,
+                coalesce=True,
+            )
+            logger.info(
+                "✅ Scheduled: Vajra open refresh 09:20 IST (5m after market open, Mon–Fri)"
+            )
+
             def _run_vajra_disc_refresh():
                 if not is_allowed_scheduler_window_ist():
                     return
