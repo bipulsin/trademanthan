@@ -489,9 +489,12 @@ body.landing-page #app {
 
 /* ========== Mobile Responsive (per reference layout) ========== */
 @media (max-width: 768px) {
+  :root {
+    --landing-feature-peek: 5.5rem;
+  }
+
   body.landing-page #app {
-    display: flex;
-    flex-direction: column;
+    display: block;
     min-height: 100vh;
     min-height: 100dvh;
   }
