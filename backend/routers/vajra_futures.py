@@ -16,6 +16,7 @@ from backend.services.vajra.job import (
     compute_vajra_ratings_live,
     fetch_vajra_ratings_for_session,
     fetch_vajra_ratings_updated_at,
+    resolve_vajra_ratings_for_api,
     sort_vajra_rows_for_display,
 )
 from backend.services.vajra.ranking import build_screener_display
@@ -116,11 +117,7 @@ def get_vajra_ratings(
         sd = session_date or effective_session_date_ist_for_trend()
         mode_norm = (mode or "transition").strip().lower()
         if mode_norm == "transition":
-            db_first = fetch_vajra_ratings_for_session(sd)
-            source = "db" if db_first else "live_pipeline"
-            rows = db_first or compute_vajra_ratings_live(
-                mode="transition", session_date=sd, use_cache=True
-            )
+            rows, source, stale_reason = resolve_vajra_ratings_for_api(sd, use_cache=True)
             display = build_screener_display(rows)
             rows = display["rows"]
             updated_dt = fetch_vajra_ratings_updated_at(sd)
@@ -151,6 +148,7 @@ def get_vajra_ratings(
                     "scan_tf": DISCOVERY_TF,
                     "htf": HTF_BIAS_TF,
                     "source": source,
+                    "stale_reason": stale_reason,
                     "count": len(rows),
                     "alert_count": len(alerts) + len(ees_alert_rows),
                     "alerts": alerts,

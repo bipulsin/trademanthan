@@ -122,11 +122,15 @@ for _i in {1..20}; do
     /bin/sleep 1 || true
     if systemctl list-unit-files 2>/dev/null | grep -q "trademanthan-backend.service" && check_backend_health; then
         log_message "✅ Backend is healthy and responding"
+        /bin/date +%s > /tmp/trademanthan_deploy_epoch 2>/dev/null || true
+        log_message "✅ Vajra deploy epoch recorded (/tmp/trademanthan_deploy_epoch)"
         timeout 2 tail -10 /home/ubuntu/trademanthan/logs/trademanthan.log 2>/dev/null || true
         exit 0
     fi
     if ! systemctl list-unit-files 2>/dev/null | grep -q "trademanthan-backend.service" && check_dev_backend_health; then
         log_message "✅ Auxiliary backend is healthy on port ${TRADEMANTHAN_DEV_PORT:-9000}"
+        /bin/date +%s > /tmp/trademanthan_deploy_epoch 2>/dev/null || true
+        log_message "✅ Vajra deploy epoch recorded (/tmp/trademanthan_deploy_epoch)"
         timeout 2 tail -10 /home/ubuntu/trademanthan/logs/trademanthan.log 2>/dev/null || true
         exit 0
     fi

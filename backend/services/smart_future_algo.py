@@ -1022,6 +1022,31 @@ class SmartFutureAlgoScheduler:
 
             threading.Thread(target=_car_nifty_startup_bg, name="car_nifty200_startup", daemon=True).start()
 
+            def _vajra_post_deploy_refresh():
+                time.sleep(20)
+                try:
+                    if not is_allowed_scheduler_window_ist():
+                        return
+                    ist = pytz.timezone("Asia/Kolkata")
+                    if _skip_ist_non_trading_job("Vajra post-deploy refresh", datetime.now(ist)):
+                        return
+                    from backend.services.vajra.job import maybe_refresh_vajra_after_deploy
+
+                    logger.info("🔧 Vajra post-deploy / startup freshness check...")
+                    result = maybe_refresh_vajra_after_deploy()
+                    if result:
+                        logger.info("✅ Vajra post-deploy refresh completed: %s", result.get("scan_trigger"))
+                    else:
+                        logger.info("✅ Vajra ratings already fresh after startup")
+                except Exception as e:
+                    logger.error("❌ Vajra post-deploy refresh failed: %s", e, exc_info=True)
+
+            threading.Thread(
+                target=_vajra_post_deploy_refresh,
+                name="vajra_post_deploy_refresh",
+                daemon=True,
+            ).start()
+
             def _premarket_watchlist_catchup_after_start():
                 time.sleep(25)
                 try:

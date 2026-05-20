@@ -20,6 +20,7 @@ from backend.services.upstox_service import UpstoxService
 from backend.services.vajra.engine import compute_ecs_rating, compute_vajra_rating, sort_vajra_rows
 from backend.services.vajra.pipeline import run_transition_pipeline
 from backend.services.vajra.ranking import sort_vajra_rows_for_display
+from backend.services.vajra.staleness import is_vajra_db_snapshot_stale, is_vajra_ratings_stale
 from backend.services.vajra.tables import ensure_vajra_futures_rating_table
 from backend.services.vajra.timeframes import (
     DEFAULT_HTF,
@@ -232,6 +233,100 @@ def _rating_to_api_row(
     }
 
 
+def _run_transition_pipeline_live(session_date: Optional[date] = None) -> List[Dict[str, Any]]:
+    sd = session_date or effective_session_date_ist_for_trend()
+    universe = load_arbitrage_curr_mth_universe()
+    if not universe:
+        return []
+    upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+
+    def _fetch(key: str, tf: str) -> List[dict]:
+        return _fetch_candles_for_tf(upstox, key, tf)
+
+    return sort_vajra_rows_for_display(
+        run_transition_pipeline(universe, _fetch, computed_at=datetime.now(IST))
+    )
+
+
+def resolve_vajra_ratings_for_api(
+    session_date: Optional[date] = None,
+    *,
+    use_cache: bool = True,
+) -> Tuple[List[Dict[str, Any]], str, Optional[str]]:
+    """
+    Load ratings for API: DB when fresh, else live pipeline recompute.
+    Returns (rows, source, stale_reason).
+    """
+    sd = session_date or effective_session_date_ist_for_trend()
+    cache_key = f"{sd.isoformat()}:transition"
+    now = time.time()
+    if use_cache and cache_key in _LIVE_CACHE:
+        ts, rows = _LIVE_CACHE[cache_key]
+        if now - ts < _LIVE_CACHE_TTL_SEC:
+            return rows, "cache", None
+
+    db_rows = fetch_vajra_ratings_for_session(sd)
+    updated_at = fetch_vajra_ratings_updated_at(sd)
+    stale, reason = is_vajra_ratings_stale(db_rows, updated_at)
+    if db_rows and not stale:
+        if use_cache:
+            _LIVE_CACHE[cache_key] = (now, db_rows)
+        return db_rows, "db", None
+
+    if stale and db_rows:
+        logger.info("vajra ratings stale (%s) — live recompute for API", reason)
+    elif not db_rows:
+        logger.info("vajra ratings empty — live recompute for API")
+
+    rows = _run_transition_pipeline_live(sd)
+    source = "live_recompute" if db_rows else "live"
+    if use_cache and rows:
+        _LIVE_CACHE[cache_key] = (now, rows)
+    return rows, source, reason
+
+
+def maybe_refresh_vajra_after_deploy() -> Optional[Dict[str, Any]]:
+    """Background persist after deploy/startup when DB snapshot is stale."""
+    sd = effective_session_date_ist_for_trend()
+    updated_at = fetch_vajra_ratings_updated_at(sd)
+    db = SessionLocal()
+    try:
+        ensure_vajra_futures_rating_table(db)
+        count = int(
+            db.execute(
+                text("SELECT COUNT(*) FROM vajra_futures_rating WHERE session_date = :sd"),
+                {"sd": sd},
+            ).scalar()
+            or 0
+        )
+        missing_evs = int(
+            db.execute(
+                text(
+                    """
+                    SELECT COUNT(*) FROM vajra_futures_rating
+                    WHERE session_date = :sd AND evs_score IS NULL
+                    """
+                ),
+                {"sd": sd},
+            ).scalar()
+            or 0
+        )
+    finally:
+        db.close()
+
+    need, reason = is_vajra_db_snapshot_stale(
+        row_count=count,
+        missing_evs_count=missing_evs,
+        updated_at=updated_at,
+    )
+    if not need:
+        logger.info("vajra post_deploy: ratings fresh — skip background refresh")
+        return None
+
+    logger.info("vajra post_deploy: background refresh (%s)", reason)
+    return run_vajra_futures_rating_job(scan_trigger=f"post_deploy:{reason}")
+
+
 def compute_vajra_ratings_live(
     scan_tf: str = DEFAULT_SCAN_TF,
     htf: str = DEFAULT_HTF,
@@ -245,30 +340,7 @@ def compute_vajra_ratings_live(
     mode_norm = (mode or "transition").strip().lower()
 
     if mode_norm == "transition":
-        cache_key = f"{sd.isoformat()}:transition"
-        now = time.time()
-        if use_cache and cache_key in _LIVE_CACHE:
-            ts, rows = _LIVE_CACHE[cache_key]
-            if now - ts < _LIVE_CACHE_TTL_SEC:
-                return rows
-        db_rows = fetch_vajra_ratings_for_session(sd)
-        if db_rows:
-            if use_cache:
-                _LIVE_CACHE[cache_key] = (now, db_rows)
-            return db_rows
-        universe = load_arbitrage_curr_mth_universe()
-        if not universe:
-            return []
-        upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
-
-        def _fetch(key: str, tf: str) -> List[dict]:
-            return _fetch_candles_for_tf(upstox, key, tf)
-
-        rows = sort_vajra_rows_for_display(
-            run_transition_pipeline(universe, _fetch, computed_at=datetime.now(IST))
-        )
-        if use_cache:
-            _LIVE_CACHE[cache_key] = (now, rows)
+        rows, _, _ = resolve_vajra_ratings_for_api(sd, use_cache=use_cache)
         return rows
 
     scan_id, htf_id = validate_tf_pair(scan_tf, htf)
