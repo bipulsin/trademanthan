@@ -266,18 +266,16 @@ def compute_execution_rank_score(
     conviction_score: float = 0.0,
     discovery_score: float = 0.0,
     risk_efficiency_score: float = 0.0,
+    setup_quality_score: float = 0.0,
 ) -> float:
     phase_w = PHASE_SCORES.get(market_phase, 30.0)
     qual = qualification_state.upper()
     if qual == STATE_EXECUTABLE:
-        return (
-            execution_score * 0.40
-            + conviction_score * 0.30
-            + risk_efficiency_score * 0.15
-            + volume_score * 0.08
-            + phase_w * 0.07
-        )
+        sq = setup_quality_score if setup_quality_score > 0 else execution_score
+        return sq * 0.45 + conviction_score * 0.35 + volume_score * 0.12 + phase_w * 0.08
     if qual == STATE_ARMED:
+        if setup_quality_score > 0:
+            return setup_quality_score * 0.65 + conviction_score * 0.25 + execution_score * 0.10
         return (
             execution_score * 0.35
             + structure_score * 0.20
@@ -446,6 +444,12 @@ def build_trade_state_dict(
     )
 
     layers = compute_score_layers(merged, tq, market_phase=market_phase, extension_quality=ext_q)
+    from backend.services.vajra.setup_quality import enrich_setup_quality_fields
+
+    sq_fields = enrich_setup_quality_fields(
+        merged, layers, market_phase=market_phase, tq=tq
+    )
+    merged.update(sq_fields)
     qual_result = qualify_trade(
         merged,
         layers,
@@ -456,22 +460,26 @@ def build_trade_state_dict(
     qual = qual_result.qualification_state
     reasons = qual_result.reject_reasons
 
-    rank = compute_execution_rank_score(
-        qualification_state=qual,
-        market_phase=market_phase,
-        structure_score=tq.structure_score,
-        momentum_score=tq.momentum_score,
-        breakout_score=tq.breakout_score,
-        trend_strength_score=tq.trend_score,
-        volume_score=tq.volume_score,
-        pullback_score=tq.pullback_score,
-        htf_alignment_score=tq.htf_alignment_score,
-        extension_quality_score=ext_q,
-        execution_score=layers.execution_score,
-        conviction_score=layers.conviction_score,
-        discovery_score=layers.discovery_score,
-        risk_efficiency_score=layers.risk_efficiency_score,
-    )
+    if qual == STATE_ARMED and sq_fields.get("armed_rank_score"):
+        rank = float(sq_fields["armed_rank_score"])
+    else:
+        rank = compute_execution_rank_score(
+            qualification_state=qual,
+            market_phase=market_phase,
+            structure_score=tq.structure_score,
+            momentum_score=tq.momentum_score,
+            breakout_score=tq.breakout_score,
+            trend_strength_score=tq.trend_score,
+            volume_score=tq.volume_score,
+            pullback_score=tq.pullback_score,
+            htf_alignment_score=tq.htf_alignment_score,
+            extension_quality_score=ext_q,
+            execution_score=layers.execution_score,
+            conviction_score=layers.conviction_score,
+            discovery_score=layers.discovery_score,
+            risk_efficiency_score=layers.risk_efficiency_score,
+            setup_quality_score=sq_fields.get("setup_quality_score"),
+        )
 
     from backend.services.vajra.actions import resolve_enter_action
 

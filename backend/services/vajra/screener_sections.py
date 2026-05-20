@@ -43,33 +43,47 @@ def _section_eligible(row: Dict[str, Any]) -> bool:
     return True
 
 
+def _confidence(row: Dict[str, Any]) -> float:
+    for key in ("confidence_score", "conviction_score", "confidence"):
+        v = _f(row, key)
+        if v > 0:
+            return v
+    return 0.0
+
+
 def rank_executable(row: Dict[str, Any]) -> tuple:
     return (
-        -_f(row, "execution_score"),
-        -_f(row, "conviction_score"),
-        -_f(row, "risk_efficiency_score"),
+        -_f(row, "setup_quality_score"),
+        -_confidence(row),
         -_f(row, "volume_score"),
+        -_f(row, "execution_score"),
         str(row.get("stock") or row.get("security") or ""),
     )
 
 
 def rank_armed(row: Dict[str, Any]) -> tuple:
-    trigger = row.get("nearest_trigger") or {}
-    prox = _f({"d": trigger.get("distance_pct")}, "d") if trigger.get("distance_pct") is not None else 99.0
+    armed = _f(row, "armed_rank_score")
+    if armed <= 0:
+        armed = (
+            _f(row, "setup_quality_score") * 0.65
+            + _confidence(row) * 0.25
+            + _f(row, "institutional_participation_score") * 0.10
+        )
     return (
-        prox,
-        -_f(row, "execution_score"),
-        -_f(row, "structure_score"),
-        -_f(row, "momentum_score"),
+        -armed,
+        -_f(row, "setup_quality_score"),
+        -_f(row, "ignition_quality_score"),
+        -_f(row, "institutional_participation_score"),
         str(row.get("stock") or row.get("security") or ""),
     )
 
 
 def rank_discovery(row: Dict[str, Any]) -> tuple:
     return (
+        -_f(row, "institutional_participation_score"),
         -_f(row, "discovery_score"),
         -_f(row, "tps_score"),
-        -_f(row, "volume_score"),
+        -(_f(row, "evs_score") or _f(row, "expansion_velocity_score")),
         str(row.get("stock") or row.get("security") or ""),
     )
 

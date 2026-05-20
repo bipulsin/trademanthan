@@ -20,6 +20,7 @@ from backend.services.vajra.breakout_phase import (
     PHASE_EXPANSION,
 )
 from backend.services.vajra.score_layers import ScoreLayers, momentum_improving, structure_improving
+from backend.services.vajra.setup_quality import is_ignition_context
 from backend.services.vajra.state_persistence import PriorQualificationState, load_prior_state, save_prior_state
 
 PHASE_COMPRESSION = "Compression"
@@ -106,7 +107,7 @@ def _hard_reject(
     if layers.structure_score < 38 or layers.momentum_score < 32:
         reject_reasons.append("weak_core_scores")
         return True
-    if layers.extension_quality_score < 28:
+    if layers.extension_quality_score < 28 and not is_ignition_context(row, layers):
         reject_reasons.append("over_extended")
         return True
     phase = (market_phase or "").upper()

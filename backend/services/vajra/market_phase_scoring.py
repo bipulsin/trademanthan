@@ -74,25 +74,50 @@ def enrich_execution_scores(row: Dict[str, Any]) -> Dict[str, Any]:
 
     ext_q = _fv("extension_quality_score") or max(0.0, 100.0 - _fv("extension_risk_score"))
     qual = _qual(row) or STATE_DISCOVERY
-    row["execution_rank_score"] = round(
-        compute_execution_rank_score(
-            qualification_state=qual,
-            market_phase=mp,
+
+    if row.get("armed_rank_score") is None or row.get("setup_quality_score") is None:
+        from backend.services.vajra.score_layers import ScoreLayers
+        from backend.services.vajra.setup_quality import enrich_setup_quality_fields
+
+        layers = ScoreLayers(
+            discovery_score=_fv("discovery_score"),
+            execution_score=_fv("execution_score"),
+            conviction_score=_fv("conviction_score") or _fv("confidence"),
+            risk_efficiency_score=_fv("risk_efficiency_score"),
             structure_score=_fv("structure_score"),
             momentum_score=_fv("momentum_score"),
             breakout_score=_fv("breakout_score"),
-            trend_strength_score=_fv("trend_score"),
+            extension_quality_score=ext_q,
+            tps_score=_fv("tps_score"),
             volume_score=_fv("volume_score"),
             pullback_score=_fv("pullback_score"),
             htf_alignment_score=_fv("htf_alignment_score"),
-            extension_quality_score=ext_q,
-            execution_score=_fv("execution_score"),
-            conviction_score=_fv("conviction_score") or _fv("confidence"),
-            discovery_score=_fv("discovery_score"),
-            risk_efficiency_score=_fv("risk_efficiency_score"),
-        ),
-        2,
-    )
+        )
+        row.update(enrich_setup_quality_fields(row, layers, market_phase=mp))
+
+    if qual == STATE_ARMED and _fv("armed_rank_score") > 0:
+        row["execution_rank_score"] = round(_fv("armed_rank_score"), 2)
+    else:
+        row["execution_rank_score"] = round(
+            compute_execution_rank_score(
+                qualification_state=qual,
+                market_phase=mp,
+                structure_score=_fv("structure_score"),
+                momentum_score=_fv("momentum_score"),
+                breakout_score=_fv("breakout_score"),
+                trend_strength_score=_fv("trend_score"),
+                volume_score=_fv("volume_score"),
+                pullback_score=_fv("pullback_score"),
+                htf_alignment_score=_fv("htf_alignment_score"),
+                extension_quality_score=ext_q,
+                execution_score=_fv("execution_score"),
+                conviction_score=_fv("conviction_score") or _fv("confidence"),
+                discovery_score=_fv("discovery_score"),
+                risk_efficiency_score=_fv("risk_efficiency_score"),
+                setup_quality_score=_fv("setup_quality_score"),
+            ),
+            2,
+        )
     from backend.services.vajra.trade_state import (
         compute_directional_scores,
         derive_structural_bias,
