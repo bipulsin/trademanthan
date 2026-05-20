@@ -53,8 +53,8 @@ body.landing-page #app {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(180deg, rgba(10, 15, 26, 0.55) 0%, rgba(15, 23, 42, 0.72) 45%, rgba(15, 25, 44, 0.92) 100%),
-    linear-gradient(90deg, rgba(10, 15, 26, 0.82) 0%, rgba(10, 15, 26, 0.35) 42%, rgba(10, 15, 26, 0.5) 100%);
+    linear-gradient(180deg, rgba(10, 15, 26, 0.28) 0%, rgba(15, 23, 42, 0.36) 45%, rgba(15, 25, 44, 0.46) 100%),
+    linear-gradient(90deg, rgba(10, 15, 26, 0.41) 0%, rgba(10, 15, 26, 0.18) 42%, rgba(10, 15, 26, 0.25) 100%);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -65,7 +65,34 @@ body.landing-page #app {
   .landing-wallpaper-scrim {
     background:
       url('hero-visual.png') center right / cover no-repeat,
-      linear-gradient(90deg, rgba(10, 15, 26, 0.92) 0%, rgba(10, 15, 26, 0.45) 50%, rgba(10, 15, 26, 0.75) 100%);
+      linear-gradient(90deg, rgba(10, 15, 26, 0.46) 0%, rgba(10, 15, 26, 0.22) 50%, rgba(10, 15, 26, 0.38) 100%);
+  }
+}
+
+/* Phone portrait: vertical video framing + lighter hero scrim */
+@media (max-width: 768px) and (orientation: portrait) {
+  .landing-wallpaper-video {
+    top: 50%;
+    left: 50%;
+    width: auto;
+    height: 100%;
+    min-width: 100%;
+    min-height: 100%;
+    max-width: none;
+    transform: translate(-50%, -50%);
+    object-fit: cover;
+    object-position: center center;
+  }
+
+  .landing-wallpaper-scrim {
+    background:
+      linear-gradient(180deg, rgba(10, 15, 26, 0.22) 0%, rgba(15, 23, 42, 0.28) 55%, rgba(15, 25, 44, 0.38) 100%),
+      linear-gradient(180deg, transparent 0%, rgba(10, 15, 26, 0.12) 70%, rgba(10, 15, 26, 0.28) 100%);
+  }
+
+  .landing-hero::before {
+    background:
+      radial-gradient(ellipse 80% 50% at 50% 35%, rgba(59, 130, 246, 0.08) 0%, transparent 60%);
   }
 }
 
@@ -215,8 +242,8 @@ body.landing-page #app {
   right: 0;
   bottom: 0;
   background:
-    radial-gradient(ellipse 100% 60% at 75% 50%, rgba(59, 130, 246, 0.12) 0%, transparent 55%),
-    radial-gradient(ellipse 80% 40% at 25% 70%, rgba(34, 211, 238, 0.06) 0%, transparent 50%);
+    radial-gradient(ellipse 100% 60% at 75% 50%, rgba(59, 130, 246, 0.08) 0%, transparent 55%),
+    radial-gradient(ellipse 80% 40% at 25% 70%, rgba(34, 211, 238, 0.04) 0%, transparent 50%);
   pointer-events: none;
   z-index: 0;
 }
@@ -511,6 +538,7 @@ body.landing-page #app {
     font-size: clamp(1.75rem, 7vw, 2.25rem);
     text-align: center;
     margin-bottom: 1rem;
+    text-shadow: 0 2px 16px rgba(0, 0, 0, 0.65);
   }
 
   .landing-hero .hero-description {
