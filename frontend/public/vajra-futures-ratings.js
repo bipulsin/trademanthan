@@ -709,6 +709,28 @@
         return modal;
     }
 
+    const RATINGS_FETCH_TIMEOUT_MS = 90000;
+
+    async function fetchJsonWithTimeout(url, options, timeoutMs) {
+        const ms = timeoutMs != null ? timeoutMs : RATINGS_FETCH_TIMEOUT_MS;
+        const ctrl = new AbortController();
+        const timer = global.setTimeout(function () {
+            ctrl.abort();
+        }, ms);
+        try {
+            const res = await fetch(url, Object.assign({}, options || {}, { signal: ctrl.signal }));
+            const data = await res.json();
+            return { res: res, data: data };
+        } catch (e) {
+            if (e && e.name === 'AbortError') {
+                throw new Error('Request timed out — try Refresh in a moment');
+            }
+            throw e;
+        } finally {
+            global.clearTimeout(timer);
+        }
+    }
+
     async function fetchRatings(scanTf, htf) {
         const q =
             '?mode=transition&scan_tf=' +
@@ -720,8 +742,13 @@
         let lastErr = null;
         for (let i = 0; i < paths.length; i++) {
             try {
-                const res = await fetch(paths[i], { headers: authHeaders(), cache: 'no-store' });
-                const data = await res.json();
+                const out = await fetchJsonWithTimeout(
+                    paths[i],
+                    { headers: authHeaders(), cache: 'no-store' },
+                    RATINGS_FETCH_TIMEOUT_MS
+                );
+                const res = out.res;
+                const data = out.data;
                 if (!res.ok) {
                     lastErr = data && data.message ? data.message : res.statusText;
                     continue;
@@ -902,7 +929,7 @@
         }
         if (refreshBtn) {
             refreshBtn.addEventListener('click', function () {
-                load();
+                load(true);
             });
         }
 
@@ -913,8 +940,8 @@
             if (ev.key === 'Escape' && modal.classList.contains('vajra-modal--open')) closeModal();
         });
 
-        async function load() {
-            if (loadInFlight) return;
+        async function load(force) {
+            if (loadInFlight && !force) return;
             loadInFlight = true;
             if (msgEl) msgEl.textContent = 'Loading transition scan (30m + 5m)…';
             try {
@@ -960,7 +987,16 @@
                         (data.htf_bias_tf || '1hr') +
                         (data.alert_count != null ? ' · Alerts: ' + data.alert_count : '');
                     if (data.data_age_sec != null && data.data_age_sec > STALE_DATA_SEC) {
-                        meta += ' · ⚠ data ' + Math.round(data.data_age_sec / 60) + 'm old — refreshing…';
+                        meta += ' · ⚠ data ' + Math.round(data.data_age_sec / 60) + 'm old';
+                    }
+                    if (data.stale_reason || data.source === 'db_stale') {
+                        meta +=
+                            ' · Showing last saved scan' +
+                            (data.stale_reason ? ' (' + data.stale_reason + ')' : '') +
+                            ' — 5m job will refresh';
+                    }
+                    if (data.source === 'empty') {
+                        meta += ' · No saved scan yet — wait for next 5m cycle or click Refresh';
                     }
                     metaEl.textContent = meta;
                 }

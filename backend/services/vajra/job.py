@@ -268,21 +268,23 @@ def resolve_vajra_ratings_for_api(
     db_rows = fetch_vajra_ratings_for_session(sd)
     updated_at = fetch_vajra_ratings_updated_at(sd)
     stale, reason = is_vajra_ratings_stale(db_rows, updated_at)
-    if db_rows and not stale:
+
+    if db_rows:
         if use_cache:
             _LIVE_CACHE[cache_key] = (now, db_rows)
-        return db_rows, "db", None
+        source = "db_stale" if stale else "db"
+        if stale:
+            logger.info(
+                "vajra ratings stale (%s) — serving DB snapshot (no blocking recompute)",
+                reason,
+            )
+        return db_rows, source, reason
 
-    if stale and db_rows:
-        logger.info("vajra ratings stale (%s) — live recompute for API", reason)
-    elif not db_rows:
-        logger.info("vajra ratings empty — live recompute for API")
-
-    rows = _run_transition_pipeline_live(sd)
-    source = "live_recompute" if db_rows else "live"
-    if use_cache and rows:
-        _LIVE_CACHE[cache_key] = (now, rows)
-    return rows, source, reason
+    logger.info(
+        "vajra ratings empty for session %s — wait for 5m job or POST /run",
+        sd,
+    )
+    return [], "empty", reason or "no_rows"
 
 
 def maybe_refresh_vajra_after_deploy() -> Optional[Dict[str, Any]]:
