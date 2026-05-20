@@ -495,6 +495,70 @@
         return 0;
     }
 
+    /** Modal default: EXECUTABLE → ARMED → DISCOVERY → REJECT (higher sorts first when desc). */
+    function modalQualificationSortRank(row) {
+        const q = qualificationOf(row);
+        if (q === QUAL_EXECUTABLE) return 5;
+        if (q === QUAL_ARMED) return 4;
+        if (q === QUAL_WATCHLIST) return 3;
+        if (q === QUAL_DISCOVERY) return 2;
+        if (q === QUAL_REJECT) return 1;
+        return 0;
+    }
+
+    function armedRankValue(row) {
+        const armed = Number(row && row.armed_rank_score);
+        if (Number.isFinite(armed) && armed > 0) return armed;
+        const sq = Number(row && row.setup_quality_score);
+        const conf = Number(
+            row && row.confidence_score != null ? row.confidence_score : row && row.confidence
+        );
+        const inst = Number(row && row.institutional_participation_score);
+        return (
+            (Number.isFinite(sq) ? sq : 0) * 0.65 +
+            (Number.isFinite(conf) ? conf : 0) * 0.25 +
+            (Number.isFinite(inst) ? inst : 0) * 0.1
+        );
+    }
+
+    /** Same ordering as backend rank_armed / Top-8 ARMED section (higher rank first). */
+    function compareArmedRank(a, b) {
+        const ar = armedRankValue(b) - armedRankValue(a);
+        if (ar !== 0) return ar;
+        const sq =
+            (Number(b.setup_quality_score) || 0) - (Number(a.setup_quality_score) || 0);
+        if (sq !== 0) return sq;
+        const ig =
+            (Number(b.ignition_quality_score) || 0) -
+            (Number(a.ignition_quality_score) || 0);
+        if (ig !== 0) return ig;
+        const ip =
+            (Number(b.institutional_participation_score) || 0) -
+            (Number(a.institutional_participation_score) || 0);
+        if (ip !== 0) return ip;
+        return String(a.security || a.stock || '').localeCompare(
+            String(b.security || b.stock || ''),
+            undefined,
+            { numeric: true }
+        );
+    }
+
+    function sortModalByQualification(rows) {
+        return rows.slice().sort(function (a, b) {
+            const tier = modalQualificationSortRank(b) - modalQualificationSortRank(a);
+            if (tier !== 0) return tier;
+            if (qualificationOf(a) === QUAL_ARMED && qualificationOf(b) === QUAL_ARMED) {
+                const armedCmp = compareArmedRank(a, b);
+                if (armedCmp !== 0) return armedCmp;
+            }
+            return String(a.security || a.stock || '').localeCompare(
+                String(b.security || b.stock || ''),
+                undefined,
+                { numeric: true }
+            );
+        });
+    }
+
     function isRejectRow(row) {
         const st = String((row && row.entry_state) || '').toUpperCase();
         return st === 'REJECT' || st.indexOf('REJECT') >= 0;
@@ -620,8 +684,28 @@
                 return ((Number.isFinite(av) ? av : -1) - (Number.isFinite(bv) ? bv : -1)) * dir;
             }
             if (sortKey === 'qualification') {
-                const av = entryStateSortRank(a.qualification || a.entry_state);
-                const bv = entryStateSortRank(b.qualification || b.entry_state);
+                const av = modalQualificationSortRank(a);
+                const bv = modalQualificationSortRank(b);
+                const tier = (av - bv) * dir;
+                if (tier !== 0) return tier;
+                if (
+                    qualificationOf(a) === QUAL_ARMED &&
+                    qualificationOf(b) === QUAL_ARMED
+                ) {
+                    const armedCmp = compareArmedRank(a, b) * (sortDir === 'asc' ? -1 : 1);
+                    if (armedCmp !== 0) return armedCmp;
+                }
+                return (
+                    String(a.security || a.stock || '').localeCompare(
+                        String(b.security || b.stock || ''),
+                        undefined,
+                        { numeric: true }
+                    ) * dir
+                );
+            }
+            if (sortKey === 'setup_quality_score' || sortKey === 'armed_rank_score') {
+                const av = armedRankValue(a);
+                const bv = armedRankValue(b);
                 return (av - bv) * dir;
             }
             const av = chipDisplayValue(col || { key: sortKey }, a);
@@ -671,7 +755,7 @@
             tbody = renderTableBodyRows(rows, TOP_COLUMNS, false);
         }
         return (
-            '<p class="vajra-meta vajra-pipeline-note">Full universe — qualification-sorted</p>' +
+            '<p class="vajra-meta vajra-pipeline-note">Full universe — ARMED → DISCOVERY → REJECT (ARMED by setup rank)</p>' +
             '<div class="vajra-table-wrap"><table class="vajra-table vajra-top-table vajra-modal-table">' +
             thead +
             '<tbody>' +
@@ -880,14 +964,16 @@
         const FORCE_RELOAD_MS = 300000;
 
         function openModal() {
-            modalRows = (window._vajraRemainder || allRows).slice();
-            sortKey = 'tps_score';
+            modalRows = sortModalByQualification(
+                (window._vajraRemainder || allRows).slice()
+            );
+            sortKey = 'qualification';
             sortDir = 'desc';
             renderModal();
             if (modalSubEl) {
                 modalSubEl.textContent =
                     modalRows.length +
-                    ' symbols · grouped REJECT / WATCHLIST / EXECUTABLE. Click headers to sort.';
+                    ' symbols · ARMED → DISCOVERY → REJECT (ARMED ranked like Top 8). Click headers to sort.';
             }
             modal.setAttribute('aria-hidden', 'false');
             modal.classList.add('vajra-modal--open');
