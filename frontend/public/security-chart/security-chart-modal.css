@@ -1,0 +1,242 @@
+/* Universal Security Chart Modal — institutional terminal layout */
+.uscm-hidden {
+    display: none !important;
+}
+
+.uscm-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 100200;
+    background: rgba(2, 6, 23, 0.82);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+    opacity: 0;
+    transition: opacity 0.18s ease;
+}
+
+.uscm-backdrop.uscm-open {
+    opacity: 1;
+}
+
+.uscm-panel {
+    width: min(80vw, 1400px);
+    height: min(85vh, 900px);
+    max-width: 100%;
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+    overflow: hidden;
+}
+
+body[data-theme="light"] .uscm-panel {
+    background: #ffffff;
+    border-color: #cbd5e1;
+}
+
+.uscm-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 16px;
+    padding: 12px 16px;
+    border-bottom: 1px solid #334155;
+    flex-shrink: 0;
+}
+
+body[data-theme="light"] .uscm-header {
+    border-bottom-color: #e2e8f0;
+}
+
+.uscm-title-block {
+    flex: 1 1 200px;
+    min-width: 0;
+}
+
+.uscm-symbol {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: #f8fafc;
+    letter-spacing: 0.02em;
+}
+
+body[data-theme="light"] .uscm-symbol {
+    color: #0f172a;
+}
+
+.uscm-meta {
+    font-size: 0.78rem;
+    color: #94a3b8;
+    margin-top: 2px;
+}
+
+.uscm-ltp-block {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.uscm-ltp {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #f8fafc;
+}
+
+body[data-theme="light"] .uscm-ltp {
+    color: #0f172a;
+}
+
+.uscm-ltp.up {
+    color: #22c55e;
+}
+
+.uscm-ltp.down {
+    color: #ef4444;
+}
+
+.uscm-chg {
+    font-size: 0.8rem;
+    color: #94a3b8;
+}
+
+.uscm-tf-group {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.uscm-tf-btn {
+    border: 1px solid #475569;
+    background: #1e293b;
+    color: #e2e8f0;
+    font-size: 0.75rem;
+    padding: 4px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.uscm-tf-btn:hover {
+    border-color: #60a5fa;
+    color: #fff;
+}
+
+.uscm-tf-btn.active {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: #fff;
+}
+
+body[data-theme="light"] .uscm-tf-btn {
+    background: #f1f5f9;
+    color: #334155;
+    border-color: #cbd5e1;
+}
+
+.uscm-close {
+    border: none;
+    background: transparent;
+    color: #94a3b8;
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+}
+
+.uscm-close:hover {
+    color: #f8fafc;
+    background: #334155;
+}
+
+.uscm-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+
+.uscm-chart-wrap {
+    flex: 1 1 auto;
+    min-height: 200px;
+    position: relative;
+}
+
+.uscm-chart-root {
+    position: absolute;
+    inset: 0;
+}
+
+.uscm-skeleton {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(
+        110deg,
+        #1e293b 8%,
+        #334155 18%,
+        #1e293b 33%
+    );
+    background-size: 200% 100%;
+    animation: uscm-shimmer 1.2s ease-in-out infinite;
+    color: #94a3b8;
+    font-size: 0.9rem;
+}
+
+@keyframes uscm-shimmer {
+    0% {
+        background-position: 100% 0;
+    }
+    100% {
+        background-position: -100% 0;
+    }
+}
+
+.uscm-footer {
+    flex-shrink: 0;
+    padding: 8px 16px;
+    border-top: 1px solid #334155;
+    font-size: 0.72rem;
+    color: #64748b;
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+body[data-theme="light"] .uscm-footer {
+    border-top-color: #e2e8f0;
+}
+
+.uscm-footer-slot {
+    opacity: 0.65;
+}
+
+.vajra-security-link {
+    cursor: pointer;
+    color: #38bdf8;
+    text-decoration: none;
+    border-bottom: 1px dotted transparent;
+}
+
+.vajra-security-link:hover {
+    border-bottom-color: #38bdf8;
+    color: #7dd3fc;
+}
+
+body[data-theme="light"] .vajra-security-link {
+    color: #2563eb;
+}
+
+@media (max-width: 768px) {
+    .uscm-panel {
+        width: 100vw;
+        height: 100vh;
+        border-radius: 0;
+    }
+}

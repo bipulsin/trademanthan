@@ -29,6 +29,7 @@ import backend.routers.daily_futures as daily_futures
 import backend.routers.futures_reports as futures_reports
 import backend.routers.iron_condor as iron_condor
 import backend.routers.vajra_futures as vajra_futures
+import backend.routers.security_chart as security_chart
 # OLD SCHEDULERS - DISABLED - Migrated to smart_future_algo
 # from backend.services.master_stock_scheduler import start_scheduler, stop_scheduler
 # from backend.services.instruments_downloader import start_instruments_scheduler, stop_instruments_scheduler
@@ -297,6 +298,8 @@ app.include_router(iron_condor.router, prefix="/api")
 app.include_router(iron_condor.router, prefix="")
 app.include_router(vajra_futures.router, prefix="/api")
 app.include_router(vajra_futures.router, prefix="")
+app.include_router(security_chart.router, prefix="/api")
+app.include_router(security_chart.router, prefix="")
 
 # Create/migrate tables in a daemon thread so import + uvicorn bind is not blocked by long DB locks
 # (idle-in-transaction + migrations used to delay port 8000 for minutes → nginx 502).

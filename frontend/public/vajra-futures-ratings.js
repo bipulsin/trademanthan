@@ -97,6 +97,84 @@
         return '&_=' + Date.now();
     }
 
+    let chartEngineLoadPromise = null;
+
+    function ensureChartEngine() {
+        if (global.SecurityChartEngine) return Promise.resolve(global.SecurityChartEngine);
+        if (chartEngineLoadPromise) return chartEngineLoadPromise;
+        chartEngineLoadPromise = new Promise(function (resolve, reject) {
+            const s = document.createElement('script');
+            s.src = 'security-chart/security-chart-engine.js?v=1';
+            s.async = true;
+            s.onload = function () {
+                resolve(global.SecurityChartEngine);
+            };
+            s.onerror = function () {
+                reject(new Error('Chart module failed to load'));
+            };
+            document.head.appendChild(s);
+        });
+        return chartEngineLoadPromise;
+    }
+
+    function renderSecurityCell(r) {
+        const label = cellValue(r, { key: 'security' });
+        const stock = String(r.stock || r.security || '').trim();
+        const ik = String(r.instrument_key || '').trim();
+        const qual = String(r.qualification_stage || r.qualification_state || '');
+        return (
+            '<button type="button" class="vajra-security-link" title="Open chart" ' +
+            'data-chart-symbol="' +
+            escapeHtml(stock) +
+            '" data-chart-instrument-key="' +
+            escapeHtml(ik) +
+            '" data-chart-label="' +
+            escapeHtml(label) +
+            '" data-chart-qual="' +
+            escapeHtml(qual) +
+            '">' +
+            escapeHtml(label) +
+            '</button>'
+        );
+    }
+
+    function openChartFromButton(btn) {
+        if (!btn) return;
+        const symbol = btn.getAttribute('data-chart-symbol') || '';
+        const instrumentKey = btn.getAttribute('data-chart-instrument-key') || '';
+        const displaySymbol = btn.getAttribute('data-chart-label') || symbol;
+        const qual = btn.getAttribute('data-chart-qual') || '';
+        ensureChartEngine()
+            .then(function (eng) {
+                return eng.openSecurityChart({
+                    symbol: symbol,
+                    instrumentType: 'FUT',
+                    instrumentKey: instrumentKey,
+                    displaySymbol: displaySymbol,
+                    exchange: 'NSE',
+                    timeframe: '5m',
+                    metadata: { qualification: qual },
+                });
+            })
+            .catch(function (err) {
+                if (global.console && global.console.warn) {
+                    global.console.warn('Security chart:', err);
+                }
+            });
+    }
+
+    function bindSecurityChartClicks(rootEl) {
+        if (!rootEl || rootEl._vajraChartBound) return;
+        rootEl._vajraChartBound = true;
+        rootEl.addEventListener('click', function (ev) {
+            const btn = ev.target.closest('.vajra-security-link');
+            if (!btn) return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            openChartFromButton(btn);
+        });
+    }
+
     function escapeHtml(s) {
         return String(s)
             .replace(/&/g, '&amp;')
@@ -431,8 +509,7 @@
         let tbody = '';
         rows.forEach(function (r, idx) {
             tbody += '<tr class="vajra-screener-row' + rowQualClass(r) + '">';
-            tbody +=
-                '<td class="vajra-td-security">' + escapeHtml(cellValue(r, { key: 'security' })) + '</td>';
+            tbody += '<td class="vajra-td-security">' + renderSecurityCell(r) + '</td>';
             cols.forEach(function (col) {
                 let tdClass = col.num ? 'vajra-td-chip num' : 'vajra-td-chip';
                 if (col.key === 'qualification') tdClass += ' vajra-td-qual';
@@ -987,6 +1064,7 @@
         function renderModal() {
             if (!modalTableEl) return;
             modalTableEl.innerHTML = renderModalTable(sortRows(modalRows, sortKey, sortDir), sortKey, sortDir);
+            bindSecurityChartClicks(modalTableEl);
             modalTableEl.querySelectorAll('.vajra-sort-th').forEach(function (th) {
                 th.addEventListener('click', function () {
                     const key = th.getAttribute('data-sort-key');
@@ -1042,6 +1120,7 @@
                 if (listEl) {
                     listEl._vajraTopRows = (data && data.top_picks) || [];
                     listEl.innerHTML = renderTopTable(null, data);
+                    bindSecurityChartClicks(listEl);
                     listEl.querySelectorAll('[data-vajra-enter]').forEach(function (btn) {
                         btn.addEventListener('click', function (ev) {
                             const sym = ev.currentTarget.getAttribute('data-vajra-stock');
