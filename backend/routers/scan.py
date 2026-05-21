@@ -4764,13 +4764,6 @@ async def get_latest_webhook_data(background_tasks: BackgroundTasks, db: Session
             IntradayStockOption.trade_date >= filter_date_start,
             IntradayStockOption.trade_date < filter_date_end
         ).order_by(desc(IntradayStockOption.alert_time)).limit(200).all()
-        bullish_records = [
-            record for record in bullish_records
-            if not live_trading.is_scan_option_tracking_disabled(
-                record.option_contract,
-                record.buy_time or record.trade_date,
-            )
-        ]
         
         # Fetch Bearish alerts from database for the current trading day only
         # Use date range comparison instead of exact equality to handle timezone/time differences
@@ -4779,13 +4772,6 @@ async def get_latest_webhook_data(background_tasks: BackgroundTasks, db: Session
             IntradayStockOption.trade_date >= filter_date_start,
             IntradayStockOption.trade_date < filter_date_end
         ).order_by(desc(IntradayStockOption.alert_time)).limit(200).all()
-        bearish_records = [
-            record for record in bearish_records
-            if not live_trading.is_scan_option_tracking_disabled(
-                record.option_contract,
-                record.buy_time or record.trade_date,
-            )
-        ]
         
         # Group records by alert_time for Bullish
         bullish_alerts = []
@@ -4909,6 +4895,10 @@ async def get_latest_webhook_data(background_tasks: BackgroundTasks, db: Session
                     except Exception as retry_error:
                         logger.info(f"⚠️ Retry option contract determination failed for {record.stock_name}: {str(retry_error)}")
                 
+                _record_date = record.buy_time or record.trade_date
+                _tracking_disabled = live_trading.is_scan_option_tracking_disabled(
+                    record.option_contract, _record_date
+                )
                 grouped_bullish[alert_key]["stocks"].append({
                     "stock_name": record.stock_name,
                     "trigger_price": record.stock_ltp or 0.0,
@@ -4953,7 +4943,12 @@ async def get_latest_webhook_data(background_tasks: BackgroundTasks, db: Session
                     "buy_order_id": record.buy_order_id or None,
                     "buy_time": record.buy_time.isoformat() if record.buy_time else None,
                     "trade_id": record.id,
-                    "live_exit_enabled": live_trading.is_scan_trade_live_exit_enabled(record.id),
+                    "live_tracking_disabled": _tracking_disabled,
+                    "live_exit_enabled": (
+                        False
+                        if _tracking_disabled
+                        else live_trading.is_scan_trade_live_exit_enabled(record.id)
+                    ),
                 })
             
             bullish_alerts = list(grouped_bullish.values())
@@ -5080,6 +5075,10 @@ async def get_latest_webhook_data(background_tasks: BackgroundTasks, db: Session
                     except Exception as retry_error:
                         logger.info(f"⚠️ Retry option contract determination failed for {record.stock_name}: {str(retry_error)}")
                 
+                _record_date = record.buy_time or record.trade_date
+                _tracking_disabled = live_trading.is_scan_option_tracking_disabled(
+                    record.option_contract, _record_date
+                )
                 grouped_bearish[alert_key]["stocks"].append({
                     "stock_name": record.stock_name,
                     "trigger_price": record.stock_ltp or 0.0,
@@ -5124,7 +5123,12 @@ async def get_latest_webhook_data(background_tasks: BackgroundTasks, db: Session
                     "buy_order_id": record.buy_order_id or None,
                     "buy_time": record.buy_time.isoformat() if record.buy_time else None,
                     "trade_id": record.id,
-                    "live_exit_enabled": live_trading.is_scan_trade_live_exit_enabled(record.id),
+                    "live_tracking_disabled": _tracking_disabled,
+                    "live_exit_enabled": (
+                        False
+                        if _tracking_disabled
+                        else live_trading.is_scan_trade_live_exit_enabled(record.id)
+                    ),
                 })
             
             bearish_alerts = list(grouped_bearish.values())

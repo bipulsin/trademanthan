@@ -16,6 +16,7 @@ from starlette.concurrency import run_in_threadpool
 from backend.database import get_db
 from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
+from backend.services.chartink_scan_bridge import chartink_payload_for_scan, run_scan_chartink_ingest
 from backend.services.daily_futures_service import (
     confirm_buy,
     confirm_sell,
@@ -209,11 +210,23 @@ async def _chartink_bearish_webhook_background(symbols: list, raw_saved_name: st
         logger.exception("daily_futures_bearish chartink failed raw_file=%s", raw_saved_name)
 
 
+async def _scan_chartink_bridge_background(scan_payload: Dict[str, Any], forced_type: str) -> None:
+    """Mirror ChartInk hits into intraday_stock_options for scan.html."""
+    try:
+        await run_in_threadpool(run_scan_chartink_ingest, scan_payload, forced_type)
+    except Exception:
+        logger.exception(
+            "chartink_scan_bridge background failed forced_type=%s",
+            forced_type,
+        )
+
+
 async def _resolve_daily_futures_chartink_symbols(
     request: Request,
     *,
     persist_body: Callable[[bytes], str],
-) -> Tuple[List[str], str]:
+    direction: str = "bullish",
+) -> Tuple[List[str], str, Dict[str, Any]]:
     """
     Collect symbols from query string + body (JSON, urlencoded, multipart text fields, or GET-only).
     Persists either raw POST bytes or a JSON audit record (GET / multipart).
@@ -238,8 +251,9 @@ async def _resolve_daily_futures_chartink_symbols(
                 status_code=503,
                 detail="Server could not store webhook receipt; retry shortly",
             ) from e
-        symbols = normalize_symbols_from_payload(df_chartink_accum_finalize_payload(acc))
-        return symbols, Path(inbox_path).name
+        flat = df_chartink_accum_finalize_payload(acc)
+        symbols = normalize_symbols_from_payload(flat)
+        return symbols, Path(inbox_path).name, chartink_payload_for_scan(flat, direction=direction)
 
     if "multipart/form-data" in ct:
         form = await request.form()
@@ -258,8 +272,9 @@ async def _resolve_daily_futures_chartink_symbols(
                 status_code=503,
                 detail="Server could not store webhook receipt; retry shortly",
             ) from e
-        symbols = normalize_symbols_from_payload(df_chartink_accum_finalize_payload(acc))
-        return symbols, Path(inbox_path).name
+        flat = df_chartink_accum_finalize_payload(acc)
+        symbols = normalize_symbols_from_payload(flat)
+        return symbols, Path(inbox_path).name, chartink_payload_for_scan(flat, direction=direction)
 
     raw = await request.body()
     if not raw.strip():
@@ -277,13 +292,14 @@ async def _resolve_daily_futures_chartink_symbols(
                 status_code=503,
                 detail="Server could not store webhook receipt; retry shortly",
             ) from e
-        symbols = normalize_symbols_from_payload(df_chartink_accum_finalize_payload(acc))
+        flat = df_chartink_accum_finalize_payload(acc)
+        symbols = normalize_symbols_from_payload(flat)
         if not symbols:
             raise HTTPException(
                 status_code=400,
                 detail="Empty body and no symbols in query string (use ?stocks=... or POST a body)",
             )
-        return symbols, Path(inbox_path).name
+        return symbols, Path(inbox_path).name, chartink_payload_for_scan(flat, direction=direction)
 
     try:
         inbox_path = persist_body(raw)
@@ -327,20 +343,21 @@ async def chartink_webhook(
     if not webhook_secret_ok(prov):
         raise HTTPException(status_code=401, detail="Invalid or missing webhook secret")
 
-    symbols, receipt_name = await _resolve_daily_futures_chartink_symbols(
-        request, persist_body=persist_chartink_webhook_raw_body
+    symbols, receipt_name, scan_payload = await _resolve_daily_futures_chartink_symbols(
+        request, persist_body=persist_chartink_webhook_raw_body, direction="bullish"
     )
     if not symbols:
         raise HTTPException(status_code=400, detail="No symbols found in payload")
 
     logger.info(
-        "daily_futures chartink %s accepted symbol_count=%d raw_receipt=%s (queue background)",
+        "daily_futures chartink %s accepted symbol_count=%d raw_receipt=%s (queue background + scan bridge)",
         (request.method or "?").upper(),
         len(symbols),
         receipt_name,
     )
     sym_copy = list(symbols)
     background_tasks.add_task(_chartink_webhook_background, sym_copy, receipt_name)
+    background_tasks.add_task(_scan_chartink_bridge_background, dict(scan_payload), "bullish")
     return {
         "success": True,
         "symbols_received": len(sym_copy),
@@ -368,13 +385,14 @@ async def chartink_bearish_webhook(
     if not webhook_bearish_secret_ok(prov):
         raise HTTPException(status_code=401, detail="Invalid or missing bearish webhook secret")
 
-    symbols, receipt_name = await _resolve_daily_futures_chartink_symbols(
-        request, persist_body=persist_chartink_bearish_webhook_raw_body
+    symbols, receipt_name, scan_payload = await _resolve_daily_futures_chartink_symbols(
+        request, persist_body=persist_chartink_bearish_webhook_raw_body, direction="bearish"
     )
     if not symbols:
         raise HTTPException(status_code=400, detail="No symbols found in payload")
     sym_copy = list(symbols)
     background_tasks.add_task(_chartink_bearish_webhook_background, sym_copy, receipt_name)
+    background_tasks.add_task(_scan_chartink_bridge_background, dict(scan_payload), "bearish")
     return {
         "success": True,
         "direction": "SHORT",
