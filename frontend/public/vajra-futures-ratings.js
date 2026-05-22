@@ -104,7 +104,7 @@
         if (chartEngineLoadPromise) return chartEngineLoadPromise;
         chartEngineLoadPromise = new Promise(function (resolve, reject) {
             const s = document.createElement('script');
-            s.src = 'security-chart/security-chart-engine.js?v=2';
+            s.src = 'security-chart/security-chart-engine.js?v=3';
             s.async = true;
             s.onload = function () {
                 resolve(global.SecurityChartEngine);
@@ -117,6 +117,81 @@
         return chartEngineLoadPromise;
     }
 
+    const chartPayloadRegistry = {};
+    let chartPayloadSeq = 0;
+
+    function registerChartPayload(payload) {
+        const id = 'vcp' + ++chartPayloadSeq;
+        chartPayloadRegistry[id] = payload || {};
+        return id;
+    }
+
+    function getChartPayload(id) {
+        return id ? chartPayloadRegistry[id] || null : null;
+    }
+
+    function buildScreenerFromRow(r) {
+        if (!r) return {};
+        const tt = String(r.trade_type || '').toUpperCase();
+        const direction = tt.indexOf('SHORT') >= 0 || tt.indexOf('BEAR') >= 0 ? 'SHORT' : 'LONG';
+        return {
+            direction: direction,
+            tps: r.tps_score,
+            ecs: r.ecs_score,
+            momentum: r.transition_state || r.momentum,
+            emaState: r.ema_reclaim_status,
+            vwapState: r.vwap_reclaim_status,
+            structure: r.structure,
+            trend: r.trend,
+            volume: r.volume,
+            lifecycle: r.pipeline_stage || r.entry_state || r.qualification_stage,
+            armed: r.enter_enabled,
+            setupQuality: r.trade_quality_score,
+            institutionalBias: r.reversal_risk,
+            pullbackQuality: r.pullback_quality_score,
+            market_phase: r.market_phase,
+            extension_risk_score: r.extension_risk_score,
+            evs_score: r.evs_score,
+            conviction_score: r.conviction_score,
+            qualification: r.qualification_stage || r.qualification_state,
+        };
+    }
+
+    function buildScreenerFromTrade(t) {
+        if (!t) return {};
+        const disc = t.discovery_snapshot || {};
+        const met = t.metrics_at_entry || {};
+        const entry = parseFloat(t.entry_price);
+        const live = parseFloat(t.current_price);
+        let pnlPct = null;
+        if (Number.isFinite(entry) && entry > 0 && Number.isFinite(live)) {
+            const bull = String(t.direction || '').toUpperCase().indexOf('L') === 0;
+            pnlPct = bull ? ((live - entry) / entry) * 100 : ((entry - live) / entry) * 100;
+        }
+        const alerts = t.alerts || [];
+        const insight =
+            alerts.length && alerts[alerts.length - 1].message
+                ? alerts[alerts.length - 1].message
+                : '';
+        return {
+            direction: t.direction,
+            livePnlPct: pnlPct,
+            tradeHealth: t.trade_health,
+            lifecycle: t.lifecycle_state,
+            tps: disc.tps_score != null ? disc.tps_score : met.tps_score,
+            ecs: disc.ecs_score != null ? disc.ecs_score : met.ecs_score,
+            emaState: t.ema_status,
+            vwapState: t.vwap_status,
+            structure: t.structure_status,
+            momentum: t.momentum_status,
+            pullbackQuality: disc.pullback_quality_score,
+            extension_risk_score: disc.extension_risk_score,
+            market_phase: disc.market_phase,
+            institutionalBias: disc.reversal_risk || disc.htf_bias,
+            insight: insight,
+        };
+    }
+
     function renderSecurityChartLink(opts) {
         opts = opts || {};
         const stock = String(opts.stock || opts.symbol || '').trim();
@@ -124,10 +199,20 @@
         const label = String(opts.label || opts.displaySymbol || stock || '—').trim();
         const qual = String(opts.qual || opts.qualification || opts.qualification_stage || '').trim();
         const extra = String(opts.className || '').trim();
+        const direction = String(opts.direction || '').trim();
+        const screenerData = opts.screenerData || null;
+        let payloadAttr = '';
+        if (screenerData && typeof screenerData === 'object' && Object.keys(screenerData).length) {
+            const pid = registerChartPayload({
+                screenerData: screenerData,
+                direction: direction || screenerData.direction,
+            });
+            payloadAttr = ' data-chart-payload-id="' + escapeHtml(pid) + '"';
+        }
         return (
             '<button type="button" class="vajra-security-link' +
             (extra ? ' ' + extra : '') +
-            '" title="Open chart" ' +
+            '" title="Open chart + intelligence" ' +
             'data-chart-symbol="' +
             escapeHtml(stock) +
             '" data-chart-instrument-key="' +
@@ -136,7 +221,11 @@
             escapeHtml(label) +
             '" data-chart-qual="' +
             escapeHtml(qual) +
-            '">' +
+            '" data-chart-direction="' +
+            escapeHtml(direction) +
+            '"' +
+            payloadAttr +
+            '>' +
             escapeHtml(label) +
             '</button>'
         );
@@ -152,6 +241,7 @@
             instrumentKey: ik,
             label: label,
             qual: qual,
+            screenerData: buildScreenerFromRow(r),
         });
     }
 
@@ -161,6 +251,14 @@
         const instrumentKey = btn.getAttribute('data-chart-instrument-key') || '';
         const displaySymbol = btn.getAttribute('data-chart-label') || symbol;
         const qual = btn.getAttribute('data-chart-qual') || '';
+        const stored = getChartPayload(btn.getAttribute('data-chart-payload-id'));
+        const screenerData =
+            (stored && stored.screenerData) || {};
+        const direction =
+            (stored && stored.direction) ||
+            btn.getAttribute('data-chart-direction') ||
+            screenerData.direction ||
+            '';
         ensureChartEngine()
             .then(function (eng) {
                 return eng.openSecurityChart({
@@ -170,6 +268,8 @@
                     displaySymbol: displaySymbol,
                     exchange: 'NSE',
                     timeframe: '5m',
+                    direction: direction,
+                    screenerData: screenerData,
                     metadata: { qualification: qual },
                 });
             })
@@ -1310,5 +1410,7 @@
         TOP_N: TOP_N,
         renderSecurityChartLink: renderSecurityChartLink,
         bindSecurityChartClicks: bindSecurityChartClicks,
+        buildScreenerFromRow: buildScreenerFromRow,
+        buildScreenerFromTrade: buildScreenerFromTrade,
     };
 })(window);

@@ -13,7 +13,8 @@
     const TF_OPTIONS = ['5m', '15m', '30m', '1hr', '1d'];
     const LWC_URL =
         'https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js';
-    const CSS_HREF = 'security-chart/security-chart-modal.css?v=1';
+    const CSS_HREF = 'security-chart/security-chart-modal.css?v=2';
+    const INTEL_JS = 'security-chart/trade-intelligence-panel.js?v=1';
     const LIVE_POLL_MS = 1000;
 
     const CANDLE_UP = '#38bdf8';
@@ -78,6 +79,7 @@
     }
 
     let lwcPromise = null;
+    let intelPromise = null;
     let cssLoaded = false;
     let modalRoot = null;
 
@@ -123,8 +125,48 @@
         return lwcPromise;
     }
 
+    function loadIntelPanel() {
+        if (global.TradeIntelligencePanel) return Promise.resolve(global.TradeIntelligencePanel);
+        if (intelPromise) return intelPromise;
+        intelPromise = new Promise(function (resolve, reject) {
+            const s = document.createElement('script');
+            s.src = INTEL_JS;
+            s.async = true;
+            s.onload = function () {
+                resolve(global.TradeIntelligencePanel);
+            };
+            s.onerror = function () {
+                reject(new Error('Failed to load Trade Intelligence Panel'));
+            };
+            document.head.appendChild(s);
+        });
+        return intelPromise;
+    }
+
     function ensureAssets() {
-        return Promise.all([loadCss(), loadLwc()]);
+        return Promise.all([loadCss(), loadLwc(), loadIntelPanel()]);
+    }
+
+    function dirBadgeHtml(direction) {
+        const d = String(direction || '').toUpperCase();
+        if (d.indexOf('S') === 0) {
+            return '<span class="uscm-dir uscm-dir--short">SHORT</span>';
+        }
+        if (d.indexOf('L') === 0) {
+            return '<span class="uscm-dir uscm-dir--long">LONG</span>';
+        }
+        return '';
+    }
+
+    function headerPnlHtml(screenerData) {
+        const sd = screenerData || {};
+        const pct = sd.livePnlPct != null ? sd.livePnlPct : sd.pnlPct;
+        if (pct == null || pct === '') return '';
+        const n = parseFloat(pct);
+        if (!Number.isFinite(n)) return '';
+        const cls = n >= 0 ? 'uscm-header-pnl--pos' : 'uscm-header-pnl--neg';
+        const txt = (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
+        return '<span class="uscm-header-pnl ' + cls + '">' + txt + '</span>';
     }
 
     /** Centralized live quote polling (one timer per subscribed symbol). */
@@ -248,7 +290,52 @@
         this._open = false;
         this._lastBarTime = null;
         this._lastOhlc = null;
+        this._screenerData = null;
+        this._direction = '';
     }
+
+    SecurityChartModal.prototype._renderHeader = function () {
+        const root = modalRoot;
+        if (!root || !this.config) return;
+        root.querySelector('[data-uscm-symbol]').textContent = this.displaySymbol;
+        root.querySelector('[data-uscm-meta]').textContent =
+            this.config.exchange +
+            ' · ' +
+            this.config.instrumentType +
+            (this.instrumentKey ? ' · ' + this.instrumentKey : '');
+        const dirHost = root.querySelector('[data-uscm-dir]');
+        if (dirHost) dirHost.innerHTML = dirBadgeHtml(this._direction);
+        const pnlHost = root.querySelector('[data-uscm-header-pnl]');
+        if (pnlHost) pnlHost.innerHTML = headerPnlHtml(this._screenerData);
+        const qual =
+            this.config.metadata && this.config.metadata.qualification
+                ? 'Qual: ' + this.config.metadata.qualification
+                : '';
+        root.querySelector('[data-uscm-footer-meta]').textContent = qual;
+    };
+
+    SecurityChartModal.prototype._renderIntelligence = function () {
+        const root = modalRoot;
+        if (!root) return;
+        const host = root.querySelector('[data-uscm-intel]');
+        const panel = global.TradeIntelligencePanel;
+        if (!host || !panel) return;
+        const data = this._screenerData;
+        const hasData =
+            data &&
+            typeof data === 'object' &&
+            (Object.keys(data).length > 0 || Array.isArray(data.sections));
+        if (!hasData) {
+            panel.clear(host);
+            root.classList.remove('uscm-panel--with-intel');
+            return;
+        }
+        root.classList.add('uscm-panel--with-intel');
+        panel.render(host, {
+            screenerData: data,
+            insight: data.insight || data.insightBanner || '',
+        });
+    };
 
     SecurityChartModal.prototype._ensureDom = function () {
         if (modalRoot) return modalRoot;
@@ -260,24 +347,30 @@
             '<div class="uscm-panel">' +
             '<header class="uscm-header">' +
             '<div class="uscm-title-block">' +
+            '<div class="uscm-title-row">' +
             '<div class="uscm-symbol" data-uscm-symbol>—</div>' +
+            '<span data-uscm-dir></span>' +
+            '</div>' +
             '<div class="uscm-meta" data-uscm-meta>—</div>' +
             '</div>' +
             '<div class="uscm-ltp-block">' +
+            '<div class="uscm-ltp-row">' +
             '<div class="uscm-ltp" data-uscm-ltp>—</div>' +
+            '<span data-uscm-header-pnl></span>' +
+            '</div>' +
             '<div class="uscm-chg" data-uscm-chg></div>' +
             '</div>' +
             '<div class="uscm-tf-group" data-uscm-tf></div>' +
             '<button type="button" class="uscm-close" data-uscm-close aria-label="Close">&times;</button>' +
             '</header>' +
-            '<div class="uscm-body">' +
+            '<div class="uscm-body uscm-body--split">' +
             '<div class="uscm-chart-wrap">' +
             '<div class="uscm-skeleton" data-uscm-skeleton>Loading chart…</div>' +
             '<div class="uscm-chart-root" data-uscm-chart></div>' +
             '</div>' +
+            '<aside class="uscm-intel-wrap tip-panel--empty" data-uscm-intel aria-label="Trade intelligence"></aside>' +
             '</div>' +
             '<footer class="uscm-footer">' +
-            '<span class="uscm-footer-slot">Signals overlay (future)</span>' +
             '<span class="uscm-footer-slot" data-uscm-footer-meta></span>' +
             '</footer>' +
             '</div>';
@@ -343,9 +436,16 @@
         this._destroyChart();
         if (modalRoot) {
             modalRoot.classList.remove('uscm-open');
+            modalRoot.classList.remove('uscm-panel--with-intel');
             modalRoot.classList.add('uscm-hidden');
+            const intel = modalRoot.querySelector('[data-uscm-intel]');
+            if (intel && global.TradeIntelligencePanel) {
+                global.TradeIntelligencePanel.clear(intel);
+            }
         }
         this.instrumentKey = null;
+        this._screenerData = null;
+        this._direction = '';
     };
 
     SecurityChartModal.prototype.setTimeframe = function (tf) {
@@ -578,6 +678,7 @@
 
     SecurityChartModal.prototype.open = function (config) {
         const self = this;
+        config = config || {};
         this.config = {
             symbol: (config.symbol || '').trim(),
             instrumentType: (config.instrumentType || 'FUT').toUpperCase(),
@@ -589,19 +690,16 @@
         this.timeframe = config.timeframe || '5m';
         this.instrumentKey = this.config.instrumentKey;
         this.displaySymbol = this.config.displaySymbol || this.config.symbol;
+        this._screenerData = config.screenerData || config.screener || null;
+        this._direction =
+            config.direction ||
+            (this._screenerData && this._screenerData.direction) ||
+            '';
 
         return ensureAssets().then(function () {
             const root = self._ensureDom();
-            root.querySelector('[data-uscm-symbol]').textContent = self.displaySymbol;
-            root.querySelector('[data-uscm-meta]').textContent =
-                self.config.exchange +
-                ' · ' +
-                self.config.instrumentType +
-                (self.instrumentKey ? ' · ' + self.instrumentKey : '');
-            root.querySelector('[data-uscm-footer-meta]').textContent =
-                self.config.metadata && self.config.metadata.qualification
-                    ? 'Qual: ' + self.config.metadata.qualification
-                    : '';
+            self._renderHeader();
+            self._renderIntelligence();
             root.querySelectorAll('.uscm-tf-btn').forEach(function (b) {
                 b.classList.toggle('active', b.dataset.tf === self.timeframe);
             });
@@ -630,4 +728,7 @@
         ChartWebSocketManager: ChartWebSocketManager,
         ensureAssets: ensureAssets,
     };
+
+    /** Alias for scanner modules expecting openChartModal(config). */
+    global.openChartModal = openSecurityChart;
 })(typeof window !== 'undefined' ? window : globalThis);

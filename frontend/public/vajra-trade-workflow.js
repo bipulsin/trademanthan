@@ -505,10 +505,16 @@
         const ratings = global.VajraFuturesRatings;
         const label = t.future_symbol || t.stock || '—';
         if (ratings && typeof ratings.renderSecurityChartLink === 'function') {
+            const buildTrade =
+                typeof ratings.buildScreenerFromTrade === 'function'
+                    ? ratings.buildScreenerFromTrade
+                    : null;
             return ratings.renderSecurityChartLink({
                 stock: t.stock || label,
                 instrumentKey: t.instrument_key || '',
                 label: label,
+                direction: t.direction,
+                screenerData: buildTrade ? buildTrade(t) : null,
             });
         }
         return esc(label);

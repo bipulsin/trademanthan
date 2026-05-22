@@ -82,11 +82,17 @@
         if (!ratings || typeof ratings.renderSecurityChartLink !== 'function') {
             return esc(identity.title);
         }
+        const buildTrade =
+            typeof ratings.buildScreenerFromTrade === 'function'
+                ? ratings.buildScreenerFromTrade
+                : null;
         return ratings.renderSecurityChartLink({
             stock: trade.stock || identity.title,
             instrumentKey: trade.instrument_key || '',
             label: identity.title,
             className: 'vop-symbol-link',
+            direction: trade.direction,
+            screenerData: buildTrade ? buildTrade(trade) : null,
         });
     }
 
