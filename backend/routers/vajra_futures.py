@@ -229,6 +229,31 @@ def run_vajra_ratings_now(user: User = Depends(_require_user)):
         return JSONResponse(status_code=500, content={"success": False, "message": str(e)})
 
 
+@router.get("/contract-lot-size")
+def vajra_contract_lot_size(
+    instrument_key: str = Query(..., description="Upstox NSE FUT instrument_key"),
+    user: User = Depends(_require_user),
+):
+    """Read-only exchange lot size for open-position P&L display (no trade logic)."""
+    del user
+    try:
+        from backend.services.smart_futures_picker.position_sizing import (
+            get_futures_lot_size_by_instrument_key,
+        )
+
+        ik = str(instrument_key or "").strip()
+        if not ik:
+            return JSONResponse(status_code=400, content={"success": False, "message": "instrument_key required"})
+        ls = int(get_futures_lot_size_by_instrument_key(ik))
+        return JSONResponse(
+            status_code=200,
+            content={"success": True, "instrument_key": ik, "lot_size": ls if ls > 0 else None},
+        )
+    except Exception as e:
+        logger.exception("vajra_contract_lot_size: %s", e)
+        return JSONResponse(status_code=500, content={"success": False, "message": str(e)})
+
+
 @router.get("/trades")
 def list_vajra_trades(
     status: str = Query("active", description="active or closed"),

@@ -444,11 +444,23 @@
             alert('Entry price is required.');
             return;
         }
+        const ik = _discoveryRow.instrument_key || '';
+        let futLotSize = null;
+        if (ik) {
+            try {
+                const lotRes = await api(
+                    '/contract-lot-size?instrument_key=' + encodeURIComponent(ik)
+                );
+                if (lotRes && lotRes.lot_size > 0) futLotSize = parseInt(lotRes.lot_size, 10);
+            } catch (e) {
+                /* display-only; activate still proceeds */
+            }
+        }
         const payload = {
             platform: _platform,
             stock: _discoveryRow.stock || _discoveryRow.security,
             future_symbol: _discoveryRow.security || _discoveryRow.stock,
-            instrument_key: _discoveryRow.instrument_key || '',
+            instrument_key: ik,
             direction: _entryDraft.direction || dirFromRow(_discoveryRow),
             entry_price: entryPrice,
             lots: parseInt(_entryDraft.lots, 10) || 1,
@@ -458,6 +470,7 @@
             metrics: Object.assign({}, (_preview && _preview.metrics) || {}, {
                 checklist_eval: (_preview && _preview.checklist_eval) || [],
                 extension_risk_level: (_preview && _preview.extension_risk_level) || null,
+                fut_lot_size: futLotSize,
             }),
             warnings: (_preview && _preview.warnings) || [],
         };

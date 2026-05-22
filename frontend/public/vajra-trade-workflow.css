@@ -385,6 +385,26 @@ table.vajra-active-table td {
 .vop-pnl--neg {
     color: #f87171;
 }
+.vop-pnl-amt {
+    margin-top: 10px;
+    font-size: 1.75rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+}
+.vop-pnl-amt--pos {
+    color: #facc15;
+    text-shadow: 0 0 18px rgba(250, 204, 21, 0.28);
+}
+.vop-pnl-amt--neg {
+    color: #f87171;
+}
+body[data-theme="light"] .vop-pnl-amt--pos,
+body.theme-page[data-theme="light"] .vop-pnl-amt--pos {
+    color: #2563eb;
+    text-shadow: 0 0 14px rgba(37, 99, 235, 0.18);
+}
 .vop-rr-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));

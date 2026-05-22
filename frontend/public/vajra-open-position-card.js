@@ -94,6 +94,38 @@
         return { title: title, subtitle: subtitle };
     }
 
+    const API_BASE =
+        global.location.hostname === 'localhost' || global.location.hostname === '127.0.0.1'
+            ? 'http://localhost:8000'
+            : global.location.origin;
+    const _lotCache = {};
+    const _lotPending = {};
+
+    function authHeaders() {
+        const t = global.localStorage.getItem('trademanthan_token') || '';
+        return {
+            Authorization: 'Bearer ' + t,
+            Accept: 'application/json',
+        };
+    }
+
+    function contractLotSize(trade) {
+        const disc = trade.discovery_snapshot || {};
+        const met = trade.metrics_at_entry || {};
+        const ik = String(trade.instrument_key || '').trim();
+        const ls = parseInt(
+            trade.fut_lot_size ||
+                trade.lot_size ||
+                met.fut_lot_size ||
+                met.lot_size ||
+                disc.fut_lot_size ||
+                disc.lot_size ||
+                (_lotCache[ik] || 0),
+            10
+        );
+        return ls > 0 ? ls : 0;
+    }
+
     function pnlPct(trade, live) {
         const entry = parseFloat(trade.entry_price);
         const px = parseFloat(live);
@@ -101,6 +133,75 @@
         const bull = dirBull(trade.direction);
         const raw = bull ? ((px - entry) / entry) * 100 : ((entry - px) / entry) * 100;
         return raw;
+    }
+
+    /** Rupee P&L for 1 exchange lot × trade lots: (live − entry) × lot_size × lots. */
+    function pnlRupees(trade, live) {
+        const entry = parseFloat(trade.entry_price);
+        const px = parseFloat(live);
+        const lots = parseInt(trade.lots, 10) || 1;
+        const unit = contractLotSize(trade);
+        if (!Number.isFinite(entry) || !Number.isFinite(px) || unit <= 0) return null;
+        const bull = dirBull(trade.direction);
+        const diff = bull ? px - entry : entry - px;
+        return diff * lots * unit;
+    }
+
+    function fmtPnlAmt(v) {
+        if (v == null || !Number.isFinite(v)) return '—';
+        const n = Math.round(v);
+        const sign = n < 0 ? '-' : '';
+        return sign + '₹' + Math.abs(n).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+    }
+
+    function fetchContractLotSize(instrumentKey) {
+        const ik = String(instrumentKey || '').trim();
+        if (!ik || _lotCache[ik] || _lotPending[ik]) return Promise.resolve(_lotCache[ik] || 0);
+        _lotPending[ik] = true;
+        const urls = [
+            API_BASE + '/api/vajra-futures/contract-lot-size?instrument_key=' + encodeURIComponent(ik),
+            API_BASE + '/vajra-futures/contract-lot-size?instrument_key=' + encodeURIComponent(ik),
+        ];
+        return (async function tryOne(i) {
+            if (i >= urls.length) {
+                delete _lotPending[ik];
+                return 0;
+            }
+            try {
+                const res = await fetch(urls[i], { headers: authHeaders() });
+                const data = await res.json();
+                if (res.ok && data && data.lot_size > 0) {
+                    _lotCache[ik] = parseInt(data.lot_size, 10);
+                }
+            } catch (e) {
+                return tryOne(i + 1);
+            }
+            delete _lotPending[ik];
+            return _lotCache[ik] || 0;
+        })(0);
+    }
+
+    function prefetchLotSizes(rows, container) {
+        const need = {};
+        (rows || []).forEach(function (t) {
+            const ik = String(t.instrument_key || '').trim();
+            if (!ik || contractLotSize(t) > 0) return;
+            need[ik] = true;
+        });
+        Object.keys(need).forEach(function (ik) {
+            fetchContractLotSize(ik).then(function () {
+                if (!container) return;
+                container.querySelectorAll('.vop-card').forEach(function (card) {
+                    const tid = card.getAttribute('data-trade-id');
+                    const trade = (rows || []).find(function (r) {
+                        return String(r.id) === String(tid);
+                    });
+                    if (trade && String(trade.instrument_key || '').trim() === ik) {
+                        patchCard(card, trade);
+                    }
+                });
+            });
+        });
     }
 
     function progressModel(trade, levels, live) {
@@ -264,6 +365,10 @@
             pct != null ? (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%' : '—';
         const pctCls =
             pct == null ? '' : pct >= 0 ? ' vop-pnl--pos' : ' vop-pnl--neg';
+        const pnlRs = pnlRupees(trade, live);
+        const pnlAmtStr = fmtPnlAmt(pnlRs);
+        const pnlAmtCls =
+            pnlRs == null ? '' : pnlRs >= 0 ? ' vop-pnl-amt--pos' : ' vop-pnl-amt--neg';
         const health = parseFloat(trade.trade_health);
         const band = healthBand(health);
         const disc = trade.discovery_snapshot || {};
@@ -315,6 +420,11 @@
             '" data-vop-pnl>' +
             esc(pctStr) +
             '</div>' +
+            '</div>' +
+            '<div class="vop-pnl-amt' +
+            pnlAmtCls +
+            '" data-vop-pnl-amt>' +
+            esc(pnlAmtStr) +
             '</div>' +
             '</div>' +
             '<div class="vop-zone vop-zone--risk">' +
@@ -404,6 +514,8 @@
         return JSON.stringify({
             id: trade.id,
             cp: trade.current_price,
+            ep: trade.entry_price,
+            ls: contractLotSize(trade),
             th: trade.trade_health,
             lc: trade.lifecycle_state,
             es: trade.ema_status,
@@ -441,6 +553,14 @@
             pnlEl.textContent = pctStr;
             pnlEl.className =
                 'vop-pnl' + (pct == null ? '' : pct >= 0 ? ' vop-pnl--pos' : ' vop-pnl--neg');
+        }
+        const pnlRs = pnlRupees(trade, live);
+        const pnlAmtEl = card.querySelector('[data-vop-pnl-amt]');
+        if (pnlAmtEl) {
+            pnlAmtEl.textContent = fmtPnlAmt(pnlRs);
+            pnlAmtEl.className =
+                'vop-pnl-amt' +
+                (pnlRs == null ? '' : pnlRs >= 0 ? ' vop-pnl-amt--pos' : ' vop-pnl-amt--neg');
         }
         const hEl = card.querySelector('[data-vop-health]');
         if (hEl) {
@@ -520,6 +640,7 @@
                 patchCard(card, trade);
             });
             bindCloseHandlers(container);
+            prefetchLotSizes(rows, container);
             return;
         }
 
@@ -532,6 +653,7 @@
         html += '</div>';
         container.innerHTML = html;
         bindCloseHandlers(container);
+        prefetchLotSizes(rows, container);
     }
 
     global.VajraOpenPositionCard = {
