@@ -331,6 +331,12 @@
         return h;
     }
 
+    function signalIcon(type) {
+        if (type === 'pos') return '✅';
+        if (type === 'warn') return '⚠️';
+        return '❌';
+    }
+
     function renderSignals(signals) {
         if (!signals.length) {
             return '<p class="vop-signal-empty">Awaiting structure updates…</p>';
@@ -339,15 +345,19 @@
             '<ul class="vop-signals">' +
             signals
                 .map(function (s) {
-                    const icon = s.type === 'pos' ? '✓' : s.type === 'warn' ? '⚠' : '✕';
+                    const icon = signalIcon(s.type);
+                    const label =
+                        s.type === 'pos' ? 'Positive' : s.type === 'warn' ? 'Caution' : 'At risk';
                     return (
                         '<li class="vop-signal vop-signal--' +
                         esc(s.type) +
-                        '"><span class="vop-signal-icon" aria-hidden="true">' +
+                        '"><span class="vop-signal-icon" aria-hidden="true" title="' +
+                        esc(label) +
+                        '">' +
                         icon +
-                        '</span>' +
+                        '</span><span class="vop-signal-text">' +
                         esc(s.text) +
-                        '</li>'
+                        '</span></li>'
                     );
                 })
                 .join('') +
@@ -466,22 +476,24 @@
             '</div>' +
             '<div class="vop-zone vop-zone--health">' +
             '<div class="vop-zone-title">Trade Health</div>' +
-            '<div class="vop-health-score ' +
-            band.cls +
-            '" title="TPS = Trade Probability Score (' +
+            '<div class="vop-health-head" title="TPS = Trade Probability Score (' +
             esc(tps) +
             ') · ECS = Entry Confidence Score (' +
             esc(ecs) +
             ')" data-vop-health>' +
+            '<div class="vop-health-score ' +
+            band.cls +
+            '">' +
             '<span class="vop-health-num">' +
             esc(num(health, 0) != null ? num(health, 0) : '—') +
             '</span>' +
             '<span class="vop-health-max">/ 100</span>' +
             '</div>' +
-            '<div class="vop-health-state ' +
+            '<span class="vop-health-state ' +
             band.cls +
             '" data-vop-health-state>' +
             esc(band.state) +
+            '</span>' +
             '</div>' +
             '<div data-vop-signals-wrap>' +
             renderSignals(signals) +
@@ -562,13 +574,22 @@
                 'vop-pnl-amt' +
                 (pnlRs == null ? '' : pnlRs >= 0 ? ' vop-pnl-amt--pos' : ' vop-pnl-amt--neg');
         }
-        const hEl = card.querySelector('[data-vop-health]');
-        if (hEl) {
-            hEl.className = 'vop-health-score ' + band.cls;
-            hEl.querySelector('.vop-health-num').textContent =
-                num(health, 0) != null ? num(health, 0) : '—';
+        const hWrap = card.querySelector('[data-vop-health]');
+        if (hWrap) {
+            const scoreEl = hWrap.querySelector('.vop-health-score');
+            if (scoreEl) {
+                scoreEl.className = 'vop-health-score ' + band.cls;
+                const numEl = scoreEl.querySelector('.vop-health-num');
+                if (numEl) {
+                    numEl.textContent = num(health, 0) != null ? num(health, 0) : '—';
+                }
+            }
+            const stateEl = hWrap.querySelector('[data-vop-health-state]');
+            if (stateEl) {
+                stateEl.textContent = band.state;
+                stateEl.className = 'vop-health-state ' + band.cls;
+            }
         }
-        set('[data-vop-health-state]', band.state, 'vop-health-state ' + band.cls);
         const fill = card.querySelector('[data-vop-progress]');
         if (fill) fill.style.width = prog.currentPct + '%';
         const curMark = card.querySelector('[data-vop-cur-mark]');
