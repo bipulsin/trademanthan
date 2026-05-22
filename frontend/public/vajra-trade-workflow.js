@@ -474,67 +474,18 @@
         syncActiveStockKeys(rows);
         const el = document.getElementById(_runningElId);
         if (!el) return;
+        if (global.VajraOpenPositionCard && typeof global.VajraOpenPositionCard.mount === 'function') {
+            global.VajraOpenPositionCard.mount(el, rows, {
+                emptyHtml: _emptyOpenHtml || '',
+                onClose: openCloseModal,
+            });
+            return;
+        }
         if (!rows.length) {
             el.innerHTML = _emptyOpenHtml || '';
             return;
         }
-        let h = _compactSections
-            ? '<div class="vajra-active-block">'
-            : '<div class="vajra-active-block"><h3>Vajra managed (discretionary)</h3>';
-        rows.forEach(function (t) {
-            const pnl = t.unrealized_pnl != null ? Number(t.unrealized_pnl).toFixed(2) : '—';
-            const health = t.trade_health != null ? Number(t.trade_health).toFixed(0) : '—';
-            let alerts = '';
-            (t.alerts || []).slice(-4).forEach(function (a) {
-                const cls =
-                    a.level === 'positive' ? 'vajra-alert-pos' : a.level === 'warning' ? 'vajra-alert-warn' : 'vajra-alert-risk';
-                alerts += '<div class="' + cls + '">' + esc(a.message || '') + '</div>';
-            });
-            h +=
-                '<details class="vajra-active-card" open><summary>' +
-                esc(t.future_symbol || t.stock) +
-                ' · ' +
-                esc(t.direction) +
-                ' · Health ' +
-                health +
-                ' · P&amp;L ' +
-                esc(pnl) +
-                '</summary><div class="vajra-active-body">' +
-                '<div class="vajra-active-grid">' +
-                '<span>Lifecycle: <strong>' +
-                esc(t.lifecycle_state || '—') +
-                '</strong></span>' +
-                '<span>TPS: ' +
-                esc(t.discovery_snapshot && t.discovery_snapshot.tps_score) +
-                '</span>' +
-                '<span>ECS: ' +
-                esc(t.discovery_snapshot && t.discovery_snapshot.ecs_score) +
-                '</span>' +
-                '<span>EMA: ' +
-                esc(t.ema_status || '—') +
-                '</span>' +
-                '<span>VWAP: ' +
-                esc(t.vwap_status || '—') +
-                '</span>' +
-                '<span>Structure: ' +
-                esc(t.structure_status || '—') +
-                '</span>' +
-                '<span>Momentum: ' +
-                esc(t.momentum_status || '—') +
-                '</span>' +
-                '</div>' +
-                alerts +
-                '<div class="vajra-wf-actions"><button type="button" class="vajra-wf-btn vajra-wf-btn-danger" data-close-trade="' +
-                t.id +
-                '">CLOSE TRADE</button></div></div></details>';
-        });
-        h += '</div>';
-        el.innerHTML = h;
-        el.querySelectorAll('[data-close-trade]').forEach(function (btn) {
-            btn.addEventListener('click', function () {
-                openCloseModal(parseInt(btn.getAttribute('data-close-trade'), 10));
-            });
-        });
+        el.innerHTML = '<p class="vajra-meta">Open position UI module failed to load.</p>';
     }
 
     function renderClosedTrades(rows) {
