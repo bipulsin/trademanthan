@@ -21,6 +21,7 @@
     const EMA5_COLOR = '#eab308';
     const VWAP_COLOR = '#ffffff';
     const EMA_PERIOD = 5;
+    const INITIAL_VISIBLE_BARS = 100;
 
     function sessionDayKey(unixSec) {
         return new Date(unixSec * 1000).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
@@ -60,6 +61,20 @@
             out.push({ time: b.time, value: cumV > 0 ? cumTpV / cumV : tp });
         });
         return out;
+    }
+
+    /** Show only the trailing N bars in the viewport (user can scroll/zoom to see more). */
+    function setInitialVisibleBars(chart, barCount) {
+        if (!chart || barCount < 1) return;
+        const visible = Math.min(INITIAL_VISIBLE_BARS, barCount);
+        if (visible >= barCount) {
+            chart.timeScale().fitContent();
+            return;
+        }
+        chart.timeScale().setVisibleLogicalRange({
+            from: barCount - visible,
+            to: barCount - 1,
+        });
     }
 
     let lwcPromise = null;
@@ -461,7 +476,7 @@
         this._lastOhlc = last
             ? { open: last.open, high: last.high, low: last.low, close: last.close }
             : null;
-        this.chart.timeScale().fitContent();
+        setInitialVisibleBars(this.chart, candles.length);
         const self = this;
         if (typeof ResizeObserver !== 'undefined') {
             this.resizeObs = new ResizeObserver(function () {
