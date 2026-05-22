@@ -16,6 +16,52 @@
     const CSS_HREF = 'security-chart/security-chart-modal.css?v=1';
     const LIVE_POLL_MS = 1000;
 
+    const CANDLE_UP = '#38bdf8';
+    const CANDLE_DOWN = '#ef4444';
+    const EMA5_COLOR = '#eab308';
+    const VWAP_COLOR = '#ffffff';
+    const EMA_PERIOD = 5;
+
+    function sessionDayKey(unixSec) {
+        return new Date(unixSec * 1000).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    }
+
+    function computeEma5(bars) {
+        if (!bars || bars.length < EMA_PERIOD) return [];
+        const k = 2 / (EMA_PERIOD + 1);
+        let sum = 0;
+        for (let i = 0; i < EMA_PERIOD; i++) sum += bars[i].close;
+        let ema = sum / EMA_PERIOD;
+        const out = [{ time: bars[EMA_PERIOD - 1].time, value: ema }];
+        for (let i = EMA_PERIOD; i < bars.length; i++) {
+            ema = (bars[i].close - ema) * k + ema;
+            out.push({ time: bars[i].time, value: ema });
+        }
+        return out;
+    }
+
+    function computeSessionVwap(bars) {
+        if (!bars || !bars.length) return [];
+        const out = [];
+        let day = null;
+        let cumTpV = 0;
+        let cumV = 0;
+        bars.forEach(function (b) {
+            const d = sessionDayKey(b.time);
+            if (d !== day) {
+                day = d;
+                cumTpV = 0;
+                cumV = 0;
+            }
+            const tp = (b.high + b.low + b.close) / 3;
+            const vol = b.volume || 0;
+            cumTpV += tp * vol;
+            cumV += vol;
+            out.push({ time: b.time, value: cumV > 0 ? cumTpV / cumV : tp });
+        });
+        return out;
+    }
+
     let lwcPromise = null;
     let cssLoaded = false;
     let modalRoot = null;
@@ -178,6 +224,9 @@
         this.chart = null;
         this.candleSeries = null;
         this.volumeSeries = null;
+        this.emaSeries = null;
+        this.vwapSeries = null;
+        this._barsCache = [];
         this.resizeObs = null;
         this.unsubLive = null;
         this.abortLoad = null;
@@ -259,6 +308,9 @@
         }
         this.candleSeries = null;
         this.volumeSeries = null;
+        this.emaSeries = null;
+        this.vwapSeries = null;
+        this._barsCache = [];
         const el = modalRoot && modalRoot.querySelector('[data-uscm-chart]');
         if (el) el.innerHTML = '';
     };
@@ -349,33 +401,61 @@
             timeScale: { borderColor: grid, timeVisible: true, secondsVisible: false },
         });
         this.candleSeries = this.chart.addCandlestickSeries({
-            upColor: '#22c55e',
-            downColor: '#ef4444',
+            upColor: CANDLE_UP,
+            downColor: CANDLE_DOWN,
             borderVisible: false,
-            wickUpColor: '#22c55e',
-            wickDownColor: '#ef4444',
+            wickUpColor: CANDLE_UP,
+            wickDownColor: CANDLE_DOWN,
         });
         this.volumeSeries = this.chart.addHistogramSeries({
             color: '#64748b',
             priceFormat: { type: 'volume' },
             priceScaleId: '',
         });
+        this.emaSeries = this.chart.addLineSeries({
+            color: EMA5_COLOR,
+            lineWidth: 2,
+            title: 'EMA(5)',
+            priceLineVisible: false,
+            lastValueVisible: true,
+        });
+        this.vwapSeries = this.chart.addLineSeries({
+            color: VWAP_COLOR,
+            lineWidth: 2,
+            title: 'VWAP',
+            priceLineVisible: false,
+            lastValueVisible: true,
+        });
         this.chart.priceScale('').applyOptions({
             scaleMargins: { top: 0.82, bottom: 0 },
         });
-        const candles = bars.map(function (b) {
+        this._barsCache = bars.map(function (b) {
+            return {
+                time: b.time,
+                open: b.open,
+                high: b.high,
+                low: b.low,
+                close: b.close,
+                volume: b.volume || 0,
+            };
+        });
+        const candles = this._barsCache.map(function (b) {
             return { time: b.time, open: b.open, high: b.high, low: b.low, close: b.close };
         });
-        const vols = bars.map(function (b) {
+        const vols = this._barsCache.map(function (b) {
             const up = b.close >= b.open;
             return {
                 time: b.time,
-                value: b.volume || 0,
-                color: up ? 'rgba(34,197,94,0.45)' : 'rgba(239,68,68,0.45)',
+                value: b.volume,
+                color: up ? 'rgba(56,189,248,0.45)' : 'rgba(239,68,68,0.45)',
             };
         });
         this.candleSeries.setData(candles);
         this.volumeSeries.setData(vols);
+        const emaData = computeEma5(this._barsCache);
+        const vwapData = computeSessionVwap(this._barsCache);
+        if (emaData.length) this.emaSeries.setData(emaData);
+        if (vwapData.length) this.vwapSeries.setData(vwapData);
         const last = candles[candles.length - 1];
         this._lastBarTime = last ? last.time : null;
         this._lastOhlc = last
@@ -439,6 +519,20 @@
             });
     };
 
+    SecurityChartModal.prototype._refreshOverlays = function () {
+        if (!this._barsCache.length) return;
+        const emaData = computeEma5(this._barsCache);
+        const vwapData = computeSessionVwap(this._barsCache);
+        if (this.emaSeries && emaData.length) {
+            const lastEma = emaData[emaData.length - 1];
+            this.emaSeries.update(lastEma);
+        }
+        if (this.vwapSeries && vwapData.length) {
+            const lastVwap = vwapData[vwapData.length - 1];
+            this.vwapSeries.update(lastVwap);
+        }
+    };
+
     SecurityChartModal.prototype._tickBar = function (quote) {
         if (!this.candleSeries || quote.ltp == null || this._lastBarTime == null || !this._lastOhlc)
             return;
@@ -447,6 +541,12 @@
         o.close = ltp;
         o.high = Math.max(o.high, ltp);
         o.low = Math.min(o.low, ltp);
+        const lastBar = this._barsCache[this._barsCache.length - 1];
+        if (lastBar && lastBar.time === this._lastBarTime) {
+            lastBar.close = o.close;
+            lastBar.high = o.high;
+            lastBar.low = o.low;
+        }
         try {
             this.candleSeries.update({
                 time: this._lastBarTime,
@@ -455,6 +555,7 @@
                 low: o.low,
                 close: o.close,
             });
+            this._refreshOverlays();
         } catch (e) {
             /* ignore occasional time mismatch */
         }

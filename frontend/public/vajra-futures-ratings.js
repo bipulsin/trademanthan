@@ -104,7 +104,7 @@
         if (chartEngineLoadPromise) return chartEngineLoadPromise;
         chartEngineLoadPromise = new Promise(function (resolve, reject) {
             const s = document.createElement('script');
-            s.src = 'security-chart/security-chart-engine.js?v=1';
+            s.src = 'security-chart/security-chart-engine.js?v=2';
             s.async = true;
             s.onload = function () {
                 resolve(global.SecurityChartEngine);
