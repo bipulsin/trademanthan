@@ -288,6 +288,7 @@ table.vajra-active-table td {
     border-radius: 12px;
     padding: 16px 18px;
     box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+    color: #cbd5e1;
 }
 .vop-card--danger {
     border-color: rgba(239, 68, 68, 0.35);
@@ -638,4 +639,179 @@ body.theme-page[data-theme="light"] .vop-pnl-amt--pos {
     .vop-actions-secondary {
         flex-wrap: wrap;
     }
+}
+
+/* Light theme — self-contained surface (avoids dark card + inherited dark page text) */
+body[data-theme="light"] .vop-card,
+body.theme-page[data-theme="light"] .vop-card {
+    background: linear-gradient(165deg, #ffffff 0%, #f8fafc 100%);
+    border: 1px solid var(--theme-border, rgba(148, 163, 184, 0.4));
+    box-shadow: 0 2px 14px rgba(15, 23, 42, 0.08);
+    color: #334155;
+}
+body[data-theme="light"] .vop-card--danger,
+body.theme-page[data-theme="light"] .vop-card--danger {
+    border-color: rgba(220, 38, 38, 0.45);
+    box-shadow: 0 0 0 1px rgba(220, 38, 38, 0.1), 0 2px 14px rgba(15, 23, 42, 0.08);
+}
+body[data-theme="light"] .vop-symbol,
+body.theme-page[data-theme="light"] .vop-symbol {
+    color: #0f172a;
+}
+body[data-theme="light"] .vop-sub,
+body[data-theme="light"] .vop-zone-title,
+body[data-theme="light"] .vop-lbl,
+body[data-theme="light"] .vop-progress-labels,
+body[data-theme="light"] .vop-signal-empty,
+body.theme-page[data-theme="light"] .vop-sub,
+body.theme-page[data-theme="light"] .vop-zone-title,
+body.theme-page[data-theme="light"] .vop-lbl,
+body.theme-page[data-theme="light"] .vop-progress-labels,
+body.theme-page[data-theme="light"] .vop-signal-empty {
+    color: #64748b;
+}
+body[data-theme="light"] .vop-val,
+body.theme-page[data-theme="light"] .vop-val {
+    color: #1e293b;
+}
+body[data-theme="light"] .vop-val--live,
+body.theme-page[data-theme="light"] .vop-val--live {
+    color: #2563eb;
+}
+body[data-theme="light"] .vop-pnl,
+body.theme-page[data-theme="light"] .vop-pnl {
+    color: #64748b;
+}
+body[data-theme="light"] .vop-pnl--pos,
+body.theme-page[data-theme="light"] .vop-pnl--pos {
+    color: #16a34a;
+    text-shadow: none;
+}
+body[data-theme="light"] .vop-pnl--neg,
+body.theme-page[data-theme="light"] .vop-pnl--neg {
+    color: #dc2626;
+}
+body[data-theme="light"] .vop-dir--long,
+body.theme-page[data-theme="light"] .vop-dir--long {
+    background: rgba(22, 163, 74, 0.12);
+    color: #15803d;
+}
+body[data-theme="light"] .vop-dir--short,
+body.theme-page[data-theme="light"] .vop-dir--short {
+    background: rgba(220, 38, 38, 0.1);
+    color: #b91c1c;
+}
+body[data-theme="light"] .vop-health-score,
+body.theme-page[data-theme="light"] .vop-health-score {
+    color: #0f172a;
+}
+body[data-theme="light"] .vop-health-max,
+body.theme-page[data-theme="light"] .vop-health-max {
+    color: #64748b;
+}
+body[data-theme="light"] .vop-health-strong,
+body.theme-page[data-theme="light"] .vop-health-strong {
+    color: #15803d;
+}
+body[data-theme="light"] .vop-health-state.vop-health-strong,
+body.theme-page[data-theme="light"] .vop-health-state.vop-health-strong {
+    background: rgba(22, 163, 74, 0.12);
+}
+body[data-theme="light"] .vop-health-healthy,
+body.theme-page[data-theme="light"] .vop-health-healthy {
+    color: #1d4ed8;
+}
+body[data-theme="light"] .vop-health-state.vop-health-healthy,
+body.theme-page[data-theme="light"] .vop-health-state.vop-health-healthy {
+    background: rgba(37, 99, 235, 0.1);
+}
+body[data-theme="light"] .vop-health-caution,
+body.theme-page[data-theme="light"] .vop-health-caution {
+    color: #b45309;
+}
+body[data-theme="light"] .vop-health-state.vop-health-caution,
+body.theme-page[data-theme="light"] .vop-health-state.vop-health-caution {
+    background: rgba(245, 158, 11, 0.12);
+}
+body[data-theme="light"] .vop-health-weak,
+body[data-theme="light"] .vop-health-neutral,
+body.theme-page[data-theme="light"] .vop-health-weak,
+body.theme-page[data-theme="light"] .vop-health-neutral {
+    color: #b91c1c;
+}
+body[data-theme="light"] .vop-health-state.vop-health-weak,
+body.theme-page[data-theme="light"] .vop-health-state.vop-health-weak {
+    background: rgba(220, 38, 38, 0.1);
+}
+body[data-theme="light"] .vop-signal--pos,
+body.theme-page[data-theme="light"] .vop-signal--pos {
+    color: #15803d;
+}
+body[data-theme="light"] .vop-signal--warn,
+body.theme-page[data-theme="light"] .vop-signal--warn {
+    color: #b45309;
+}
+body[data-theme="light"] .vop-signal--risk,
+body.theme-page[data-theme="light"] .vop-signal--risk {
+    color: #dc2626;
+}
+body[data-theme="light"] .vop-progress-entry,
+body.theme-page[data-theme="light"] .vop-progress-entry {
+    background: #64748b;
+}
+body[data-theme="light"] .vop-progress-fill,
+body.theme-page[data-theme="light"] .vop-progress-fill {
+    background: rgba(37, 99, 235, 0.18);
+}
+body[data-theme="light"] .vop-progress-marker,
+body.theme-page[data-theme="light"] .vop-progress-marker {
+    background: #2563eb;
+    box-shadow: 0 0 6px rgba(37, 99, 235, 0.45);
+}
+body[data-theme="light"] .vop-lifecycle,
+body.theme-page[data-theme="light"] .vop-lifecycle {
+    border-top-color: rgba(148, 163, 184, 0.3);
+}
+body[data-theme="light"] .vop-lc-step,
+body.theme-page[data-theme="light"] .vop-lc-step {
+    color: #94a3b8;
+}
+body[data-theme="light"] .vop-lc-step--active,
+body.theme-page[data-theme="light"] .vop-lc-step--active {
+    color: #1d4ed8;
+    background: rgba(37, 99, 235, 0.12);
+    box-shadow: none;
+}
+body[data-theme="light"] .vop-lc-arrow,
+body.theme-page[data-theme="light"] .vop-lc-arrow {
+    color: #cbd5e1;
+}
+body[data-theme="light"] .vop-intel,
+body.theme-page[data-theme="light"] .vop-intel {
+    background: #f1f5f9;
+    border-left-color: #2563eb;
+    color: #334155;
+}
+body[data-theme="light"] .vop-btn--ghost,
+body.theme-page[data-theme="light"] .vop-btn--ghost {
+    background: rgba(37, 99, 235, 0.08);
+    border-color: rgba(37, 99, 235, 0.35);
+    color: #1d4ed8;
+}
+body[data-theme="light"] .vop-btn--soft,
+body.theme-page[data-theme="light"] .vop-btn--soft {
+    background: #f1f5f9;
+    border-color: #e2e8f0;
+    color: #475569;
+}
+body[data-theme="light"] .vop-btn--close,
+body.theme-page[data-theme="light"] .vop-btn--close {
+    border-color: #e2e8f0;
+    color: #64748b;
+}
+body[data-theme="light"] .vop-btn--close-emphasis,
+body.theme-page[data-theme="light"] .vop-btn--close-emphasis {
+    background: rgba(220, 38, 38, 0.08);
+    border-color: rgba(220, 38, 38, 0.4);
+    color: #b91c1c;
 }
