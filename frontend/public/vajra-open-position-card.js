@@ -77,6 +77,19 @@
         };
     }
 
+    function renderSymbolChartLink(trade, identity) {
+        const ratings = global.VajraFuturesRatings;
+        if (!ratings || typeof ratings.renderSecurityChartLink !== 'function') {
+            return esc(identity.title);
+        }
+        return ratings.renderSecurityChartLink({
+            stock: trade.stock || identity.title,
+            instrumentKey: trade.instrument_key || '',
+            label: identity.title,
+            className: 'vop-symbol-link',
+        });
+    }
+
     function parseIdentity(trade) {
         const fs = String(trade.future_symbol || '').trim();
         const stock = String(trade.stock || '').trim();
@@ -408,7 +421,7 @@
             '<div class="vop-top">' +
             '<div class="vop-zone vop-zone--identity">' +
             '<div class="vop-symbol">' +
-            esc(identity.title) +
+            renderSymbolChartLink(trade, identity) +
             '</div>' +
             '<div class="vop-sub">' +
             esc(identity.subtitle) +
@@ -662,6 +675,7 @@
             });
             bindCloseHandlers(container);
             prefetchLotSizes(rows, container);
+            bindChartClicks(container);
             return;
         }
 

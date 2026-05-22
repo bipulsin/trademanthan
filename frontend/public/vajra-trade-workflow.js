@@ -501,6 +501,28 @@
         el.innerHTML = '<p class="vajra-meta">Open position UI module failed to load.</p>';
     }
 
+    function renderClosedSymbolCell(t) {
+        const ratings = global.VajraFuturesRatings;
+        const label = t.future_symbol || t.stock || '—';
+        if (ratings && typeof ratings.renderSecurityChartLink === 'function') {
+            return ratings.renderSecurityChartLink({
+                stock: t.stock || label,
+                instrumentKey: t.instrument_key || '',
+                label: label,
+            });
+        }
+        return esc(label);
+    }
+
+    function bindWorkflowChartClicks() {
+        const ratings = global.VajraFuturesRatings;
+        if (!ratings || typeof ratings.bindSecurityChartClicks !== 'function') return;
+        const runEl = document.getElementById(_runningElId);
+        const closedEl = document.getElementById(_closedElId);
+        if (runEl) ratings.bindSecurityChartClicks(runEl);
+        if (closedEl) ratings.bindSecurityChartClicks(closedEl);
+    }
+
     function renderClosedTrades(rows) {
         const el = document.getElementById(_closedElId);
         if (!el) return;
@@ -516,7 +538,7 @@
         rows.forEach(function (t) {
             h +=
                 '<tr><td>' +
-                esc(t.future_symbol || t.stock) +
+                renderClosedSymbolCell(t) +
                 '</td><td>' +
                 esc(t.direction) +
                 '</td><td>' +
@@ -604,6 +626,7 @@
         _emptyOpenHtml = opts.emptyOpenHtml || '';
         _emptyClosedHtml = opts.emptyClosedHtml || '';
         _listAllPlatforms = opts.listAllPlatforms === true;
+        bindWorkflowChartClicks();
         const tick = refreshCockpit();
         setInterval(refreshCockpit, 300000);
         return tick;

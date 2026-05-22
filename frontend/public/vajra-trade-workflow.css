@@ -327,6 +327,24 @@ table.vajra-active-table td {
     color: #f1f5f9;
     line-height: 1.2;
 }
+.vop-symbol .vop-symbol-link,
+.vop-symbol .vajra-security-link {
+    font-size: 1.15rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: #93c5fd;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 3px;
+}
+.vop-symbol .vop-symbol-link:hover,
+.vop-symbol .vajra-security-link:hover {
+    color: #bfdbfe;
+}
+.vajra-active-table .vajra-security-link {
+    font-size: inherit;
+    font-weight: 600;
+}
 .vop-sub {
     font-size: 0.68rem;
     color: #64748b;
@@ -675,6 +693,18 @@ body.theme-page[data-theme="light"] .vop-card--danger {
 body[data-theme="light"] .vop-symbol,
 body.theme-page[data-theme="light"] .vop-symbol {
     color: #0f172a;
+}
+body[data-theme="light"] .vop-symbol .vop-symbol-link,
+body[data-theme="light"] .vop-symbol .vajra-security-link,
+body.theme-page[data-theme="light"] .vop-symbol .vop-symbol-link,
+body.theme-page[data-theme="light"] .vop-symbol .vajra-security-link {
+    color: #2563eb;
+}
+body[data-theme="light"] .vop-symbol .vop-symbol-link:hover,
+body[data-theme="light"] .vop-symbol .vajra-security-link:hover,
+body.theme-page[data-theme="light"] .vop-symbol .vop-symbol-link:hover,
+body.theme-page[data-theme="light"] .vop-symbol .vajra-security-link:hover {
+    color: #1d4ed8;
 }
 body[data-theme="light"] .vop-sub,
 body[data-theme="light"] .vop-zone-title,

@@ -117,13 +117,17 @@
         return chartEngineLoadPromise;
     }
 
-    function renderSecurityCell(r) {
-        const label = cellValue(r, { key: 'security' });
-        const stock = String(r.stock || r.security || '').trim();
-        const ik = String(r.instrument_key || '').trim();
-        const qual = String(r.qualification_stage || r.qualification_state || '');
+    function renderSecurityChartLink(opts) {
+        opts = opts || {};
+        const stock = String(opts.stock || opts.symbol || '').trim();
+        const ik = String(opts.instrumentKey || opts.instrument_key || '').trim();
+        const label = String(opts.label || opts.displaySymbol || stock || '—').trim();
+        const qual = String(opts.qual || opts.qualification || opts.qualification_stage || '').trim();
+        const extra = String(opts.className || '').trim();
         return (
-            '<button type="button" class="vajra-security-link" title="Open chart" ' +
+            '<button type="button" class="vajra-security-link' +
+            (extra ? ' ' + extra : '') +
+            '" title="Open chart" ' +
             'data-chart-symbol="' +
             escapeHtml(stock) +
             '" data-chart-instrument-key="' +
@@ -136,6 +140,19 @@
             escapeHtml(label) +
             '</button>'
         );
+    }
+
+    function renderSecurityCell(r) {
+        const label = cellValue(r, { key: 'security' });
+        const stock = String(r.stock || r.security || '').trim();
+        const ik = String(r.instrument_key || '').trim();
+        const qual = String(r.qualification_stage || r.qualification_state || '');
+        return renderSecurityChartLink({
+            stock: stock,
+            instrumentKey: ik,
+            label: label,
+            qual: qual,
+        });
     }
 
     function openChartFromButton(btn) {
@@ -1291,5 +1308,7 @@
         fetchRatings: fetchRatings,
         fetchRatingsStatus: fetchRatingsStatus,
         TOP_N: TOP_N,
+        renderSecurityChartLink: renderSecurityChartLink,
+        bindSecurityChartClicks: bindSecurityChartClicks,
     };
 })(window);
