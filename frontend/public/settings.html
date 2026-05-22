@@ -6,6 +6,43 @@
     <title>Settings - Tradentical</title>
     <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
     <script src="auth-check.js?v=1"></script>
+    <script>
+        (async function () {
+            try {
+                const API_BASE_URL =
+                    window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+                        ? 'http://localhost:8000'
+                        : window.location.origin;
+                const token = localStorage.getItem('trademanthan_token') || '';
+                if (!token || !token.includes('.')) {
+                    window.location.replace('index.html');
+                    return;
+                }
+                let meRes = await fetch(`${API_BASE_URL}/api/auth/me`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                    cache: 'no-store'
+                });
+                if (!meRes.ok) {
+                    meRes = await fetch(`${API_BASE_URL}/auth/me`, {
+                        headers: { Authorization: `Bearer ${token}` },
+                        cache: 'no-store'
+                    });
+                }
+                if (!meRes.ok) {
+                    window.location.replace('index.html');
+                    return;
+                }
+                const me = await meRes.json();
+                const merged = Object.assign({}, JSON.parse(localStorage.getItem('trademanthan_user') || '{}'), me || {});
+                localStorage.setItem('trademanthan_user', JSON.stringify(merged));
+                if ((String(merged.isAdmin || '').trim()) !== 'Yes') {
+                    window.location.replace('dashboard.html');
+                }
+            } catch (e) {
+                window.location.replace('index.html');
+            }
+        })();
+    </script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="settings.css">
     <link rel="stylesheet" href="left-menu.css?v=3.24">

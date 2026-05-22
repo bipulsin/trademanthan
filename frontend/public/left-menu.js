@@ -13,7 +13,7 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html?v=3.23';
+const MENU_HTML_PATH = 'left-menu.html?v=3.24';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 const NOTIFY_TRADE_CHANNEL_SCRIPT = 'notify-trade-channel.js?v=3';
 
@@ -70,6 +70,7 @@ class LeftMenu {
                 this.applyAdminNavVisibility();
                 await this.refreshUserProfileFromApi();
                 this.applyAdminNavVisibility();
+                this.enforceAdminOnlyPageAccess();
                 this.trackCurrentPageVisit();
                 this.injectMobileFooter();
                 this.injectPanelSheetHandle();
@@ -189,16 +190,29 @@ class LeftMenu {
         }
     }
 
-    /** Show Admin nav link when user is admin (isAdmin Yes in DB) */
+    /** Show admin-only nav links (Settings, Admin) when user is admin (isAdmin Yes in DB). */
     applyAdminNavVisibility() {
         let user = {};
         try {
             user = JSON.parse(localStorage.getItem('trademanthan_user') || '{}');
         } catch (e) {}
         const show = LeftMenu.isUserAdmin(user);
-        document.querySelectorAll('.nav-item.nav-item-admin[data-page="admintwc.html"]').forEach((el) => {
+        document.querySelectorAll('.nav-item.nav-item-admin[data-page]').forEach((el) => {
             el.style.display = show ? 'flex' : 'none';
         });
+    }
+
+    /** Redirect non-admins away from admin-only pages (direct URL access). */
+    enforceAdminOnlyPageAccess() {
+        const adminOnly = new Set(['settings', 'admin']);
+        if (!adminOnly.has(this.currentPage)) return;
+        let user = {};
+        try {
+            user = JSON.parse(localStorage.getItem('trademanthan_user') || '{}');
+        } catch (e) {}
+        if (!LeftMenu.isUserAdmin(user)) {
+            window.location.replace('dashboard.html');
+        }
     }
 
     setupThemeToggle() {
@@ -261,7 +275,7 @@ class LeftMenu {
                 <li class="nav-item nav-item-menu-hidden" data-page="broker.html" aria-hidden="true"><i class="fas fa-university"></i><span>Broker Management</span></li>
                 <li class="nav-item nav-item-menu-hidden" data-page="strategy.html" aria-hidden="true"><i class="fas fa-robot"></i><span>Strategy Management</span></li>
                 <li class="nav-item" data-page="reports.html"><i class="fas fa-chart-bar"></i><span>Reports</span></li>
-                <li class="nav-item" data-page="settings.html"><i class="fas fa-cog"></i><span>Settings</span></li>
+                <li class="nav-item nav-item-admin" data-page="settings.html" style="display: none;" title="Administrator only"><i class="fas fa-cog"></i><span>Settings</span></li>
                 <li class="nav-item nav-item-admin" data-page="admintwc.html" style="display: none;" title="Administrator only"><i class="fas fa-user-shield"></i><span>Admin</span></li>
             </ul>
         </nav>

@@ -113,7 +113,7 @@ def activate_trade(
                 ) VALUES (
                     :user_id, :platform, :sd, :stock, :fs, :ik,
                     :direction, :lots, :entry_price, :entry_time, 'active',
-                    :disc::jsonb, :chk::jsonb, :met::jsonb, :warn::jsonb,
+                    CAST(:disc AS jsonb), CAST(:chk AS jsonb), CAST(:met AS jsonb), CAST(:warn AS jsonb),
                     'Early Transition', 50, '[]'::jsonb, '{}'::jsonb, :now, :now
                 )
                 RETURNING id
@@ -179,9 +179,9 @@ def close_trade(
                     status = 'closed',
                     exit_price = :xp,
                     exit_time = :xt,
-                    exit_reasons = :er::jsonb,
+                    exit_reasons = CAST(:er AS jsonb),
                     realized_pnl = :pnl,
-                    journal = :jr::jsonb,
+                    journal = CAST(:jr AS jsonb),
                     closed_at = :now,
                     updated_at = :now
                 WHERE id = :id AND user_id = :uid
@@ -230,8 +230,8 @@ def refresh_all_active_trades() -> int:
                         momentum_status = :ms,
                         ema_status = :es,
                         vwap_status = :vs,
-                        alerts = :al::jsonb,
-                        lifecycle_history = :lh::jsonb,
+                        alerts = CAST(:al AS jsonb),
+                        lifecycle_history = CAST(:lh AS jsonb),
                         updated_at = NOW()
                     WHERE id = :id
                     """
@@ -277,8 +277,8 @@ def persist_refresh(user_id: int, trade_id: int) -> Optional[Dict[str, Any]]:
                     momentum_status = :ms,
                     ema_status = :es,
                     vwap_status = :vs,
-                    alerts = :al::jsonb,
-                    lifecycle_history = :lh::jsonb,
+                    alerts = CAST(:al AS jsonb),
+                    lifecycle_history = CAST(:lh AS jsonb),
                     updated_at = NOW()
                 WHERE id = :id AND user_id = :uid
                 """
