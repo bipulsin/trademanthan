@@ -641,6 +641,45 @@
         return st === 'REJECT' || st.indexOf('REJECT') >= 0;
     }
 
+    function rowStockKey(row) {
+        return String((row && (row.stock || row.security)) || '')
+            .trim()
+            .toUpperCase();
+    }
+
+    function getActiveTradeStocks() {
+        if (global.VajraTradeWorkflow && typeof global.VajraTradeWorkflow.getActiveTradeStocks === 'function') {
+            return global.VajraTradeWorkflow.getActiveTradeStocks();
+        }
+        return new Set();
+    }
+
+    function filterRowsByActivePositions(rows, activeSet) {
+        if (!activeSet || !activeSet.size) return rows || [];
+        return (rows || []).filter(function (r) {
+            const k = rowStockKey(r);
+            return !k || !activeSet.has(k);
+        });
+    }
+
+    function filterRatingsPayload(data, activeSet) {
+        if (!data || !activeSet || !activeSet.size) return data;
+        const sections = data.top_sections || {};
+        const filteredSections = {
+            EXECUTABLE: filterRowsByActivePositions(sections.EXECUTABLE, activeSet),
+            ARMED: filterRowsByActivePositions(sections.ARMED, activeSet),
+            DISCOVERY: filterRowsByActivePositions(sections.DISCOVERY, activeSet),
+        };
+        const topPicks = filterRowsByActivePositions(data.top_picks, activeSet);
+        const allFiltered = filterRowsByActivePositions(data.rows, activeSet);
+        return Object.assign({}, data, {
+            rows: allFiltered,
+            top_picks: topPicks,
+            top_sections: filteredSections,
+            remainder: filterRowsByActivePositions(data.remainder, activeSet),
+        });
+    }
+
     function rowsForTopTable(rows) {
         const pool = (rows || []).filter(function (r) {
             return !isRejectRow(r);
@@ -1030,6 +1069,7 @@
         const modalSubEl = document.getElementById(prefix + 'VajraMoreSub');
 
         let allRows = [];
+        let _lastRawData = null;
         let modalRows = [];
         let sortKey = 'tps_score';
         let sortDir = 'desc';
@@ -1039,6 +1079,85 @@
         let loadInFlight = false;
         const STALE_DATA_SEC = 420;
         const FORCE_RELOAD_MS = 300000;
+
+        function renderLoadedData(data) {
+            const activeSet = getActiveTradeStocks();
+            const filtered = filterRatingsPayload(data, activeSet);
+            allRows = filtered.rows || [];
+            global._vajraRemainder = filtered.remainder || allRows.slice(TOP_N);
+            if (listEl) {
+                listEl._vajraTopRows = filtered.top_picks || [];
+                listEl.innerHTML = renderTopTable(null, filtered);
+                bindSecurityChartClicks(listEl);
+                listEl.querySelectorAll('[data-vajra-enter]').forEach(function (btn) {
+                    btn.addEventListener('click', function (ev) {
+                        const sym = ev.currentTarget.getAttribute('data-vajra-stock');
+                        const row = (listEl._vajraTopRows || []).find(function (r) {
+                            return String(r.stock || r.security) === sym;
+                        });
+                        if (row && global.VajraTradeWorkflow && global.VajraTradeWorkflow.openEntry) {
+                            global.VajraTradeWorkflow.openEntry(row);
+                        }
+                    });
+                });
+            }
+            if (moreBtn) {
+                const rest = (filtered.remainder || allRows).length;
+                moreBtn.hidden = rest <= 0;
+                moreBtn.textContent = rest > 0 ? 'more… (' + rest + ')' : 'more…';
+            }
+            if (metaEl) {
+                let meta =
+                    'Session: ' +
+                    (filtered.session_date || data.session_date || '—') +
+                    ' · Updated: ' +
+                    fmtUpdated(
+                        filtered.computed_at || data.computed_at || (allRows[0] && allRows[0].computed_at)
+                    ) +
+                    ' · ' +
+                    allRows.length +
+                    ' symbols · 30m TPS · EES/Entry every ' +
+                    (filtered.ees_refresh_minutes || data.ees_refresh_minutes || 5) +
+                    'm · HTF ' +
+                    (filtered.htf_bias_tf || data.htf_bias_tf || '1hr') +
+                    (filtered.alert_count != null || data.alert_count != null
+                        ? ' · Alerts: ' + (filtered.alert_count != null ? filtered.alert_count : data.alert_count)
+                        : '');
+                if (
+                    (filtered.data_age_sec != null && filtered.data_age_sec > STALE_DATA_SEC) ||
+                    (data.data_age_sec != null && data.data_age_sec > STALE_DATA_SEC)
+                ) {
+                    const age =
+                        filtered.data_age_sec != null ? filtered.data_age_sec : data.data_age_sec;
+                    meta += ' · ⚠ data ' + Math.round(age / 60) + 'm old';
+                }
+                if (filtered.stale_reason || data.stale_reason || filtered.source === 'db_stale' || data.source === 'db_stale') {
+                    meta +=
+                        ' · Showing last saved scan' +
+                        (filtered.stale_reason || data.stale_reason
+                            ? ' (' + (filtered.stale_reason || data.stale_reason) + ')'
+                            : '') +
+                        ' — 5m job will refresh';
+                }
+                if (filtered.source === 'empty' || data.source === 'empty') {
+                    meta += ' · No saved scan yet — wait for next 5m cycle or click Refresh';
+                }
+                if (activeSet.size) {
+                    meta += ' · ' + activeSet.size + ' in open position (hidden from screen)';
+                }
+                metaEl.textContent = meta;
+            }
+            processEnterTelegramAlerts(allRows, filtered.session_date || data.session_date);
+            if (modal.classList.contains('vajra-modal--open')) {
+                modalRows = global._vajraRemainder || allRows.slice(TOP_N);
+                renderModal();
+            }
+        }
+
+        function refilterForActivePositions() {
+            if (!_lastRawData) return;
+            renderLoadedData(_lastRawData);
+        }
 
         function openModal() {
             modalRows = sortModalByQualification(
@@ -1110,67 +1229,16 @@
             if (msgEl) msgEl.textContent = 'Loading transition scan (30m + 5m)…';
             try {
                 const data = await fetchRatings(DEFAULT_SCAN_TF, DEFAULT_HTF);
-                allRows = (data && data.rows) || [];
-                global._vajraRemainder = (data && data.remainder) || allRows.slice(TOP_N);
+                _lastRawData = data;
                 const computedIso =
-                    (data && data.computed_at) || (allRows[0] && allRows[0].computed_at) || null;
+                    (data && data.computed_at) ||
+                    (data && data.rows && data.rows[0] && data.rows[0].computed_at) ||
+                    null;
                 const ep = tsEpoch(computedIso);
                 if (ep != null) lastComputedEpoch = ep;
                 lastFullLoadMs = Date.now();
-                if (listEl) {
-                    listEl._vajraTopRows = (data && data.top_picks) || [];
-                    listEl.innerHTML = renderTopTable(null, data);
-                    bindSecurityChartClicks(listEl);
-                    listEl.querySelectorAll('[data-vajra-enter]').forEach(function (btn) {
-                        btn.addEventListener('click', function (ev) {
-                            const sym = ev.currentTarget.getAttribute('data-vajra-stock');
-                            const row = (listEl._vajraTopRows || []).find(function (r) {
-                                return String(r.stock || r.security) === sym;
-                            });
-                            if (row && global.VajraTradeWorkflow && global.VajraTradeWorkflow.openEntry) {
-                                global.VajraTradeWorkflow.openEntry(row);
-                            }
-                        });
-                    });
-                }
-                if (moreBtn) {
-                    const rest = ((data && data.remainder) || allRows).length;
-                    moreBtn.hidden = rest <= 0;
-                    moreBtn.textContent = rest > 0 ? 'more… (' + rest + ')' : 'more…';
-                }
-                if (metaEl) {
-                    let meta =
-                        'Session: ' +
-                        (data.session_date || '—') +
-                        ' · Updated: ' +
-                        fmtUpdated(data.computed_at || (allRows[0] && allRows[0].computed_at)) +
-                        ' · ' +
-                        allRows.length +
-                        ' symbols · 30m TPS · EES/Entry every ' +
-                        (data.ees_refresh_minutes || 5) +
-                        'm · HTF ' +
-                        (data.htf_bias_tf || '1hr') +
-                        (data.alert_count != null ? ' · Alerts: ' + data.alert_count : '');
-                    if (data.data_age_sec != null && data.data_age_sec > STALE_DATA_SEC) {
-                        meta += ' · ⚠ data ' + Math.round(data.data_age_sec / 60) + 'm old';
-                    }
-                    if (data.stale_reason || data.source === 'db_stale') {
-                        meta +=
-                            ' · Showing last saved scan' +
-                            (data.stale_reason ? ' (' + data.stale_reason + ')' : '') +
-                            ' — 5m job will refresh';
-                    }
-                    if (data.source === 'empty') {
-                        meta += ' · No saved scan yet — wait for next 5m cycle or click Refresh';
-                    }
-                    metaEl.textContent = meta;
-                }
+                renderLoadedData(data);
                 if (msgEl) msgEl.textContent = '';
-                processEnterTelegramAlerts(allRows, data.session_date);
-                if (modal.classList.contains('vajra-modal--open')) {
-                    modalRows = global._vajraRemainder || allRows.slice(TOP_N);
-                    renderModal();
-                }
             } catch (e) {
                 if (listEl) listEl.innerHTML = '';
                 if (moreBtn) moreBtn.hidden = true;
@@ -1203,6 +1271,8 @@
                 /* status poll is best-effort; force reload still runs on interval */
             }
         }
+
+        document.addEventListener('vajra:active-positions-changed', refilterForActivePositions);
 
         load();
         const watchMs = opts.watchMs != null ? Number(opts.watchMs) : 20000;

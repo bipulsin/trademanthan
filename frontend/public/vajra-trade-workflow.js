@@ -34,6 +34,34 @@
     let _discoveryRow = null;
     let _preview = null;
     let _entryDraft = {};
+    /** Uppercase stock symbols with status=active (hide from Vajra Screen). */
+    let _activeStockKeys = new Set();
+
+    function tradeStockKey(t) {
+        return String((t && t.stock) || '').trim().toUpperCase();
+    }
+
+    function syncActiveStockKeys(rows) {
+        const next = new Set();
+        (rows || []).forEach(function (t) {
+            const k = tradeStockKey(t);
+            if (k) next.add(k);
+        });
+        _activeStockKeys = next;
+        try {
+            global.dispatchEvent(
+                new CustomEvent('vajra:active-positions-changed', {
+                    detail: { stocks: Array.from(_activeStockKeys) },
+                })
+            );
+        } catch (e) {
+            /* ignore */
+        }
+    }
+
+    function getActiveTradeStocks() {
+        return new Set(_activeStockKeys);
+    }
 
     function authHeaders() {
         const t = global.localStorage.getItem('trademanthan_token') || '';
@@ -443,6 +471,7 @@
     }
 
     function renderActiveTrades(rows) {
+        syncActiveStockKeys(rows);
         const el = document.getElementById(_runningElId);
         if (!el) return;
         if (!rows.length) {
@@ -611,9 +640,15 @@
         _emptyOpenHtml = opts.emptyOpenHtml || '';
         _emptyClosedHtml = opts.emptyClosedHtml || '';
         _listAllPlatforms = opts.listAllPlatforms === true;
-        refreshCockpit();
+        const tick = refreshCockpit();
         setInterval(refreshCockpit, 300000);
+        return tick;
     }
 
-    global.VajraTradeWorkflow = { init: init, openEntry: openEntry, refresh: refreshCockpit };
+    global.VajraTradeWorkflow = {
+        init: init,
+        openEntry: openEntry,
+        refresh: refreshCockpit,
+        getActiveTradeStocks: getActiveTradeStocks,
+    };
 })(window);
