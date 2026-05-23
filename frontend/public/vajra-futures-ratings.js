@@ -9,6 +9,8 @@
             : global.location.origin;
 
     const TOP_N = 8;
+    /** Screen table: max ARMED rows when back-filling Top 8 (after EXECUTABLE). */
+    const TOP8_ARMED_MAX = 6;
     const DEFAULT_SCAN_TF = '30m';
     const DEFAULT_HTF = '1hr';
     const HTF_OPTIONS = ['1hr', '1d', '1w'];
@@ -737,6 +739,106 @@
         );
     }
 
+    function confidenceVal(row) {
+        const c = row.confidence_score != null ? row.confidence_score : row.confidence;
+        const n = Number(c);
+        return Number.isFinite(n) ? n : 0;
+    }
+
+    /** Align with backend rank_executable (highest setup quality first). */
+    function compareExecutableRank(a, b) {
+        const sq =
+            (Number(b.setup_quality_score) || 0) - (Number(a.setup_quality_score) || 0);
+        if (sq !== 0) return sq;
+        const conf = confidenceVal(b) - confidenceVal(a);
+        if (conf !== 0) return conf;
+        const vol = (Number(b.volume_score) || 0) - (Number(a.volume_score) || 0);
+        if (vol !== 0) return vol;
+        const ex = (Number(b.execution_score) || 0) - (Number(a.execution_score) || 0);
+        if (ex !== 0) return ex;
+        return String(a.security || a.stock || '').localeCompare(
+            String(b.security || b.stock || ''),
+            undefined,
+            { numeric: true }
+        );
+    }
+
+    /** Align with backend rank_discovery. */
+    function compareDiscoveryRank(a, b) {
+        const ip =
+            (Number(b.institutional_participation_score) || 0) -
+            (Number(a.institutional_participation_score) || 0);
+        if (ip !== 0) return ip;
+        const ds = (Number(b.discovery_score) || 0) - (Number(a.discovery_score) || 0);
+        if (ds !== 0) return ds;
+        const tps = (Number(b.tps_score) || 0) - (Number(a.tps_score) || 0);
+        if (tps !== 0) return tps;
+        const evs =
+            (Number(b.evs_score) || Number(b.expansion_velocity_score) || 0) -
+            (Number(a.evs_score) || Number(a.expansion_velocity_score) || 0);
+        if (evs !== 0) return evs;
+        return String(a.security || a.stock || '').localeCompare(
+            String(b.security || b.stock || ''),
+            undefined,
+            { numeric: true }
+        );
+    }
+
+    function poolByQual(rows, qual) {
+        return (rows || []).filter(function (r) {
+            if (isRejectRow(r)) return false;
+            const q = qualificationOf(r);
+            if (qual === QUAL_EXECUTABLE) return q === QUAL_EXECUTABLE;
+            if (qual === QUAL_ARMED) {
+                return q === QUAL_ARMED || q === QUAL_WATCHLIST;
+            }
+            if (qual === QUAL_DISCOVERY) return q === QUAL_DISCOVERY;
+            return false;
+        });
+    }
+
+    /**
+     * Screen — Futures Rating: Top 8 only.
+     * 8+ EXECUTABLE → top 8 EXECUTABLE only.
+     * Else EXECUTABLE + up to 6 ARMED + DISCOVERY fill; never REJECT.
+     */
+    function composeTop8ScreenRows(data) {
+        const sections = (data && data.top_sections) || {};
+        const picks = (data && data.top_picks) || [];
+        const execSource = sections.EXECUTABLE && sections.EXECUTABLE.length
+            ? sections.EXECUTABLE
+            : picks;
+        const execPool = poolByQual(execSource, QUAL_EXECUTABLE).slice().sort(compareExecutableRank);
+        const armedPool = poolByQual(sections.ARMED, QUAL_ARMED).slice().sort(compareArmedRank);
+        const discPool = poolByQual(sections.DISCOVERY, QUAL_DISCOVERY)
+            .slice()
+            .sort(compareDiscoveryRank);
+
+        if (execPool.length >= TOP_N) {
+            const execEight = execPool.slice(0, TOP_N);
+            return {
+                EXECUTABLE: execEight,
+                ARMED: [],
+                DISCOVERY: [],
+                top8: execEight,
+            };
+        }
+
+        const execRows = execPool.slice();
+        let slots = TOP_N - execRows.length;
+        const armedTake = Math.min(TOP8_ARMED_MAX, slots, armedPool.length);
+        const armedRows = armedPool.slice(0, armedTake);
+        slots -= armedRows.length;
+        const discRows = discPool.slice(0, slots);
+
+        return {
+            EXECUTABLE: execRows,
+            ARMED: armedRows,
+            DISCOVERY: discRows,
+            top8: execRows.concat(armedRows).concat(discRows),
+        };
+    }
+
     function sortModalByQualification(rows) {
         return rows.slice().sort(function (a, b) {
             const tier = modalQualificationSortRank(b) - modalQualificationSortRank(a);
@@ -833,15 +935,14 @@
     }
 
     function renderTopTableFromPayload(data) {
-        const picks = (data && data.top_picks) || [];
-        const sections = (data && data.top_sections) || {};
+        const composed = composeTop8ScreenRows(data || {});
+        const execRows = composed.EXECUTABLE || [];
+        const armedRows = composed.ARMED || [];
+        const discRows = composed.DISCOVERY || [];
         const banner = data && data.banner;
-        const execRows = sections.EXECUTABLE || picks || [];
-        const armedRows = sections.ARMED || [];
-        const discRows = sections.DISCOVERY || [];
-        const hasAny = execRows.length || armedRows.length || discRows.length;
+        const hasAny = composed.top8 && composed.top8.length;
 
-        if (!hasAny && !picks.length) {
+        if (!hasAny) {
             return (
                 '<p class="vajra-meta">No Vajra ratings for this session yet. ' +
                 'The engine runs every 5 minutes (9:30–15:00 IST). ' +
@@ -1201,9 +1302,18 @@
             const activeSet = getActiveTradeStocks();
             const filtered = filterRatingsPayload(data, activeSet);
             allRows = filtered.rows || [];
-            global._vajraRemainder = filtered.remainder || allRows.slice(TOP_N);
+            const composed = composeTop8ScreenRows(filtered);
+            const top8Keys = {};
+            (composed.top8 || []).forEach(function (r) {
+                const k = rowStockKey(r);
+                if (k) top8Keys[k] = true;
+            });
+            global._vajraRemainder = (filtered.remainder || allRows).filter(function (r) {
+                const k = rowStockKey(r);
+                return !k || !top8Keys[k];
+            });
             if (listEl) {
-                listEl._vajraTopRows = filtered.top_picks || [];
+                listEl._vajraTopRows = composed.top8 || [];
                 listEl.innerHTML = renderTopTable(null, filtered);
                 bindSecurityChartClicks(listEl);
                 listEl.querySelectorAll('[data-vajra-enter]').forEach(function (btn) {
