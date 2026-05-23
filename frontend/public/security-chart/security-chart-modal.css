@@ -172,15 +172,61 @@ body[data-theme="light"] .uscm-tf-btn {
     position: relative;
 }
 
+.uscm-body--split {
+    --uscm-intel-w: 320px;
+}
+
 .uscm-panel--with-intel .uscm-chart-wrap {
-    flex: 1 1 68%;
+    flex: 1 1 auto;
+    min-width: 120px;
+}
+
+.uscm-splitter {
+    display: none;
+    flex: 0 0 6px;
+    width: 6px;
+    cursor: col-resize;
+    touch-action: none;
+    position: relative;
+    z-index: 3;
+    background: transparent;
+}
+
+.uscm-panel--with-intel:not(.uscm-intel-empty) .uscm-splitter {
+    display: block;
+}
+
+.uscm-splitter::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 1px;
+    margin-left: -1px;
+    background: #334155;
+    transition: background 0.15s, width 0.15s;
+}
+
+.uscm-splitter:hover::before,
+.uscm-splitter.uscm-splitter--active::before,
+.uscm-splitter:focus-visible::before {
+    width: 3px;
+    margin-left: -2px;
+    background: #3b82f6;
+}
+
+body.uscm-col-resize,
+body.uscm-col-resize * {
+    cursor: col-resize !important;
+    user-select: none !important;
 }
 
 .uscm-intel-wrap {
-    flex: 0 0 32%;
+    flex: 0 0 var(--uscm-intel-w, 320px);
+    width: var(--uscm-intel-w, 320px);
     max-width: 380px;
-    min-width: 240px;
-    border-left: 1px solid #334155;
+    min-width: 200px;
     overflow-y: auto;
     overflow-x: hidden;
     background: #0c1222;
@@ -427,8 +473,12 @@ body[data-theme="light"] .vajra-security-link {
         flex: 1 1 58%;
         min-height: 240px;
     }
+    .uscm-splitter {
+        display: none !important;
+    }
     .uscm-intel-wrap {
         flex: 0 0 auto;
+        width: auto;
         max-width: none;
         min-width: 0;
         max-height: 42vh;

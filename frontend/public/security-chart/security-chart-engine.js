@@ -13,8 +13,11 @@
     const TF_OPTIONS = ['5m', '15m', '30m', '1hr', '1d'];
     const LWC_URL =
         'https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js';
-    const CSS_HREF = 'security-chart/security-chart-modal.css?v=2';
+    const CSS_HREF = 'security-chart/security-chart-modal.css?v=3';
     const INTEL_JS = 'security-chart/trade-intelligence-panel.js?v=1';
+    const INTEL_PANEL_MAX_PX = 380;
+    const INTEL_PANEL_MIN_PX = 200;
+    const INTEL_PANEL_DEFAULT_PX = 320;
     const LIVE_POLL_MS = 1000;
 
     const CANDLE_UP = '#38bdf8';
@@ -328,13 +331,40 @@
         if (!hasData) {
             panel.clear(host);
             root.classList.remove('uscm-panel--with-intel');
+            root.classList.add('uscm-intel-empty');
             return;
         }
         root.classList.add('uscm-panel--with-intel');
+        root.classList.remove('uscm-intel-empty');
         panel.render(host, {
             screenerData: data,
             insight: data.insight || data.insightBanner || '',
         });
+        this._resetIntelPanelWidth();
+    };
+
+    SecurityChartModal.prototype._resetIntelPanelWidth = function () {
+        const root = modalRoot;
+        if (!root) return;
+        const split = root.querySelector('[data-uscm-split]');
+        if (!split) return;
+        const w = Math.min(INTEL_PANEL_MAX_PX, INTEL_PANEL_DEFAULT_PX);
+        split.style.setProperty('--uscm-intel-w', w + 'px');
+    };
+
+    SecurityChartModal.prototype._notifyChartResize = function () {
+        const root = modalRoot;
+        if (!this.chart || !root) return;
+        const chartEl = root.querySelector('[data-uscm-chart]');
+        if (!chartEl || !chartEl.clientWidth) return;
+        try {
+            this.chart.applyOptions({
+                width: chartEl.clientWidth,
+                height: chartEl.clientHeight,
+            });
+        } catch (e) {
+            /* ignore */
+        }
     };
 
     SecurityChartModal.prototype._ensureDom = function () {
@@ -363,11 +393,12 @@
             '<div class="uscm-tf-group" data-uscm-tf></div>' +
             '<button type="button" class="uscm-close" data-uscm-close aria-label="Close">&times;</button>' +
             '</header>' +
-            '<div class="uscm-body uscm-body--split">' +
+            '<div class="uscm-body uscm-body--split" data-uscm-split>' +
             '<div class="uscm-chart-wrap">' +
             '<div class="uscm-skeleton" data-uscm-skeleton>Loading chart…</div>' +
             '<div class="uscm-chart-root" data-uscm-chart></div>' +
             '</div>' +
+            '<div class="uscm-splitter" data-uscm-splitter role="separator" aria-orientation="vertical" aria-label="Resize statistics panel" tabindex="0"></div>' +
             '<aside class="uscm-intel-wrap tip-panel--empty" data-uscm-intel aria-label="Trade intelligence"></aside>' +
             '</div>' +
             '<footer class="uscm-footer">' +
@@ -397,9 +428,80 @@
             });
             tfHost.appendChild(btn);
         });
+        bindIntelSplitter(backdrop, self);
         modalRoot = backdrop;
         return backdrop;
     };
+
+    function bindIntelSplitter(root, modalInstance) {
+        const splitter = root.querySelector('[data-uscm-splitter]');
+        const splitEl = root.querySelector('[data-uscm-split]');
+        const panelEl = root.querySelector('.uscm-panel');
+        if (!splitter || !splitEl || !panelEl || splitter._uscmBound) return;
+        splitter._uscmBound = true;
+
+        let dragging = false;
+
+        function clampIntelWidth(px) {
+            return Math.max(INTEL_PANEL_MIN_PX, Math.min(INTEL_PANEL_MAX_PX, px));
+        }
+
+        function setIntelWidth(px) {
+            splitEl.style.setProperty('--uscm-intel-w', clampIntelWidth(px) + 'px');
+            modalInstance._notifyChartResize();
+        }
+
+        splitter.addEventListener('pointerdown', function (e) {
+            if (!root.classList.contains('uscm-panel--with-intel')) return;
+            dragging = true;
+            splitter.classList.add('uscm-splitter--active');
+            try {
+                splitter.setPointerCapture(e.pointerId);
+            } catch (err) {
+                /* ignore */
+            }
+            document.body.classList.add('uscm-col-resize');
+            e.preventDefault();
+        });
+
+        splitter.addEventListener('pointermove', function (e) {
+            if (!dragging) return;
+            const pr = panelEl.getBoundingClientRect();
+            setIntelWidth(pr.right - e.clientX);
+        });
+
+        function endDrag(e) {
+            if (!dragging) return;
+            dragging = false;
+            splitter.classList.remove('uscm-splitter--active');
+            document.body.classList.remove('uscm-col-resize');
+            try {
+                splitter.releasePointerCapture(e.pointerId);
+            } catch (err) {
+                /* ignore */
+            }
+            modalInstance._notifyChartResize();
+        }
+
+        splitter.addEventListener('pointerup', endDrag);
+        splitter.addEventListener('pointercancel', endDrag);
+
+        splitter.addEventListener('keydown', function (e) {
+            if (!root.classList.contains('uscm-panel--with-intel')) return;
+            const cur = parseInt(
+                getComputedStyle(splitEl).getPropertyValue('--uscm-intel-w'),
+                10
+            );
+            const base = Number.isFinite(cur) ? cur : INTEL_PANEL_DEFAULT_PX;
+            if (e.key === 'ArrowLeft') {
+                setIntelWidth(base + 12);
+                e.preventDefault();
+            } else if (e.key === 'ArrowRight') {
+                setIntelWidth(base - 12);
+                e.preventDefault();
+            }
+        });
+    }
 
     SecurityChartModal.prototype._destroyChart = function () {
         if (this.resizeObs) {
@@ -437,6 +539,7 @@
         if (modalRoot) {
             modalRoot.classList.remove('uscm-open');
             modalRoot.classList.remove('uscm-panel--with-intel');
+            modalRoot.classList.add('uscm-intel-empty');
             modalRoot.classList.add('uscm-hidden');
             const intel = modalRoot.querySelector('[data-uscm-intel]');
             if (intel && global.TradeIntelligencePanel) {
