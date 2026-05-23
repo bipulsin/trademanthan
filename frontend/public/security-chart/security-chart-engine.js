@@ -23,11 +23,32 @@
     const INTEL_PANEL_DEFAULT_PX = 320;
     const LIVE_POLL_MS = 1000;
 
-    const CANDLE_UP = '#38bdf8';
-    const CANDLE_DOWN = '#ef4444';
     const EMA_COLOR = '#eab308';
-    const VWAP_COLOR = '#ffffff';
     const INITIAL_VISIBLE_BARS = 100;
+
+    function isChartDarkTheme() {
+        const t = document.body.getAttribute('data-theme');
+        return !t || t === 'dark';
+    }
+
+    function chartThemeColors() {
+        if (isChartDarkTheme()) {
+            return {
+                candleUp: '#38bdf8',
+                candleDown: '#ef4444',
+                vwap: '#ffffff',
+                volumeUp: 'rgba(56,189,248,0.45)',
+                volumeDown: 'rgba(239,68,68,0.45)',
+            };
+        }
+        return {
+            candleUp: '#2563eb',
+            candleDown: '#ef4444',
+            vwap: '#000000',
+            volumeUp: 'rgba(37,99,235,0.55)',
+            volumeDown: 'rgba(239,68,68,0.45)',
+        };
+    }
     const CHART_TZ = 'Asia/Kolkata';
 
     function istDateParts(utcSec) {
@@ -864,9 +885,8 @@
         }
         sk.style.display = 'none';
         this._destroyChart();
-        const isDark =
-            !document.body.getAttribute('data-theme') ||
-            document.body.getAttribute('data-theme') === 'dark';
+        const isDark = isChartDarkTheme();
+        const colors = chartThemeColors();
         const grid = isDark ? '#334155' : '#e2e8f0';
         const text = isDark ? '#94a3b8' : '#64748b';
         this.chart = LWC.createChart(chartEl, {
@@ -891,11 +911,11 @@
             },
         });
         this.candleSeries = this.chart.addCandlestickSeries({
-            upColor: CANDLE_UP,
-            downColor: CANDLE_DOWN,
+            upColor: colors.candleUp,
+            downColor: colors.candleDown,
             borderVisible: false,
-            wickUpColor: CANDLE_UP,
-            wickDownColor: CANDLE_DOWN,
+            wickUpColor: colors.candleUp,
+            wickDownColor: colors.candleDown,
         });
         this.volumeSeries = this.chart.addHistogramSeries({
             color: '#64748b',
@@ -912,7 +932,7 @@
             visible: this.emaEnabled,
         });
         this.vwapSeries = this.chart.addLineSeries({
-            color: VWAP_COLOR,
+            color: colors.vwap,
             lineWidth: 2,
             title: 'VWAP',
             priceLineVisible: false,
@@ -934,7 +954,7 @@
             return {
                 time: b.time,
                 value: b.volume,
-                color: up ? 'rgba(56,189,248,0.45)' : 'rgba(239,68,68,0.45)',
+                color: up ? colors.volumeUp : colors.volumeDown,
             };
         });
         this.candleSeries.setData(candles);
