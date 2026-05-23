@@ -28,9 +28,90 @@
     const EMA_COLOR = '#eab308';
     const VWAP_COLOR = '#ffffff';
     const INITIAL_VISIBLE_BARS = 100;
+    const CHART_TZ = 'Asia/Kolkata';
 
-    function sessionDayKey(unixSec) {
-        return new Date(unixSec * 1000).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    function istDateParts(utcSec) {
+        const parts = new Intl.DateTimeFormat('en-US', {
+            timeZone: CHART_TZ,
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false,
+        }).formatToParts(new Date(utcSec * 1000));
+        function part(type) {
+            const p = parts.find(function (x) {
+                return x.type === type;
+            });
+            return p ? parseInt(p.value, 10) : 0;
+        }
+        return {
+            year: part('year'),
+            month: part('month'),
+            day: part('day'),
+            hour: part('hour'),
+            minute: part('minute'),
+            second: part('second'),
+        };
+    }
+
+    /** LWC reads UTC fields for labels — shift so axis shows IST wall clock (NSE). */
+    function utcUnixToChartTime(utcSec, daily) {
+        const p = istDateParts(utcSec);
+        if (daily) {
+            const mm = String(p.month).padStart(2, '0');
+            const dd = String(p.day).padStart(2, '0');
+            return String(p.year) + '-' + mm + '-' + dd;
+        }
+        return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) / 1000;
+    }
+
+    function sessionDayKeyUtc(utcSec) {
+        return new Date(utcSec * 1000).toLocaleDateString('en-CA', { timeZone: CHART_TZ });
+    }
+
+    function isDailyTimeframe(tf) {
+        return String(tf || '').toLowerCase() === '1d';
+    }
+
+    function normalizeBarFromApi(bar, timeframe) {
+        const utcTime = bar.time;
+        const daily = isDailyTimeframe(timeframe);
+        return {
+            utcTime: utcTime,
+            time: utcUnixToChartTime(utcTime, daily),
+            open: bar.open,
+            high: bar.high,
+            low: bar.low,
+            close: bar.close,
+            volume: bar.volume || 0,
+        };
+    }
+
+    /** Format chart time values (IST wall clock stored in UTC fields). */
+    function formatChartDisplayTime(time, withSuffix) {
+        const LWC = global.LightweightCharts;
+        if (LWC && LWC.isBusinessDay && LWC.isBusinessDay(time)) {
+            return (
+                time.year +
+                '-' +
+                String(time.month).padStart(2, '0') +
+                '-' +
+                String(time.day).padStart(2, '0')
+            );
+        }
+        const sec = typeof time === 'number' ? time : time && time.timestamp;
+        if (!Number.isFinite(sec)) return '';
+        const d = new Date(sec * 1000);
+        const hh = String(d.getUTCHours()).padStart(2, '0');
+        const mi = String(d.getUTCMinutes()).padStart(2, '0');
+        return withSuffix ? hh + ':' + mi + ' IST' : hh + ':' + mi;
+    }
+
+    function formatChartTimeIst(time) {
+        return formatChartDisplayTime(time, true);
     }
 
     function clampEmaPeriod(n) {
@@ -61,7 +142,7 @@
         let cumTpV = 0;
         let cumV = 0;
         bars.forEach(function (b) {
-            const d = sessionDayKey(b.time);
+            const d = sessionDayKeyUtc(b.utcTime != null ? b.utcTime : b.time);
             if (d !== day) {
                 day = d;
                 cumTpV = 0;
@@ -796,7 +877,18 @@
             grid: { vertLines: { color: grid }, horzLines: { color: grid } },
             crosshair: { mode: LWC.CrosshairMode.Normal },
             rightPriceScale: { borderColor: grid },
-            timeScale: { borderColor: grid, timeVisible: true, secondsVisible: false },
+            localization: {
+                locale: 'en-IN',
+                timeFormatter: formatChartTimeIst,
+            },
+            timeScale: {
+                borderColor: grid,
+                timeVisible: true,
+                secondsVisible: false,
+                tickMarkFormatter: function (time) {
+                    return formatChartDisplayTime(time, false);
+                },
+            },
         });
         this.candleSeries = this.chart.addCandlestickSeries({
             upColor: CANDLE_UP,
@@ -830,15 +922,9 @@
         this.chart.priceScale('').applyOptions({
             scaleMargins: { top: 0.82, bottom: 0 },
         });
+        const tf = this.timeframe;
         this._barsCache = bars.map(function (b) {
-            return {
-                time: b.time,
-                open: b.open,
-                high: b.high,
-                low: b.low,
-                close: b.close,
-                volume: b.volume || 0,
-            };
+            return normalizeBarFromApi(b, tf);
         });
         const candles = this._barsCache.map(function (b) {
             return { time: b.time, open: b.open, high: b.high, low: b.low, close: b.close };
