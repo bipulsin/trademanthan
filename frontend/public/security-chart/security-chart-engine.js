@@ -13,7 +13,7 @@
     const TF_OPTIONS = ['5m', '15m', '30m', '1hr', '1d'];
     const LWC_URL =
         'https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js';
-    const CSS_HREF = 'security-chart/security-chart-modal.css?v=4';
+    const CSS_HREF = 'security-chart/security-chart-modal.css?v=5';
     const INTEL_JS = 'security-chart/trade-intelligence-panel.js?v=2';
     const EMA_PERIOD_MIN = 2;
     const EMA_PERIOD_MAX = 200;
@@ -170,6 +170,18 @@
         return '';
     }
 
+    function extractLtp(data) {
+        if (!data || typeof data !== 'object') return null;
+        const raw =
+            data.ltp != null
+                ? data.ltp
+                : data.last_price != null
+                  ? data.last_price
+                  : data.close;
+        const n = Number(raw);
+        return Number.isFinite(n) ? n : null;
+    }
+
     function headerPnlHtml(screenerData) {
         const sd = screenerData || {};
         const pct = sd.livePnlPct != null ? sd.livePnlPct : sd.pnlPct;
@@ -208,21 +220,30 @@
             });
         }
 
+        function notifyListeners(ik, data) {
+            const entry = subs.get(ik);
+            if (!entry || !data || !data.success) return;
+            entry.listeners.forEach(function (fn) {
+                try {
+                    fn(data);
+                } catch (e) {
+                    /* ignore */
+                }
+            });
+        }
+
+        function fetchLiveNow(ik) {
+            apiGet('/api/chart/live', { instrument_key: ik })
+                .then(function (data) {
+                    notifyListeners(ik, data);
+                })
+                .catch(function () {});
+        }
+
         function tick() {
             subs.forEach(function (entry, ik) {
                 if (!entry.listeners.size) return;
-                apiGet('/api/chart/live', { instrument_key: ik })
-                    .then(function (data) {
-                        if (!data || !data.success) return;
-                        entry.listeners.forEach(function (fn) {
-                            try {
-                                fn(data);
-                            } catch (e) {
-                                /* ignore */
-                            }
-                        });
-                    })
-                    .catch(function () {});
+                fetchLiveNow(ik);
             });
         }
 
@@ -252,6 +273,7 @@
                 entry.refcount += 1;
                 entry.listeners.add(listener);
                 ensureTimer();
+                fetchLiveNow(ik);
                 return function unsubscribe() {
                     const e = subs.get(ik);
                     if (!e) return;
@@ -395,15 +417,11 @@
             '</div>' +
             '<div class="uscm-meta" data-uscm-meta>—</div>' +
             '</div>' +
-            '<div class="uscm-ltp-block">' +
-            '<div class="uscm-ltp-row">' +
-            '<div class="uscm-ltp" data-uscm-ltp>—</div>' +
-            '<span data-uscm-header-pnl></span>' +
-            '</div>' +
-            '<div class="uscm-chg" data-uscm-chg></div>' +
-            '</div>' +
-            '<div class="uscm-tf-group" data-uscm-tf></div>' +
-            '<div class="uscm-overlay-controls" data-uscm-overlays>' +
+            '<div class="uscm-header-prices">' +
+            '<div class="uscm-indicator-wrap" data-uscm-indicator-wrap>' +
+            '<button type="button" class="uscm-indicator-btn" data-uscm-indicator-toggle aria-haspopup="true" aria-expanded="false">Indicator</button>' +
+            '<div class="uscm-indicator-menu uscm-hidden" data-uscm-indicator-menu role="menu">' +
+            '<div class="uscm-indicator-menu-inner" data-uscm-overlays>' +
             '<label class="uscm-ov-label">' +
             '<input type="checkbox" data-uscm-ema-on checked> EMA' +
             '</label>' +
@@ -417,7 +435,15 @@
             '<label class="uscm-ov-label">' +
             '<input type="checkbox" data-uscm-vwap-on checked> VWAP' +
             '</label>' +
+            '</div></div></div>' +
+            '<div class="uscm-ltp-block">' +
+            '<div class="uscm-ltp-row">' +
+            '<div class="uscm-ltp" data-uscm-ltp>—</div>' +
+            '<span data-uscm-header-pnl></span>' +
             '</div>' +
+            '<div class="uscm-chg" data-uscm-chg></div>' +
+            '</div></div>' +
+            '<div class="uscm-tf-group" data-uscm-tf></div>' +
             '<button type="button" class="uscm-close" data-uscm-close aria-label="Close">&times;</button>' +
             '</header>' +
             '<div class="uscm-body uscm-body--split" data-uscm-split>' +
@@ -457,9 +483,41 @@
         });
         bindIntelSplitter(backdrop, self);
         bindOverlayControls(backdrop, self);
+        bindIndicatorDropdown(backdrop);
         modalRoot = backdrop;
         return backdrop;
     };
+
+    function bindIndicatorDropdown(root) {
+        const wrap = root.querySelector('[data-uscm-indicator-wrap]');
+        const btn = root.querySelector('[data-uscm-indicator-toggle]');
+        const menu = root.querySelector('[data-uscm-indicator-menu]');
+        if (!wrap || !btn || !menu || wrap._uscmIndicatorBound) return;
+        wrap._uscmIndicatorBound = true;
+
+        function setOpen(open) {
+            wrap.classList.toggle('uscm-indicator-wrap--open', open);
+            menu.classList.toggle('uscm-hidden', !open);
+            btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        }
+
+        btn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            setOpen(menu.classList.contains('uscm-hidden'));
+        });
+
+        menu.addEventListener('click', function (e) {
+            e.stopPropagation();
+        });
+
+        root.addEventListener('click', function () {
+            setOpen(false);
+        });
+
+        global.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') setOpen(false);
+        });
+    }
 
     function bindOverlayControls(root, modalInstance) {
         const host = root.querySelector('[data-uscm-overlays]');
@@ -667,34 +725,50 @@
         this._loadHistorical();
     };
 
+    SecurityChartModal.prototype._resetLtpDisplay = function () {
+        const root = modalRoot;
+        if (!root) return;
+        const ltpEl = root.querySelector('[data-uscm-ltp]');
+        const chgEl = root.querySelector('[data-uscm-chg]');
+        if (ltpEl) {
+            ltpEl.textContent = '—';
+            ltpEl.classList.remove('up', 'down');
+        }
+        if (chgEl) chgEl.textContent = '';
+    };
+
+    SecurityChartModal.prototype._seedLtpFromBars = function () {
+        if (!this._barsCache.length) return;
+        const last = this._barsCache[this._barsCache.length - 1];
+        const close = last && Number(last.close);
+        if (!Number.isFinite(close)) return;
+        this._updateLtp({ ltp: close, change: null, change_pct: null });
+    };
+
     SecurityChartModal.prototype._updateLtp = function (data) {
         const root = modalRoot;
         if (!root) return;
         const ltpEl = root.querySelector('[data-uscm-ltp]');
         const chgEl = root.querySelector('[data-uscm-chg]');
-        if (data.ltp == null) {
-            ltpEl.textContent = '—';
-            chgEl.textContent = '';
-            return;
-        }
-        ltpEl.textContent = Number(data.ltp).toLocaleString('en-IN', {
+        if (!ltpEl) return;
+        const ltp = extractLtp(data);
+        if (ltp == null) return;
+        ltpEl.textContent = ltp.toLocaleString('en-IN', {
             maximumFractionDigits: 2,
         });
         const chg = data.change;
         const pct = data.change_pct;
+        if (chg == null || pct == null) return;
         ltpEl.classList.remove('up', 'down');
-        let chgText = '';
-        if (chg != null && pct != null) {
-            chgText =
-                (chg >= 0 ? '+' : '') +
-                Number(chg).toFixed(2) +
-                ' (' +
-                (pct >= 0 ? '+' : '') +
-                Number(pct).toFixed(2) +
-                '%)';
-            ltpEl.classList.add(chg >= 0 ? 'up' : 'down');
-        }
-        chgEl.textContent = chgText;
+        const chgText =
+            (chg >= 0 ? '+' : '') +
+            Number(chg).toFixed(2) +
+            ' (' +
+            (pct >= 0 ? '+' : '') +
+            Number(pct).toFixed(2) +
+            '%)';
+        ltpEl.classList.add(chg >= 0 ? 'up' : 'down');
+        if (chgEl) chgEl.textContent = chgText;
     };
 
     SecurityChartModal.prototype._applyBars = function (bars) {
@@ -786,6 +860,7 @@
             ? { open: last.open, high: last.high, low: last.low, close: last.close }
             : null;
         setInitialVisibleBars(this.chart, candles.length);
+        this._seedLtpFromBars();
         const self = this;
         if (typeof ResizeObserver !== 'undefined') {
             this.resizeObs = new ResizeObserver(function () {
@@ -808,6 +883,7 @@
         const token = { aborted: false };
         this.abortLoad = token;
         const root = this._ensureDom();
+        this._resetLtpDisplay();
         root.querySelector('[data-uscm-skeleton]').style.display = 'flex';
         root.querySelector('[data-uscm-skeleton]').textContent = 'Loading ' + self.timeframe + '…';
         fetchCandles({
@@ -860,9 +936,10 @@
     };
 
     SecurityChartModal.prototype._tickBar = function (quote) {
-        if (!this.candleSeries || quote.ltp == null || this._lastBarTime == null || !this._lastOhlc)
+        const ltpVal = extractLtp(quote);
+        if (!this.candleSeries || ltpVal == null || this._lastBarTime == null || !this._lastOhlc)
             return;
-        const ltp = Number(quote.ltp);
+        const ltp = ltpVal;
         const o = this._lastOhlc;
         o.close = ltp;
         o.high = Math.max(o.high, ltp);
