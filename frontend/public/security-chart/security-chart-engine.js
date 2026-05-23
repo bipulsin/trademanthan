@@ -14,7 +14,7 @@
     const LWC_URL =
         'https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js';
     const CSS_HREF = 'security-chart/security-chart-modal.css?v=3';
-    const INTEL_JS = 'security-chart/trade-intelligence-panel.js?v=1';
+    const INTEL_JS = 'security-chart/trade-intelligence-panel.js?v=2';
     const INTEL_PANEL_MAX_PX = 380;
     const INTEL_PANEL_MIN_PX = 200;
     const INTEL_PANEL_DEFAULT_PX = 320;

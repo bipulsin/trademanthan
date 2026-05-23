@@ -4,6 +4,14 @@
 (function (global) {
     'use strict';
 
+    /** Full display names for score abbreviations (Vajra help / pipeline docs). */
+    const METRIC_LABELS = {
+        tps: 'Transition Potential Score',
+        ecs: 'Expansion Confirmation Score',
+        evs: 'Expansion Velocity Score',
+        evs_score: 'Expansion Velocity Score',
+    };
+
     const SKIP_KEYS = {
         insight: 1,
         insightBanner: 1,
@@ -25,6 +33,8 @@
                 'health',
                 'tps',
                 'ecs',
+                'evs_score',
+                'evs',
                 'setupQuality',
                 'setup_quality',
                 'trade_quality_score',
@@ -101,7 +111,10 @@
     }
 
     function labelize(key) {
-        return String(key)
+        const raw = String(key || '').trim();
+        const mapped = METRIC_LABELS[raw.toLowerCase()];
+        if (mapped) return mapped;
+        return raw
             .replace(/_/g, ' ')
             .replace(/([a-z])([A-Z])/g, '$1 $2')
             .replace(/\b\w/g, function (c) {
