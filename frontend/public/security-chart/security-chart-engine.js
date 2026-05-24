@@ -13,12 +13,16 @@
     const TF_OPTIONS = ['5m', '15m', '30m', '1hr', '1d'];
     const LWC_URL =
         'https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js';
-    const CSS_HREF = 'security-chart/security-chart-modal.css?v=6';
+    const CSS_HREF = 'security-chart/security-chart-modal.css?v=7';
     const INTEL_JS = 'security-chart/trade-intelligence-panel.js?v=2';
     const HM_SCRIPTS = [
         'security-chart/indicators/rsi.js?v=1',
         'security-chart/indicators/movingAverages.js?v=1',
         'security-chart/indicators/hilega-milega.js?v=1',
+    ];
+    const CHART_UTIL_SCRIPTS = [
+        'security-chart/chart/crosshair-format.js?v=1',
+        'security-chart/chart/volume-visibility.js?v=1',
     ];
     const HM_PANE_DEFAULT_PX = 140;
     const HM_PANE_MIN_PX = 80;
@@ -221,11 +225,22 @@
         });
     }
 
+    function loadChartUtils() {
+        if (global.ChartCrosshairFormat && global.ChartVolumeVisibility) return Promise.resolve();
+        let chain = Promise.resolve();
+        CHART_UTIL_SCRIPTS.forEach(function (src) {
+            chain = chain.then(function () {
+                return loadScriptOnce(src);
+            });
+        });
+        return chain;
+    }
+
     function loadHmIndicators() {
         if (global.HilegaMilegaIndicator) return Promise.resolve();
         if (hmScriptsPromise) return hmScriptsPromise;
         hmScriptsPromise = loadLwc().then(function () {
-            let chain = Promise.resolve();
+            let chain = loadChartUtils();
             HM_SCRIPTS.forEach(function (src) {
                 chain = chain.then(function () {
                     return loadScriptOnce(src);
@@ -297,7 +312,21 @@
     }
 
     function ensureAssets() {
-        return Promise.all([loadCss(), loadLwc(), loadIntelPanel(), loadHmIndicators()]);
+        return Promise.all([loadCss(), loadLwc(), loadIntelPanel(), loadChartUtils(), loadHmIndicators()]);
+    }
+
+    function crosshairLabelForTime(time, timeframe) {
+        if (global.ChartCrosshairFormat) {
+            return global.ChartCrosshairFormat.formatCrosshair(time, timeframe);
+        }
+        return formatChartDisplayTime(time, true);
+    }
+
+    function axisTickForTime(time, timeframe) {
+        if (global.ChartCrosshairFormat) {
+            return global.ChartCrosshairFormat.formatAxisTick(time, timeframe);
+        }
+        return formatChartDisplayTime(time, false);
     }
 
     function dirBadgeHtml(direction) {
@@ -473,6 +502,8 @@
         this.hmEnabled = false;
         this.hmPaneHeight = HM_PANE_DEFAULT_PX;
         this.hmIndicator = null;
+        this.volumeEnabled = true;
+        this._crosshairUnsubs = [];
     }
 
     SecurityChartModal.prototype._renderHeader = function () {
@@ -592,6 +623,9 @@
             '<label class="uscm-ov-label">' +
             '<input type="checkbox" data-uscm-vwap-on checked> VWAP' +
             '</label>' +
+            '<label class="uscm-ov-label">' +
+            '<input type="checkbox" data-uscm-vol-on checked> Volume' +
+            '</label>' +
             '<label class="uscm-ov-label uscm-ov-label--hm">' +
             '<input type="checkbox" data-uscm-hm-on> Hilega-Milega' +
             '</label>' +
@@ -611,6 +645,7 @@
             '<div class="uscm-skeleton" data-uscm-skeleton>Loading chart…</div>' +
             '<div class="uscm-chart-stack" data-uscm-chart-stack>' +
             '<div class="uscm-main-pane" data-uscm-main-pane>' +
+            '<div class="uscm-crosshair-time uscm-hidden" data-uscm-crosshair-time aria-live="polite"></div>' +
             '<div class="uscm-chart-root" data-uscm-chart></div>' +
             '</div>' +
             '<div class="uscm-hm-splitter uscm-hidden" data-uscm-hm-splitter role="separator" aria-orientation="horizontal" aria-label="Resize Hilega-Milega panel" tabindex="0"></div>' +
@@ -662,6 +697,15 @@
         const root = modalRoot;
         if (!root) return;
         const overlays = root.querySelector('[data-uscm-overlays]');
+        if (overlays && !overlays.querySelector('[data-uscm-vol-on]')) {
+            const hmLabel = overlays.querySelector('.uscm-ov-label--hm');
+            const volHtml =
+                '<label class="uscm-ov-label">' +
+                '<input type="checkbox" data-uscm-vol-on checked> Volume' +
+                '</label>';
+            if (hmLabel) hmLabel.insertAdjacentHTML('beforebegin', volHtml);
+            else overlays.insertAdjacentHTML('beforeend', volHtml);
+        }
         if (overlays && !overlays.querySelector('[data-uscm-hm-on]')) {
             overlays.insertAdjacentHTML(
                 'beforeend',
@@ -678,7 +722,7 @@
         wrap.innerHTML =
             '<div class="uscm-skeleton" data-uscm-skeleton>Loading chart…</div>' +
             '<div class="uscm-chart-stack" data-uscm-chart-stack>' +
-            '<div class="uscm-main-pane" data-uscm-main-pane><div class="uscm-chart-root" data-uscm-chart></div></div>' +
+            '<div class="uscm-main-pane" data-uscm-main-pane><div class="uscm-crosshair-time uscm-hidden" data-uscm-crosshair-time aria-live="polite"></div><div class="uscm-chart-root" data-uscm-chart></div></div>' +
             '<div class="uscm-hm-splitter uscm-hidden" data-uscm-hm-splitter role="separator" aria-orientation="horizontal" aria-label="Resize Hilega-Milega panel" tabindex="0"></div>' +
             '<div class="uscm-hm-pane uscm-hidden" data-uscm-hm-pane>' +
             '<div class="uscm-hm-label">Hilega-Milega</div>' +
@@ -690,6 +734,98 @@
         }
         bindHmSplitter(root, this);
         bindHmCheckboxIfNeeded(root, this);
+        bindVolumeCheckboxIfNeeded(root, this);
+        const mainPane = root.querySelector('[data-uscm-main-pane]');
+        if (mainPane && !mainPane.querySelector('[data-uscm-crosshair-time]')) {
+            mainPane.insertAdjacentHTML(
+                'afterbegin',
+                '<div class="uscm-crosshair-time uscm-hidden" data-uscm-crosshair-time aria-live="polite"></div>'
+            );
+        }
+    };
+
+    function bindVolumeCheckboxIfNeeded(root, modalInstance) {
+        const volCb = root.querySelector('[data-uscm-vol-on]');
+        if (!volCb || volCb._uscmVolBound) return;
+        volCb._uscmVolBound = true;
+        volCb.addEventListener('change', function () {
+            modalInstance._readOverlayPrefs();
+            modalInstance._applyVolumeVisibility();
+        });
+    }
+
+    SecurityChartModal.prototype._clearCrosshairHandlers = function () {
+        (this._crosshairUnsubs || []).forEach(function (fn) {
+            try {
+                fn();
+            } catch (e) {
+                /* ignore */
+            }
+        });
+        this._crosshairUnsubs = [];
+        const el = modalRoot && modalRoot.querySelector('[data-uscm-crosshair-time]');
+        if (el) {
+            el.textContent = '';
+            el.classList.add('uscm-hidden');
+        }
+    };
+
+    SecurityChartModal.prototype._bindCrosshairHandlers = function () {
+        this._clearCrosshairHandlers();
+        const root = modalRoot;
+        const el = root && root.querySelector('[data-uscm-crosshair-time]');
+        if (!el) return;
+        const self = this;
+        const tf = this.timeframe;
+
+        function onCrosshair(param) {
+            if (!param || param.time == null || param.point === undefined) {
+                el.classList.add('uscm-hidden');
+                el.textContent = '';
+                return;
+            }
+            el.textContent = crosshairLabelForTime(param.time, tf);
+            el.classList.remove('uscm-hidden');
+        }
+
+        if (this.chart) {
+            this.chart.subscribeCrosshairMove(onCrosshair);
+            this._crosshairUnsubs.push(
+                function () {
+                    try {
+                        self.chart.unsubscribeCrosshairMove(onCrosshair);
+                    } catch (e) {
+                        /* ignore */
+                    }
+                }
+            );
+        }
+        if (this.hmIndicator && this.hmIndicator.chart) {
+            this.hmIndicator.chart.subscribeCrosshairMove(onCrosshair);
+            this._crosshairUnsubs.push(
+                function () {
+                    try {
+                        self.hmIndicator.chart.unsubscribeCrosshairMove(onCrosshair);
+                    } catch (e) {
+                        /* ignore */
+                    }
+                }
+            );
+        }
+    };
+
+    SecurityChartModal.prototype._applyVolumeVisibility = function () {
+        if (!this.volumeSeries || !this.chart) return;
+        if (global.ChartVolumeVisibility) {
+            global.ChartVolumeVisibility.apply(this.volumeSeries, this.chart, this.volumeEnabled);
+        } else {
+            this.volumeSeries.applyOptions({ visible: this.volumeEnabled });
+            this.chart.priceScale('').applyOptions({
+                scaleMargins: this.volumeEnabled
+                    ? { top: 0.82, bottom: 0 }
+                    : { top: 0.02, bottom: 0 },
+            });
+        }
     };
 
     function bindHmCheckboxIfNeeded(root, modalInstance) {
@@ -795,12 +931,14 @@
 
         const emaCb = host.querySelector('[data-uscm-ema-on]');
         const vwapCb = host.querySelector('[data-uscm-vwap-on]');
+        const volCb = host.querySelector('[data-uscm-vol-on]');
         const hmCb = host.querySelector('[data-uscm-hm-on]');
         const emaIn = host.querySelector('[data-uscm-ema-period]');
 
         function onOverlayChange() {
             modalInstance._readOverlayPrefs();
             modalInstance._rebuildOverlays();
+            modalInstance._applyVolumeVisibility();
             modalInstance._applyHmIndicator();
         }
 
@@ -809,6 +947,10 @@
         }
         if (vwapCb) {
             vwapCb.addEventListener('change', onOverlayChange);
+        }
+        if (volCb) {
+            volCb.addEventListener('change', onOverlayChange);
+            volCb._uscmVolBound = true;
         }
         if (hmCb) {
             hmCb.addEventListener('change', onOverlayChange);
@@ -948,9 +1090,11 @@
             bars: this._barsCache,
             isDark: isChartDarkTheme(),
             mainChart: this.chart,
-            timeFormatter: formatChartTimeIst,
+            timeFormatter: function (time) {
+                return crosshairLabelForTime(time, self.timeframe);
+            },
             tickMarkFormatter: function (time) {
-                return formatChartDisplayTime(time, false);
+                return axisTickForTime(time, self.timeframe);
             },
         });
         requestAnimationFrame(function () {
@@ -958,10 +1102,12 @@
             if (self.chart && self.hmIndicator) {
                 self.hmIndicator.syncFromMain(self.chart);
             }
+            self._bindCrosshairHandlers();
         });
     };
 
     SecurityChartModal.prototype._destroyChart = function () {
+        this._clearCrosshairHandlers();
         this._destroyHmIndicator();
         if (this.resizeObs) {
             this.resizeObs.disconnect();
@@ -1025,6 +1171,8 @@
         }
         const hmCb = root.querySelector('[data-uscm-hm-on]');
         if (hmCb) this.hmEnabled = hmCb.checked;
+        const volCb = root.querySelector('[data-uscm-vol-on]');
+        if (volCb) this.volumeEnabled = volCb.checked;
     };
 
     SecurityChartModal.prototype._syncOverlayUi = function () {
@@ -1033,9 +1181,11 @@
         const emaCb = root.querySelector('[data-uscm-ema-on]');
         const vwapCb = root.querySelector('[data-uscm-vwap-on]');
         const hmCb = root.querySelector('[data-uscm-hm-on]');
+        const volCb = root.querySelector('[data-uscm-vol-on]');
         const emaIn = root.querySelector('[data-uscm-ema-period]');
         if (emaCb) emaCb.checked = this.emaEnabled;
         if (vwapCb) vwapCb.checked = this.vwapEnabled;
+        if (volCb) volCb.checked = this.volumeEnabled;
         if (hmCb) hmCb.checked = this.hmEnabled;
         if (emaIn) {
             emaIn.value = String(this.emaPeriod);
@@ -1132,6 +1282,7 @@
         const colors = chartThemeColors();
         const grid = isDark ? '#334155' : '#e2e8f0';
         const text = isDark ? '#94a3b8' : '#64748b';
+        const tf = this.timeframe;
         this.chart = LWC.createChart(chartEl, {
             layout: {
                 background: { color: isDark ? '#0f172a' : '#ffffff' },
@@ -1142,14 +1293,16 @@
             rightPriceScale: { borderColor: grid },
             localization: {
                 locale: 'en-IN',
-                timeFormatter: formatChartTimeIst,
+                timeFormatter: function (time) {
+                    return crosshairLabelForTime(time, tf);
+                },
             },
             timeScale: {
                 borderColor: grid,
                 timeVisible: true,
                 secondsVisible: false,
                 tickMarkFormatter: function (time) {
-                    return formatChartDisplayTime(time, false);
+                    return axisTickForTime(time, tf);
                 },
             },
         });
@@ -1185,7 +1338,6 @@
         this.chart.priceScale('').applyOptions({
             scaleMargins: { top: 0.82, bottom: 0 },
         });
-        const tf = this.timeframe;
         this._barsCache = bars.map(function (b) {
             return normalizeBarFromApi(b, tf);
         });
@@ -1202,6 +1354,7 @@
         });
         this.candleSeries.setData(candles);
         this.volumeSeries.setData(vols);
+        this._applyVolumeVisibility();
         this._rebuildOverlays();
         const last = candles[candles.length - 1];
         this._lastBarTime = last ? last.time : null;
@@ -1211,6 +1364,7 @@
         setInitialVisibleBars(this.chart, candles.length);
         this._seedLtpFromBars();
         this._applyHmIndicator();
+        this._bindCrosshairHandlers();
         const self = this;
         if (typeof ResizeObserver !== 'undefined') {
             this.resizeObs = new ResizeObserver(function () {

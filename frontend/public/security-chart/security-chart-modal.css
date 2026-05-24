@@ -310,6 +310,37 @@ body[data-theme="light"] .uscm-tf-btn {
     position: relative;
 }
 
+.uscm-crosshair-time {
+    position: absolute;
+    left: 8px;
+    bottom: 6px;
+    z-index: 6;
+    pointer-events: none;
+    font-size: 0.72rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    color: #e2e8f0;
+    background: rgba(15, 23, 42, 0.82);
+    border: 1px solid #475569;
+    border-radius: 6px;
+    padding: 3px 8px;
+    max-width: calc(100% - 16px);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+body[data-theme="light"] .uscm-crosshair-time {
+    color: #0f172a;
+    background: rgba(255, 255, 255, 0.92);
+    border-color: #cbd5e1;
+}
+
+.uscm-crosshair-time.uscm-hidden {
+    display: none;
+}
+
 .uscm-chart-root,
 .uscm-hm-chart-root {
     position: absolute;
