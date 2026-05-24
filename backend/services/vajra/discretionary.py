@@ -49,14 +49,69 @@ def _fetch_5m(instrument_key: str) -> List[dict]:
 
 
 def _ltp(upstox: UpstoxService, instrument_key: str) -> Optional[float]:
+    if not instrument_key:
+        return None
+    keys = {instrument_key.strip()}
+    keys.add(instrument_key.replace("|", ":"))
+    keys.add(instrument_key.replace(":", "|"))
+    for key in keys:
+        if not key:
+            continue
+        try:
+            q = upstox.get_market_quote_by_key(key)
+            if q:
+                p = float(q.get("last_price") or q.get("ltp") or 0)
+                if p > 0:
+                    return p
+        except Exception:
+            pass
     try:
-        q = upstox.get_market_quote_by_key(instrument_key)
-        if q:
-            p = float(q.get("last_price") or 0)
+        from backend.services.chart_feed_manager import get_chart_live_quote
+        from backend.services.upstox_market_feed import _normalize_ik
+
+        q = get_chart_live_quote(_normalize_ik(instrument_key))
+        if q and q.get("ltp") is not None:
+            p = float(q["ltp"])
             return p if p > 0 else None
     except Exception:
         pass
     return None
+
+
+def _existing_current_price(trade: Dict[str, Any]) -> Optional[float]:
+    raw = trade.get("current_price")
+    if raw is None:
+        return None
+    try:
+        p = float(raw)
+        return p if p > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _resolve_current_price(
+    trade: Dict[str, Any],
+    ltp: Optional[float],
+    candles: Sequence[Dict[str, Any]],
+) -> Optional[float]:
+    """Keep last known price; replace only when a new non-null LTP is available."""
+    price = _existing_current_price(trade)
+    if ltp is not None and ltp > 0:
+        return ltp
+    if price is not None:
+        return price
+    if candles:
+        try:
+            last_close = float(candles[-1].get("close") or 0)
+            if last_close > 0:
+                return last_close
+        except (TypeError, ValueError, IndexError):
+            pass
+    try:
+        entry = float(trade.get("entry_price") or 0)
+        return entry if entry > 0 else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _sector_alignment_label(stock: str, bull: bool) -> str:
@@ -278,7 +333,7 @@ def refresh_trade_state(trade: Dict[str, Any]) -> Dict[str, Any]:
 
     upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
     ltp = _ltp(upstox, instrument_key)
-    current_price = ltp
+    current_price = _resolve_current_price(trade, ltp, candles)
     structure_status = "Neutral"
     momentum_status = "Neutral"
     ema_status = "—"

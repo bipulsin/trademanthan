@@ -107,12 +107,12 @@ def activate_trade(
                 """
                 INSERT INTO vajra_discretionary_trade (
                     user_id, platform, session_date, stock, future_symbol, instrument_key,
-                    direction, lots, entry_price, entry_time, status,
+                    direction, lots, entry_price, entry_time, status, current_price,
                     discovery_snapshot, checklist, metrics_at_entry, warnings_at_entry,
                     lifecycle_state, trade_health, lifecycle_history, journal, created_at, updated_at
                 ) VALUES (
                     :user_id, :platform, :sd, :stock, :fs, :ik,
-                    :direction, :lots, :entry_price, :entry_time, 'active',
+                    :direction, :lots, :entry_price, :entry_time, 'active', :entry_price,
                     CAST(:disc AS jsonb), CAST(:chk AS jsonb), CAST(:met AS jsonb), CAST(:warn AS jsonb),
                     'Early Transition', 50, '[]'::jsonb, '{}'::jsonb, :now, :now
                 )
@@ -223,7 +223,7 @@ def refresh_all_active_trades() -> int:
                 text(
                     """
                     UPDATE vajra_discretionary_trade SET
-                        current_price = :cp,
+                        current_price = COALESCE(:cp, current_price),
                         trade_health = :th,
                         lifecycle_state = :lc,
                         structure_status = :ss,
@@ -270,7 +270,7 @@ def persist_refresh(user_id: int, trade_id: int) -> Optional[Dict[str, Any]]:
             text(
                 """
                 UPDATE vajra_discretionary_trade SET
-                    current_price = :cp,
+                    current_price = COALESCE(:cp, current_price),
                     trade_health = :th,
                     lifecycle_state = :lc,
                     structure_status = :ss,
