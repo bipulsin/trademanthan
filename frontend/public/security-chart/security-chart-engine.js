@@ -13,8 +13,16 @@
     const TF_OPTIONS = ['5m', '15m', '30m', '1hr', '1d'];
     const LWC_URL =
         'https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js';
-    const CSS_HREF = 'security-chart/security-chart-modal.css?v=5';
+    const CSS_HREF = 'security-chart/security-chart-modal.css?v=6';
     const INTEL_JS = 'security-chart/trade-intelligence-panel.js?v=2';
+    const HM_SCRIPTS = [
+        'security-chart/indicators/rsi.js?v=1',
+        'security-chart/indicators/movingAverages.js?v=1',
+        'security-chart/indicators/hilega-milega.js?v=1',
+    ];
+    const HM_PANE_DEFAULT_PX = 140;
+    const HM_PANE_MIN_PX = 80;
+    const HM_PANE_MAX_PX = 320;
     const EMA_PERIOD_MIN = 2;
     const EMA_PERIOD_MAX = 200;
     const EMA_PERIOD_DEFAULT = 5;
@@ -194,8 +202,39 @@
 
     let lwcPromise = null;
     let intelPromise = null;
+    let hmScriptsPromise = null;
     let cssLoaded = false;
     let modalRoot = null;
+
+    function loadScriptOnce(src) {
+        return new Promise(function (resolve, reject) {
+            const s = document.createElement('script');
+            s.src = src;
+            s.async = true;
+            s.onload = function () {
+                resolve();
+            };
+            s.onerror = function () {
+                reject(new Error('Failed to load ' + src));
+            };
+            document.head.appendChild(s);
+        });
+    }
+
+    function loadHmIndicators() {
+        if (global.HilegaMilegaIndicator) return Promise.resolve();
+        if (hmScriptsPromise) return hmScriptsPromise;
+        hmScriptsPromise = loadLwc().then(function () {
+            let chain = Promise.resolve();
+            HM_SCRIPTS.forEach(function (src) {
+                chain = chain.then(function () {
+                    return loadScriptOnce(src);
+                });
+            });
+            return chain;
+        });
+        return hmScriptsPromise;
+    }
 
     function authHeaders() {
         const t = global.localStorage.getItem('trademanthan_token') || '';
@@ -258,7 +297,7 @@
     }
 
     function ensureAssets() {
-        return Promise.all([loadCss(), loadLwc(), loadIntelPanel()]);
+        return Promise.all([loadCss(), loadLwc(), loadIntelPanel(), loadHmIndicators()]);
     }
 
     function dirBadgeHtml(direction) {
@@ -431,6 +470,9 @@
         this.emaEnabled = true;
         this.vwapEnabled = true;
         this.emaPeriod = EMA_PERIOD_DEFAULT;
+        this.hmEnabled = false;
+        this.hmPaneHeight = HM_PANE_DEFAULT_PX;
+        this.hmIndicator = null;
     }
 
     SecurityChartModal.prototype._renderHeader = function () {
@@ -490,16 +532,29 @@
 
     SecurityChartModal.prototype._notifyChartResize = function () {
         const root = modalRoot;
-        if (!this.chart || !root) return;
+        if (!root) return;
         const chartEl = root.querySelector('[data-uscm-chart]');
-        if (!chartEl || !chartEl.clientWidth) return;
-        try {
-            this.chart.applyOptions({
-                width: chartEl.clientWidth,
-                height: chartEl.clientHeight,
-            });
-        } catch (e) {
-            /* ignore */
+        const hmEl = root.querySelector('[data-uscm-hm-chart]');
+        if (this.chart && chartEl && chartEl.clientWidth && chartEl.clientHeight) {
+            try {
+                this.chart.applyOptions({
+                    width: chartEl.clientWidth,
+                    height: chartEl.clientHeight,
+                });
+            } catch (e) {
+                /* ignore */
+            }
+        }
+        if (this.hmIndicator && hmEl && hmEl.clientWidth && hmEl.clientHeight) {
+            this.hmIndicator.resize(hmEl.clientWidth, hmEl.clientHeight);
+            if (this.chart && this.hmIndicator.chart) {
+                try {
+                    const range = this.chart.timeScale().getVisibleLogicalRange();
+                    if (range) this.hmIndicator.chart.timeScale().setVisibleLogicalRange(range);
+                } catch (e2) {
+                    /* ignore */
+                }
+            }
         }
     };
 
@@ -537,6 +592,9 @@
             '<label class="uscm-ov-label">' +
             '<input type="checkbox" data-uscm-vwap-on checked> VWAP' +
             '</label>' +
+            '<label class="uscm-ov-label uscm-ov-label--hm">' +
+            '<input type="checkbox" data-uscm-hm-on> Hilega-Milega' +
+            '</label>' +
             '</div></div></div>' +
             '<div class="uscm-ltp-block">' +
             '<div class="uscm-ltp-row">' +
@@ -551,7 +609,16 @@
             '<div class="uscm-body uscm-body--split" data-uscm-split>' +
             '<div class="uscm-chart-wrap">' +
             '<div class="uscm-skeleton" data-uscm-skeleton>Loading chart…</div>' +
+            '<div class="uscm-chart-stack" data-uscm-chart-stack>' +
+            '<div class="uscm-main-pane" data-uscm-main-pane>' +
             '<div class="uscm-chart-root" data-uscm-chart></div>' +
+            '</div>' +
+            '<div class="uscm-hm-splitter uscm-hidden" data-uscm-hm-splitter role="separator" aria-orientation="horizontal" aria-label="Resize Hilega-Milega panel" tabindex="0"></div>' +
+            '<div class="uscm-hm-pane uscm-hidden" data-uscm-hm-pane>' +
+            '<div class="uscm-hm-label">Hilega-Milega</div>' +
+            '<div class="uscm-hm-chart-root" data-uscm-hm-chart></div>' +
+            '</div>' +
+            '</div>' +
             '</div>' +
             '<div class="uscm-splitter" data-uscm-splitter role="separator" aria-orientation="vertical" aria-label="Resize statistics panel" tabindex="0"></div>' +
             '<aside class="uscm-intel-wrap tip-panel--empty" data-uscm-intel aria-label="Trade intelligence"></aside>' +
@@ -584,11 +651,111 @@
             tfHost.appendChild(btn);
         });
         bindIntelSplitter(backdrop, self);
+        bindHmSplitter(backdrop, self);
         bindOverlayControls(backdrop, self);
         bindIndicatorDropdown(backdrop);
         modalRoot = backdrop;
         return backdrop;
     };
+
+    SecurityChartModal.prototype._upgradeChartDom = function () {
+        const root = modalRoot;
+        if (!root) return;
+        const overlays = root.querySelector('[data-uscm-overlays]');
+        if (overlays && !overlays.querySelector('[data-uscm-hm-on]')) {
+            overlays.insertAdjacentHTML(
+                'beforeend',
+                '<label class="uscm-ov-label uscm-ov-label--hm">' +
+                    '<input type="checkbox" data-uscm-hm-on> Hilega-Milega' +
+                    '</label>'
+            );
+        }
+        const wrap = root.querySelector('.uscm-chart-wrap');
+        if (!wrap || wrap.querySelector('[data-uscm-chart-stack]')) return;
+        const skeleton = wrap.querySelector('[data-uscm-skeleton]');
+        const skDisplay = skeleton ? skeleton.style.display : '';
+        const skText = skeleton ? skeleton.textContent : 'Loading chart…';
+        wrap.innerHTML =
+            '<div class="uscm-skeleton" data-uscm-skeleton>Loading chart…</div>' +
+            '<div class="uscm-chart-stack" data-uscm-chart-stack>' +
+            '<div class="uscm-main-pane" data-uscm-main-pane><div class="uscm-chart-root" data-uscm-chart></div></div>' +
+            '<div class="uscm-hm-splitter uscm-hidden" data-uscm-hm-splitter role="separator" aria-orientation="horizontal" aria-label="Resize Hilega-Milega panel" tabindex="0"></div>' +
+            '<div class="uscm-hm-pane uscm-hidden" data-uscm-hm-pane>' +
+            '<div class="uscm-hm-label">Hilega-Milega</div>' +
+            '<div class="uscm-hm-chart-root" data-uscm-hm-chart></div></div></div>';
+        const sk2 = wrap.querySelector('[data-uscm-skeleton]');
+        if (sk2) {
+            sk2.style.display = skDisplay || '';
+            sk2.textContent = skText;
+        }
+        bindHmSplitter(root, this);
+        bindHmCheckboxIfNeeded(root, this);
+    };
+
+    function bindHmCheckboxIfNeeded(root, modalInstance) {
+        const hmCb = root.querySelector('[data-uscm-hm-on]');
+        if (!hmCb || hmCb._uscmHmBound) return;
+        hmCb._uscmHmBound = true;
+        hmCb.addEventListener('change', function () {
+            modalInstance._readOverlayPrefs();
+            modalInstance._rebuildOverlays();
+            modalInstance._applyHmIndicator();
+        });
+    }
+
+    function bindHmSplitter(root, modalInstance) {
+        const splitter = root.querySelector('[data-uscm-hm-splitter]');
+        const stack = root.querySelector('[data-uscm-chart-stack]');
+        if (!splitter || !stack || splitter._uscmHmBound) return;
+        splitter._uscmHmBound = true;
+
+        let dragging = false;
+
+        function clampHmHeight(px) {
+            return Math.max(HM_PANE_MIN_PX, Math.min(HM_PANE_MAX_PX, px));
+        }
+
+        function setHmHeight(px) {
+            modalInstance.hmPaneHeight = clampHmHeight(px);
+            stack.style.setProperty('--uscm-hm-h', modalInstance.hmPaneHeight + 'px');
+            modalInstance._notifyChartResize();
+        }
+
+        splitter.addEventListener('pointerdown', function (e) {
+            if (!root.classList.contains('uscm-panel--hm')) return;
+            dragging = true;
+            splitter.classList.add('uscm-hm-splitter--active');
+            try {
+                splitter.setPointerCapture(e.pointerId);
+            } catch (err) {
+                /* ignore */
+            }
+            document.body.classList.add('uscm-row-resize');
+            e.preventDefault();
+        });
+
+        splitter.addEventListener('pointermove', function (e) {
+            if (!dragging) return;
+            const sr = stack.getBoundingClientRect();
+            setHmHeight(sr.bottom - e.clientY);
+        });
+
+        function endDrag(e) {
+            if (!dragging) return;
+            dragging = false;
+            splitter.classList.remove('uscm-hm-splitter--active');
+            document.body.classList.remove('uscm-row-resize');
+            try {
+                splitter.releasePointerCapture(e.pointerId);
+            } catch (err) {
+                /* ignore */
+            }
+            modalInstance._notifyChartResize();
+        }
+
+        splitter.addEventListener('pointerup', endDrag);
+        splitter.addEventListener('pointercancel', endDrag);
+    }
 
     function bindIndicatorDropdown(root) {
         const wrap = root.querySelector('[data-uscm-indicator-wrap]');
@@ -628,11 +795,13 @@
 
         const emaCb = host.querySelector('[data-uscm-ema-on]');
         const vwapCb = host.querySelector('[data-uscm-vwap-on]');
+        const hmCb = host.querySelector('[data-uscm-hm-on]');
         const emaIn = host.querySelector('[data-uscm-ema-period]');
 
         function onOverlayChange() {
             modalInstance._readOverlayPrefs();
             modalInstance._rebuildOverlays();
+            modalInstance._applyHmIndicator();
         }
 
         if (emaCb) {
@@ -640,6 +809,10 @@
         }
         if (vwapCb) {
             vwapCb.addEventListener('change', onOverlayChange);
+        }
+        if (hmCb) {
+            hmCb.addEventListener('change', onOverlayChange);
+            hmCb._uscmHmBound = true;
         }
         if (emaIn) {
             emaIn.addEventListener('change', onOverlayChange);
@@ -723,7 +896,73 @@
         });
     }
 
+    SecurityChartModal.prototype._destroyHmIndicator = function () {
+        const root = modalRoot;
+        const hmEl = root && root.querySelector('[data-uscm-hm-chart]');
+        if (this.hmIndicator) {
+            this.hmIndicator.destroy(hmEl);
+            this.hmIndicator = null;
+        } else if (hmEl) {
+            hmEl.innerHTML = '';
+        }
+    };
+
+    SecurityChartModal.prototype._updateHmLayout = function () {
+        const root = modalRoot;
+        if (!root) return;
+        const stack = root.querySelector('[data-uscm-chart-stack]');
+        const splitter = root.querySelector('[data-uscm-hm-splitter]');
+        const pane = root.querySelector('[data-uscm-hm-pane]');
+        if (!stack) return;
+        if (this.hmEnabled) {
+            root.classList.add('uscm-panel--hm');
+            if (splitter) splitter.classList.remove('uscm-hidden');
+            if (pane) pane.classList.remove('uscm-hidden');
+            stack.style.setProperty('--uscm-hm-h', this.hmPaneHeight + 'px');
+        } else {
+            root.classList.remove('uscm-panel--hm');
+            if (splitter) splitter.classList.add('uscm-hidden');
+            if (pane) pane.classList.add('uscm-hidden');
+        }
+    };
+
+    SecurityChartModal.prototype._applyHmIndicator = function () {
+        const root = modalRoot;
+        if (!root) return;
+        this._updateHmLayout();
+        if (!this.hmEnabled) {
+            this._destroyHmIndicator();
+            return;
+        }
+        if (!this.chart || !this._barsCache.length || !global.HilegaMilegaIndicator) {
+            return;
+        }
+        const hmEl = root.querySelector('[data-uscm-hm-chart]');
+        if (!hmEl) return;
+        if (!this.hmIndicator) {
+            this.hmIndicator = new global.HilegaMilegaIndicator();
+        }
+        const self = this;
+        this.hmIndicator.render({
+            container: hmEl,
+            bars: this._barsCache,
+            isDark: isChartDarkTheme(),
+            mainChart: this.chart,
+            timeFormatter: formatChartTimeIst,
+            tickMarkFormatter: function (time) {
+                return formatChartDisplayTime(time, false);
+            },
+        });
+        requestAnimationFrame(function () {
+            self._notifyChartResize();
+            if (self.chart && self.hmIndicator) {
+                self.hmIndicator.syncFromMain(self.chart);
+            }
+        });
+    };
+
     SecurityChartModal.prototype._destroyChart = function () {
+        this._destroyHmIndicator();
         if (this.resizeObs) {
             this.resizeObs.disconnect();
             this.resizeObs = null;
@@ -784,6 +1023,8 @@
             emaIn.value = String(this.emaPeriod);
             emaIn.disabled = !this.emaEnabled;
         }
+        const hmCb = root.querySelector('[data-uscm-hm-on]');
+        if (hmCb) this.hmEnabled = hmCb.checked;
     };
 
     SecurityChartModal.prototype._syncOverlayUi = function () {
@@ -791,9 +1032,11 @@
         if (!root) return;
         const emaCb = root.querySelector('[data-uscm-ema-on]');
         const vwapCb = root.querySelector('[data-uscm-vwap-on]');
+        const hmCb = root.querySelector('[data-uscm-hm-on]');
         const emaIn = root.querySelector('[data-uscm-ema-period]');
         if (emaCb) emaCb.checked = this.emaEnabled;
         if (vwapCb) vwapCb.checked = this.vwapEnabled;
+        if (hmCb) hmCb.checked = this.hmEnabled;
         if (emaIn) {
             emaIn.value = String(this.emaPeriod);
             emaIn.disabled = !this.emaEnabled;
@@ -967,6 +1210,7 @@
             : null;
         setInitialVisibleBars(this.chart, candles.length);
         this._seedLtpFromBars();
+        this._applyHmIndicator();
         const self = this;
         if (typeof ResizeObserver !== 'undefined') {
             this.resizeObs = new ResizeObserver(function () {
@@ -1065,6 +1309,9 @@
                 close: o.close,
             });
             this._refreshOverlays();
+            if (this.hmIndicator && this.hmEnabled) {
+                this.hmIndicator.updateLastBar(this._barsCache);
+            }
         } catch (e) {
             /* ignore occasional time mismatch */
         }
@@ -1092,6 +1339,7 @@
 
         return ensureAssets().then(function () {
             const root = self._ensureDom();
+            self._upgradeChartDom();
             self._syncOverlayUi();
             self._renderHeader();
             self._renderIntelligence();
