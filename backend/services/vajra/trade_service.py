@@ -30,15 +30,25 @@ def list_trades(
     session_date: Optional[date] = None,
     platform: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    sd = session_date or effective_session_date_ist_for_trend()
+    """
+    Active trades: all open rows for the user (any session_date).
+    Closed trades: default to today's IST session_date unless session_date is passed.
+    """
     db = SessionLocal()
     try:
         ensure_vajra_discretionary_tables(db)
         q = """
             SELECT * FROM vajra_discretionary_trade
-            WHERE user_id = :uid AND status = :st AND session_date = :sd
+            WHERE user_id = :uid AND status = :st
         """
-        params: Dict[str, Any] = {"uid": user_id, "st": status, "sd": sd}
+        params: Dict[str, Any] = {"uid": user_id, "st": status}
+        if status == "closed":
+            sd = session_date or effective_session_date_ist_for_trend()
+            q += " AND session_date = :sd"
+            params["sd"] = sd
+        elif session_date is not None:
+            q += " AND session_date = :sd"
+            params["sd"] = session_date
         if platform:
             q += " AND platform = :pf"
             params["pf"] = platform
