@@ -25,6 +25,9 @@
             refreshBtnId: 'vfVajraRefreshBtn',
         };
         const startRatings = function () {
+            if (window.VajraStableExecution) {
+                window.VajraStableExecution.init({ prefix: 'vf' });
+            }
             if (window.VajraFuturesRatings) {
                 window.VajraFuturesRatings.init(ratingsOpts);
             }

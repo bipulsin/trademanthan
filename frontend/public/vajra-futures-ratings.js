@@ -57,6 +57,7 @@
         { key: 'tps_score', label: 'TPS' },
         { key: 'setup_potential_score', label: 'Setup Potential' },
         { key: 'ecs_score', label: 'ECS' },
+        { key: 'ess_score', label: 'ESS' },
         { key: 'vwap_reclaim_status', label: 'VWAP' },
         { key: 'obv', label: 'OBV' },
         { key: 'htf_alignment_score', label: 'HTF' },
@@ -349,7 +350,8 @@
             col.num ||
             col.key === 'confidence' ||
             col.key === 'tps_score' ||
-            col.key === 'ecs_score'
+            col.key === 'ecs_score' ||
+            col.key === 'ess_score'
         ) {
             return fmtNum(r[col.key] != null ? r[col.key] : r.confidence);
         }
@@ -963,13 +965,46 @@
         );
     }
 
+    function renderStableBanner(se) {
+        if (!se || !se.stable_mode_enabled) return '';
+        let html = '';
+        if (se.attention_banner) {
+            html +=
+                '<p class="vajra-stable-attention-banner"><i class="fas fa-bullseye"></i> ' +
+                escapeHtml(se.attention_banner) +
+                '</p>';
+        }
+        const rots = se.suggested_rotations || [];
+        if (rots.length) {
+            html += '<ul class="vajra-stable-rotations">';
+            rots.forEach(function (rot) {
+                html +=
+                    '<li><span class="vajra-rot-tag">Suggested rotation</span> ' +
+                    escapeHtml(rot.from_stock) +
+                    ' → ' +
+                    escapeHtml(rot.to_stock) +
+                    ' — ' +
+                    escapeHtml(rot.reason || '') +
+                    '</li>';
+            });
+            html += '</ul>';
+        }
+        return html;
+    }
+
     function renderTopTableFromPayload(data) {
+        const se = (data && data.stable_execution) || {};
+        if (global.VajraStableExecution && global.VajraStableExecution.syncFromPayload) {
+            global.VajraStableExecution.syncFromPayload(data);
+        }
         const composed = composeTop8ScreenRows(data || {});
         const execRows = composed.EXECUTABLE || [];
         const armedRows = composed.ARMED || [];
         const discRows = composed.DISCOVERY || [];
         const banner = data && data.banner;
-        const hasAny = composed.top8 && composed.top8.length;
+        const hasAny =
+            (se.stable_mode_enabled && stickyRows.length) ||
+            (composed.top8 && composed.top8.length);
 
         if (!hasAny) {
             return (
@@ -990,23 +1025,31 @@
         }
 
         let tbody = '';
-        if (execRows.length) {
+        const stickyRows = (se.sticky_top3 || []).slice();
+        const focusOnly = se.stable_mode_enabled && se.focus_mode_enabled && stickyRows.length;
+
+        if (se.stable_mode_enabled && stickyRows.length) {
+            tbody += renderSectionHeader('Sticky Top 3 — Stable Execution', 'vajra-section-sticky');
+            tbody += renderTableBodyRows(stickyRows, TOP_COLUMNS, true);
+        }
+        if (!focusOnly && execRows.length) {
             tbody += renderSectionHeader('Executable Now', 'vajra-section-exec');
             tbody += renderTableBodyRows(execRows, TOP_COLUMNS, true);
         }
-        if (armedRows.length) {
+        if (!focusOnly && !se.stable_mode_enabled && armedRows.length) {
             tbody += renderSectionHeader('Armed — One Trigger Away', 'vajra-section-armed');
             tbody += renderTableBodyRows(armedRows, TOP_COLUMNS, true);
         }
-        if (discRows.length) {
+        if (!focusOnly && !se.stable_mode_enabled && discRows.length) {
             tbody += renderSectionHeader('Discovery — Institutional Attention', 'vajra-section-discovery');
             tbody += renderTableBodyRows(discRows, TOP_COLUMNS, true);
         }
 
         return (
             bannerHtml +
+            renderStableBanner(se) +
             '<p class="vajra-meta vajra-pipeline-note">Execution screener — EXECUTABLE / ARMED / DISCOVERY. ' +
-            'Scan updates until 15:25 IST; ENTER closes 15:30 IST.</p>' +
+            'Scan updates until 15:25 IST; ENTER closes 15:30 IST. Stable mode: sticky Top 3 with ESS-led ranking.</p>' +
             '<div class="vajra-table-wrap"><table class="vajra-table vajra-top-table">' +
             renderTableHead(TOP_COLUMNS, true) +
             '<tbody>' +
@@ -1330,6 +1373,9 @@
 
         function renderLoadedData(data) {
             applyVajraSessionFlags(data);
+            if (global.VajraStableExecution && global.VajraStableExecution.syncFromPayload) {
+                global.VajraStableExecution.syncFromPayload(data);
+            }
             const activeSet = getActiveTradeStocks();
             const filtered = filterRatingsPayload(data, activeSet);
             allRows = filtered.rows || [];

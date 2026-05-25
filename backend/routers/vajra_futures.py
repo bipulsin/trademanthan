@@ -111,7 +111,6 @@ def get_vajra_ratings(
     user: User = Depends(_require_user),
 ):
     """Vajra ratings for current-month futures (transition pipeline or legacy ECS)."""
-    del user
     try:
         from backend.services.smart_futures_session_date import effective_session_date_ist_for_trend
         from backend.services.vajra.pipeline import DISCOVERY_TF, EXECUTION_TF, HTF_BIAS_TF
@@ -121,6 +120,20 @@ def get_vajra_ratings(
         mode_norm = (mode or "transition").strip().lower()
         if mode_norm == "transition":
             rows, source, stale_reason = resolve_vajra_ratings_for_api(sd, use_cache=True)
+            from backend.services.vajra.session_window import vajra_session_api_fields
+            from backend.services.vajra.stable_execution import apply_stable_execution_overlay
+
+            stable = apply_stable_execution_overlay(rows, user.id, session_date=sd)
+            rows = stable["rows"]
+            row_by_stock = {
+                str(r.get("stock") or r.get("security") or "").strip().upper(): r
+                for r in rows
+            }
+            for slot_row in stable.get("sticky_top3") or []:
+                sym = str(slot_row.get("stock") or "").strip().upper()
+                if sym:
+                    row_by_stock[sym] = slot_row
+            rows = list(row_by_stock.values())
             display = build_screener_display(rows)
             rows = display["rows"]
             updated_dt = fetch_vajra_ratings_updated_at(sd)
@@ -139,7 +152,6 @@ def get_vajra_ratings(
             ees_alert_rows = [
                 r for r in rows if (r.get("ees_alerts") or []) and not r.get("alertable")
             ]
-            from backend.services.vajra.session_window import vajra_session_api_fields
 
             return JSONResponse(
                 status_code=200,
@@ -175,6 +187,18 @@ def get_vajra_ratings(
                     "sections": display.get("sections", {}),
                     "banner": display.get("banner"),
                     "remainder": display["remainder"],
+                    "stable_execution": {
+                        "stable_mode_enabled": stable.get("stable_mode_enabled"),
+                        "focus_mode_enabled": stable.get("focus_mode_enabled"),
+                        "sticky_persist_minutes": stable.get("sticky_persist_minutes"),
+                        "sticky_top3": stable.get("sticky_top3"),
+                        "suggested_rotations": stable.get("suggested_rotations"),
+                        "freeze_window_open": stable.get("freeze_window_open"),
+                        "watchlist_frozen": stable.get("watchlist_frozen"),
+                        "frozen_focus_stocks": stable.get("frozen_focus_stocks"),
+                        "watchlist_frozen_at": stable.get("watchlist_frozen_at"),
+                        "attention_banner": stable.get("attention_banner"),
+                    },
                 },
                 headers={
                     "Cache-Control": "no-store, no-cache, must-revalidate",
@@ -354,3 +378,66 @@ def vajra_trade_refresh(trade_id: int, user: User = Depends(_require_user)):
     if not trade:
         return JSONResponse(status_code=404, content={"success": False, "message": "Trade not found"})
     return JSONResponse(status_code=200, content={"success": True, "trade": trade})
+
+
+@router.get("/stable-execution/state")
+def get_stable_execution_state(
+    session_date: Optional[date] = Query(None),
+    user: User = Depends(_require_user),
+):
+    from backend.services.smart_futures_session_date import effective_session_date_ist_for_trend
+    from backend.services.vajra.stable_execution import (
+        ALLOWED_STICKY_MINUTES,
+        is_freeze_watchlist_window_ist,
+        load_user_state,
+    )
+
+    sd = session_date or effective_session_date_ist_for_trend()
+    cfg = load_user_state(user.id, sd)
+    return JSONResponse(
+        status_code=200,
+        content={
+            "success": True,
+            "session_date": sd.isoformat(),
+            "stable_mode_enabled": cfg.stable_mode_enabled,
+            "focus_mode_enabled": cfg.focus_mode_enabled,
+            "sticky_persist_minutes": cfg.sticky_persist_minutes,
+            "allowed_sticky_minutes": list(ALLOWED_STICKY_MINUTES),
+            "frozen_focus_stocks": cfg.frozen_focus_stocks,
+            "watchlist_frozen_at": (
+                cfg.watchlist_frozen_at.isoformat() if cfg.watchlist_frozen_at else None
+            ),
+            "freeze_window_open": is_freeze_watchlist_window_ist(),
+            "sticky_slots": cfg.sticky_slots,
+        },
+    )
+
+
+@router.put("/stable-execution/state")
+def put_stable_execution_state(
+    body: Dict[str, Any] = Body(...),
+    user: User = Depends(_require_user),
+):
+    from backend.services.vajra.stable_execution import load_user_state, save_user_state
+
+    cfg = load_user_state(user.id)
+    if "stable_mode_enabled" in body:
+        cfg.stable_mode_enabled = bool(body["stable_mode_enabled"])
+    if "focus_mode_enabled" in body:
+        cfg.focus_mode_enabled = bool(body["focus_mode_enabled"])
+    if "sticky_persist_minutes" in body:
+        cfg.sticky_persist_minutes = int(body["sticky_persist_minutes"])
+    save_user_state(user.id, cfg)
+    return JSONResponse(status_code=200, content={"success": True})
+
+
+@router.post("/stable-execution/freeze-focus")
+def post_freeze_watchlist_focus(
+    body: Dict[str, Any] = Body(...),
+    user: User = Depends(_require_user),
+):
+    from backend.services.vajra.stable_execution import freeze_watchlist_focus
+
+    stocks = list(body.get("stocks") or body.get("frozen_focus_stocks") or [])
+    out = freeze_watchlist_focus(user.id, stocks)
+    return JSONResponse(status_code=200, content=out)
