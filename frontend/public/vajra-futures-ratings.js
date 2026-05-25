@@ -596,28 +596,44 @@
         return { line1: s, line2: '' };
     }
 
+    function workflowTone(wf) {
+        const w = String(wf || '').toUpperCase();
+        if (w === 'EXECUTABLE') return 'vajra-wf-exec';
+        if (w === 'PREPARE') return 'vajra-wf-prepare';
+        if (w === 'ACTIVE') return 'vajra-wf-active';
+        if (w === 'EXIT_RISK') return 'vajra-wf-risk';
+        return 'vajra-wf-wait';
+    }
+
     function renderQualificationCell(row) {
         const qual = qualificationOf(row);
-        const tags = row.qualification_tags || [];
-        let tagsHtml = '';
-        if (tags.length) {
-            tagsHtml =
-                '<div class="vajra-qual-tags">' +
-                tags
-                    .map(function (t) {
-                        return '<span class="vajra-qual-tag">' + escapeHtml(t) + '</span>';
-                    })
-                    .join('') +
-                '</div>';
+        const wf = String(row.execution_workflow_state || row.execution_state || '').toUpperCase();
+        const grade = row.quality_grade ? String(row.quality_grade) : '';
+        let wfHtml = '';
+        if (wf) {
+            wfHtml =
+                '<span class="vajra-wf-pill ' +
+                workflowTone(wf) +
+                '" title="Co-Pilot workflow state">' +
+                escapeHtml(wf) +
+                '</span>';
+        }
+        let gradeHtml = '';
+        if (grade) {
+            gradeHtml =
+                '<span class="vajra-grade-pill" title="Setup quality grade">' +
+                escapeHtml(grade) +
+                '</span>';
         }
         return (
             '<div class="vajra-qual-cell">' +
+            wfHtml +
             '<span class="df-dir-pill ' +
             qualTone(qual) +
-            '">' +
+            ' vajra-qual-pill--compact">' +
             escapeHtml(qual) +
             '</span>' +
-            tagsHtml +
+            gradeHtml +
             '</div>'
         );
     }
@@ -1405,7 +1421,17 @@
                 moreBtn.textContent = rest > 0 ? 'more… (' + rest + ')' : 'more…';
             }
             if (metaEl) {
-                let meta =
+                const cp = (data && data.co_pilot) || {};
+                const mc = cp.market_context || {};
+                let meta = '';
+                if (mc.market_bias) {
+                    meta += 'Market: ' + mc.market_bias;
+                    if (mc.bias_conviction != null) {
+                        meta += ' (' + Math.round(mc.bias_conviction) + '%)';
+                    }
+                    meta += ' · ';
+                }
+                meta +=
                     (filtered.session_date || data.session_date || '—') +
                     ' · ' +
                     fmtUpdated(

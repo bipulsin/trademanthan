@@ -219,11 +219,62 @@
         return h;
     }
 
+    function renderTradePlanBlock(plan) {
+        if (!plan || !plan.entry_condition) return '';
+        const pe = plan.preferred_entry || {};
+        const tg = plan.targets || {};
+        let ctx = '';
+        (plan.market_context || []).forEach(function (c) {
+            ctx += '<li>' + esc(c) + '</li>';
+        });
+        let inv = '';
+        (plan.invalidation || []).forEach(function (c) {
+            inv += '<li>' + esc(c) + '</li>';
+        });
+        return (
+            '<div class="vajra-trade-plan">' +
+            '<h4 class="vajra-trade-plan-title">' +
+            esc(plan.symbol || '') +
+            ' · ' +
+            esc(plan.setup_type || 'Setup') +
+            ' · Grade ' +
+            esc(plan.quality_grade || '—') +
+            '</h4>' +
+            '<p class="vajra-trade-plan-lead"><strong>Conditional plan</strong> — ' +
+            esc(plan.disclaimer || '') +
+            '</p>' +
+            '<p class="vajra-trade-plan-entry">' +
+            esc(plan.entry_condition) +
+            '</p>' +
+            '<div class="vajra-trade-plan-grid">' +
+            '<div><span>Entry zone</span><strong>' +
+            esc(pe.low != null ? pe.low : '—') +
+            ' – ' +
+            esc(pe.high != null ? pe.high : '—') +
+            '</strong></div>' +
+            '<div><span>Stop</span><strong>' +
+            esc(plan.stop_loss != null ? plan.stop_loss : '—') +
+            '</strong></div>' +
+            '<div><span>T1</span><strong>' +
+            esc(tg.t1 != null ? tg.t1 : '—') +
+            '</strong></div>' +
+            '<div><span>T2</span><strong>' +
+            esc(tg.t2 != null ? tg.t2 : '—') +
+            '</strong></div></div>' +
+            (tg.t3_note ? '<p class="vajra-meta">T3: ' + esc(tg.t3_note) + '</p>' : '') +
+            (ctx ? '<ul class="vajra-trade-plan-list">' + ctx + '</ul>' : '') +
+            (inv ? '<p class="vajra-trade-plan-inv"><em>Invalidation</em></p><ul class="vajra-trade-plan-list">' + inv + '</ul>' : '') +
+            '</div>'
+        );
+    }
+
     function renderStepA() {
         const sym = _discoveryRow.security || _discoveryRow.stock || '—';
         const dir = dirFromRow(_discoveryRow);
+        const planBlock = renderTradePlanBlock(_discoveryRow.trade_plan);
         return (
             '<div class="vajra-wf-step vajra-wf-step--active" data-step="a">' +
+            planBlock +
             '<div class="vajra-wf-field"><label>Symbol</label><input readonly value="' +
             esc(sym) +
             '"></div>' +
@@ -282,6 +333,7 @@
         const smSummary = structureMarketEvalSummary(evalAll);
         const canActivate = smSummary.canActivate;
         const extLevel = (_preview && _preview.extension_risk_level) || metrics.extension_risk_level || '—';
+        const planBlock = renderTradePlanBlock((_preview && _preview.trade_plan) || _discoveryRow.trade_plan);
         const passN = metrics.validation_pass_count;
         const warnN = metrics.validation_warn_count;
         const failN = metrics.validation_fail_count;
@@ -316,6 +368,7 @@
 
         return (
             '<div class="vajra-wf-step vajra-wf-step--active" data-step="b">' +
+            planBlock +
             summary +
             '<h3>Structure (5m) — automated</h3>' +
             renderEvalTable(structure) +

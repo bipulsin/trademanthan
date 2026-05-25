@@ -203,7 +203,9 @@ def get_vajra_ratings(
                         "workflow_phase": stable.get("workflow_phase"),
                         "workflow_notice": stable.get("workflow_notice"),
                         "sector_heatmap": stable.get("sector_heatmap") or [],
+                        "co_pilot": stable.get("co_pilot") or {},
                     },
+                    "co_pilot": stable.get("co_pilot") or {},
                 },
                 headers={
                     "Cache-Control": "no-store, no-cache, must-revalidate",

@@ -224,9 +224,23 @@ def build_validation_preview(
             seen.add(w)
             deduped.append(w)
 
+    plan = discovery_row.get("trade_plan")
+    if not plan:
+        try:
+            from backend.services.vajra.execution_co_pilot import enrich_row_co_pilot
+
+            enriched = enrich_row_co_pilot(dict(discovery_row), active_trades={}, prior_wf=None)
+            plan = enriched.get("trade_plan")
+        except Exception:
+            plan = None
+
     return {
         "checklist": checklist,
         "checklist_eval": items,
+        "trade_plan": plan,
+        "execution_workflow_state": discovery_row.get("execution_workflow_state"),
+        "setup_type": discovery_row.get("setup_type"),
+        "quality_grade": discovery_row.get("quality_grade"),
         "warnings": deduped[:12],
         "metrics": metrics,
         "auto_available": True,

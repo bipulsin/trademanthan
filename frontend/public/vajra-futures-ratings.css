@@ -534,6 +534,62 @@ body[data-theme="dark"] .df-sector-badge--bear {
     gap: 10px 14px;
     align-items: center;
 }
+.vajra-wf-pill {
+    display: inline-block;
+    font-size: 0.62rem;
+    font-weight: 800;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-right: 4px;
+    letter-spacing: 0.02em;
+}
+.vajra-wf-exec { background: #166534; color: #fff; }
+.vajra-wf-prepare { background: #1e40af; color: #dbeafe; }
+.vajra-wf-active { background: #7c3aed; color: #fff; }
+.vajra-wf-risk { background: #991b1b; color: #fecaca; }
+.vajra-wf-wait { background: #475569; color: #e2e8f0; }
+.vajra-grade-pill {
+    font-size: 0.62rem;
+    font-weight: 700;
+    margin-left: 4px;
+    color: #fbbf24;
+}
+.vajra-qual-pill--compact {
+    font-size: 0.68rem;
+}
+.vajra-trade-plan {
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(59, 130, 246, 0.35);
+    background: rgba(30, 58, 95, 0.25);
+}
+.vajra-trade-plan-title {
+    margin: 0 0 6px;
+    font-size: 0.9rem;
+}
+.vajra-trade-plan-entry {
+    font-weight: 600;
+    font-size: 0.82rem;
+    margin: 6px 0;
+}
+.vajra-trade-plan-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    font-size: 0.75rem;
+    margin: 8px 0;
+}
+.vajra-trade-plan-grid span {
+    display: block;
+    color: var(--theme-muted, #94a3b8);
+    font-size: 0.65rem;
+}
+.vajra-trade-plan-list {
+    margin: 6px 0 0;
+    padding-left: 1.1rem;
+    font-size: 0.75rem;
+}
 .vajra-workflow-phase {
     margin: 8px 0;
     padding: 8px 10px;

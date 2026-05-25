@@ -398,6 +398,18 @@ def apply_stable_execution_overlay(
     except Exception as e:
         logger.debug("sector intelligence overlay skipped: %s", e)
         workflow = {}
+    co_meta: Dict[str, Any] = {}
+    try:
+        from backend.services.vajra.execution_co_pilot import apply_execution_co_pilot
+
+        co_meta = apply_execution_co_pilot(enriched, user_id, session_date=session_date)
+        enriched = co_meta.get("rows") or enriched
+    except Exception as e:
+        logger.debug("execution co-pilot overlay skipped: %s", e)
+    co_pilot_payload = {
+        "market_context": co_meta.get("market_context") or {},
+        "execution_events": co_meta.get("execution_events") or [],
+    }
     by_stock = {_stock_key(r): r for r in enriched if _stock_key(r)}
 
     if not cfg.stable_mode_enabled:
@@ -413,6 +425,7 @@ def apply_stable_execution_overlay(
             "frozen_focus_stocks": cfg.frozen_focus_stocks,
             "attention_banner": None,
             "sector_heatmap": sector_meta.get("sector_heatmap") or [],
+            "co_pilot": co_pilot_payload,
             **workflow,
         }
 
@@ -454,6 +467,7 @@ def apply_stable_execution_overlay(
         "attention_banner": banner,
         "rows": enriched,
         "sector_heatmap": sector_meta.get("sector_heatmap") or [],
+        "co_pilot": co_pilot_payload,
         **workflow,
     }
 
