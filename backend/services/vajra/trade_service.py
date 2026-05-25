@@ -23,6 +23,51 @@ def _jdump(obj: Any) -> str:
     return json.dumps(obj, default=str)
 
 
+def _trade_lot_size_units(trade: Dict[str, Any]) -> int:
+    """Exchange quantity per lot (from activation metrics or instruments lookup)."""
+    for blob_key in ("metrics_at_entry", "discovery_snapshot"):
+        blob = trade.get(blob_key) or {}
+        if not isinstance(blob, dict):
+            continue
+        for key in ("fut_lot_size", "lot_size"):
+            try:
+                ls = int(blob.get(key) or 0)
+            except (TypeError, ValueError):
+                ls = 0
+            if ls > 0:
+                return ls
+    ik = str(trade.get("instrument_key") or "").strip()
+    if ik:
+        try:
+            from backend.services.smart_futures_picker.position_sizing import (
+                get_futures_lot_size_by_instrument_key,
+            )
+
+            ls = int(get_futures_lot_size_by_instrument_key(ik) or 0)
+            if ls > 0:
+                return ls
+        except Exception as e:
+            logger.debug("trade lot size lookup %s: %s", ik, e)
+    return 0
+
+
+def compute_realized_pnl_rupees(trade: Dict[str, Any], exit_price: float) -> float:
+    """
+    Rupee P&L: (exit − entry) × lot_size × lots (LONG), inverted for SHORT.
+    Matches Open Position card: diff × lots × quantity_per_lot.
+    """
+    entry = float(trade.get("entry_price") or 0)
+    lots = max(1, int(trade.get("lots") or 1))
+    unit = _trade_lot_size_units(trade)
+    bull = str(trade.get("direction") or "").upper().startswith("L")
+    diff = float(exit_price) - entry
+    if not bull:
+        diff = -diff
+    if unit > 0:
+        return diff * lots * unit
+    return diff * lots
+
+
 def _ist_calendar_today() -> date:
     return datetime.now(IST).date()
 
@@ -67,7 +112,16 @@ def list_trades(
         )
         q += order
         rows = db.execute(text(q), params).fetchall()
-        return [row_to_dict(r) for r in rows]
+        out = [row_to_dict(r) for r in rows]
+        if status == "closed":
+            for row in out:
+                xp = row.get("exit_price")
+                if xp is not None:
+                    try:
+                        row["realized_pnl"] = compute_realized_pnl_rupees(row, float(xp))
+                    except (TypeError, ValueError):
+                        pass
+        return out
     finally:
         db.close()
 
@@ -182,11 +236,7 @@ def close_trade(
     trade = get_trade(user_id, trade_id)
     if not trade or trade.get("status") != "active":
         return None
-    entry = float(trade.get("entry_price") or 0)
-    lots = int(trade.get("lots") or 1)
-    bull = str(trade.get("direction") or "").upper().startswith("L")
-    mult = 1 if bull else -1
-    pnl = (float(exit_price) - entry) * lots * mult
+    pnl = compute_realized_pnl_rupees(trade, float(exit_price))
     journal = dict(trade.get("journal") or {})
     journal["exit_reasons"] = exit_reasons
     journal["checklist_at_entry"] = trade.get("checklist")

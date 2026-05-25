@@ -529,6 +529,13 @@
         if (closedEl) ratings.bindSecurityChartClicks(closedEl);
     }
 
+    function fmtRupeePnl(v) {
+        const n = parseFloat(v);
+        if (!Number.isFinite(n)) return '—';
+        const sign = n < 0 ? '-' : '';
+        return sign + '₹' + Math.abs(Math.round(n)).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+    }
+
     function renderClosedTrades(rows) {
         const el = document.getElementById(_closedElId);
         if (!el) return;
@@ -552,7 +559,7 @@
                 '</td><td>' +
                 esc(t.exit_price) +
                 '</td><td>' +
-                esc(t.realized_pnl) +
+                fmtRupeePnl(t.realized_pnl) +
                 '</td><td>' +
                 esc(t.lifecycle_state) +
                 '</td></tr>';
