@@ -58,9 +58,6 @@
     function syncFromPayload(data) {
         const se = (data && data.stable_execution) || {};
         _stable = Object.assign(_stable, se);
-        if (se.workflow_notice && !_stable.attention_banner) {
-            _stable.attention_banner = se.workflow_notice;
-        }
         global._vajraStableExecution = _stable;
         updateControlChrome();
     }
@@ -149,15 +146,13 @@
         bar.id = 'vajraStableBar';
         bar.className = 'vajra-stable-bar';
         bar.innerHTML =
-            '<div class="vajra-stable-bar-row">' +
-            '<label class="vajra-stable-toggle"><input type="checkbox" id="vajraStableModeToggle" checked> Execution Stability Mode</label>' +
-            '<span id="vajraStableBadge" class="vajra-stable-badge">Sticky Top 3 active</span>' +
-            '</div>' +
-            '<div class="vajra-stable-bar-row vajra-stable-bar-row--sub">' +
-            '<label class="vajra-stable-toggle"><input type="checkbox" id="vajraStableFocusToggle"> Focus Mode (Top 3 only)</label>' +
-            '<label class="vajra-stable-persist">Sticky window' +
-            '<select id="vajraStickyPersist"><option value="15">15 min</option><option value="30" selected>30 min</option><option value="60">60 min</option></select></label>' +
-            '<button type="button" class="df-more-link" id="vajraFreezeFocusBtn">Freeze Top 3 focus</button>' +
+            '<div class="vajra-stable-bar-row vajra-stable-bar-row--compact">' +
+            '<label class="vajra-stable-toggle"><input type="checkbox" id="vajraStableModeToggle" checked> Stability</label>' +
+            '<label class="vajra-stable-toggle"><input type="checkbox" id="vajraStableFocusToggle"> Focus Top 3</label>' +
+            '<label class="vajra-stable-persist">Sticky' +
+            '<select id="vajraStickyPersist"><option value="15">15m</option><option value="30" selected>30m</option><option value="60">60m</option></select></label>' +
+            '<button type="button" class="df-more-link" id="vajraFreezeFocusBtn">Freeze focus</button>' +
+            '<span id="vajraStableBadge" class="vajra-stable-badge">Sticky active</span>' +
             '</div>';
         const meta = document.getElementById(prefix + 'VajraMeta');
         if (meta && meta.parentNode) {

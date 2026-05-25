@@ -377,6 +377,8 @@ tr.vajra-adv-row td {
 .vajra-dir-weak { opacity: 0.78; font-weight: 600; }
 
 .vajra-security-link {
+    display: inline-flex;
+    align-items: center;
     cursor: pointer;
     color: #2563eb;
     font-weight: 600;
@@ -493,20 +495,44 @@ body[data-theme="light"] .vajra-stable-attention-banner {
     white-space: normal;
     text-align: left;
 }
-.vajra-sector-under {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    margin-top: 4px;
+/* Sector rank badges — same as Daily Futures (S1–S3 / W1–W3) */
+.df-sector-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.75em;
+    height: 1.75em;
+    padding: 0 5px;
+    border-radius: 50%;
+    margin-left: 6px;
+    vertical-align: middle;
+    line-height: 1;
+    flex-shrink: 0;
+    font-size: 0.65rem;
+    font-weight: 800;
 }
-.vajra-sector-badge,
-.vajra-sector-tag {
-    font-size: 0.62rem;
-    font-weight: 700;
-    padding: 1px 5px;
-    border-radius: 4px;
-    background: rgba(30, 58, 95, 0.5);
-    color: #cbd5e1;
+.df-sector-badge-inner {
+    position: relative;
+    top: 0.5px;
+}
+.df-sector-badge--bull {
+    background: #15803d !important;
+    color: #ffffff !important;
+}
+.df-sector-badge--bear {
+    background: #b91c1c !important;
+    color: #ffffff !important;
+}
+body[data-theme="dark"] .df-sector-badge--bull {
+    background: #166534 !important;
+}
+body[data-theme="dark"] .df-sector-badge--bear {
+    background: #991b1b !important;
+}
+.vajra-stable-bar-row--compact {
+    flex-wrap: wrap;
+    gap: 10px 14px;
+    align-items: center;
 }
 .vajra-workflow-phase {
     margin: 8px 0;

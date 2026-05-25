@@ -49,7 +49,6 @@
         { key: 'confidence', label: 'Confidence', num: true },
         { key: 'setup_quality_score', label: 'Setup Quality', num: true },
         { key: 'market_context', label: 'Market Context' },
-        { key: 'sector_context', label: 'Sector' },
         { key: 'pullback_quality_score', label: 'Pullback', num: true },
         { key: 'extension_risk_score', label: 'Extension Risk', num: true },
     ];
@@ -245,37 +244,42 @@
             payloadAttr +
             '>' +
             escapeHtml(label) +
+            (opts.sectorBadgeHtml || '') +
             '</button>'
         );
     }
 
-    function sectorTagLabel(tag) {
-        const t = String(tag || '').toUpperCase();
-        if (t === 'TOP_SECTOR') return '🟢 TOP SECTOR';
-        if (t === 'PERSISTENT_LEADER') return '🟢 PERSISTENT LEADER';
-        if (t === 'ROTATIONAL') return '🟠 ROTATIONAL';
-        if (t === 'WEAK_SECTOR') return '🔴 WEAK SECTOR';
-        return '';
-    }
-
-    function renderSectorUnderSymbol(r) {
-        const parts = [];
-        const badge = r.sector_trade_badge_label || '';
-        if (badge) {
-            parts.push(
-                '<span class="vajra-sector-badge" title="' +
-                    escapeHtml(r.sector_alignment_state || '') +
-                    '">' +
-                    escapeHtml(badge) +
-                    '</span>'
-            );
+    /** Daily Futures style: S1–S3 (top gainers) or W1–W3 (top losers). */
+    function sectorMoverBadgeHtml(r) {
+        var n = r && r.sector_in_top_losers_rank;
+        var letter;
+        var cls;
+        if (n === 1 || n === 2 || n === 3) {
+            letter = 'W';
+            cls = 'df-sector-badge df-sector-badge--bear';
+        } else {
+            n = r && r.sector_in_top_gainers_rank;
+            if (n === 1 || n === 2 || n === 3) {
+                letter = 'S';
+                cls = 'df-sector-badge df-sector-badge--bull';
+            } else {
+                return '';
+            }
         }
-        const tag = sectorTagLabel(r.sector_tag);
-        if (tag) {
-            parts.push('<span class="vajra-sector-tag">' + escapeHtml(tag) + '</span>');
-        }
-        if (!parts.length) return '';
-        return '<div class="vajra-sector-under">' + parts.join('') + '</div>';
+        var title =
+            r && (r.nifty_sector_label || r.sector_name)
+                ? 'Nifty sector: ' + String(r.nifty_sector_label || r.sector_name)
+                : '';
+        return (
+            ' <span class="' +
+            cls +
+            '"' +
+            (title ? ' title="' + escapeHtml(title) + '"' : '') +
+            '><span class="df-sector-badge-inner">' +
+            letter +
+            String(n) +
+            '</span></span>'
+        );
     }
 
     function renderSecurityCell(r) {
@@ -283,15 +287,14 @@
         const stock = String(r.stock || r.security || '').trim();
         const ik = String(r.instrument_key || '').trim();
         const qual = String(r.qualification_stage || r.qualification_state || '');
-        return (
-            renderSecurityChartLink({
-                stock: stock,
-                instrumentKey: ik,
-                label: label,
-                qual: qual,
-                screenerData: buildScreenerFromRow(r),
-            }) + renderSectorUnderSymbol(r)
-        );
+        return renderSecurityChartLink({
+            stock: stock,
+            instrumentKey: ik,
+            label: label,
+            qual: qual,
+            screenerData: buildScreenerFromRow(r),
+            sectorBadgeHtml: sectorMoverBadgeHtml(r),
+        });
     }
 
     function openChartFromButton(btn) {
@@ -370,11 +373,6 @@
         if (col.key === 'qualification') return qualificationOf(r);
         if (col.key === 'market_context') {
             return String(r.market_context || r.market_phase || '—');
-        }
-        if (col.key === 'sector_context') {
-            const name = r.sector_name || '—';
-            const status = r.sector_status || r.sector_trade_badge_label || '';
-            return status ? name + ' · ' + status : name;
         }
         if (col.key === 'setup_quality_score') {
             const v = r.setup_quality_score != null ? r.setup_quality_score : r.trade_quality_score;
@@ -536,16 +534,6 @@
         if (col.key === 'qualification') {
             return qualTone(qualificationOf(row));
         }
-        if (col.key === 'sector_context') {
-            const tag = String(row.sector_tag || '').toUpperCase();
-            if (tag === 'WEAK_SECTOR') return 'df-dir-short';
-            if (tag === 'ROTATIONAL') return 'vajra-rev-med';
-            if (tag === 'TOP_SECTOR' || tag === 'PERSISTENT_LEADER') return 'df-dir-long';
-            const sss = Number(row.sector_stability_score);
-            if (sss >= 60) return 'df-dir-long';
-            if (sss < 40) return 'df-dir-short';
-            return 'df-dir-neutral';
-        }
         if (col.key === 'market_context') {
             const ctx = String(row.market_context || row.market_phase || '').toUpperCase();
             if (ctx.indexOf('EARLY BULL') >= 0) return 'vajra-ctx-early-bull';
@@ -637,37 +625,6 @@
     function renderChip(col, row) {
         if (col.key === 'qualification') {
             return renderQualificationCell(row);
-        }
-        if (col.key === 'sector_context') {
-            const name = String(row.sector_name || '—');
-            const status = String(row.sector_status || '—');
-            const sss = row.sector_stability_score != null ? fmtNum(row.sector_stability_score) : '—';
-            const persist =
-                row.sector_persistence_minutes != null
-                    ? row.sector_persistence_minutes + 'm'
-                    : '—';
-            const tip =
-                'Sector: ' +
-                name +
-                ' · SSS ' +
-                sss +
-                ' · Persistence ' +
-                persist +
-                ' · ' +
-                status;
-            return (
-                '<div class="vajra-sector-cell" title="' +
-                escapeHtml(tip) +
-                '">' +
-                '<span class="vajra-sector-name">' +
-                escapeHtml(name) +
-                '</span>' +
-                '<span class="vajra-sector-status df-dir-pill ' +
-                chipToneClass(col, row) +
-                '">' +
-                escapeHtml(status) +
-                '</span></div>'
-            );
         }
         if (col.key === 'confidence') {
             return renderConfidenceMeter(row);
@@ -1044,72 +1001,6 @@
         );
     }
 
-    function renderSectorHeatmapMini(se) {
-        const rows = (se && se.sector_heatmap) || [];
-        if (!rows.length) return '';
-        const top = rows.slice(0, 6);
-        let body = '';
-        top.forEach(function (r) {
-            body +=
-                '<tr><td>' +
-                escapeHtml(r.sector || '—') +
-                '</td><td class="num">' +
-                escapeHtml(fmtNum(r.pct_change)) +
-                '%</td><td class="num">' +
-                escapeHtml(fmtNum(r.sector_stability_score)) +
-                '</td><td class="num">' +
-                escapeHtml(String(r.persistence_minutes != null ? r.persistence_minutes : '—')) +
-                'm</td><td>' +
-                escapeHtml(r.sector_status || r.sector_tag || '') +
-                '</td></tr>';
-        });
-        return (
-            '<div class="vajra-sector-heatmap-wrap">' +
-            '<p class="vajra-sector-heatmap-title"><i class="fas fa-layer-group"></i> Sector persistence (institutional flow)</p>' +
-            '<table class="vajra-sector-heatmap"><thead><tr>' +
-            '<th>Sector</th><th class="num">Strength</th><th class="num">SSS</th><th class="num">Persist</th><th>Status</th>' +
-            '</tr></thead><tbody>' +
-            body +
-            '</tbody></table></div>'
-        );
-    }
-
-    function renderStableBanner(se) {
-        if (!se || !se.stable_mode_enabled) return '';
-        let html = '';
-        if (se.workflow_notice) {
-            html +=
-                '<p class="vajra-workflow-phase vajra-workflow-phase--' +
-                escapeHtml(se.workflow_phase || 'execution') +
-                '"><i class="fas fa-route"></i> ' +
-                escapeHtml(se.workflow_notice) +
-                '</p>';
-        }
-        if (se.attention_banner) {
-            html +=
-                '<p class="vajra-stable-attention-banner"><i class="fas fa-bullseye"></i> ' +
-                escapeHtml(se.attention_banner) +
-                '</p>';
-        }
-        const rots = se.suggested_rotations || [];
-        if (rots.length) {
-            html += '<ul class="vajra-stable-rotations">';
-            rots.forEach(function (rot) {
-                html +=
-                    '<li><span class="vajra-rot-tag">Suggested rotation</span> ' +
-                    escapeHtml(rot.from_stock) +
-                    ' → ' +
-                    escapeHtml(rot.to_stock) +
-                    ' — ' +
-                    escapeHtml(rot.reason || '') +
-                    '</li>';
-            });
-            html += '</ul>';
-        }
-        html += renderSectorHeatmapMini(se);
-        return html;
-    }
-
     function renderTopTableFromPayload(data) {
         const se = (data && data.stable_execution) || {};
         if (global.VajraStableExecution && global.VajraStableExecution.syncFromPayload) {
@@ -1133,16 +1024,6 @@
             );
         }
 
-        let bannerHtml = '';
-        if (banner && banner.message) {
-            bannerHtml =
-                '<p class="vajra-banner vajra-banner-' +
-                escapeHtml(banner.type || 'info') +
-                '">' +
-                escapeHtml(banner.message) +
-                '</p>';
-        }
-
         let tbody = '';
         const focusOnly = se.stable_mode_enabled && se.focus_mode_enabled && stickyTop3.length;
 
@@ -1164,16 +1045,11 @@
         }
 
         return (
-            bannerHtml +
-            renderStableBanner(se) +
-            '<p class="vajra-meta vajra-pipeline-note">Execution screener — EXECUTABLE / ARMED / DISCOVERY. ' +
-            'Scan updates until 15:25 IST; ENTER closes 15:30 IST. Stable mode: sticky Top 3 with ESS-led ranking.</p>' +
             '<div class="vajra-table-wrap"><table class="vajra-table vajra-top-table">' +
             renderTableHead(TOP_COLUMNS, true) +
             '<tbody>' +
             tbody +
-            '</tbody></table></div>' +
-            '<p class="vajra-score-footnote">Advanced row: TPS, Setup Potential, ECS, VWAP, OBV, HTF. Blocker shown in Action tooltip.</p>'
+            '</tbody></table></div>'
         );
     }
 
@@ -1530,21 +1406,14 @@
             }
             if (metaEl) {
                 let meta =
-                    'Session: ' +
                     (filtered.session_date || data.session_date || '—') +
-                    ' · Updated: ' +
+                    ' · ' +
                     fmtUpdated(
                         filtered.computed_at || data.computed_at || (allRows[0] && allRows[0].computed_at)
                     ) +
                     ' · ' +
                     allRows.length +
-                    ' symbols · 30m TPS · EES/Entry every ' +
-                    (filtered.ees_refresh_minutes || data.ees_refresh_minutes || 5) +
-                    'm · HTF ' +
-                    (filtered.htf_bias_tf || data.htf_bias_tf || '1hr') +
-                    (filtered.alert_count != null || data.alert_count != null
-                        ? ' · Alerts: ' + (filtered.alert_count != null ? filtered.alert_count : data.alert_count)
-                        : '');
+                    ' symbols · scan 5m until 15:25 · ENTER until 15:30';
                 if (
                     (filtered.data_age_sec != null && filtered.data_age_sec > STALE_DATA_SEC) ||
                     (data.data_age_sec != null && data.data_age_sec > STALE_DATA_SEC)
@@ -1572,6 +1441,16 @@
                 }
                 if (_vajraEntryDisabled) {
                     meta += ' · ENTER closed (15:30 IST)';
+                }
+                const se = (data && data.stable_execution) || {};
+                if (se.stable_mode_enabled) {
+                    meta += ' · Sticky Top 3';
+                    if (se.watchlist_frozen) meta += ' · Focus frozen';
+                    else if (se.focus_mode_enabled) meta += ' · Focus mode';
+                }
+                const apiBanner = data && data.banner;
+                if (apiBanner && apiBanner.message) {
+                    meta += ' · ' + apiBanner.message;
                 }
                 metaEl.textContent = meta;
             }
@@ -1654,7 +1533,7 @@
         async function load(force) {
             if (loadInFlight && !force) return;
             loadInFlight = true;
-            if (msgEl) msgEl.textContent = 'Loading transition scan (30m + 5m)…';
+            if (metaEl) metaEl.textContent = 'Loading 30m + 5m scan…';
             try {
                 const data = await fetchRatings(DEFAULT_SCAN_TF, DEFAULT_HTF);
                 _lastRawData = data;
@@ -1670,7 +1549,9 @@
             } catch (e) {
                 if (listEl) listEl.innerHTML = '';
                 if (moreBtn) moreBtn.hidden = true;
-                if (msgEl) msgEl.textContent = 'Vajra: ' + (e.message || String(e));
+                const err = 'Vajra: ' + (e.message || String(e));
+                if (metaEl) metaEl.textContent = err;
+                else if (msgEl) msgEl.textContent = err;
             } finally {
                 loadInFlight = false;
             }

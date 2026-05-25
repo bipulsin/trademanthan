@@ -17,8 +17,9 @@ from backend.services.vajra.candles import ist_minutes
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
 
-TOP_GAINER_RANK_TRACK = 3
-TOP_LOSER_RANK_TRACK = 3
+TOP_GAINER_RANK_TRACK = 5
+TOP_LOSER_RANK_TRACK = 5
+SECTOR_BADGE_TOP_N = 3
 PERSISTENT_LEADER_MINUTES = 30.0
 ROTATION_RANK_CHANGES = 2
 SSS_STRONG = 55.0
@@ -82,7 +83,7 @@ def record_sector_snapshot(
     *,
     session_date: Optional[date] = None,
     now: Optional[datetime] = None,
-    top_n: int = 3,
+    top_n: int = 5,
 ) -> Dict[str, Any]:
     """
     Append a sector-movers snapshot for persistence / SSS.
@@ -381,6 +382,9 @@ def enrich_row_sector_context(
     stock = str(row.get("stock") or row.get("security") or "").strip().upper()
     lbl = nifty_sector_label_for_nse_equity(stock)
     row["sector_name"] = lbl
+    row["nifty_sector_label"] = lbl
+    row["sector_in_top_gainers_rank"] = None
+    row["sector_in_top_losers_rank"] = None
     if not lbl or lbl not in sector_states:
         row["sector_stability_score"] = 50.0
         row["sector_tag"] = "NEUTRAL"
@@ -395,7 +399,7 @@ def enrich_row_sector_context(
     tag = _sector_tag(st, sss)
     bull = str(row.get("execution_bias") or row.get("direction") or "LONG").upper() != "SHORT"
     index_ok = nifty_pct >= 0 if bull else nifty_pct <= 0
-    badge, badge_lbl = sector_trade_badge(
+    badge, _badge_lbl = sector_trade_badge(
         bull=bull,
         sss=sss,
         in_top_gainer=bool(st.in_top_gainer_rank),
@@ -406,6 +410,10 @@ def enrich_row_sector_context(
 
     row["sector_strength_pct"] = round(st.pct_change, 4)
     row["sector_stability_score"] = sss
+    if st.in_top_gainer_rank and st.in_top_gainer_rank <= SECTOR_BADGE_TOP_N:
+        row["sector_in_top_gainers_rank"] = st.in_top_gainer_rank
+    if st.in_top_loser_rank and st.in_top_loser_rank <= SECTOR_BADGE_TOP_N:
+        row["sector_in_top_losers_rank"] = st.in_top_loser_rank
     row["sector_rank"] = st.in_top_gainer_rank or st.in_top_loser_rank
     row["sector_rank_side"] = (
         "gainer" if st.in_top_gainer_rank else ("loser" if st.in_top_loser_rank else None)
@@ -417,7 +425,7 @@ def enrich_row_sector_context(
     row["sector_status"] = _sector_status_display(st, sss, tag)
     row["sector_alignment_state"] = badge
     row["sector_trade_badge"] = badge
-    row["sector_trade_badge_label"] = badge_lbl
+    row["sector_trade_badge_label"] = ""
     row["sector_rank_boost"] = round(boost, 2)
     if boost > 0 and row.get("conviction_score") is not None:
         try:
