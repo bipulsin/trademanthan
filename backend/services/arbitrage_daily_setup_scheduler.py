@@ -220,6 +220,19 @@ class ArbitrageDailySetupScheduler:
         except Exception as exc:
             logger.error("arbitrage daily setup 09:20 failed: %s", exc, exc_info=True)
 
+    def _run_intraday_ltp_refresh(self) -> None:
+        if should_skip_scheduled_market_jobs_ist():
+            logger.debug("IST non-trading day — skip arbitrage intraday LTP refresh")
+            return
+        try:
+            out = run_arbitrage_ltp_refresh(execution="intraday_ltp")
+            if out.get("success"):
+                logger.debug("arbitrage intraday LTP refresh completed: %s", out)
+            else:
+                logger.error("arbitrage intraday LTP refresh reported failure: %s", out)
+        except Exception as exc:
+            logger.error("arbitrage intraday LTP refresh failed: %s", exc, exc_info=True)
+
     def get_status(self) -> Dict:
         jobs = self.scheduler.get_jobs() if self.is_running else []
         return {
