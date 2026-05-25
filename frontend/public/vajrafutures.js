@@ -13,7 +13,7 @@
                 compactSections: true,
                 emptyOpenHtml:
                     '<p class="vajra-meta">No open Vajra positions. Use ENTER on the screen above to activate a trade.</p>',
-                emptyClosedHtml: '<p class="vajra-meta">No closed Vajra trades this session.</p>',
+                emptyClosedHtml: '<p class="vajra-meta">No closed Vajra trades today (IST).</p>',
             });
         const ratingsOpts = {
             prefix: 'vf',

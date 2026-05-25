@@ -23,16 +23,21 @@ def _jdump(obj: Any) -> str:
     return json.dumps(obj, default=str)
 
 
+def _ist_calendar_today() -> date:
+    return datetime.now(IST).date()
+
+
 def list_trades(
     user_id: int,
     *,
     status: str = "active",
     session_date: Optional[date] = None,
     platform: Optional[str] = None,
+    closed_on: Optional[date] = None,
 ) -> List[Dict[str, Any]]:
     """
     Active trades: all open rows for the user (any session_date).
-    Closed trades: default to today's IST session_date unless session_date is passed.
+    Closed trades: rows whose exit/close timestamp falls on closed_on (default: IST calendar today).
     """
     db = SessionLocal()
     try:
@@ -43,16 +48,24 @@ def list_trades(
         """
         params: Dict[str, Any] = {"uid": user_id, "st": status}
         if status == "closed":
-            sd = session_date or effective_session_date_ist_for_trend()
-            q += " AND session_date = :sd"
-            params["sd"] = sd
+            exit_day = closed_on or session_date or _ist_calendar_today()
+            q += """
+                AND COALESCE(closed_at, exit_time) IS NOT NULL
+                AND (COALESCE(closed_at, exit_time) AT TIME ZONE 'Asia/Kolkata')::date = :exit_day
+            """
+            params["exit_day"] = exit_day
         elif session_date is not None:
             q += " AND session_date = :sd"
             params["sd"] = session_date
         if platform:
             q += " AND platform = :pf"
             params["pf"] = platform
-        q += " ORDER BY created_at DESC"
+        order = (
+            " ORDER BY COALESCE(closed_at, exit_time) DESC"
+            if status == "closed"
+            else " ORDER BY created_at DESC"
+        )
+        q += order
         rows = db.execute(text(q), params).fetchall()
         return [row_to_dict(r) for r in rows]
     finally:
