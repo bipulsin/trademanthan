@@ -125,6 +125,23 @@
                                 <ul class="sector-movers-list" id="sectorMoversLosers" aria-label="Top losing sectors"></ul>
                             </div>
                         </div>
+                        <div class="sector-persistence-block" id="sectorPersistenceBlock" hidden>
+                            <h4 class="sector-persistence-title"><i class="fas fa-clock"></i> Sector persistence heatmap</h4>
+                            <p class="sector-movers-hint">Sustained sector flow — not just latest movers. SSS = Sector Stability Score (0–100).</p>
+                            <table class="sector-persistence-table" id="sectorPersistenceTable" aria-label="Sector persistence heatmap">
+                                <thead>
+                                    <tr>
+                                        <th>Sector</th>
+                                        <th>Strength</th>
+                                        <th>SSS</th>
+                                        <th>Persist</th>
+                                        <th>Breadth</th>
+                                        <th>Vol stability</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="sectorPersistenceBody"></tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
 
@@ -404,7 +421,7 @@
     <script src="dashboard-pnl-day.js?v=1"></script>
     <script src="dashboard.js?v=1.2"></script>
     <script src="market-sentiment-dials.js?v=1.6"></script>
-    <script src="dashboard-sector-movers.js?v=1.3"></script>
+    <script src="dashboard-sector-movers.js?v=1.4"></script>
     <script src="dashboard-sf-watchlist.js?v=1.3"></script>
     <script src="dashboard-oi-heatmap.js?v=3.3"></script>
     <script src="crypto-prices.js?v=1.4"></script>

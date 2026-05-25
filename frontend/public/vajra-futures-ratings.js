@@ -49,6 +49,7 @@
         { key: 'confidence', label: 'Confidence', num: true },
         { key: 'setup_quality_score', label: 'Setup Quality', num: true },
         { key: 'market_context', label: 'Market Context' },
+        { key: 'sector_context', label: 'Sector' },
         { key: 'pullback_quality_score', label: 'Pullback', num: true },
         { key: 'extension_risk_score', label: 'Extension Risk', num: true },
     ];
@@ -58,6 +59,7 @@
         { key: 'setup_potential_score', label: 'Setup Potential' },
         { key: 'ecs_score', label: 'ECS' },
         { key: 'ess_score', label: 'ESS' },
+        { key: 'sector_stability_score', label: 'SSS' },
         { key: 'vwap_reclaim_status', label: 'VWAP' },
         { key: 'obv', label: 'OBV' },
         { key: 'htf_alignment_score', label: 'HTF' },
@@ -247,18 +249,49 @@
         );
     }
 
+    function sectorTagLabel(tag) {
+        const t = String(tag || '').toUpperCase();
+        if (t === 'TOP_SECTOR') return '🟢 TOP SECTOR';
+        if (t === 'PERSISTENT_LEADER') return '🟢 PERSISTENT LEADER';
+        if (t === 'ROTATIONAL') return '🟠 ROTATIONAL';
+        if (t === 'WEAK_SECTOR') return '🔴 WEAK SECTOR';
+        return '';
+    }
+
+    function renderSectorUnderSymbol(r) {
+        const parts = [];
+        const badge = r.sector_trade_badge_label || '';
+        if (badge) {
+            parts.push(
+                '<span class="vajra-sector-badge" title="' +
+                    escapeHtml(r.sector_alignment_state || '') +
+                    '">' +
+                    escapeHtml(badge) +
+                    '</span>'
+            );
+        }
+        const tag = sectorTagLabel(r.sector_tag);
+        if (tag) {
+            parts.push('<span class="vajra-sector-tag">' + escapeHtml(tag) + '</span>');
+        }
+        if (!parts.length) return '';
+        return '<div class="vajra-sector-under">' + parts.join('') + '</div>';
+    }
+
     function renderSecurityCell(r) {
         const label = cellValue(r, { key: 'security' });
         const stock = String(r.stock || r.security || '').trim();
         const ik = String(r.instrument_key || '').trim();
         const qual = String(r.qualification_stage || r.qualification_state || '');
-        return renderSecurityChartLink({
-            stock: stock,
-            instrumentKey: ik,
-            label: label,
-            qual: qual,
-            screenerData: buildScreenerFromRow(r),
-        });
+        return (
+            renderSecurityChartLink({
+                stock: stock,
+                instrumentKey: ik,
+                label: label,
+                qual: qual,
+                screenerData: buildScreenerFromRow(r),
+            }) + renderSectorUnderSymbol(r)
+        );
     }
 
     function openChartFromButton(btn) {
@@ -337,6 +370,11 @@
         if (col.key === 'qualification') return qualificationOf(r);
         if (col.key === 'market_context') {
             return String(r.market_context || r.market_phase || '—');
+        }
+        if (col.key === 'sector_context') {
+            const name = r.sector_name || '—';
+            const status = r.sector_status || r.sector_trade_badge_label || '';
+            return status ? name + ' · ' + status : name;
         }
         if (col.key === 'setup_quality_score') {
             const v = r.setup_quality_score != null ? r.setup_quality_score : r.trade_quality_score;
@@ -498,6 +536,16 @@
         if (col.key === 'qualification') {
             return qualTone(qualificationOf(row));
         }
+        if (col.key === 'sector_context') {
+            const tag = String(row.sector_tag || '').toUpperCase();
+            if (tag === 'WEAK_SECTOR') return 'df-dir-short';
+            if (tag === 'ROTATIONAL') return 'vajra-rev-med';
+            if (tag === 'TOP_SECTOR' || tag === 'PERSISTENT_LEADER') return 'df-dir-long';
+            const sss = Number(row.sector_stability_score);
+            if (sss >= 60) return 'df-dir-long';
+            if (sss < 40) return 'df-dir-short';
+            return 'df-dir-neutral';
+        }
         if (col.key === 'market_context') {
             const ctx = String(row.market_context || row.market_phase || '').toUpperCase();
             if (ctx.indexOf('EARLY BULL') >= 0) return 'vajra-ctx-early-bull';
@@ -589,6 +637,37 @@
     function renderChip(col, row) {
         if (col.key === 'qualification') {
             return renderQualificationCell(row);
+        }
+        if (col.key === 'sector_context') {
+            const name = String(row.sector_name || '—');
+            const status = String(row.sector_status || '—');
+            const sss = row.sector_stability_score != null ? fmtNum(row.sector_stability_score) : '—';
+            const persist =
+                row.sector_persistence_minutes != null
+                    ? row.sector_persistence_minutes + 'm'
+                    : '—';
+            const tip =
+                'Sector: ' +
+                name +
+                ' · SSS ' +
+                sss +
+                ' · Persistence ' +
+                persist +
+                ' · ' +
+                status;
+            return (
+                '<div class="vajra-sector-cell" title="' +
+                escapeHtml(tip) +
+                '">' +
+                '<span class="vajra-sector-name">' +
+                escapeHtml(name) +
+                '</span>' +
+                '<span class="vajra-sector-status df-dir-pill ' +
+                chipToneClass(col, row) +
+                '">' +
+                escapeHtml(status) +
+                '</span></div>'
+            );
         }
         if (col.key === 'confidence') {
             return renderConfidenceMeter(row);
@@ -965,9 +1044,47 @@
         );
     }
 
+    function renderSectorHeatmapMini(se) {
+        const rows = (se && se.sector_heatmap) || [];
+        if (!rows.length) return '';
+        const top = rows.slice(0, 6);
+        let body = '';
+        top.forEach(function (r) {
+            body +=
+                '<tr><td>' +
+                escapeHtml(r.sector || '—') +
+                '</td><td class="num">' +
+                escapeHtml(fmtNum(r.pct_change)) +
+                '%</td><td class="num">' +
+                escapeHtml(fmtNum(r.sector_stability_score)) +
+                '</td><td class="num">' +
+                escapeHtml(String(r.persistence_minutes != null ? r.persistence_minutes : '—')) +
+                'm</td><td>' +
+                escapeHtml(r.sector_status || r.sector_tag || '') +
+                '</td></tr>';
+        });
+        return (
+            '<div class="vajra-sector-heatmap-wrap">' +
+            '<p class="vajra-sector-heatmap-title"><i class="fas fa-layer-group"></i> Sector persistence (institutional flow)</p>' +
+            '<table class="vajra-sector-heatmap"><thead><tr>' +
+            '<th>Sector</th><th class="num">Strength</th><th class="num">SSS</th><th class="num">Persist</th><th>Status</th>' +
+            '</tr></thead><tbody>' +
+            body +
+            '</tbody></table></div>'
+        );
+    }
+
     function renderStableBanner(se) {
         if (!se || !se.stable_mode_enabled) return '';
         let html = '';
+        if (se.workflow_notice) {
+            html +=
+                '<p class="vajra-workflow-phase vajra-workflow-phase--' +
+                escapeHtml(se.workflow_phase || 'execution') +
+                '"><i class="fas fa-route"></i> ' +
+                escapeHtml(se.workflow_notice) +
+                '</p>';
+        }
         if (se.attention_banner) {
             html +=
                 '<p class="vajra-stable-attention-banner"><i class="fas fa-bullseye"></i> ' +
@@ -989,6 +1106,7 @@
             });
             html += '</ul>';
         }
+        html += renderSectorHeatmapMini(se);
         return html;
     }
 
@@ -1002,8 +1120,9 @@
         const armedRows = composed.ARMED || [];
         const discRows = composed.DISCOVERY || [];
         const banner = data && data.banner;
+        const stickyTop3 = (se.sticky_top3 || []).slice();
         const hasAny =
-            (se.stable_mode_enabled && stickyRows.length) ||
+            (se.stable_mode_enabled && stickyTop3.length) ||
             (composed.top8 && composed.top8.length);
 
         if (!hasAny) {
@@ -1025,12 +1144,11 @@
         }
 
         let tbody = '';
-        const stickyRows = (se.sticky_top3 || []).slice();
-        const focusOnly = se.stable_mode_enabled && se.focus_mode_enabled && stickyRows.length;
+        const focusOnly = se.stable_mode_enabled && se.focus_mode_enabled && stickyTop3.length;
 
-        if (se.stable_mode_enabled && stickyRows.length) {
+        if (se.stable_mode_enabled && stickyTop3.length) {
             tbody += renderSectionHeader('Sticky Top 3 — Stable Execution', 'vajra-section-sticky');
-            tbody += renderTableBodyRows(stickyRows, TOP_COLUMNS, true);
+            tbody += renderTableBodyRows(stickyTop3, TOP_COLUMNS, true);
         }
         if (!focusOnly && execRows.length) {
             tbody += renderSectionHeader('Executable Now', 'vajra-section-exec');

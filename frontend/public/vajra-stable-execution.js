@@ -58,6 +58,9 @@
     function syncFromPayload(data) {
         const se = (data && data.stable_execution) || {};
         _stable = Object.assign(_stable, se);
+        if (se.workflow_notice && !_stable.attention_banner) {
+            _stable.attention_banner = se.workflow_notice;
+        }
         global._vajraStableExecution = _stable;
         updateControlChrome();
     }
@@ -147,7 +150,7 @@
         bar.className = 'vajra-stable-bar';
         bar.innerHTML =
             '<div class="vajra-stable-bar-row">' +
-            '<label class="vajra-stable-toggle"><input type="checkbox" id="vajraStableModeToggle" checked> Stable Execution Mode</label>' +
+            '<label class="vajra-stable-toggle"><input type="checkbox" id="vajraStableModeToggle" checked> Execution Stability Mode</label>' +
             '<span id="vajraStableBadge" class="vajra-stable-badge">Sticky Top 3 active</span>' +
             '</div>' +
             '<div class="vajra-stable-bar-row vajra-stable-bar-row--sub">' +

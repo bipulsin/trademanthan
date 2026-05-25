@@ -188,6 +188,49 @@
         }
         renderList(g, data && data.gainers, true, "gainers");
         renderList(l, data && data.losers, false, "losers");
+        renderPersistenceHeatmap(data && data.persistence_heatmap);
+    }
+
+    function renderPersistenceHeatmap(rows) {
+        const block = document.getElementById("sectorPersistenceBlock");
+        const tbody = document.getElementById("sectorPersistenceBody");
+        if (!block || !tbody) return;
+        if (!rows || !rows.length) {
+            block.hidden = true;
+            tbody.innerHTML = "";
+            return;
+        }
+        block.hidden = false;
+        const sorted = rows.slice().sort(function (a, b) {
+            return Number(b.sector_stability_score || 0) - Number(a.sector_stability_score || 0);
+        });
+        tbody.innerHTML = sorted
+            .slice(0, 12)
+            .map(function (r) {
+                return (
+                    "<tr>" +
+                    "<td>" +
+                    escapeHtml(r.sector || "—") +
+                    "</td>" +
+                    '<td class="num">' +
+                    fmtPct(r.pct_change) +
+                    "</td>" +
+                    '<td class="num">' +
+                    (r.sector_stability_score != null ? Number(r.sector_stability_score).toFixed(0) : "—") +
+                    "</td>" +
+                    '<td class="num">' +
+                    (r.persistence_minutes != null ? Number(r.persistence_minutes).toFixed(0) + "m" : "—") +
+                    "</td>" +
+                    '<td class="num">' +
+                    (r.breadth_quality != null ? Number(r.breadth_quality).toFixed(0) : "—") +
+                    "</td>" +
+                    '<td class="num">' +
+                    (r.volatility_stability != null ? Number(r.volatility_stability).toFixed(0) : "—") +
+                    "</td>" +
+                    "</tr>"
+                );
+            })
+            .join("");
     }
 
     async function fetchMovers() {

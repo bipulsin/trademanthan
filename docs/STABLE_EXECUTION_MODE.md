@@ -2,6 +2,8 @@
 
 Overlay on the existing dynamic Vajra scanner. **Backend scoring still runs every 5 minutes** until 15:25 IST; the trader-facing experience prioritizes **focus and stability**.
 
+**Sector integration:** See [SECTOR_STABLE_EXECUTION.md](./SECTOR_STABLE_EXECUTION.md) — SSS, persistence heatmap, discovery (9:15–10:00) vs execution (10:00+) windows, sector-weighted sticky ranking.
+
 ## Philosophy
 
 | Before | After (Stable Mode) |

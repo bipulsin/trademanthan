@@ -198,6 +198,11 @@ def get_vajra_ratings(
                         "frozen_focus_stocks": stable.get("frozen_focus_stocks"),
                         "watchlist_frozen_at": stable.get("watchlist_frozen_at"),
                         "attention_banner": stable.get("attention_banner"),
+                        "discovery_window": stable.get("discovery_window"),
+                        "execution_window": stable.get("execution_window"),
+                        "workflow_phase": stable.get("workflow_phase"),
+                        "workflow_notice": stable.get("workflow_notice"),
+                        "sector_heatmap": stable.get("sector_heatmap") or [],
                     },
                 },
                 headers={
@@ -441,3 +446,31 @@ def post_freeze_watchlist_focus(
     stocks = list(body.get("stocks") or body.get("frozen_focus_stocks") or [])
     out = freeze_watchlist_focus(user.id, stocks)
     return JSONResponse(status_code=200, content=out)
+
+
+@router.get("/sector-persistence")
+def get_sector_persistence_heatmap(
+    session_date: Optional[date] = Query(None),
+    user: User = Depends(_require_user),
+):
+    """Sector persistence heatmap for dashboard / Vajra stable execution."""
+    del user  # auth only
+    try:
+        from backend.services.smart_futures_session_date import effective_session_date_ist_for_trend
+        from backend.services.vajra.sector_intelligence import build_sector_persistence_heatmap
+        from backend.services.vajra.session_window import vajra_workflow_phase_fields
+
+        sd = session_date or effective_session_date_ist_for_trend()
+        rows = build_sector_persistence_heatmap(session_date=sd)
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "session_date": sd.isoformat(),
+                "sectors": rows,
+                **vajra_workflow_phase_fields(),
+            },
+        )
+    except Exception as e:
+        logger.exception("vajra_sector_persistence: %s", e)
+        return JSONResponse(status_code=500, content={"success": False, "message": str(e)})

@@ -47,11 +47,19 @@ def _now_ist() -> datetime:
 
 
 def is_freeze_watchlist_window_ist(now: Optional[datetime] = None) -> bool:
+    """Early freeze 9:20–9:45, or any time from execution window (10:00+)."""
     now = now or _now_ist()
     if now.weekday() >= 5:
         return False
     m = ist_minutes(now)
-    return FREEZE_WINDOW_START <= m <= FREEZE_WINDOW_END
+    if FREEZE_WINDOW_START <= m <= FREEZE_WINDOW_END:
+        return True
+    try:
+        from backend.services.vajra.session_window import is_vajra_execution_window_ist
+
+        return is_vajra_execution_window_ist(now)
+    except Exception:
+        return False
 
 
 def _stock_key(row: Dict[str, Any]) -> str:
@@ -59,13 +67,20 @@ def _stock_key(row: Dict[str, Any]) -> str:
 
 
 def _rank_score(row: Dict[str, Any]) -> float:
-    """Stable-mode primary rank: ESS-led with setup quality tie-break."""
+    """Stable-mode primary rank: ESS-led with setup quality + sector stability."""
     conv = _f(row, "conviction_score") or _f(row, "confidence")
-    return (
+    base = (
         _f(row, "ess_score") * 0.55
         + _f(row, "setup_quality_score") * 0.25
         + conv * 0.20
     )
+    try:
+        from backend.services.vajra.sector_intelligence import sector_weighted_rank_adjustment
+
+        base += sector_weighted_rank_adjustment(row)
+    except Exception:
+        pass
+    return base
 
 
 def _f(row: Dict[str, Any], key: str, default: float = 0.0) -> float:
@@ -372,6 +387,17 @@ def apply_stable_execution_overlay(
     cfg = load_user_state(user_id, session_date)
     now = _now_ist()
     enriched = [enrich_row_ess(dict(r)) for r in rows]
+    sector_meta: Dict[str, Any] = {}
+    try:
+        from backend.services.vajra.sector_intelligence import apply_sector_intelligence_to_rows
+        from backend.services.vajra.session_window import vajra_workflow_phase_fields
+
+        sector_meta = apply_sector_intelligence_to_rows(enriched, session_date=session_date)
+        enriched = sector_meta.get("rows") or enriched
+        workflow = vajra_workflow_phase_fields(now)
+    except Exception as e:
+        logger.debug("sector intelligence overlay skipped: %s", e)
+        workflow = {}
     by_stock = {_stock_key(r): r for r in enriched if _stock_key(r)}
 
     if not cfg.stable_mode_enabled:
@@ -386,6 +412,8 @@ def apply_stable_execution_overlay(
             "watchlist_frozen": bool(cfg.frozen_focus_stocks),
             "frozen_focus_stocks": cfg.frozen_focus_stocks,
             "attention_banner": None,
+            "sector_heatmap": sector_meta.get("sector_heatmap") or [],
+            **workflow,
         }
 
     sticky_rows, suggestions, new_slots = _update_sticky_slots(by_stock, cfg, now)
@@ -405,6 +433,11 @@ def apply_stable_execution_overlay(
         banner = "Focus Mode — trade selected setups. Ignore market noise."
     elif cfg.frozen_focus_stocks:
         banner = "Watchlist frozen — primary focus list locked for this session."
+    elif workflow.get("execution_window"):
+        banner = (
+            workflow.get("workflow_notice")
+            or "Execution window — sector-aligned Top 3 with sticky leadership."
+        )
 
     return {
         "stable_mode_enabled": True,
@@ -420,6 +453,8 @@ def apply_stable_execution_overlay(
         ),
         "attention_banner": banner,
         "rows": enriched,
+        "sector_heatmap": sector_meta.get("sector_heatmap") or [],
+        **workflow,
     }
 
 

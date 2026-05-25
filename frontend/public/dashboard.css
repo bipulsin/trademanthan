@@ -1910,6 +1910,35 @@ body[data-theme="dark"] .sector-movers-pct--lose {
     color: #f87171;
 }
 
+.sector-persistence-block {
+    margin-top: 1rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid rgba(148, 163, 184, 0.25);
+}
+.sector-persistence-title {
+    margin: 0 0 0.35rem;
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: #334155;
+}
+body[data-theme="dark"] .sector-persistence-title {
+    color: #e2e8f0;
+}
+.sector-persistence-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+}
+.sector-persistence-table th,
+.sector-persistence-table td {
+    padding: 0.35rem 0.5rem;
+    text-align: left;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+}
+.sector-persistence-table .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
 .sector-movers-empty {
     padding: 0.75rem;
     font-size: 0.82rem;

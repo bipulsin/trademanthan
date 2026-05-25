@@ -12,7 +12,6 @@ import pytz
 
 from backend.config import settings
 from backend.services.market_sentiment_dials import build_dial_rows
-from backend.services.sector_movers import get_sector_movers_cached
 from backend.services.upstox_service import UpstoxService
 from backend.services.vajra.indicators import cumulative_vwap, ema_series
 from backend.services.vajra.job import _fetch_candles_for_tf
@@ -116,21 +115,9 @@ def _resolve_current_price(
 
 def _sector_alignment_label(stock: str, bull: bool) -> str:
     try:
-        movers = get_sector_movers_cached(3)
-        gainers = {str(x.get("symbol") or "").upper() for x in (movers.get("top_gainers") or [])}
-        losers = {str(x.get("symbol") or "").upper() for x in (movers.get("top_losers") or [])}
-        sym = stock.upper().replace(".NS", "")
-        if bull:
-            if sym in gainers:
-                return "aligned"
-            if sym in losers:
-                return "conflicting"
-        else:
-            if sym in losers:
-                return "aligned"
-            if sym in gainers:
-                return "conflicting"
-        return "neutral"
+        from backend.services.vajra.sector_intelligence import sector_alignment_for_stock
+
+        return sector_alignment_for_stock(stock, bull)
     except Exception:
         return "neutral"
 

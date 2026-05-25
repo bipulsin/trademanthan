@@ -6193,6 +6193,13 @@ async def dashboard_sector_movers():
     """
     try:
         data = get_sector_movers_cached(top_n=3)
+        try:
+            from backend.services.vajra.sector_intelligence import build_sector_persistence_heatmap
+
+            data = dict(data)
+            data["persistence_heatmap"] = build_sector_persistence_heatmap()
+        except Exception as pe:
+            logger.debug("dashboard sector persistence heatmap: %s", pe)
         return JSONResponse(status_code=200, content=data)
     except Exception as e:
         logger.exception("dashboard_sector_movers: %s", e)
