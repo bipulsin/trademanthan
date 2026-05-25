@@ -176,6 +176,12 @@ button.vajra-enter-btn.vajra-enter-btn-enter:hover {
     font-size: 0.65rem;
     letter-spacing: 0.02em;
 }
+.vajra-enter-btn-closed,
+button.vajra-enter-btn.vajra-enter-btn-closed {
+    border-color: #64748b;
+    background: #1e293b;
+    color: #94a3b8;
+}
 .vajra-enter-btn-wait {
     border-color: #ca8a04;
     background: #854d0e;

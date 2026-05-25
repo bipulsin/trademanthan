@@ -74,6 +74,8 @@ def get_vajra_ratings_status(
                 0,
                 int((datetime.now(updated.tzinfo) - updated).total_seconds()),
             )
+        from backend.services.vajra.session_window import vajra_session_api_fields
+
         return JSONResponse(
             status_code=200,
             content={
@@ -82,6 +84,7 @@ def get_vajra_ratings_status(
                 "computed_at": computed_at,
                 "data_age_sec": data_age_sec,
                 "ees_refresh_minutes": 5,
+                **vajra_session_api_fields(),
             },
             headers={
                 "Cache-Control": "no-store, no-cache, must-revalidate",
@@ -136,6 +139,8 @@ def get_vajra_ratings(
             ees_alert_rows = [
                 r for r in rows if (r.get("ees_alerts") or []) and not r.get("alertable")
             ]
+            from backend.services.vajra.session_window import vajra_session_api_fields
+
             return JSONResponse(
                 status_code=200,
                 content={
@@ -156,6 +161,7 @@ def get_vajra_ratings(
                     "computed_at": computed_at,
                     "data_age_sec": data_age_sec,
                     "ees_refresh_minutes": 5,
+                    **vajra_session_api_fields(),
                     "rows": rows,
                     "top_picks": display["top_picks"],
                     "top_sections": display["top_sections"],
@@ -307,6 +313,8 @@ def vajra_trade_activate(
         )
         refreshed = vajra_trade_service.persist_refresh(user.id, int(trade["id"]))
         return JSONResponse(status_code=200, content={"success": True, "trade": refreshed})
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"success": False, "message": str(e)})
     except Exception as e:
         logger.exception("vajra_trade_activate: %s", e)
         return JSONResponse(status_code=500, content={"success": False, "message": str(e)})

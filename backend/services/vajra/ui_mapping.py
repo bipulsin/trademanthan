@@ -11,6 +11,7 @@ from backend.services.vajra.qualification_config import (
     STATE_REJECT,
     STATE_WATCHLIST,
 )
+from backend.services.vajra.session_window import entry_disabled_message, is_vajra_entry_disabled_ist
 from backend.services.vajra.trade_state import derive_structural_bias, resolve_market_phase
 
 
@@ -95,6 +96,11 @@ def finalize_screener_row(row: Dict[str, Any]) -> Dict[str, Any]:
     row["directional_conviction"] = has_directional_conviction(row, mp)
     if row.get("conviction_score") is None and row.get("confidence") is not None:
         row["conviction_score"] = row["confidence"]
+    if row.get("enter_enabled") and is_vajra_entry_disabled_ist():
+        row["enter_enabled"] = False
+        row["enter_action"] = "CLOSED"
+        row["enter_reason"] = entry_disabled_message()
+        row["action"] = "CLOSED"
     return row
 
 

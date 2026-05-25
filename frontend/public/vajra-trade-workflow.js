@@ -413,6 +413,11 @@
     }
 
     async function openEntry(row) {
+        const sess = global._vajraSessionFlags || {};
+        if (sess.entry_disabled) {
+            alert(sess.session_notice || 'New entries closed at 15:30 IST.');
+            return;
+        }
         _discoveryRow = row;
         _preview = null;
         const m = ensureModal();

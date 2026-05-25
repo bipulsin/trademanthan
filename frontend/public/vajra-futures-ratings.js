@@ -64,6 +64,19 @@
 
     const VAJRA_ENTER_SEEN_KEY = 'vajra_enter_telegram_seen';
 
+    let _vajraEntryDisabled = false;
+    let _vajraScreenerFrozen = false;
+
+    function applyVajraSessionFlags(data) {
+        _vajraEntryDisabled = !!(data && data.entry_disabled);
+        _vajraScreenerFrozen = !!(data && data.screener_frozen);
+        global._vajraSessionFlags = {
+            entry_disabled: _vajraEntryDisabled,
+            screener_frozen: _vajraScreenerFrozen,
+            session_notice: (data && data.session_notice) || null,
+        };
+    }
+
     function authHeaders() {
         const t = global.localStorage.getItem('trademanthan_token') || '';
         return {
@@ -373,12 +386,28 @@
     function renderEnterCell(row, idx, rowspan2) {
         const qual = qualificationOf(row);
         const action = String(row.enter_action || '').toUpperCase();
-        const enabled = row.enter_enabled === true && qual === QUAL_EXECUTABLE;
-        const title = escapeHtml(row.enter_reason || action || qual);
+        const enabled =
+            row.enter_enabled === true && qual === QUAL_EXECUTABLE && !_vajraEntryDisabled;
+        const title = escapeHtml(
+            _vajraEntryDisabled
+                ? global._vajraSessionFlags && global._vajraSessionFlags.session_notice
+                    ? global._vajraSessionFlags.session_notice
+                    : 'New entries closed at 15:30 IST.'
+                : row.enter_reason || action || qual
+        );
         const sym = escapeHtml(row.stock || row.security || '');
         const rs = rowspan2 ? ' rowspan="2"' : '';
         if (qual === QUAL_REJECT || !action) {
             return '<td class="vajra-td-enter' + rs + '"><span class="vajra-action-none">—</span></td>';
+        }
+        if (qual === QUAL_EXECUTABLE && _vajraEntryDisabled) {
+            return (
+                '<td class="vajra-td-enter"' +
+                rs +
+                '><button type="button" class="vajra-enter-btn vajra-enter-btn-closed" disabled title="' +
+                title +
+                '">CLOSED</button></td>'
+            );
         }
         if (enabled) {
             return (
@@ -945,7 +974,7 @@
         if (!hasAny) {
             return (
                 '<p class="vajra-meta">No Vajra ratings for this session yet. ' +
-                'The engine runs every 5 minutes (9:30–15:00 IST). ' +
+                'The engine runs every 5 minutes (9:30–15:25 IST; frozen after 15:25). ' +
                 'If this persists after market open, use Refresh or wait for the next scan.</p>'
             );
         }
@@ -976,7 +1005,8 @@
 
         return (
             bannerHtml +
-            '<p class="vajra-meta vajra-pipeline-note">Execution screener — EXECUTABLE / ARMED / DISCOVERY sections. No watchlist padding.</p>' +
+            '<p class="vajra-meta vajra-pipeline-note">Execution screener — EXECUTABLE / ARMED / DISCOVERY. ' +
+            'Scan updates until 15:25 IST; ENTER closes 15:30 IST.</p>' +
             '<div class="vajra-table-wrap"><table class="vajra-table vajra-top-table">' +
             renderTableHead(TOP_COLUMNS, true) +
             '<tbody>' +
@@ -1299,6 +1329,7 @@
         const FORCE_RELOAD_MS = 300000;
 
         function renderLoadedData(data) {
+            applyVajraSessionFlags(data);
             const activeSet = getActiveTradeStocks();
             const filtered = filterRatingsPayload(data, activeSet);
             allRows = filtered.rows || [];
@@ -1371,6 +1402,12 @@
                 }
                 if (activeSet.size) {
                     meta += ' · ' + activeSet.size + ' in open position (hidden from screen)';
+                }
+                if (_vajraScreenerFrozen) {
+                    meta += ' · Screener frozen (15:25 IST)';
+                }
+                if (_vajraEntryDisabled) {
+                    meta += ' · ENTER closed (15:30 IST)';
                 }
                 metaEl.textContent = meta;
             }
@@ -1477,6 +1514,7 @@
 
         async function checkForScheduledUpdate() {
             if (loadInFlight) return;
+            if (_vajraScreenerFrozen) return;
             const nowMs = Date.now();
             if (lastFullLoadMs && nowMs - lastFullLoadMs >= FORCE_RELOAD_MS) {
                 await load();

@@ -174,6 +174,11 @@ def activate_trade(
     metrics: Dict[str, Any],
     warnings: List[str],
 ) -> Dict[str, Any]:
+    from backend.services.vajra.session_window import entry_disabled_message, is_vajra_entry_disabled_ist
+
+    if is_vajra_entry_disabled_ist():
+        raise ValueError(entry_disabled_message())
+
     sd = effective_session_date_ist_for_trend()
     now = datetime.now(IST)
     db = SessionLocal()

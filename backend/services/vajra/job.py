@@ -403,6 +403,26 @@ def run_vajra_futures_rating_job(scan_trigger: str = "manual") -> Dict[str, Any]
     """
     Rate all current-month futures from arbitrage_master and persist for today's session.
     """
+    from backend.services.vajra.session_window import (
+        is_vajra_screener_frozen_ist,
+        screener_freeze_message,
+        screener_freeze_skip_reason,
+    )
+
+    if is_vajra_screener_frozen_ist():
+        session_date = effective_session_date_ist_for_trend()
+        logger.info(
+            "vajra_rating: skip %s — %s",
+            scan_trigger,
+            screener_freeze_message(),
+        )
+        return {
+            "skipped": screener_freeze_skip_reason(),
+            "message": screener_freeze_message(),
+            "scan_trigger": scan_trigger,
+            "session_date": session_date.isoformat(),
+        }
+
     if os.getenv("VAJRA_RATING_FORCE_WEEKEND", "").strip() not in ("1", "true", "yes"):
         from backend.services.market_holiday import should_skip_scheduled_market_jobs_ist
 
