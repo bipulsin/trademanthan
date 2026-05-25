@@ -536,6 +536,25 @@
         return sign + '₹' + Math.abs(Math.round(n)).toLocaleString('en-IN', { maximumFractionDigits: 0 });
     }
 
+    function sumClosedPnl(rows) {
+        let total = 0;
+        let any = false;
+        rows.forEach(function (t) {
+            const n = parseFloat(t.realized_pnl);
+            if (Number.isFinite(n)) {
+                total += n;
+                any = true;
+            }
+        });
+        return any ? total : null;
+    }
+
+    function pnlToneClass(v) {
+        const n = parseFloat(v);
+        if (!Number.isFinite(n) || n === 0) return '';
+        return n > 0 ? 'vajra-closed-total--pos' : 'vajra-closed-total--neg';
+    }
+
     function fmtIstDateTime(iso) {
         if (!iso) return '—';
         const d = new Date(iso);
@@ -560,9 +579,23 @@
             el.innerHTML = _emptyClosedHtml || '';
             return;
         }
+        const dayTotal = sumClosedPnl(rows);
         let h = _compactSections
-            ? '<div class="vajra-active-block"><table class="vajra-active-table"><thead><tr>'
-            : '<div class="vajra-active-block"><h3>Vajra journal (closed)</h3><table class="vajra-active-table"><thead><tr>';
+            ? '<div class="vajra-active-block">'
+            : '<div class="vajra-active-block"><h3>Vajra journal (closed)</h3>';
+        h +=
+            '<div class="vajra-closed-day-total ' +
+            pnlToneClass(dayTotal) +
+            '"><span class="vajra-closed-day-total-label">Total P&amp;L today (IST)</span>' +
+            '<span class="vajra-closed-day-total-value">' +
+            fmtRupeePnl(dayTotal) +
+            '</span>' +
+            '<span class="vajra-closed-day-total-meta">' +
+            esc(String(rows.length)) +
+            ' trade' +
+            (rows.length === 1 ? '' : 's') +
+            '</span></div>';
+        h += '<table class="vajra-active-table"><thead><tr>';
         h +=
             '<th>Symbol</th><th>Dir</th><th>Entry</th><th>Exit</th>' +
             '<th>Entry date &amp; time</th><th>Exit date &amp; time</th>' +
