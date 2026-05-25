@@ -275,6 +275,12 @@ table.vajra-active-table td {
     padding: 6px 4px;
     text-align: left;
 }
+table.vajra-active-table td.vajra-dt-cell,
+table.vajra-active-table th:nth-child(5),
+table.vajra-active-table th:nth-child(6) {
+    white-space: nowrap;
+    font-size: 0.7rem;
+}
 
 /* ── Open Position institutional cards ── */
 .vop-stack {

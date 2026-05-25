@@ -536,6 +536,23 @@
         return sign + '₹' + Math.abs(Math.round(n)).toLocaleString('en-IN', { maximumFractionDigits: 0 });
     }
 
+    function fmtIstDateTime(iso) {
+        if (!iso) return '—';
+        const d = new Date(iso);
+        if (!Number.isFinite(d.getTime())) return '—';
+        return (
+            d.toLocaleString('en-IN', {
+                timeZone: 'Asia/Kolkata',
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false,
+            }) + ' IST'
+        );
+    }
+
     function renderClosedTrades(rows) {
         const el = document.getElementById(_closedElId);
         if (!el) return;
@@ -547,7 +564,9 @@
             ? '<div class="vajra-active-block"><table class="vajra-active-table"><thead><tr>'
             : '<div class="vajra-active-block"><h3>Vajra journal (closed)</h3><table class="vajra-active-table"><thead><tr>';
         h +=
-            '<th>Symbol</th><th>Dir</th><th>Entry</th><th>Exit</th><th>P&amp;L</th><th>Lifecycle</th></tr></thead><tbody>';
+            '<th>Symbol</th><th>Dir</th><th>Entry</th><th>Exit</th>' +
+            '<th>Entry date &amp; time</th><th>Exit date &amp; time</th>' +
+            '<th>P&amp;L</th><th>Lifecycle</th></tr></thead><tbody>';
         rows.forEach(function (t) {
             h +=
                 '<tr><td>' +
@@ -558,6 +577,10 @@
                 esc(t.entry_price) +
                 '</td><td>' +
                 esc(t.exit_price) +
+                '</td><td class="vajra-dt-cell">' +
+                esc(fmtIstDateTime(t.entry_time)) +
+                '</td><td class="vajra-dt-cell">' +
+                esc(fmtIstDateTime(t.exit_time || t.closed_at)) +
                 '</td><td>' +
                 fmtRupeePnl(t.realized_pnl) +
                 '</td><td>' +
