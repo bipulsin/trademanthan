@@ -42,6 +42,19 @@
     const QUAL_DISCOVERY = 'DISCOVERY';
     const QUAL_WATCHLIST = 'WATCHLIST';
     const QUAL_REJECT = 'REJECT';
+    function isPremiumGradeRow(row) {
+        if (!row) return false;
+        const g = String(row.quality_grade || '')
+            .trim()
+            .toUpperCase();
+        if (g === 'A+') return true;
+        if (g === 'A') return true;
+        return false;
+    }
+
+    function filterPremiumGradeRows(rows) {
+        return (rows || []).filter(isPremiumGradeRow);
+    }
 
     const TOP_COLUMNS = [
         { key: 'execution_bias', label: 'Direction' },
@@ -919,7 +932,7 @@
     }
 
     function poolByQual(rows, qual) {
-        return (rows || []).filter(function (r) {
+        return filterPremiumGradeRows(rows).filter(function (r) {
             if (isRejectRow(r)) return false;
             const q = qualificationOf(r);
             if (qual === QUAL_EXECUTABLE) return q === QUAL_EXECUTABLE;
@@ -1016,28 +1029,45 @@
     }
 
     function filterRatingsPayload(data, activeSet) {
-        if (!data || !activeSet || !activeSet.size) return data;
+        if (!data) return data;
         const sections = data.top_sections || {};
-        const filteredSections = {
-            EXECUTABLE: filterRowsByActivePositions(sections.EXECUTABLE, activeSet),
-            ARMED: filterRowsByActivePositions(sections.ARMED, activeSet),
-            DISCOVERY: filterRowsByActivePositions(sections.DISCOVERY, activeSet),
+        let filteredSections = {
+            EXECUTABLE: filterPremiumGradeRows(sections.EXECUTABLE),
+            ARMED: filterPremiumGradeRows(sections.ARMED),
+            DISCOVERY: filterPremiumGradeRows(sections.DISCOVERY),
         };
-        const topPicks = filterRowsByActivePositions(data.top_picks, activeSet);
-        const allFiltered = filterRowsByActivePositions(data.rows, activeSet);
+        let topPicks = filterPremiumGradeRows(data.top_picks);
+        let allFiltered = filterPremiumGradeRows(data.rows);
+        let remainder = filterPremiumGradeRows(data.remainder);
+        if (activeSet && activeSet.size) {
+            filteredSections = {
+                EXECUTABLE: filterRowsByActivePositions(filteredSections.EXECUTABLE, activeSet),
+                ARMED: filterRowsByActivePositions(filteredSections.ARMED, activeSet),
+                DISCOVERY: filterRowsByActivePositions(filteredSections.DISCOVERY, activeSet),
+            };
+            topPicks = filterRowsByActivePositions(topPicks, activeSet);
+            allFiltered = filterRowsByActivePositions(allFiltered, activeSet);
+            remainder = filterRowsByActivePositions(remainder, activeSet);
+        }
+        const se = data.stable_execution || {};
+        const stableFiltered = Object.assign({}, se, {
+            sticky_top3: filterPremiumGradeRows(se.sticky_top3),
+            momentum_leaders: filterPremiumGradeRows(se.momentum_leaders),
+        });
         return Object.assign({}, data, {
             rows: allFiltered,
             top_picks: topPicks,
             top_sections: filteredSections,
-            remainder: filterRowsByActivePositions(data.remainder, activeSet),
+            remainder: remainder,
+            stable_execution: stableFiltered,
         });
     }
 
     function rowsForTopTable(rows) {
-        const pool = (rows || []).filter(function (r) {
+        const pool = filterPremiumGradeRows(rows).filter(function (r) {
             return !isRejectRow(r);
         });
-        return sortForDisplay(pool.length ? pool : rows || []);
+        return sortForDisplay(pool);
     }
 
     function sortForDisplay(rows) {
@@ -1089,8 +1119,8 @@
         const armedRows = composed.ARMED || [];
         const discRows = composed.DISCOVERY || [];
         const banner = data && data.banner;
-        const stickyTop3 = (se.sticky_top3 || []).slice();
-        const momentumLeaders = (se.momentum_leaders || []).slice();
+        const stickyTop3 = filterPremiumGradeRows(se.sticky_top3 || []);
+        const momentumLeaders = filterPremiumGradeRows(se.momentum_leaders || []);
         const stickyCols = se.stable_mode_enabled ? STICKY_EXEC_COLUMNS : TOP_COLUMNS;
         const headColCount = stickyCols.length;
         const hasAny =

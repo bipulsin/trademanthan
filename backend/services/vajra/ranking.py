@@ -84,10 +84,24 @@ def group_by_qualification(rows: List[Dict[str, Any]]) -> Dict[str, List[Dict[st
     return groups
 
 
+def _filter_screener_grades(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    from backend.services.vajra.setup_classifier import quality_grade, screener_grade_allowed
+
+    out: List[Dict[str, Any]] = []
+    for r in rows:
+        row = dict(r)
+        if not row.get("quality_grade"):
+            row["quality_grade"] = quality_grade(row)
+        if screener_grade_allowed(row):
+            out.append(row)
+    return out
+
+
 def build_screener_display(rows: List[Dict[str, Any]], top_n: int = 8) -> Dict[str, Any]:
     enriched = [enrich_execution_scores(dict(r)) for r in rows]
     finalized = finalize_screener_rows(enriched)
-    sorted_rows = sort_vajra_rows_for_display(finalized)
+    graded = _filter_screener_grades(finalized)
+    sorted_rows = sort_vajra_rows_for_display(graded)
     groups = group_by_qualification(sorted_rows)
     section_out = build_screener_sections(sorted_rows, limits={
         STATE_EXECUTABLE: top_n,

@@ -90,6 +90,17 @@ def quality_grade(row: Dict[str, Any]) -> str:
     return "B"
 
 
+SCREENER_ALLOWED_GRADES = frozenset({"A+", "A"})
+
+
+def screener_grade_allowed(row: Dict[str, Any]) -> bool:
+    """Screener UI: A+ and A setups only (LONG or SHORT)."""
+    grade = str(row.get("quality_grade") or quality_grade(row)).strip().upper()
+    if grade == "A+":
+        return True
+    return grade == "A"
+
+
 def resolve_execution_workflow_state(
     row: Dict[str, Any],
     *,

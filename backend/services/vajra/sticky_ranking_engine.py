@@ -505,6 +505,13 @@ def refresh_slot_metrics(slot: Dict[str, Any], row: Dict[str, Any]) -> Dict[str,
 
 
 def eligible_for_executable_top3(row: Dict[str, Any]) -> bool:
+    try:
+        from backend.services.vajra.setup_classifier import screener_grade_allowed
+
+        if not screener_grade_allowed(row):
+            return False
+    except Exception:
+        pass
     if str(row.get("qualification_state") or row.get("qualification") or "").upper() == "REJECT":
         return False
     if not str(row.get("stock") or row.get("security") or "").strip():
@@ -525,11 +532,18 @@ def select_momentum_leaders(
     """Discovery/momentum leaders — separate from executable Top 3."""
     ex = exclude or set()
     pool = []
+    try:
+        from backend.services.vajra.setup_classifier import screener_grade_allowed
+    except Exception:
+        screener_grade_allowed = None  # type: ignore
+
     for r in rows:
         sym = str(r.get("stock") or r.get("security") or "").strip().upper()
         if not sym or sym in ex:
             continue
         if str(r.get("qualification_state") or r.get("qualification") or "").upper() == "REJECT":
+            continue
+        if screener_grade_allowed and not screener_grade_allowed(r):
             continue
         pool.append(r)
 
