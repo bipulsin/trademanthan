@@ -1363,7 +1363,22 @@
         }, ms);
         try {
             const res = await fetch(url, Object.assign({}, options || {}, { signal: ctrl.signal }));
-            const data = await res.json();
+            const raw = await res.text();
+            let data;
+            try {
+                data = raw ? JSON.parse(raw) : {};
+            } catch (parseErr) {
+                if (raw && /^\s*</.test(raw)) {
+                    throw new Error(
+                        res.status >= 500
+                            ? 'Server temporarily unavailable (HTTP ' +
+                                  res.status +
+                                  ') — try Refresh in a moment'
+                            : 'Invalid server response (HTTP ' + res.status + ')'
+                    );
+                }
+                throw parseErr;
+            }
             return { res: res, data: data };
         } catch (e) {
             if (e && e.name === 'AbortError') {

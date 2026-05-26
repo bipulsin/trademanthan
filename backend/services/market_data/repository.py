@@ -14,6 +14,38 @@ from backend.services.market_data.schema import ensure_market_data_columns
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
 
+# Every key referenced in bulk_update_market_data SQL must be present (use None = no change).
+_BULK_UPDATE_KEYS = (
+    "stock",
+    "stock_ltp",
+    "stock_vwap",
+    "stock_ema5",
+    "stock_last_updated",
+    "currmth_future_ltp",
+    "currmth_future_vwap",
+    "currmth_future_ema5",
+    "currmth_future_last_updated",
+    "currmth_candle_open_5m",
+    "currmth_candle_high_5m",
+    "currmth_candle_low_5m",
+    "currmth_candle_close_5m",
+    "currmth_candle_volume_5m",
+    "nextmth_future_ltp",
+    "nextmth_future_vwap",
+    "nextmth_future_ema5",
+    "nextmth_future_last_updated",
+    "market_data_source",
+    "market_data_refresh_status",
+    "market_data_refresh_error",
+    "market_data_last_updated",
+)
+
+
+def normalize_market_data_update(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensure all SQL bind params exist (LTP-only websocket rows omit VWAP/EMA keys)."""
+    return {k: row.get(k) for k in _BULK_UPDATE_KEYS}
+
+
 _UNIVERSE_SQL = text(
     """
     SELECT
@@ -90,9 +122,10 @@ def bulk_update_market_data(updates: List[Dict[str, Any]]) -> int:
         WHERE stock = :stock
         """
     )
+    payload = [normalize_market_data_update(u) for u in updates]
     with engine.begin() as conn:
-        conn.execute(sql, updates)
-    return len(updates)
+        conn.execute(sql, payload)
+    return len(payload)
 
 
 def load_row_by_stock(stock: str) -> Optional[Dict[str, Any]]:
