@@ -1043,7 +1043,35 @@
         let tbody = '';
         const focusOnly = se.stable_mode_enabled && se.focus_mode_enabled && stickyTop3.length;
 
-        if (se.stable_mode_enabled && stickyTop3.length) {
+        function wfRank(row) {
+            const w = String(row.execution_workflow_state || row.execution_state || '').toUpperCase();
+            if (w === 'EXECUTABLE') return 5;
+            if (w === 'PREPARE') return 4;
+            if (w === 'ACTIVE') return 3;
+            if (w === 'EXIT_RISK') return 2;
+            return 1;
+        }
+
+        function sortByWorkflow(rows) {
+            return rows.slice().sort(function (a, b) {
+                return wfRank(b) - wfRank(a);
+            });
+        }
+
+        if (focusOnly && stickyTop3.length) {
+            const byWf = { EXECUTABLE: [], PREPARE: [], ACTIVE: [], EXIT_RISK: [], WAIT: [] };
+            stickyTop3.forEach(function (r) {
+                const w = String(r.execution_workflow_state || r.execution_state || 'WAIT').toUpperCase();
+                if (byWf[w]) byWf[w].push(r);
+                else byWf.WAIT.push(r);
+            });
+            ['EXECUTABLE', 'PREPARE', 'ACTIVE', 'EXIT_RISK', 'WAIT'].forEach(function (wf) {
+                const group = byWf[wf];
+                if (!group.length) return;
+                tbody += renderSectionHeader('Focus — ' + wf, 'vajra-section-sticky');
+                tbody += renderTableBodyRows(sortByWorkflow(group), TOP_COLUMNS, true);
+            });
+        } else if (se.stable_mode_enabled && stickyTop3.length) {
             tbody += renderSectionHeader('Sticky Top 3 — Stable Execution', 'vajra-section-sticky');
             tbody += renderTableBodyRows(stickyTop3, TOP_COLUMNS, true);
         }
@@ -1321,8 +1349,13 @@
         }
     }
 
-    /** One Telegram message when ENTER becomes enabled for symbols (first time per session). */
-    function processEnterTelegramAlerts(rows, sessionDate) {
+    /** Client ENTER alerts — skipped when server sends Focus Mode consolidated alerts. */
+    function processEnterTelegramAlerts(rows, sessionDate, data) {
+        if (data && (data.server_telegram_alerts || (data.stable_execution && data.stable_execution.focus_telegram && data.stable_execution.focus_telegram.sent))) {
+            return;
+        }
+        const se = (data && data.stable_execution) || {};
+        if (se.focus_mode_enabled && se.stable_mode_enabled) return;
         if (!isVajraTelegramEnabled()) return;
         if (typeof global.notifyTelegramUserMessage !== 'function') return;
         const seen = loadEnterSeenForSession(sessionDate);
@@ -1480,7 +1513,7 @@
                 }
                 metaEl.textContent = meta;
             }
-            processEnterTelegramAlerts(allRows, filtered.session_date || data.session_date);
+            processEnterTelegramAlerts(allRows, filtered.session_date || data.session_date, data);
             if (modal.classList.contains('vajra-modal--open')) {
                 modalRows = global._vajraRemainder || allRows.slice(TOP_N);
                 renderModal();

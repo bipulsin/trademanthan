@@ -43,4 +43,20 @@ Qualification v2 (`DISCOVERY` / `ARMED` / `EXECUTABLE`) remains on the backend f
 3. Watch **WAIT → PREPARE → EXECUTABLE** pills and **S1–S3 / W1–W3** sector badges.
 4. On ENTER, review **conditional trade plan** before activation.
 
+## Focus Mode Telegram (server)
+
+When **Focus Mode** is on, the server sends **one consolidated** message to the TradeWithCTO channel (max every 5 min) listing all focus-universe workflow transitions. Client ENTER Telegram alerts are suppressed. Dedup stored in `vajra_stable_execution_state.focus_alert_dedup`. Env: `VAJRA_FOCUS_TELEGRAM=1`.
+
+## Trade plan journal
+
+On activate, `trade_plan` (+ narrative if present) is saved to `vajra_discretionary_trade.journal`.
+
+## LTP-aware plans
+
+Ratings overlay fetches batch LTP via Upstox before generating plan levels.
+
+## LLM narrative
+
+OpenAI (`gpt-4o-mini`) adds `trade_plan.narrative` for up to 3 focus symbols per poll when `OPENAI_API_KEY` is set; rule-based fallback otherwise.
+
 See also: `SECTOR_STABLE_EXECUTION.md`, `STABLE_EXECUTION_MODE.md`.

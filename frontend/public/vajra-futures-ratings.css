@@ -590,6 +590,13 @@ body[data-theme="dark"] .df-sector-badge--bear {
     padding-left: 1.1rem;
     font-size: 0.75rem;
 }
+.vajra-trade-plan-narrative {
+    font-size: 0.82rem;
+    line-height: 1.45;
+    margin: 8px 0;
+    color: #cbd5e1;
+    font-style: italic;
+}
 .vajra-workflow-phase {
     margin: 8px 0;
     padding: 8px 10px;

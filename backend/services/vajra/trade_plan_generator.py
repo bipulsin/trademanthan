@@ -54,7 +54,14 @@ def generate_conditional_trade_plan(row: Dict[str, Any]) -> Optional[Dict[str, A
     ext = _f(row.get("extension_risk_score"), 50.0)
     px = _anchor_price(row)
     if not px or px <= 0:
-        # Plan skeleton without prices — trader must read chart for levels
+        skel_ctx: List[str] = []
+        if row.get("sector_in_top_gainers_rank"):
+            skel_ctx.append("Sector in top gainers")
+        if row.get("sector_in_top_losers_rank"):
+            skel_ctx.append("Sector in top losers")
+        vwap_s = str(row.get("vwap_reclaim_status") or "")
+        if vwap_s:
+            skel_ctx.append(f"VWAP: {vwap_s}")
         return {
             "symbol": stock,
             "direction": direction,
@@ -68,7 +75,7 @@ def generate_conditional_trade_plan(row: Dict[str, Any]) -> Optional[Dict[str, A
             "preferred_entry": None,
             "stop_loss": None,
             "targets": None,
-            "market_context": [],
+            "market_context": skel_ctx,
             "invalidation": [
                 "Exit if VWAP is lost against your direction.",
                 "Exit if sector alignment flips (S↔W badge change).",

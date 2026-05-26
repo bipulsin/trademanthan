@@ -243,6 +243,9 @@
             '<p class="vajra-trade-plan-lead"><strong>Conditional plan</strong> — ' +
             esc(plan.disclaimer || '') +
             '</p>' +
+            (plan.narrative
+                ? '<p class="vajra-trade-plan-narrative">' + esc(plan.narrative) + '</p>'
+                : '') +
             '<p class="vajra-trade-plan-entry">' +
             esc(plan.entry_condition) +
             '</p>' +

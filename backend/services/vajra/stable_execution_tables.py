@@ -27,3 +27,14 @@ def ensure_vajra_stable_execution_table(db: Session) -> None:
             """
         )
     )
+    try:
+        db.execute(
+            text(
+                """
+                ALTER TABLE vajra_stable_execution_state
+                ADD COLUMN IF NOT EXISTS focus_alert_dedup JSONB NOT NULL DEFAULT '{}'
+                """
+            )
+        )
+    except Exception:
+        pass

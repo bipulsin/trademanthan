@@ -87,8 +87,12 @@ def apply_execution_co_pilot(
     user_id: int,
     *,
     session_date: Optional[date] = None,
+    narrative_symbols: Optional[Set[str]] = None,
 ) -> Dict[str, Any]:
     """Enrich all rating rows + session market context. Non-blocking overlay."""
+    from backend.services.vajra.ltp_enrich import enrich_rows_with_ltp
+
+    rows = enrich_rows_with_ltp(list(rows or []))
     sk = _session_key(session_date)
     bucket = _prior_wf.setdefault(sk, {})
     active_trades = _load_active_trade_context(user_id)
@@ -112,6 +116,26 @@ def apply_execution_co_pilot(
 
     market = build_session_market_context(enriched, nifty_pct=nifty, bank_pct=bank)
     events = aggregate_session_events(enriched)
+
+    narr_syms = narrative_symbols or set()
+    narr_count = 0
+    if narr_syms:
+        from backend.services.vajra.trade_plan_narrative import enrich_trade_plan_narrative
+
+        bias_lbl = market.get("market_bias")
+        for i, r in enumerate(enriched):
+            sym = str(r.get("stock") or r.get("security") or "").strip().upper()
+            if sym not in narr_syms or narr_count >= 3:
+                continue
+            plan = r.get("trade_plan")
+            wf = str(r.get("execution_workflow_state") or "").upper()
+            if not plan or wf not in ("PREPARE", "EXECUTABLE"):
+                continue
+            enriched[i] = dict(r)
+            enriched[i]["trade_plan"] = enrich_trade_plan_narrative(
+                plan, enriched[i], market_bias=bias_lbl
+            )
+            narr_count += 1
 
     return {
         "market_context": market,

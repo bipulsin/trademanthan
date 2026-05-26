@@ -406,7 +406,7 @@ def apply_stable_execution_overlay(
         enriched = co_meta.get("rows") or enriched
     except Exception as e:
         logger.debug("execution co-pilot overlay skipped: %s", e)
-    co_pilot_payload = {
+    co_pilot_payload: Dict[str, Any] = {
         "market_context": co_meta.get("market_context") or {},
         "execution_events": co_meta.get("execution_events") or [],
     }
@@ -452,6 +452,61 @@ def apply_stable_execution_overlay(
             or "Execution window — sector-aligned Top 3 with sticky leadership."
         )
 
+    focus_syms = set(cfg.frozen_focus_stocks or [])
+    for sr in sticky_rows:
+        sym = _stock_key(sr)
+        if sym:
+            focus_syms.add(sym)
+
+    if cfg.focus_mode_enabled and focus_syms:
+        try:
+            from backend.services.vajra.execution_co_pilot import apply_execution_co_pilot
+
+            co_meta = apply_execution_co_pilot(
+                enriched,
+                user_id,
+                session_date=session_date,
+                narrative_symbols=focus_syms,
+            )
+            enriched = co_meta.get("rows") or enriched
+            by_stock = {_stock_key(r): r for r in enriched if _stock_key(r)}
+            refreshed_sticky: List[Dict[str, Any]] = []
+            for sr in sticky_rows:
+                sym = _stock_key(sr)
+                row = by_stock.get(sym)
+                if row:
+                    row = dict(row)
+                    row["sticky_leader"] = True
+                    if sr.get("watchlist_frozen"):
+                        row["watchlist_frozen"] = True
+                    refreshed_sticky.append(row)
+            sticky_rows = refreshed_sticky
+            co_pilot_payload["market_context"] = co_meta.get("market_context") or co_pilot_payload.get(
+                "market_context"
+            )
+            co_pilot_payload["execution_events"] = co_meta.get("execution_events") or co_pilot_payload.get(
+                "execution_events"
+            )
+        except Exception as e:
+            logger.debug("focus narrative co-pilot: %s", e)
+
+        try:
+            from backend.services.vajra.focus_mode_telegram import maybe_send_focus_mode_telegram
+
+            sd = session_date or effective_session_date_ist_for_trend()
+            tg = maybe_send_focus_mode_telegram(
+                user_id,
+                enriched,
+                session_date=sd,
+                focus_mode_enabled=True,
+                sticky_top3=sticky_rows,
+                frozen_focus_stocks=cfg.frozen_focus_stocks,
+                market_bias=(co_pilot_payload.get("market_context") or {}).get("market_bias"),
+            )
+            co_pilot_payload["focus_telegram"] = tg
+        except Exception as e:
+            logger.debug("focus telegram: %s", e)
+
     return {
         "stable_mode_enabled": True,
         "focus_mode_enabled": cfg.focus_mode_enabled,
@@ -468,6 +523,7 @@ def apply_stable_execution_overlay(
         "rows": enriched,
         "sector_heatmap": sector_meta.get("sector_heatmap") or [],
         "co_pilot": co_pilot_payload,
+        "server_telegram_alerts": True,
         **workflow,
     }
 

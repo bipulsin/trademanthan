@@ -206,6 +206,7 @@ def get_vajra_ratings(
                         "co_pilot": stable.get("co_pilot") or {},
                     },
                     "co_pilot": stable.get("co_pilot") or {},
+                    "server_telegram_alerts": stable.get("server_telegram_alerts", False),
                 },
                 headers={
                     "Cache-Control": "no-store, no-cache, must-revalidate",

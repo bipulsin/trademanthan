@@ -181,6 +181,17 @@ def activate_trade(
 
     sd = effective_session_date_ist_for_trend()
     now = datetime.now(IST)
+    journal: Dict[str, Any] = {}
+    trade_plan = discovery_row.get("trade_plan") or metrics.get("trade_plan")
+    if trade_plan:
+        journal["trade_plan"] = trade_plan
+        if trade_plan.get("narrative"):
+            journal["plan_narrative"] = trade_plan.get("narrative")
+    journal["execution_workflow_state"] = discovery_row.get("execution_workflow_state")
+    journal["setup_type"] = discovery_row.get("setup_type")
+    journal["quality_grade"] = discovery_row.get("quality_grade")
+    journal["activated_at"] = now.isoformat()
+
     db = SessionLocal()
     try:
         ensure_vajra_discretionary_tables(db)
@@ -196,7 +207,7 @@ def activate_trade(
                     :user_id, :platform, :sd, :stock, :fs, :ik,
                     :direction, :lots, :entry_price, :entry_time, 'active', :entry_price,
                     CAST(:disc AS jsonb), CAST(:chk AS jsonb), CAST(:met AS jsonb), CAST(:warn AS jsonb),
-                    'Early Transition', 50, '[]'::jsonb, '{}'::jsonb, :now, :now
+                    'Early Transition', 50, '[]'::jsonb, CAST(:journal AS jsonb), :now, :now
                 )
                 RETURNING id
                 """
@@ -216,6 +227,7 @@ def activate_trade(
                 "chk": _jdump(checklist),
                 "met": _jdump(metrics),
                 "warn": _jdump(warnings),
+                "journal": _jdump(journal),
                 "now": now,
             },
         )
