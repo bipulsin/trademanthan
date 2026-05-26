@@ -116,6 +116,54 @@ table.vajra-wf-check-table th {
 .vajra-wf-grid-2 input[type='checkbox'] {
     margin: 0;
 }
+
+/* Close trade — exit reasons: checkbox beside label, two columns */
+.vajra-wf-exit-reasons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px 24px;
+    margin-top: 4px;
+}
+.vajra-wf-panel .vajra-wf-exit-reasons .vajra-wf-check-label,
+.vajra-wf-exit-reasons .vajra-wf-check-label {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 10px !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 2px 0 !important;
+    font-size: 0.95rem !important;
+    font-weight: 500 !important;
+    line-height: 1.35 !important;
+    color: var(--theme-text, #e2e8f0) !important;
+    cursor: pointer;
+}
+.vajra-wf-exit-reasons .vajra-wf-check-text {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.vajra-wf-exit-reasons input[type='checkbox'] {
+    flex: 0 0 auto !important;
+    width: 1.125rem !important;
+    height: 1.125rem !important;
+    margin: 0 !important;
+    cursor: pointer;
+}
+.vajra-wf-field--reasons .vajra-wf-sublabel {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--theme-muted, #94a3b8);
+    margin-bottom: 6px;
+}
+@media (max-width: 520px) {
+    .vajra-wf-exit-reasons {
+        grid-template-columns: 1fr;
+    }
+}
+
 .vajra-wf-field {
     margin-bottom: 10px;
 }

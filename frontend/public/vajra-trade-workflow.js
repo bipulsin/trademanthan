@@ -219,6 +219,22 @@
         return h;
     }
 
+    function renderExitReasonGrid() {
+        let h = '<div class="vajra-wf-exit-reasons">';
+        EXIT_REASONS.forEach(function (r) {
+            h +=
+                '<label class="vajra-wf-check-label">' +
+                '<input type="checkbox" data-exit-reason value="' +
+                esc(r) +
+                '">' +
+                '<span class="vajra-wf-check-text">' +
+                esc(r) +
+                '</span></label>';
+        });
+        h += '</div>';
+        return h;
+    }
+
     function renderTradePlanBlock(plan) {
         if (!plan || !plan.entry_condition) return '';
         const pe = plan.preferred_entry || {};
@@ -686,16 +702,13 @@
     }
 
     function openCloseModal(tradeId) {
-        let reasons = EXIT_REASONS.map(function (r) {
-            return '<label><input type="checkbox" data-exit-reason value="' + esc(r) + '"> ' + esc(r) + '</label>';
-        }).join('');
         const html =
             '<div class="vajra-wf-step vajra-wf-step--active">' +
             '<h3>Close trade</h3>' +
             '<div class="vajra-wf-field"><label>Exit price</label><input type="number" step="0.05" id="vajraWfExitPrice"></div>' +
-            '<div class="vajra-wf-field"><label>Reason</label><div style="display:flex;flex-direction:column;gap:4px">' +
-            reasons +
-            '</div></div>' +
+            '<div class="vajra-wf-field vajra-wf-field--reasons"><label class="vajra-wf-sublabel">Reason</label>' +
+            renderExitReasonGrid() +
+            '</div>' +
             '<div class="vajra-wf-actions"><button type="button" class="vajra-wf-btn vajra-wf-btn-ghost" data-vajra-wf-close="1">Cancel</button>' +
             '<button type="button" class="vajra-wf-btn vajra-wf-btn-danger" id="vajraWfConfirmClose">Confirm close</button></div></div>';
         const m = ensureModal();
