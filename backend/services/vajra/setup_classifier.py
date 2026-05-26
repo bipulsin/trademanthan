@@ -67,7 +67,7 @@ def classify_setup_type(row: Dict[str, Any]) -> str:
 
 
 def quality_grade(row: Dict[str, Any]) -> str:
-    """A+ / A / B / C discretionary execution quality."""
+    """A+ / A / B+ / B / C discretionary execution quality."""
     if _qual(row) == STATE_REJECT:
         return "C"
     conv = _f(row, "conviction_score") or _f(row, "confidence")
@@ -83,6 +83,8 @@ def quality_grade(row: Dict[str, Any]) -> str:
         return "A+"
     if _qual(row) == STATE_EXECUTABLE and conv >= 72 and sq >= 68:
         return "A"
+    if _qual(row) in (STATE_EXECUTABLE, STATE_ARMED) and conv >= 62 and sq >= 58:
+        return "B+"
     if _qual(row) in (STATE_EXECUTABLE, STATE_ARMED) and conv >= 55:
         return "B"
     if _qual(row) == STATE_DISCOVERY:
@@ -90,15 +92,13 @@ def quality_grade(row: Dict[str, Any]) -> str:
     return "B"
 
 
-SCREENER_ALLOWED_GRADES = frozenset({"A+", "A"})
+SCREENER_ALLOWED_GRADES = frozenset({"A+", "A", "B+"})
 
 
 def screener_grade_allowed(row: Dict[str, Any]) -> bool:
-    """Screener UI: A+ and A setups only (LONG or SHORT)."""
+    """Screener / Top 3: A+, A, and B+ setups (LONG or SHORT)."""
     grade = str(row.get("quality_grade") or quality_grade(row)).strip().upper()
-    if grade == "A+":
-        return True
-    return grade == "A"
+    return grade in SCREENER_ALLOWED_GRADES
 
 
 def resolve_execution_workflow_state(

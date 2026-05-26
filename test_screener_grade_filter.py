@@ -1,13 +1,24 @@
-"""Screener shows A+ and A grades only."""
+"""Screener shows A+, A, and B+ grades."""
 from backend.services.vajra.ranking import build_screener_display
-from backend.services.vajra.setup_classifier import screener_grade_allowed
+from backend.services.vajra.setup_classifier import quality_grade, screener_grade_allowed
 
 
 def test_screener_grade_allowed():
     assert screener_grade_allowed({"quality_grade": "A+"})
     assert screener_grade_allowed({"quality_grade": "A"})
+    assert screener_grade_allowed({"quality_grade": "B+"})
     assert not screener_grade_allowed({"quality_grade": "B"})
     assert not screener_grade_allowed({"quality_grade": "C"})
+
+
+def test_quality_grade_assigns_b_plus():
+    row = {
+        "qualification_state": "ARMED",
+        "conviction_score": 64,
+        "setup_quality_score": 60,
+        "extension_risk_score": 40,
+    }
+    assert quality_grade(row) == "B+"
 
 
 def test_build_screener_display_filters_grades():

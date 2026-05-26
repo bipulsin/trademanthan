@@ -47,9 +47,7 @@
         const g = String(row.quality_grade || '')
             .trim()
             .toUpperCase();
-        if (g === 'A+') return true;
-        if (g === 'A') return true;
-        return false;
+        return g === 'A+' || g === 'A' || g === 'B+';
     }
 
     function filterPremiumGradeRows(rows) {
@@ -1169,7 +1167,7 @@
             });
         } else if (se.stable_mode_enabled && stickyTop3.length) {
             stickyTbody += renderSectionHeader(
-                'A+ Executable Trades — Top 3 (actionable NOW)',
+                'Executable Top 3 — A+ / A / B+ (actionable NOW)',
                 'vajra-section-sticky',
                 headColCount
             );
