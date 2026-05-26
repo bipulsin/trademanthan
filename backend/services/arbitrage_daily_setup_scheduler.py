@@ -540,7 +540,22 @@ def _run_arbitrage_daily_setup_impl(execution: _Execution = None) -> Dict:
 
 
 def _refresh_arbitrage_master_ltps(conn, upstox: UpstoxService) -> int:
-    """Update stock / curr / next LTP columns for all arbitrage_master rows."""
+    """
+    Update stock / curr / next LTP columns for all arbitrage_master rows.
+
+    Delegates to centralized market_data engine when available (ignores conn/upstox).
+    """
+    try:
+        from backend.services.market_data.engine import refresh_arbitrage_master_market_data
+        from backend.services.market_data.reads import invalidate_read_cache
+
+        out = refresh_arbitrage_master_market_data(execution="arbitrage_scheduler", fetch_candles=True)
+        invalidate_read_cache()
+        return int(out.get("rows_updated") or 0)
+    except Exception as e:
+        logger.warning("market_data engine fallback to legacy LTP refresh: %s", e)
+
+    # Legacy path
     price_cache: Dict[str, Optional[float]] = {}
     price_updates: List[Dict] = []
 
@@ -586,17 +601,24 @@ def _refresh_arbitrage_master_ltps(conn, upstox: UpstoxService) -> int:
 
 
 def run_arbitrage_ltp_refresh(execution: _Execution = "intraday_ltp") -> Dict:
-    """Intraday: refresh LTP columns only (no instrument metadata / roll-window changes)."""
+    """Intraday: centralized market data refresh (LTP; candles on 5m job only)."""
     try:
         _ensure_arbitrage_table()
-        upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
-        with engine.begin() as conn:
-            updated = _refresh_arbitrage_master_ltps(conn, upstox)
+        from backend.services.market_data.engine import refresh_arbitrage_master_market_data
+        from backend.services.market_data.reads import invalidate_read_cache
+
+        fetch_candles = execution != "intraday_ltp"
+        out = refresh_arbitrage_master_market_data(
+            execution=execution or "intraday_ltp",
+            fetch_candles=fetch_candles,
+        )
+        invalidate_read_cache()
         return {
-            "success": True,
+            "success": bool(out.get("success")),
             "job_name": "arbitrage_ltpRefresh",
             "execution": execution,
-            "ltp_rows_updated": int(updated),
+            "ltp_rows_updated": int(out.get("rows_updated") or 0),
+            "market_data": out,
             "updated_at_ist": datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S"),
         }
     except Exception as e:

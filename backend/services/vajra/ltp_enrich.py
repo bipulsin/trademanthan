@@ -25,12 +25,13 @@ def enrich_rows_with_ltp(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
     ltp_map: Dict[str, float] = {}
     try:
-        from backend.config import settings
-        from backend.services.upstox_service import UpstoxService
+        from backend.services.market_data.reads import ltp_map_with_fallback
 
-        u = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
-        if getattr(u, "access_token", None):
-            ltp_map = u.get_market_quotes_batch_by_keys(list(dict.fromkeys(keys))) or {}
+        ltp_map = ltp_map_with_fallback(
+            list(dict.fromkeys(keys)),
+            allow_broker_fallback=True,
+            allow_stale=True,
+        )
     except Exception as e:
         logger.debug("vajra ltp enrich failed: %s", e)
 

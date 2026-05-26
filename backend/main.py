@@ -21,6 +21,7 @@ import backend.routers.algo as algo
 import backend.routers.scan as scan
 import backend.routers.cargpt as cargpt
 import backend.routers.arbitrage as arbitrage
+import backend.routers.market_data as market_data_router
 import backend.routers.smart_futures_stub as smart_futures
 import backend.routers.smart_futures_backtest_router as smart_futures_backtest
 import backend.routers.nks_intraday as nks_intraday
@@ -281,6 +282,8 @@ app.include_router(algo.router)
 app.include_router(scan.router)
 app.include_router(cargpt.router)
 app.include_router(arbitrage.router)
+app.include_router(market_data_router.router, prefix="/api")
+app.include_router(market_data_router.router)
 app.include_router(smart_futures.router, prefix="/api/smart-futures")
 app.include_router(smart_futures.router, prefix="/smart-futures")
 app.include_router(smart_futures_backtest.router, prefix="/api/smart-futures-backtest")

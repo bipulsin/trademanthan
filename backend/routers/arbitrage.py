@@ -11,6 +11,8 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy import text
 import logging
 
+logger = logging.getLogger(__name__)
+
 from backend.config import get_instruments_file_path
 from backend.database import engine
 from backend.utils.json_safe import json_safe_row
@@ -267,12 +269,16 @@ def _arbitrage_selection_rows_live() -> tuple[list[dict[str, Any]], Optional[str
 
     ltp_map: dict[str, float] = {}
     if all_keys:
-        chunk_size = 450
-        for i in range(0, len(all_keys), chunk_size):
-            chunk = all_keys[i : i + chunk_size]
-            part = upstox.get_market_quotes_batch_by_keys(chunk)
-            if part:
-                ltp_map.update(part)
+        try:
+            from backend.services.market_data.reads import ltp_map_with_fallback
+
+            ltp_map = ltp_map_with_fallback(
+                all_keys,
+                allow_broker_fallback=True,
+                allow_stale=True,
+            )
+        except Exception as e:
+            logger.warning("arbitrage selection market_data read failed: %s", e)
 
     if not ltp_map and all_keys:
         return [], "live_quotes_unavailable"

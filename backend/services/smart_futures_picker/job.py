@@ -571,6 +571,26 @@ def _load_sentiment_map(db) -> Dict[str, float]:
     return out
 
 
+def _gate_ltp_from_market_data(fut_key: str, upstox: Any, last_close: float) -> float:
+    """Centralized DB LTP first; broker quote only if missing."""
+    try:
+        from backend.services.market_data.reads import get_ltp_for_instrument_key
+
+        px = get_ltp_for_instrument_key(fut_key, allow_stale=True)
+        if px and px > 0:
+            return float(px)
+    except Exception:
+        pass
+    try:
+        q = upstox.get_market_quote_by_key(fut_key) or {}
+        ltp = float(q.get("last_price") or 0.0)
+        if ltp > 0:
+            return ltp
+    except Exception:
+        pass
+    return float(last_close)
+
+
 def _score_symbol_outcome(
     upstox: UpstoxService,
     stock: str,
@@ -694,13 +714,9 @@ def _score_symbol_outcome(
     if len(m5_today_same_session) < 15:
         gate_price = _latest_same_session_5m_close_from_1m(upstox, fut_key, session_date, bar_end)
         if gate_price is None:
-            q = upstox.get_market_quote_by_key(fut_key) or {}
-            ltp = float(q.get("last_price") or 0.0)
-            gate_price = ltp if ltp > 0 else last_close
+            gate_price = _gate_ltp_from_market_data(fut_key, upstox, last_close)
     else:
-        q = upstox.get_market_quote_by_key(fut_key) or {}
-        ltp = float(q.get("last_price") or 0.0)
-        gate_price = ltp if ltp > 0 else last_close
+        gate_price = _gate_ltp_from_market_data(fut_key, upstox, last_close)
     vwap_dev = vwap_deviation_atr_norm(gate_price, vwap, float(atr))
 
     frac = _session_elapsed_fraction(session_date, m5_today)

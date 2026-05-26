@@ -637,6 +637,35 @@ class SmartFutureAlgoScheduler:
                 coalesce=True
             )
             logger.info("✅ Scheduled: Index Price Check (Every 5 minutes)")
+
+            def run_centralized_market_data_refresh():
+                if _skip_ist_non_trading_job("centralized market data"):
+                    return
+                ist = pytz.timezone("Asia/Kolkata")
+                now = datetime.now(ist)
+                t = now.time()
+                if t < dt_time(9, 15) or t > dt_time(15, 35):
+                    return
+                logger.info("🔧 Triggering centralized arbitrage_master market data refresh...")
+                try:
+                    from backend.services.market_data.scheduler import run_market_data_refresh_job
+
+                    out = run_market_data_refresh_job()
+                    logger.info("✅ Centralized market data refresh: %s", out)
+                except Exception as e:
+                    logger.error("❌ Centralized market data refresh failed: %s", e, exc_info=True)
+
+            self.scheduler.add_job(
+                run_centralized_market_data_refresh,
+                trigger=IntervalTrigger(minutes=5),
+                id="centralized_market_data_5m",
+                name="Centralized market data (arbitrage_master LTP/VWAP/EMA)",
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=300,
+                coalesce=True,
+            )
+            logger.info("✅ Scheduled: Centralized market data (every 5 min, 9:15–15:35 IST)")
             
             # Special jobs for 9:15 AM and 3:30 PM
             def run_index_price_9_15():

@@ -3378,9 +3378,16 @@ def _apply_live_rel_strength_to_picks_and_running(
     ltp_by_key: Dict[str, float] = {}
     snap_by_key: Dict[str, Dict[str, Any]] = {}
     try:
-        ltp_by_key = upstox.get_market_quotes_batch_by_keys(all_keys) or {}
+        from backend.services.market_data.reads import ltp_map_with_fallback
+
+        ltp_by_key = ltp_map_with_fallback(all_keys, allow_broker_fallback=True, allow_stale=True)
     except Exception as e:
-        logger.warning("daily_futures: rel-strength batch LTP failed: %s", e)
+        logger.warning("daily_futures: rel-strength market_data LTP failed: %s", e)
+    if len(ltp_by_key) < max(1, len(all_keys) // 3):
+        try:
+            ltp_by_key = upstox.get_market_quotes_batch_by_keys(all_keys) or {}
+        except Exception as e:
+            logger.warning("daily_futures: rel-strength batch LTP failed: %s", e)
     try:
         snap_by_key = upstox.get_market_quote_snapshots_batch(all_keys) or {}
     except Exception as e:

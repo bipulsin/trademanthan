@@ -390,6 +390,12 @@ def _run_startup_schema_migrations(db_engine):
                 if "sector_index" not in _am_cols:
                     conn.execute(text("ALTER TABLE arbitrage_master ADD COLUMN sector_index TEXT"))
                     print("Applied migration: added arbitrage_master.sector_index")
+                try:
+                    from backend.services.market_data.schema import ensure_market_data_columns
+
+                    ensure_market_data_columns()
+                except Exception as _md_mig_err:
+                    print(f"arbitrage_master market_data columns migration skipped: {_md_mig_err}")
 
             # Smart Futures daily picks (CMS picker job → smart_futures_daily)
             if "smart_futures_daily" not in table_names:
