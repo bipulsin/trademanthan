@@ -192,6 +192,7 @@ def get_vajra_ratings(
                         "focus_mode_enabled": stable.get("focus_mode_enabled"),
                         "sticky_persist_minutes": stable.get("sticky_persist_minutes"),
                         "sticky_top3": stable.get("sticky_top3"),
+                        "momentum_leaders": stable.get("momentum_leaders") or [],
                         "suggested_rotations": stable.get("suggested_rotations"),
                         "freeze_window_open": stable.get("freeze_window_open"),
                         "watchlist_frozen": stable.get("watchlist_frozen"),

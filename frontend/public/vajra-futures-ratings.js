@@ -53,6 +53,19 @@
         { key: 'extension_risk_score', label: 'Extension Risk', num: true },
     ];
 
+    /** Sticky / executable Top 3 — execution-first columns. */
+    const STICKY_EXEC_COLUMNS = [
+        { key: 'execution_bias', label: 'Direction' },
+        { key: 'qualification', label: 'Qualification' },
+        { key: 'executable_score', label: 'Executability', num: true },
+        { key: 'extension_risk_display', label: 'Extension Risk', num: true },
+        { key: 'momentum_velocity', label: 'Mom Velocity', num: true },
+        { key: 'score_trend', label: 'Score Trend' },
+        { key: 'freshness_score', label: 'Freshness', num: true },
+        { key: 'chase_risk', label: 'Chase Risk' },
+        { key: 'setup_trend', label: 'Setup Trend' },
+    ];
+
     const ADVANCED_COLUMNS = [
         { key: 'tps_score', label: 'TPS' },
         { key: 'setup_potential_score', label: 'Setup Potential' },
@@ -546,11 +559,45 @@
             if (ctx.indexOf('COMPRESSION') >= 0) return 'vajra-ctx-compression';
             return 'df-dir-neutral';
         }
-        if (col.key === 'extension_risk_score') {
-            const n = Number(row.extension_risk_score);
+        if (col.key === 'extension_risk_score' || col.key === 'extension_risk_display') {
+            const n = Number(
+                row.extension_risk_display != null
+                    ? row.extension_risk_display
+                    : row.extension_risk_score
+            );
             if (n >= 65) return 'df-dir-short';
             if (n >= 40) return 'vajra-rev-med';
             return 'df-dir-long';
+        }
+        if (col.key === 'executable_score' || col.key === 'freshness_score') {
+            const n = Number(row[col.key]);
+            if (n >= 68) return 'df-dir-long';
+            if (n >= 48) return 'vajra-rev-med';
+            return 'df-dir-short';
+        }
+        if (col.key === 'momentum_velocity') {
+            const n = Number(row.momentum_velocity);
+            if (n > 2) return 'df-dir-long';
+            if (n < -2) return 'df-dir-short';
+            return 'vajra-rev-med';
+        }
+        if (col.key === 'score_trend') {
+            const t = String(row.score_trend || '');
+            if (t.indexOf('↑') >= 0) return 'df-dir-long';
+            if (t.indexOf('↓') >= 0) return 'df-dir-short';
+            return 'vajra-rev-med';
+        }
+        if (col.key === 'setup_trend') {
+            const st = String(row.setup_trend || '').toLowerCase();
+            if (st === 'improving') return 'df-dir-long';
+            if (st === 'deteriorating' || st === 'exhausted') return 'df-dir-short';
+            return 'vajra-rev-med';
+        }
+        if (col.key === 'chase_risk') {
+            const cr = String(row.chase_risk || '').toUpperCase();
+            if (cr === 'HIGH') return 'df-dir-short';
+            if (cr === 'LOW') return 'df-dir-long';
+            return 'vajra-rev-med';
         }
         if (
             col.key === 'pullback_quality_score' ||
@@ -677,6 +724,10 @@
     }
 
     function rowQualClass(row) {
+        const trend = String(row.setup_trend || '').toLowerCase();
+        if (trend === 'improving') return ' vajra-row-trend-improving';
+        if (trend === 'deteriorating') return ' vajra-row-trend-deteriorating';
+        if (trend === 'exhausted') return ' vajra-row-trend-exhausted';
         const q = qualificationOf(row);
         if (q === QUAL_REJECT) return ' vajra-row-reject';
         if (q === QUAL_ARMED || q === QUAL_WATCHLIST) return ' vajra-row-armed';
@@ -1004,8 +1055,8 @@
     }
 
 
-    function renderSectionHeader(title, cssClass) {
-        const colSpan = TOP_COLUMNS.length + 2;
+    function renderSectionHeader(title, cssClass, colCount) {
+        const colSpan = (colCount != null ? colCount : TOP_COLUMNS.length) + 2;
         return (
             '<tr class="vajra-section-head ' +
             (cssClass || '') +
@@ -1014,6 +1065,17 @@
             '">' +
             escapeHtml(title) +
             '</td></tr>'
+        );
+    }
+
+    function wrapVajraTable(columns, tbody, showEnter) {
+        if (!tbody) return '';
+        return (
+            '<div class="vajra-table-wrap"><table class="vajra-table vajra-top-table">' +
+            renderTableHead(columns, !!showEnter) +
+            '<tbody>' +
+            tbody +
+            '</tbody></table></div>'
         );
     }
 
@@ -1028,8 +1090,11 @@
         const discRows = composed.DISCOVERY || [];
         const banner = data && data.banner;
         const stickyTop3 = (se.sticky_top3 || []).slice();
+        const momentumLeaders = (se.momentum_leaders || []).slice();
+        const stickyCols = se.stable_mode_enabled ? STICKY_EXEC_COLUMNS : TOP_COLUMNS;
+        const headColCount = stickyCols.length;
         const hasAny =
-            (se.stable_mode_enabled && stickyTop3.length) ||
+            (se.stable_mode_enabled && (stickyTop3.length || momentumLeaders.length)) ||
             (composed.top8 && composed.top8.length);
 
         if (!hasAny) {
@@ -1040,7 +1105,8 @@
             );
         }
 
-        let tbody = '';
+        let stickyTbody = '';
+        let legacyTbody = '';
         const focusOnly = se.stable_mode_enabled && se.focus_mode_enabled && stickyTop3.length;
 
         function wfRank(row) {
@@ -1068,33 +1134,54 @@
             ['EXECUTABLE', 'PREPARE', 'ACTIVE', 'EXIT_RISK', 'WAIT'].forEach(function (wf) {
                 const group = byWf[wf];
                 if (!group.length) return;
-                tbody += renderSectionHeader('Focus — ' + wf, 'vajra-section-sticky');
-                tbody += renderTableBodyRows(sortByWorkflow(group), TOP_COLUMNS, true);
+                stickyTbody += renderSectionHeader('Focus — ' + wf, 'vajra-section-sticky', headColCount);
+                stickyTbody += renderTableBodyRows(sortByWorkflow(group), stickyCols, true);
             });
         } else if (se.stable_mode_enabled && stickyTop3.length) {
-            tbody += renderSectionHeader('Sticky Top 3 — Stable Execution', 'vajra-section-sticky');
-            tbody += renderTableBodyRows(stickyTop3, TOP_COLUMNS, true);
+            stickyTbody += renderSectionHeader(
+                'A+ Executable Trades — Top 3 (actionable NOW)',
+                'vajra-section-sticky',
+                headColCount
+            );
+            stickyTbody += renderTableBodyRows(stickyTop3, stickyCols, true);
+        }
+        let momentumTbody = '';
+        if (se.stable_mode_enabled && momentumLeaders.length && !focusOnly) {
+            momentumTbody += renderSectionHeader(
+                'Momentum Leaders — discovery / trend (not entry list)',
+                'vajra-section-discovery',
+                TOP_COLUMNS.length
+            );
+            momentumTbody += renderTableBodyRows(momentumLeaders, TOP_COLUMNS, false);
         }
         if (!focusOnly && execRows.length) {
-            tbody += renderSectionHeader('Executable Now', 'vajra-section-exec');
-            tbody += renderTableBodyRows(execRows, TOP_COLUMNS, true);
+            legacyTbody += renderSectionHeader('Executable Now', 'vajra-section-exec', TOP_COLUMNS.length);
+            legacyTbody += renderTableBodyRows(execRows, TOP_COLUMNS, true);
         }
         if (!focusOnly && !se.stable_mode_enabled && armedRows.length) {
-            tbody += renderSectionHeader('Armed — One Trigger Away', 'vajra-section-armed');
-            tbody += renderTableBodyRows(armedRows, TOP_COLUMNS, true);
+            legacyTbody += renderSectionHeader('Armed — One Trigger Away', 'vajra-section-armed', TOP_COLUMNS.length);
+            legacyTbody += renderTableBodyRows(armedRows, TOP_COLUMNS, true);
         }
         if (!focusOnly && !se.stable_mode_enabled && discRows.length) {
-            tbody += renderSectionHeader('Discovery — Institutional Attention', 'vajra-section-discovery');
-            tbody += renderTableBodyRows(discRows, TOP_COLUMNS, true);
+            legacyTbody += renderSectionHeader(
+                'Discovery — Institutional Attention',
+                'vajra-section-discovery',
+                TOP_COLUMNS.length
+            );
+            legacyTbody += renderTableBodyRows(discRows, TOP_COLUMNS, true);
         }
 
-        return (
-            '<div class="vajra-table-wrap"><table class="vajra-table vajra-top-table">' +
-            renderTableHead(TOP_COLUMNS, true) +
-            '<tbody>' +
-            tbody +
-            '</tbody></table></div>'
-        );
+        let html = '';
+        if (stickyTbody) {
+            html += wrapVajraTable(stickyCols, stickyTbody, true);
+        }
+        if (momentumTbody) {
+            html += wrapVajraTable(TOP_COLUMNS, momentumTbody, false);
+        }
+        if (legacyTbody) {
+            html += wrapVajraTable(TOP_COLUMNS, legacyTbody, true);
+        }
+        return html;
     }
 
     function renderTopTable(rows, data) {

@@ -14,6 +14,14 @@ from backend.database import SessionLocal
 from backend.services.smart_futures_session_date import effective_session_date_ist_for_trend
 from backend.services.vajra.candles import ist_minutes
 from backend.services.vajra.execution_stability_score import enrich_row_ess
+from backend.services.vajra.sticky_ranking_engine import (
+    composite_sticky_rank,
+    eligible_for_executable_top3,
+    enrich_sticky_ranking_fields,
+    refresh_slot_metrics,
+    select_momentum_leaders,
+    sticky_health_ok,
+)
 from backend.services.vajra.qualification_config import STATE_EXECUTABLE
 from backend.services.vajra.stable_execution_tables import ensure_vajra_stable_execution_table
 
@@ -24,9 +32,9 @@ STICKY_TOP_N = 3
 DEFAULT_STICKY_MINUTES = 30
 ALLOWED_STICKY_MINUTES = (15, 30, 60)
 # 82 vs 84 — no swap; ~11pt lead required (e.g. 93 vs 82)
-RANK_OVERRIDE_GAP = 11.0
-ESS_OVERRIDE_GAP = 15.0
-DETERIORATION_SCORE_DROP = 12.0
+RANK_OVERRIDE_GAP = 9.0
+EXEC_OVERRIDE_GAP = 12.0
+DETERIORATION_SCORE_DROP = 10.0
 QUAL_DECAY_CONVICTION_DROP = 12.0
 FREEZE_WINDOW_START = 9 * 60 + 20
 FREEZE_WINDOW_END = 9 * 60 + 45
@@ -67,20 +75,10 @@ def _stock_key(row: Dict[str, Any]) -> str:
 
 
 def _rank_score(row: Dict[str, Any]) -> float:
-    """Stable-mode primary rank: ESS-led with setup quality + sector stability."""
-    conv = _f(row, "conviction_score") or _f(row, "confidence")
-    base = (
-        _f(row, "ess_score") * 0.55
-        + _f(row, "setup_quality_score") * 0.25
-        + conv * 0.20
-    )
-    try:
-        from backend.services.vajra.sector_intelligence import sector_weighted_rank_adjustment
-
-        base += sector_weighted_rank_adjustment(row)
-    except Exception:
-        pass
-    return base
+    """Executable-first rank (ExecutableScore > momentum persistence)."""
+    if row.get("sticky_rank_score") is not None:
+        return _f(row, "sticky_rank_score")
+    return composite_sticky_rank(row)
 
 
 def _f(row: Dict[str, Any], key: str, default: float = 0.0) -> float:
@@ -207,13 +205,19 @@ def _slot_locked(slot: Dict[str, Any], now: datetime, persist_minutes: int) -> b
 
 
 def _materially_deteriorated(slot: Dict[str, Any], row: Dict[str, Any]) -> bool:
+    if row.get("failed_followthrough") or row.get("no_chase_watch_only"):
+        return True
+    if not sticky_health_ok(slot, row):
+        return True
     lock_rank = _f(slot, "lock_rank_score")
-    lock_ess = _f(slot, "lock_ess_score")
+    lock_exec = _f(slot, "lock_executable_score")
     cur_rank = _rank_score(row)
-    cur_ess = _f(row, "ess_score")
+    cur_exec = _f(row, "executable_score")
     if lock_rank - cur_rank >= DETERIORATION_SCORE_DROP:
         return True
-    if lock_ess - cur_ess >= DETERIORATION_SCORE_DROP:
+    if lock_exec - cur_exec >= DETERIORATION_SCORE_DROP:
+        return True
+    if _f(row, "extension_decay_penalty") >= 25:
         return True
     if _qual(row) == "REJECT":
         return True
@@ -221,27 +225,38 @@ def _materially_deteriorated(slot: Dict[str, Any], row: Dict[str, Any]) -> bool:
 
 
 def _challenger_beats_slot(slot: Dict[str, Any], challenger: Dict[str, Any]) -> bool:
+    if not eligible_for_executable_top3(challenger):
+        return False
     lock_rank = _f(slot, "lock_rank_score")
-    lock_ess = _f(slot, "lock_ess_score")
+    lock_exec = _f(slot, "lock_executable_score")
     cur_rank = _rank_score(challenger)
-    cur_ess = _f(challenger, "ess_score")
+    cur_exec = _f(challenger, "executable_score")
     if cur_rank < lock_rank + RANK_OVERRIDE_GAP:
         return False
-    if cur_ess < lock_ess + ESS_OVERRIDE_GAP:
+    if cur_exec < lock_exec + EXEC_OVERRIDE_GAP:
         return False
     return True
 
 
 def _new_slot(row: Dict[str, Any], now: datetime) -> Dict[str, Any]:
-    return {
+    slot = {
         "stock": _stock_key(row),
         "locked_at": now.isoformat(),
         "lock_rank_score": _rank_score(row),
-        "lock_ess_score": _f(row, "ess_score"),
+        "lock_executable_score": _f(row, "executable_score"),
+        "lock_momentum_score": _f(row, "momentum_score"),
+        "lock_breakout_score": _f(row, "breakout_score"),
         "lock_setup_quality": _f(row, "setup_quality_score"),
         "lock_qualification": _qual(row),
         "lock_conviction": _f(row, "conviction_score") or _f(row, "confidence"),
+        "lock_market_phase": str(row.get("market_phase") or row.get("market_context") or ""),
+        "momentum_hist": [_f(row, "momentum_score")],
+        "breakout_pass": bool(
+            row.get("execution_validated") or _f(row, "breakout_score") >= 58
+        ),
+        "polls_since_breakout_pass": 0,
     }
+    return refresh_slot_metrics(slot, row)
 
 
 def _apply_qualification_smoothing(slot: Optional[Dict[str, Any]], row: Dict[str, Any]) -> Dict[str, Any]:
@@ -265,9 +280,7 @@ def _apply_qualification_smoothing(slot: Optional[Dict[str, Any]], row: Dict[str
 def _eligible_focus_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     out = []
     for r in rows:
-        if _qual(r) == "REJECT":
-            continue
-        if not _stock_key(r):
+        if not eligible_for_executable_top3(r):
             continue
         out.append(r)
     return out
@@ -283,7 +296,12 @@ def _update_sticky_slots(
     """
     ranked = sorted(
         _eligible_focus_rows(list(rows_by_stock.values())),
-        key=lambda r: (-_rank_score(r), -_f(r, "ess_score"), _stock_key(r)),
+        key=lambda r: (
+            -_rank_score(r),
+            -_f(r, "executable_score"),
+            -_f(r, "freshness_score"),
+            _stock_key(r),
+        ),
     )
     slots = [dict(s) for s in cfg.sticky_slots if s.get("stock")]
     slots = slots[:STICKY_TOP_N]
@@ -303,14 +321,16 @@ def _update_sticky_slots(
         row = rows_by_stock.get(sym)
         if not row:
             continue
+        row = enrich_sticky_ranking_fields(row, slot)
+        slot = refresh_slot_metrics(slot, row)
         if sym in frozen_set:
-            slot = {**slot, **_new_slot(row, now), "frozen": True}
+            slot = {**_new_slot(row, now), **slot, "frozen": True}
             kept.append(slot)
             continue
-        if _slot_locked(slot, now, persist) and not _materially_deteriorated(slot, row):
-            kept.append(slot)
+        if not sticky_health_ok(slot, row) or _materially_deteriorated(slot, row):
             continue
-        if _materially_deteriorated(slot, row):
+        if _slot_locked(slot, now, persist):
+            kept.append(slot)
             continue
         kept.append(slot)
 
@@ -346,9 +366,9 @@ def _update_sticky_slots(
                             "from_stock": sym,
                             "to_stock": csym,
                             "reason": (
-                                f"{csym} ESS {_f(cand, 'ess_score'):.0f} vs "
-                                f"{sym} ESS {_f(row, 'ess_score'):.0f}; "
-                                "material deterioration on incumbent"
+                                f"{csym} executable {_f(cand, 'executable_score'):.0f} vs "
+                                f"{sym} {_f(row, 'executable_score'):.0f}; "
+                                "incumbent deteriorated or exhausted"
                             ),
                         }
                     )
@@ -360,8 +380,10 @@ def _update_sticky_slots(
         row = rows_by_stock.get(sym)
         if not row:
             continue
+        row = enrich_sticky_ranking_fields(row, slot)
         display = _apply_qualification_smoothing(slot, row)
         display["sticky_leader"] = True
+        display["sticky_ranking_v2"] = True
         display["sticky_locked_until"] = (
             datetime.fromisoformat(slot["locked_at"].replace("Z", "+00:00"))
             + timedelta(minutes=persist)
@@ -386,7 +408,9 @@ def apply_stable_execution_overlay(
     """
     cfg = load_user_state(user_id, session_date)
     now = _now_ist()
-    enriched = [enrich_row_ess(dict(r)) for r in rows]
+    enriched = [
+        enrich_sticky_ranking_fields(enrich_row_ess(dict(r))) for r in rows
+    ]
     sector_meta: Dict[str, Any] = {}
     try:
         from backend.services.vajra.sector_intelligence import apply_sector_intelligence_to_rows
@@ -419,6 +443,7 @@ def apply_stable_execution_overlay(
             "sticky_persist_minutes": cfg.sticky_persist_minutes,
             "rows": enriched,
             "sticky_top3": [],
+            "momentum_leaders": select_momentum_leaders(enriched),
             "suggested_rotations": [],
             "freeze_window_open": is_freeze_watchlist_window_ist(now),
             "watchlist_frozen": bool(cfg.frozen_focus_stocks),
@@ -430,6 +455,11 @@ def apply_stable_execution_overlay(
         }
 
     sticky_rows, suggestions, new_slots = _update_sticky_slots(by_stock, cfg, now)
+    sticky_syms = {_stock_key(sr) for sr in sticky_rows}
+    momentum_leaders = select_momentum_leaders(
+        enriched,
+        exclude=sticky_syms,
+    )
     if persist_state:
         cfg.sticky_slots = new_slots
         save_user_state(user_id, cfg, session_date)
@@ -512,6 +542,10 @@ def apply_stable_execution_overlay(
         "focus_mode_enabled": cfg.focus_mode_enabled,
         "sticky_persist_minutes": cfg.sticky_persist_minutes,
         "sticky_top3": sticky_rows,
+        "momentum_leaders": momentum_leaders,
+        "executable_top3_philosophy": (
+            "Top 3 = actionable execution NOW (executable score), not stale momentum."
+        ),
         "suggested_rotations": suggestions,
         "freeze_window_open": is_freeze_watchlist_window_ist(now),
         "watchlist_frozen": bool(cfg.frozen_focus_stocks),
