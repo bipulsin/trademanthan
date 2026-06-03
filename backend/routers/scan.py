@@ -5304,26 +5304,13 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
             if bro_net is None or bro_net > 0:
                 return False
 
-            from sqlalchemy.orm.attributes import flag_modified
-
-            fp = float(fallback_sell_price or record.sell_price or record.buy_price or 0.0)
-            record.sell_price = fp
-            record.sell_time = now
-            record.exit_reason = "manual"
-            record.status = "sold"
-            if record.buy_price and record.qty:
-                record.pnl = (fp - record.buy_price) * record.qty
-                flag_modified(record, "pnl")
-            flag_modified(record, "sell_price")
-            flag_modified(record, "sell_time")
-            flag_modified(record, "exit_reason")
-            flag_modified(record, "status")
             logger.warning(
-                "✅ Exit guard: %s broker net long=%s (flat) — marked sold/manual, skipped SELL",
+                "⚠️ Exit guard: %s broker net long=%s but no completed SELL in reconcile — "
+                "not marking sold from LTP",
                 record.stock_name,
                 bro_net,
             )
-            return True
+            return False
         
         # Get all OPEN records for today (not exited, not no_entry)
         # Only update trades that are still open (bought + no exit_reason)
@@ -5539,13 +5526,18 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                             trade_id=record.id,
                                         )
                                         if live_exit_result.get("success") or live_exit_result.get("skipped_duplicate"):
-                                            record.sell_price = new_option_ltp
+                                            afp = live_exit_result.get("average_fill_price")
+                                            try:
+                                                sp = float(afp) if afp is not None and float(afp) > 0 else float(new_option_ltp)
+                                            except (TypeError, ValueError):
+                                                sp = float(new_option_ltp)
+                                            record.sell_price = sp
                                             record.sell_time = now
                                             record.exit_reason = 'stop_loss'
                                             record.status = 'sold'
                                             record.sell_order_id = live_exit_result.get("order_id") or record.sell_order_id
                                             if record.buy_price and record.qty:
-                                                record.pnl = (new_option_ltp - record.buy_price) * record.qty
+                                                record.pnl = (sp - record.buy_price) * record.qty
                                             logger.info(f"✅ APPLIED: STOP LOSS EXIT for {record.stock_name}: PnL=₹{record.pnl}")
                                             exit_applied = True
                                         elif live_exit_result.get("exit_manually"):
@@ -5576,13 +5568,18 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                             trade_id=record.id,
                                         )
                                         if live_exit_result.get("success") or live_exit_result.get("skipped_duplicate"):
-                                            record.sell_price = new_option_ltp
+                                            afp = live_exit_result.get("average_fill_price")
+                                            try:
+                                                sp = float(afp) if afp is not None and float(afp) > 0 else float(new_option_ltp)
+                                            except (TypeError, ValueError):
+                                                sp = float(new_option_ltp)
+                                            record.sell_price = sp
                                             record.sell_time = now
                                             record.exit_reason = 'stock_vwap_cross'
                                             record.status = 'sold'
                                             record.sell_order_id = live_exit_result.get("order_id") or record.sell_order_id
                                             if record.buy_price and record.qty:
-                                                record.pnl = (new_option_ltp - record.buy_price) * record.qty
+                                                record.pnl = (sp - record.buy_price) * record.qty
                                             logger.info(f"✅ APPLIED: VWAP CROSS EXIT for {record.stock_name}: PnL=₹{record.pnl}")
                                             exit_applied = True
                                         elif live_exit_result.get("exit_manually"):
@@ -5613,13 +5610,18 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                             trade_id=record.id,
                                         )
                                         if live_exit_result.get("success") or live_exit_result.get("skipped_duplicate"):
-                                            record.sell_price = new_option_ltp
+                                            afp = live_exit_result.get("average_fill_price")
+                                            try:
+                                                sp = float(afp) if afp is not None and float(afp) > 0 else float(new_option_ltp)
+                                            except (TypeError, ValueError):
+                                                sp = float(new_option_ltp)
+                                            record.sell_price = sp
                                             record.sell_time = now
                                             record.exit_reason = 'profit_target'
                                             record.status = 'sold'
                                             record.sell_order_id = live_exit_result.get("order_id") or record.sell_order_id
                                             if record.qty:
-                                                record.pnl = (new_option_ltp - record.buy_price) * record.qty
+                                                record.pnl = (sp - record.buy_price) * record.qty
                                             logger.info(f"✅ APPLIED: PROFIT TARGET EXIT for {record.stock_name}: PnL=₹{record.pnl}")
                                             exit_applied = True
                                         elif live_exit_result.get("exit_manually"):

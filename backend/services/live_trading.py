@@ -21,6 +21,10 @@ UPSTOX_ORDER_PRODUCT = "D"
 _exit_lock_guard = threading.Lock()
 _exit_locks: Dict[str, threading.Lock] = {}
 
+# Serialize live entries per instrument to prevent duplicate BUYs when VWAP cycle + refresh overlap.
+_entry_lock_guard = threading.Lock()
+_entry_locks: Dict[str, threading.Lock] = {}
+
 # Throttle broker reconcile for scan.html (GET /scan/latest)
 _reconcile_scan_last_mono: float = 0.0
 
@@ -36,10 +40,23 @@ def _acquire_live_exit_lock(key: str) -> threading.Lock:
         return _exit_locks[key]
 
 
+def _live_entry_lock_key(instrument_key: str) -> str:
+    return (instrument_key or "").strip().upper()
+
+
+def _acquire_live_entry_lock(key: str) -> threading.Lock:
+    with _entry_lock_guard:
+        if key not in _entry_locks:
+            _entry_locks[key] = threading.Lock()
+        return _entry_locks[key]
+
+
 # After broker accepts a BUY, poll until filled or cancel and fall back (LIMIT can stay open).
 ENTRY_FILL_WAIT_SEC = 90.0
 ENTRY_FILL_POLL_SEC = 1.5
 MARKET_FILL_WAIT_SEC = 45.0
+EXIT_FILL_WAIT_SEC = 90.0
+EXIT_FILL_POLL_SEC = 1.5
 
 # System-wide live trading switch (default: NO)
 TRADING_LIVE_FILE = Path("/home/ubuntu/trademanthan/data/trading_live.json")
@@ -569,6 +586,75 @@ def wait_for_buy_order_fill(
                 }
         time.sleep(poll_interval)
     return {"filled": False, "error": "timeout_waiting_for_fill", "order_id": order_id}
+
+
+def wait_for_sell_order_fill(
+    order_id: str,
+    expected_qty: int,
+    timeout_sec: float = EXIT_FILL_WAIT_SEC,
+    poll_interval: float = EXIT_FILL_POLL_SEC,
+) -> Dict[str, Any]:
+    """
+    Poll order details until SELL shows complete with filled qty (>= 99% of expected) and average price,
+    or terminal failure / timeout.
+    """
+    if not order_id or not upstox_service:
+        return {"filled": False, "error": "missing order_id or service"}
+    deadline = time.monotonic() + float(timeout_sec)
+    while time.monotonic() < deadline:
+        det = upstox_service.get_order_details(str(order_id))
+        row = _row_from_order_details_api(det)
+        if not row:
+            time.sleep(poll_interval)
+            continue
+        st = (row.get("status") or "").lower()
+        if "cancel" in st or "reject" in st:
+            return {"filled": False, "error": "order_cancelled_or_rejected", "status": st, "row": row}
+        fq = int(float(row.get("filled_quantity") or 0))
+        ap = _broker_buy_row_average_price(row)
+        if _order_row_is_complete_sell(row):
+            if fq < int(expected_qty) * 0.99:
+                return {
+                    "filled": False,
+                    "error": "partial_fill_incomplete",
+                    "filled_quantity": fq,
+                    "row": row,
+                }
+            if ap and ap > 0:
+                return {
+                    "filled": True,
+                    "average_price": ap,
+                    "filled_quantity": fq,
+                    "row": row,
+                }
+        time.sleep(poll_interval)
+    return {"filled": False, "error": "timeout_waiting_for_fill", "order_id": order_id}
+
+
+def _confirm_existing_sell_order_filled(
+    sell_order_id: str,
+    instrument_key: str,
+    expected_qty: int,
+) -> Dict[str, Any]:
+    """Verify a stored sell_order_id is a completed SELL fill (not merely open/pending)."""
+    oid = (sell_order_id or "").strip()
+    if not oid:
+        return {"filled": False, "error": "missing sell_order_id"}
+    wf = wait_for_sell_order_fill(oid, expected_qty, timeout_sec=8.0, poll_interval=1.0)
+    if wf.get("filled"):
+        return wf
+    det = upstox_service.get_order_details(oid) if upstox_service else {}
+    row = _row_from_order_details_api(det or {})
+    if (
+        row
+        and _order_row_is_complete_sell(row)
+        and _instrument_key_match(instrument_key, _order_row_instrument_token(row))
+    ):
+        fq = int(float(row.get("filled_quantity") or 0))
+        ap = _broker_buy_row_average_price(row)
+        if ap and ap > 0 and fq >= int(expected_qty) * 0.99:
+            return {"filled": True, "average_price": ap, "filled_quantity": fq, "row": row}
+    return {"filled": False, "error": wf.get("error") or "sell_not_complete"}
 
 
 def sync_trade_buy_fill_from_broker(db, trade) -> bool:
@@ -1630,6 +1716,28 @@ def place_live_upstox_entry_market_first(
     if not qty or qty <= 0:
         return {"success": False, "error": "Invalid quantity"}
 
+    entry_lk = _acquire_live_entry_lock(_live_entry_lock_key(instrument_key))
+    with entry_lk:
+        return _place_live_upstox_entry_market_first_locked(
+            instrument_key=instrument_key,
+            qty=qty,
+            stock_name=stock_name,
+            option_contract=option_contract,
+            buy_price=buy_price,
+            stop_loss=stop_loss,
+            risk_reward=risk_reward,
+        )
+
+
+def _place_live_upstox_entry_market_first_locked(
+    instrument_key: str,
+    qty: int,
+    stock_name: str,
+    option_contract: str,
+    buy_price: float,
+    stop_loss: float,
+    risk_reward: float = 2.5,
+) -> Dict[str, Any]:
     # Step 1 (always): Delivery LIMIT BUY first, using intended buy_price.
     # If not filled within wait window, cancel and fall through to MARKET.
     lim_tag = f"entry_lmt_primary|{stock_name}"[:200]
@@ -1964,19 +2072,37 @@ def place_live_upstox_exit(
         )
     ex = (existing_sell_order_id or "").strip()
     if ex:
+        confirm = _confirm_existing_sell_order_filled(ex, ik, qty)
+        if confirm.get("filled"):
+            logger.warning(
+                "⏭️ LIVE EXIT — existing sell_order_id %s already filled | %s %s",
+                ex,
+                stock_name,
+                option_contract,
+            )
+            return {
+                "success": True,
+                "order_id": ex,
+                "skipped_duplicate": True,
+                "ref_buy_order_id": oid,
+                "exit_method": "already_had_sell_order_id",
+                "average_fill_price": confirm.get("average_price"),
+                "filled_quantity": confirm.get("filled_quantity"),
+            }
         logger.warning(
-            "⏭️ LIVE EXIT skipped — sell_order_id already stored (%s); not placing another SELL | %s %s",
+            "⚠️ LIVE EXIT — sell_order_id %s not confirmed filled; will not mark sold without fill | %s %s",
             ex,
             stock_name,
             option_contract,
         )
-        return {
-            "success": True,
-            "order_id": ex,
-            "skipped_duplicate": True,
-            "ref_buy_order_id": oid,
-            "exit_method": "already_had_sell_order_id",
-        }
+        return _finalize_sell_result(
+            {
+                "success": False,
+                "error": confirm.get("error") or "existing_sell_not_filled",
+                "order_id": ex,
+                "ambiguous": True,
+            }
+        )
 
     def _finalize_sell_result(sell_result: Dict[str, Any], gtt_cancel: Any = None) -> Dict[str, Any]:
         if sell_result.get("skipped"):
@@ -2010,20 +2136,35 @@ def place_live_upstox_exit(
                 product=UPSTOX_ORDER_PRODUCT,
             )
             if sell_result.get("success"):
-                logger.warning(
-                    "🚨 LIVE MARKET EXIT (GTT legacy): %s %s | sell_order_id=%s | ref_buy_order_id=%s",
-                    stock_name,
-                    option_contract,
-                    sell_result.get("order_id"),
-                    oid,
+                sell_oid = str(sell_result.get("order_id") or "")
+                wf = wait_for_sell_order_fill(sell_oid, qty, timeout_sec=EXIT_FILL_WAIT_SEC)
+                if wf.get("filled"):
+                    logger.warning(
+                        "🚨 LIVE MARKET EXIT (GTT legacy): %s %s | sell_order_id=%s | ref_buy_order_id=%s",
+                        stock_name,
+                        option_contract,
+                        sell_oid,
+                        oid,
+                    )
+                    return {
+                        "success": True,
+                        "order_id": sell_oid,
+                        "gtt_cancel": cancel_result,
+                        "exit_method": "market_sell_after_gtt_cancel",
+                        "exit_manually": False,
+                        "average_fill_price": wf.get("average_price"),
+                        "filled_quantity": wf.get("filled_quantity"),
+                    }
+                return _finalize_sell_result(
+                    {
+                        "success": False,
+                        "error": wf.get("error") or "sell_not_filled",
+                        "order_id": sell_oid,
+                        "ambiguous": True,
+                        "sell": sell_result,
+                    },
+                    gtt_cancel=cancel_result,
                 )
-                return {
-                    "success": True,
-                    "order_id": sell_result.get("order_id"),
-                    "gtt_cancel": cancel_result,
-                    "exit_method": "market_sell_after_gtt_cancel",
-                    "exit_manually": False,
-                }
             err = sell_result.get("error") or "Market SELL failed after GTT cancel"
             logger.error(
                 "❌ GTT legacy exit: SELL failed for %s %s | err=%s",
@@ -2054,20 +2195,35 @@ def place_live_upstox_exit(
             product=UPSTOX_ORDER_PRODUCT,
         )
         if sell_result.get("success"):
-            logger.warning(
-                "🚨 LIVE MARKET EXIT: %s %s | sell_order_id=%s | ref_buy_order_id=%s",
-                stock_name,
-                option_contract,
-                sell_result.get("order_id"),
-                oid,
+            sell_oid = str(sell_result.get("order_id") or "")
+            wf = wait_for_sell_order_fill(sell_oid, qty, timeout_sec=EXIT_FILL_WAIT_SEC)
+            if wf.get("filled"):
+                logger.warning(
+                    "🚨 LIVE MARKET EXIT (filled): %s %s | sell_order_id=%s | avg=₹%s | ref_buy_order_id=%s",
+                    stock_name,
+                    option_contract,
+                    sell_oid,
+                    wf.get("average_price"),
+                    oid,
+                )
+                return {
+                    "success": True,
+                    "order_id": sell_oid,
+                    "ref_buy_order_id": oid,
+                    "exit_method": "market_sell",
+                    "exit_manually": False,
+                    "average_fill_price": wf.get("average_price"),
+                    "filled_quantity": wf.get("filled_quantity"),
+                }
+            return _finalize_sell_result(
+                {
+                    "success": False,
+                    "error": wf.get("error") or "sell_not_filled",
+                    "order_id": sell_oid,
+                    "ambiguous": True,
+                    "sell": sell_result,
+                }
             )
-            return {
-                "success": True,
-                "order_id": sell_result.get("order_id"),
-                "ref_buy_order_id": oid,
-                "exit_method": "market_sell",
-                "exit_manually": False,
-            }
         return _finalize_sell_result(sell_result)
 
 
