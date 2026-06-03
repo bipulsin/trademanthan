@@ -19,7 +19,7 @@ from backend.services.vajra.job import (
     resolve_vajra_ratings_for_api,
     sort_vajra_rows_for_display,
 )
-from backend.services.vajra.ranking import build_screener_display
+from backend.services.vajra.ranking import build_screener_display, build_universe_modal_rows
 from backend.services.vajra.timeframes import (
     DEFAULT_HTF,
     DEFAULT_SCAN_TF,
@@ -134,6 +134,10 @@ def get_vajra_ratings(
                 if sym:
                     row_by_stock[sym] = slot_row
             rows = list(row_by_stock.values())
+            from backend.services.vajra.job import load_arbitrage_curr_mth_universe
+
+            universe = load_arbitrage_curr_mth_universe()
+            universe_rows = build_universe_modal_rows(rows, universe)
             display = build_screener_display(rows)
             rows = display["rows"]
             updated_dt = fetch_vajra_ratings_updated_at(sd)
@@ -167,6 +171,7 @@ def get_vajra_ratings(
                     "source": source,
                     "stale_reason": stale_reason,
                     "count": len(rows),
+                    "universe_count": len(universe_rows),
                     "alert_count": len(alerts) + len(ees_alert_rows),
                     "alerts": alerts,
                     "ees_alert_rows": ees_alert_rows,
@@ -175,6 +180,7 @@ def get_vajra_ratings(
                     "ees_refresh_minutes": 5,
                     **vajra_session_api_fields(),
                     "rows": rows,
+                    "universe_rows": universe_rows,
                     "top_picks": display["top_picks"],
                     "top_sections": display["top_sections"],
                     "groups": {

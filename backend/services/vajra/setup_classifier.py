@@ -92,11 +92,11 @@ def quality_grade(row: Dict[str, Any]) -> str:
     return "B"
 
 
-SCREENER_ALLOWED_GRADES = frozenset({"A+", "A", "B+"})
+SCREENER_ALLOWED_GRADES = frozenset({"A+", "A", "B+", "B"})
 
 
 def screener_grade_allowed(row: Dict[str, Any]) -> bool:
-    """Screener / Top 3: A+, A, and B+ setups (LONG or SHORT)."""
+    """Screener / Top 3: A+, A, B+, and B setups (LONG or SHORT)."""
     grade = str(row.get("quality_grade") or quality_grade(row)).strip().upper()
     return grade in SCREENER_ALLOWED_GRADES
 

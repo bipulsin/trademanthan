@@ -36,6 +36,20 @@
         .vf-brand-icon { width: 56px; height: 56px; vertical-align: middle; margin-right: 8px; }
         .vajra-card-head.df-pick-card-head { margin-bottom: 6px; }
         .vajra-card-head.df-pick-card-head h2 { margin: 0; flex: 1 1 auto; }
+        .df-more-link {
+            flex: 0 0 auto;
+            margin: 0;
+            padding: 2px 0 0;
+            border: none;
+            background: none;
+            color: var(--theme-accent, #2563eb);
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: underline;
+            font-family: inherit;
+        }
+        .df-more-link:hover { filter: brightness(1.08); }
 
         /* Modals: solid surfaces only (--theme-card is rgba and bleeds the page through) */
         .vajra-modal,
@@ -137,7 +151,7 @@
                             </label>
                         </div>
                         <button type="button" class="df-more-link" id="vfVajraRefreshBtn" title="Reload ratings from server">Refresh</button>
-                        <button type="button" class="df-more-link" id="vfVajraMoreBtn" hidden>more…</button>
+                        <button type="button" class="df-more-link" id="vfVajraMoreBtn" title="All arbitrage_master futures beyond Top 3">more…</button>
                     </div>
                     <p class="vajra-meta" id="vfVajraMeta">—</p>
                     <p class="vajra-meta vajra-meta--hidden" id="vfVajraMsg" hidden aria-hidden="true"></p>
@@ -167,7 +181,7 @@
     <script src="left-menu.js?v=3.24"></script>
     <script src="notify-trade-channel.js?v=1"></script>
     <script src="vajra-stable-execution.js?v=3"></script>
-    <script src="vajra-futures-ratings.js?v=47"></script>
+    <script src="vajra-futures-ratings.js?v=50"></script>
     <script src="vajra-open-position-card.js?v=5"></script>
     <script src="vajra-trade-workflow.js?v=19"></script>
     <script src="vajra-help-guide.js?v=3"></script>

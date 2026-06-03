@@ -1,4 +1,4 @@
-"""Screener shows A+, A, and B+ grades."""
+"""Screener shows A+, A, B+, and B grades."""
 from backend.services.vajra.ranking import build_screener_display
 from backend.services.vajra.setup_classifier import quality_grade, screener_grade_allowed
 
@@ -7,7 +7,7 @@ def test_screener_grade_allowed():
     assert screener_grade_allowed({"quality_grade": "A+"})
     assert screener_grade_allowed({"quality_grade": "A"})
     assert screener_grade_allowed({"quality_grade": "B+"})
-    assert not screener_grade_allowed({"quality_grade": "B"})
+    assert screener_grade_allowed({"quality_grade": "B"})
     assert not screener_grade_allowed({"quality_grade": "C"})
 
 
@@ -47,4 +47,4 @@ def test_build_screener_display_filters_grades():
     out = build_screener_display(rows, top_n=8)
     stocks = {r.get("stock") for r in out["rows"]}
     assert "AAA" in stocks
-    assert "BBB" not in stocks
+    assert "BBB" in stocks

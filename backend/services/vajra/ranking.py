@@ -97,6 +97,84 @@ def _filter_screener_grades(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
+_GRADE_SORT_RANK = {"A+": 6, "A": 5, "B+": 4, "B": 3, "C": 2, "—": 0, "": 0}
+
+
+def grade_sort_rank(grade: Any) -> int:
+    g = str(grade or "").strip().upper()
+    return _GRADE_SORT_RANK.get(g, 1)
+
+
+def _stock_key(row: Dict[str, Any]) -> str:
+    return str(row.get("stock") or row.get("security") or "").strip().upper()
+
+
+def _placeholder_universe_row(item: Dict[str, str]) -> Dict[str, Any]:
+    stock = str(item.get("stock") or "").strip()
+    fut_sym = str(item.get("future_symbol") or "").strip()
+    return {
+        "stock": stock,
+        "security": fut_sym or stock,
+        "future_symbol": fut_sym,
+        "instrument_key": item.get("instrument_key"),
+        "qualification_state": STATE_REJECT,
+        "entry_state": STATE_REJECT,
+        "qualification": STATE_REJECT,
+        "trade_type": "—",
+        "confidence": 0,
+        "quality_grade": "C",
+        "pipeline_stage": "unrated",
+        "execution_validated": False,
+        "enter_action": "",
+        "enter_enabled": False,
+    }
+
+
+def build_universe_modal_rows(
+    rated_rows: List[Dict[str, Any]],
+    universe: List[Dict[str, str]],
+) -> List[Dict[str, Any]]:
+    """
+    Full arbitrage_master curr-month universe for the More modal — all symbols,
+    rated rows merged with placeholders for symbols without a scan row.
+    """
+    from backend.services.vajra.setup_classifier import quality_grade
+    from backend.services.vajra.sticky_ranking_engine import enrich_sticky_ranking_fields
+
+    by_stock: Dict[str, Dict[str, Any]] = {}
+    for r in rated_rows:
+        key = _stock_key(r)
+        if key:
+            by_stock[key] = dict(r)
+
+    merged: List[Dict[str, Any]] = []
+    for item in universe:
+        key = str(item.get("stock") or "").strip().upper()
+        if not key:
+            continue
+        row = dict(by_stock.get(key) or _placeholder_universe_row(item))
+        merged.append(row)
+
+    enriched = [enrich_execution_scores(dict(r)) for r in merged]
+    finalized = finalize_screener_rows(enriched)
+    out: List[Dict[str, Any]] = []
+    for r in finalized:
+        row = dict(r)
+        if not row.get("quality_grade"):
+            row["quality_grade"] = quality_grade(row)
+        out.append(enrich_sticky_ranking_fields(row))
+
+    out.sort(
+        key=lambda r: (
+            -grade_sort_rank(r.get("quality_grade")),
+            -entry_state_sort_rank(_qualification(r)),
+            -float(r.get("executable_score") or 0),
+            _stock_key(r),
+        )
+    )
+    return out
+
+
 def build_screener_display(rows: List[Dict[str, Any]], top_n: int = 8) -> Dict[str, Any]:
     enriched = [enrich_execution_scores(dict(r)) for r in rows]
     finalized = finalize_screener_rows(enriched)

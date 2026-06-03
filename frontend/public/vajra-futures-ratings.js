@@ -47,7 +47,7 @@
         const g = String(row.quality_grade || '')
             .trim()
             .toUpperCase();
-        return g === 'A+' || g === 'A' || g === 'B+';
+        return g === 'A+' || g === 'A' || g === 'B+' || g === 'B';
     }
 
     function filterPremiumGradeRows(rows) {
@@ -76,6 +76,9 @@
         { key: 'chase_risk', label: 'Chase Risk' },
         { key: 'setup_trend', label: 'Setup Trend' },
     ];
+
+    /** More modal — grade column + sticky Top 3 layout. */
+    const MODAL_COLUMNS = [{ key: 'quality_grade', label: 'Grade' }].concat(STICKY_EXEC_COLUMNS);
 
     const ADVANCED_COLUMNS = [
         { key: 'tps_score', label: 'TPS' },
@@ -395,6 +398,9 @@
             return d === 'NEUTRAL' ? 'LONG' : d;
         }
         if (col.key === 'qualification') return qualificationOf(r);
+        if (col.key === 'quality_grade') {
+            return r.quality_grade != null && r.quality_grade !== '' ? String(r.quality_grade) : '—';
+        }
         if (col.key === 'market_context') {
             return String(r.market_context || r.market_phase || '—');
         }
@@ -699,6 +705,14 @@
     function renderChip(col, row) {
         if (col.key === 'qualification') {
             return renderQualificationCell(row);
+        }
+        if (col.key === 'quality_grade') {
+            const grade = row.quality_grade ? String(row.quality_grade) : '—';
+            return (
+                '<span class="vajra-grade-pill" title="Setup quality grade">' +
+                escapeHtml(grade) +
+                '</span>'
+            );
         }
         if (col.key === 'confidence') {
             return renderConfidenceMeter(row);
@@ -1011,6 +1025,113 @@
             .toUpperCase();
     }
 
+    function isStableScreenerMode(data) {
+        return !!((data && data.stable_execution) || {}).stable_mode_enabled;
+    }
+
+    /** Symbols shown in sticky Top 3 (stable mode) or Top 8 (legacy). */
+    function excludedScreenerTopKeys(data) {
+        const keys = {};
+        const se = (data && data.stable_execution) || {};
+        if (isStableScreenerMode(data)) {
+            filterPremiumGradeRows(se.sticky_top3 || []).forEach(function (r) {
+                const k = rowStockKey(r);
+                if (k) keys[k] = true;
+            });
+            return keys;
+        }
+        const composed = composeTop8ScreenRows(data || {});
+        (composed.top8 || []).forEach(function (r) {
+            const k = rowStockKey(r);
+            if (k) keys[k] = true;
+        });
+        return keys;
+    }
+
+    /** Grade order for More modal default sort (A+ highest). */
+    function gradeSortRank(row) {
+        const g = String((row && row.quality_grade) || '')
+            .trim()
+            .toUpperCase();
+        const map = { 'A+': 6, A: 5, 'B+': 4, B: 3, C: 2, '—': 0, '': 0 };
+        return Object.prototype.hasOwnProperty.call(map, g) ? map[g] : 1;
+    }
+
+    function compareGradeThenSymbol(a, b) {
+        const gr = gradeSortRank(b) - gradeSortRank(a);
+        if (gr !== 0) return gr;
+        const ex = (Number(b.executable_score) || 0) - (Number(a.executable_score) || 0);
+        if (ex !== 0) return ex;
+        return String(a.security || a.stock || '').localeCompare(
+            String(b.security || b.stock || ''),
+            undefined,
+            { numeric: true }
+        );
+    }
+
+    /** Full arbitrage_master universe for More modal — excludes sticky Top 3 only. */
+    function buildMoreModalRows(filtered) {
+        const exclude = excludedScreenerTopKeys(filtered);
+        const source = filtered.universe_rows || filtered.rows || [];
+        return source
+            .filter(function (r) {
+                const k = rowStockKey(r);
+                return !k || !exclude[k];
+            })
+            .slice()
+            .sort(compareGradeThenSymbol);
+    }
+
+    function collectMainTableRows(filtered) {
+        const se = (filtered && filtered.stable_execution) || {};
+        const composed = composeTop8ScreenRows(filtered || {});
+        const out = [];
+        const seen = {};
+        function add(rows) {
+            (rows || []).forEach(function (r) {
+                const k = rowStockKey(r);
+                if (k && seen[k]) return;
+                if (k) seen[k] = true;
+                out.push(r);
+            });
+        }
+        if (isStableScreenerMode(filtered)) {
+            add(filterPremiumGradeRows(se.sticky_top3));
+            const focusOnly =
+                se.focus_mode_enabled && filterPremiumGradeRows(se.sticky_top3 || []).length;
+            if (!focusOnly) {
+                add(filterPremiumGradeRows(se.momentum_leaders));
+            }
+        }
+        const focusOnly =
+            isStableScreenerMode(filtered) &&
+            se.focus_mode_enabled &&
+            filterPremiumGradeRows(se.sticky_top3 || []).length;
+        if (!focusOnly) {
+            add(composed.EXECUTABLE);
+            if (!isStableScreenerMode(filtered)) {
+                add(composed.ARMED);
+                add(composed.DISCOVERY);
+            }
+        }
+        return out;
+    }
+
+    function bindEnterButtons(rootEl, rows) {
+        if (!rootEl) return;
+        rootEl.querySelectorAll('[data-vajra-enter]').forEach(function (btn) {
+            btn.addEventListener('click', function (ev) {
+                const sym = ev.currentTarget.getAttribute('data-vajra-stock');
+                const row = (rows || []).find(function (r) {
+                    return String(r.stock || r.security) === sym;
+                });
+                if (row && global.VajraTradeWorkflow && global.VajraTradeWorkflow.openEntry) {
+                    global.VajraTradeWorkflow.openEntry(row);
+                }
+            });
+        });
+    }
+
     function getActiveTradeStocks() {
         if (global.VajraTradeWorkflow && typeof global.VajraTradeWorkflow.getActiveTradeStocks === 'function') {
             return global.VajraTradeWorkflow.getActiveTradeStocks();
@@ -1037,6 +1158,7 @@
         let topPicks = filterPremiumGradeRows(data.top_picks);
         let allFiltered = filterPremiumGradeRows(data.rows);
         let remainder = filterPremiumGradeRows(data.remainder);
+        let universeRows = data.universe_rows || data.rows || [];
         if (activeSet && activeSet.size) {
             filteredSections = {
                 EXECUTABLE: filterRowsByActivePositions(filteredSections.EXECUTABLE, activeSet),
@@ -1046,6 +1168,7 @@
             topPicks = filterRowsByActivePositions(topPicks, activeSet);
             allFiltered = filterRowsByActivePositions(allFiltered, activeSet);
             remainder = filterRowsByActivePositions(remainder, activeSet);
+            universeRows = filterRowsByActivePositions(universeRows, activeSet);
         }
         const se = data.stable_execution || {};
         const stableFiltered = Object.assign({}, se, {
@@ -1057,6 +1180,8 @@
             top_picks: topPicks,
             top_sections: filteredSections,
             remainder: remainder,
+            universe_rows: universeRows,
+            universe_count: data.universe_count != null ? data.universe_count : universeRows.length,
             stable_execution: stableFiltered,
         });
     }
@@ -1167,7 +1292,7 @@
             });
         } else if (se.stable_mode_enabled && stickyTop3.length) {
             stickyTbody += renderSectionHeader(
-                'Executable Top 3 — A+ / A / B+ (actionable NOW)',
+                'Executable Top 3 — A+ / A / B+ / B (actionable NOW)',
                 'vajra-section-sticky',
                 headColCount
             );
@@ -1222,9 +1347,10 @@
         return renderTopTableFromPayload({ top_picks: rows.slice(0, TOP_N), top_sections: {} });
     }
 
-    function sortRows(rows, sortKey, sortDir) {
+    function sortRows(rows, sortKey, sortDir, columns) {
         const dir = sortDir === 'asc' ? 1 : -1;
-        const col = TOP_COLUMNS.find(function (c) {
+        const cols = columns || MODAL_COLUMNS;
+        const col = cols.find(function (c) {
             return c.key === sortKey;
         });
         return rows.slice().sort(function (a, b) {
@@ -1233,15 +1359,69 @@
                 const bv = String(b.security || b.stock || '');
                 return av.localeCompare(bv, undefined, { numeric: true }) * dir;
             }
+            if (sortKey === 'quality_grade') {
+                return (gradeSortRank(a) - gradeSortRank(b)) * dir;
+            }
+            if (col && col.num) {
+                const av = Number(
+                    a[sortKey] != null
+                        ? a[sortKey]
+                        : sortKey === 'extension_risk_display'
+                          ? a.extension_risk_score
+                          : NaN
+                );
+                const bv = Number(
+                    b[sortKey] != null
+                        ? b[sortKey]
+                        : sortKey === 'extension_risk_display'
+                          ? b.extension_risk_score
+                          : NaN
+                );
+                return (
+                    ((Number.isFinite(av) ? av : -Infinity) - (Number.isFinite(bv) ? bv : -Infinity)) *
+                    dir
+                );
+            }
             if (
                 sortKey === 'tps_score' ||
                 sortKey === 'ees_score' ||
                 sortKey === 'ecs_score' ||
-                sortKey === 'confidence'
+                sortKey === 'confidence' ||
+                sortKey === 'executable_score' ||
+                sortKey === 'freshness_score' ||
+                sortKey === 'momentum_velocity' ||
+                sortKey === 'extension_risk_display' ||
+                sortKey === 'extension_risk_score' ||
+                sortKey === 'sticky_rank_score' ||
+                sortKey === 'setup_quality_score' ||
+                sortKey === 'armed_rank_score'
             ) {
-                const av = Number(a[sortKey] != null ? a[sortKey] : a.confidence);
-                const bv = Number(b[sortKey] != null ? b[sortKey] : b.confidence);
-                return ((Number.isFinite(av) ? av : -1) - (Number.isFinite(bv) ? bv : -1)) * dir;
+                const av = Number(
+                    a[sortKey] != null
+                        ? a[sortKey]
+                        : sortKey === 'confidence'
+                          ? a.confidence
+                          : sortKey === 'extension_risk_display'
+                            ? a.extension_risk_score
+                            : sortKey === 'setup_quality_score' || sortKey === 'armed_rank_score'
+                              ? armedRankValue(a)
+                              : -Infinity
+                );
+                const bv = Number(
+                    b[sortKey] != null
+                        ? b[sortKey]
+                        : sortKey === 'confidence'
+                          ? b.confidence
+                          : sortKey === 'extension_risk_display'
+                            ? b.extension_risk_score
+                            : sortKey === 'setup_quality_score' || sortKey === 'armed_rank_score'
+                              ? armedRankValue(b)
+                              : -Infinity
+                );
+                return (
+                    ((Number.isFinite(av) ? av : -Infinity) - (Number.isFinite(bv) ? bv : -Infinity)) *
+                    dir
+                );
             }
             if (sortKey === 'qualification') {
                 const av = modalQualificationSortRank(a);
@@ -1270,7 +1450,18 @@
             }
             const av = chipDisplayValue(col || { key: sortKey }, a);
             const bv = chipDisplayValue(col || { key: sortKey }, b);
-            return String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' }) * dir;
+            const cmp = String(av).localeCompare(String(bv), undefined, {
+                numeric: true,
+                sensitivity: 'base',
+            });
+            if (cmp !== 0) return cmp * dir;
+            return (
+                String(a.security || a.stock || '').localeCompare(
+                    String(b.security || b.stock || ''),
+                    undefined,
+                    { numeric: true }
+                ) * dir
+            );
         });
     }
 
@@ -1281,8 +1472,9 @@
             : '<span class="vajra-sort-ind vajra-sort-ind--active" aria-hidden="true">▼</span>';
     }
 
-    function renderModalTable(rows, sortKey, sortDir) {
-        const colCount = 1 + TOP_COLUMNS.length;
+    function renderModalTable(rows, sortKey, sortDir, columns) {
+        const cols = columns || MODAL_COLUMNS;
+        const colCount = 1 + cols.length + 1;
         let thead =
             '<thead><tr>' +
             '<th scope="col" class="vajra-sort-th" data-sort-key="security" role="columnheader" aria-sort="' +
@@ -1290,7 +1482,7 @@
             '" tabindex="0">Security' +
             sortIndicator(sortKey, sortDir, 'security') +
             '</th>';
-        TOP_COLUMNS.forEach(function (col) {
+        cols.forEach(function (col) {
             const thNum = col.num ? ' num' : '';
             thead +=
                 '<th scope="col" class="vajra-sort-th' +
@@ -1304,27 +1496,32 @@
                 sortIndicator(sortKey, sortDir, col.key) +
                 '</th>';
         });
-        thead += '</tr></thead>';
+        thead += '<th scope="col" class="vajra-th-enter">Action</th></tr></thead>';
         let tbody = '';
         if (!rows.length) {
             tbody =
                 '<tr><td colspan="' +
                 colCount +
-                '" class="vajra-meta">No additional ratings.</td></tr>';
+                '" class="vajra-meta">No additional futures beyond Top 3.</td></tr>';
         } else {
-            tbody = renderTableBodyRows(rows, TOP_COLUMNS, false);
+            tbody = renderTableBodyRows(rows, cols, true);
         }
+        const note =
+            'Full arbitrage_master universe — all grades (A+ → C). Excludes Top 3 on screen. Click any column header to sort.';
+        const footnote =
+            '<strong>Grade</strong> = setup quality · <strong>Executability</strong> = sticky ranking score · ' +
+            '<strong>Freshness</strong> = scan recency · <strong>Extension Risk</strong> = chase / exhaustion risk';
         return (
-            '<p class="vajra-meta vajra-pipeline-note">Full universe — ARMED → DISCOVERY → REJECT (ARMED by setup rank)</p>' +
+            '<p class="vajra-meta vajra-pipeline-note">' +
+            escapeHtml(note) +
+            '</p>' +
             '<div class="vajra-table-wrap"><table class="vajra-table vajra-top-table vajra-modal-table">' +
             thead +
             '<tbody>' +
             tbody +
             '</tbody></table></div>' +
             '<p class="vajra-score-footnote">' +
-            '<strong>TPS</strong> = Transition Potential Score (30m discovery) · ' +
-            '<strong>EES</strong> = Executable Entry Score (5m timing) · ' +
-            '<strong>ECS</strong> = Expansion Confirmation Score' +
+            footnote +
             '</p>'
         );
     }
@@ -1531,11 +1728,17 @@
         const modal = ensureModal(prefix);
         const modalTableEl = document.getElementById(prefix + 'VajraMoreTable');
         const modalSubEl = document.getElementById(prefix + 'VajraMoreSub');
+        if (moreBtn) {
+            moreBtn.hidden = false;
+            moreBtn.style.display = '';
+        }
 
         let allRows = [];
         let _lastRawData = null;
+        let _lastFiltered = null;
         let modalRows = [];
-        let sortKey = 'tps_score';
+        let modalColumns = MODAL_COLUMNS;
+        let sortKey = 'quality_grade';
         let sortDir = 'desc';
         const seenAlertKeys = {};
         let lastComputedEpoch = null;
@@ -1551,37 +1754,30 @@
             }
             const activeSet = getActiveTradeStocks();
             const filtered = filterRatingsPayload(data, activeSet);
+            _lastFiltered = filtered;
             allRows = filtered.rows || [];
-            const composed = composeTop8ScreenRows(filtered);
-            const top8Keys = {};
-            (composed.top8 || []).forEach(function (r) {
-                const k = rowStockKey(r);
-                if (k) top8Keys[k] = true;
-            });
-            global._vajraRemainder = (filtered.remainder || allRows).filter(function (r) {
-                const k = rowStockKey(r);
-                return !k || !top8Keys[k];
-            });
+            const moreRows = buildMoreModalRows(filtered);
+            global._vajraRemainder = moreRows;
             if (listEl) {
-                listEl._vajraTopRows = composed.top8 || [];
                 listEl.innerHTML = renderTopTable(null, filtered);
                 bindSecurityChartClicks(listEl);
-                listEl.querySelectorAll('[data-vajra-enter]').forEach(function (btn) {
-                    btn.addEventListener('click', function (ev) {
-                        const sym = ev.currentTarget.getAttribute('data-vajra-stock');
-                        const row = (listEl._vajraTopRows || []).find(function (r) {
-                            return String(r.stock || r.security) === sym;
-                        });
-                        if (row && global.VajraTradeWorkflow && global.VajraTradeWorkflow.openEntry) {
-                            global.VajraTradeWorkflow.openEntry(row);
-                        }
-                    });
-                });
+                bindEnterButtons(listEl, collectMainTableRows(filtered));
             }
             if (moreBtn) {
-                const rest = (filtered.remainder || allRows).length;
-                moreBtn.hidden = rest <= 0;
-                moreBtn.textContent = rest > 0 ? 'more… (' + rest + ')' : 'more…';
+                const rest = moreRows.length;
+                const total =
+                    filtered.universe_count != null
+                        ? Number(filtered.universe_count)
+                        : (filtered.universe_rows || []).length;
+                moreBtn.hidden = false;
+                moreBtn.style.display = '';
+                if (rest > 0) {
+                    moreBtn.textContent = 'more… (' + rest + ')';
+                } else if (total > 0) {
+                    moreBtn.textContent = 'more… (' + total + ')';
+                } else {
+                    moreBtn.textContent = 'more…';
+                }
             }
             if (metaEl) {
                 const cp = (data && data.co_pilot) || {};
@@ -1645,7 +1841,7 @@
             }
             processEnterTelegramAlerts(allRows, filtered.session_date || data.session_date, data);
             if (modal.classList.contains('vajra-modal--open')) {
-                modalRows = global._vajraRemainder || allRows.slice(TOP_N);
+                modalRows = (global._vajraRemainder || buildMoreModalRows(filtered)).slice();
                 renderModal();
             }
         }
@@ -1656,16 +1852,20 @@
         }
 
         function openModal() {
-            modalRows = sortModalByQualification(
-                (window._vajraRemainder || allRows).slice()
-            );
-            sortKey = 'qualification';
+            const filtered = _lastFiltered || { rows: allRows, universe_rows: allRows, stable_execution: {} };
+            modalColumns = MODAL_COLUMNS;
+            modalRows = (window._vajraRemainder || buildMoreModalRows(filtered)).slice();
+            sortKey = 'quality_grade';
             sortDir = 'desc';
             renderModal();
+            const titleEl = document.getElementById(prefix + 'VajraMoreTitle');
+            if (titleEl) {
+                titleEl.textContent = 'All futures — arbitrage_master';
+            }
             if (modalSubEl) {
                 modalSubEl.textContent =
                     modalRows.length +
-                    ' symbols · ARMED → DISCOVERY → REJECT (ARMED ranked like Top 8). Click headers to sort.';
+                    ' symbols · sorted by grade (A+ → C) · excludes Top 3 on screen. Click headers to sort.';
             }
             modal.setAttribute('aria-hidden', 'false');
             modal.classList.add('vajra-modal--open');
@@ -1678,8 +1878,14 @@
 
         function renderModal() {
             if (!modalTableEl) return;
-            modalTableEl.innerHTML = renderModalTable(sortRows(modalRows, sortKey, sortDir), sortKey, sortDir);
+            modalTableEl.innerHTML = renderModalTable(
+                sortRows(modalRows, sortKey, sortDir, modalColumns),
+                sortKey,
+                sortDir,
+                modalColumns
+            );
             bindSecurityChartClicks(modalTableEl);
+            bindEnterButtons(modalTableEl, modalRows);
             modalTableEl.querySelectorAll('.vajra-sort-th').forEach(function (th) {
                 th.addEventListener('click', function () {
                     const key = th.getAttribute('data-sort-key');
@@ -1688,7 +1894,16 @@
                     else {
                         sortKey = key;
                         sortDir =
-                            key === 'tps_score' || key === 'ecs_score' || key === 'trade_type' ? 'desc' : 'asc';
+                            key === 'quality_grade' ||
+                            key === 'tps_score' ||
+                            key === 'ecs_score' ||
+                            key === 'trade_type' ||
+                            key === 'executable_score' ||
+                            key === 'sticky_rank_score' ||
+                            key === 'freshness_score' ||
+                            key === 'qualification'
+                                ? 'desc'
+                                : 'asc';
                     }
                     renderModal();
                 });
@@ -1703,7 +1918,7 @@
 
         if (moreBtn) {
             moreBtn.addEventListener('click', function () {
-                if (!moreBtn.hidden) openModal();
+                openModal();
             });
         }
         if (refreshBtn) {
@@ -1737,7 +1952,10 @@
                 if (msgEl) msgEl.textContent = '';
             } catch (e) {
                 if (listEl) listEl.innerHTML = '';
-                if (moreBtn) moreBtn.hidden = true;
+                if (moreBtn) {
+                    moreBtn.hidden = false;
+                    moreBtn.style.display = '';
+                }
                 const err = 'Vajra: ' + (e.message || String(e));
                 if (metaEl) metaEl.textContent = err;
                 else if (msgEl) msgEl.textContent = err;
