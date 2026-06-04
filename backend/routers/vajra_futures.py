@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
@@ -36,6 +37,87 @@ router = APIRouter(prefix="/vajra-futures", tags=["vajra-futures"])
 
 def _require_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
     return get_user_from_token(token, db)
+
+
+def _json_safe(value: Any) -> Any:
+    """Ensure Vajra API payloads serialize (datetime, NaN, nested dicts)."""
+    if value is None or isinstance(value, (str, int, bool)):
+        return value
+    if isinstance(value, float):
+        if math.isnan(value) or math.isinf(value):
+            return None
+        return value
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return str(value)
+
+
+def _resolve_vajra_transition_bundle(
+    user_id: int,
+    session_date: Optional[date] = None,
+) -> Dict[str, Any]:
+    """Shared ratings payload: screener display + stable execution (no full universe build)."""
+    from backend.services.smart_futures_session_date import effective_session_date_ist_for_trend
+    from backend.services.vajra.job import load_arbitrage_curr_mth_universe
+    from backend.services.vajra.pipeline import DISCOVERY_TF, EXECUTION_TF, HTF_BIAS_TF
+    from backend.services.vajra.session_window import vajra_session_api_fields
+    from backend.services.vajra.stable_execution import apply_stable_execution_overlay
+
+    sd = session_date or effective_session_date_ist_for_trend()
+    rows, source, stale_reason = resolve_vajra_ratings_for_api(sd, use_cache=True)
+    stable = apply_stable_execution_overlay(rows, user_id, session_date=sd)
+    merged_rows = list(stable["rows"])
+    row_by_stock = {
+        str(r.get("stock") or r.get("security") or "").strip().upper(): r
+        for r in merged_rows
+    }
+    for slot_row in stable.get("sticky_top3") or []:
+        sym = str(slot_row.get("stock") or "").strip().upper()
+        if sym:
+            row_by_stock[sym] = slot_row
+    rated_for_screener = list(row_by_stock.values())
+    display = build_screener_display(rated_for_screener)
+    screener_rows = display["rows"]
+    updated_dt = fetch_vajra_ratings_updated_at(sd)
+    computed_at = (
+        updated_dt.isoformat()
+        if updated_dt
+        else (screener_rows[0].get("computed_at") if screener_rows else None)
+    )
+    data_age_sec = None
+    if updated_dt:
+        data_age_sec = max(
+            0,
+            int((datetime.now(updated_dt.tzinfo) - updated_dt).total_seconds()),
+        )
+    alerts = [r for r in screener_rows if r.get("alertable")]
+    ees_alert_rows = [
+        r for r in screener_rows if (r.get("ees_alerts") or []) and not r.get("alertable")
+    ]
+    universe_count = len(load_arbitrage_curr_mth_universe())
+    return {
+        "session_date": sd,
+        "source": source,
+        "stale_reason": stale_reason,
+        "computed_at": computed_at,
+        "data_age_sec": data_age_sec,
+        "discovery_tf": DISCOVERY_TF,
+        "execution_tf": EXECUTION_TF,
+        "htf_bias_tf": HTF_BIAS_TF,
+        "alerts": alerts,
+        "ees_alert_rows": ees_alert_rows,
+        "display": display,
+        "stable": stable,
+        "rated_for_universe": rated_for_screener,
+        "universe_count": universe_count,
+        "session_fields": vajra_session_api_fields(),
+    }
 
 
 @router.get("/timeframes")
@@ -119,102 +201,70 @@ def get_vajra_ratings(
         sd = session_date or effective_session_date_ist_for_trend()
         mode_norm = (mode or "transition").strip().lower()
         if mode_norm == "transition":
-            rows, source, stale_reason = resolve_vajra_ratings_for_api(sd, use_cache=True)
-            from backend.services.vajra.session_window import vajra_session_api_fields
-            from backend.services.vajra.stable_execution import apply_stable_execution_overlay
-
-            stable = apply_stable_execution_overlay(rows, user.id, session_date=sd)
-            rows = stable["rows"]
-            row_by_stock = {
-                str(r.get("stock") or r.get("security") or "").strip().upper(): r
-                for r in rows
-            }
-            for slot_row in stable.get("sticky_top3") or []:
-                sym = str(slot_row.get("stock") or "").strip().upper()
-                if sym:
-                    row_by_stock[sym] = slot_row
-            rows = list(row_by_stock.values())
-            from backend.services.vajra.job import load_arbitrage_curr_mth_universe
-
-            universe = load_arbitrage_curr_mth_universe()
-            universe_rows = build_universe_modal_rows(rows, universe)
-            display = build_screener_display(rows)
+            bundle = _resolve_vajra_transition_bundle(user.id, session_date=sd)
+            display = bundle["display"]
+            stable = bundle["stable"]
             rows = display["rows"]
-            updated_dt = fetch_vajra_ratings_updated_at(sd)
-            computed_at = (
-                updated_dt.isoformat()
-                if updated_dt
-                else (rows[0].get("computed_at") if rows else None)
-            )
-            data_age_sec = None
-            if updated_dt:
-                data_age_sec = max(
-                    0,
-                    int((datetime.now(updated_dt.tzinfo) - updated_dt).total_seconds()),
-                )
-            alerts = [r for r in rows if r.get("alertable")]
-            ees_alert_rows = [
-                r for r in rows if (r.get("ees_alerts") or []) and not r.get("alertable")
-            ]
-
+            sd = bundle["session_date"]
+            payload = {
+                "success": True,
+                "session_date": sd.isoformat(),
+                "mode": "transition",
+                "discovery_tf": bundle["discovery_tf"],
+                "execution_tf": bundle["execution_tf"],
+                "htf_bias_tf": bundle["htf_bias_tf"],
+                "scan_tf": bundle["discovery_tf"],
+                "htf": bundle["htf_bias_tf"],
+                "source": bundle["source"],
+                "stale_reason": bundle["stale_reason"],
+                "count": len(rows),
+                "universe_count": bundle["universe_count"],
+                "alert_count": len(bundle["alerts"]) + len(bundle["ees_alert_rows"]),
+                "alerts": bundle["alerts"],
+                "ees_alert_rows": bundle["ees_alert_rows"],
+                "computed_at": bundle["computed_at"],
+                "data_age_sec": bundle["data_age_sec"],
+                "ees_refresh_minutes": 5,
+                **bundle["session_fields"],
+                "rows": rows,
+                "universe_rows": [],
+                "top_picks": display["top_picks"],
+                "top_sections": display["top_sections"],
+                "groups": {
+                    "EXECUTABLE": display["groups"].get("EXECUTABLE", []),
+                    "ARMED": display["groups"].get("ARMED", []),
+                    "DISCOVERY": display["groups"].get("DISCOVERY", []),
+                    "WATCHLIST": display["groups"].get("WATCHLIST", []),
+                    "REJECT": display["groups"].get("REJECT", []),
+                },
+                "sections": display.get("sections", {}),
+                "banner": display.get("banner"),
+                "remainder": display["remainder"],
+                "stable_execution": {
+                    "stable_mode_enabled": stable.get("stable_mode_enabled"),
+                    "focus_mode_enabled": stable.get("focus_mode_enabled"),
+                    "sticky_persist_minutes": stable.get("sticky_persist_minutes"),
+                    "sticky_top3": stable.get("sticky_top3"),
+                    "momentum_leaders": stable.get("momentum_leaders") or [],
+                    "suggested_rotations": stable.get("suggested_rotations"),
+                    "freeze_window_open": stable.get("freeze_window_open"),
+                    "watchlist_frozen": stable.get("watchlist_frozen"),
+                    "frozen_focus_stocks": stable.get("frozen_focus_stocks"),
+                    "watchlist_frozen_at": stable.get("watchlist_frozen_at"),
+                    "attention_banner": stable.get("attention_banner"),
+                    "discovery_window": stable.get("discovery_window"),
+                    "execution_window": stable.get("execution_window"),
+                    "workflow_phase": stable.get("workflow_phase"),
+                    "workflow_notice": stable.get("workflow_notice"),
+                    "sector_heatmap": stable.get("sector_heatmap") or [],
+                    "co_pilot": stable.get("co_pilot") or {},
+                },
+                "co_pilot": stable.get("co_pilot") or {},
+                "server_telegram_alerts": stable.get("server_telegram_alerts", False),
+            }
             return JSONResponse(
                 status_code=200,
-                content={
-                    "success": True,
-                    "session_date": sd.isoformat(),
-                    "mode": "transition",
-                    "discovery_tf": DISCOVERY_TF,
-                    "execution_tf": EXECUTION_TF,
-                    "htf_bias_tf": HTF_BIAS_TF,
-                    "scan_tf": DISCOVERY_TF,
-                    "htf": HTF_BIAS_TF,
-                    "source": source,
-                    "stale_reason": stale_reason,
-                    "count": len(rows),
-                    "universe_count": len(universe_rows),
-                    "alert_count": len(alerts) + len(ees_alert_rows),
-                    "alerts": alerts,
-                    "ees_alert_rows": ees_alert_rows,
-                    "computed_at": computed_at,
-                    "data_age_sec": data_age_sec,
-                    "ees_refresh_minutes": 5,
-                    **vajra_session_api_fields(),
-                    "rows": rows,
-                    "universe_rows": universe_rows,
-                    "top_picks": display["top_picks"],
-                    "top_sections": display["top_sections"],
-                    "groups": {
-                        "EXECUTABLE": display["groups"].get("EXECUTABLE", []),
-                        "ARMED": display["groups"].get("ARMED", []),
-                        "DISCOVERY": display["groups"].get("DISCOVERY", []),
-                        "WATCHLIST": display["groups"].get("WATCHLIST", []),
-                        "REJECT": display["groups"].get("REJECT", []),
-                    },
-                    "sections": display.get("sections", {}),
-                    "banner": display.get("banner"),
-                    "remainder": display["remainder"],
-                    "stable_execution": {
-                        "stable_mode_enabled": stable.get("stable_mode_enabled"),
-                        "focus_mode_enabled": stable.get("focus_mode_enabled"),
-                        "sticky_persist_minutes": stable.get("sticky_persist_minutes"),
-                        "sticky_top3": stable.get("sticky_top3"),
-                        "momentum_leaders": stable.get("momentum_leaders") or [],
-                        "suggested_rotations": stable.get("suggested_rotations"),
-                        "freeze_window_open": stable.get("freeze_window_open"),
-                        "watchlist_frozen": stable.get("watchlist_frozen"),
-                        "frozen_focus_stocks": stable.get("frozen_focus_stocks"),
-                        "watchlist_frozen_at": stable.get("watchlist_frozen_at"),
-                        "attention_banner": stable.get("attention_banner"),
-                        "discovery_window": stable.get("discovery_window"),
-                        "execution_window": stable.get("execution_window"),
-                        "workflow_phase": stable.get("workflow_phase"),
-                        "workflow_notice": stable.get("workflow_notice"),
-                        "sector_heatmap": stable.get("sector_heatmap") or [],
-                        "co_pilot": stable.get("co_pilot") or {},
-                    },
-                    "co_pilot": stable.get("co_pilot") or {},
-                    "server_telegram_alerts": stable.get("server_telegram_alerts", False),
-                },
+                content=_json_safe(payload),
                 headers={
                     "Cache-Control": "no-store, no-cache, must-revalidate",
                     "Pragma": "no-cache",
@@ -247,7 +297,48 @@ def get_vajra_ratings(
         logger.exception("vajra_ratings: %s", e)
         return JSONResponse(
             status_code=500,
-            content={"success": False, "message": str(e), "rows": []},
+            content=_json_safe({"success": False, "message": str(e), "rows": []}),
+        )
+
+
+@router.get("/universe-rows")
+def get_vajra_universe_rows(
+    session_date: Optional[date] = Query(None, description="IST session date; default today"),
+    user: User = Depends(_require_user),
+):
+    """Full arbitrage_master list for the More modal (loaded on demand — keeps /ratings fast)."""
+    try:
+        from backend.services.vajra.job import load_arbitrage_curr_mth_universe
+
+        bundle = _resolve_vajra_transition_bundle(user.id, session_date=session_date)
+        universe = load_arbitrage_curr_mth_universe()
+        universe_rows = build_universe_modal_rows(bundle["rated_for_universe"], universe)
+        return JSONResponse(
+            status_code=200,
+            content=_json_safe(
+                {
+                    "success": True,
+                    "session_date": bundle["session_date"].isoformat(),
+                    "universe_count": len(universe_rows),
+                    "universe_rows": universe_rows,
+                    "stable_execution": {
+                        "stable_mode_enabled": bundle["stable"].get("stable_mode_enabled"),
+                        "sticky_top3": bundle["stable"].get("sticky_top3") or [],
+                    },
+                }
+            ),
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate",
+                "Pragma": "no-cache",
+            },
+        )
+    except Exception as e:
+        logger.exception("vajra_universe_rows: %s", e)
+        return JSONResponse(
+            status_code=500,
+            content=_json_safe(
+                {"success": False, "message": str(e), "universe_rows": [], "universe_count": 0}
+            ),
         )
 
 

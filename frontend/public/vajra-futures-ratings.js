@@ -1617,6 +1617,37 @@
         throw new Error(lastErr || 'Failed to load Vajra ratings');
     }
 
+    async function fetchUniverseRows(sessionDate) {
+        let q = '?mode=transition' + cacheBustQ();
+        if (sessionDate) {
+            q += '&session_date=' + encodeURIComponent(sessionDate);
+        }
+        const paths = [
+            API_BASE + '/api/vajra-futures/universe-rows' + q,
+            API_BASE + '/vajra-futures/universe-rows' + q,
+        ];
+        let lastErr = null;
+        for (let i = 0; i < paths.length; i++) {
+            try {
+                const out = await fetchJsonWithTimeout(
+                    paths[i],
+                    { headers: authHeaders(), cache: 'no-store' },
+                    RATINGS_FETCH_TIMEOUT_MS
+                );
+                const res = out.res;
+                const data = out.data;
+                if (!res.ok) {
+                    lastErr = (data && data.message) || res.statusText;
+                    continue;
+                }
+                return data;
+            } catch (e) {
+                lastErr = e.message || String(e);
+            }
+        }
+        throw new Error(lastErr || 'Failed to load Vajra universe');
+    }
+
     async function fetchRatingsStatus() {
         const paths = [
             API_BASE + '/api/vajra-futures/ratings-status' + cacheBustQ(),
@@ -1736,6 +1767,7 @@
         let allRows = [];
         let _lastRawData = null;
         let _lastFiltered = null;
+        let _universeCache = null;
         let modalRows = [];
         let modalColumns = MODAL_COLUMNS;
         let sortKey = 'quality_grade';
@@ -1755,29 +1787,22 @@
             const activeSet = getActiveTradeStocks();
             const filtered = filterRatingsPayload(data, activeSet);
             _lastFiltered = filtered;
+            _universeCache = null;
             allRows = filtered.rows || [];
-            const moreRows = buildMoreModalRows(filtered);
-            global._vajraRemainder = moreRows;
+            global._vajraRemainder = [];
             if (listEl) {
                 listEl.innerHTML = renderTopTable(null, filtered);
                 bindSecurityChartClicks(listEl);
                 bindEnterButtons(listEl, collectMainTableRows(filtered));
             }
             if (moreBtn) {
-                const rest = moreRows.length;
                 const total =
                     filtered.universe_count != null
                         ? Number(filtered.universe_count)
                         : (filtered.universe_rows || []).length;
                 moreBtn.hidden = false;
                 moreBtn.style.display = '';
-                if (rest > 0) {
-                    moreBtn.textContent = 'more… (' + rest + ')';
-                } else if (total > 0) {
-                    moreBtn.textContent = 'more… (' + total + ')';
-                } else {
-                    moreBtn.textContent = 'more…';
-                }
+                moreBtn.textContent = total > 0 ? 'more… (' + total + ')' : 'more…';
             }
             if (metaEl) {
                 const cp = (data && data.co_pilot) || {};
@@ -1851,24 +1876,57 @@
             renderLoadedData(_lastRawData);
         }
 
-        function openModal() {
-            const filtered = _lastFiltered || { rows: allRows, universe_rows: allRows, stable_execution: {} };
+        async function openModal() {
+            const filtered = _lastFiltered || {
+                rows: allRows,
+                universe_rows: [],
+                stable_execution: {},
+            };
             modalColumns = MODAL_COLUMNS;
-            modalRows = (window._vajraRemainder || buildMoreModalRows(filtered)).slice();
             sortKey = 'quality_grade';
             sortDir = 'desc';
-            renderModal();
             const titleEl = document.getElementById(prefix + 'VajraMoreTitle');
             if (titleEl) {
                 titleEl.textContent = 'All futures — arbitrage_master';
             }
-            if (modalSubEl) {
-                modalSubEl.textContent =
-                    modalRows.length +
-                    ' symbols · sorted by grade (A+ → C) · excludes Top 3 on screen. Click headers to sort.';
-            }
             modal.setAttribute('aria-hidden', 'false');
             modal.classList.add('vajra-modal--open');
+            if (modalTableEl) {
+                modalTableEl.innerHTML =
+                    '<p class="vajra-meta">Loading full universe from arbitrage_master…</p>';
+            }
+            if (modalSubEl) {
+                modalSubEl.textContent = 'Loading…';
+            }
+            try {
+                if (!_universeCache) {
+                    const udata = await fetchUniverseRows(filtered.session_date || _lastRawData?.session_date);
+                    const activeSet = getActiveTradeStocks();
+                    _universeCache = filterRatingsPayload(
+                        Object.assign({}, _lastRawData || {}, udata),
+                        activeSet
+                    );
+                }
+                const ufiltered = _universeCache;
+                global._vajraRemainder = buildMoreModalRows(ufiltered);
+                modalRows = (window._vajraRemainder || []).slice();
+                renderModal();
+                if (modalSubEl) {
+                    modalSubEl.textContent =
+                        modalRows.length +
+                        ' symbols · sorted by grade (A+ → C) · excludes Top 3 on screen. Click headers to sort.';
+                }
+            } catch (e) {
+                if (modalTableEl) {
+                    modalTableEl.innerHTML =
+                        '<p class="vajra-meta">Could not load universe: ' +
+                        escapeHtml(e.message || String(e)) +
+                        '</p>';
+                }
+                if (modalSubEl) {
+                    modalSubEl.textContent = 'Load failed — try Refresh, then open more again.';
+                }
+            }
         }
 
         function closeModal() {
@@ -2006,6 +2064,7 @@
     global.VajraFuturesRatings = {
         init: init,
         fetchRatings: fetchRatings,
+        fetchUniverseRows: fetchUniverseRows,
         fetchRatingsStatus: fetchRatingsStatus,
         TOP_N: TOP_N,
         renderSecurityChartLink: renderSecurityChartLink,

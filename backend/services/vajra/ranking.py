@@ -130,6 +130,25 @@ def _placeholder_universe_row(item: Dict[str, str]) -> Dict[str, Any]:
     }
 
 
+def _minimal_modal_placeholder_row(item: Dict[str, str]) -> Dict[str, Any]:
+    """Light row for symbols without a scan — avoids heavy sticky enrich on 200+ names."""
+    row = _placeholder_universe_row(item)
+    row.update(
+        {
+            "executable_score": 0.0,
+            "freshness_score": 0.0,
+            "extension_risk_display": 50.0,
+            "momentum_velocity": 0.0,
+            "score_trend": "→",
+            "chase_risk": "MEDIUM",
+            "setup_trend": "stable",
+            "execution_bias": "LONG",
+            "sticky_rank_score": 0.0,
+        }
+    )
+    return row
+
+
 def build_universe_modal_rows(
     rated_rows: List[Dict[str, Any]],
     universe: List[Dict[str, str]],
@@ -137,9 +156,9 @@ def build_universe_modal_rows(
     """
     Full arbitrage_master curr-month universe for the More modal — all symbols,
     rated rows merged with placeholders for symbols without a scan row.
+    Rated rows are reused as-is (already enriched by stable_execution overlay).
     """
     from backend.services.vajra.setup_classifier import quality_grade
-    from backend.services.vajra.sticky_ranking_engine import enrich_sticky_ranking_fields
 
     by_stock: Dict[str, Dict[str, Any]] = {}
     for r in rated_rows:
@@ -147,22 +166,18 @@ def build_universe_modal_rows(
         if key:
             by_stock[key] = dict(r)
 
-    merged: List[Dict[str, Any]] = []
+    out: List[Dict[str, Any]] = []
     for item in universe:
         key = str(item.get("stock") or "").strip().upper()
         if not key:
             continue
-        row = dict(by_stock.get(key) or _placeholder_universe_row(item))
-        merged.append(row)
-
-    enriched = [enrich_execution_scores(dict(r)) for r in merged]
-    finalized = finalize_screener_rows(enriched)
-    out: List[Dict[str, Any]] = []
-    for r in finalized:
-        row = dict(r)
-        if not row.get("quality_grade"):
-            row["quality_grade"] = quality_grade(row)
-        out.append(enrich_sticky_ranking_fields(row))
+        if key in by_stock:
+            row = dict(by_stock[key])
+            if not row.get("quality_grade"):
+                row["quality_grade"] = quality_grade(row)
+        else:
+            row = _minimal_modal_placeholder_row(item)
+        out.append(row)
 
     out.sort(
         key=lambda r: (
