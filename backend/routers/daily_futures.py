@@ -316,8 +316,9 @@ async def _resolve_daily_futures_chartink_symbols(
         raise HTTPException(status_code=400, detail=f"Could not parse body: {e}") from e
 
     df_chartink_ingest_parsed_into_accum(acc, inner)
-    symbols = normalize_symbols_from_payload(df_chartink_accum_finalize_payload(acc))
-    return symbols, Path(inbox_path).name
+    flat = df_chartink_accum_finalize_payload(acc)
+    symbols = normalize_symbols_from_payload(flat)
+    return symbols, Path(inbox_path).name, chartink_payload_for_scan(flat, direction=direction)
 
 
 @router.api_route("/webhook/chartink", methods=["GET", "POST", "PUT", "PATCH"])
