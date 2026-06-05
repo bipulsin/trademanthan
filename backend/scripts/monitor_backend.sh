@@ -18,18 +18,62 @@ log_message() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
 }
 
+systemd_unit_state() {
+    systemctl show trademanthan-backend -p ActiveState --value 2>/dev/null || echo "unknown"
+}
+
+# If graceful shutdown hangs (common during market hours), force-kill after 3 minutes.
+recover_stuck_systemd_stop() {
+    local state since now_s elapsed
+    state="$(systemd_unit_state)"
+    if [ "$state" != "deactivating" ]; then
+        rm -f /tmp/trademanthan_deactivating_since 2>/dev/null || true
+        return 1
+    fi
+    now_s=$(date +%s)
+    if [ ! -f /tmp/trademanthan_deactivating_since ]; then
+        echo "$now_s" > /tmp/trademanthan_deactivating_since
+        return 1
+    fi
+    since=$(cat /tmp/trademanthan_deactivating_since 2>/dev/null || echo "$now_s")
+    elapsed=$((now_s - since))
+    if [ "$elapsed" -lt 200 ]; then
+        log_message "⏸️  systemd deactivating (${elapsed}s) — waiting for stop to finish"
+        return 1
+    fi
+    log_message "⚠️  systemd stuck deactivating ${elapsed}s — sending SIGKILL and starting"
+    sudo systemctl kill -s SIGKILL trademanthan-backend 2>>"$LOG_FILE" || true
+    sleep 2
+    sudo systemctl reset-failed trademanthan-backend 2>>"$LOG_FILE" || true
+    sudo systemctl start trademanthan-backend 2>>"$LOG_FILE" || true
+    rm -f /tmp/trademanthan_deactivating_since 2>/dev/null || true
+    return 0
+}
+
 check_backend() {
     local url
     if systemctl list-unit-files 2>/dev/null | grep -q "trademanthan-backend.service"; then
+        local state
+        state="$(systemd_unit_state)"
+        case "$state" in
+            activating|reloading)
+                log_message "⏸️  systemd state=${state} — waiting"
+                return 1
+                ;;
+            deactivating)
+                return 1
+                ;;
+        esac
         systemctl is-active --quiet trademanthan-backend 2>/dev/null || return 1
-        url="http://localhost:8000/scan/index-prices"
+        url="http://localhost:8000/scan/health"
     else
         if ! pgrep -f "uvicorn.*backend.main:app.*--port ${TRADEMANTHAN_DEV_PORT}" > /dev/null 2>&1; then
             return 1
         fi
-        url="http://localhost:${TRADEMANTHAN_DEV_PORT}/scan/index-prices"
+        url="http://localhost:${TRADEMANTHAN_DEV_PORT}/scan/health"
     fi
-    if timeout 5 curl -s -f "$url" > /dev/null 2>&1; then
+    # Startup + heavy market jobs can exceed 5s; avoid false-positive restarts.
+    if timeout 15 curl -s -f "$url" > /dev/null 2>&1; then
         return 0
     fi
     return 1
@@ -44,14 +88,25 @@ restart_backend() {
     fi
 
     if systemctl list-unit-files 2>/dev/null | grep -q "trademanthan-backend.service"; then
+        local state
+        state="$(systemd_unit_state)"
+        case "$state" in
+            activating|deactivating|reloading)
+                log_message "⏸️  systemd state=${state}; skipping restart"
+                return 1
+                ;;
+        esac
         log_message "Restarting via systemd (production :8000)..."
         sudo systemctl restart trademanthan-backend 2>>"$LOG_FILE" || true
-        sleep 5
-        if check_backend; then
-            log_message "✅ Backend restarted successfully via systemd"
-            return 0
-        fi
-        log_message "❌ systemd restart did not pass health check"
+        local i
+        for i in $(seq 1 30); do
+            sleep 3
+            if check_backend; then
+                log_message "✅ Backend restarted successfully via systemd (${i} checks)"
+                return 0
+            fi
+        done
+        log_message "❌ systemd restart did not pass health check after 90s"
         return 1
     fi
 
@@ -75,6 +130,16 @@ restart_backend() {
 if check_backend; then
     log_message "✅ Backend is running and healthy"
     exit 0
+fi
+
+if recover_stuck_systemd_stop; then
+    for _i in $(seq 1 30); do
+        sleep 3
+        if check_backend; then
+            log_message "✅ Backend recovered from stuck shutdown"
+            exit 0
+        fi
+    done
 fi
 
 log_message "⚠️ Backend is not running or not responding"
