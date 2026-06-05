@@ -246,7 +246,9 @@
                 throw new Error(data.detail || "Failed to fetch data");
             }
             renderRows(data.rows);
-            summaryEl.textContent = `Total matching records: ${data.count}`;
+            summaryEl.textContent =
+                `Total matching records: ${data.count}` +
+                (isArbitrageSessionIST() ? ' · Auto-refresh every 5 min (09:15–15:30 IST)' : '');
             await loadOrdersByStatus("OPEN");
         } catch (err) {
             bodyEl.innerHTML = `<tr><td colspan="7" class="state-cell">Error loading data: ${err.message}</td></tr>`;
@@ -258,7 +260,7 @@
         }
     }
 
-    const AUTO_REFRESH_MS = 30 * 60 * 1000;
+    const AUTO_REFRESH_MS = 5 * 60 * 1000;
 
     function getIstClock() {
         const parts = new Intl.DateTimeFormat("en-GB", {
