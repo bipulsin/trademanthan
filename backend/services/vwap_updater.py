@@ -603,7 +603,7 @@ def update_vwap_for_all_open_positions():
                                 vwap2=current_stock_vwap,
                                 time2=now
                             )
-                            vwap_slope_passed = (slope_result == "Yes")
+                            vwap_slope_passed = live_trading.vwap_slope_status_passed(slope_result)
                         except Exception as slope_error:
                             logger.warning(f"Error calculating VWAP slope for {stock_name}: {str(slope_error)}")
                     
@@ -674,8 +674,14 @@ def update_vwap_for_all_open_positions():
                         candle_size_passed = True  # Don't block if skipped/blank
                         logger.info(f"ℹ️ {stock_name}: Candle size status is '{no_entry_trade.candle_size_status}' - Not blocking entry")
                     
+                    # Live entry is webhook-only within WEBHOOK_ENTRY_WINDOW_SEC — no deferred re-entry here.
+                    if not live_trading.deferred_vwap_entry_allowed():
+                        logger.debug(
+                            "⚪ %s still 'no_entry': deferred re-entry disabled (webhook-only policy)",
+                            stock_name,
+                        )
                     # Check if all entry conditions are met
-                    if (is_before_3pm and 
+                    elif (is_before_3pm and 
                         can_enter_by_index and 
                         vwap_slope_passed and 
                         candle_size_passed and 
@@ -898,7 +904,7 @@ def update_vwap_for_all_open_positions():
                                 vwap2=current_stock_vwap,
                                 time2=now
                             )
-                            vwap_slope_passed = (slope_result == "Yes")
+                            vwap_slope_passed = live_trading.vwap_slope_status_passed(slope_result)
                         except Exception as slope_error:
                             logger.warning(f"Error calculating VWAP slope for {stock_name}: {str(slope_error)}")
                     
@@ -969,8 +975,14 @@ def update_vwap_for_all_open_positions():
                         candle_size_passed = True  # Don't block if skipped/blank
                         logger.info(f"ℹ️ {stock_name}: Candle size status is '{no_entry_trade.candle_size_status}' - Not blocking entry")
                     
+                    # Live entry is webhook-only within WEBHOOK_ENTRY_WINDOW_SEC — no deferred re-entry here.
+                    if not live_trading.deferred_vwap_entry_allowed():
+                        logger.debug(
+                            "⚪ %s still 'no_entry': deferred re-entry disabled (webhook-only policy)",
+                            stock_name,
+                        )
                     # Check if all entry conditions are met
-                    if (is_before_3pm and 
+                    elif (is_before_3pm and 
                         can_enter_by_index and 
                         vwap_slope_passed and 
                         candle_size_passed and 
@@ -3834,7 +3846,12 @@ async def calculate_vwap_slope_for_cycle(cycle_number: int, cycle_time: datetime
                         logger.info(f"      - Option Contract: {'✅' if trade.option_contract else '❌'} ({trade.option_contract or 'Missing'})")
                         logger.info(f"      - Instrument Key: {'✅' if trade.instrument_key else '❌'} ({trade.instrument_key or 'Missing'})")
                     
-                    if all_conditions_met:
+                    if all_conditions_met and not live_trading.deferred_vwap_entry_allowed():
+                        logger.info(
+                            f"⏭️ Cycle {cycle_number} - {stock_name}: Deferred live entry disabled "
+                            f"(webhook-only within {int(live_trading.WEBHOOK_ENTRY_WINDOW_SEC // 60)} min)"
+                        )
+                    elif all_conditions_met:
                         # Webhook may have entered the same row moments earlier — avoid a second broker order.
                         try:
                             db.refresh(trade)

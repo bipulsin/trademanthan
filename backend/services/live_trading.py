@@ -44,6 +44,92 @@ def _live_entry_lock_key(instrument_key: str) -> str:
     return (instrument_key or "").strip().upper()
 
 
+def deferred_vwap_entry_allowed() -> bool:
+    """Live scan entry is webhook-only within WEBHOOK_ENTRY_WINDOW_SEC; VWAP cycles must not enter."""
+    return False
+
+
+def is_within_webhook_entry_window(
+    alert_time: Optional[datetime],
+    now: Optional[datetime] = None,
+) -> bool:
+    """True when `now` is within WEBHOOK_ENTRY_WINDOW_SEC after `alert_time` (IST-aware)."""
+    if not alert_time:
+        return False
+    ist = ZoneInfo("Asia/Kolkata")
+    if alert_time.tzinfo is None:
+        alert_dt = alert_time.replace(tzinfo=ist)
+    else:
+        alert_dt = alert_time.astimezone(ist)
+    if now is None:
+        now = datetime.now(ist)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=ist)
+    else:
+        now = now.astimezone(ist)
+    elapsed = (now - alert_dt).total_seconds()
+    return 0 <= elapsed <= WEBHOOK_ENTRY_WINDOW_SEC
+
+
+def vwap_slope_status_passed(slope_result) -> bool:
+    """Normalize vwap_slope() return (dict or legacy str) to pass/fail."""
+    if isinstance(slope_result, dict):
+        return slope_result.get("status") == "Yes"
+    return slope_result == "Yes"
+
+
+def intraday_row_has_open_broker_position(trade) -> bool:
+    """True when the row or broker book shows an open long for this option."""
+    st = getattr(trade, "status", None)
+    if st == "bought" and getattr(trade, "exit_reason", None) is None:
+        if getattr(trade, "buy_order_id", None) or getattr(trade, "buy_time", None):
+            return True
+    ikey = (getattr(trade, "instrument_key", None) or "").strip()
+    if ikey:
+        net = get_broker_net_long_qty_for_instrument(ikey)
+        if net is not None and net > 0:
+            return True
+    return False
+
+
+def reset_intraday_row_for_repeat_webhook(trade, alert_time: datetime) -> None:
+    """
+    Same-day repeat webhook for the same instrument with no broker fill:
+    refresh alert time and clear stale entry fields so webhook can retry within the window.
+    """
+    from sqlalchemy.orm.attributes import flag_modified
+
+    trade.alert_time = alert_time
+    if intraday_row_has_open_broker_position(trade):
+        return
+    pending_oid = (getattr(trade, "buy_order_id", None) or "").strip()
+    if pending_oid and getattr(trade, "status", None) != "bought":
+        cancel_open_buy_if_pending(pending_oid)
+    if getattr(trade, "status", None) != "sold":
+        trade.status = "no_entry"
+        trade.buy_order_id = None
+        trade.buy_time = None
+        trade.sell_order_id = None
+        trade.sell_time = None
+        trade.sell_price = None
+        trade.exit_reason = None
+        trade.pnl = None
+        trade.no_entry_reason = None
+        for attr in (
+            "buy_order_id",
+            "buy_time",
+            "sell_order_id",
+            "sell_time",
+            "sell_price",
+            "exit_reason",
+            "pnl",
+            "no_entry_reason",
+            "status",
+            "alert_time",
+        ):
+            flag_modified(trade, attr)
+
+
 def _acquire_live_entry_lock(key: str) -> threading.Lock:
     with _entry_lock_guard:
         if key not in _entry_locks:
@@ -51,8 +137,11 @@ def _acquire_live_entry_lock(key: str) -> threading.Lock:
         return _entry_locks[key]
 
 
+# Live scan entry is only attempted from the webhook handler within this window (seconds).
+WEBHOOK_ENTRY_WINDOW_SEC = 600.0
+
 # After broker accepts a BUY, poll until filled or cancel and fall back (LIMIT can stay open).
-ENTRY_FILL_WAIT_SEC = 90.0
+ENTRY_FILL_WAIT_SEC = WEBHOOK_ENTRY_WINDOW_SEC
 ENTRY_FILL_POLL_SEC = 1.5
 MARKET_FILL_WAIT_SEC = 45.0
 EXIT_FILL_WAIT_SEC = 90.0

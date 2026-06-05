@@ -1894,6 +1894,87 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 continue
                 
             stock_name = stock.get("stock_name", "UNKNOWN")
+            db_record_reuse = None
+            _dedupe_ikey = (stock.get("instrument_key") or "").strip()
+            _dedupe_contract = (stock.get("option_contract") or "").strip()
+            _day_start = trading_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            _day_end = _day_start + timedelta(days=1)
+            _existing_trade = None
+            if _dedupe_ikey:
+                _existing_trade = (
+                    db.query(IntradayStockOption)
+                    .filter(
+                        and_(
+                            IntradayStockOption.trade_date >= _day_start,
+                            IntradayStockOption.trade_date < _day_end,
+                            IntradayStockOption.instrument_key == _dedupe_ikey,
+                        )
+                    )
+                    .order_by(desc(IntradayStockOption.id))
+                    .first()
+                )
+            elif _dedupe_contract and stock_name != "UNKNOWN":
+                _existing_trade = (
+                    db.query(IntradayStockOption)
+                    .filter(
+                        and_(
+                            IntradayStockOption.trade_date >= _day_start,
+                            IntradayStockOption.trade_date < _day_end,
+                            IntradayStockOption.stock_name == stock_name,
+                            IntradayStockOption.option_contract == _dedupe_contract,
+                        )
+                    )
+                    .order_by(desc(IntradayStockOption.id))
+                    .first()
+                )
+            if _existing_trade is not None:
+                if _existing_trade.status == "sold":
+                    _existing_trade.alert_time = triggered_datetime
+                    _existing_trade.alert_type = data_type
+                    if stock.get("last_traded_price"):
+                        _existing_trade.stock_ltp = stock.get("last_traded_price")
+                    if stock.get("stock_vwap"):
+                        _existing_trade.stock_vwap = stock.get("stock_vwap")
+                    if stock.get("option_ltp"):
+                        _existing_trade.option_ltp = stock.get("option_ltp")
+                    saved_count += 1
+                    try:
+                        db.commit()
+                    except Exception as _dedupe_commit_err:
+                        db.rollback()
+                        failed_count += 1
+                        logger.error(f"Dedupe commit failed for sold {stock_name}: {_dedupe_commit_err}")
+                        continue
+                    logger.info(
+                        f"   🔁 Deduped {stock_name}: same-day sold row id={_existing_trade.id} — metadata only"
+                    )
+                    continue
+                if live_trading.intraday_row_has_open_broker_position(_existing_trade):
+                    _existing_trade.alert_time = triggered_datetime
+                    _existing_trade.alert_type = data_type
+                    if stock.get("last_traded_price"):
+                        _existing_trade.stock_ltp = stock.get("last_traded_price")
+                    if stock.get("stock_vwap"):
+                        _existing_trade.stock_vwap = stock.get("stock_vwap")
+                    if stock.get("option_ltp"):
+                        _existing_trade.option_ltp = stock.get("option_ltp")
+                    saved_count += 1
+                    try:
+                        db.commit()
+                    except Exception as _dedupe_commit_err:
+                        db.rollback()
+                        failed_count += 1
+                        logger.error(f"Dedupe commit failed for open {stock_name}: {_dedupe_commit_err}")
+                        continue
+                    logger.info(
+                        f"   🔁 Deduped {stock_name}: open broker position — row id={_existing_trade.id}, no second entry"
+                    )
+                    continue
+                live_trading.reset_intraday_row_for_repeat_webhook(_existing_trade, triggered_datetime)
+                db_record_reuse = _existing_trade
+                logger.info(
+                    f"   🔁 Deduped {stock_name}: repeat webhook — reusing row id={_existing_trade.id} (no broker fill yet)"
+                )
             # Initialize all variables that will be used in db_record to avoid UnboundLocalError
             # Default blank for non-LIVE and no_entry; only set when a live order is placed
             buy_order_id = None
@@ -2113,8 +2194,21 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 if option_ltp_value <= 0 or lot_size <= 0:
                     if not no_entry_reason:  # Only set if no other reason was set
                         no_entry_reason = "Missing option data"
+
+                within_webhook_entry_window = live_trading.is_within_webhook_entry_window(
+                    triggered_datetime
+                )
+                if not within_webhook_entry_window and not no_entry_reason:
+                    no_entry_reason = "Entry window expired (>10 min from alert)"
                 
-                if not is_after_3_00pm and can_enter_trade_by_index and filters_passed and option_ltp_value > 0 and lot_size > 0:
+                if (
+                    not is_after_3_00pm
+                    and within_webhook_entry_window
+                    and can_enter_trade_by_index
+                    and filters_passed
+                    and option_ltp_value > 0
+                    and lot_size > 0
+                ):
                     # Enter trade: Fetch current option LTP again, set buy_time to current system time, stop_loss from previous candle low
                     # IMPORTANT: sell_price remains NULL initially, will be populated by hourly updater
                     import pytz
@@ -2470,7 +2564,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     option_strike_val = 0.0
                     option_vwap_val = 0.0
                 
-                db_record = IntradayStockOption(
+                _row_fields = dict(
                     alert_time=triggered_datetime,
                     alert_type=data_type,
                     scan_name=scan_name_for_record,
@@ -2484,8 +2578,6 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     option_strike=option_strike_val,
                     option_ltp=option_ltp_value,
                     option_vwap=option_vwap_val,
-                    # Option daily OHLC candles (current day vs previous day)
-                    # Safely extract candle data, handling None and empty dict cases
                     option_current_candle_open=current_day_candle.get('open') if (current_day_candle and isinstance(current_day_candle, dict)) else None,
                     option_current_candle_high=current_day_candle.get('high') if (current_day_candle and isinstance(current_day_candle, dict)) else None,
                     option_current_candle_low=current_day_candle.get('low') if (current_day_candle and isinstance(current_day_candle, dict)) else None,
@@ -2496,23 +2588,28 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     option_previous_candle_low=previous_day_candle.get('low') if (previous_day_candle and isinstance(previous_day_candle, dict)) else None,
                     option_previous_candle_close=previous_day_candle.get('close') if (previous_day_candle and isinstance(previous_day_candle, dict)) else None,
                     option_previous_candle_time=previous_day_candle.get('time') if (previous_day_candle and isinstance(previous_day_candle, dict)) else None,
-                    # Candle size fields (calculated when stock is received from webhook)
                     candle_size_ratio=saved_candle_size_ratio,
                     candle_size_status=saved_candle_size_status,
                     qty=qty,
                     trade_date=trading_date,
                     status=status,
                     buy_price=buy_price,
-                    instrument_key=stock_instrument_key,  # Get from stock dictionary, not from variable
+                    instrument_key=stock_instrument_key,
                     stop_loss=stop_loss_price,
                     sell_price=sell_price,
-                    buy_time=buy_time,  # Will be set to triggered_datetime if trade was entered
+                    buy_time=buy_time,
                     buy_order_id=buy_order_id,
                     exit_reason=exit_reason if status == 'no_entry' else None,
                     pnl=pnl,
-                    no_entry_reason=no_entry_reason if status == 'no_entry' else None
+                    no_entry_reason=no_entry_reason if status == 'no_entry' else None,
                 )
-                db.add(db_record)
+                if db_record_reuse is not None:
+                    db_record = db_record_reuse
+                    for _k, _v in _row_fields.items():
+                        setattr(db_record, _k, _v)
+                else:
+                    db_record = IntradayStockOption(**_row_fields)
+                    db.add(db_record)
                 saved_count += 1
                 logger.info(f"   💾 Saved {stock_name} to database (status: {status})")
                 
@@ -5654,27 +5751,19 @@ async def refresh_hourly_prices(db: Session = Depends(get_db)):
                                             if ikey_chk
                                             else None
                                         )
-                                        if bro_net is not None and bro_net <= 0:
-                                            from sqlalchemy.orm.attributes import flag_modified
-
+                                        if bro_net is not None and bro_net <= 0 and not record.buy_order_id:
                                             logger.warning(
-                                                "⏰ TIME EXIT: %s broker net long=%s — skipping live SELL",
+                                                "⏰ TIME EXIT: %s broker net long=%s, no buy_order_id — keeping OPEN",
                                                 record.stock_name,
                                                 bro_net,
                                             )
-                                            record.sell_price = new_option_ltp
-                                            record.sell_time = now
-                                            record.exit_reason = "manual"
-                                            record.status = "sold"
-                                            if record.buy_price and record.qty:
-                                                record.pnl = (new_option_ltp - record.buy_price) * record.qty
-                                                flag_modified(record, "pnl")
-                                            flag_modified(record, "sell_price")
-                                            flag_modified(record, "sell_time")
-                                            flag_modified(record, "exit_reason")
-                                            flag_modified(record, "status")
-                                            exit_applied = True
                                         else:
+                                            if bro_net is not None and bro_net <= 0 and record.buy_order_id:
+                                                logger.warning(
+                                                    "⏰ TIME EXIT: %s broker net long=%s but buy_order_id set — attempting live SELL",
+                                                    record.stock_name,
+                                                    bro_net,
+                                                )
                                             live_exit_result = live_trading.place_live_upstox_exit(
                                                 instrument_key=live_instrument_key,
                                                 qty=record.qty,
