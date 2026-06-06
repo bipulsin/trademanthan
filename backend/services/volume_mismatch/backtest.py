@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, time as dtime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List
 
 import pytz
@@ -31,27 +31,13 @@ def _iter_weekdays(d0: date, d1: date) -> List[date]:
     return out
 
 
-def _filter_trading_days(
-    upstox: UpstoxService,
-    days: List[date],
-) -> List[date]:
-    out: List[date] = []
-    for d in days:
-        try:
-            dt = IST.localize(datetime.combine(d, dtime(9, 15)))
-            if upstox.is_trading_day(dt):
-                out.append(d)
-        except Exception:
-            out.append(d)
-    return out
-
-
 def run_volume_mismatch_backtest(
     from_date: date,
     to_date: date,
     *,
     gap_threshold: float = DEFAULT_GAP_THRESHOLD_PCT,
-    day_pause_sec: float = 0.15,
+    day_pause_sec: float = 1.0,
+    max_workers: int = 4,
 ) -> Dict[str, Any]:
     """Replay first-15m volume mismatch scan for each session in range."""
     if from_date > to_date:
@@ -61,7 +47,7 @@ def run_volume_mismatch_backtest(
     if not getattr(upstox, "access_token", None):
         return {"error": "Upstox token unavailable", "rows": []}
 
-    session_days = _filter_trading_days(upstox, _iter_weekdays(from_date, to_date))
+    session_days = _iter_weekdays(from_date, to_date)
     all_rows: List[Dict[str, Any]] = []
     by_date: List[Dict[str, Any]] = []
     errors: List[Dict[str, str]] = []
@@ -87,6 +73,7 @@ def run_volume_mismatch_backtest(
                 universe,
                 sd,
                 gap_threshold=gap_threshold,
+                max_workers=max_workers,
             )
             for s in signals:
                 row = dict(s)

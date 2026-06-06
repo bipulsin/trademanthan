@@ -49,7 +49,8 @@ def main() -> int:
         help="YYYY-MM-DD (default today IST calendar)",
     )
     parser.add_argument("--out", type=Path, default=None, help="Output JSON path")
-    parser.add_argument("--day-pause", type=float, default=0.15, help="Seconds between session days")
+    parser.add_argument("--day-pause", type=float, default=1.0, help="Seconds between session days")
+    parser.add_argument("--max-workers", type=int, default=4, help="Parallel Upstox candle fetches per day")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -68,6 +69,7 @@ def main() -> int:
         from_date,
         to_date,
         day_pause_sec=args.day_pause,
+        max_workers=args.max_workers,
     )
     doc = build_output_document(raw)
     with open(out_path, "w", encoding="utf-8") as f:

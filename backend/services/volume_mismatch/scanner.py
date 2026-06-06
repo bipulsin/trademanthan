@@ -34,6 +34,7 @@ def collect_volume_mismatch_signals_for_date(
     trade_date: date,
     *,
     gap_threshold: float = DEFAULT_GAP_THRESHOLD_PCT,
+    max_workers: int = 24,
 ) -> List[Dict[str, Any]]:
     """Run mismatch logic for one session (no DB write)."""
     if not universe:
@@ -43,10 +44,20 @@ def collect_volume_mismatch_signals_for_date(
     keys = [u["instrument_key"] for u in universe if u.get("instrument_key")]
 
     candles_15m = batch_fetch_candles(
-        upstox, keys, "minutes/15", days_back=35, range_end_date=trade_date
+        upstox,
+        keys,
+        "minutes/15",
+        days_back=35,
+        range_end_date=trade_date,
+        max_workers=max_workers,
     )
     candles_1d = batch_fetch_candles(
-        upstox, keys, "days/1", days_back=12, range_end_date=trade_date
+        upstox,
+        keys,
+        "days/1",
+        days_back=12,
+        range_end_date=trade_date,
+        max_workers=max_workers,
     )
 
     signals: List[Dict[str, Any]] = []
