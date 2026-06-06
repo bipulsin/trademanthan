@@ -236,11 +236,12 @@ class BacktestDailyCache:
         existing = self._bars.get(ik) or []
         cached_end = self._range_end.get(ik)
         if (
-            cached_end is not None
-            and session_date <= cached_end
+            existing
             and previous_day_close(existing, session_date) is not None
             and self._closes_before(existing, session_date) >= min_closes
         ):
+            if cached_end is None or session_date > cached_end:
+                self._range_end[ik] = session_date
             return existing, False
 
         if cached_end is not None and session_date > cached_end:
