@@ -28,23 +28,26 @@ from backend.services.volume_mismatch.universe import load_volume_mismatch_unive
 logger = logging.getLogger(__name__)
 
 
-def run_volume_mismatch_scan(
+def collect_volume_mismatch_signals_for_date(
+    upstox: UpstoxService,
+    universe: List[Dict[str, Any]],
+    trade_date: date,
     *,
-    trade_date: Optional[date] = None,
     gap_threshold: float = DEFAULT_GAP_THRESHOLD_PCT,
-) -> Dict[str, Any]:
-    t0 = time.perf_counter()
-    sd = trade_date or effective_session_date_ist_for_trend()
-    universe = load_volume_mismatch_universe()
+) -> List[Dict[str, Any]]:
+    """Run mismatch logic for one session (no DB write)."""
     if not universe:
-        return {"success": False, "error": "empty_universe", "trade_date": str(sd)}
+        return []
 
     clear_candle_cache()
-    upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
-    keys = [u["instrument_key"] for u in universe]
+    keys = [u["instrument_key"] for u in universe if u.get("instrument_key")]
 
-    candles_15m = batch_fetch_candles(upstox, keys, "minutes/15", days_back=30, range_end_date=sd)
-    candles_1d = batch_fetch_candles(upstox, keys, "days/1", days_back=10, range_end_date=sd)
+    candles_15m = batch_fetch_candles(
+        upstox, keys, "minutes/15", days_back=35, range_end_date=trade_date
+    )
+    candles_1d = batch_fetch_candles(
+        upstox, keys, "days/1", days_back=12, range_end_date=trade_date
+    )
 
     signals: List[Dict[str, Any]] = []
     for u in universe:
@@ -52,16 +55,16 @@ def run_volume_mismatch_scan(
         sym = u["symbol"]
         bars_15 = candles_15m.get(ik) or []
         bars_1d = candles_1d.get(ik) or []
-        first_bar = first_15m_bar_for_session(bars_15, sd)
+        first_bar = first_15m_bar_for_session(bars_15, trade_date)
         if not first_bar:
             continue
-        prev_close = previous_day_close(bars_1d, sd)
+        prev_close = previous_day_close(bars_1d, trade_date)
         if prev_close is None or prev_close <= 0:
             continue
 
         hist_vols = first_15m_volumes_by_session(
             bars_15,
-            before_date=sd,
+            before_date=trade_date,
             max_sessions=RELATIVE_VOLUME_LOOKBACK_SESSIONS,
         )
         rel_vol: Optional[float] = None
@@ -85,8 +88,28 @@ def run_volume_mismatch_scan(
         )
         if sig:
             row = sig.to_dict()
-            row["entry_status"] = "WAITING"
+            row["trade_date"] = trade_date.isoformat()
             signals.append(row)
+    return signals
+
+
+def run_volume_mismatch_scan(
+    *,
+    trade_date: Optional[date] = None,
+    gap_threshold: float = DEFAULT_GAP_THRESHOLD_PCT,
+) -> Dict[str, Any]:
+    t0 = time.perf_counter()
+    sd = trade_date or effective_session_date_ist_for_trend()
+    universe = load_volume_mismatch_universe()
+    if not universe:
+        return {"success": False, "error": "empty_universe", "trade_date": str(sd)}
+
+    upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+    signals = collect_volume_mismatch_signals_for_date(
+        upstox, universe, sd, gap_threshold=gap_threshold
+    )
+    for row in signals:
+        row["entry_status"] = "WAITING"
 
     db = SessionLocal()
     try:

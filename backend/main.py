@@ -31,6 +31,7 @@ import backend.routers.futures_reports as futures_reports
 import backend.routers.iron_condor as iron_condor
 import backend.routers.vajra_futures as vajra_futures
 import backend.routers.volume_mismatch_futures as volume_mismatch_futures
+import backend.routers.volume_mismatch_backtest as volume_mismatch_backtest
 import backend.routers.security_chart as security_chart
 # OLD SCHEDULERS - DISABLED - Migrated to smart_future_algo
 # from backend.services.master_stock_scheduler import start_scheduler, stop_scheduler
@@ -304,6 +305,8 @@ app.include_router(vajra_futures.router, prefix="/api")
 app.include_router(vajra_futures.router, prefix="")
 app.include_router(volume_mismatch_futures.router, prefix="/api")
 app.include_router(volume_mismatch_futures.router, prefix="")
+app.include_router(volume_mismatch_backtest.router, prefix="/api")
+app.include_router(volume_mismatch_backtest.router, prefix="")
 app.include_router(security_chart.router, prefix="/api")
 app.include_router(security_chart.router, prefix="")
 

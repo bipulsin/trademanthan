@@ -40,7 +40,10 @@
                 <div class="vmf-card">
                     <div class="vmf-head">
                         <p class="vmf-meta" id="vmfMeta">Loading…</p>
-                        <button type="button" class="vmf-refresh-btn" id="vmfRefreshBtn"><i class="fas fa-sync-alt"></i> Refresh</button>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <a href="volumemismatch-backtest.html" class="vmf-refresh-btn" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;background:transparent;border:1px solid var(--theme-border,#cbd5e1);color:var(--theme-text,#0f172a);">Backtest</a>
+                            <button type="button" class="vmf-refresh-btn" id="vmfRefreshBtn"><i class="fas fa-sync-alt"></i> Refresh</button>
+                        </div>
                     </div>
                     <p class="vmf-banner" id="vmfBanner">
                         LONG: gap down + red first 15m + buying pressure. SHORT: gap up + green first 15m + selling pressure.
