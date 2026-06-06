@@ -1,13 +1,16 @@
 # Cursor AI Assistant Rules for TradeManthan Project
 
-## EC2 SSH (persistent)
+## Production SSH (paperclip-vm)
 
-- **Key file:** `TradeM.pem` in the **workspace root** (same folder as this repo). Path: `./TradeM.pem` — **never commit** (`*.pem` is gitignored).
-- **Connection:** `ubuntu@3.6.199.247`
-- **Full detail for agents:** `.cursor/rules/ec2-ssh.mdc` (always applied).
-- **Helper script:** `./scripts/ec2-ssh.sh` or `./scripts/ec2-ssh.sh 'command'`
+- **Host:** `140.245.14.17` (SSH alias: `paperclip` in `~/.ssh/config`)
+- **Key:** `~/.ssh/paperclip_key` — never commit private keys
+- **Docker compose:** `/home/ubuntu/twcto` from [bipulsin/twcto_docker](https://github.com/bipulsin/twcto_docker)
+- **Full detail for agents:** `.cursor/rules/ec2-ssh.mdc` and `.cursor/rules/auto-push-deploy.mdc`
+- **Helper script:** `./scripts/paperclip-ssh.sh` ( `./scripts/ec2-ssh.sh` is a deprecated alias)
 
-Example: `ssh -i ./TradeM.pem ubuntu@3.6.199.247` (use `timeout` / `ConnectTimeout` per guidelines below).
+Example: `ssh paperclip` or `./scripts/paperclip-ssh.sh 'docker ps'`
+
+Retired EC2 `3.6.199.247` / `TradeM.pem` — do not use for production.
 
 ## Command Execution Guidelines
 
@@ -22,36 +25,31 @@ Example: `ssh -i ./TradeM.pem ubuntu@3.6.199.247` (use `timeout` / `ConnectTimeo
 ```bash
 # ✅ CORRECT - with timeout
 timeout 5 tail -10 /tmp/uvicorn.log
-timeout 10 ssh ... "command"
+timeout 10 ssh paperclip "command"
 timeout 3 grep pattern file.log
-
-# ❌ WRONG - no timeout
-tail -10 /tmp/uvicorn.log
-ssh ... "command"
-grep pattern file.log
 ```
 
 ### Deployment Commands
-- Use the API endpoint `/scan/deploy-backend` for deployments (fast, non-blocking)
-- If using SSH directly, always include timeout wrapper
-- Never use `tail -f` without timeout in deployment scripts
+- **App code:** push `bipulsin/trademanthan` main, then `REBUILD=1 ./scripts/trigger-paperclip-deploy.sh`
+- **Docker/compose:** push `bipulsin/twcto_docker` main, then `./scripts/trigger-paperclip-deploy.sh`
+- Do **not** use `POST /scan/deploy-backend` (EC2 systemd path; production is Docker)
 
 ### Log Checking
-- Always use timeout when checking logs via SSH
-- Prefer API endpoints for status checks when available
-- Use `timeout 5` for quick log checks, `timeout 10` for longer operations
+- `./scripts/paperclip-ssh.sh 'cd /home/ubuntu/twcto && docker compose logs --tail=50 app'`
+- Always use timeout when tailing logs via SSH
 
-## After Every Code Change (GitHub + EC2)
+## After Every Code Change (GitHub + paperclip-vm)
 
 **Unless the user explicitly says not to deploy**, after finishing edits that affect the app:
 
-1. **Commit** the changed files with a clear message: `git add … && git commit -m "…"`
-2. **Push** to GitHub: `git push origin main`
-3. **Deploy** to EC2 (pulls `origin/main` on the server + restarts backend):
+1. **Commit** the changed files with a clear message
+2. **Push** to GitHub: `git push origin main` (trademanthan)
+3. **Deploy** on paperclip-vm:
    ```bash
-   curl -s --max-time 30 -X POST "https://www.tradewithcto.com/scan/deploy-backend" -H "Content-Type: application/json"
+   REBUILD=1 ./scripts/trigger-paperclip-deploy.sh
    ```
-   Expect `{"success":true,...}` in the response.
+   Or: `./scripts/release-push-and-deploy.sh -m "message"`
+
+Verify: `curl -s https://www.tradewithcto.com/scan/health`
 
 Do **not** leave fixes only in the working tree—production is updated from Git + deploy, not from local files alone.
-

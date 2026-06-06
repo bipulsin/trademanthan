@@ -1,42 +1,51 @@
 ---
-description: EC2 SSH connection — host, user, key path (TradeManthan production)
+description: Production SSH — paperclip-vm (TradeWithCTO Docker host)
 alwaysApply: true
 ---
 
-# EC2 SSH (TradeManthan)
+# Production SSH (paperclip-vm)
 
-Use these defaults when running remote commands, deployment checks, or `ssh`/`scp` to the production server.
+Production runs on **paperclip-vm** (`140.245.14.17`) as Docker (`twcto_docker`), not the retired EC2 instance.
 
 | Setting | Value |
 |--------|--------|
-| **Host** | `3.6.199.247` |
+| **Host** | `140.245.14.17` |
+| **SSH config alias** | `paperclip` (in `~/.ssh/config`) |
 | **User** | `ubuntu` |
-| **Private key** | **`${workspaceFolder}/TradeM.pem`** (same as `/Users/bipulsahay/TradeManthan/TradeM.pem` on this machine) |
+| **Private key** | `~/.ssh/paperclip_key` |
+| **App compose** | `/home/ubuntu/twcto` ([bipulsin/twcto_docker](https://github.com/bipulsin/twcto_docker)) |
+| **Public URLs** | `https://www.tradewithcto.com`, `https://twcto.tradentical.com` |
 
 ## Commands
 
 ```bash
 # Interactive shell
-ssh -i "${workspaceFolder}/TradeM.pem" ubuntu@3.6.199.247
+ssh paperclip
+# or
+./scripts/paperclip-ssh.sh
 
-# One-off remote command (wrap remote in quotes; use timeout for long-running tails)
-ssh -i "${workspaceFolder}/TradeM.pem" -o ConnectTimeout=20 ubuntu@3.6.199.247 'hostname && uptime'
+# One-off remote command
+./scripts/paperclip-ssh.sh 'cd /home/ubuntu/twcto && docker compose ps'
 ```
 
-Or from repo root:
+## Deploy (after pushing TradeManthan to GitHub)
 
 ```bash
-ssh -i ./TradeM.pem ubuntu@3.6.199.247
-./scripts/ec2-ssh.sh 'tail -50 /tmp/deploy_backend.log'
+REBUILD=1 ./scripts/trigger-paperclip-deploy.sh
+# or commit + push + deploy:
+./scripts/release-push-and-deploy.sh -m "your message"
+```
+
+`REBUILD=1` rebuilds `app` + `nginx` images cloning latest `bipulsin/trademanthan` `main`.  
+Docker packaging / compose changes go to **bipulsin/twcto_docker** (not TradeManthan).
+
+## Logs
+
+```bash
+./scripts/paperclip-ssh.sh 'cd /home/ubuntu/twcto && docker compose logs -f --tail=50 app'
 ```
 
 ## Security
 
-- **`*.pem` is gitignored** — never commit the key or paste its contents into the repo or rules.
-- If the key path differs on another machine, set `EC2_KEY` or use `scripts/ec2-ssh.sh`.
-
-## Project paths on server
-
-- App: `/home/ubuntu/trademanthan`
-- Deploy log: `/tmp/deploy_backend.log`
-- Scan algo log: `/home/ubuntu/trademanthan/logs/smart_future_algo.log` (legacy: `scan_st1_algo.log`)
+- Never commit SSH private keys or `.env` secrets.
+- `TradeM.pem` was for the old EC2 — do not use for paperclip-vm.

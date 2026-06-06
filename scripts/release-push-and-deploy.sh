@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# Local release: push TradeManthan to GitHub main, then tell EC2 to pull and deploy.
-# GitHub never receives EC2 host/key — only git push; deploy is triggered on the server.
+# Release: push TradeManthan app code, then deploy on paperclip-vm via twcto_docker.
+#
+# Flow:
+#   1. git push bipulsin/trademanthan main  (application source)
+#   2. SSH paperclip-vm: git pull bipulsin/twcto_docker + docker compose pull/rebuild
 #
 # Usage:
 #   ./scripts/release-push-and-deploy.sh
 #   ./scripts/release-push-and-deploy.sh -m "Your commit message"
-#
-# Requires: clean commit already staged, or pass -m to commit all tracked changes (not untracked junk).
+#   REBUILD=0 ./scripts/release-push-and-deploy.sh   # pull images only (no local docker build)
 
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -41,8 +43,11 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
   exit 1
 fi
 
-echo "Pushing to origin main..."
+echo "Pushing TradeManthan (app) to origin main..."
 git push origin main
 
 echo ""
-exec "$ROOT/scripts/trigger-ec2-deploy.sh"
+echo "Deploying on paperclip-vm (twcto_docker)..."
+export REBUILD="${REBUILD:-1}"
+export TRADEMANTHAN_REF="${TRADEMANTHAN_REF:-main}"
+exec "$ROOT/scripts/trigger-paperclip-deploy.sh"

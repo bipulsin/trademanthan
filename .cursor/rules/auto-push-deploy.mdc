@@ -3,21 +3,25 @@ description: Auto push and deploy workflow after code changes
 alwaysApply: true
 ---
 
-# Auto Push + EC2 Deploy Workflow (Default Process)
+# Auto Push + Deploy (paperclip-vm / twcto_docker)
 
-**GitHub only stores code** (`bipulsin/trademanthan`, branch `main`). **Do not** put EC2 host, SSH keys, or deploy credentials in GitHub Actions secrets. EC2 pulls from GitHub when you tell the server to deploy.
+Production: **paperclip-vm** (`140.245.14.17`) running [bipulsin/twcto_docker](https://github.com/bipulsin/twcto_docker).
 
-After app-affecting changes in the local workspace `/Users/bipulsahay/TradeManthan`, unless the user says not to deploy:
+| Repo | Purpose |
+|------|---------|
+| `bipulsin/trademanthan` | Application source (FastAPI, frontend, algos) |
+| `bipulsin/twcto_docker` | Docker compose, Dockerfiles, deploy scripts, GHCR images |
 
-1. Stage and commit relevant changes with a clear message.
-2. Push to `origin main` (`git push origin main`).
-3. Trigger EC2 pull + restart (server runs `backend/scripts/deploy_backend.sh`):
-   - **Preferred:** `./scripts/trigger-ec2-deploy.sh` (POST `https://www.tradewithcto.com/scan/deploy-backend`)
+After **app-affecting** changes in `/Users/bipulsahay/TradeManthan`, unless the user says not to deploy:
+
+1. Commit and `git push origin main` on **trademanthan**.
+2. Deploy on paperclip-vm:
+   - **Preferred:** `REBUILD=1 ./scripts/trigger-paperclip-deploy.sh`
    - **Or one step:** `./scripts/release-push-and-deploy.sh -m "commit message"`
-   - **Or SSH:** `./scripts/ec2-ssh.sh 'cd /home/ubuntu/trademanthan && git pull origin main && sudo systemctl restart trademanthan-backend'` (and nginx copy if needed)
+3. Verify: `curl -s https://www.tradewithcto.com/scan/health`
 
-Verify via `GET https://www.tradewithcto.com/scan/deployment-status` or `./scripts/trigger-ec2-deploy.sh` log output.
+After **Docker/compose/nginx-in-container** changes, commit and push to **twcto_docker** `main`, then run `./scripts/trigger-paperclip-deploy.sh` (CI also publishes GHCR images on twcto_docker push).
 
-Frontend is served from the same EC2 tree as the backend; one deploy updates both.
+Do **not** use retired EC2 (`3.6.199.247`) or `POST /scan/deploy-backend` (that path targeted EC2 systemd, not Docker).
 
-If deployment fails, surface the exact failure and next remediation step.
+SSH: `./scripts/paperclip-ssh.sh` or `ssh paperclip` — see `.cursor/rules/ec2-ssh.mdc`.

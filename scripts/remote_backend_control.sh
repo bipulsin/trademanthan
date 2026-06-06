@@ -1,67 +1,32 @@
 #!/bin/bash
-# Remote Backend Control Script
-# Wraps SSH commands with timeouts to prevent hanging
-# Usage: remote_backend_control.sh [start|stop|restart|status|check]
+# Remote backend control on paperclip-vm (Docker twcto stack).
+# Usage: remote_backend_control.sh [start|stop|restart|status]
 
-set -e
+set -euo pipefail
 
 ACTION="${1:-status}"
-EC2_KEY="/Users/bipulsahay/TradeManthan/TradeM.pem"
-EC2_HOST="3.6.199.247"
-EC2_USER="ubuntu"
-# Use longer timeout for restart operations
-if [ "$ACTION" = "restart" ]; then
-    SSH_TIMEOUT=20
-else
-    SSH_TIMEOUT=10
-fi
-SCRIPT_PATH="/home/ubuntu/trademanthan/backend/scripts/backend_control.sh"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SSH_TIMEOUT=25
 
-# Function to run SSH command with timeout using background process
-run_ssh_with_timeout() {
-    local timeout=$1
-    shift
-    local ssh_cmd="$@"
-    local output_file=$(mktemp)
-    local error_file=$(mktemp)
-    
-    # Run SSH in background
-    ssh -i "$EC2_KEY" \
-        -o ConnectTimeout=5 \
-        -o ServerAliveInterval=2 \
-        -o ServerAliveCountMax=3 \
-        -o StrictHostKeyChecking=no \
-        "$EC2_USER@$EC2_HOST" "$ssh_cmd" > "$output_file" 2> "$error_file" &
-    
-    local ssh_pid=$!
-    
-    # Monitor with timeout
-    local elapsed=0
-    while [ $elapsed -lt $timeout ]; do
-        if ! kill -0 $ssh_pid 2>/dev/null; then
-            # Process finished
-            wait $ssh_pid
-            local exit_code=$?
-            cat "$output_file"
-            cat "$error_file" >&2
-            rm -f "$output_file" "$error_file"
-            return $exit_code
-        fi
-        sleep 0.5
-        elapsed=$((elapsed + 1))
-    done
-    
-    # Timeout reached
-    kill $ssh_pid 2>/dev/null || true
-    kill -9 $ssh_pid 2>/dev/null || true
-    rm -f "$output_file" "$error_file"
-    echo "ERROR: Command timed out after ${timeout}s" >&2
-    return 124
+run_paperclip() {
+  "${ROOT}/scripts/paperclip-ssh.sh" "$@"
 }
 
-# Run the action with timeout
-echo "Executing: $ACTION (timeout: ${SSH_TIMEOUT}s)"
-run_ssh_with_timeout $SSH_TIMEOUT "bash $SCRIPT_PATH $ACTION"
-
-exit $?
-
+case "$ACTION" in
+  start)
+    run_paperclip 'cd /home/ubuntu/twcto && docker compose up -d app nginx'
+    ;;
+  stop)
+    run_paperclip 'cd /home/ubuntu/twcto && docker compose stop app nginx'
+    ;;
+  restart)
+    run_paperclip 'cd /home/ubuntu/twcto && docker compose restart app nginx'
+    ;;
+  status)
+    run_paperclip 'cd /home/ubuntu/twcto && docker compose ps && curl -fsS http://127.0.0.1:8080/scan/health | head -c 300; echo'
+    ;;
+  *)
+    echo "Usage: $0 [start|stop|restart|status]" >&2
+    exit 1
+    ;;
+esac
