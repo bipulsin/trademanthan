@@ -15,9 +15,10 @@ Production: **paperclip-vm** (`140.245.14.17`) running [bipulsin/twcto_docker](h
 After **app-affecting** changes in `/Users/bipulsahay/TradeManthan`, unless the user says not to deploy:
 
 1. Commit and `git push origin main` on **trademanthan**.
-2. Deploy on paperclip-vm:
-   - **Preferred:** `REBUILD=1 ./scripts/trigger-paperclip-deploy.sh`
-   - **Or one step:** `./scripts/release-push-and-deploy.sh -m "commit message"`
+2. Rebuild multi-arch images + deploy on paperclip-vm:
+   - **Preferred:** `GITHUB_TOKEN=... ./scripts/release-push-and-deploy.sh -m "commit message"` (CI build + pull deploy)
+   - **Pull only** (after CI finished): `REBUILD=0 ./scripts/trigger-paperclip-deploy.sh`
+   - **Fallback local build:** `REBUILD=1 ./scripts/trigger-paperclip-deploy.sh`
 3. Verify: `curl -s https://www.tradewithcto.com/scan/health`
 
 After **Docker/compose/nginx-in-container** changes, commit and push to **twcto_docker** `main`, then run `./scripts/trigger-paperclip-deploy.sh` (CI also publishes GHCR images on twcto_docker push).

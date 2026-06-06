@@ -1,18 +1,17 @@
 #!/usr/bin/env bash
 # Deploy TradeWithCTO on paperclip-vm (Docker twcto stack).
-# Pulls twcto_docker from GitHub, refreshes GHCR images, optionally rebuilds app/nginx from trademanthan main.
+# Default: pull multi-arch GHCR images (fast). Use REBUILD=1 only as fallback.
 #
 # Usage:
 #   ./scripts/trigger-paperclip-deploy.sh
 #   REBUILD=1 ./scripts/trigger-paperclip-deploy.sh
-#   TRADEMANTHAN_REF=main REBUILD=1 ./scripts/trigger-paperclip-deploy.sh
 #
 # Requires: SSH access to paperclip-vm (see scripts/paperclip-ssh.sh).
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-REBUILD="${REBUILD:-1}"
+REBUILD="${REBUILD:-0}"
 TRADEMANTHAN_REF="${TRADEMANTHAN_REF:-main}"
 TWCTO_DIR="${TWCTO_DIR:-/home/ubuntu/twcto}"
 
@@ -26,12 +25,17 @@ echo "[deploy] git pull twcto_docker..."
 git fetch origin main
 git reset --hard origin/main
 
-echo "[deploy] docker compose pull (best-effort; paperclip-vm is arm64, GHCR may be amd64-only)..."
-docker compose pull || true
-
-if [[ "${REBUILD:-1}" == "1" ]]; then
-  echo "[deploy] building app + nginx (TRADEMANTHAN_REF=${TRADEMANTHAN_REF})..."
+if [[ "${REBUILD:-0}" == "1" ]]; then
+  echo "[deploy] REBUILD=1: building app + nginx locally (TRADEMANTHAN_REF=${TRADEMANTHAN_REF})..."
   TRADEMANTHAN_REF="${TRADEMANTHAN_REF:-main}" docker compose build app nginx
+else
+  echo "[deploy] pulling app + nginx from GHCR (linux/arm64)..."
+  if ! docker compose pull app nginx; then
+    echo "[deploy] pull failed — CI may still be building. Run:" >&2
+    echo "  ./scripts/wait-twcto-docker-build.sh && REBUILD=0 ./scripts/trigger-paperclip-deploy.sh" >&2
+    echo "  or REBUILD=1 ./scripts/trigger-paperclip-deploy.sh" >&2
+    exit 1
+  fi
 fi
 
 echo "[deploy] recreating app + nginx..."

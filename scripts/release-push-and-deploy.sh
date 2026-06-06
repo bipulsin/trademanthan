@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# Release: push TradeManthan app code, then deploy on paperclip-vm via twcto_docker.
+# Release: push TradeManthan, rebuild multi-arch images in CI, deploy on paperclip-vm.
 #
 # Flow:
-#   1. git push bipulsin/trademanthan main  (application source)
-#   2. SSH paperclip-vm: git pull bipulsin/twcto_docker + docker compose pull/rebuild
+#   1. git push bipulsin/trademanthan main
+#   2. repository_dispatch → bipulsin/twcto_docker CI (amd64 + arm64 GHCR)
+#   3. wait for CI (default), then pull images on paperclip-vm
 #
 # Usage:
-#   ./scripts/release-push-and-deploy.sh
-#   ./scripts/release-push-and-deploy.sh -m "Your commit message"
-#   REBUILD=0 ./scripts/release-push-and-deploy.sh   # pull images only (no local docker build)
+#   GITHUB_TOKEN=ghp_... ./scripts/release-push-and-deploy.sh -m "message"
+#   WAIT_CI=0 ./scripts/release-push-and-deploy.sh   # skip wait (deploy may fail if images stale)
+#   REBUILD=1 ./scripts/release-push-and-deploy.sh   # fallback: local build on paperclip
 
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -46,8 +47,18 @@ fi
 echo "Pushing TradeManthan (app) to origin main..."
 git push origin main
 
+REF="$(git rev-parse HEAD)"
 echo ""
-echo "Deploying on paperclip-vm (twcto_docker)..."
-export REBUILD="${REBUILD:-1}"
-export TRADEMANTHAN_REF="${TRADEMANTHAN_REF:-main}"
+echo "Triggering twcto_docker multi-arch image build for ref ${REF}..."
+"$ROOT/scripts/trigger-twcto-docker-build.sh" "$REF"
+
+if [[ "${WAIT_CI:-1}" == "1" ]]; then
+  echo ""
+  "$ROOT/scripts/wait-twcto-docker-build.sh"
+fi
+
+echo ""
+echo "Deploying on paperclip-vm (pull from GHCR)..."
+export REBUILD="${REBUILD:-0}"
+export TRADEMANTHAN_REF="${REF}"
 exec "$ROOT/scripts/trigger-paperclip-deploy.sh"

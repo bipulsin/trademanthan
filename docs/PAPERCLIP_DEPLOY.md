@@ -21,19 +21,23 @@ Requires `~/.ssh/paperclip_key` or `Host paperclip` in `~/.ssh/config`.
 
 ## Deploy after app changes (TradeManthan)
 
-```bash
-git push origin main
-REBUILD=1 ./scripts/trigger-paperclip-deploy.sh
-```
-
-Or one step:
+GHCR images are **multi-arch** (amd64 + arm64). Fast path: CI builds in GitHub, paperclip **pulls** (~1 min).
 
 ```bash
+export GITHUB_TOKEN=ghp_your_pat   # repo scope for bipulsin/*
 ./scripts/release-push-and-deploy.sh -m "your commit message"
 ```
 
-`REBUILD=1` (default) rebuilds `app` and `nginx` on paperclip-vm cloning latest `trademanthan` `main`.  
-Paperclip-vm is **arm64**; GHCR images from CI are **amd64**, so local build is required after app changes.
+Or step by step:
+
+```bash
+git push origin main
+./scripts/trigger-twcto-docker-build.sh "$(git rev-parse HEAD)"
+./scripts/wait-twcto-docker-build.sh
+REBUILD=0 ./scripts/trigger-paperclip-deploy.sh
+```
+
+Fallback if CI unavailable: `REBUILD=1 ./scripts/trigger-paperclip-deploy.sh` (~4 min local build on paperclip).
 
 ## Deploy after Docker/compose changes (twcto_docker)
 
