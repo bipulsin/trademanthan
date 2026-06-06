@@ -11,65 +11,83 @@
     <link rel="stylesheet" href="settings.css">
     <link rel="stylesheet" href="left-menu.css?v=3.24">
     <link rel="stylesheet" href="theme.css?v=1.3">
-    <link rel="stylesheet" href="volume-mismatch-futures.css?v=1">
+    <link rel="stylesheet" href="volume-mismatch-futures.css?v=2">
 </head>
-<body>
-    <div id="leftMenuContainer"></div>
-    <main class="main-content" id="mainContent">
-        <div class="vmf-wrap">
-            <div class="vmf-card">
-                <div class="vmf-head">
-                    <div>
-                        <h1><i class="fas fa-chart-bar" style="color:#7c3aed;margin-right:8px;"></i>Volume Mismatch Futures</h1>
-                        <p class="vmf-meta" id="vmfMeta">Loading…</p>
-                    </div>
-                    <button type="button" class="vmf-refresh-btn" id="vmfRefreshBtn"><i class="fas fa-sync-alt"></i> Refresh</button>
-                </div>
-                <p class="vmf-banner" id="vmfBanner">
-                    First 15m candle (09:15–09:30) volume mismatch scan runs at 09:30:30 IST. Entry monitored every 5 minutes until close.
-                </p>
-                <div class="vmf-toolbar">
-                    <input type="search" class="vmf-search" id="vmfSearch" placeholder="Search symbol…" autocomplete="off">
-                    <button type="button" class="vmf-filter-btn active" data-filter="ALL">All</button>
-                    <button type="button" class="vmf-filter-btn" data-filter="LONG">LONG</button>
-                    <button type="button" class="vmf-filter-btn" data-filter="SHORT">SHORT</button>
-                    <button type="button" class="vmf-filter-btn" data-filter="READY">READY</button>
-                    <button type="button" class="vmf-filter-btn" data-filter="TRIGGERED">TRIGGERED</button>
-                    <button type="button" class="vmf-filter-btn" data-filter="SCORE60">Score &gt; 60</button>
-                    <button type="button" class="vmf-filter-btn" data-filter="SCORE80">Score &gt; 80</button>
-                </div>
-                <div class="vmf-table-wrap">
-                    <table class="vmf-table" id="vmfTable">
-                        <thead>
-                            <tr>
-                                <th>Symbol</th>
-                                <th>Direction</th>
-                                <th class="num">Gap %</th>
-                                <th class="num">1st 15m Vol</th>
-                                <th class="num">Rel Vol</th>
-                                <th class="num">Net Vol</th>
-                                <th class="num">Score</th>
-                                <th class="num">Pref Entry</th>
-                                <th class="num">Stop Loss</th>
-                                <th class="num">T1</th>
-                                <th class="num">T2</th>
-                                <th class="num">LTP</th>
-                                <th class="num">VWAP</th>
-                                <th>Status</th>
-                                <th>Updated</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody id="vmfTbody">
-                            <tr><td colspan="16" class="vmf-empty">Loading signals…</td></tr>
-                        </tbody>
-                    </table>
+<body class="theme-page">
+    <div class="mobile-title-bar">
+        <button class="mobile-menu-toggle" id="mobileMenuToggle" type="button" aria-label="Menu"><i class="fas fa-bars"></i></button>
+        <div class="mobile-title-content">
+            <img src="tradewithcto-logo.png" alt="TradeWithCTO" class="mobile-logo">
+            <i class="fas fa-chart-bar" style="font-size:1.5rem;color:#7c3aed;" aria-hidden="true"></i>
+            <h1 class="mobile-title">Volume Mismatch Futures</h1>
+        </div>
+    </div>
+    <div class="app-container app-with-left-menu">
+        <div id="left-menu-container"></div>
+        <main class="right-panel main-content-area">
+            <div class="settings-header">
+                <div class="settings-title-section">
+                    <h1 class="settings-title">
+                        <i class="fas fa-chart-bar" style="margin-right:10px;color:#7c3aed;" aria-hidden="true"></i>
+                        Volume Mismatch Futures
+                    </h1>
+                    <p class="settings-subtitle">
+                        Opening-gap volume mismatch on first 15m candle (09:15–09:30). Scan at 09:30:30 IST; entry monitored every 5 minutes until close.
+                    </p>
                 </div>
             </div>
-        </div>
-    </main>
+            <div class="settings-content vmf-wrap">
+                <div class="vmf-card">
+                    <div class="vmf-head">
+                        <p class="vmf-meta" id="vmfMeta">Loading…</p>
+                        <button type="button" class="vmf-refresh-btn" id="vmfRefreshBtn"><i class="fas fa-sync-alt"></i> Refresh</button>
+                    </div>
+                    <p class="vmf-banner" id="vmfBanner">
+                        LONG: gap down + red first 15m + buying pressure. SHORT: gap up + green first 15m + selling pressure.
+                    </p>
+                    <div class="vmf-toolbar">
+                        <input type="search" class="vmf-search" id="vmfSearch" placeholder="Search symbol…" autocomplete="off">
+                        <button type="button" class="vmf-filter-btn active" data-filter="ALL">All</button>
+                        <button type="button" class="vmf-filter-btn" data-filter="LONG">LONG</button>
+                        <button type="button" class="vmf-filter-btn" data-filter="SHORT">SHORT</button>
+                        <button type="button" class="vmf-filter-btn" data-filter="READY">READY</button>
+                        <button type="button" class="vmf-filter-btn" data-filter="TRIGGERED">TRIGGERED</button>
+                        <button type="button" class="vmf-filter-btn" data-filter="SCORE60">Score &gt; 60</button>
+                        <button type="button" class="vmf-filter-btn" data-filter="SCORE80">Score &gt; 80</button>
+                    </div>
+                    <div class="vmf-table-wrap">
+                        <table class="vmf-table" id="vmfTable">
+                            <thead>
+                                <tr>
+                                    <th>Symbol</th>
+                                    <th>Direction</th>
+                                    <th class="num">Gap %</th>
+                                    <th class="num">1st 15m Vol</th>
+                                    <th class="num">Rel Vol</th>
+                                    <th class="num">Net Vol</th>
+                                    <th class="num">Score</th>
+                                    <th class="num">Pref Entry</th>
+                                    <th class="num">Stop Loss</th>
+                                    <th class="num">T1</th>
+                                    <th class="num">T2</th>
+                                    <th class="num">LTP</th>
+                                    <th class="num">VWAP</th>
+                                    <th>Status</th>
+                                    <th>Updated</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="vmfTbody">
+                                <tr><td colspan="16" class="vmf-empty">Loading signals…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
     <script src="left-menu.js?v=3.25"></script>
     <script src="notify-trade-channel.js?v=2"></script>
-    <script src="volumemismatchfutures.js?v=1"></script>
+    <script src="volumemismatchfutures.js?v=2"></script>
 </body>
 </html>
