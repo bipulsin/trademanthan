@@ -1,5 +1,5 @@
 """
-Public read-only API for Volume Mismatch Futures backtest artifact.
+Public read-only API for Gap + Bollinger Band Futures backtest artifact.
 
 No authentication — page at ``/volumemismatch-backtest.html``.
 """
@@ -58,7 +58,7 @@ def get_volume_mismatch_backtest_data() -> Dict[str, Any]:
         raise HTTPException(
             status_code=503,
             detail=(
-                "Volume Mismatch backtest artifact not found. Run "
+                "Gap + BB backtest artifact not found. Run "
                 "`python3 backend/scripts/run_volume_mismatch_backtest.py` "
                 "to generate it."
             ),

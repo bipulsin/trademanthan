@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Run Volume Mismatch Futures backtest and write public JSON artifact.
+Run Gap + Bollinger Band Futures backtest and write public JSON artifact.
 
 Usage::
 
@@ -9,7 +9,7 @@ Usage::
         --from-date 2026-05-01 --to-date 2026-06-06
 
 Artifact: ``volume_mismatch_backtest.json`` under ``data/`` (served at
-``/volume-mismatch-backtest/data``).
+``/volume-mismatch-backtest/data``). Live Volume Mismatch scanner is unchanged.
 """
 from __future__ import annotations
 
@@ -69,7 +69,7 @@ def main() -> int:
     out_path = args.out or default_out_path()
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    logging.info("VM backtest %s .. %s -> %s", from_date, to_date, out_path)
+    logging.info("Gap+BB backtest %s .. %s -> %s", from_date, to_date, out_path)
     raw = run_volume_mismatch_backtest(
         from_date,
         to_date,

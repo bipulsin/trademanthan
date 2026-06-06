@@ -1,4 +1,4 @@
-"""Volume Mismatch Futures historical backtest — May 2026 onward."""
+"""Gap + Bollinger Band Futures backtest — May 2026 onward (backtest path only)."""
 from __future__ import annotations
 
 import json
@@ -11,16 +11,19 @@ import pytz
 
 from backend.config import settings
 from backend.services.upstox_service import UpstoxService
+from backend.services.volume_mismatch.backtest_signals import collect_gap_bb_signals_for_date
 from backend.services.volume_mismatch.backtest_universe import (
     load_volume_mismatch_universe_for_session,
 )
-from backend.services.volume_mismatch.constants import DEFAULT_GAP_THRESHOLD_PCT
-from backend.services.volume_mismatch.scanner import collect_volume_mismatch_signals_for_date
 
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
 
 BACKTEST_DEFAULT_FROM = date(2026, 5, 1)
+SIGNAL_CRITERIA = (
+    "LONG: gap down (open < prev close) + first 15m close below lower BB (20,2 daily). "
+    "SHORT: gap up (open > prev close) + first 15m close above upper BB."
+)
 
 
 def _iter_weekdays(d0: date, d1: date) -> List[date]:
@@ -38,7 +41,6 @@ def _write_incremental_artifact(
     *,
     from_date: date,
     to_date: date,
-    gap_threshold: float,
     all_rows: List[Dict[str, Any]],
     by_date: List[Dict[str, Any]],
     errors: List[Dict[str, str]],
@@ -49,11 +51,11 @@ def _write_incremental_artifact(
     long_total = sum(1 for r in all_rows if r.get("direction") == "LONG")
     short_total = sum(1 for r in all_rows if r.get("direction") == "SHORT")
     partial = {
-        "algo": "volume_mismatch_futures",
+        "algo": "gap_bb_futures_backtest",
+        "signal_criteria": SIGNAL_CRITERIA,
         "generated_at": datetime.now(IST).isoformat(),
         "from_date": from_date.isoformat(),
         "to_date": to_date.isoformat(),
-        "gap_threshold_pct": gap_threshold,
         "scan_time_ist": "09:30:30",
         "partial": True,
         "summary": {
@@ -79,12 +81,11 @@ def run_volume_mismatch_backtest(
     from_date: date,
     to_date: date,
     *,
-    gap_threshold: float = DEFAULT_GAP_THRESHOLD_PCT,
     day_pause_sec: float = 1.0,
     max_workers: int = 4,
     out_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
-    """Replay first-15m volume mismatch scan for each session in range."""
+    """Replay gap + BB first-15m scan for each session in range."""
     if from_date > to_date:
         return {"error": "from_date must be <= to_date", "rows": []}
 
@@ -113,11 +114,10 @@ def run_volume_mismatch_backtest(
                     }
                 )
                 continue
-            signals = collect_volume_mismatch_signals_for_date(
+            signals = collect_gap_bb_signals_for_date(
                 upstox,
                 universe,
                 sd,
-                gap_threshold=gap_threshold,
                 max_workers=max_workers,
             )
             for s in signals:
@@ -137,7 +137,7 @@ def run_volume_mismatch_backtest(
                 }
             )
             logger.info(
-                "VM backtest %s: %s signals (L=%s S=%s) universe=%s",
+                "Gap+BB backtest %s: %s signals (L=%s S=%s) universe=%s",
                 sd,
                 len(signals),
                 long_n,
@@ -148,7 +148,6 @@ def run_volume_mismatch_backtest(
                 out_path,
                 from_date=from_date,
                 to_date=to_date,
-                gap_threshold=gap_threshold,
                 all_rows=all_rows,
                 by_date=by_date,
                 errors=errors,
@@ -158,13 +157,12 @@ def run_volume_mismatch_backtest(
 
                 time.sleep(day_pause_sec)
         except Exception as e:
-            logger.exception("VM backtest day %s failed: %s", sd, e)
+            logger.exception("Gap+BB backtest day %s failed: %s", sd, e)
             errors.append({"trade_date": sd.isoformat(), "error": str(e)})
             _write_incremental_artifact(
                 out_path,
                 from_date=from_date,
                 to_date=to_date,
-                gap_threshold=gap_threshold,
                 all_rows=all_rows,
                 by_date=by_date,
                 errors=errors,
@@ -173,7 +171,6 @@ def run_volume_mismatch_backtest(
     all_rows.sort(
         key=lambda r: (
             str(r.get("trade_date") or ""),
-            -(float(r.get("score") or 0)),
             str(r.get("symbol") or ""),
         ),
         reverse=True,
@@ -185,11 +182,11 @@ def run_volume_mismatch_backtest(
     short_total = sum(1 for r in all_rows if r.get("direction") == "SHORT")
 
     result = {
-        "algo": "volume_mismatch_futures",
+        "algo": "gap_bb_futures_backtest",
+        "signal_criteria": SIGNAL_CRITERIA,
         "generated_at": datetime.now(IST).isoformat(),
         "from_date": from_date.isoformat(),
         "to_date": to_date.isoformat(),
-        "gap_threshold_pct": gap_threshold,
         "scan_time_ist": "09:30:30",
         "partial": False,
         "summary": {
@@ -216,10 +213,10 @@ def build_output_document(result: Dict[str, Any]) -> Dict[str, Any]:
     """Stable public JSON shape for the backtest page."""
     return {
         "algo": result.get("algo"),
+        "signal_criteria": result.get("signal_criteria"),
         "generated_at": result.get("generated_at"),
         "from_date": result.get("from_date"),
         "to_date": result.get("to_date"),
-        "gap_threshold_pct": result.get("gap_threshold_pct"),
         "scan_time_ist": result.get("scan_time_ist"),
         "partial": result.get("partial"),
         "summary": result.get("summary") or {},

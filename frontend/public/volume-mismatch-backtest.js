@@ -1,11 +1,12 @@
 /**
- * Public Volume Mismatch Futures backtest viewer.
+ * Public Gap + Bollinger Band Futures backtest viewer.
  * No login required — /volumemismatch-backtest.html
  */
 (function () {
     'use strict';
 
     const API_PATHS = ['/volume-mismatch-backtest/data', '/api/volume-mismatch-backtest/data'];
+    const COL_COUNT = 12;
 
     const state = {
         rows: [],
@@ -64,7 +65,6 @@
         const to = document.getElementById('vmbTo')?.value || '';
         const dir = (document.getElementById('vmbDir')?.value || '').toUpperCase();
         const symQ = (document.getElementById('vmbSymbol')?.value || '').trim().toUpperCase();
-        const minScore = Number(document.getElementById('vmbMinScore')?.value);
         let out = rows.slice();
         if (from) out = out.filter(function (r) { return String(r.trade_date) >= from; });
         if (to) out = out.filter(function (r) { return String(r.trade_date) <= to; });
@@ -73,9 +73,6 @@
             out = out.filter(function (r) {
                 return String(r.symbol || '').toUpperCase().indexOf(symQ) >= 0;
             });
-        }
-        if (Number.isFinite(minScore) && minScore > 0) {
-            out = out.filter(function (r) { return Number(r.score) >= minScore; });
         }
         const sk = state.sort.key;
         const sd = state.sort.dir === 'asc' ? 1 : -1;
@@ -98,7 +95,7 @@
         if (countEl) countEl.textContent = filtered.length + ' rows';
         if (!tbody) return;
         if (!filtered.length) {
-            tbody.innerHTML = '<tr><td colspan="11" class="vmb-empty">No rows match filters.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="' + COL_COUNT + '" class="vmb-empty">No rows match filters.</td></tr>';
             return;
         }
         tbody.innerHTML = filtered.map(function (r) {
@@ -110,12 +107,13 @@
                 '<td><strong>' + escapeHtml(r.symbol || '—') + '</strong></td>' +
                 '<td><span class="vmb-pill ' + pillCls + '">' + escapeHtml(dir) + '</span></td>' +
                 '<td class="num">' + escapeHtml(fmtPct(r.gap_percent)) + '</td>' +
-                '<td class="num">' + escapeHtml(fmtNum(r.score, 1)) + '</td>' +
-                '<td class="num">' + escapeHtml(fmtNum(r.relative_volume, 2)) + '</td>' +
-                '<td class="num">' + escapeHtml(fmtNum(r.net_volume, 0)) + '</td>' +
-                '<td class="num">' + escapeHtml(fmtNum(r.first_15m_volume, 0)) + '</td>' +
-                '<td class="num">' + escapeHtml(fmtNum(r.preferred_entry || r.entry_price)) + '</td>' +
-                '<td class="num">' + escapeHtml(fmtNum(r.stop_loss)) + '</td>' +
+                '<td class="num">' + escapeHtml(fmtNum(r.previous_close)) + '</td>' +
+                '<td class="num">' + escapeHtml(fmtNum(r.first_15m_open)) + '</td>' +
+                '<td class="num">' + escapeHtml(fmtNum(r.first_15m_high)) + '</td>' +
+                '<td class="num">' + escapeHtml(fmtNum(r.first_15m_low)) + '</td>' +
+                '<td class="num">' + escapeHtml(fmtNum(r.first_15m_close)) + '</td>' +
+                '<td class="num">' + escapeHtml(fmtNum(r.bb_upper)) + '</td>' +
+                '<td class="num">' + escapeHtml(fmtNum(r.bb_lower)) + '</td>' +
                 '<td>' + escapeHtml(r.future_symbol || '—') + '</td>' +
                 '</tr>'
             );
@@ -138,10 +136,11 @@
         const foot = document.getElementById('vmbFooter');
         if (foot) {
             const partialNote = doc.partial ? ' · Run in progress (partial results)' : '';
+            const criteria = doc.signal_criteria ? ' · ' + doc.signal_criteria : '';
             foot.textContent =
                 'Generated: ' + (doc.generated_at || '—') +
-                ' · Gap threshold: ' + (doc.gap_threshold_pct != null ? doc.gap_threshold_pct + '%' : '—') +
                 ' · Scan: first 15m after open (' + (doc.scan_time_ist || '09:30:30') + ' IST)' +
+                criteria +
                 partialNote;
         }
         const err = document.getElementById('vmbErr');
@@ -174,7 +173,7 @@
     }
 
     function bindFilters() {
-        ['vmbFrom', 'vmbTo', 'vmbDir', 'vmbSymbol', 'vmbMinScore'].forEach(function (id) {
+        ['vmbFrom', 'vmbTo', 'vmbDir', 'vmbSymbol'].forEach(function (id) {
             const el = document.getElementById(id);
             if (el) el.addEventListener('input', function () { renderTable(state.rows); });
             if (el && el.tagName === 'SELECT') el.addEventListener('change', function () { renderTable(state.rows); });
@@ -213,7 +212,7 @@
                 }
                 const tbody = document.getElementById('vmbTbody');
                 if (tbody) {
-                    tbody.innerHTML = '<tr><td colspan="11" class="vmb-empty">Backtest data unavailable.</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="' + COL_COUNT + '" class="vmb-empty">Backtest data unavailable.</td></tr>';
                 }
             });
     });

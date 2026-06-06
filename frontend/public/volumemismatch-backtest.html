@@ -4,21 +4,22 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-    <title>Volume Mismatch Futures Backtest | TradeWithCTO</title>
+    <title>Gap + Bollinger Band Futures Backtest | TradeWithCTO</title>
     <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="theme.css?v=1.3">
-    <link rel="stylesheet" href="volume-mismatch-backtest.css?v=1">
+    <link rel="stylesheet" href="volume-mismatch-backtest.css?v=2">
 </head>
 <body class="theme-page" data-theme="dark">
     <div class="vmb-wrap">
         <header class="vmb-header">
             <div>
-                <h1><i class="fas fa-chart-bar" style="color:#7c3aed;"></i> Volume Mismatch Futures Backtest</h1>
+                <h1><i class="fas fa-chart-bar" style="color:#7c3aed;"></i> Gap + Bollinger Band Futures Backtest</h1>
                 <p class="vmb-lede">
-                    Historical replay of the first 15-minute candle mismatch scan (09:15–09:30 IST) on
-                    <strong>arbitrage_master</strong> stock futures. Each row is a symbol that qualified
-                    on that session date.
+                    Historical replay of the first 15-minute candle (09:15–09:30 IST) on
+                    <strong>arbitrage_master</strong> stock futures.
+                    <strong>LONG</strong>: gap down vs prior close and close below lower BB (20,2 daily).
+                    <strong>SHORT</strong>: gap up and close above upper BB.
                 </p>
             </div>
             <div class="vmb-header-actions">
@@ -49,7 +50,6 @@
                 </select>
             </label>
             <label>Symbol <input type="search" id="vmbSymbol" placeholder="e.g. RELIANCE"></label>
-            <label>Min score <input type="number" id="vmbMinScore" min="0" max="100" step="1" placeholder="0"></label>
             <span class="vmb-count" id="vmbCount">—</span>
         </div>
 
@@ -61,23 +61,24 @@
                         <th data-sort="symbol">Symbol</th>
                         <th data-sort="direction">Dir</th>
                         <th class="num" data-sort="gap_percent">Gap %</th>
-                        <th class="num" data-sort="score">Score</th>
-                        <th class="num" data-sort="relative_volume">Rel Vol</th>
-                        <th class="num" data-sort="net_volume">Net Vol</th>
-                        <th class="num" data-sort="first_15m_volume">1st 15m Vol</th>
-                        <th class="num" data-sort="preferred_entry">Pref Entry</th>
-                        <th class="num" data-sort="stop_loss">SL</th>
+                        <th class="num" data-sort="previous_close">Prev Close</th>
+                        <th class="num" data-sort="first_15m_open">1st 15m O</th>
+                        <th class="num" data-sort="first_15m_high">H</th>
+                        <th class="num" data-sort="first_15m_low">L</th>
+                        <th class="num" data-sort="first_15m_close">C</th>
+                        <th class="num" data-sort="bb_upper">BB Upper</th>
+                        <th class="num" data-sort="bb_lower">BB Lower</th>
                         <th data-sort="future_symbol">Future</th>
                     </tr>
                 </thead>
                 <tbody id="vmbTbody">
-                    <tr><td colspan="11" class="vmb-empty">Loading backtest…</td></tr>
+                    <tr><td colspan="12" class="vmb-empty">Loading backtest…</td></tr>
                 </tbody>
             </table>
         </div>
 
         <p class="vmb-footer" id="vmbFooter"></p>
     </div>
-    <script src="volume-mismatch-backtest.js?v=1"></script>
+    <script src="volume-mismatch-backtest.js?v=2"></script>
 </body>
 </html>
