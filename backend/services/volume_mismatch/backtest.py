@@ -10,11 +10,13 @@ from typing import Any, Dict, List, Optional
 import pytz
 
 from backend.config import settings
+from backend.services.market_holiday import refresh_holiday_dates_from_db
 from backend.services.upstox_service import UpstoxService
 from backend.services.volume_mismatch.backtest_signals import collect_gap_bb_signals_for_date
 from backend.services.volume_mismatch.backtest_universe import (
     load_volume_mismatch_universe_for_session,
 )
+from backend.services.volume_mismatch.candles import BacktestDailyCache
 
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
@@ -26,11 +28,30 @@ SIGNAL_CRITERIA = (
 )
 
 
-def _iter_weekdays(d0: date, d1: date) -> List[date]:
+def _load_holiday_dates(
+    upstox: UpstoxService,
+    from_date: date,
+    to_date: date,
+) -> set[date]:
+    """NSE holidays for the backtest range — DB first, Upstox API fallback."""
+    holidays = refresh_holiday_dates_from_db()
+    if holidays:
+        return holidays
+    out: set[date] = set()
+    for year in range(from_date.year, to_date.year + 1):
+        for dstr in upstox.get_market_holidays(year) or []:
+            try:
+                out.add(date.fromisoformat(str(dstr)[:10]))
+            except ValueError:
+                continue
+    return out
+
+
+def _iter_trading_days(d0: date, d1: date, holiday_dates: set[date]) -> List[date]:
     out: List[date] = []
     d = d0
     while d <= d1:
-        if d.weekday() < 5:
+        if d.weekday() < 5 and d not in holiday_dates:
             out.append(d)
         d += timedelta(days=1)
     return out
@@ -81,7 +102,7 @@ def run_volume_mismatch_backtest(
     from_date: date,
     to_date: date,
     *,
-    day_pause_sec: float = 1.0,
+    day_pause_sec: float = 0.5,
     max_workers: int = 4,
     out_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
@@ -93,13 +114,31 @@ def run_volume_mismatch_backtest(
     if not getattr(upstox, "access_token", None):
         return {"error": "Upstox token unavailable", "rows": []}
 
-    session_days = _iter_weekdays(from_date, to_date)
+    holiday_dates = _load_holiday_dates(upstox, from_date, to_date)
+    session_days = _iter_trading_days(from_date, to_date, holiday_dates)
+    holidays_in_range = sum(
+        1
+        for d in (from_date + timedelta(days=i) for i in range((to_date - from_date).days + 1))
+        if d.weekday() < 5 and d in holiday_dates
+    )
+    logger.info(
+        "Gap+BB backtest range %s..%s: %s trading days (%s NSE holidays skipped)",
+        from_date,
+        to_date,
+        len(session_days),
+        holidays_in_range,
+    )
+
+    daily_cache = BacktestDailyCache()
     all_rows: List[Dict[str, Any]] = []
     by_date: List[Dict[str, Any]] = []
     errors: List[Dict[str, str]] = []
 
     for sd in session_days:
         try:
+            import time as _time
+
+            day_t0 = _time.monotonic()
             universe = load_volume_mismatch_universe_for_session(sd)
             if not universe:
                 by_date.append(
@@ -114,11 +153,12 @@ def run_volume_mismatch_backtest(
                     }
                 )
                 continue
-            signals = collect_gap_bb_signals_for_date(
+            signals, day_stats = collect_gap_bb_signals_for_date(
                 upstox,
                 universe,
                 sd,
                 max_workers=max_workers,
+                daily_cache=daily_cache,
             )
             for s in signals:
                 row = dict(s)
@@ -126,6 +166,7 @@ def run_volume_mismatch_backtest(
                 all_rows.append(row)
             long_n = sum(1 for s in signals if s.get("direction") == "LONG")
             short_n = sum(1 for s in signals if s.get("direction") == "SHORT")
+            day_elapsed = round(_time.monotonic() - day_t0, 2)
             by_date.append(
                 {
                     "trade_date": sd.isoformat(),
@@ -134,15 +175,22 @@ def run_volume_mismatch_backtest(
                     "short_count": short_n,
                     "universe_count": len(universe),
                     "signals": signals,
+                    "timing": {**day_stats, "total_sec": day_elapsed},
                 }
             )
             logger.info(
-                "Gap+BB backtest %s: %s signals (L=%s S=%s) universe=%s",
+                "Gap+BB backtest %s: %s signals (L=%s S=%s) universe=%s "
+                "in %.1fs (m15=%s daily=%s gaps=%s bb=%s)",
                 sd,
                 len(signals),
                 long_n,
                 short_n,
                 len(universe),
+                day_elapsed,
+                day_stats.get("m15_api"),
+                day_stats.get("daily_api"),
+                day_stats.get("gaps"),
+                day_stats.get("bb_evals"),
             )
             _write_incremental_artifact(
                 out_path,

@@ -49,7 +49,7 @@ def main() -> int:
         help="YYYY-MM-DD (default today IST calendar)",
     )
     parser.add_argument("--out", type=Path, default=None, help="Output JSON path")
-    parser.add_argument("--day-pause", type=float, default=1.0, help="Seconds between session days")
+    parser.add_argument("--day-pause", type=float, default=0.5, help="Seconds between session days")
     parser.add_argument(
         "--max-workers",
         type=int,

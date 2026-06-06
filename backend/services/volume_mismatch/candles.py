@@ -140,6 +140,153 @@ def first_15m_volumes_by_session(
     return ordered[:max_sessions]
 
 
+# Backtest: daily history for prev close + BB (20,2 needs ~20 sessions + holiday buffer).
+BB_DAILY_DAYS_BACK = 35
+FIRST_15M_DAYS_BACK = 1
+
+
+def fetch_first_15m_bar_for_session(
+    upstox: Any,
+    instrument_key: str,
+    session_date: date,
+) -> Optional[Dict[str, Any]]:
+    """Minimal 15m fetch: one session day only (09:15 bar for ``session_date``)."""
+    ik = (instrument_key or "").strip()
+    if not ik:
+        return None
+    try:
+        raw = upstox.get_historical_candles_by_instrument_key(
+            ik,
+            interval="minutes/15",
+            days_back=FIRST_15M_DAYS_BACK,
+            range_end_date=session_date,
+        )
+    except Exception as e:
+        logger.debug("VM first 15m %s %s: %s", ik, session_date, e)
+        return None
+    return first_15m_bar_for_session(raw or [], session_date)
+
+
+def _daily_candle_date(candle: Dict[str, Any]) -> Optional[date]:
+    ts = _parse_ts(candle.get("timestamp"))
+    return ts.astimezone(IST).date() if ts is not None else None
+
+
+def _merge_daily_candles(
+    existing: Sequence[Dict[str, Any]],
+    fresh: Sequence[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    by_date: Dict[date, Dict[str, Any]] = {}
+    for c in list(existing) + list(fresh):
+        d = _daily_candle_date(c)
+        if d is not None:
+            by_date[d] = c
+    return [by_date[d] for d in sorted(by_date)]
+
+
+class BacktestDailyCache:
+    """In-memory daily series per instrument — reused across backtest session days."""
+
+    def __init__(self) -> None:
+        self._bars: Dict[str, List[Dict[str, Any]]] = {}
+        self._range_end: Dict[str, date] = {}
+
+    def _closes_before(self, bars: Sequence[Dict[str, Any]], session_date: date) -> int:
+        n = 0
+        for c in bars:
+            d = _daily_candle_date(c)
+            if d is None or d >= session_date:
+                continue
+            try:
+                cl = float(c.get("close") or 0)
+            except (TypeError, ValueError):
+                continue
+            if cl > 0:
+                n += 1
+        return n
+
+    def _ensure(
+        self,
+        upstox: Any,
+        instrument_key: str,
+        session_date: date,
+        *,
+        min_closes: int,
+    ) -> tuple[List[Dict[str, Any]], bool]:
+        """Return (daily bars, True if an Upstox fetch was performed)."""
+        ik = (instrument_key or "").strip()
+        if not ik:
+            return [], False
+        existing = self._bars.get(ik) or []
+        cached_end = self._range_end.get(ik)
+        if (
+            cached_end is not None
+            and session_date <= cached_end
+            and previous_day_close(existing, session_date) is not None
+            and self._closes_before(existing, session_date) >= min_closes
+        ):
+            return existing, False
+
+        if cached_end is not None and session_date > cached_end:
+            gap_days = (session_date - cached_end).days
+            days_back = min(max(gap_days + 5, 5), BB_DAILY_DAYS_BACK)
+        else:
+            days_back = BB_DAILY_DAYS_BACK
+
+        try:
+            fresh = upstox.get_historical_candles_by_instrument_key(
+                ik,
+                interval="days/1",
+                days_back=days_back,
+                range_end_date=session_date,
+            )
+        except Exception as e:
+            logger.debug("VM daily cache %s %s: %s", ik, session_date, e)
+            fresh = []
+        merged = _merge_daily_candles(existing, fresh or [])
+        self._bars[ik] = merged
+        self._range_end[ik] = session_date
+        if (
+            previous_day_close(merged, session_date) is not None
+            and self._closes_before(merged, session_date) >= min_closes
+        ):
+            return merged, True
+        if days_back >= BB_DAILY_DAYS_BACK:
+            return merged, True
+        try:
+            fresh = upstox.get_historical_candles_by_instrument_key(
+                ik,
+                interval="days/1",
+                days_back=BB_DAILY_DAYS_BACK,
+                range_end_date=session_date,
+            )
+        except Exception as e:
+            logger.debug("VM daily cache retry %s %s: %s", ik, session_date, e)
+            fresh = []
+        merged = _merge_daily_candles(merged, fresh or [])
+        self._bars[ik] = merged
+        return merged, True
+
+    def previous_close(
+        self,
+        upstox: Any,
+        instrument_key: str,
+        session_date: date,
+    ) -> tuple[Optional[float], bool]:
+        bars, fetched = self._ensure(upstox, instrument_key, session_date, min_closes=1)
+        return previous_day_close(bars, session_date), fetched
+
+    def daily_bars_for_bb(
+        self,
+        upstox: Any,
+        instrument_key: str,
+        session_date: date,
+        *,
+        min_closes: int = 20,
+    ) -> tuple[List[Dict[str, Any]], bool]:
+        return self._ensure(upstox, instrument_key, session_date, min_closes=min_closes)
+
+
 def previous_day_close(
     daily_candles: Sequence[Dict[str, Any]],
     session_date: date,

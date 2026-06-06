@@ -2,25 +2,19 @@
 from __future__ import annotations
 
 import logging
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pandas as pd
 import pandas_ta as ta
 
-from backend.services.upstox_service import UpstoxService
 from backend.services.upstox_service import _parse_ts_to_aware_ist
 from backend.services.volume_mismatch.candles import (
-    batch_fetch_candles,
-    clear_candle_cache,
-    first_15m_bar_for_session,
-    previous_day_close,
+    BacktestDailyCache,
+    fetch_first_15m_bar_for_session,
 )
-
-
-def _candle_date(ts: Any) -> Optional[date]:
-    dt = _parse_ts_to_aware_ist(ts)
-    return dt.date() if dt is not None else None
 from backend.services.volume_mismatch.signal_engine import compute_gap_percent
 
 logger = logging.getLogger(__name__)
@@ -28,11 +22,14 @@ logger = logging.getLogger(__name__)
 # Standard daily BB: 20-period SMA ± 2σ on closes completed before signal session.
 BB_LENGTH = 20
 BB_STD_DEV = 2.0
-DAILY_DAYS_BACK = 60
-M15_DAYS_BACK = 35
 
 # Band comparison uses the first 15m bar close (09:15–09:30 IST), not open.
 BB_COMPARE_FIELD = "close"
+
+
+def _candle_date(ts: Any) -> Optional[date]:
+    dt = _parse_ts_to_aware_ist(ts)
+    return dt.date() if dt is not None else None
 
 
 def _f(v: Any, default: float = 0.0) -> float:
@@ -152,63 +149,114 @@ def evaluate_gap_bb_signal(
     }
 
 
+def _scan_one_symbol(
+    upstox: Any,
+    u: Dict[str, Any],
+    trade_date: date,
+    daily_cache: BacktestDailyCache,
+) -> Tuple[Optional[Dict[str, Any]], Dict[str, int]]:
+    """Returns (signal_or_none, api_call_counts)."""
+    stats = {"daily": 0, "m15": 0, "gap": 0, "bb": 0}
+    ik = u.get("instrument_key") or ""
+    sym = u.get("symbol") or ""
+    if not ik:
+        return None, stats
+
+    prev_close, daily_fetched = daily_cache.previous_close(upstox, ik, trade_date)
+    if daily_fetched:
+        stats["daily"] += 1
+
+    first_bar = fetch_first_15m_bar_for_session(upstox, ik, trade_date)
+    stats["m15"] += 1
+    if not first_bar:
+        return None, stats
+
+    o = _f(first_bar.get("open"))
+    if o <= 0 or prev_close is None or prev_close <= 0:
+        return None, stats
+
+    if o == prev_close:
+        return None, stats
+
+    stats["gap"] += 1
+    daily_bars, bb_fetched = daily_cache.daily_bars_for_bb(
+        upstox, ik, trade_date, min_closes=BB_LENGTH
+    )
+    if bb_fetched:
+        stats["daily"] += 1
+    stats["bb"] += 1
+
+    bb = bollinger_bands_as_of_session(daily_bars, trade_date)
+    if not bb:
+        return None, stats
+
+    sig = evaluate_gap_bb_signal(
+        symbol=sym,
+        future_symbol=u.get("future_symbol") or sym,
+        instrument_key=ik,
+        first_bar=first_bar,
+        previous_close=prev_close,
+        bb=bb,
+    )
+    if sig:
+        row = dict(sig)
+        row["trade_date"] = trade_date.isoformat()
+        return row, stats
+    return None, stats
+
+
 def collect_gap_bb_signals_for_date(
-    upstox: UpstoxService,
+    upstox: Any,
     universe: List[Dict[str, Any]],
     trade_date: date,
     *,
-    max_workers: int = 24,
-) -> List[Dict[str, Any]]:
-    """Run gap + BB logic for one session (no DB write)."""
+    max_workers: int = 2,
+    daily_cache: Optional[BacktestDailyCache] = None,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """
+    Run gap + BB logic for one session (no DB write).
+
+    Gap check uses prev daily close + first 15m bar only. BB is computed only
+    when open != previous close. Returns (signals, timing/stats dict).
+    """
+    t0 = time.monotonic()
     if not universe:
-        return []
+        return [], {"elapsed_sec": 0.0, "symbols": 0}
 
-    clear_candle_cache()
-    keys = [u["instrument_key"] for u in universe if u.get("instrument_key")]
-
-    candles_15m = batch_fetch_candles(
-        upstox,
-        keys,
-        "minutes/15",
-        days_back=M15_DAYS_BACK,
-        range_end_date=trade_date,
-        max_workers=max_workers,
-    )
-    candles_1d = batch_fetch_candles(
-        upstox,
-        keys,
-        "days/1",
-        days_back=DAILY_DAYS_BACK,
-        range_end_date=trade_date,
-        max_workers=max_workers,
-    )
-
+    cache = daily_cache if daily_cache is not None else BacktestDailyCache()
     signals: List[Dict[str, Any]] = []
-    for u in universe:
-        ik = u["instrument_key"]
-        sym = u["symbol"]
-        bars_15 = candles_15m.get(ik) or []
-        bars_1d = candles_1d.get(ik) or []
-        first_bar = first_15m_bar_for_session(bars_15, trade_date)
-        if not first_bar:
-            continue
-        prev_close = previous_day_close(bars_1d, trade_date)
-        if prev_close is None or prev_close <= 0:
-            continue
-        bb = bollinger_bands_as_of_session(bars_1d, trade_date)
-        if not bb:
-            continue
+    totals = {"daily_api": 0, "m15_api": 0, "gaps": 0, "bb_evals": 0, "symbols": len(universe)}
 
-        sig = evaluate_gap_bb_signal(
-            symbol=sym,
-            future_symbol=u.get("future_symbol") or sym,
-            instrument_key=ik,
-            first_bar=first_bar,
-            previous_close=prev_close,
-            bb=bb,
-        )
-        if sig:
-            row = dict(sig)
-            row["trade_date"] = trade_date.isoformat()
-            signals.append(row)
-    return signals
+    workers = min(max(1, max_workers), len(universe))
+    if workers == 1:
+        for u in universe:
+            sig, st = _scan_one_symbol(upstox, u, trade_date, cache)
+            totals["daily_api"] += st["daily"]
+            totals["m15_api"] += st["m15"]
+            totals["gaps"] += st["gap"]
+            totals["bb_evals"] += st["bb"]
+            if sig:
+                signals.append(sig)
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futs = {
+                pool.submit(_scan_one_symbol, upstox, u, trade_date, cache): u
+                for u in universe
+            }
+            for fut in as_completed(futs):
+                try:
+                    sig, st = fut.result()
+                except Exception as e:
+                    u = futs[fut]
+                    logger.debug("VM gap+BB scan %s: %s", u.get("symbol"), e)
+                    continue
+                totals["daily_api"] += st["daily"]
+                totals["m15_api"] += st["m15"]
+                totals["gaps"] += st["gap"]
+                totals["bb_evals"] += st["bb"]
+                if sig:
+                    signals.append(sig)
+
+    totals["elapsed_sec"] = round(time.monotonic() - t0, 2)
+    totals["signals"] = len(signals)
+    return signals, totals
