@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <title>Volume Mismatch Futures - TradeWithCTO</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
+    <script src="auth-check.js?v=1"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="settings.css">
+    <link rel="stylesheet" href="left-menu.css?v=3.24">
+    <link rel="stylesheet" href="theme.css?v=1.3">
+    <link rel="stylesheet" href="volume-mismatch-futures.css?v=1">
+</head>
+<body>
+    <div id="leftMenuContainer"></div>
+    <main class="main-content" id="mainContent">
+        <div class="vmf-wrap">
+            <div class="vmf-card">
+                <div class="vmf-head">
+                    <div>
+                        <h1><i class="fas fa-chart-bar" style="color:#7c3aed;margin-right:8px;"></i>Volume Mismatch Futures</h1>
+                        <p class="vmf-meta" id="vmfMeta">Loading…</p>
+                    </div>
+                    <button type="button" class="vmf-refresh-btn" id="vmfRefreshBtn"><i class="fas fa-sync-alt"></i> Refresh</button>
+                </div>
+                <p class="vmf-banner" id="vmfBanner">
+                    First 15m candle (09:15–09:30) volume mismatch scan runs at 09:30:30 IST. Entry monitored every 5 minutes until close.
+                </p>
+                <div class="vmf-toolbar">
+                    <input type="search" class="vmf-search" id="vmfSearch" placeholder="Search symbol…" autocomplete="off">
+                    <button type="button" class="vmf-filter-btn active" data-filter="ALL">All</button>
+                    <button type="button" class="vmf-filter-btn" data-filter="LONG">LONG</button>
+                    <button type="button" class="vmf-filter-btn" data-filter="SHORT">SHORT</button>
+                    <button type="button" class="vmf-filter-btn" data-filter="READY">READY</button>
+                    <button type="button" class="vmf-filter-btn" data-filter="TRIGGERED">TRIGGERED</button>
+                    <button type="button" class="vmf-filter-btn" data-filter="SCORE60">Score &gt; 60</button>
+                    <button type="button" class="vmf-filter-btn" data-filter="SCORE80">Score &gt; 80</button>
+                </div>
+                <div class="vmf-table-wrap">
+                    <table class="vmf-table" id="vmfTable">
+                        <thead>
+                            <tr>
+                                <th>Symbol</th>
+                                <th>Direction</th>
+                                <th class="num">Gap %</th>
+                                <th class="num">1st 15m Vol</th>
+                                <th class="num">Rel Vol</th>
+                                <th class="num">Net Vol</th>
+                                <th class="num">Score</th>
+                                <th class="num">Pref Entry</th>
+                                <th class="num">Stop Loss</th>
+                                <th class="num">T1</th>
+                                <th class="num">T2</th>
+                                <th class="num">LTP</th>
+                                <th class="num">VWAP</th>
+                                <th>Status</th>
+                                <th>Updated</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="vmfTbody">
+                            <tr><td colspan="16" class="vmf-empty">Loading signals…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+    <script src="left-menu.js?v=3.25"></script>
+    <script src="notify-trade-channel.js?v=2"></script>
+    <script src="volumemismatchfutures.js?v=1"></script>
+</body>
+</html>

@@ -1047,6 +1047,63 @@ class SmartFutureAlgoScheduler:
                 coalesce=True,
             )
 
+            # Volume Mismatch Futures — 09:30:30 scan + 5m entry monitor
+            def _run_vm_scan():
+                ist = pytz.timezone("Asia/Kolkata")
+                if _skip_ist_non_trading_job("Volume Mismatch scan", datetime.now(ist)):
+                    return
+                logger.info("🔧 Volume Mismatch Futures daily scan (09:30:30)...")
+                try:
+                    from backend.services.volume_mismatch.job import run_volume_mismatch_daily_scan_job
+
+                    run_volume_mismatch_daily_scan_job()
+                    logger.info("✅ Volume Mismatch Futures daily scan completed")
+                except Exception as e:
+                    logger.error("❌ Volume Mismatch Futures daily scan failed: %s", e, exc_info=True)
+
+            self.scheduler.add_job(
+                _run_vm_scan,
+                trigger=CronTrigger(
+                    day_of_week="mon-fri",
+                    hour=9,
+                    minute=30,
+                    second=30,
+                    timezone="Asia/Kolkata",
+                ),
+                id="volume_mismatch_scan_093030",
+                name="Volume Mismatch Futures scan (09:30:30)",
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=300,
+                coalesce=True,
+            )
+            logger.info("✅ Scheduled: Volume Mismatch Futures scan 09:30:30 IST (Mon–Fri)")
+
+            def _run_vm_monitor():
+                if not is_allowed_scheduler_window_ist():
+                    return
+                ist = pytz.timezone("Asia/Kolkata")
+                if _skip_ist_non_trading_job("Volume Mismatch monitor", datetime.now(ist)):
+                    return
+                try:
+                    from backend.services.volume_mismatch.job import run_volume_mismatch_monitor_job
+
+                    run_volume_mismatch_monitor_job()
+                except Exception as e:
+                    logger.error("❌ Volume Mismatch entry monitor failed: %s", e, exc_info=True)
+
+            self.scheduler.add_job(
+                _run_vm_monitor,
+                trigger=IntervalTrigger(minutes=5),
+                id="volume_mismatch_monitor_5m",
+                name="Volume Mismatch Futures entry monitor (5m)",
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=120,
+                coalesce=True,
+            )
+            logger.info("✅ Scheduled: Volume Mismatch entry monitor (every 5 min)")
+
             # 6. CAR NIFTY200 Updater - Every 3 hours (Yahoo first, Upstox fallback)
             def run_car_nifty200_update():
                 if not is_allowed_scheduler_window_ist():
