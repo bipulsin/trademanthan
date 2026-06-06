@@ -137,10 +137,19 @@
         if (toEl && doc.to_date) toEl.value = doc.to_date;
         const foot = document.getElementById('vmbFooter');
         if (foot) {
+            const partialNote = doc.partial ? ' · Run in progress (partial results)' : '';
             foot.textContent =
                 'Generated: ' + (doc.generated_at || '—') +
                 ' · Gap threshold: ' + (doc.gap_threshold_pct != null ? doc.gap_threshold_pct + '%' : '—') +
-                ' · Scan: first 15m after open (' + (doc.scan_time_ist || '09:30:30') + ' IST)';
+                ' · Scan: first 15m after open (' + (doc.scan_time_ist || '09:30:30') + ' IST)' +
+                partialNote;
+        }
+        const err = document.getElementById('vmbErr');
+        if (err && doc.partial) {
+            err.hidden = false;
+            err.className = 'vmb-callout vmb-callout-info';
+            err.textContent =
+                'Backtest still running — showing results scanned so far. Refresh later for the full range.';
         }
     }
 

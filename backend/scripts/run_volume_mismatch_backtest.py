@@ -50,7 +50,12 @@ def main() -> int:
     )
     parser.add_argument("--out", type=Path, default=None, help="Output JSON path")
     parser.add_argument("--day-pause", type=float, default=1.0, help="Seconds between session days")
-    parser.add_argument("--max-workers", type=int, default=4, help="Parallel Upstox candle fetches per day")
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=2,
+        help="Parallel Upstox candle fetches per day (use 1-2 to avoid 429)",
+    )
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -70,10 +75,9 @@ def main() -> int:
         to_date,
         day_pause_sec=args.day_pause,
         max_workers=args.max_workers,
+        out_path=out_path,
     )
     doc = build_output_document(raw)
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(doc, f, indent=2, default=str)
     logging.info(
         "Wrote %s signals across %s days to %s",
         doc.get("summary", {}).get("total_signals"),

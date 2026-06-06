@@ -1,9 +1,11 @@
 """Volume Mismatch Futures historical backtest — May 2026 onward."""
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 import pytz
 
@@ -31,6 +33,48 @@ def _iter_weekdays(d0: date, d1: date) -> List[date]:
     return out
 
 
+def _write_incremental_artifact(
+    path: Optional[Path],
+    *,
+    from_date: date,
+    to_date: date,
+    gap_threshold: float,
+    all_rows: List[Dict[str, Any]],
+    by_date: List[Dict[str, Any]],
+    errors: List[Dict[str, str]],
+) -> None:
+    if path is None:
+        return
+    symbols = {str(r.get("symbol") or "").upper() for r in all_rows if r.get("symbol")}
+    long_total = sum(1 for r in all_rows if r.get("direction") == "LONG")
+    short_total = sum(1 for r in all_rows if r.get("direction") == "SHORT")
+    partial = {
+        "algo": "volume_mismatch_futures",
+        "generated_at": datetime.now(IST).isoformat(),
+        "from_date": from_date.isoformat(),
+        "to_date": to_date.isoformat(),
+        "gap_threshold_pct": gap_threshold,
+        "scan_time_ist": "09:30:30",
+        "partial": True,
+        "summary": {
+            "trading_days_scanned": len(by_date),
+            "total_signals": len(all_rows),
+            "long_count": long_total,
+            "short_count": short_total,
+            "unique_symbols": len(symbols),
+            "errors": len(errors),
+        },
+        "by_date": list(by_date),
+        "rows": list(all_rows),
+        "errors": list(errors),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(partial, f, indent=2, default=str)
+    tmp.replace(path)
+
+
 def run_volume_mismatch_backtest(
     from_date: date,
     to_date: date,
@@ -38,6 +82,7 @@ def run_volume_mismatch_backtest(
     gap_threshold: float = DEFAULT_GAP_THRESHOLD_PCT,
     day_pause_sec: float = 1.0,
     max_workers: int = 4,
+    out_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """Replay first-15m volume mismatch scan for each session in range."""
     if from_date > to_date:
@@ -99,6 +144,15 @@ def run_volume_mismatch_backtest(
                 short_n,
                 len(universe),
             )
+            _write_incremental_artifact(
+                out_path,
+                from_date=from_date,
+                to_date=to_date,
+                gap_threshold=gap_threshold,
+                all_rows=all_rows,
+                by_date=by_date,
+                errors=errors,
+            )
             if day_pause_sec > 0:
                 import time
 
@@ -106,6 +160,15 @@ def run_volume_mismatch_backtest(
         except Exception as e:
             logger.exception("VM backtest day %s failed: %s", sd, e)
             errors.append({"trade_date": sd.isoformat(), "error": str(e)})
+            _write_incremental_artifact(
+                out_path,
+                from_date=from_date,
+                to_date=to_date,
+                gap_threshold=gap_threshold,
+                all_rows=all_rows,
+                by_date=by_date,
+                errors=errors,
+            )
 
     all_rows.sort(
         key=lambda r: (
@@ -121,13 +184,14 @@ def run_volume_mismatch_backtest(
     long_total = sum(1 for r in all_rows if r.get("direction") == "LONG")
     short_total = sum(1 for r in all_rows if r.get("direction") == "SHORT")
 
-    return {
+    result = {
         "algo": "volume_mismatch_futures",
         "generated_at": datetime.now(IST).isoformat(),
         "from_date": from_date.isoformat(),
         "to_date": to_date.isoformat(),
         "gap_threshold_pct": gap_threshold,
         "scan_time_ist": "09:30:30",
+        "partial": False,
         "summary": {
             "trading_days_scanned": len(by_date),
             "total_signals": len(all_rows),
@@ -140,6 +204,12 @@ def run_volume_mismatch_backtest(
         "rows": all_rows,
         "errors": errors,
     }
+    if out_path is not None:
+        doc = build_output_document(result)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(doc, f, indent=2, default=str)
+    return result
 
 
 def build_output_document(result: Dict[str, Any]) -> Dict[str, Any]:
@@ -151,6 +221,7 @@ def build_output_document(result: Dict[str, Any]) -> Dict[str, Any]:
         "to_date": result.get("to_date"),
         "gap_threshold_pct": result.get("gap_threshold_pct"),
         "scan_time_ist": result.get("scan_time_ist"),
+        "partial": result.get("partial"),
         "summary": result.get("summary") or {},
         "by_date": result.get("by_date") or [],
         "rows": result.get("rows") or [],

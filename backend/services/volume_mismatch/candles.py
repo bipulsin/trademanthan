@@ -73,7 +73,7 @@ def batch_fetch_candles(
     if not keys:
         return {}
     out: Dict[str, List[Dict[str, Any]]] = {}
-    workers = min(max_workers, max(4, len(keys)))
+    workers = min(max(1, max_workers), len(keys))
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futs = {
             pool.submit(
