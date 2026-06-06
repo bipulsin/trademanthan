@@ -7,9 +7,12 @@ Usage::
     PYTHONPATH=. python backend/scripts/run_volume_mismatch_backtest.py
     PYTHONPATH=. python backend/scripts/run_volume_mismatch_backtest.py \\
         --from-date 2026-05-01 --to-date 2026-06-06
+    PYTHONPATH=. python backend/scripts/run_volume_mismatch_backtest.py \\
+        --warm-cache-only --from-date 2026-05-01 --to-date 2026-06-06
 
 Artifact: ``volume_mismatch_backtest.json`` under ``data/`` (served at
-``/volume-mismatch-backtest/data``). Live Volume Mismatch scanner is unchanged.
+``/volume-mismatch-backtest/data``). Candles cached under
+``data/volume_mismatch_candle_cache/``. Live Volume Mismatch scanner is unchanged.
 """
 from __future__ import annotations
 
@@ -56,6 +59,17 @@ def main() -> int:
         default=2,
         help="Parallel Upstox candle fetches per day (use 1-2 to avoid 429)",
     )
+    parser.add_argument(
+        "--warm-cache-only",
+        action="store_true",
+        help="Pre-fetch candles to disk cache only; skip day scans",
+    )
+    parser.add_argument(
+        "--cache-dir",
+        type=Path,
+        default=None,
+        help="Override candle cache directory",
+    )
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -76,8 +90,13 @@ def main() -> int:
         day_pause_sec=args.day_pause,
         max_workers=args.max_workers,
         out_path=out_path,
+        warm_cache_only=args.warm_cache_only,
+        cache_dir=args.cache_dir,
     )
     doc = build_output_document(raw)
+    if args.warm_cache_only:
+        print(json.dumps(raw.get("warm_stats") or {}, indent=2))
+        return 0 if not doc.get("error") else 1
     logging.info(
         "Wrote %s signals across %s days to %s",
         doc.get("summary", {}).get("total_signals"),

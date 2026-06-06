@@ -16,6 +16,12 @@ from backend.services.volume_mismatch.backtest_signals import collect_gap_bb_sig
 from backend.services.volume_mismatch.backtest_universe import (
     load_volume_mismatch_universe_for_session,
 )
+from backend.services.volume_mismatch.candle_cache import (
+    VolumeMismatchCandleCache,
+    cache_dir_size_bytes,
+    collect_instrument_session_dates,
+    default_cache_dir,
+)
 from backend.services.volume_mismatch.candles import BacktestDailyCache
 
 logger = logging.getLogger(__name__)
@@ -105,6 +111,8 @@ def run_volume_mismatch_backtest(
     day_pause_sec: float = 0.5,
     max_workers: int = 4,
     out_path: Optional[Path] = None,
+    warm_cache_only: bool = False,
+    cache_dir: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """Replay gap + BB first-15m scan for each session in range."""
     if from_date > to_date:
@@ -129,7 +137,49 @@ def run_volume_mismatch_backtest(
         holidays_in_range,
     )
 
-    daily_cache = BacktestDailyCache()
+    persistent = VolumeMismatchCandleCache(cache_dir=cache_dir or default_cache_dir())
+    ik_dates = collect_instrument_session_dates(
+        session_days,
+        load_volume_mismatch_universe_for_session,
+    )
+    import time as _time
+
+    warm_t0 = _time.monotonic()
+    warm_stats = persistent.warm_for_backtest(
+        upstox,
+        ik_dates,
+        from_date=from_date,
+        to_date=to_date,
+        max_workers=max_workers,
+    )
+    warm_stats["elapsed_sec"] = round(_time.monotonic() - warm_t0, 2)
+    warm_stats["cache_bytes"] = cache_dir_size_bytes(persistent.cache_dir)
+    logger.info(
+        "Gap+BB candle cache warm: %.1fs instruments=%s daily_fetch=%s m15_chunks=%s "
+        "api(d=%s m=%s) dir=%s size=%.1fMB",
+        warm_stats["elapsed_sec"],
+        warm_stats.get("instruments"),
+        warm_stats.get("daily_fetches"),
+        warm_stats.get("m15_chunks"),
+        warm_stats.get("daily_api"),
+        warm_stats.get("m15_api"),
+        warm_stats.get("cache_dir"),
+        (warm_stats.get("cache_bytes") or 0) / (1024 * 1024),
+    )
+
+    if warm_cache_only:
+        return {
+            "algo": "gap_bb_futures_backtest",
+            "warm_cache_only": True,
+            "from_date": from_date.isoformat(),
+            "to_date": to_date.isoformat(),
+            "warm_stats": warm_stats,
+            "rows": [],
+            "by_date": [],
+            "errors": [],
+        }
+
+    daily_cache = BacktestDailyCache(persistent_cache=persistent)
     all_rows: List[Dict[str, Any]] = []
     by_date: List[Dict[str, Any]] = []
     errors: List[Dict[str, str]] = []
@@ -180,7 +230,7 @@ def run_volume_mismatch_backtest(
             )
             logger.info(
                 "Gap+BB backtest %s: %s signals (L=%s S=%s) universe=%s "
-                "in %.1fs (m15=%s daily=%s gaps=%s bb=%s)",
+                "in %.1fs (m15_api=%s daily_api=%s cache_m15=%s cache_daily=%s gaps=%s bb=%s)",
                 sd,
                 len(signals),
                 long_n,
@@ -189,6 +239,8 @@ def run_volume_mismatch_backtest(
                 day_elapsed,
                 day_stats.get("m15_api"),
                 day_stats.get("daily_api"),
+                day_stats.get("cache_m15_hit"),
+                day_stats.get("cache_daily_hit"),
                 day_stats.get("gaps"),
                 day_stats.get("bb_evals"),
             )
@@ -237,6 +289,7 @@ def run_volume_mismatch_backtest(
         "to_date": to_date.isoformat(),
         "scan_time_ist": "09:30:30",
         "partial": False,
+        "warm_stats": warm_stats,
         "summary": {
             "trading_days_scanned": len(by_date),
             "total_signals": len(all_rows),
@@ -272,6 +325,7 @@ def build_output_document(result: Dict[str, Any]) -> Dict[str, Any]:
         "rows": result.get("rows") or [],
         "errors": result.get("errors") or [],
         "error": result.get("error"),
+        "warm_stats": result.get("warm_stats"),
     }
 
 

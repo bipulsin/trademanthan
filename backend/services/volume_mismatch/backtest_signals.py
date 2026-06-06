@@ -166,8 +166,14 @@ def _scan_one_symbol(
     if daily_fetched:
         stats["daily"] += 1
 
-    first_bar = fetch_first_15m_bar_for_session(upstox, ik, trade_date)
-    stats["m15"] += 1
+    first_bar, m15_fetched = fetch_first_15m_bar_for_session(
+        upstox,
+        ik,
+        trade_date,
+        persistent_cache=daily_cache.persistent,
+    )
+    if m15_fetched:
+        stats["m15"] += 1
     if not first_bar:
         return None, stats
 
@@ -225,7 +231,17 @@ def collect_gap_bb_signals_for_date(
 
     cache = daily_cache if daily_cache is not None else BacktestDailyCache()
     signals: List[Dict[str, Any]] = []
-    totals = {"daily_api": 0, "m15_api": 0, "gaps": 0, "bb_evals": 0, "symbols": len(universe)}
+    totals = {
+        "daily_api": 0,
+        "m15_api": 0,
+        "gaps": 0,
+        "bb_evals": 0,
+        "symbols": len(universe),
+        "cache_daily_hit": 0,
+        "cache_m15_hit": 0,
+    }
+    if cache.persistent is not None:
+        cache.persistent.reset_day_stats()
 
     workers = min(max(1, max_workers), len(universe))
     if workers == 1:
@@ -259,4 +275,10 @@ def collect_gap_bb_signals_for_date(
 
     totals["elapsed_sec"] = round(time.monotonic() - t0, 2)
     totals["signals"] = len(signals)
+    if cache.persistent is not None:
+        ds = cache.persistent.day_stats()
+        totals["cache_daily_hit"] = ds.get("daily_disk_hit", 0)
+        totals["cache_m15_hit"] = ds.get("m15_disk_hit", 0)
+        totals["cache_daily_api"] = ds.get("daily_api", 0)
+        totals["cache_m15_api"] = ds.get("m15_api", 0)
     return signals, totals

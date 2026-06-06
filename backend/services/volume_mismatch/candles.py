@@ -149,11 +149,19 @@ def fetch_first_15m_bar_for_session(
     upstox: Any,
     instrument_key: str,
     session_date: date,
-) -> Optional[Dict[str, Any]]:
-    """Minimal 15m fetch: one session day only (09:15 bar for ``session_date``)."""
+    *,
+    persistent_cache: Any = None,
+) -> Tuple[Optional[Dict[str, Any]], bool]:
+    """
+    Minimal 15m fetch: one session day only (09:15 bar for ``session_date``).
+
+    Returns (bar, api_fetched). With ``persistent_cache``, reads disk first.
+    """
     ik = (instrument_key or "").strip()
     if not ik:
-        return None
+        return None, False
+    if persistent_cache is not None:
+        return persistent_cache.get_first_15m_bar(upstox, ik, session_date)
     try:
         raw = upstox.get_historical_candles_by_instrument_key(
             ik,
@@ -163,8 +171,8 @@ def fetch_first_15m_bar_for_session(
         )
     except Exception as e:
         logger.debug("VM first 15m %s %s: %s", ik, session_date, e)
-        return None
-    return first_15m_bar_for_session(raw or [], session_date)
+        return None, True
+    return first_15m_bar_for_session(raw or [], session_date), True
 
 
 def _daily_candle_date(candle: Dict[str, Any]) -> Optional[date]:
@@ -187,9 +195,10 @@ def _merge_daily_candles(
 class BacktestDailyCache:
     """In-memory daily series per instrument — reused across backtest session days."""
 
-    def __init__(self) -> None:
+    def __init__(self, persistent_cache: Any = None) -> None:
         self._bars: Dict[str, List[Dict[str, Any]]] = {}
         self._range_end: Dict[str, date] = {}
+        self.persistent = persistent_cache
 
     def _closes_before(self, bars: Sequence[Dict[str, Any]], session_date: date) -> int:
         n = 0
@@ -217,6 +226,13 @@ class BacktestDailyCache:
         ik = (instrument_key or "").strip()
         if not ik:
             return [], False
+        if self.persistent is not None:
+            bars, fetched = self.persistent.ensure_daily(
+                upstox, ik, session_date, min_closes=min_closes
+            )
+            self._bars[ik] = bars
+            self._range_end[ik] = session_date
+            return bars, fetched
         existing = self._bars.get(ik) or []
         cached_end = self._range_end.get(ik)
         if (
