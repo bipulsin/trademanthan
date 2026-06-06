@@ -36,7 +36,8 @@ REBUILD=1 ./scripts/trigger-paperclip-deploy.sh
 ./scripts/release-push-and-deploy.sh -m "your message"
 ```
 
-`REBUILD=1` rebuilds `app` + `nginx` images cloning latest `bipulsin/trademanthan` `main`.  
+**Fast deploy:** `GITHUB_TOKEN=... ./scripts/release-push-and-deploy.sh -m "msg"` → CI builds multi-arch images, paperclip pulls (`REBUILD=0`).  
+**Fallback:** `REBUILD=1 ./scripts/trigger-paperclip-deploy.sh` (~4 min local build).  
 Docker packaging / compose changes go to **bipulsin/twcto_docker** (not TradeManthan).
 
 ## Logs
