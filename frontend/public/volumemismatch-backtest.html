@@ -18,8 +18,10 @@
                 <p class="vmb-lede">
                     Historical replay of the first 15-minute candle (09:15–09:30 IST) on
                     <strong>arbitrage_master</strong> stock futures.
-                    <strong>LONG</strong>: gap down at least 1% vs prior close and first 15m open below lower BB (20,2 daily).
-                    <strong>SHORT</strong>: gap up at least 1% and first 15m open above upper BB.
+                    <strong>LONG</strong>: gap down at least 1% vs prior close, first 15m open below lower BB (20,2 daily),
+                    and first 15m candle green (close &gt; open).
+                    <strong>SHORT</strong>: gap up at least 1%, first 15m open above upper BB,
+                    and first 15m candle red (close &lt; open).
                 </p>
             </div>
             <div class="vmb-header-actions">
@@ -66,19 +68,22 @@
                         <th class="num" data-sort="first_15m_high">H</th>
                         <th class="num" data-sort="first_15m_low">L</th>
                         <th class="num" data-sort="first_15m_close">C</th>
+                        <th class="num" data-sort="first_15m_volume">Vol</th>
+                        <th class="num" data-sort="volume_bought">Vol Bought</th>
+                        <th class="num" data-sort="volume_sold">Vol Sold</th>
                         <th class="num" data-sort="bb_upper">BB Upper</th>
                         <th class="num" data-sort="bb_lower">BB Lower</th>
                         <th data-sort="future_symbol">Future</th>
                     </tr>
                 </thead>
                 <tbody id="vmbTbody">
-                    <tr><td colspan="12" class="vmb-empty">Loading backtest…</td></tr>
+                    <tr><td colspan="15" class="vmb-empty">Loading backtest…</td></tr>
                 </tbody>
             </table>
         </div>
 
         <p class="vmb-footer" id="vmbFooter"></p>
     </div>
-    <script src="volume-mismatch-backtest.js?v=2"></script>
+    <script src="volume-mismatch-backtest.js?v=3"></script>
 </body>
 </html>

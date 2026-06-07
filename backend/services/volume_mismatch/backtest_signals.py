@@ -129,6 +129,33 @@ def bollinger_bands_as_of_session(
     }
 
 
+def _volume_bought_sold(first_bar: Dict[str, Any]) -> Tuple[int, int, int]:
+    """
+    Split first 15m volume into bought/sold legs.
+
+    Upstox candles are OHLCV only (no exchange buy/sell volume fields), so use
+    close position in the bar range when high > low; otherwise assign by candle color.
+    """
+    vol = _f(first_bar.get("volume"))
+    if vol <= 0:
+        return 0, 0, 0
+    o = _f(first_bar.get("open"))
+    h = _f(first_bar.get("high"))
+    l = _f(first_bar.get("low"))
+    c = _f(first_bar.get("close"))
+    total = int(round(vol))
+    if h > l:
+        buy = vol * (c - l) / (h - l)
+        sell = vol * (h - c) / (h - l)
+        return total, int(round(buy)), int(round(sell))
+    if c > o:
+        return total, total, 0
+    if c < o:
+        return total, 0, total
+    half = total // 2
+    return total, half, total - half
+
+
 def evaluate_gap_bb_signal(
     *,
     symbol: str,
@@ -139,8 +166,10 @@ def evaluate_gap_bb_signal(
     bb: Dict[str, float],
 ) -> Optional[Dict[str, Any]]:
     """
-    LONG: gap down (open < prev close), gap <= -1%, first 15m open below lower BB.
-    SHORT: gap up (open > prev close), gap >= +1%, first 15m open above upper BB.
+    LONG: gap down (open < prev close), gap <= -1%, first 15m open below lower BB,
+    first 15m candle green (close > open).
+    SHORT: gap up (open > prev close), gap >= +1%, first 15m open above upper BB,
+    first 15m candle red (close < open).
     """
     o = _f(first_bar.get("open"))
     h = _f(first_bar.get("high"))
@@ -158,11 +187,17 @@ def evaluate_gap_bb_signal(
     lower = bb["bb_lower"]
 
     if o < previous_close and gap <= MIN_GAP_PCT_LONG and bb_px < lower:
+        if c <= o:
+            return None
         direction = "LONG"
     elif o > previous_close and gap >= MIN_GAP_PCT_SHORT and bb_px > upper:
+        if c >= o:
+            return None
         direction = "SHORT"
     else:
         return None
+
+    first_vol, vol_bought, vol_sold = _volume_bought_sold(first_bar)
 
     return {
         "symbol": symbol,
@@ -175,6 +210,9 @@ def evaluate_gap_bb_signal(
         "first_15m_high": round(h, 4),
         "first_15m_low": round(l, 4),
         "first_15m_close": round(c, 4),
+        "first_15m_volume": first_vol,
+        "volume_bought": vol_bought,
+        "volume_sold": vol_sold,
         "bb_upper": upper,
         "bb_middle": bb["bb_middle"],
         "bb_lower": lower,

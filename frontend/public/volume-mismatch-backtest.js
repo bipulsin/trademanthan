@@ -6,7 +6,7 @@
     'use strict';
 
     const API_PATHS = ['/volume-mismatch-backtest/data', '/api/volume-mismatch-backtest/data'];
-    const COL_COUNT = 12;
+    const COL_COUNT = 15;
 
     const state = {
         rows: [],
@@ -112,6 +112,9 @@
                 '<td class="num">' + escapeHtml(fmtNum(r.first_15m_high)) + '</td>' +
                 '<td class="num">' + escapeHtml(fmtNum(r.first_15m_low)) + '</td>' +
                 '<td class="num">' + escapeHtml(fmtNum(r.first_15m_close)) + '</td>' +
+                '<td class="num">' + escapeHtml(fmtNum(r.first_15m_volume, 0)) + '</td>' +
+                '<td class="num">' + escapeHtml(fmtNum(r.volume_bought, 0)) + '</td>' +
+                '<td class="num">' + escapeHtml(fmtNum(r.volume_sold, 0)) + '</td>' +
                 '<td class="num">' + escapeHtml(fmtNum(r.bb_upper)) + '</td>' +
                 '<td class="num">' + escapeHtml(fmtNum(r.bb_lower)) + '</td>' +
                 '<td>' + escapeHtml(r.future_symbol || '—') + '</td>' +
