@@ -266,12 +266,12 @@
         const filtered = applyFilters(rows);
         if (!filtered.length) {
             const msg = sectionEmptyMessage(section, filtered.length, rows.length);
-            tbody.innerHTML = '<tr><td colspan="18" class="vmf-empty">' + escapeHtml(msg) + '</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="13" class="vmf-empty">' + escapeHtml(msg) + '</td></tr>';
             return;
         }
         tbody.innerHTML = filtered.map(function (r) {
             const dir = String(r.direction || '').toUpperCase();
-            const dirCls = dir === 'SHORT' ? 'vmf-dir-short' : 'vmf-dir-long';
+            const dirCls = dir === 'SHORT' ? 'vmf-chip-short' : 'vmf-chip-long';
             const st = String(r.entry_status || 'WAITING').toUpperCase();
             const canEnter = allowEnter && st === 'READY';
             const sym = escapeHtml(r.symbol || '—');
@@ -279,14 +279,9 @@
             return (
                 '<tr data-id="' + escapeHtml(r.id) + '">' +
                 '<td><button type="button" class="vmf-security-link" data-chart-pid="' + escapeHtml(pid) + '" data-sym="' + sym + '">' + sym + '</button></td>' +
-                '<td class="' + dirCls + '">' + escapeHtml(dir) + '</td>' +
+                '<td><span class="vmf-chip ' + dirCls + '">' + escapeHtml(dir) + '</span></td>' +
                 '<td class="num">' + escapeHtml(fmtPct(r.gap_percent)) + '</td>' +
-                '<td class="num">' + escapeHtml(fmtNum(r.first_15m_volume, 0)) + '</td>' +
-                '<td class="num">' + escapeHtml(fmtNum(r.relative_volume, 2)) + '</td>' +
-                '<td class="num">' + escapeHtml(fmtNum(r.net_volume, 0)) + '</td>' +
                 '<td class="num">' + escapeHtml(fmtNum(r.score, 1)) + '</td>' +
-                '<td class="num">' + escapeHtml(fmtNum(r.bb_lower)) + '</td>' +
-                '<td class="num">' + escapeHtml(fmtNum(r.bb_upper)) + '</td>' +
                 '<td class="num">' + escapeHtml(fmtNum(r.preferred_entry || r.entry_price)) + '</td>' +
                 '<td class="num">' + escapeHtml(fmtNum(r.stop_loss)) + '</td>' +
                 '<td class="num">' + escapeHtml(fmtNum(r.target1)) + '</td>' +
@@ -449,7 +444,7 @@
         const msg = escapeHtml(e.message || e);
         ['vmfTodayTbody', 'vmfPrevTbody'].forEach(function (id) {
             const tbody = document.getElementById(id);
-            if (tbody) tbody.innerHTML = '<tr><td colspan="18" class="vmf-empty">Failed to load: ' + msg + '</td></tr>';
+            if (tbody) tbody.innerHTML = '<tr><td colspan="13" class="vmf-empty">Failed to load: ' + msg + '</td></tr>';
         });
     }
 
