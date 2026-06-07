@@ -6,7 +6,11 @@
 
     const POLL_MS = 60000;
     const state = {
-        rows: [],
+        todayRows: [],
+        previousRows: [],
+        todaySection: {},
+        previousSection: {},
+        universeCount: null,
         filter: 'ALL',
         search: '',
         prevReadyKeys: {},
@@ -77,6 +81,17 @@
             return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         } catch (e) {
             return String(iso);
+        }
+    }
+
+    function fmtDate(ymd) {
+        if (!ymd) return '—';
+        try {
+            const d = new Date(ymd + 'T12:00:00+05:30');
+            if (!Number.isFinite(d.getTime())) return String(ymd);
+            return d.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
+        } catch (e) {
+            return String(ymd);
         }
     }
 
@@ -206,6 +221,13 @@
         };
     }
 
+    function findRowById(id) {
+        const sid = String(id);
+        return state.todayRows.find(function (r) { return String(r.id) === sid; }) ||
+            state.previousRows.find(function (r) { return String(r.id) === sid; }) ||
+            null;
+    }
+
     function openChart(row) {
         const stock = String(row.symbol || '').trim();
         const ik = String(row.instrument_key || row.instrument_token || '').trim();
@@ -230,19 +252,28 @@
             });
     }
 
-    function renderTable(rows) {
-        const tbody = document.getElementById('vmfTbody');
+    function sectionEmptyMessage(section, filteredCount, totalCount) {
+        if (section.market_closed) return 'Market closed';
+        if (section.awaiting_scan) return 'Awaiting scan (runs at 09:30 IST)';
+        if (!totalCount) return 'No signals for this session.';
+        if (!filteredCount) return 'No signals match filters.';
+        return 'No signals match filters.';
+    }
+
+    function renderSectionTable(tbodyId, rows, section, allowEnter) {
+        const tbody = document.getElementById(tbodyId);
         if (!tbody) return;
         const filtered = applyFilters(rows);
         if (!filtered.length) {
-            tbody.innerHTML = '<tr><td colspan="18" class="vmf-empty">No signals match filters.</td></tr>';
+            const msg = sectionEmptyMessage(section, filtered.length, rows.length);
+            tbody.innerHTML = '<tr><td colspan="18" class="vmf-empty">' + escapeHtml(msg) + '</td></tr>';
             return;
         }
         tbody.innerHTML = filtered.map(function (r) {
             const dir = String(r.direction || '').toUpperCase();
             const dirCls = dir === 'SHORT' ? 'vmf-dir-short' : 'vmf-dir-long';
             const st = String(r.entry_status || 'WAITING').toUpperCase();
-            const canEnter = st === 'READY';
+            const canEnter = allowEnter && st === 'READY';
             const sym = escapeHtml(r.symbol || '—');
             const pid = registerChartPayload({ screenerData: buildScreenerFromRow(r) });
             return (
@@ -271,23 +302,86 @@
         }).join('');
     }
 
-    function updateMeta(data) {
+    function updateSectionMeta(elId, section) {
+        const el = document.getElementById(elId);
+        if (!el) return;
+        const parts = [];
+        if (section.trade_date) parts.push(fmtDate(section.trade_date));
+        if (section.market_closed && section.closed_reason) {
+            parts.push('Closed (' + section.closed_reason + ')');
+        } else if (section.awaiting_scan) {
+            parts.push('Awaiting scan');
+        } else if (section.signal_count != null) {
+            parts.push('Signals: ' + section.signal_count + ' (L:' + (section.long_count || 0) + ' S:' + (section.short_count || 0) + ')');
+        }
+        if (section.last_updated) parts.push('Updated: ' + fmtTs(section.last_updated));
+        el.textContent = parts.join(' · ') || '—';
+    }
+
+    function updateTopMeta() {
         const el = document.getElementById('vmfMeta');
         if (!el) return;
         const parts = [];
-        if (data.trade_date) parts.push('Session: ' + data.trade_date);
-        if (data.signal_count != null) parts.push('Signals: ' + data.signal_count + ' (L:' + (data.long_count || 0) + ' S:' + (data.short_count || 0) + ')');
-        if (data.universe_count != null) parts.push('Universe: ' + data.universe_count);
-        if (data.last_updated) parts.push('Updated: ' + fmtTs(data.last_updated));
+        if (state.universeCount != null) parts.push('Universe: ' + state.universeCount);
+        if (state.todaySection.trade_date) parts.push('Today: ' + state.todaySection.trade_date);
+        if (state.previousSection.trade_date) parts.push('Previous: ' + state.previousSection.trade_date);
         el.textContent = parts.join(' · ') || '—';
+    }
+
+    function updateTodayBanners(section) {
+        const closedEl = document.getElementById('vmfTodayClosed');
+        const awaitEl = document.getElementById('vmfTodayAwaiting');
+        const tableWrap = document.querySelector('#vmfTodaySection .vmf-table-wrap');
+        if (closedEl) {
+            closedEl.hidden = !section.market_closed;
+            if (section.market_closed) {
+                const reason = section.closed_reason ? ' (' + section.closed_reason + ')' : '';
+                closedEl.textContent = 'Market closed' + reason;
+            }
+        }
+        if (awaitEl) {
+            awaitEl.hidden = !(section.awaiting_scan && !section.market_closed);
+        }
+        if (tableWrap) {
+            tableWrap.hidden = !!(section.market_closed || section.awaiting_scan);
+        }
+    }
+
+    function renderAll() {
+        updateTodayBanners(state.todaySection);
+        updateSectionMeta('vmfTodayMeta', state.todaySection);
+        updateSectionMeta('vmfPrevMeta', state.previousSection);
+        updateTopMeta();
+        renderSectionTable('vmfTodayTbody', state.todayRows, state.todaySection, true);
+        renderSectionTable('vmfPrevTbody', state.previousRows, state.previousSection, false);
     }
 
     async function loadSignals() {
         const data = await apiGet('/volume-mismatch-futures/signals');
-        state.rows = data.rows || [];
-        detectReadyTransitions(state.rows);
-        updateMeta(data);
-        renderTable(state.rows);
+        if (data.today && data.previous) {
+            state.todaySection = data.today || {};
+            state.previousSection = data.previous || {};
+            state.todayRows = data.today.rows || [];
+            state.previousRows = data.previous.rows || [];
+            state.universeCount = data.universe_count;
+            detectReadyTransitions(state.todayRows);
+        } else {
+            state.todaySection = {
+                trade_date: data.trade_date,
+                signal_count: data.signal_count,
+                long_count: data.long_count,
+                short_count: data.short_count,
+                last_updated: data.last_updated,
+                market_closed: false,
+                awaiting_scan: false,
+            };
+            state.previousSection = {};
+            state.todayRows = data.rows || [];
+            state.previousRows = [];
+            state.universeCount = data.universe_count;
+            detectReadyTransitions(state.todayRows);
+        }
+        renderAll();
     }
 
     async function onEnter(signalId) {
@@ -299,6 +393,24 @@
         }
     }
 
+    function bindTableClicks(tbody) {
+        if (!tbody) return;
+        tbody.addEventListener('click', function (ev) {
+            const enterBtn = ev.target.closest('[data-enter-id]');
+            if (enterBtn && !enterBtn.disabled) {
+                onEnter(enterBtn.getAttribute('data-enter-id'));
+                return;
+            }
+            const symBtn = ev.target.closest('.vmf-security-link');
+            if (symBtn) {
+                const tr = symBtn.closest('tr');
+                const id = tr && tr.getAttribute('data-id');
+                const row = findRowById(id);
+                if (row) openChart(row);
+            }
+        });
+    }
+
     function bindEvents() {
         document.getElementById('vmfRefreshBtn')?.addEventListener('click', function () {
             loadSignals().catch(function (e) {
@@ -308,7 +420,7 @@
 
         document.getElementById('vmfSearch')?.addEventListener('input', function (ev) {
             state.search = ev.target.value || '';
-            renderTable(state.rows);
+            renderAll();
         });
 
         document.querySelectorAll('.vmf-filter-btn').forEach(function (btn) {
@@ -316,27 +428,12 @@
                 document.querySelectorAll('.vmf-filter-btn').forEach(function (b) { b.classList.remove('active'); });
                 btn.classList.add('active');
                 state.filter = btn.getAttribute('data-filter') || 'ALL';
-                renderTable(state.rows);
+                renderAll();
             });
         });
 
-        const tbody = document.getElementById('vmfTbody');
-        if (tbody) {
-            tbody.addEventListener('click', function (ev) {
-                const enterBtn = ev.target.closest('[data-enter-id]');
-                if (enterBtn && !enterBtn.disabled) {
-                    onEnter(enterBtn.getAttribute('data-enter-id'));
-                    return;
-                }
-                const symBtn = ev.target.closest('.vmf-security-link');
-                if (symBtn) {
-                    const tr = symBtn.closest('tr');
-                    const id = tr && tr.getAttribute('data-id');
-                    const row = state.rows.find(function (r) { return String(r.id) === String(id); });
-                    if (row) openChart(row);
-                }
-            });
-        }
+        bindTableClicks(document.getElementById('vmfTodayTbody'));
+        bindTableClicks(document.getElementById('vmfPrevTbody'));
     }
 
     let pollTimer = null;
@@ -348,13 +445,20 @@
         }, POLL_MS);
     }
 
+    function showLoadError(e) {
+        const msg = escapeHtml(e.message || e);
+        ['vmfTodayTbody', 'vmfPrevTbody'].forEach(function (id) {
+            const tbody = document.getElementById(id);
+            if (tbody) tbody.innerHTML = '<tr><td colspan="18" class="vmf-empty">Failed to load: ' + msg + '</td></tr>';
+        });
+    }
+
     document.addEventListener('DOMContentLoaded', function () {
         bindEvents();
         loadSignals()
             .then(startPoll)
             .catch(function (e) {
-                const tbody = document.getElementById('vmfTbody');
-                if (tbody) tbody.innerHTML = '<tr><td colspan="18" class="vmf-empty">Failed to load: ' + escapeHtml(e.message || e) + '</td></tr>';
+                showLoadError(e);
             });
     });
 })(window);

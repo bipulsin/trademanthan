@@ -128,6 +128,55 @@ table.vmf-table td.num { text-align: right; }
     color: var(--theme-muted, #64748b);
     margin-bottom: 10px;
 }
+.vmf-section {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--theme-border, #e2e8f0);
+}
+.vmf-section:first-of-type {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+}
+.vmf-section-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px 16px;
+    margin-bottom: 10px;
+}
+.vmf-section-title {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--theme-text, #0f172a);
+}
+.vmf-section-meta {
+    margin: 0;
+    font-size: 0.84rem;
+    color: var(--theme-muted, #64748b);
+}
+.vmf-section-banner {
+    margin: 0 0 10px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+.vmf-section-banner-closed {
+    background: rgba(100, 116, 139, 0.12);
+    color: var(--theme-muted, #64748b);
+    border: 1px solid var(--theme-border, #cbd5e1);
+}
+.vmf-section-banner-await {
+    background: rgba(37, 99, 235, 0.08);
+    color: var(--theme-accent, #2563eb);
+    border: 1px solid rgba(37, 99, 235, 0.25);
+}
+.vmf-section-prev .vmf-enter-btn {
+    display: none;
+}
 
 /* Theme page — match Vajra / Premium Futures readability */
 body.theme-page .vmf-wrap .vmf-card {

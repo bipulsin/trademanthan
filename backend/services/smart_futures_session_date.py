@@ -6,11 +6,15 @@ Must match what GET /smart-futures/daily filters on.
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
-from typing import Optional
+from typing import Optional, Tuple
 
 import pytz
 
+from backend.services.market_holiday import is_nse_holiday_ist, should_skip_scheduled_market_jobs_ist
+
 IST = pytz.timezone("Asia/Kolkata")
+
+VMF_SCAN_READY_TIME = time(9, 30)
 
 
 def _prev_trading_day(d: date) -> date:
@@ -20,6 +24,50 @@ def _prev_trading_day(d: date) -> date:
             return x
         x -= timedelta(days=1)
     return d - timedelta(days=1)
+
+
+def is_nse_trading_day(d: date) -> bool:
+    """Weekday that is not listed in the NSE ``holiday`` table."""
+    if d.weekday() >= 5:
+        return False
+    noon = IST.localize(datetime.combine(d, time(12, 0)))
+    return not is_nse_holiday_ist(noon)
+
+
+def previous_nse_trading_day(before: date) -> date:
+    """Last NSE session strictly before ``before`` (skips weekends and holidays)."""
+    x = before - timedelta(days=1)
+    for _ in range(15):
+        if is_nse_trading_day(x):
+            return x
+        x -= timedelta(days=1)
+    return before - timedelta(days=1)
+
+
+def vmf_live_sections_ist(
+    now_ist: Optional[datetime] = None,
+) -> Tuple[date, date, bool, Optional[str], bool]:
+    """
+    Volume Mismatch Futures live page session split.
+
+    Returns:
+        (today_calendar_date, previous_trading_day, market_closed, closed_reason, awaiting_scan)
+
+    ``today_calendar_date`` is always the IST calendar date (even on weekends/holidays).
+    ``previous_trading_day`` skips weekends and NSE holidays (Monday → Friday, etc.).
+    """
+    now = now_ist or datetime.now(IST)
+    if now.tzinfo is None:
+        now = IST.localize(now)
+    else:
+        now = now.astimezone(IST)
+    today = now.date()
+    prev = previous_nse_trading_day(today)
+    if should_skip_scheduled_market_jobs_ist(now):
+        reason = "weekend" if today.weekday() >= 5 else "holiday"
+        return today, prev, True, reason, False
+    awaiting = now.time() < VMF_SCAN_READY_TIME
+    return today, prev, False, None, awaiting
 
 
 def effective_session_date_ist_for_trend(now_ist: Optional[datetime] = None) -> date:

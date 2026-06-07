@@ -14,7 +14,10 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
-from backend.services.smart_futures_session_date import effective_session_date_ist_for_trend
+from backend.services.smart_futures_session_date import (
+    effective_session_date_ist_for_trend,
+    vmf_live_sections_ist,
+)
 from backend.services.volume_mismatch.job import (
     run_volume_mismatch_daily_scan_job,
     run_volume_mismatch_monitor_job,
@@ -61,6 +64,76 @@ def _serialize_row(row: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def _signals_section_payload(
+    db: Session,
+    trade_date: date,
+    *,
+    direction: Optional[str] = None,
+    entry_status: Optional[str] = None,
+    min_score: Optional[float] = None,
+    market_closed: bool = False,
+    closed_reason: Optional[str] = None,
+    awaiting_scan: bool = False,
+) -> Dict[str, Any]:
+    rows: List[Dict[str, Any]] = []
+    meta: Dict[str, Any] = {"signal_count": 0, "last_updated": None}
+    if not market_closed and not awaiting_scan:
+        rows = fetch_signals_for_date(
+            db,
+            trade_date,
+            direction=direction,
+            entry_status=entry_status,
+            min_score=min_score,
+        )
+        meta = fetch_scan_meta(db, trade_date)
+    long_rows = [r for r in rows if str(r.get("direction")).upper() == "LONG"]
+    short_rows = [r for r in rows if str(r.get("direction")).upper() == "SHORT"]
+    return {
+        "trade_date": trade_date.isoformat(),
+        "market_closed": market_closed,
+        "closed_reason": closed_reason,
+        "awaiting_scan": awaiting_scan,
+        "signal_count": len(rows),
+        "long_count": len(long_rows),
+        "short_count": len(short_rows),
+        "last_updated": _json_safe(meta.get("last_updated")),
+        "rows": [_serialize_row(r) for r in rows],
+        "long_rows": [_serialize_row(r) for r in long_rows],
+        "short_rows": [_serialize_row(r) for r in short_rows],
+    }
+
+
+def _single_day_signals_payload(
+    db: Session,
+    sd: date,
+    *,
+    direction: Optional[str],
+    entry_status: Optional[str],
+    min_score: Optional[float],
+) -> Dict[str, Any]:
+    ensure_volume_mismatch_signals_table(db)
+    section = _signals_section_payload(
+        db,
+        sd,
+        direction=direction,
+        entry_status=entry_status,
+        min_score=min_score,
+    )
+    universe_count = len(load_volume_mismatch_universe())
+    return {
+        "success": True,
+        "trade_date": section["trade_date"],
+        "universe_count": universe_count,
+        "signal_count": section["signal_count"],
+        "long_count": section["long_count"],
+        "short_count": section["short_count"],
+        "last_updated": section["last_updated"],
+        "rows": section["rows"],
+        "long_rows": section["long_rows"],
+        "short_rows": section["short_rows"],
+    }
+
+
 @router.get("/signals")
 def get_signals(
     trade_date: Optional[date] = Query(None),
@@ -71,31 +144,45 @@ def get_signals(
     db: Session = Depends(get_db),
 ):
     del user
-    sd = trade_date or effective_session_date_ist_for_trend()
     ensure_volume_mismatch_signals_table(db)
-    rows = fetch_signals_for_date(
+    if trade_date is not None:
+        return JSONResponse(
+            status_code=200,
+            content=_single_day_signals_payload(
+                db,
+                trade_date,
+                direction=direction,
+                entry_status=entry_status,
+                min_score=min_score,
+            ),
+        )
+
+    today_d, prev_d, market_closed, closed_reason, awaiting_scan = vmf_live_sections_ist()
+    universe_count = len(load_volume_mismatch_universe())
+    today_section = _signals_section_payload(
         db,
-        sd,
+        today_d,
+        direction=direction,
+        entry_status=entry_status,
+        min_score=min_score,
+        market_closed=market_closed,
+        closed_reason=closed_reason,
+        awaiting_scan=awaiting_scan,
+    )
+    prev_section = _signals_section_payload(
+        db,
+        prev_d,
         direction=direction,
         entry_status=entry_status,
         min_score=min_score,
     )
-    meta = fetch_scan_meta(db, sd)
-    long_rows = [r for r in rows if str(r.get("direction")).upper() == "LONG"]
-    short_rows = [r for r in rows if str(r.get("direction")).upper() == "SHORT"]
     return JSONResponse(
         status_code=200,
         content={
             "success": True,
-            "trade_date": sd.isoformat(),
-            "universe_count": len(load_volume_mismatch_universe()),
-            "signal_count": len(rows),
-            "long_count": len(long_rows),
-            "short_count": len(short_rows),
-            "last_updated": _json_safe(meta.get("last_updated")),
-            "rows": [_serialize_row(r) for r in rows],
-            "long_rows": [_serialize_row(r) for r in long_rows],
-            "short_rows": [_serialize_row(r) for r in short_rows],
+            "universe_count": universe_count,
+            "today": today_section,
+            "previous": prev_section,
         },
     )
 
