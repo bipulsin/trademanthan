@@ -56,7 +56,8 @@ inbox/chartink_daily_futures/
 !backend/nse_holidays_2026.csv
 !scripts/ic_universe_sheet9.csv
 *.xlsx
-data/
+data/*
+!data/nk_vm_bull_backtest_source.csv
 
 # Local DB exports (keep exports/ via .gitkeep)
 exports/*.txt

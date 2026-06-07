@@ -1,0 +1,50 @@
+date,symbol,marketcapname,sector
+30-04-2026 09:35,KOTAKBANK,Largecap,Bank
+05-05-2026 09:35,HINDPETRO,Largecap,Energy
+08-05-2026 11:55,BHARTIARTL,Largecap,Telecom-Service
+11-05-2026 09:25,ULTRACEMCO,Largecap,Building Materials
+11-05-2026 10:45,ICICIBANK,Largecap,Bank
+11-05-2026 11:25,DELHIVERY,Largecap,Transportation
+12-05-2026 09:45,PNB,Largecap,Bank
+12-05-2026 09:45,UNIONBANK,Largecap,Bank
+12-05-2026 10:05,SUZLON,Largecap,Industrials
+13-05-2026 09:35,JUBLFOOD,Largecap,Consumer Discretionary
+13-05-2026 09:35,HYUNDAI,Largecap,Auto
+15-05-2026 09:35,CHOLAFIN,Largecap,Financials
+18-05-2026 09:25,VOLTAS,Largecap,Consumer Discretionary
+18-05-2026 09:25,BSE,Largecap,Financials
+18-05-2026 10:15,MFSL,Largecap,Miscellaneous
+20-05-2026 09:25,BAJFINANCE,Largecap,Financials
+20-05-2026 09:25,TITAN,Largecap,Consumer Discretionary
+20-05-2026 09:25,KOTAKBANK,Largecap,Bank
+20-05-2026 09:25,APOLLOHOSP,Largecap,Healthcare
+20-05-2026 09:25,MARICO,Largecap,FMCG
+20-05-2026 09:25,GMRAIRPORT,Largecap,Miscellaneous
+20-05-2026 09:25,GODREJPROP,Largecap,Realty
+20-05-2026 09:25,INDIGO,Largecap,Transportation
+20-05-2026 09:25,VBL,Largecap,FMCG
+20-05-2026 09:25,HDFCLIFE,Largecap,Financials
+22-05-2026 09:25,GAIL,Largecap,Energy
+25-05-2026 09:25,DIVISLAB,Largecap,Healthcare
+26-05-2026 09:25,RVNL,Largecap,Realty
+27-05-2026 09:25,COALINDIA,Largecap,Metals & Mining
+27-05-2026 09:35,COALINDIA,Largecap,Metals & Mining
+29-05-2026 09:55,HDFCBANK,Largecap,Bank
+02-06-2026 09:25,APLAPOLLO,Largecap,Industrials
+02-06-2026 09:35,HAVELLS,Largecap,Consumer Discretionary
+02-06-2026 09:35,PIIND,Largecap,Chemicals
+02-06-2026 09:35,VBL,Largecap,FMCG
+02-06-2026 09:45,ABB,Largecap,Industrials
+02-06-2026 09:45,ADANIENT,Largecap,Services
+02-06-2026 09:45,ADANIPORTS,Largecap,Transportation
+02-06-2026 09:45,MUTHOOTFIN,Largecap,Financials
+02-06-2026 09:45,LTF,Largecap,Financials
+02-06-2026 09:45,HAL,Largecap,Aerospace & Defence
+02-06-2026 09:45,ETERNAL,Largecap,I.T
+03-06-2026 09:35,HINDPETRO,Largecap,Energy
+04-06-2026 09:25,KFINTECH,Midcap,Financials
+04-06-2026 09:35,HAVELLS,Largecap,Consumer Discretionary
+04-06-2026 09:55,GAIL,Largecap,Energy
+04-06-2026 09:55,PRESTIGE,Largecap,Realty
+05-06-2026 09:35,HDFCAMC,Largecap,Financials
+05-06-2026 09:45,WIPRO,Largecap,I.T
