@@ -18,10 +18,11 @@
                 <p class="vmb-lede">
                     Historical replay of the first 15-minute candle (09:15–09:30 IST) on
                     <strong>arbitrage_master</strong> stock futures.
-                    <strong>LONG</strong>: gap down at least 1% vs prior close, first 15m open below lower BB (20,2 daily),
-                    and first 15m candle green (close &gt; open).
-                    <strong>SHORT</strong>: gap up at least 1%, first 15m open above upper BB,
-                    and first 15m candle red (close &lt; open).
+                    <strong>LONG</strong>: gap down ≥1%, first 15m open below lower BB (20,2 daily),
+                    green candle (close &gt; open), net volume &gt; 0.
+                    <strong>SHORT</strong>: gap up ≥1%, first 15m open above upper BB,
+                    red candle (close &lt; open), net volume &lt; 0.
+                    Score is display-only. Table includes net volume, relative volume, volume bought/sold.
                 </p>
             </div>
             <div class="vmb-header-actions">
@@ -69,6 +70,9 @@
                         <th class="num" data-sort="first_15m_low">L</th>
                         <th class="num" data-sort="first_15m_close">C</th>
                         <th class="num" data-sort="first_15m_volume">Vol</th>
+                        <th class="num" data-sort="net_volume">Net Vol</th>
+                        <th class="num" data-sort="relative_volume">Rel Vol</th>
+                        <th class="num" data-sort="score">Score</th>
                         <th class="num" data-sort="volume_bought">Vol Bought</th>
                         <th class="num" data-sort="volume_sold">Vol Sold</th>
                         <th class="num" data-sort="bb_upper">BB Upper</th>
@@ -77,13 +81,13 @@
                     </tr>
                 </thead>
                 <tbody id="vmbTbody">
-                    <tr><td colspan="15" class="vmb-empty">Loading backtest…</td></tr>
+                    <tr><td colspan="18" class="vmb-empty">Loading backtest…</td></tr>
                 </tbody>
             </table>
         </div>
 
         <p class="vmb-footer" id="vmbFooter"></p>
     </div>
-    <script src="volume-mismatch-backtest.js?v=3"></script>
+    <script src="volume-mismatch-backtest.js?v=5"></script>
 </body>
 </html>

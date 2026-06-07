@@ -46,7 +46,8 @@
                         </div>
                     </div>
                     <p class="vmf-banner" id="vmfBanner">
-                        LONG: gap down + red first 15m + buying pressure. SHORT: gap up + green first 15m + selling pressure.
+                        LONG: gap down ≥1% + open below lower BB (20,2 daily) + green first 15m + net vol &gt; 0.
+                        SHORT: gap up ≥1% + open above upper BB + red first 15m + net vol &lt; 0. Score is display-only.
                     </p>
                     <div class="vmf-toolbar">
                         <input type="search" class="vmf-search" id="vmfSearch" placeholder="Search symbol…" autocomplete="off">
@@ -69,6 +70,8 @@
                                     <th class="num">Rel Vol</th>
                                     <th class="num">Net Vol</th>
                                     <th class="num">Score</th>
+                                    <th class="num">BB Lower</th>
+                                    <th class="num">BB Upper</th>
                                     <th class="num">Pref Entry</th>
                                     <th class="num">Stop Loss</th>
                                     <th class="num">T1</th>
@@ -81,7 +84,7 @@
                                 </tr>
                             </thead>
                             <tbody id="vmfTbody">
-                                <tr><td colspan="16" class="vmf-empty">Loading signals…</td></tr>
+                                <tr><td colspan="18" class="vmf-empty">Loading signals…</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -91,6 +94,6 @@
     </div>
     <script src="left-menu.js?v=3.25"></script>
     <script src="notify-trade-channel.js?v=2"></script>
-    <script src="volumemismatchfutures.js?v=2"></script>
+    <script src="volumemismatchfutures.js?v=3"></script>
 </body>
 </html>

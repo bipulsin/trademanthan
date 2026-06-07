@@ -11,6 +11,7 @@ from backend.database import SessionLocal
 from backend.services.smart_futures_session_date import effective_session_date_ist_for_trend
 from backend.services.upstox_service import UpstoxService
 from backend.services.volume_mismatch.candles import (
+    BB_DAILY_DAYS_BACK,
     batch_fetch_candles,
     clear_candle_cache,
     first_15m_bar_for_session,
@@ -23,6 +24,7 @@ from backend.services.volume_mismatch.constants import (
 )
 from backend.services.volume_mismatch.repository import upsert_signal
 from backend.services.volume_mismatch.signal_engine import evaluate_mismatch
+from backend.services.volume_mismatch.signal_rules import bollinger_bands_as_of_session
 from backend.services.volume_mismatch.universe import load_volume_mismatch_universe
 
 logger = logging.getLogger(__name__)
@@ -55,7 +57,7 @@ def collect_volume_mismatch_signals_for_date(
         upstox,
         keys,
         "days/1",
-        days_back=12,
+        days_back=BB_DAILY_DAYS_BACK,
         range_end_date=trade_date,
         max_workers=max_workers,
     )
@@ -71,6 +73,14 @@ def collect_volume_mismatch_signals_for_date(
             continue
         prev_close = previous_day_close(bars_1d, trade_date)
         if prev_close is None or prev_close <= 0:
+            continue
+
+        o = float(first_bar.get("open") or 0)
+        if o <= 0 or o == prev_close:
+            continue
+
+        bb = bollinger_bands_as_of_session(bars_1d, trade_date)
+        if not bb:
             continue
 
         hist_vols = first_15m_volumes_by_session(
@@ -95,6 +105,7 @@ def collect_volume_mismatch_signals_for_date(
             first_bar=first_bar,
             previous_close=prev_close,
             relative_volume=rel_vol,
+            bb=bb,
             gap_threshold=gap_threshold,
         )
         if sig:

@@ -296,6 +296,10 @@ class VolumeMismatchCandleCache:
             self._day_stats["daily_api"] = self._day_stats.get("daily_api", 0) + 1
             return merged, True
 
+    def get_m15_candles(self, instrument_key: str) -> List[Dict[str, Any]]:
+        """Cached 15m series for relative-volume lookback (disk + memory)."""
+        return self._load_m15((instrument_key or "").strip())
+
     def get_first_15m_bar(
         self,
         upstox: Any,

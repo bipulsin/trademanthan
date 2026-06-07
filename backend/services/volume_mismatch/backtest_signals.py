@@ -1,159 +1,30 @@
-"""Gap + Bollinger Band signal logic — backtest only (not live scanner)."""
+"""Gap + Bollinger Band signal logic — uses shared ``signal_rules``."""
 from __future__ import annotations
 
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-import pandas as pd
-import pandas_ta as ta
-
-from backend.services.upstox_service import _parse_ts_to_aware_ist
 from backend.services.volume_mismatch.candles import (
     BacktestDailyCache,
     fetch_first_15m_bar_for_session,
 )
-from backend.services.volume_mismatch.signal_engine import compute_gap_percent
+from backend.services.volume_mismatch.signal_rules import (
+    BB_LENGTH,
+    _f,
+    bollinger_bands_as_of_session,
+    compute_relative_volume,
+    evaluate_vm_signal,
+)
 
 logger = logging.getLogger(__name__)
 
-# Standard daily BB: 20-period SMA ± 2σ on closes completed before signal session.
-BB_LENGTH = 20
-BB_STD_DEV = 2.0
-
-# Band comparison uses the first 15m bar open (09:15–09:30 IST).
-BB_COMPARE_FIELD = "open"
-
-# Minimum gap magnitude (backtest only; live scanner uses separate thresholds).
+# Re-export for callers that imported from here.
 MIN_GAP_PCT_LONG = -1.0
 MIN_GAP_PCT_SHORT = 1.0
-
-
-def _candle_date(ts: Any) -> Optional[date]:
-    dt = _parse_ts_to_aware_ist(ts)
-    return dt.date() if dt is not None else None
-
-
-def _f(v: Any, default: float = 0.0) -> float:
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return default
-
-
-def daily_closes_before_session(
-    daily_candles: Sequence[Dict[str, Any]],
-    session_date: date,
-) -> List[float]:
-    """Ascending daily closes strictly before ``session_date``."""
-    rows: List[tuple] = []
-    for c in daily_candles:
-        d = _candle_date(c.get("timestamp"))
-        if d is None:
-            continue
-        if d >= session_date:
-            continue
-        cl = _f(c.get("close"))
-        if cl <= 0:
-            continue
-        rows.append((d, cl))
-    rows.sort(key=lambda x: x[0])
-    return [cl for _, cl in rows]
-
-
-def _bb_band_from_row(
-    row: pd.Series,
-    prefix: str,
-    length: int,
-    std_dev: float,
-) -> Optional[float]:
-    """Resolve one BB band column across pandas_ta naming variants."""
-    candidates = [
-        f"{prefix}_{length}_{std_dev}",
-        f"{prefix}_{length}_{std_dev}_{std_dev}",
-        f"{prefix}_{length}_{int(std_dev)}",
-        f"{prefix}_{length}_{int(std_dev)}_{int(std_dev)}",
-    ]
-    for key in candidates:
-        if key in row.index:
-            try:
-                val = float(row[key])
-            except (TypeError, ValueError):
-                continue
-            if val == val:
-                return val
-    stem = f"{prefix}_{length}_"
-    for col in row.index:
-        if str(col).startswith(stem):
-            try:
-                val = float(row[col])
-            except (TypeError, ValueError):
-                continue
-            if val == val:
-                return val
-    return None
-
-
-def bollinger_bands_as_of_session(
-    daily_candles: Sequence[Dict[str, Any]],
-    session_date: date,
-    *,
-    length: int = BB_LENGTH,
-    std_dev: float = BB_STD_DEV,
-) -> Optional[Dict[str, float]]:
-    """
-    Bollinger Bands from daily closes ending the day before ``session_date``.
-
-    Uses pandas_ta ``bbands`` (same 20 / 2 convention as strategy_runner).
-    Returns bands as of the last completed daily bar before the session.
-    """
-    closes = daily_closes_before_session(daily_candles, session_date)
-    if len(closes) < length:
-        return None
-    df = pd.DataFrame({"close": closes})
-    bb = ta.bbands(df["close"], length=length, std=std_dev)
-    if bb is None or bb.empty:
-        return None
-    last = bb.iloc[-1]
-    upper = _bb_band_from_row(last, "BBU", length, std_dev)
-    middle = _bb_band_from_row(last, "BBM", length, std_dev)
-    lower = _bb_band_from_row(last, "BBL", length, std_dev)
-    if upper is None or middle is None or lower is None:
-        return None
-    return {
-        "bb_upper": round(upper, 4),
-        "bb_middle": round(middle, 4),
-        "bb_lower": round(lower, 4),
-    }
-
-
-def _volume_bought_sold(first_bar: Dict[str, Any]) -> Tuple[int, int, int]:
-    """
-    Split first 15m volume into bought/sold legs.
-
-    Upstox candles are OHLCV only (no exchange buy/sell volume fields), so use
-    close position in the bar range when high > low; otherwise assign by candle color.
-    """
-    vol = _f(first_bar.get("volume"))
-    if vol <= 0:
-        return 0, 0, 0
-    o = _f(first_bar.get("open"))
-    h = _f(first_bar.get("high"))
-    l = _f(first_bar.get("low"))
-    c = _f(first_bar.get("close"))
-    total = int(round(vol))
-    if h > l:
-        buy = vol * (c - l) / (h - l)
-        sell = vol * (h - c) / (h - l)
-        return total, int(round(buy)), int(round(sell))
-    if c > o:
-        return total, total, 0
-    if c < o:
-        return total, 0, total
-    half = total // 2
-    return total, half, total - half
+BB_COMPARE_FIELD = "open"
 
 
 def evaluate_gap_bb_signal(
@@ -164,59 +35,19 @@ def evaluate_gap_bb_signal(
     first_bar: Dict[str, Any],
     previous_close: float,
     bb: Dict[str, float],
+    relative_volume: Optional[float] = None,
 ) -> Optional[Dict[str, Any]]:
-    """
-    LONG: gap down (open < prev close), gap <= -1%, first 15m open below lower BB,
-    first 15m candle green (close > open).
-    SHORT: gap up (open > prev close), gap >= +1%, first 15m open above upper BB,
-    first 15m candle red (close < open).
-    """
-    o = _f(first_bar.get("open"))
-    h = _f(first_bar.get("high"))
-    l = _f(first_bar.get("low"))
-    c = _f(first_bar.get("close"))
-    bb_px = _f(first_bar.get(BB_COMPARE_FIELD))
-    if o <= 0 or h <= 0 or l <= 0 or c <= 0 or bb_px <= 0 or previous_close <= 0:
-        return None
-
-    gap = compute_gap_percent(o, previous_close)
-    if gap is None:
-        return None
-
-    upper = bb["bb_upper"]
-    lower = bb["bb_lower"]
-
-    if o < previous_close and gap <= MIN_GAP_PCT_LONG and bb_px < lower:
-        if c <= o:
-            return None
-        direction = "LONG"
-    elif o > previous_close and gap >= MIN_GAP_PCT_SHORT and bb_px > upper:
-        if c >= o:
-            return None
-        direction = "SHORT"
-    else:
-        return None
-
-    first_vol, vol_bought, vol_sold = _volume_bought_sold(first_bar)
-
-    return {
-        "symbol": symbol,
-        "future_symbol": future_symbol,
-        "instrument_key": instrument_key,
-        "direction": direction,
-        "gap_percent": round(gap, 4),
-        "previous_close": round(previous_close, 4),
-        "first_15m_open": round(o, 4),
-        "first_15m_high": round(h, 4),
-        "first_15m_low": round(l, 4),
-        "first_15m_close": round(c, 4),
-        "first_15m_volume": first_vol,
-        "volume_bought": vol_bought,
-        "volume_sold": vol_sold,
-        "bb_upper": upper,
-        "bb_middle": bb["bb_middle"],
-        "bb_lower": lower,
-    }
+    """Thin wrapper around unified ``evaluate_vm_signal`` (backtest row shape)."""
+    return evaluate_vm_signal(
+        symbol=symbol,
+        future_symbol=future_symbol,
+        instrument_key=instrument_key,
+        first_bar=first_bar,
+        previous_close=previous_close,
+        bb=bb,
+        relative_volume=relative_volume,
+        include_volume_split=True,
+    )
 
 
 def _scan_one_symbol(
@@ -266,6 +97,11 @@ def _scan_one_symbol(
     if not bb:
         return None, stats
 
+    rel_vol: Optional[float] = None
+    if daily_cache.persistent is not None:
+        m15_bars = daily_cache.persistent.get_m15_candles(ik)
+        rel_vol = compute_relative_volume(first_bar, m15_bars, trade_date)
+
     sig = evaluate_gap_bb_signal(
         symbol=sym,
         future_symbol=u.get("future_symbol") or sym,
@@ -273,6 +109,7 @@ def _scan_one_symbol(
         first_bar=first_bar,
         previous_close=prev_close,
         bb=bb,
+        relative_volume=rel_vol,
     )
     if sig:
         row = dict(sig)

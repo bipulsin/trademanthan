@@ -1,7 +1,10 @@
 """Volume Mismatch Futures configuration."""
 from __future__ import annotations
 
-DEFAULT_GAP_THRESHOLD_PCT = 0.75
+MIN_GAP_PCT_LONG = -1.0
+MIN_GAP_PCT_SHORT = 1.0
+# Scoring + live scan default gap magnitude (same as SHORT minimum).
+DEFAULT_GAP_THRESHOLD_PCT = MIN_GAP_PCT_SHORT
 RELATIVE_VOLUME_LOOKBACK_SESSIONS = 20
 SCAN_HOUR = 9
 SCAN_MINUTE = 30

@@ -32,13 +32,17 @@ def upsert_signal(db: Session, trade_date: date, payload: Dict[str, Any]) -> Non
                 symbol, future_symbol, instrument_token, trade_date, direction,
                 gap_percent, first_15m_volume, relative_volume, net_volume, score,
                 entry_price, preferred_entry, stop_loss, target1, target2,
-                first_15m_high, first_15m_low, current_price, entry_status,
+                first_15m_high, first_15m_low, first_15m_open, first_15m_close,
+                bb_upper, bb_middle, bb_lower,
+                current_price, entry_status,
                 created_at, updated_at
             ) VALUES (
                 :symbol, :future_symbol, :instrument_token, :trade_date, :direction,
                 :gap_percent, :first_15m_volume, :relative_volume, :net_volume, :score,
                 :entry_price, :preferred_entry, :stop_loss, :target1, :target2,
-                :first_15m_high, :first_15m_low, :current_price, :entry_status,
+                :first_15m_high, :first_15m_low, :first_15m_open, :first_15m_close,
+                :bb_upper, :bb_middle, :bb_lower,
+                :current_price, :entry_status,
                 NOW(), NOW()
             )
             ON CONFLICT (trade_date, symbol) DO UPDATE SET
@@ -57,6 +61,11 @@ def upsert_signal(db: Session, trade_date: date, payload: Dict[str, Any]) -> Non
                 target2 = EXCLUDED.target2,
                 first_15m_high = EXCLUDED.first_15m_high,
                 first_15m_low = EXCLUDED.first_15m_low,
+                first_15m_open = EXCLUDED.first_15m_open,
+                first_15m_close = EXCLUDED.first_15m_close,
+                bb_upper = EXCLUDED.bb_upper,
+                bb_middle = EXCLUDED.bb_middle,
+                bb_lower = EXCLUDED.bb_lower,
                 current_price = EXCLUDED.current_price,
                 entry_status = CASE
                     WHEN volume_mismatch_signals.entry_status IN ('TRIGGERED', 'EXPIRED')
@@ -84,6 +93,11 @@ def upsert_signal(db: Session, trade_date: date, payload: Dict[str, Any]) -> Non
             "target2": payload.get("target2"),
             "first_15m_high": payload.get("first_15m_high"),
             "first_15m_low": payload.get("first_15m_low"),
+            "first_15m_open": payload.get("first_15m_open"),
+            "first_15m_close": payload.get("first_15m_close"),
+            "bb_upper": payload.get("bb_upper"),
+            "bb_middle": payload.get("bb_middle"),
+            "bb_lower": payload.get("bb_lower"),
             "current_price": payload.get("current_price"),
             "entry_status": payload.get("entry_status") or "WAITING",
         },

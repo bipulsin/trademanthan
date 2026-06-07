@@ -4,11 +4,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from backend.services.volume_mismatch.constants import (
-    DEFAULT_GAP_THRESHOLD_PCT,
-    PREFERRED_ENTRY_BUFFER_PCT,
+from backend.services.volume_mismatch.constants import DEFAULT_GAP_THRESHOLD_PCT, PREFERRED_ENTRY_BUFFER_PCT
+from backend.services.volume_mismatch.signal_rules import (
+    compute_gap_percent,
+    compute_net_volume,
+    evaluate_vm_signal,
 )
-from backend.services.volume_mismatch.scoring import total_score
+
+# Re-export for callers that imported from signal_engine.
+__all__ = [
+    "MismatchSignal",
+    "compute_gap_percent",
+    "compute_net_volume",
+    "evaluate_mismatch",
+]
 
 
 @dataclass
@@ -31,6 +40,9 @@ class MismatchSignal:
     first_15m_low: float
     first_15m_open: float
     first_15m_close: float
+    bb_upper: Optional[float] = None
+    bb_middle: Optional[float] = None
+    bb_lower: Optional[float] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -52,46 +64,11 @@ class MismatchSignal:
             "first_15m_low": self.first_15m_low,
             "first_15m_open": self.first_15m_open,
             "first_15m_close": self.first_15m_close,
+            "bb_upper": self.bb_upper,
+            "bb_middle": self.bb_middle,
+            "bb_lower": self.bb_lower,
             "entry_status": "WAITING",
         }
-
-
-def _f(v: Any, default: float = 0.0) -> float:
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return default
-
-
-def compute_net_volume(first_bar: Dict[str, Any], previous_close: float) -> float:
-    """
-    Signed volume for mismatch detection.
-
-    Primary rule (spec): close vs previous day close.
-    When the first 15m bar has range, use close position in the bar
-    (upper half → buying pressure, lower half → selling) so gap-down red
-    absorption / gap-up green distribution can qualify.
-    """
-    close = _f(first_bar.get("close"))
-    low = _f(first_bar.get("low"))
-    high = _f(first_bar.get("high"))
-    vol = _f(first_bar.get("volume"))
-    if vol <= 0:
-        return 0.0
-    if high > low:
-        pos = (close - low) / (high - low)
-        return vol * (2.0 * pos - 1.0)
-    if close > previous_close:
-        return vol
-    if close < previous_close:
-        return -vol
-    return 0.0
-
-
-def compute_gap_percent(today_open: float, previous_close: float) -> Optional[float]:
-    if previous_close <= 0 or today_open <= 0:
-        return None
-    return ((today_open - previous_close) / previous_close) * 100.0
 
 
 def _trade_levels_long(high: float, low: float) -> Dict[str, float]:
@@ -134,57 +111,43 @@ def evaluate_mismatch(
     first_bar: Dict[str, Any],
     previous_close: float,
     relative_volume: Optional[float],
+    bb: Dict[str, float],
     gap_threshold: float = DEFAULT_GAP_THRESHOLD_PCT,
 ) -> Optional[MismatchSignal]:
-    o = _f(first_bar.get("open"))
-    h = _f(first_bar.get("high"))
-    l = _f(first_bar.get("low"))
-    c = _f(first_bar.get("close"))
-    vol = _f(first_bar.get("volume"))
-    if o <= 0 or h <= 0 or l <= 0 or c <= 0 or previous_close <= 0:
-        return None
-
-    gap = compute_gap_percent(o, previous_close)
-    if gap is None:
-        return None
-
-    net_vol = compute_net_volume(first_bar, previous_close)
-
-    # Bullish mismatch -> LONG
-    if gap <= -gap_threshold and c < o and net_vol > 0:
-        direction = "LONG"
-        levels = _trade_levels_long(h, l)
-    # Bearish mismatch -> SHORT
-    elif gap >= gap_threshold and c > o and net_vol < 0:
-        direction = "SHORT"
-        levels = _trade_levels_short(h, l)
-    else:
-        return None
-
-    score = total_score(
-        gap,
-        net_vol,
-        vol,
-        relative_volume,
-        o,
-        h,
-        l,
-        gap_threshold=gap_threshold,
+    del gap_threshold  # unified rules use MIN_GAP_PCT_* from constants
+    core = evaluate_vm_signal(
+        symbol=symbol,
+        future_symbol=future_symbol,
+        instrument_key=instrument_key,
+        first_bar=first_bar,
+        previous_close=previous_close,
+        bb=bb,
+        relative_volume=relative_volume,
     )
+    if not core:
+        return None
+
+    direction = core["direction"]
+    h = core["first_15m_high"]
+    l = core["first_15m_low"]
+    levels = _trade_levels_long(h, l) if direction == "LONG" else _trade_levels_short(h, l)
 
     return MismatchSignal(
         symbol=symbol,
         future_symbol=future_symbol,
         instrument_key=instrument_key,
         direction=direction,
-        gap_percent=round(gap, 4),
-        first_15m_volume=round(vol, 2),
-        relative_volume=round(relative_volume, 4) if relative_volume is not None else None,
-        net_volume=round(net_vol, 2),
-        score=score,
+        gap_percent=core["gap_percent"],
+        first_15m_volume=core["first_15m_volume"],
+        relative_volume=core.get("relative_volume"),
+        net_volume=core["net_volume"],
+        score=core["score"],
         first_15m_high=h,
         first_15m_low=l,
-        first_15m_open=o,
-        first_15m_close=c,
+        first_15m_open=core["first_15m_open"],
+        first_15m_close=core["first_15m_close"],
+        bb_upper=core.get("bb_upper"),
+        bb_middle=core.get("bb_middle"),
+        bb_lower=core.get("bb_lower"),
         **levels,
     )

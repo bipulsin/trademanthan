@@ -235,7 +235,7 @@
         if (!tbody) return;
         const filtered = applyFilters(rows);
         if (!filtered.length) {
-            tbody.innerHTML = '<tr><td colspan="16" class="vmf-empty">No signals match filters.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="18" class="vmf-empty">No signals match filters.</td></tr>';
             return;
         }
         tbody.innerHTML = filtered.map(function (r) {
@@ -254,6 +254,8 @@
                 '<td class="num">' + escapeHtml(fmtNum(r.relative_volume, 2)) + '</td>' +
                 '<td class="num">' + escapeHtml(fmtNum(r.net_volume, 0)) + '</td>' +
                 '<td class="num">' + escapeHtml(fmtNum(r.score, 1)) + '</td>' +
+                '<td class="num">' + escapeHtml(fmtNum(r.bb_lower)) + '</td>' +
+                '<td class="num">' + escapeHtml(fmtNum(r.bb_upper)) + '</td>' +
                 '<td class="num">' + escapeHtml(fmtNum(r.preferred_entry || r.entry_price)) + '</td>' +
                 '<td class="num">' + escapeHtml(fmtNum(r.stop_loss)) + '</td>' +
                 '<td class="num">' + escapeHtml(fmtNum(r.target1)) + '</td>' +
@@ -352,7 +354,7 @@
             .then(startPoll)
             .catch(function (e) {
                 const tbody = document.getElementById('vmfTbody');
-                if (tbody) tbody.innerHTML = '<tr><td colspan="16" class="vmf-empty">Failed to load: ' + escapeHtml(e.message || e) + '</td></tr>';
+                if (tbody) tbody.innerHTML = '<tr><td colspan="18" class="vmf-empty">Failed to load: ' + escapeHtml(e.message || e) + '</td></tr>';
             });
     });
 })(window);
