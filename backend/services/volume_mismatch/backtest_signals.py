@@ -59,6 +59,39 @@ def daily_closes_before_session(
     return [cl for _, cl in rows]
 
 
+def _bb_band_from_row(
+    row: pd.Series,
+    prefix: str,
+    length: int,
+    std_dev: float,
+) -> Optional[float]:
+    """Resolve one BB band column across pandas_ta naming variants."""
+    candidates = [
+        f"{prefix}_{length}_{std_dev}",
+        f"{prefix}_{length}_{std_dev}_{std_dev}",
+        f"{prefix}_{length}_{int(std_dev)}",
+        f"{prefix}_{length}_{int(std_dev)}_{int(std_dev)}",
+    ]
+    for key in candidates:
+        if key in row.index:
+            try:
+                val = float(row[key])
+            except (TypeError, ValueError):
+                continue
+            if val == val:
+                return val
+    stem = f"{prefix}_{length}_"
+    for col in row.index:
+        if str(col).startswith(stem):
+            try:
+                val = float(row[col])
+            except (TypeError, ValueError):
+                continue
+            if val == val:
+                return val
+    return None
+
+
 def bollinger_bands_as_of_session(
     daily_candles: Sequence[Dict[str, Any]],
     session_date: date,
@@ -80,16 +113,10 @@ def bollinger_bands_as_of_session(
     if bb is None or bb.empty:
         return None
     last = bb.iloc[-1]
-    upper_key = f"BBU_{length}_{std_dev}"
-    middle_key = f"BBM_{length}_{std_dev}"
-    lower_key = f"BBL_{length}_{std_dev}"
-    try:
-        upper = float(last[upper_key])
-        middle = float(last[middle_key])
-        lower = float(last[lower_key])
-    except (KeyError, TypeError, ValueError):
-        return None
-    if any(x != x for x in (upper, middle, lower)):  # NaN check
+    upper = _bb_band_from_row(last, "BBU", length, std_dev)
+    middle = _bb_band_from_row(last, "BBM", length, std_dev)
+    lower = _bb_band_from_row(last, "BBL", length, std_dev)
+    if upper is None or middle is None or lower is None:
         return None
     return {
         "bb_upper": round(upper, 4),
