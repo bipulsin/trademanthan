@@ -29,8 +29,8 @@ IST = pytz.timezone("Asia/Kolkata")
 
 BACKTEST_DEFAULT_FROM = date(2026, 5, 1)
 SIGNAL_CRITERIA = (
-    "LONG: gap down (open < prev close) + first 15m close below lower BB (20,2 daily). "
-    "SHORT: gap up (open > prev close) + first 15m close above upper BB."
+    "LONG: gap down >=1% (open < prev close) + first 15m open below lower BB (20,2 daily). "
+    "SHORT: gap up >=1% (open > prev close) + first 15m open above upper BB."
 )
 
 

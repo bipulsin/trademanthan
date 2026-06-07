@@ -23,8 +23,12 @@ logger = logging.getLogger(__name__)
 BB_LENGTH = 20
 BB_STD_DEV = 2.0
 
-# Band comparison uses the first 15m bar close (09:15–09:30 IST), not open.
-BB_COMPARE_FIELD = "close"
+# Band comparison uses the first 15m bar open (09:15–09:30 IST).
+BB_COMPARE_FIELD = "open"
+
+# Minimum gap magnitude (backtest only; live scanner uses separate thresholds).
+MIN_GAP_PCT_LONG = -1.0
+MIN_GAP_PCT_SHORT = 1.0
 
 
 def _candle_date(ts: Any) -> Optional[date]:
@@ -135,14 +139,15 @@ def evaluate_gap_bb_signal(
     bb: Dict[str, float],
 ) -> Optional[Dict[str, Any]]:
     """
-    LONG: gap down (open < prev close) and first 15m close below lower BB.
-    SHORT: gap up (open > prev close) and first 15m close above upper BB.
+    LONG: gap down (open < prev close), gap <= -1%, first 15m open below lower BB.
+    SHORT: gap up (open > prev close), gap >= +1%, first 15m open above upper BB.
     """
     o = _f(first_bar.get("open"))
     h = _f(first_bar.get("high"))
     l = _f(first_bar.get("low"))
-    c = _f(first_bar.get(BB_COMPARE_FIELD))
-    if o <= 0 or h <= 0 or l <= 0 or c <= 0 or previous_close <= 0:
+    c = _f(first_bar.get("close"))
+    bb_px = _f(first_bar.get(BB_COMPARE_FIELD))
+    if o <= 0 or h <= 0 or l <= 0 or c <= 0 or bb_px <= 0 or previous_close <= 0:
         return None
 
     gap = compute_gap_percent(o, previous_close)
@@ -152,9 +157,9 @@ def evaluate_gap_bb_signal(
     upper = bb["bb_upper"]
     lower = bb["bb_lower"]
 
-    if o < previous_close and c < lower:
+    if o < previous_close and gap <= MIN_GAP_PCT_LONG and bb_px < lower:
         direction = "LONG"
-    elif o > previous_close and c > upper:
+    elif o > previous_close and gap >= MIN_GAP_PCT_SHORT and bb_px > upper:
         direction = "SHORT"
     else:
         return None
