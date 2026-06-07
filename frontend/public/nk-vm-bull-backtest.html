@@ -8,7 +8,7 @@
     <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="theme.css?v=1.3">
-    <link rel="stylesheet" href="nk-vm-bull-backtest.css?v=1">
+    <link rel="stylesheet" href="nk-vm-bull-backtest.css?v=2">
 </head>
 <body class="theme-page" data-theme="dark">
     <div class="nvb-wrap">
@@ -31,7 +31,7 @@
         <div class="nvb-callout" id="nvbErr" hidden></div>
 
         <div class="nvb-summary" id="nvbSummary">
-            <div class="nvb-stat"><span class="nvb-stat-label">Trades</span><span class="nvb-stat-val" id="nvbStatTrades">—</span></div>
+            <div class="nvb-stat"><span class="nvb-stat-label">Trades (selected)</span><span class="nvb-stat-val" id="nvbStatTrades">—</span></div>
             <div class="nvb-stat"><span class="nvb-stat-label">Errors</span><span class="nvb-stat-val" id="nvbStatErrors">—</span></div>
             <div class="nvb-stat"><span class="nvb-stat-label">Sum PnL 12:30</span><span class="nvb-stat-val" id="nvbStatPnl1230">—</span></div>
             <div class="nvb-stat"><span class="nvb-stat-label">Sum PnL 15:15</span><span class="nvb-stat-val" id="nvbStatPnl1515">—</span></div>
@@ -49,6 +49,7 @@
             <table class="nvb-table" id="nvbTable">
                 <thead>
                     <tr>
+                        <th class="nvb-chk-col" aria-label="Include in totals"></th>
                         <th data-sort="signal_time">Trade Date/Time</th>
                         <th data-sort="symbol">Symbol</th>
                         <th data-sort="future_symbol">Future</th>
@@ -63,13 +64,13 @@
                     </tr>
                 </thead>
                 <tbody id="nvbTbody">
-                    <tr><td colspan="11" class="nvb-empty">Loading backtest…</td></tr>
+                    <tr><td colspan="12" class="nvb-empty">Loading backtest…</td></tr>
                 </tbody>
             </table>
         </div>
 
         <p class="nvb-footer" id="nvbFooter"></p>
     </div>
-    <script src="nk-vm-bull-backtest.js?v=1"></script>
+    <script src="nk-vm-bull-backtest.js?v=2"></script>
 </body>
 </html>

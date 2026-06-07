@@ -6,12 +6,13 @@
     'use strict';
 
     const API_PATHS = ['/nk-vm-bull-backtest/data', '/api/nk-vm-bull-backtest/data'];
-    const COL_COUNT = 11;
+    const COL_COUNT = 12;
 
     const state = {
         rows: [],
         meta: {},
         sort: { key: 'signal_time', dir: 'asc' },
+        unchecked: new Set(),
     };
 
     function apiBase() {
@@ -62,9 +63,36 @@
         return cls ? '<span class="' + cls + '">' + txt + '</span>' : txt;
     }
 
+    function fmtPnlPlain(v) {
+        if (v == null || v === '') return null;
+        const n = Number(v);
+        return Number.isFinite(n) ? n : null;
+    }
+
     function tradeDateFromSignal(signalTime) {
         if (!signalTime) return '';
         return String(signalTime).slice(0, 10);
+    }
+
+    function rowKey(r) {
+        return String(r.signal_time || '') + '|' + String(r.symbol || '') + '|' + String(r.future_symbol || '');
+    }
+
+    function isRowChecked(key) {
+        return !state.unchecked.has(key);
+    }
+
+    function fmtDateHeader(isoDate) {
+        if (!isoDate) return 'Unknown date';
+        const parts = String(isoDate).split('-');
+        if (parts.length !== 3) return isoDate;
+        const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 12, 0, 0);
+        return d.toLocaleDateString('en-IN', {
+            weekday: 'long',
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric',
+        });
     }
 
     function applyFilters(rows) {
@@ -87,9 +115,13 @@
                 return String(r.symbol || '').toUpperCase().indexOf(symQ) >= 0;
             });
         }
+        return out;
+    }
+
+    function sortRows(rows) {
         const sk = state.sort.key;
         const sd = state.sort.dir === 'asc' ? 1 : -1;
-        out.sort(function (a, b) {
+        return rows.slice().sort(function (a, b) {
             const va = a[sk];
             const vb = b[sk];
             if (sk === 'signal_time') return sd * String(va).localeCompare(String(vb));
@@ -98,58 +130,216 @@
             if (Number.isFinite(na) && Number.isFinite(nb)) return sd * (na - nb);
             return sd * String(va || '').localeCompare(String(vb || ''));
         });
-        return out;
+    }
+
+    function groupByDate(rows) {
+        const map = {};
+        rows.forEach(function (r) {
+            const d = tradeDateFromSignal(r.signal_time) || String(r.trade_date || '');
+            if (!map[d]) map[d] = [];
+            map[d].push(r);
+        });
+        const dates = Object.keys(map).sort();
+        if (state.sort.key === 'signal_time') {
+            dates.forEach(function (d) {
+                map[d].sort(function (a, b) {
+                    return String(a.signal_time).localeCompare(String(b.signal_time));
+                });
+            });
+        } else {
+            dates.forEach(function (d) {
+                map[d] = sortRows(map[d]);
+            });
+        }
+        return dates.map(function (d) { return { date: d, rows: map[d] }; });
+    }
+
+    function sumCheckedRows(rows) {
+        let sum1230 = 0;
+        let sum1515 = 0;
+        let hits5k = 0;
+        let checked = 0;
+        rows.forEach(function (r) {
+            const key = rowKey(r);
+            if (!isRowChecked(key)) return;
+            checked += 1;
+            const p1230 = fmtPnlPlain(r.pnl_1230);
+            const p1515 = fmtPnlPlain(r.pnl_1515);
+            if (p1230 != null) sum1230 += p1230;
+            if (p1515 != null) sum1515 += p1515;
+            if (r.pnl_5000_time) hits5k += 1;
+        });
+        return { sum1230: sum1230, sum1515: sum1515, hits5k: hits5k, checked: checked, total: rows.length };
+    }
+
+    function updateSummary(filteredRows) {
+        const totals = sumCheckedRows(filteredRows);
+        const tradesEl = document.getElementById('nvbStatTrades');
+        if (tradesEl) {
+            tradesEl.textContent = totals.checked + ' / ' + totals.total;
+        }
+        const p1230El = document.getElementById('nvbStatPnl1230');
+        const p1515El = document.getElementById('nvbStatPnl1515');
+        const hitsEl = document.getElementById('nvbStatPnl5k');
+        if (p1230El) p1230El.innerHTML = fmtPnl(totals.sum1230);
+        if (p1515El) p1515El.innerHTML = fmtPnl(totals.sum1515);
+        if (hitsEl) hitsEl.textContent = totals.hits5k;
+    }
+
+    function dateGroupAllChecked(groupRows) {
+        return groupRows.every(function (r) { return isRowChecked(rowKey(r)); });
+    }
+
+    function dateGroupSomeChecked(groupRows) {
+        return groupRows.some(function (r) { return isRowChecked(rowKey(r)); });
     }
 
     function renderTable(rows) {
         const tbody = document.getElementById('nvbTbody');
         const countEl = document.getElementById('nvbCount');
         const filtered = applyFilters(rows);
-        if (countEl) countEl.textContent = filtered.length + ' rows';
+        const totals = sumCheckedRows(filtered);
+        if (countEl) {
+            countEl.textContent = totals.checked + ' / ' + filtered.length + ' rows selected';
+        }
+        updateSummary(filtered);
         if (!tbody) return;
         if (!filtered.length) {
             tbody.innerHTML = '<tr><td colspan="' + COL_COUNT + '" class="nvb-empty">No rows match filters.</td></tr>';
             return;
         }
-        tbody.innerHTML = filtered.map(function (r) {
-            const err = r.error ? ' title="' + escapeHtml(r.error) + '"' : '';
-            return (
-                '<tr' + err + '>' +
-                '<td>' + escapeHtml(r.signal_time || '—') + '</td>' +
-                '<td><strong>' + escapeHtml(r.symbol || '—') + '</strong></td>' +
-                '<td>' + escapeHtml(r.future_symbol || '—') + '</td>' +
-                '<td class="num">' + escapeHtml(fmtNum(r.lot_size, 0)) + '</td>' +
-                '<td class="num">' + escapeHtml(fmtNum(r.entry_price)) + '</td>' +
-                '<td class="num">' + escapeHtml(fmtNum(r.exit_1230_price)) + '</td>' +
-                '<td class="num">' + fmtPnl(r.pnl_1230) + '</td>' +
-                '<td class="num">' + escapeHtml(fmtNum(r.exit_1515_price)) + '</td>' +
-                '<td class="num">' + fmtPnl(r.pnl_1515) + '</td>' +
-                '<td>' + escapeHtml(r.pnl_5000_time || '—') + '</td>' +
-                '<td class="num">' + escapeHtml(fmtNum(r.pnl_5000_ltp)) + '</td>' +
+
+        const groups = groupByDate(filtered);
+        const html = [];
+
+        groups.forEach(function (group) {
+            const allChecked = dateGroupAllChecked(group.rows);
+            const someChecked = dateGroupSomeChecked(group.rows);
+            const dateIndeterminate = someChecked && !allChecked;
+
+            html.push(
+                '<tr class="nvb-date-header">' +
+                '<td colspan="' + COL_COUNT + '">' +
+                '<label class="nvb-date-label">' +
+                '<input type="checkbox" class="nvb-date-select-all"' +
+                ' data-date="' + escapeHtml(group.date) + '"' +
+                (allChecked ? ' checked' : '') +
+                (dateIndeterminate ? ' data-indeterminate="1"' : '') +
+                '> ' +
+                '<span class="nvb-date-title">' + escapeHtml(fmtDateHeader(group.date)) + '</span>' +
+                '</label>' +
+                '<span class="nvb-date-meta">' + group.rows.length + ' trade' + (group.rows.length === 1 ? '' : 's') + '</span>' +
+                '</td>' +
                 '</tr>'
             );
-        }).join('');
+
+            group.rows.forEach(function (r) {
+                const key = rowKey(r);
+                const checked = isRowChecked(key);
+                const err = r.error ? ' title="' + escapeHtml(r.error) + '"' : '';
+                html.push(
+                    '<tr class="nvb-trade-row' + (checked ? '' : ' nvb-row-excluded') + '"' + err +
+                    ' data-row-key="' + escapeHtml(key) + '">' +
+                    '<td class="nvb-chk">' +
+                    '<input type="checkbox" class="nvb-row-chk" data-row-key="' + escapeHtml(key) + '"' +
+                    (checked ? ' checked' : '') + ' aria-label="Include trade in totals">' +
+                    '</td>' +
+                    '<td>' + escapeHtml(r.signal_time || '—') + '</td>' +
+                    '<td><strong>' + escapeHtml(r.symbol || '—') + '</strong></td>' +
+                    '<td>' + escapeHtml(r.future_symbol || '—') + '</td>' +
+                    '<td class="num">' + escapeHtml(fmtNum(r.lot_size, 0)) + '</td>' +
+                    '<td class="num">' + escapeHtml(fmtNum(r.entry_price)) + '</td>' +
+                    '<td class="num">' + escapeHtml(fmtNum(r.exit_1230_price)) + '</td>' +
+                    '<td class="num">' + fmtPnl(r.pnl_1230) + '</td>' +
+                    '<td class="num">' + escapeHtml(fmtNum(r.exit_1515_price)) + '</td>' +
+                    '<td class="num">' + fmtPnl(r.pnl_1515) + '</td>' +
+                    '<td>' + escapeHtml(r.pnl_5000_time || '—') + '</td>' +
+                    '<td class="num">' + escapeHtml(fmtNum(r.pnl_5000_ltp)) + '</td>' +
+                    '</tr>'
+                );
+            });
+
+            const sub = sumCheckedRows(group.rows);
+            html.push(
+                '<tr class="nvb-subtotal" data-date="' + escapeHtml(group.date) + '">' +
+                '<td class="nvb-chk"></td>' +
+                '<td colspan="6"><strong>Subtotal</strong>' +
+                (sub.checked < sub.total
+                    ? ' <span class="nvb-subtotal-meta">(' + sub.checked + ' of ' + sub.total + ' included)</span>'
+                    : ' <span class="nvb-subtotal-meta">(' + sub.checked + ' trade' + (sub.checked === 1 ? '' : 's') + ')</span>') +
+                '</td>' +
+                '<td class="num"><strong>' + fmtPnl(sub.sum1230) + '</strong></td>' +
+                '<td class="num">—</td>' +
+                '<td class="num"><strong>' + fmtPnl(sub.sum1515) + '</strong></td>' +
+                '<td class="num"><strong>' + (sub.hits5k ? sub.hits5k : '—') + '</strong></td>' +
+                '<td class="num">—</td>' +
+                '</tr>'
+            );
+        });
+
+        tbody.innerHTML = html.join('');
+
+        tbody.querySelectorAll('.nvb-date-select-all[data-indeterminate="1"]').forEach(function (cb) {
+            cb.indeterminate = true;
+        });
+    }
+
+    function setRowChecked(key, checked) {
+        if (checked) {
+            state.unchecked.delete(key);
+        } else {
+            state.unchecked.add(key);
+        }
+    }
+
+    function setDateGroupChecked(date, groupRows, checked) {
+        groupRows.forEach(function (r) {
+            setRowChecked(rowKey(r), checked);
+        });
+    }
+
+    function getGroupRowsForDate(date, filtered) {
+        return filtered.filter(function (r) {
+            return (tradeDateFromSignal(r.signal_time) || String(r.trade_date || '')) === date;
+        });
+    }
+
+    function bindTableEvents() {
+        const tbody = document.getElementById('nvbTbody');
+        if (!tbody || tbody.dataset.bound) return;
+        tbody.dataset.bound = '1';
+
+        tbody.addEventListener('change', function (e) {
+            const target = e.target;
+            if (!target || target.type !== 'checkbox') return;
+
+            const filtered = applyFilters(state.rows);
+
+            if (target.classList.contains('nvb-row-chk')) {
+                const key = target.getAttribute('data-row-key');
+                if (!key) return;
+                setRowChecked(key, target.checked);
+                renderTable(state.rows);
+                return;
+            }
+
+            if (target.classList.contains('nvb-date-select-all')) {
+                const date = target.getAttribute('data-date');
+                if (!date) return;
+                const groupRows = getGroupRowsForDate(date, filtered);
+                setDateGroupChecked(date, groupRows, target.checked);
+                renderTable(state.rows);
+            }
+        });
     }
 
     function fillSummary(doc) {
         const s = doc.summary || {};
-        const rows = doc.rows || [];
-        document.getElementById('nvbStatTrades').textContent = s.total_trades != null ? s.total_trades : '—';
         document.getElementById('nvbStatErrors').textContent = s.errors != null ? s.errors : '—';
 
-        let sum1230 = 0;
-        let sum1515 = 0;
-        let hits5k = 0;
-        rows.forEach(function (r) {
-            if (Number.isFinite(Number(r.pnl_1230))) sum1230 += Number(r.pnl_1230);
-            if (Number.isFinite(Number(r.pnl_1515))) sum1515 += Number(r.pnl_1515);
-            if (r.pnl_5000_time) hits5k += 1;
-        });
-        document.getElementById('nvbStatPnl1230').innerHTML = fmtPnl(sum1230);
-        document.getElementById('nvbStatPnl1515').innerHTML = fmtPnl(sum1515);
-        document.getElementById('nvbStatPnl5k').textContent = hits5k;
-
-        const dates = rows.map(function (r) { return tradeDateFromSignal(r.signal_time) || r.trade_date; }).filter(Boolean).sort();
+        const dates = (doc.rows || []).map(function (r) {
+            return tradeDateFromSignal(r.signal_time) || r.trade_date;
+        }).filter(Boolean).sort();
         const fromEl = document.getElementById('nvbFrom');
         const toEl = document.getElementById('nvbTo');
         if (fromEl && dates.length) fromEl.value = dates[0];
@@ -210,10 +400,12 @@
     document.addEventListener('DOMContentLoaded', function () {
         setupTheme();
         bindFilters();
+        bindTableEvents();
         loadData()
             .then(function (doc) {
                 state.meta = doc;
                 state.rows = doc.rows || [];
+                state.unchecked = new Set();
                 fillSummary(doc);
                 renderTable(state.rows);
                 const err = document.getElementById('nvbErr');
