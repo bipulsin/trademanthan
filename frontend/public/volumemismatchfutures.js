@@ -351,6 +351,22 @@
         renderSectionTable('vmfPrevTbody', state.previousRows, state.previousSection, false);
     }
 
+    async function refreshLiveData() {
+        const section = state.todaySection || {};
+        const runScan = !section.market_closed && !section.awaiting_scan;
+        if (runScan) {
+            try {
+                await apiPost('/volume-mismatch-futures/scan', {});
+            } catch (e) {
+                const banner = document.getElementById('vmfBanner');
+                if (banner) {
+                    banner.textContent = 'Scan failed: ' + (e.message || e) + ' — showing last DB snapshot.';
+                }
+            }
+        }
+        await loadSignals();
+    }
+
     async function loadSignals() {
         const data = await apiGet('/volume-mismatch-futures/signals');
         if (data.today && data.previous) {
@@ -408,7 +424,7 @@
 
     function bindEvents() {
         document.getElementById('vmfRefreshBtn')?.addEventListener('click', function () {
-            loadSignals().catch(function (e) {
+            refreshLiveData().catch(function (e) {
                 document.getElementById('vmfBanner').textContent = 'Refresh failed: ' + (e.message || e);
             });
         });
@@ -438,6 +454,11 @@
         pollTimer = setInterval(function () {
             loadSignals().catch(function () {});
         }, POLL_MS);
+    }
+
+    global.VolumeMismatchFutures = {
+        refresh: refreshLiveData,
+        loadSignals: loadSignals,
     }
 
     function showLoadError(e) {

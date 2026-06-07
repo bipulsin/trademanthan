@@ -1,4 +1,8 @@
-"""Daily 09:30:30 scan — first 15m volume mismatch candidates."""
+"""Daily 09:30:30 scan — first 15m volume mismatch candidates.
+
+Live path: fresh Upstox candles via ``batch_fetch_candles`` (no disk cache / backtest artifact).
+``clear_candle_cache()`` at job start; results persisted to ``volume_mismatch_signals`` for the live page.
+"""
 from __future__ import annotations
 
 import logging
@@ -13,6 +17,7 @@ from backend.services.upstox_service import UpstoxService
 from backend.services.volume_mismatch.candles import (
     BB_DAILY_DAYS_BACK,
     batch_fetch_candles,
+    candle_fetch_stats,
     clear_candle_cache,
     first_15m_bar_for_session,
     first_15m_volumes_by_session,
@@ -148,14 +153,18 @@ def run_volume_mismatch_scan(
     elapsed = round(time.perf_counter() - t0, 3)
     long_n = sum(1 for s in signals if s.get("direction") == "LONG")
     short_n = sum(1 for s in signals if s.get("direction") == "SHORT")
+    cstats = candle_fetch_stats()
     logger.info(
-        "Volume Mismatch scan %s: %s signals (LONG=%s SHORT=%s) in %.3fs / universe=%s",
+        "Volume Mismatch scan %s: %s signals (LONG=%s SHORT=%s) in %.3fs / universe=%s "
+        "(Upstox fetches=%s in-memory cache_hits=%s)",
         sd,
         len(signals),
         long_n,
         short_n,
         elapsed,
         len(universe),
+        cstats.get("api", 0),
+        cstats.get("cache_hit", 0),
     )
     return {
         "success": True,

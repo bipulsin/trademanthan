@@ -1,4 +1,9 @@
-"""Candle helpers for Volume Mismatch — batch fetch + first 15m bar extraction."""
+"""Candle helpers for Volume Mismatch — batch fetch + first 15m bar extraction.
+
+Live scanner/monitor paths call ``fetch_candles_cached`` → ``UpstoxService.get_historical_candles_by_instrument_key``
+only (in-memory dedup within one job). They never use ``VolumeMismatchCandleCache`` / disk cache
+(``volume_mismatch_candle_cache/``) — that is backtest-only via ``candle_cache.py``.
+"""
 from __future__ import annotations
 
 import logging
@@ -11,13 +16,20 @@ import pytz
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
 
-# Per-job cache: instrument_key -> (interval, days_back) -> candles
+# Per-job in-memory cache: instrument_key -> (interval, days_back) -> candles
 _candle_cache: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+_candle_fetch_stats: Dict[str, int] = {"api": 0, "cache_hit": 0}
 
 
 def clear_candle_cache() -> None:
-    global _candle_cache
+    global _candle_cache, _candle_fetch_stats
     _candle_cache = {}
+    _candle_fetch_stats = {"api": 0, "cache_hit": 0}
+
+
+def candle_fetch_stats() -> Dict[str, int]:
+    """Upstox API vs in-memory cache hits for the current scan/monitor job."""
+    return dict(_candle_fetch_stats)
 
 
 def _parse_ts(ts: Any) -> Optional[datetime]:
@@ -44,8 +56,11 @@ def fetch_candles_cached(
     ck = _cache_key(interval, days_back, range_end_date)
     bucket = _candle_cache.setdefault(ik, {})
     if ck in bucket:
+        _candle_fetch_stats["cache_hit"] += 1
+        logger.debug("VM live scan: in-memory cache hit %s %s", ik, interval)
         return bucket[ck]
     try:
+        logger.debug("VM live scan: Upstox live fetch %s %s", ik, interval)
         raw = upstox.get_historical_candles_by_instrument_key(
             ik,
             interval=interval,
@@ -56,6 +71,7 @@ def fetch_candles_cached(
     except Exception as e:
         logger.debug("VM candles %s %s: %s", ik, interval, e)
         out = []
+    _candle_fetch_stats["api"] += 1
     bucket[ck] = out
     return out
 

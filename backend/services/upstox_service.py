@@ -1495,7 +1495,13 @@ class UpstoxService:
                     instrument_key, interval, to_date, from_date
                 )
 
-            if range_end_date is None and iv in _INTRADAY_MERGE_INTERVALS:
+            # Intraday V3 has today's session; historical minute/hour bars lag for F&O.
+            # Merge when end anchor is "today" (live scan passes range_end_date=today) or
+            # unset (default live fetches). Skip for past range_end_date (backtest/backfill).
+            today_ist = datetime.now(ist).date()
+            if iv in _INTRADAY_MERGE_INTERVALS and (
+                range_end_date is None or range_end_date >= today_ist
+            ):
                 intra = self._fetch_intraday_candles_v3(instrument_key, iv)
                 if intra:
                     candles = _merge_historical_with_intraday(
