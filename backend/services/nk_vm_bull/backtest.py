@@ -33,6 +33,7 @@ ENTRY_OFFSET_MIN = 5
 EXIT_1230_HHMM = (12, 30)
 EXIT_1515_HHMM = (15, 15)
 PNL_MILESTONE_RUPEES = 5000.0
+STOP_LOSS_PCT = 0.005
 
 ARTIFACT_NAME = "nk_vm_bull_backtest.json"
 SOURCE_NAME = "nk_vm_bull_backtest_source.csv"
@@ -198,26 +199,105 @@ def _session_candles(
     return actual_date, buckets, ("; ".join(notes) if notes else None)
 
 
-def _scan_pnl_milestone(
+def _candle_at_slot_with_fallback(
+    buckets: Dict[Tuple[int, int], Dict[str, Any]],
+    hhmm: Tuple[int, int],
+) -> Optional[Dict[str, Any]]:
+    """1m candle at HH:MM with nearest-minute fallback (same as entry LTP)."""
+    exact = buckets.get(hhmm)
+    if exact is not None:
+        return exact
+    h, m = hhmm
+    for delta in (1, -1, 2, -2, 3, -3, 4, -4, 5, -5):
+        probe_m = m + delta
+        probe_h = h
+        while probe_m < 0:
+            probe_m += 60
+            probe_h -= 1
+        while probe_m > 59:
+            probe_m -= 60
+            probe_h += 1
+        if probe_h < 0 or probe_h > 23:
+            continue
+        c = buckets.get((probe_h, probe_m))
+        if c is not None:
+            return c
+    return None
+
+
+def _entry_stop_loss_price(
+    buckets: Dict[Tuple[int, int], Dict[str, Any]],
+    entry_hhmm: Tuple[int, int],
+) -> Optional[float]:
+    """0.5% below min(open, close) of the entry 1m candle."""
+    c = _candle_at_slot_with_fallback(buckets, entry_hhmm)
+    if c is None:
+        return None
+    op, _, _, cl, _ = _candle_ohlcv(c)
+    if op is None or cl is None:
+        return None
+    o_f, c_f = float(op), float(cl)
+    if o_f <= 0 or c_f <= 0:
+        return None
+    ref = min(o_f, c_f)
+    return round(ref * (1.0 - STOP_LOSS_PCT), 2)
+
+
+def _scan_sl_and_milestone(
     buckets: Dict[Tuple[int, int], Dict[str, Any]],
     entry_hhmm: Tuple[int, int],
     entry_price: float,
     lot_size: int,
+    stop_loss_price: float,
     *,
     end_hhmm: Tuple[int, int] = EXIT_1515_HHMM,
-) -> Tuple[Optional[str], Optional[float]]:
-    """First minute from entry where (ltp - entry) * lot_size >= 5000."""
-    if lot_size <= 0 or entry_price <= 0:
-        return None, None
+) -> Tuple[bool, Optional[str], Optional[float], Optional[str], Optional[float]]:
+    """Minute scan from entry: SL (low) before Rs 5000 milestone (close LTP)."""
+    if lot_size <= 0 or entry_price <= 0 or stop_loss_price <= 0:
+        return False, None, None, None, None
+
+    sl_hit = False
+    sl_hit_time: Optional[str] = None
+    pnl_5000_time: Optional[str] = None
+    pnl_5000_ltp: Optional[float] = None
+
     keys = sorted(k for k in buckets if entry_hhmm <= k <= end_hhmm)
     for k in keys:
-        ltp = _ltp_close_at_slot(buckets, k)
-        if ltp is None:
-            continue
-        pnl = (ltp - entry_price) * lot_size
-        if pnl >= PNL_MILESTONE_RUPEES:
-            return f"{k[0]:02d}:{k[1]:02d}", round(ltp, 2)
-    return None, None
+        if not sl_hit:
+            c = buckets.get(k)
+            if c is not None:
+                _, _, lo, _, _ = _candle_ohlcv(c)
+                if lo is not None and float(lo) <= stop_loss_price:
+                    sl_hit = True
+                    sl_hit_time = f"{k[0]:02d}:{k[1]:02d}"
+
+        if pnl_5000_time is None:
+            ltp = _ltp_close_at_slot(buckets, k)
+            if ltp is not None:
+                pnl = (ltp - entry_price) * lot_size
+                if pnl >= PNL_MILESTONE_RUPEES:
+                    pnl_5000_time = f"{k[0]:02d}:{k[1]:02d}"
+                    pnl_5000_ltp = round(ltp, 2)
+
+    pnl_at_sl: Optional[float] = None
+    if sl_hit:
+        pnl_at_sl = round((stop_loss_price - entry_price) * lot_size, 2)
+    return sl_hit, sl_hit_time, pnl_at_sl, pnl_5000_time, pnl_5000_ltp
+
+
+def _reached_profit(
+    sl_hit: bool,
+    sl_hit_time: Optional[str],
+    pnl_5000_time: Optional[str],
+) -> bool:
+    """Rs 5000 milestone hit before SL, or milestone hit when SL never triggered."""
+    if not pnl_5000_time:
+        return False
+    if not sl_hit:
+        return True
+    if not sl_hit_time:
+        return True
+    return pnl_5000_time < sl_hit_time
 
 
 def compute_trade_row(
@@ -250,6 +330,13 @@ def compute_trade_row(
         "pnl_1515": None,
         "pnl_5000_time": None,
         "pnl_5000_ltp": None,
+        "stop_loss_price": None,
+        "sl_hit": False,
+        "sl_hit_time": None,
+        "pnl_at_sl": None,
+        "reached_profit": False,
+        "reached_profit_1230": False,
+        "reached_profit_1515": False,
         "error": None,
         "notes": None,
     }
@@ -302,9 +389,25 @@ def compute_trade_row(
     if exit_1515 is not None:
         out["pnl_1515"] = round((exit_1515 - entry_price) * lot_size, 2)
 
-    pnl_time, pnl_ltp = _scan_pnl_milestone(buckets, entry_hhmm, entry_price, lot_size)
+    sl_price = _entry_stop_loss_price(buckets, entry_hhmm)
+    if sl_price is None:
+        out["error"] = "stop_loss_price_unavailable"
+        return out
+    out["stop_loss_price"] = sl_price
+
+    sl_hit, sl_hit_time, pnl_at_sl, pnl_time, pnl_ltp = _scan_sl_and_milestone(
+        buckets, entry_hhmm, entry_price, lot_size, sl_price
+    )
+    out["sl_hit"] = sl_hit
+    out["sl_hit_time"] = sl_hit_time
+    out["pnl_at_sl"] = pnl_at_sl
     out["pnl_5000_time"] = pnl_time
     out["pnl_5000_ltp"] = pnl_ltp
+    out["reached_profit"] = _reached_profit(sl_hit, sl_hit_time, pnl_time)
+    if out.get("pnl_1230") is not None:
+        out["reached_profit_1230"] = float(out["pnl_1230"]) > 0
+    if out.get("pnl_1515") is not None:
+        out["reached_profit_1515"] = float(out["pnl_1515"]) > 0
     if pnl_time is None:
         out["notes"] = (
             f"{out['notes']}; pnl_5000_not_hit" if out.get("notes") else "pnl_5000_not_hit"
@@ -375,6 +478,15 @@ def build_output_document(
     partial: bool = False,
 ) -> Dict[str, Any]:
     sorted_rows = sorted(rows, key=lambda r: str(r.get("signal_time") or ""))
+    ok_rows = [r for r in sorted_rows if not r.get("error")]
+    sl_hit_before_profit = 0
+    for r in ok_rows:
+        if not r.get("sl_hit"):
+            continue
+        pnl_t = r.get("pnl_5000_time")
+        sl_t = r.get("sl_hit_time")
+        if not pnl_t or (sl_t and sl_t <= pnl_t):
+            sl_hit_before_profit += 1
     return {
         "algo": "nk_vm_bull_backtest",
         "generated_at": datetime.now(IST).isoformat(),
@@ -382,6 +494,9 @@ def build_output_document(
         "summary": {
             "total_trades": len(sorted_rows),
             "errors": errors,
+            "sl_hit_count": sum(1 for r in ok_rows if r.get("sl_hit")),
+            "reached_profit_count": sum(1 for r in ok_rows if r.get("reached_profit")),
+            "sl_hit_before_profit_count": sl_hit_before_profit,
         },
         "rows": sorted_rows,
     }

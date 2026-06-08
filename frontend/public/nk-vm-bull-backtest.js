@@ -6,7 +6,7 @@
     'use strict';
 
     const API_PATHS = ['/nk-vm-bull-backtest/data', '/api/nk-vm-bull-backtest/data'];
-    const COL_COUNT = 12;
+    const COL_COUNT = 16;
 
     const state = {
         rows: [],
@@ -154,10 +154,17 @@
         return dates.map(function (d) { return { date: d, rows: map[d] }; });
     }
 
+    function fmtSlHit(v) {
+        if (v === true || v === 'true' || v === 1) return 'Y';
+        if (v === false || v === 'false' || v === 0) return 'N';
+        return '—';
+    }
+
     function sumCheckedRows(rows) {
         let sum1230 = 0;
         let sum1515 = 0;
-        let hits5k = 0;
+        let slHits = 0;
+        let reachedProfit = 0;
         let checked = 0;
         rows.forEach(function (r) {
             const key = rowKey(r);
@@ -167,9 +174,17 @@
             const p1515 = fmtPnlPlain(r.pnl_1515);
             if (p1230 != null) sum1230 += p1230;
             if (p1515 != null) sum1515 += p1515;
-            if (r.pnl_5000_time) hits5k += 1;
+            if (r.sl_hit) slHits += 1;
+            if (r.reached_profit) reachedProfit += 1;
         });
-        return { sum1230: sum1230, sum1515: sum1515, hits5k: hits5k, checked: checked, total: rows.length };
+        return {
+            sum1230: sum1230,
+            sum1515: sum1515,
+            slHits: slHits,
+            reachedProfit: reachedProfit,
+            checked: checked,
+            total: rows.length,
+        };
     }
 
     function updateSummary(filteredRows) {
@@ -180,10 +195,12 @@
         }
         const p1230El = document.getElementById('nvbStatPnl1230');
         const p1515El = document.getElementById('nvbStatPnl1515');
+        const slEl = document.getElementById('nvbStatSlHit');
         const hitsEl = document.getElementById('nvbStatPnl5k');
         if (p1230El) p1230El.innerHTML = fmtPnl(totals.sum1230);
         if (p1515El) p1515El.innerHTML = fmtPnl(totals.sum1515);
-        if (hitsEl) hitsEl.textContent = totals.hits5k;
+        if (slEl) slEl.textContent = totals.slHits;
+        if (hitsEl) hitsEl.textContent = totals.reachedProfit;
     }
 
     function dateGroupAllChecked(groupRows) {
@@ -249,6 +266,10 @@
                     '<td>' + escapeHtml(r.future_symbol || '—') + '</td>' +
                     '<td class="num">' + escapeHtml(fmtNum(r.lot_size, 0)) + '</td>' +
                     '<td class="num">' + escapeHtml(fmtNum(r.entry_price)) + '</td>' +
+                    '<td class="num">' + escapeHtml(fmtNum(r.stop_loss_price)) + '</td>' +
+                    '<td>' + escapeHtml(fmtSlHit(r.sl_hit)) + '</td>' +
+                    '<td>' + escapeHtml(r.sl_hit_time || '—') + '</td>' +
+                    '<td class="num">' + fmtPnl(r.pnl_at_sl) + '</td>' +
                     '<td class="num">' + escapeHtml(fmtNum(r.exit_1230_price)) + '</td>' +
                     '<td class="num">' + fmtPnl(r.pnl_1230) + '</td>' +
                     '<td class="num">' + escapeHtml(fmtNum(r.exit_1515_price)) + '</td>' +
@@ -263,7 +284,7 @@
             html.push(
                 '<tr class="nvb-subtotal" data-date="' + escapeHtml(group.date) + '">' +
                 '<td class="nvb-chk"></td>' +
-                '<td colspan="6"><strong>Subtotal</strong>' +
+                '<td colspan="10"><strong>Subtotal</strong>' +
                 (sub.checked < sub.total
                     ? ' <span class="nvb-subtotal-meta">(' + sub.checked + ' of ' + sub.total + ' included)</span>'
                     : ' <span class="nvb-subtotal-meta">(' + sub.checked + ' trade' + (sub.checked === 1 ? '' : 's') + ')</span>') +
@@ -271,8 +292,8 @@
                 '<td class="num"><strong>' + fmtPnl(sub.sum1230) + '</strong></td>' +
                 '<td class="num">—</td>' +
                 '<td class="num"><strong>' + fmtPnl(sub.sum1515) + '</strong></td>' +
-                '<td class="num"><strong>' + (sub.hits5k ? sub.hits5k : '—') + '</strong></td>' +
-                '<td class="num">—</td>' +
+                '<td class="num"><strong>' + (sub.slHits ? sub.slHits + ' SL' : '—') + '</strong></td>' +
+                '<td class="num"><strong>' + (sub.reachedProfit ? sub.reachedProfit + ' Rs5k' : '—') + '</strong></td>' +
                 '</tr>'
             );
         });
