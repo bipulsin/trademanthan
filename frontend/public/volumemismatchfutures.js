@@ -151,7 +151,29 @@
         });
     }
 
-    function applyFilters(rows) {
+    function compareScoreDesc(a, b) {
+        const sa = Number(a.score) || 0;
+        const sb = Number(b.score) || 0;
+        if (sb !== sa) return sb - sa;
+        const ga = Math.abs(Number(a.gap_percent) || 0);
+        const gb = Math.abs(Number(b.gap_percent) || 0);
+        if (gb !== ga) return gb - ga;
+        return (Number(b.first_15m_volume) || 0) - (Number(a.first_15m_volume) || 0);
+    }
+
+    function sortRows(rows, readyFirst) {
+        return rows.sort(function (a, b) {
+            if (readyFirst) {
+                const ra = String(a.entry_status || '').toUpperCase() === 'READY' ? 1 : 0;
+                const rb = String(b.entry_status || '').toUpperCase() === 'READY' ? 1 : 0;
+                if (rb !== ra) return rb - ra;
+            }
+            return compareScoreDesc(a, b);
+        });
+    }
+
+    function applyFilters(rows, sortOpts) {
+        sortOpts = sortOpts || {};
         let out = rows.slice();
         const f = state.filter;
         if (f === 'LONG') out = out.filter(function (r) { return String(r.direction).toUpperCase() === 'LONG'; });
@@ -169,15 +191,7 @@
                 return sym.indexOf(q) >= 0 || fs.indexOf(q) >= 0;
             });
         }
-        out.sort(function (a, b) {
-            const sa = Number(a.score) || 0;
-            const sb = Number(b.score) || 0;
-            if (sb !== sa) return sb - sa;
-            const ga = Math.abs(Number(a.gap_percent) || 0);
-            const gb = Math.abs(Number(b.gap_percent) || 0);
-            if (gb !== ga) return gb - ga;
-            return (Number(b.first_15m_volume) || 0) - (Number(a.first_15m_volume) || 0);
-        });
+        sortRows(out, !!sortOpts.readyFirst);
         return out;
     }
 
@@ -192,7 +206,10 @@
             const s = document.createElement('script');
             s.src = 'security-chart/security-chart-engine.js?v=10';
             s.async = true;
-            s.onload = function () { resolve(global.SecurityChartEngine); };
+            s.onload = function () {
+                if (global.SecurityChartEngine) resolve(global.SecurityChartEngine);
+                else reject(new Error('Chart module failed to initialize'));
+            };
             s.onerror = function () { reject(new Error('Chart module failed to load')); };
             document.head.appendChild(s);
         });
@@ -203,6 +220,10 @@
         const id = 'vmf' + ++chartPayloadSeq;
         chartPayloadRegistry[id] = payload || {};
         return id;
+    }
+
+    function getChartPayload(id) {
+        return id ? chartPayloadRegistry[id] || null : null;
     }
 
     function buildScreenerFromRow(r) {
@@ -221,28 +242,54 @@
         };
     }
 
-    function findRowById(id) {
-        const sid = String(id);
-        return state.todayRows.find(function (r) { return String(r.id) === sid; }) ||
-            state.previousRows.find(function (r) { return String(r.id) === sid; }) ||
-            null;
+    function renderSymbolChartLink(r) {
+        const stock = String(r.symbol || '').trim();
+        const ik = String(r.instrument_key || r.instrument_token || '').trim();
+        const chartLabel = String(r.future_symbol || stock || '—');
+        const buttonText = stock || '—';
+        const direction = String(r.direction || '').trim();
+        const screenerData = buildScreenerFromRow(r);
+        const pid = registerChartPayload({
+            screenerData: screenerData,
+            direction: direction || screenerData.direction,
+        });
+        return (
+            '<button type="button" class="vmf-security-link" title="Open chart + intelligence" ' +
+            'data-chart-symbol="' + escapeHtml(stock) + '" ' +
+            'data-chart-instrument-key="' + escapeHtml(ik) + '" ' +
+            'data-chart-label="' + escapeHtml(chartLabel) + '" ' +
+            'data-chart-direction="' + escapeHtml(direction) + '" ' +
+            'data-chart-payload-id="' + escapeHtml(pid) + '">' +
+            escapeHtml(buttonText) +
+            '</button>'
+        );
     }
 
-    function openChart(row) {
-        const stock = String(row.symbol || '').trim();
-        const ik = String(row.instrument_key || row.instrument_token || '').trim();
-        const label = String(row.future_symbol || stock);
-        const screenerData = buildScreenerFromRow(row);
+    function openChartFromButton(btn) {
+        if (!btn) return;
+        const symbol = btn.getAttribute('data-chart-symbol') || '';
+        const instrumentKey = btn.getAttribute('data-chart-instrument-key') || '';
+        const displaySymbol = btn.getAttribute('data-chart-label') || symbol;
+        const stored = getChartPayload(btn.getAttribute('data-chart-payload-id'));
+        const screenerData = (stored && stored.screenerData) || {};
+        const direction =
+            (stored && stored.direction) ||
+            btn.getAttribute('data-chart-direction') ||
+            screenerData.direction ||
+            '';
         ensureChartEngine()
             .then(function (eng) {
+                if (!eng || typeof eng.openSecurityChart !== 'function') {
+                    throw new Error('Chart module unavailable');
+                }
                 return eng.openSecurityChart({
-                    symbol: stock,
+                    symbol: symbol,
                     instrumentType: 'FUT',
-                    instrumentKey: ik,
-                    displaySymbol: label,
+                    instrumentKey: instrumentKey,
+                    displaySymbol: displaySymbol,
                     exchange: 'NSE',
                     timeframe: '15m',
-                    direction: String(row.direction || ''),
+                    direction: direction,
                     screenerData: screenerData,
                     metadata: { algo: 'volume_mismatch' },
                 });
@@ -263,7 +310,8 @@
     function renderSectionTable(tbodyId, rows, section, allowEnter) {
         const tbody = document.getElementById(tbodyId);
         if (!tbody) return;
-        const filtered = applyFilters(rows);
+        const readyFirst = tbodyId === 'vmfTodayTbody';
+        const filtered = applyFilters(rows, { readyFirst: readyFirst });
         if (!filtered.length) {
             const msg = sectionEmptyMessage(section, filtered.length, rows.length);
             tbody.innerHTML = '<tr><td colspan="13" class="vmf-empty">' + escapeHtml(msg) + '</td></tr>';
@@ -274,11 +322,9 @@
             const dirCls = dir === 'SHORT' ? 'vmf-chip-short' : 'vmf-chip-long';
             const st = String(r.entry_status || 'WAITING').toUpperCase();
             const canEnter = allowEnter && st === 'READY';
-            const sym = escapeHtml(r.symbol || '—');
-            const pid = registerChartPayload({ screenerData: buildScreenerFromRow(r) });
             return (
                 '<tr data-id="' + escapeHtml(r.id) + '">' +
-                '<td><button type="button" class="vmf-security-link" data-chart-pid="' + escapeHtml(pid) + '" data-sym="' + sym + '">' + sym + '</button></td>' +
+                '<td>' + renderSymbolChartLink(r) + '</td>' +
                 '<td><span class="vmf-chip ' + dirCls + '">' + escapeHtml(dir) + '</span></td>' +
                 '<td class="num">' + escapeHtml(fmtPct(r.gap_percent)) + '</td>' +
                 '<td class="num">' + escapeHtml(fmtNum(r.score, 1)) + '</td>' +
@@ -405,7 +451,8 @@
     }
 
     function bindTableClicks(tbody) {
-        if (!tbody) return;
+        if (!tbody || tbody._vmfChartBound) return;
+        tbody._vmfChartBound = true;
         tbody.addEventListener('click', function (ev) {
             const enterBtn = ev.target.closest('[data-enter-id]');
             if (enterBtn && !enterBtn.disabled) {
@@ -414,10 +461,9 @@
             }
             const symBtn = ev.target.closest('.vmf-security-link');
             if (symBtn) {
-                const tr = symBtn.closest('tr');
-                const id = tr && tr.getAttribute('data-id');
-                const row = findRowById(id);
-                if (row) openChart(row);
+                ev.preventDefault();
+                ev.stopPropagation();
+                openChartFromButton(symBtn);
             }
         });
     }
