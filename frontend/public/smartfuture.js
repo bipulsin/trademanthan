@@ -85,6 +85,22 @@
         window.location.replace('index.html');
     }
 
+    /** FastAPI may return detail as string or list of validation objects ({msg,...}). */
+    function fmtFastApiDetail(detail) {
+        if (detail == null || detail === '') return '';
+        if (typeof detail === 'string') return detail;
+        if (Array.isArray(detail)) {
+            const out = [];
+            detail.forEach(function (it) {
+                if (it && typeof it === 'object' && typeof it.msg === 'string') out.push(it.msg);
+                else if (typeof it === 'string') out.push(it);
+                else out.push(JSON.stringify(it));
+            });
+            return out.join('; ');
+        }
+        return String(detail);
+    }
+
     async function fetchSfConfigJson() {
         const paths = ['/api/smart-futures/config', '/smart-futures/config'];
         let lastErr = null;
@@ -1656,7 +1672,7 @@
                 } catch (e) {
                     data = null;
                 }
-                if (res.ok && data && data.success) {
+                if (res.ok && data && data.success !== false) {
                     ok = true;
                     break;
                 }
@@ -1666,7 +1682,7 @@
                     return;
                 }
                 errText =
-                    (data && (data.detail || data.message)) ||
+                    fmtFastApiDetail(data && (data.detail || data.message)) ||
                     resText ||
                     res.statusText;
             } catch (e) {

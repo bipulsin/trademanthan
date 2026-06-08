@@ -464,13 +464,22 @@ def _parse_any_ts_to_ist(ts: Any) -> Optional[datetime]:
         return None
 
 
+def _manual_entry_synthetic_atr(entry_px: float, atr_val: Optional[float]) -> float:
+    """Use session ATR when available; else ~1% of entry (early session / thin history)."""
+    if atr_val is not None and atr_val > 0:
+        return float(atr_val)
+    return max(float(entry_px) * 0.01, 0.05)
+
+
 def _resolve_currmth_future_master(db: Session, symbol_raw: str) -> Dict[str, Any]:
     """
     Map equity symbol to arbitrage_master current-month future (production universe).
+    Accepts underlying (RELIANCE) or pasted currmth_future_symbol (RELIANCE FUT 30 JUN 26).
     """
     sym_u = str(symbol_raw or "").strip().upper()
     if not sym_u:
         raise HTTPException(status_code=422, detail="symbol is empty")
+    base_u = sym_u.split(" FUT")[0].strip() or sym_u
     row = db.execute(
         text(
             """
@@ -478,11 +487,12 @@ def _resolve_currmth_future_master(db: Session, symbol_raw: str) -> Dict[str, An
                    COALESCE(TRIM(currmth_future_symbol), '') AS cfs,
                    COALESCE(TRIM(currmth_future_instrument_key), '') AS cfi
             FROM arbitrage_master
-            WHERE UPPER(TRIM(stock)) = :sym
+            WHERE UPPER(TRIM(stock)) IN (:sym, :base)
+               OR UPPER(TRIM(currmth_future_symbol)) = :sym
             LIMIT 1
             """
         ),
-        {"sym": sym_u},
+        {"sym": sym_u, "base": base_u},
     ).mappings().first()
     if not row:
         raise HTTPException(
@@ -1471,33 +1481,28 @@ def post_smart_futures_manual_entry(
         except Exception as e:
             logger.warning("manual_entry ATR/upstox: %s", e)
             atr_val = None
-        if atr_val is None or atr_val <= 0:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "ATR(14) on current-month future is unavailable from 5‑minute candles "
-                    "(Upstox history / session bars). Specify both SL and Target, or retry later."
-                ),
-            )
+            ratio_val = None
+
+    atr_derive = _manual_entry_synthetic_atr(entry_px, atr_val) if need_atr else None
 
     if side_u == "LONG":
         sl_f = (
-            round(entry_px - 1.1 * float(atr_val), 2) if manual_sl is None else round(float(manual_sl), 2)
+            round(entry_px - 1.1 * float(atr_derive), 2) if manual_sl is None else round(float(manual_sl), 2)
         )
         tg_f = (
-            round(entry_px + 1.6 * float(atr_val), 2) if manual_tgt is None else round(float(manual_tgt), 2)
+            round(entry_px + 1.6 * float(atr_derive), 2) if manual_tgt is None else round(float(manual_tgt), 2)
         )
     else:
         sl_f = (
-            round(entry_px + 1.1 * float(atr_val), 2) if manual_sl is None else round(float(manual_sl), 2)
+            round(entry_px + 1.1 * float(atr_derive), 2) if manual_sl is None else round(float(manual_sl), 2)
         )
         tg_f = (
-            round(entry_px - 1.6 * float(atr_val), 2) if manual_tgt is None else round(float(manual_tgt), 2)
+            round(entry_px - 1.6 * float(atr_derive), 2) if manual_tgt is None else round(float(manual_tgt), 2)
         )
 
     if not need_atr:
         ratio_val = None
-    atr14_col: Optional[float] = atr_val if need_atr else None
+    atr14_col: Optional[float] = atr_val if need_atr and atr_val is not None and atr_val > 0 else None
 
     ex_row = db.execute(
         text(
@@ -1538,11 +1543,6 @@ def post_smart_futures_manual_entry(
                 status_code=400,
                 detail="An open bought position already exists for this contract today.",
             )
-        if ex_row.get("sell_time") is not None or ost == "sold":
-            raise HTTPException(
-                status_code=400,
-                detail="A closed row already exists for this contract today; cannot add a second via manual entry.",
-            )
         rid = int(ex_row["id"])
         db.execute(
             text(
@@ -1569,6 +1569,8 @@ def post_smart_futures_manual_entry(
                     buy_price = :buy_price,
                     sell_price = NULL,
                     sell_time = NULL,
+                    manual_exit_reason = NULL,
+                    manual_exit_at = NULL,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = :rid AND session_date = :session_date
                 """
