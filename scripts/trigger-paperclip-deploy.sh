@@ -27,14 +27,20 @@ git fetch origin main
 git reset --hard origin/main
 
 if [[ "${REBUILD:-0}" == "1" ]]; then
-  BUILD_FLAGS=()
+  TRADEMANTHAN_REF="${TRADEMANTHAN_REF:-main}"
   if [[ "${NO_CACHE:-0}" == "1" ]]; then
-    BUILD_FLAGS+=(--no-cache)
-    echo "[deploy] REBUILD=1 NO_CACHE=1: fresh build (no Docker layer cache)..."
+    echo "[deploy] REBUILD=1 NO_CACHE=1: fresh app-src from Git (reuse pip/deps cache)..."
+    docker buildx build -f Dockerfile.app \
+      --no-cache-filter app-src \
+      --build-arg "TRADEMANTHAN_REF=${TRADEMANTHAN_REF}" \
+      -t ghcr.io/bipulsin/twcto-app:latest \
+      --load \
+      .
+    docker compose build nginx
   else
     echo "[deploy] REBUILD=1: building app + nginx locally (TRADEMANTHAN_REF=${TRADEMANTHAN_REF})..."
+    TRADEMANTHAN_REF="${TRADEMANTHAN_REF}" docker compose build app nginx
   fi
-  TRADEMANTHAN_REF="${TRADEMANTHAN_REF:-main}" docker compose build "${BUILD_FLAGS[@]}" app nginx
 else
   echo "[deploy] pulling app + nginx from GHCR (linux/arm64)..."
   if ! docker compose pull app nginx; then
