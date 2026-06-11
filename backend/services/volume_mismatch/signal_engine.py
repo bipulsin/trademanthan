@@ -71,6 +71,13 @@ class MismatchSignal:
         }
 
 
+def trade_levels_for_direction(direction: str, high: float, low: float) -> Dict[str, float]:
+    """Entry / SL / targets from first 15m range for LONG or SHORT."""
+    if str(direction or "").strip().upper() == "SHORT":
+        return _trade_levels_short(high, low)
+    return _trade_levels_long(high, low)
+
+
 def _trade_levels_long(high: float, low: float) -> Dict[str, float]:
     entry = high
     preferred = high * (1.0 + PREFERRED_ENTRY_BUFFER_PCT / 100.0)

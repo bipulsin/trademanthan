@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 import pytz
 
@@ -143,15 +143,20 @@ def refresh_arbitrage_master_market_data(
     *,
     execution: str = "scheduled",
     fetch_candles: bool = True,
+    stocks: Optional[Sequence[str]] = None,
 ) -> Dict[str, Any]:
     """
-    Refresh LTP (+ optional 5m VWAP/EMA) for all arbitrage_master rows.
+    Refresh LTP (+ optional 5m VWAP/EMA) for arbitrage_master rows.
 
+    When ``stocks`` is set, only those underlyings are refreshed (case-insensitive).
     Safe to call from schedulers; returns summary dict for monitoring.
     """
     ensure_market_data_columns()
     started = _now_ist()
     rows = load_universe_rows()
+    if stocks:
+        want = {str(s or "").strip().upper() for s in stocks if str(s or "").strip()}
+        rows = [r for r in rows if str(r.get("stock") or "").strip().upper() in want]
     if not rows:
         return {
             "success": True,

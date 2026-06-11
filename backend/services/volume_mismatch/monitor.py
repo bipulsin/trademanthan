@@ -9,7 +9,7 @@ import pytz
 
 from backend.config import settings
 from backend.database import SessionLocal
-from backend.services.market_data.reads import get_row_market_snapshot, ltp_map_with_fallback
+from backend.services.market_data.reads import ltp_map_with_fallback
 from backend.services.smart_futures_session_date import effective_session_date_ist_for_trend
 from backend.services.upstox_service import UpstoxService
 from backend.services.volume_mismatch.candles import (
@@ -19,10 +19,19 @@ from backend.services.volume_mismatch.candles import (
 )
 from sqlalchemy import text
 
+from backend.services.volume_mismatch.fresh_market import (
+    refresh_stale_arbitrage_master,
+    resolve_fut_price_and_indicators,
+)
 from backend.services.volume_mismatch.repository import (
     fetch_signals_for_date,
     update_signal_monitor_fields,
 )
+from backend.services.volume_mismatch.session_trend import (
+    assess_session_trend,
+    flipped_direction,
+)
+from backend.services.volume_mismatch.signal_engine import trade_levels_for_direction
 
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
@@ -90,15 +99,23 @@ def run_volume_mismatch_entry_monitor(
         if not waiting:
             return {"success": True, "trade_date": str(sd), "checked": 0, "ready": 0}
 
+        symbols = [str(r.get("symbol") or "").strip().upper() for r in waiting]
+        refresh_stale_arbitrage_master(symbols)
+
         keys = [str(r.get("instrument_token") or "").strip() for r in waiting]
         keys = [k for k in keys if k]
-        ltp_map = ltp_map_with_fallback(keys, allow_broker_fallback=True, allow_stale=True)
+        ltp_map = ltp_map_with_fallback(
+            keys,
+            allow_broker_fallback=True,
+            allow_stale=False,
+        )
 
         clear_candle_cache()
         upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
         candles_5m = batch_fetch_candles(upstox, keys, "minutes/5", days_back=2)
 
         ready_count = 0
+        flip_count = 0
         status_changes: List[Dict[str, Any]] = []
         for r in waiting:
             sid = int(r["id"])
@@ -108,26 +125,43 @@ def run_volume_mismatch_entry_monitor(
             first_high = float(r.get("first_15m_high") or 0)
             first_low = float(r.get("first_15m_low") or 0)
 
-            price = ltp_map.get(ik)
-            if price is None:
-                snap = get_row_market_snapshot(sym)
-                if snap:
-                    try:
-                        price = float(snap.get("currmth_future_ltp") or 0) or None
-                    except (TypeError, ValueError):
-                        price = None
+            bars = candles_5m.get(ik) or []
+            resolved = resolve_fut_price_and_indicators(
+                instrument_key=ik,
+                symbol=sym,
+                ltp_map=ltp_map,
+                candles_5m=bars,
+            )
+            price = resolved.get("price")
+            vwap = resolved.get("vwap")
+            ema5 = resolved.get("ema5")
 
-            vwap: Optional[float] = None
-            snap = get_row_market_snapshot(sym)
-            if snap:
-                try:
-                    vwap = float(snap.get("currmth_future_vwap") or 0) or None
-                except (TypeError, ValueError):
-                    vwap = None
-
-            cur_5m, prev_5m = last_two_completed_5m_bars(candles_5m.get(ik) or [], now=now)
+            cur_5m, prev_5m = last_two_completed_5m_bars(bars, now=now)
             cur_vol = float((cur_5m or {}).get("volume") or 0)
             prev_vol = float((prev_5m or {}).get("volume") or 0)
+
+            flip_fields: Dict[str, Any] = {}
+            if price and vwap and ema5 and cur_5m:
+                trend = assess_session_trend(price, vwap, ema5, cur_5m, prev_5m)
+                new_dir = flipped_direction(direction, trend)
+                if new_dir:
+                    levels = trade_levels_for_direction(new_dir, first_high, first_low)
+                    direction = new_dir
+                    flip_fields = {
+                        "direction": new_dir,
+                        **levels,
+                    }
+                    flip_count += 1
+                    logger.info(
+                        "VM direction flip %s %s -> %s (trend=%s price=%.2f vwap=%.2f ema5=%.2f)",
+                        sd,
+                        sym,
+                        new_dir,
+                        trend,
+                        price,
+                        vwap,
+                        ema5,
+                    )
 
             ready = False
             if price and vwap:
@@ -143,6 +177,7 @@ def run_volume_mismatch_entry_monitor(
                 current_price=price,
                 vwap=vwap,
                 entry_status=new_status,
+                **flip_fields,
             )
             if ready:
                 ready_count += 1
@@ -153,21 +188,29 @@ def run_volume_mismatch_entry_monitor(
                         "direction": direction,
                         "previous_status": "WAITING",
                         "entry_status": "READY",
-                        "preferred_entry": r.get("preferred_entry"),
-                        "stop_loss": r.get("stop_loss"),
-                        "target1": r.get("target1"),
-                        "target2": r.get("target2"),
+                        "preferred_entry": flip_fields.get("preferred_entry") or r.get("preferred_entry"),
+                        "stop_loss": flip_fields.get("stop_loss") or r.get("stop_loss"),
+                        "target1": flip_fields.get("target1") or r.get("target1"),
+                        "target2": flip_fields.get("target2") or r.get("target2"),
+                        "direction_flipped": bool(flip_fields),
                     }
                 )
 
         db.commit()
-        if ready_count:
-            logger.info("Volume Mismatch monitor %s: %s READY of %s WAITING", sd, ready_count, len(waiting))
+        if ready_count or flip_count:
+            logger.info(
+                "Volume Mismatch monitor %s: %s READY of %s WAITING, %s direction flips",
+                sd,
+                ready_count,
+                len(waiting),
+                flip_count,
+            )
         return {
             "success": True,
             "trade_date": str(sd),
             "checked": len(waiting),
             "ready": ready_count,
+            "direction_flips": flip_count,
             "status_changes": status_changes,
         }
     except Exception as e:

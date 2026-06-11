@@ -143,6 +143,12 @@ def update_signal_monitor_fields(
     current_price: Optional[float] = None,
     vwap: Optional[float] = None,
     entry_status: Optional[str] = None,
+    direction: Optional[str] = None,
+    entry_price: Optional[float] = None,
+    preferred_entry: Optional[float] = None,
+    stop_loss: Optional[float] = None,
+    target1: Optional[float] = None,
+    target2: Optional[float] = None,
 ) -> None:
     sets = ["updated_at = NOW()"]
     params: Dict[str, Any] = {"id": signal_id}
@@ -155,6 +161,24 @@ def update_signal_monitor_fields(
     if entry_status is not None:
         sets.append("entry_status = :entry_status")
         params["entry_status"] = entry_status
+    if direction is not None:
+        sets.append("direction = :direction")
+        params["direction"] = direction
+    if entry_price is not None:
+        sets.append("entry_price = :entry_price")
+        params["entry_price"] = entry_price
+    if preferred_entry is not None:
+        sets.append("preferred_entry = :preferred_entry")
+        params["preferred_entry"] = preferred_entry
+    if stop_loss is not None:
+        sets.append("stop_loss = :stop_loss")
+        params["stop_loss"] = stop_loss
+    if target1 is not None:
+        sets.append("target1 = :target1")
+        params["target1"] = target1
+    if target2 is not None:
+        sets.append("target2 = :target2")
+        params["target2"] = target2
     db.execute(
         text(f"UPDATE volume_mismatch_signals SET {', '.join(sets)} WHERE id = :id"),
         params,
