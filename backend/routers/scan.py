@@ -630,8 +630,7 @@ def find_option_contract_from_instruments(stock_name: str, option_type: str, sto
         import pytz
         from pathlib import Path
         import json as json_lib
-        from datetime import timedelta
-        
+
         ist = pytz.timezone('Asia/Kolkata')
         now = datetime.now(ist)
         
@@ -3217,7 +3216,6 @@ async def recalculate_vwap_slope_today(db: Session = Depends(get_db)):
         from backend.services.vwap_updater import calculate_vwap_slope_for_trade
         from backend.services.upstox_service import upstox_service
         import pytz
-        from datetime import timedelta
         
         ist = pytz.timezone('Asia/Kolkata')
         now = datetime.now(ist)
@@ -3302,7 +3300,6 @@ async def recalculate_all_today_trades(db: Session = Depends(get_db)):
         from backend.services.vwap_updater import calculate_vwap_slope_for_cycle
         from backend.services.upstox_service import upstox_service
         import pytz
-        from datetime import timedelta
         
         ist = pytz.timezone('Asia/Kolkata')
         now = datetime.now(ist)
@@ -4834,7 +4831,6 @@ async def get_latest_webhook_data(background_tasks: BackgroundTasks, db: Session
         
         # If it's after 9:00 AM IST, only show today's data
         # If it's before 9:00 AM IST, show yesterday's data
-        from datetime import timedelta
         if current_hour > 9 or (current_hour == 9 and current_minute >= 0):
             # After 9:00 AM - show only today's data
             filter_date_start = today
@@ -6875,8 +6871,6 @@ async def upstox_oauth_callback(code: str = None, state: str = None, error: str 
         # Calculate expiration timestamp
         expires_at = None
         if expires_in:
-            from datetime import timedelta
-            # datetime is already imported at top of file
             expires_at = int((datetime.now() + timedelta(seconds=expires_in)).timestamp())
         else:
             # If expires_in not provided, decode from JWT token
@@ -7178,7 +7172,6 @@ def _process_upstox_order_update(db: Session, payload: dict):
     from backend.models.trading import IntradayStockOption
     from sqlalchemy import and_
     from sqlalchemy.orm.attributes import flag_modified
-    from datetime import timedelta
     import pytz
 
     flat = _flatten_upstox_notifier_payload(payload)
@@ -8012,13 +8005,12 @@ async def diagnose_bearish_trades(db: Session = Depends(get_db)):
     """
     try:
         import pytz
-        from datetime import timedelta
         from backend.services.upstox_service import upstox_service
-        
+
         ist = pytz.timezone('Asia/Kolkata')
         now = datetime.now(ist)
         today = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        
+
         # Get all bearish trades for today
         bearish_trades = db.query(IntradayStockOption).filter(
             IntradayStockOption.alert_type == 'Bearish',
@@ -8171,12 +8163,11 @@ async def get_historical_market_data(
     """
     try:
         import pytz
-        from datetime import timedelta
         from backend.models.trading import HistoricalMarketData
-        
+
         ist = pytz.timezone('Asia/Kolkata')
         now = datetime.now(ist)
-        
+
         # Parse date or use today
         if date:
             try:
@@ -8270,11 +8261,10 @@ async def analyze_historical_vwap_slope(
     """
     try:
         import pytz
-        from datetime import timedelta
-        
+
         ist = pytz.timezone('Asia/Kolkata')
         now = datetime.now(ist)
-        
+
         # Parse date or use today
         if date:
             try:

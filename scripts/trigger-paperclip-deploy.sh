@@ -12,12 +12,13 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REBUILD="${REBUILD:-0}"
+NO_CACHE="${NO_CACHE:-0}"
 TRADEMANTHAN_REF="${TRADEMANTHAN_REF:-main}"
 TWCTO_DIR="${TWCTO_DIR:-/home/ubuntu/twcto}"
 
-echo "Deploying to paperclip-vm (REBUILD=${REBUILD}, TRADEMANTHAN_REF=${TRADEMANTHAN_REF})..."
+echo "Deploying to paperclip-vm (REBUILD=${REBUILD}, NO_CACHE=${NO_CACHE}, TRADEMANTHAN_REF=${TRADEMANTHAN_REF})..."
 
-"${ROOT}/scripts/paperclip-ssh.sh" "REBUILD=${REBUILD} TRADEMANTHAN_REF=${TRADEMANTHAN_REF} TWCTO_DIR=${TWCTO_DIR} bash -s" <<'REMOTE'
+"${ROOT}/scripts/paperclip-ssh.sh" "REBUILD=${REBUILD} NO_CACHE=${NO_CACHE} TRADEMANTHAN_REF=${TRADEMANTHAN_REF} TWCTO_DIR=${TWCTO_DIR} bash -s" <<'REMOTE'
 set -euo pipefail
 cd "${TWCTO_DIR:-/home/ubuntu/twcto}"
 
@@ -26,8 +27,14 @@ git fetch origin main
 git reset --hard origin/main
 
 if [[ "${REBUILD:-0}" == "1" ]]; then
-  echo "[deploy] REBUILD=1: building app + nginx locally (TRADEMANTHAN_REF=${TRADEMANTHAN_REF})..."
-  TRADEMANTHAN_REF="${TRADEMANTHAN_REF:-main}" docker compose build app nginx
+  BUILD_FLAGS=()
+  if [[ "${NO_CACHE:-0}" == "1" ]]; then
+    BUILD_FLAGS+=(--no-cache)
+    echo "[deploy] REBUILD=1 NO_CACHE=1: fresh build (no Docker layer cache)..."
+  else
+    echo "[deploy] REBUILD=1: building app + nginx locally (TRADEMANTHAN_REF=${TRADEMANTHAN_REF})..."
+  fi
+  TRADEMANTHAN_REF="${TRADEMANTHAN_REF:-main}" docker compose build "${BUILD_FLAGS[@]}" app nginx
 else
   echo "[deploy] pulling app + nginx from GHCR (linux/arm64)..."
   if ! docker compose pull app nginx; then
