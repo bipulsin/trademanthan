@@ -92,6 +92,52 @@ def intraday_row_has_open_broker_position(trade) -> bool:
     return False
 
 
+def same_day_stock_has_completed_or_open_trade(db, stock_name: str, day_start: datetime, day_end: datetime):
+    """
+    Return an existing intraday row if this stock already has a filled or open trade today
+    (sold, bought, or broker net-long). Used to block a second option on the same underlying.
+    """
+    from sqlalchemy import desc
+
+    from backend.models.trading import IntradayStockOption
+
+    if not stock_name or stock_name == "UNKNOWN":
+        return None
+    rows = (
+        db.query(IntradayStockOption)
+        .filter(
+            IntradayStockOption.trade_date >= day_start,
+            IntradayStockOption.trade_date < day_end,
+            IntradayStockOption.stock_name == stock_name,
+        )
+        .order_by(desc(IntradayStockOption.id))
+        .all()
+    )
+    for row in rows:
+        if row.status == "sold":
+            return row
+        if intraday_row_has_open_broker_position(row):
+            return row
+        if row.status == "bought" and (
+            (getattr(row, "buy_order_id", None) or "").strip()
+            or (getattr(row, "buy_price", None) or 0) > 0
+        ):
+            return row
+    return None
+
+
+def cancel_pending_buy_for_entry_window_expired(
+    buy_order_id: Optional[str],
+    db_row=None,
+) -> None:
+    """Cancel unfilled broker BUY when webhook entry window has closed."""
+    oid = (buy_order_id or "").strip()
+    if not oid and db_row is not None:
+        oid = (getattr(db_row, "buy_order_id", None) or "").strip()
+    if oid:
+        cancel_open_buy_if_pending(oid)
+
+
 def reset_intraday_row_for_repeat_webhook(trade, alert_time: datetime) -> None:
     """
     Same-day repeat webhook for the same instrument with no broker fill:
@@ -139,6 +185,7 @@ def _acquire_live_entry_lock(key: str) -> threading.Lock:
 
 # Live scan entry is only attempted from the webhook handler within this window (seconds).
 WEBHOOK_ENTRY_WINDOW_SEC = 600.0
+NO_ENTRY_ENTRY_WINDOW_EXPIRED = "Entry window expired (>10 min from alert)"
 
 # After broker accepts a BUY, poll until filled or cancel and fall back (LIMIT can stay open).
 ENTRY_FILL_WAIT_SEC = WEBHOOK_ENTRY_WINDOW_SEC

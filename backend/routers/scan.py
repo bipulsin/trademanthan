@@ -1904,6 +1904,43 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             _dedupe_contract = (stock.get("option_contract") or "").strip()
             _day_start = ist_midnight(trading_date)
             _day_end = _day_start + timedelta(days=1)
+
+            # One executed/open trade per stock per day — do not open another strike/contract.
+            if stock_name != "UNKNOWN":
+                _stock_traded = live_trading.same_day_stock_has_completed_or_open_trade(
+                    db, stock_name, _day_start, _day_end
+                )
+                if _stock_traded is not None:
+                    _row_ikey = (getattr(_stock_traded, "instrument_key", None) or "").strip()
+                    _row_contract = (getattr(_stock_traded, "option_contract", None) or "").strip()
+                    _same_instrument = (
+                        (_dedupe_ikey and _dedupe_ikey == _row_ikey)
+                        or (_dedupe_contract and _dedupe_contract == _row_contract)
+                    )
+                    if not _same_instrument:
+                        if stock.get("last_traded_price"):
+                            _stock_traded.stock_ltp = stock.get("last_traded_price")
+                        if stock.get("stock_vwap"):
+                            _stock_traded.stock_vwap = stock.get("stock_vwap")
+                        if stock.get("option_ltp"):
+                            _stock_traded.option_ltp = stock.get("option_ltp")
+                        saved_count += 1
+                        try:
+                            db.commit()
+                        except Exception as _stock_dedupe_err:
+                            db.rollback()
+                            failed_count += 1
+                            logger.error(
+                                f"Stock dedupe commit failed for {stock_name}: {_stock_dedupe_err}"
+                            )
+                            continue
+                        logger.info(
+                            f"   🔁 Skipped {stock_name}: already traded today on "
+                            f"{_row_contract or _row_ikey} (row id={_stock_traded.id}) — "
+                            f"not opening {_dedupe_contract or _dedupe_ikey}"
+                        )
+                        continue
+
             _existing_trade = None
             if _dedupe_ikey:
                 _existing_trade = (
@@ -1934,7 +1971,6 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 )
             if _existing_trade is not None:
                 if _existing_trade.status == "sold":
-                    _existing_trade.alert_time = triggered_datetime
                     _existing_trade.alert_type = data_type
                     if stock.get("last_traded_price"):
                         _existing_trade.stock_ltp = stock.get("last_traded_price")
@@ -1955,7 +1991,6 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     )
                     continue
                 if live_trading.intraday_row_has_open_broker_position(_existing_trade):
-                    _existing_trade.alert_time = triggered_datetime
                     _existing_trade.alert_type = data_type
                     if stock.get("last_traded_price"):
                         _existing_trade.stock_ltp = stock.get("last_traded_price")
@@ -2203,9 +2238,14 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 within_webhook_entry_window = live_trading.is_within_webhook_entry_window(
                     triggered_datetime
                 )
-                if not within_webhook_entry_window and not no_entry_reason:
-                    no_entry_reason = "Entry window expired (>10 min from alert)"
-                
+                if not within_webhook_entry_window:
+                    if not no_entry_reason:
+                        no_entry_reason = live_trading.NO_ENTRY_ENTRY_WINDOW_EXPIRED
+                    live_trading.cancel_pending_buy_for_entry_window_expired(
+                        buy_order_id, db_record_reuse
+                    )
+                    buy_order_id = None
+
                 if (
                     not is_after_3_00pm
                     and within_webhook_entry_window
@@ -2455,14 +2495,14 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                 # SAFEGUARD: If buy_price is set, ensure buy_time is set (for both entered and no_entry trades)
                 # Use alert_time as fallback if buy_time is None
                 # CRITICAL: This prevents data integrity issues where trades have buy_price but no buy_time
-                # Note: Even no_entry trades should have buy_time set if buy_price is set, for display purposes
-                if buy_price and buy_price > 0:
+                # no_entry rows must not get buy_time from alert_time — avoids misleading late-bucket timestamps
+                if buy_price and buy_price > 0 and status != "no_entry":
                     if buy_time is None:
                         buy_time = triggered_datetime  # Use alert_time as buy_time fallback
-                        if status != 'no_entry':
-                            logger.info(f"⚠️  Setting buy_time to alert_time for {stock_name} (buy_price set but buy_time was None)")
-                        else:
-                            logger.info(f"ℹ️  Setting buy_time to alert_time for {stock_name} (no_entry trade with buy_price)")
+                        logger.info(
+                            f"⚠️  Setting buy_time to alert_time for {stock_name} "
+                            f"(buy_price set but buy_time was None)"
+                        )
                     elif buy_time != triggered_datetime:
                         # If buy_time is set but different from alert_time, log for debugging
                         logger.info(f"ℹ️  buy_time ({buy_time}) differs from alert_time ({triggered_datetime}) for {stock_name}")
