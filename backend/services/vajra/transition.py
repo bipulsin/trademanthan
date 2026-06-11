@@ -33,6 +33,60 @@ TPS_SHORTLIST_MIN = 5
 TPS_SHORTLIST_MAX = 15
 TPS_EARLY_THRESHOLD = 52.0
 EXTENSION_RISK_CAP = 65.0
+OPENING_5M_BULL_BIAS_PTS = 18.0
+OPENING_MOMENTUM_END_MINUTES = 12 * 60 + 0  # through noon IST
+
+
+def opening_session_5m_bull_bias(candles_5m: Sequence[Dict[str, Any]]) -> bool:
+    """
+    Live 5m continuation: price above session VWAP + EMA5 with rising volume.
+    Used 09:20–12:00 IST when 30m TPS is still bear-biased (late VWAP reclaim banks).
+    """
+    if not candles_5m or len(candles_5m) < 12:
+        return False
+    opens = [float(c.get("open") or 0) for c in candles_5m]
+    highs = [float(c.get("high") or 0) for c in candles_5m]
+    lows = [float(c.get("low") or 0) for c in candles_5m]
+    closes = [float(c.get("close") or 0) for c in candles_5m]
+    volumes = [float(c.get("volume") or 0) for c in candles_5m]
+    i = len(closes) - 1
+    close = closes[i]
+    vwap_series = cumulative_vwap(highs, lows, closes, volumes)
+    vwap = vwap_series[i]
+    ema_exec = ema_series(closes, EMA_EXEC_LEN)
+    if close <= vwap or close <= ema_exec[i]:
+        return False
+    cur_vol = volumes[i]
+    prev_vol = volumes[i - 1] if i > 0 else 0.0
+    if prev_vol > 0 and cur_vol <= prev_vol:
+        return False
+    if i >= 2:
+        hi_ok = highs[i] > max(highs[i - 2 : i])
+        if not hi_ok:
+            return False
+    return True
+
+
+def apply_opening_5m_bias_to_tps(tps: TransitionScores, *, bull_bias: bool) -> TransitionScores:
+    if not bull_bias:
+        return tps
+    bull = float(tps.tps_bull) + OPENING_5M_BULL_BIAS_PTS
+    bear = float(tps.tps_bear)
+    bull_dir = bull >= bear
+    return TransitionScores(
+        tps_bull=min(100.0, bull),
+        tps_bear=bear,
+        pullback_quality=tps.pullback_quality,
+        extension_risk=tps.extension_risk,
+        transition_state=tps.transition_state + (" · 5M MOMENTUM" if bull_dir else ""),
+        vwap_reclaim_status=tps.vwap_reclaim_status,
+        ema_reclaim_status=tps.ema_reclaim_status,
+        rsi_transition_status=tps.rsi_transition_status,
+        bull_dir=bull_dir,
+        trend_pass=True if bull_dir else tps.trend_pass,
+        momentum_improving=True if bull_dir else tps.momentum_improving,
+        market_phase=tps.market_phase,
+    )
 
 
 @dataclass

@@ -5,6 +5,7 @@ volume surge, Renko momentum, HA trend, EMA spread slope, and oscillator diverge
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from backend.services.smart_futures_config import ADX_SLOW_LENGTH, cms_weights_active
@@ -346,6 +347,54 @@ def market_regime_ok(
     if adx_prev is None:
         return False
     return atr5 > atr14 and adx > float(adx_threshold) and adx > adx_prev
+
+
+def opening_momentum_regime_ok(
+    bar_end: datetime,
+    atr5: float,
+    atr14: float,
+    adx: float,
+    gate_price: float,
+    vwap: float,
+    volume_surge: float,
+    *,
+    adx_threshold: float = 18.0,
+) -> bool:
+    """
+    09:30–11:30 IST continuation bypass when ADX is not yet rising but price is above VWAP
+    with elevated session volume (gap-up bank mornings).
+    """
+    from zoneinfo import ZoneInfo
+
+    ist = bar_end.astimezone(ZoneInfo("Asia/Kolkata")) if bar_end.tzinfo else bar_end
+    m = ist.hour * 60 + ist.minute
+    if m < 9 * 60 + 30 or m > 11 * 60 + 30:
+        return False
+    if gate_price <= vwap or float(volume_surge) < 1.25:
+        return False
+    if float(adx) < float(adx_threshold) or atr5 <= 0 or atr14 <= 0:
+        return False
+    return float(atr5) >= float(atr14) * 0.85
+
+
+def opening_long_sector_waiver(
+    bar_end: datetime,
+    gate_price: float,
+    vwap: float,
+    atr14: float,
+    volume_surge: float,
+) -> bool:
+    """09:30–12:00 IST: waive daily sector gate when stock leads with price>VWAP + volume."""
+    from zoneinfo import ZoneInfo
+
+    ist = bar_end.astimezone(ZoneInfo("Asia/Kolkata")) if bar_end.tzinfo else bar_end
+    m = ist.hour * 60 + ist.minute
+    if m < 9 * 60 + 30 or m > 12 * 60:
+        return False
+    if gate_price <= vwap or float(volume_surge) < 1.5 or atr14 <= 0:
+        return False
+    vwap_dev = (float(gate_price) - float(vwap)) / float(atr14)
+    return vwap_dev >= 0.12
 
 
 def volume_surge_norm_01(volume_surge_ratio_val: float) -> float:

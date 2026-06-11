@@ -66,6 +66,8 @@ from backend.services.smart_futures_picker.indicators import (
     ema_slope_norm_m5,
     ha_trend_score,
     market_regime_ok,
+    opening_long_sector_waiver,
+    opening_momentum_regime_ok,
     renko_momentum_score,
     session_vwap_close,
     volume_surge_ratio,
@@ -682,20 +684,6 @@ def _score_symbol_outcome(
     adx_curr, adx_prev = adx_last_two(highs, lows, closes, ADX_LENGTH)
     if adx_curr is None:
         return _fail("adx_missing")
-    if not market_regime_ok(
-        float(atr5), float(atr), float(adx_curr), adx_prev, adx_threshold=ADX_THRESHOLD
-    ):
-        _log_sf_event(
-            {
-                "timestamp": bar_end.isoformat(),
-                "symbol": stock,
-                "action": "BLOCKED",
-                "block_reason": "BLOCKED: regime filter failed",
-                "regime_filter_passed": False,
-                "adx": float(adx_curr),
-            }
-        )
-        return _fail("regime_fail", reject_note="BLOCKED: regime filter failed", final_cms=None)
 
     m15_raw = upstox.get_historical_candles_by_instrument_key(
         fut_key, interval="minutes/15", days_back=6
@@ -723,6 +711,31 @@ def _score_symbol_outcome(
     vs = volume_surge_ratio(vols, avg_daily_vol, frac)
     if vs < 1.5:
         return _fail("volume_surge_low", volume_surge=float(vs))
+
+    regime_ok = market_regime_ok(
+        float(atr5), float(atr), float(adx_curr), adx_prev, adx_threshold=ADX_THRESHOLD
+    ) or opening_momentum_regime_ok(
+        bar_end,
+        float(atr5),
+        float(atr),
+        float(adx_curr),
+        float(gate_price),
+        float(vwap),
+        float(vs),
+        adx_threshold=max(18.0, ADX_THRESHOLD - 2.0),
+    )
+    if not regime_ok:
+        _log_sf_event(
+            {
+                "timestamp": bar_end.isoformat(),
+                "symbol": stock,
+                "action": "BLOCKED",
+                "block_reason": "BLOCKED: regime filter failed",
+                "regime_filter_passed": False,
+                "adx": float(adx_curr),
+            }
+        )
+        return _fail("regime_fail", reject_note="BLOCKED: regime filter failed", final_cms=None)
 
     brick = max(atr * 0.1, last_close * 0.0005)
     rm = renko_momentum_score(closes, brick)
@@ -799,7 +812,8 @@ def _score_symbol_outcome(
         "final_cms_ge_th": bool(final_cms >= th - 1e-12),
         "close_gt_vwap": bool(gate_price > vwap),
         "m15_close_gt_vwap": bool(m15_last_close > vwap),
-        "sector_gt_min": bool(sector_score > SECTOR_ALIGN_MIN),
+        "sector_gt_min": bool(sector_score > SECTOR_ALIGN_MIN)
+        or opening_long_sector_waiver(bar_end, float(gate_price), float(vwap), float(atr), float(vs)),
         "index_long_ok": bool(index_long_ok),
     }
     gs = {

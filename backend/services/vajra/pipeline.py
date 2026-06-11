@@ -14,6 +14,7 @@ import pytz
 
 from backend.services.vajra.candles import (
     has_sufficient_bars,
+    ist_minutes,
     min_bars_for_tf,
     opening_session_skip_5m_validation,
 )
@@ -24,9 +25,12 @@ from backend.services.vajra.ranking import shortlist_by_trade_quality, sort_vajr
 from backend.services.vajra.transition import (
     TPS_SHORTLIST_MAX,
     TPS_SHORTLIST_MIN,
+    OPENING_MOMENTUM_END_MINUTES,
+    apply_opening_5m_bias_to_tps,
     classify_early_transition,
     compute_tps,
     merge_trade_type,
+    opening_session_5m_bull_bias,
     validate_execution_5m,
 )
 
@@ -155,6 +159,13 @@ def rate_symbol_transition(
     if tps is None:
         return None
 
+    ts = computed_at or datetime.now(IST)
+    bull_bias = False
+    if candles_5m and ist_minutes(ts) <= OPENING_MOMENTUM_END_MINUTES:
+        bull_bias = opening_session_5m_bull_bias(candles_5m)
+        if bull_bias:
+            tps = apply_opening_5m_bias_to_tps(tps, bull_bias=True)
+
     execution = None
     if run_execution and candles_5m:
         execution = validate_execution_5m(candles_5m, bull_dir=tps.bull_dir)
@@ -176,7 +187,6 @@ def rate_symbol_transition(
             tps_score=tps.tps_score,
         )
 
-    ts = computed_at or datetime.now(IST)
     row = _build_row(
         stock=stock,
         fut_sym=fut_sym,

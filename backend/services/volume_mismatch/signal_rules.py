@@ -10,7 +10,10 @@ import pandas_ta as ta
 from backend.services.upstox_service import _parse_ts_to_aware_ist
 from backend.services.volume_mismatch.constants import (
     MIN_GAP_PCT_LONG,
+    MIN_GAP_PCT_MOMENTUM_LONG,
+    MIN_GAP_PCT_MOMENTUM_LONG_CEIL,
     MIN_GAP_PCT_SHORT,
+    MIN_REL_VOL_MOMENTUM_LONG,
     RELATIVE_VOLUME_LOOKBACK_SESSIONS,
 )
 from backend.services.volume_mismatch.scoring import total_score
@@ -215,7 +218,8 @@ def evaluate_vm_signal(
     """
     Unified gap + BB + candle color + net volume criteria.
 
-    LONG: gap down <= -1%, open below lower BB, green candle, net volume > 0.
+    LONG (classic): gap down <= -1%, open below lower BB, green candle, net volume > 0.
+    LONG (momentum): mild gap (-1% < gap < +1%), green candle, net vol > 0, rel vol >= 1.25x, close >= BB mid.
     SHORT: gap up >= +1%, open above upper BB, red candle, net volume < 0.
 
     ``total_score`` is computed for display only — never used to filter.
@@ -236,6 +240,7 @@ def evaluate_vm_signal(
     upper = bb["bb_upper"]
     lower = bb["bb_lower"]
 
+    signal_path = "gap_bb"
     if o < previous_close and gap <= MIN_GAP_PCT_LONG and bb_px < lower:
         if c <= o:
             return None
@@ -248,6 +253,17 @@ def evaluate_vm_signal(
         if net_vol >= 0:
             return None
         direction = "SHORT"
+    elif (
+        gap > MIN_GAP_PCT_MOMENTUM_LONG
+        and gap < MIN_GAP_PCT_MOMENTUM_LONG_CEIL
+        and c > o
+        and net_vol > 0
+        and c >= bb["bb_middle"]
+        and relative_volume is not None
+        and relative_volume >= MIN_REL_VOL_MOMENTUM_LONG
+    ):
+        direction = "LONG"
+        signal_path = "momentum_open"
     else:
         return None
 
@@ -281,6 +297,7 @@ def evaluate_vm_signal(
         "bb_upper": upper,
         "bb_middle": bb["bb_middle"],
         "bb_lower": lower,
+        "signal_path": signal_path,
     }
     if include_volume_split:
         first_vol, vol_bought, vol_sold = volume_bought_sold(first_bar)

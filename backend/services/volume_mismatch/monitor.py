@@ -23,6 +23,10 @@ from backend.services.volume_mismatch.fresh_market import (
     refresh_stale_arbitrage_master,
     resolve_fut_price_and_indicators,
 )
+from backend.services.volume_mismatch.momentum_discovery import (
+    discover_intraday_momentum_signals,
+    is_momentum_discovery_window,
+)
 from backend.services.volume_mismatch.repository import (
     fetch_signals_for_date,
     update_signal_monitor_fields,
@@ -96,8 +100,25 @@ def run_volume_mismatch_entry_monitor(
     try:
         rows = fetch_signals_for_date(db, sd)
         waiting = [r for r in rows if str(r.get("entry_status") or "").upper() == "WAITING"]
+
+        discovered: List[Dict[str, Any]] = []
+        if is_momentum_discovery_window(now):
+            try:
+                discovered = discover_intraday_momentum_signals(db, sd, now=now)
+                if discovered:
+                    rows = fetch_signals_for_date(db, sd)
+                    waiting = [r for r in rows if str(r.get("entry_status") or "").upper() == "WAITING"]
+            except Exception as disc_err:
+                logger.warning("VM momentum discovery skipped: %s", disc_err)
+
         if not waiting:
-            return {"success": True, "trade_date": str(sd), "checked": 0, "ready": 0}
+            return {
+                "success": True,
+                "trade_date": str(sd),
+                "checked": 0,
+                "ready": 0,
+                "discovered": len(discovered),
+            }
 
         symbols = [str(r.get("symbol") or "").strip().upper() for r in waiting]
         refresh_stale_arbitrage_master(symbols)
@@ -211,6 +232,7 @@ def run_volume_mismatch_entry_monitor(
             "checked": len(waiting),
             "ready": ready_count,
             "direction_flips": flip_count,
+            "discovered": len(discovered),
             "status_changes": status_changes,
         }
     except Exception as e:
