@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Request, HTTPException, Depends, Query, BackgroundTasks
 from fastapi.responses import JSONResponse, RedirectResponse, PlainTextResponse
 from datetime import date, datetime, timedelta, time as dt_time
+
+from backend.services.ist_datetime import ist_isoformat, ist_midnight, naive_ist
 from typing import List, Dict, Any, Optional, Tuple
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -934,11 +936,11 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
         triggered_at_raw = data.get("triggered_at", "")
         
         # For intraday alerts, use today if it's a trading day, otherwise get last trading date
-        today = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        if vwap_service.is_trading_day(today):
-            trading_date = today
+        today_aware = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        if vwap_service.is_trading_day(today_aware):
+            trading_date = naive_ist(today_aware)
         else:
-            trading_date = vwap_service.get_last_trading_date(now)
+            trading_date = naive_ist(vwap_service.get_last_trading_date(now))
         
         logger.info(f"Current date: {now.strftime('%Y-%m-%d %A')}")
         logger.info(f"Last trading date: {trading_date.strftime('%Y-%m-%d %A')}")
@@ -987,20 +989,25 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     second=0,
                     microsecond=0
                 )
-                triggered_at_str = triggered_datetime.isoformat()
+                triggered_datetime = naive_ist(triggered_datetime)
+                triggered_at_str = ist_isoformat(triggered_datetime)
                 triggered_at_display = corrected_time
                 logger.info(f"Original time: {triggered_at_raw} -> Corrected to: {corrected_time}")
                 logger.info(f"Triggered at: {triggered_datetime.strftime('%Y-%m-%d %H:%M:%S %A')}")
             else:
                 # Default to first Chartink time if no time provided
-                triggered_datetime = trading_date.replace(hour=10, minute=15, second=0, microsecond=0)
-                triggered_at_str = triggered_datetime.isoformat()
+                triggered_datetime = naive_ist(
+                    trading_date.replace(hour=10, minute=15, second=0, microsecond=0)
+                )
+                triggered_at_str = ist_isoformat(triggered_datetime)
                 triggered_at_display = "10:15 AM"
         except Exception as e:
             logger.info(f"Error parsing triggered_at '{triggered_at_raw}': {e}")
             # Default to first Chartink time on error
-            triggered_datetime = trading_date.replace(hour=10, minute=15, second=0, microsecond=0)
-            triggered_at_str = triggered_datetime.isoformat()
+            triggered_datetime = naive_ist(
+                trading_date.replace(hour=10, minute=15, second=0, microsecond=0)
+            )
+            triggered_at_str = ist_isoformat(triggered_datetime)
             triggered_at_display = "10:15 AM"
         
         # Process the data into a standardized format
@@ -1010,7 +1017,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             "alert_name": data.get("alert_name", "Alert"),
             "triggered_at": triggered_at_str,
             "triggered_at_time": triggered_at_display,
-            "received_at": datetime.now(ist).isoformat(),
+            "received_at": ist_isoformat(datetime.now(ist)),
             "stocks": []
         }
         
@@ -1895,7 +1902,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
             db_record_reuse = None
             _dedupe_ikey = (stock.get("instrument_key") or "").strip()
             _dedupe_contract = (stock.get("option_contract") or "").strip()
-            _day_start = trading_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            _day_start = ist_midnight(trading_date)
             _day_end = _day_start + timedelta(days=1)
             _existing_trade = None
             if _dedupe_ikey:
@@ -2589,7 +2596,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                     candle_size_ratio=saved_candle_size_ratio,
                     candle_size_status=saved_candle_size_status,
                     qty=qty,
-                    trade_date=trading_date,
+                    trade_date=naive_ist(trading_date),
                     status=status,
                     buy_price=buy_price,
                     instrument_key=stock_instrument_key,
@@ -2762,7 +2769,7 @@ async def process_webhook_data(data: dict, db: Session, forced_type: str = None)
                         option_ltp=stock.get("option_ltp", 0.0) if stock else 0.0,
                         option_vwap=0.0,
                         qty=stock.get("qty", 0) if stock else 0,
-                        trade_date=trading_date,
+                        trade_date=naive_ist(trading_date),
                         status='alert_received',  # Minimal status - saved when database save fails
                         buy_price=None,
                         stop_loss=None,
@@ -4648,8 +4655,10 @@ async def manual_stock_entry(request: Request, db: Session = Depends(get_db)):
                 raise ValueError("Invalid time values")
             
             # Create datetime for triggered_at
-            triggered_datetime = trading_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
-            
+            triggered_datetime = naive_ist(
+                trading_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            )
+
             # Format time for display (12-hour format)
             if hour == 0:
                 time_display = f"12:{minute:02d} AM"
@@ -4826,8 +4835,8 @@ async def get_latest_webhook_data(background_tasks: BackgroundTasks, db: Session
         current_hour = now.hour
         current_minute = now.minute
         
-        # Calculate today's date
-        today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        # Calculate today's date (naive IST midnight for DB comparisons)
+        today = ist_midnight(now)
         
         # If it's after 9:00 AM IST, only show today's data
         # If it's before 9:00 AM IST, show yesterday's data
@@ -4872,13 +4881,13 @@ async def get_latest_webhook_data(background_tasks: BackgroundTasks, db: Session
             for record in bullish_records:
                 # Database now stores IST timestamps directly, no conversion needed
                 alert_time_ist = record.alert_time
-                alert_key = alert_time_ist.isoformat()
+                alert_key = ist_isoformat(alert_time_ist) or ""
                 if alert_key not in grouped_bullish:
                     grouped_bullish[alert_key] = {
                         "scan_name": record.scan_name or "Unknown Scan",
                         "alert_name": f"Bullish Alert",
-                        "triggered_at": alert_time_ist.isoformat(),
-                        "received_at": record.created_date_time.isoformat(),
+                        "triggered_at": ist_isoformat(alert_time_ist),
+                        "received_at": ist_isoformat(record.created_date_time),
                         "stocks": []
                     }
                 
@@ -5033,7 +5042,7 @@ async def get_latest_webhook_data(background_tasks: BackgroundTasks, db: Session
                     "status": record.status,  # Include status to identify no_entry trades
                     "no_entry_reason": record.no_entry_reason or None,  # Reason for no entry if status is no_entry
                     "buy_order_id": record.buy_order_id or None,
-                    "buy_time": record.buy_time.isoformat() if record.buy_time else None,
+                    "buy_time": ist_isoformat(record.buy_time),
                     "trade_id": record.id,
                     "live_tracking_disabled": _tracking_disabled,
                     "live_exit_enabled": (
@@ -5052,13 +5061,13 @@ async def get_latest_webhook_data(background_tasks: BackgroundTasks, db: Session
             for record in bearish_records:
                 # Database now stores IST timestamps directly, no conversion needed
                 alert_time_ist = record.alert_time
-                alert_key = alert_time_ist.isoformat()
+                alert_key = ist_isoformat(alert_time_ist) or ""
                 if alert_key not in grouped_bearish:
                     grouped_bearish[alert_key] = {
                         "scan_name": record.scan_name or "Unknown Scan",
                         "alert_name": f"Bearish Alert",
-                        "triggered_at": alert_time_ist.isoformat(),
-                        "received_at": record.created_date_time.isoformat(),
+                        "triggered_at": ist_isoformat(alert_time_ist),
+                        "received_at": ist_isoformat(record.created_date_time),
                         "stocks": []
                     }
                 
@@ -5213,7 +5222,7 @@ async def get_latest_webhook_data(background_tasks: BackgroundTasks, db: Session
                     "status": record.status,  # Include status to identify no_entry trades
                     "no_entry_reason": record.no_entry_reason or None,  # Reason for no entry if status is no_entry
                     "buy_order_id": record.buy_order_id or None,
-                    "buy_time": record.buy_time.isoformat() if record.buy_time else None,
+                    "buy_time": ist_isoformat(record.buy_time),
                     "trade_id": record.id,
                     "live_tracking_disabled": _tracking_disabled,
                     "live_exit_enabled": (

@@ -1462,12 +1462,22 @@ function stopAutoRefresh() {
     }
 }
 
+// Parse API datetimes: naive strings are IST wall clock; prefer explicit +05:30.
+function parseApiDateTime(dateString) {
+    if (!dateString) return null;
+    const s = String(dateString).trim();
+    if (/[zZ]$|[+-]\d{2}:\d{2}$/.test(s)) {
+        return new Date(s);
+    }
+    return new Date(s + '+05:30');
+}
+
 // Format datetime
 function formatDateTime(dateString) {
     if (!dateString) return 'N/A';
     
     try {
-        const date = new Date(dateString);
+        const date = parseApiDateTime(dateString);
         
         // Check if date is valid
         if (isNaN(date.getTime())) {
