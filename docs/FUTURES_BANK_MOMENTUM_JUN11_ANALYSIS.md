@@ -107,9 +107,14 @@ python3 -m pytest backend/services/volume_mismatch/test_momentum_signal.py \
   backend/services/vajra/test_opening_5m_bias.py -q
 ```
 
-**Expected after fix (11-Jun production candles):**
-- **ICICIBANK:** `VM scan: LONG via momentum_open` (gap −0.35%, rel_vol 2.98, close 1302.8 > BB mid 1264.8)
-- **KOTAKBANK:** VM scan still no signal at 9:30 (rel_vol 0.44); **intraday discovery** after 11:15 VWAP breakout
+**Verified on production (time-sliced replay, commit `bf0f3d4`):**
+
+| Symbol | VM 9:30 scan | Vajra @ 10:00 | Vajra @ 11:15 | Vajra @ 11:30 |
+|--------|--------------|---------------|---------------|---------------|
+| **ICICIBANK** | LONG `momentum_open` (rel 2.98×) | LONG [A+] conf 81.2 | LONG conf 77.0, **5m bias ✓** | LONG WATCH |
+| **KOTAKBANK** | No (rel 0.44×) | EARLY LONG TRANSITION | EARLY LONG TRANSITION | **5m bias ✓**, REJECT (ECS) |
+
+KOTAK still needs **VM intraday discovery** at monitor (rel vol too low at 9:30); Vajra now surfaces EARLY LONG from 10:00 with new 5m bias path.
 - Vajra: `5m bias` true at 11:15/11:30; trade_type moves toward EARLY LONG TRANSITION
 - Smart Futures: regime/sector gates pass during opening window when re-scored with Jun-11 candles
 

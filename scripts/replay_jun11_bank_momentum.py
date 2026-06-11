@@ -24,6 +24,17 @@ TRADE_DATE = date(2026, 6, 11)
 BANKS = ("ICICIBANK", "KOTAKBANK")
 
 
+def _bars_upto(candles: list, ts: datetime) -> list:
+    from backend.services.upstox_service import _parse_ts_to_aware_ist
+
+    out = []
+    for c in candles or []:
+        dt = _parse_ts_to_aware_ist(c.get("timestamp"))
+        if dt is not None and dt <= ts:
+            out.append(c)
+    return out
+
+
 def main() -> int:
     from backend.config import settings
     from backend.services.smart_futures_picker.indicators import (
@@ -88,19 +99,23 @@ def main() -> int:
 
         for label, minute in [("10:00", 10 * 60), ("11:15", 11 * 60 + 15), ("11:30", 11 * 60 + 30)]:
             ts = IST.localize(datetime(2026, 6, 11, minute // 60, minute % 60))
-            bias = opening_session_5m_bull_bias(bars_5) if bars_5 else False
+            bars_5_upto = _bars_upto(bars_5, ts)
+            bias = opening_session_5m_bull_bias(bars_5_upto) if bars_5_upto else False
             print(f"  Vajra 5m bias @ {label}: {bias}")
 
         for at in ["10:00", "11:15", "11:30"]:
             hh, mm = map(int, at.split(":"))
             ts = IST.localize(datetime(2026, 6, 11, hh, mm))
+            bars_5_upto = _bars_upto(bars_5, ts)
+            bars_30_upto = _bars_upto(bars_30, ts)
+            bars_1h_upto = _bars_upto(bars_1h, ts)
             row = rate_symbol_transition(
                 stock=sym,
                 fut_sym=u.get("future_symbol") or sym,
                 instrument_key=ik,
-                candles_30m=bars_30,
-                candles_1hr=bars_1h,
-                candles_5m=bars_5,
+                candles_30m=bars_30_upto,
+                candles_1hr=bars_1h_upto,
+                candles_5m=bars_5_upto,
                 computed_at=ts,
                 run_execution=True,
             )
