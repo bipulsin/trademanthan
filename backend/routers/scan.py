@@ -4286,33 +4286,34 @@ async def run_car_nifty200_full_refresh(background: bool = True):
 
 
 @router.get("/health")
-async def health_check(db: Session = Depends(get_db)):
+async def health_check():
     """
     Health check endpoint for monitoring system status
     Returns status of all critical components
     """
     try:
         import pytz
+        from backend.database import db_session, get_db_pool_stats, log_db_pool_pressure
+
         ist = pytz.timezone('Asia/Kolkata')
         now = datetime.now(ist)
         today = now.date()
         
-        # Check database
+        # Short DB session — do not hold a pool connection through Upstox I/O
         db_healthy = False
-        try:
-            db.execute(text("SELECT 1"))
-            db_healthy = True
-        except Exception as e:
-            logger.info(f"Database health check failed: {e}")
-        
-        # Check today's webhook activity
         today_alerts = 0
-        try:
-            today_alerts = db.query(IntradayStockOption).filter(
-                IntradayStockOption.trade_date >= datetime.combine(today, datetime.min.time())
-            ).count()
-        except:
-            pass
+        with db_session() as db:
+            try:
+                db.execute(text("SELECT 1"))
+                db_healthy = True
+            except Exception as e:
+                logger.info(f"Database health check failed: {e}")
+            try:
+                today_alerts = db.query(IntradayStockOption).filter(
+                    IntradayStockOption.trade_date >= datetime.combine(today, datetime.min.time())
+                ).count()
+            except Exception:
+                pass
         
         # Check Upstox token (only during market hours to avoid unnecessary API calls)
         token_valid = False
@@ -4334,9 +4335,14 @@ async def health_check(db: Session = Depends(get_db)):
         # Check instruments file
         from backend.config import get_instruments_file_path
         instruments_exists = get_instruments_file_path().exists()
+
+        pool_stats = get_db_pool_stats()
+        log_db_pool_pressure(logger, "scan_health")
         
         # Overall health status
         is_healthy = db_healthy and (now.hour < 11 or today_alerts > 0 or now.weekday() >= 5)
+        if pool_stats.get("stressed"):
+            is_healthy = False
         
         health_data = {
             "status": "healthy" if is_healthy else "degraded",
@@ -4359,12 +4365,19 @@ async def health_check(db: Session = Depends(get_db)):
                 "instruments_file": {
                     "status": "ok" if instruments_exists else "error",
                     "exists": instruments_exists
-                }
+                },
+                "db_pool": {
+                    "status": "warning" if pool_stats.get("stressed") else "ok",
+                    "healthy": not pool_stats.get("stressed"),
+                    **{k: v for k, v in pool_stats.items() if k != "available"},
+                },
             },
             "metrics": {
                 "consecutive_webhook_failures": health_monitor.webhook_failures if health_monitor else 0,
                 "consecutive_token_failures": health_monitor.api_token_failures if health_monitor else 0,
-                "consecutive_db_failures": health_monitor.database_failures if health_monitor else 0
+                "consecutive_db_failures": health_monitor.database_failures if health_monitor else 0,
+                "db_pool_checked_out": pool_stats.get("checked_out"),
+                "db_pool_max_capacity": pool_stats.get("max_capacity"),
             }
         }
         
@@ -4524,7 +4537,7 @@ async def receive_bearish_webhook(request: Request):
         )
 
 @router.api_route("/chartink-webhook", methods=["GET", "POST", "PUT"])
-async def receive_chartink_webhook(request: Request, db: Session = Depends(get_db)):
+async def receive_chartink_webhook(request: Request):
     """
     Original webhook endpoint with auto-detection (for backward compatibility)
 
@@ -4569,42 +4582,16 @@ async def receive_chartink_webhook(request: Request, db: Session = Depends(get_d
         logger.info(f"📦 Alert details: alert_name='{alert_name}', scan_name='{scan_name}', scan_url='{scan_url}'")
         logger.info(f"📦 Full webhook payload: {json.dumps(data, indent=2)}")
         logger.info(f"📥 Received webhook (auto-detect) at {datetime.now().isoformat()}")
-        logger.info(f"📦 Alert details: alert_name='{alert_name}', scan_name='{scan_name}', scan_url='{scan_url}'")
         logger.info(f"📦 Payload: {json.dumps(data, indent=2)}")
         
-        # Process SYNCHRONOUSLY for reliability
-        try:
-            result = await process_webhook_data(data, db, forced_type=None)  # Auto-detect
-            # Track webhook success
-            if health_monitor:
-                health_monitor.record_webhook_success()
-            
-            # Return the result from process_webhook_data
-            if isinstance(result, JSONResponse):
-                return result
-            else:
-                return JSONResponse(content={
-                    "status": "success",
-                    "message": "Webhook processed successfully (auto-detect)",
-                    "timestamp": datetime.now().isoformat()
-                }, status_code=200)
-        except Exception as e:
-            logger.error(f"❌ CRITICAL: Failed to process webhook (auto-detect): {str(e)}")
-            logger.error(f"   Stock names in webhook: {data.get('stocks', 'N/A')}")
-            import traceback
-            logger.error(f"   Traceback: {traceback.format_exc()}")
-            logger.info(f"❌ CRITICAL: Failed to process webhook (auto-detect): {str(e)}")
-            traceback.print_exc()
-            # Track webhook failure
-            if health_monitor:
-                health_monitor.record_webhook_failure()
-            
-            # Return error response but still acknowledge receipt
-            return JSONResponse(content={
-                "status": "error",
-                "message": f"Failed to process webhook: {str(e)}",
-                "timestamp": datetime.now().isoformat()
-            }, status_code=500)
+        webhook_data = data.copy()
+        asyncio.get_running_loop().run_in_executor(None, _run_webhook_worker, webhook_data, None)
+
+        return JSONResponse(content={
+            "status": "success",
+            "message": "Webhook received and queued for processing (auto-detect)",
+            "timestamp": datetime.now().isoformat()
+        }, status_code=200)
     except asyncio.TimeoutError:
         logger.error("⚠️ Timeout reading webhook body")
         return JSONResponse(
@@ -4845,11 +4832,14 @@ async def get_latest_webhook_data(background_tasks: BackgroundTasks, db: Session
     except Exception:
         pass
 
-    # Align today's DB rows with Upstox positions + order book so scan.html matches the broker
+    # Align today's DB rows with Upstox positions + order book so scan.html matches the broker.
+    # Use a dedicated short-lived session — reconcile calls Upstox and must not hold the request pool slot.
     try:
+        from backend.database import db_session
         from backend.services.live_trading import reconcile_scan_algo_today_with_broker
 
-        rec = reconcile_scan_algo_today_with_broker(db, force=False)
+        with db_session() as rec_db:
+            rec = reconcile_scan_algo_today_with_broker(rec_db, force=False)
         if rec.get("success") and not rec.get("skipped"):
             logger.info(
                 "Broker↔scan reconcile: updated=%s orphans=%s qty_sync=%s err=%s",
@@ -4858,10 +4848,6 @@ async def get_latest_webhook_data(background_tasks: BackgroundTasks, db: Session
                 rec.get("qty_synced"),
                 len(rec.get("errors") or []),
             )
-        try:
-            db.expire_all()
-        except Exception:
-            pass
     except Exception as rec_err:
         logger.warning("Broker reconcile skipped: %s", rec_err)
 

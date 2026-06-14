@@ -404,6 +404,9 @@ def update_vwap_for_all_open_positions():
         _UPDATE_VWAP_LOCK.release()
         return
     _UPDATE_VWAP_LAST_START_TS = now_ts
+
+    from backend.database import log_db_pool_pressure
+    log_db_pool_pressure(logger, "update_vwap_start")
     
     # #region agent log
     import json as json_module
@@ -2327,6 +2330,12 @@ def update_vwap_for_all_open_positions():
                 _UPDATE_VWAP_LOCK.release()
             except Exception:
                 pass
+
+        try:
+            from backend.database import log_db_pool_pressure
+            log_db_pool_pressure(logger, "update_vwap_end")
+        except Exception:
+            pass
         
         # CRITICAL: Log function exit with summary
         try:

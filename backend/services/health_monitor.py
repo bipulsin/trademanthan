@@ -114,10 +114,12 @@ class HealthMonitor:
                 from sqlalchemy import text
                 logger.info("🔍 Checking database connectivity...")
                 db = SessionLocal()
-                db.execute(text("SELECT 1"))
-                db.close()
-                logger.info("✅ Database: OK")
-                self.database_failures = 0
+                try:
+                    db.execute(text("SELECT 1"))
+                    logger.info("✅ Database: OK")
+                    self.database_failures = 0
+                finally:
+                    db.close()
             except Exception as e:
                 self.database_failures += 1
                 issues.append(f"❌ Database connection failed: {str(e)}")
@@ -127,12 +129,15 @@ class HealthMonitor:
             try:
                 logger.info("🔍 Checking webhook status...")
                 db = SessionLocal()
-                today_alerts = db.query(IntradayStockOption).filter(
-                    IntradayStockOption.trade_date >= datetime.combine(today, datetime.min.time())
-                ).count()
+                try:
+                    today_alerts = db.query(IntradayStockOption).filter(
+                        IntradayStockOption.trade_date >= datetime.combine(today, datetime.min.time())
+                    ).count()
+                finally:
+                    db.close()
                 logger.info(f"🔍 Found {today_alerts} alerts today")
                 
-                # Check if it's a trading day (not weekend or holiday)
+                # Check if it's a trading day (not weekend or holiday) — no DB held during Upstox call
                 is_trading_day = False
                 try:
                     from backend.services.upstox_service import upstox_service
@@ -158,8 +163,6 @@ class HealthMonitor:
                         logger.info(f"ℹ️ Market holiday - No webhooks expected ({today_alerts} alerts)")
                     else:
                         logger.info(f"ℹ️ Weekend - No webhooks expected ({today_alerts} alerts)")
-                
-                db.close()
             except Exception as e:
                 issues.append(f"❌ Webhook check failed: {str(e)}")
                 logger.error(f"Webhook health check failed: {e}")
@@ -219,6 +222,12 @@ class HealthMonitor:
                 self.handle_health_issues(issues, now)
             else:
                 logger.info("✅ Health check completed with no issues")
+
+            try:
+                from backend.database import log_db_pool_pressure
+                log_db_pool_pressure(logger, "health_monitor")
+            except Exception:
+                pass
             
         except Exception as e:
             logger.error(f"❌ Health check failed: {str(e)}")
@@ -326,38 +335,38 @@ class HealthMonitor:
             day_end = day_start + timedelta(days=1)
             
             db = SessionLocal()
-            
-            # Get today's stats (same calendar day as trade_date)
-            total_alerts = db.query(IntradayStockOption).filter(
-                IntradayStockOption.trade_date >= day_start,
-                IntradayStockOption.trade_date < day_end,
-            ).count()
-            
-            bullish_count = db.query(IntradayStockOption).filter(
-                IntradayStockOption.trade_date >= day_start,
-                IntradayStockOption.trade_date < day_end,
-                IntradayStockOption.alert_type == 'Bullish'
-            ).count()
-            
-            bearish_count = db.query(IntradayStockOption).filter(
-                IntradayStockOption.trade_date >= day_start,
-                IntradayStockOption.trade_date < day_end,
-                IntradayStockOption.alert_type == 'Bearish'
-            ).count()
-            
-            trades_entered = db.query(IntradayStockOption).filter(
-                IntradayStockOption.trade_date >= day_start,
-                IntradayStockOption.trade_date < day_end,
-                IntradayStockOption.status == 'bought'
-            ).count()
-            
-            no_entry = db.query(IntradayStockOption).filter(
-                IntradayStockOption.trade_date >= day_start,
-                IntradayStockOption.trade_date < day_end,
-                IntradayStockOption.status == 'no_entry'
-            ).count()
-            
-            db.close()
+            try:
+                # Get today's stats (same calendar day as trade_date)
+                total_alerts = db.query(IntradayStockOption).filter(
+                    IntradayStockOption.trade_date >= day_start,
+                    IntradayStockOption.trade_date < day_end,
+                ).count()
+                
+                bullish_count = db.query(IntradayStockOption).filter(
+                    IntradayStockOption.trade_date >= day_start,
+                    IntradayStockOption.trade_date < day_end,
+                    IntradayStockOption.alert_type == 'Bullish'
+                ).count()
+                
+                bearish_count = db.query(IntradayStockOption).filter(
+                    IntradayStockOption.trade_date >= day_start,
+                    IntradayStockOption.trade_date < day_end,
+                    IntradayStockOption.alert_type == 'Bearish'
+                ).count()
+                
+                trades_entered = db.query(IntradayStockOption).filter(
+                    IntradayStockOption.trade_date >= day_start,
+                    IntradayStockOption.trade_date < day_end,
+                    IntradayStockOption.status == 'bought'
+                ).count()
+                
+                no_entry = db.query(IntradayStockOption).filter(
+                    IntradayStockOption.trade_date >= day_start,
+                    IntradayStockOption.trade_date < day_end,
+                    IntradayStockOption.status == 'no_entry'
+                ).count()
+            finally:
+                db.close()
             
             report = f"""
 📊 DAILY HEALTH REPORT - {today.strftime('%B %d, %Y')}

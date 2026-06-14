@@ -1,15 +1,21 @@
+import logging
 import os
+from contextlib import contextmanager
+from typing import Any, Dict, Iterator, Optional
 
 import backend.env_bootstrap  # noqa: F401 — load `<project_root>/.env` before os.getenv
 
 from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 # Database configuration - PostgreSQL production database (configurable via DATABASE_URL env var)
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://trademanthan:trademanthan123@localhost/trademanthan")
 DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "20"))
 DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "40"))
 DB_POOL_TIMEOUT_SEC = int(os.getenv("DB_POOL_TIMEOUT_SEC", "60"))
+DB_POOL_WARN_CHECKED_OUT = int(
+    os.getenv("DB_POOL_WARN_CHECKED_OUT", str(max(1, int((DB_POOL_SIZE + DB_MAX_OVERFLOW) * 0.75))))
+)
 
 # Import Base from models.base to ensure all models use the same Base instance
 from backend.models.base import Base
@@ -43,6 +49,77 @@ try:
 except Exception as e:
     print(f"Warning: Database connection failed during import: {e}")
     print("Database will be initialized when create_tables() is called")
+
+def get_db_pool_stats() -> Dict[str, Any]:
+    """Snapshot SQLAlchemy QueuePool usage (one engine per process)."""
+    if engine is None:
+        return {"available": False}
+    pool = engine.pool
+    max_capacity = DB_POOL_SIZE + DB_MAX_OVERFLOW
+    checked_out = int(pool.checkedout())
+    return {
+        "available": True,
+        "pool_size": int(pool.size()),
+        "checked_out": checked_out,
+        "checked_in": int(pool.checkedin()),
+        "overflow": int(pool.overflow()),
+        "max_capacity": max_capacity,
+        "utilization_pct": round(100.0 * checked_out / max_capacity, 1) if max_capacity else 0.0,
+        "warn_threshold": DB_POOL_WARN_CHECKED_OUT,
+        "stressed": checked_out >= DB_POOL_WARN_CHECKED_OUT,
+    }
+
+
+def log_db_pool_pressure(logger: Optional[logging.Logger], tag: str = "") -> Dict[str, Any]:
+    """Log when checked-out connections exceed DB_POOL_WARN_CHECKED_OUT."""
+    stats = get_db_pool_stats()
+    log = logger or logging.getLogger(__name__)
+    if not stats.get("available"):
+        return stats
+    prefix = f"[db_pool{(' ' + tag) if tag else ''}]"
+    if stats.get("stressed"):
+        log.warning(
+            "%s stressed checked_out=%s/%s overflow=%s utilization=%s%%",
+            prefix,
+            stats["checked_out"],
+            stats["max_capacity"],
+            stats["overflow"],
+            stats["utilization_pct"],
+        )
+    else:
+        log.debug(
+            "%s ok checked_out=%s/%s overflow=%s",
+            prefix,
+            stats["checked_out"],
+            stats["max_capacity"],
+            stats["overflow"],
+        )
+    return stats
+
+
+@contextmanager
+def db_session() -> Iterator[Session]:
+    """
+    Short-lived Session for background jobs and broker I/O boundaries.
+    Rolls back on error; always closes (returns connection to pool).
+    """
+    if SessionLocal is None:
+        raise Exception("Database not initialized. Please call create_tables() first.")
+    db = SessionLocal()
+    try:
+        yield db
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        try:
+            db.close()
+        except Exception as e:
+            print(f"Warning: Error closing database session: {e}")
+
 
 # Dependency to get database session
 def get_db():
