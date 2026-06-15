@@ -229,6 +229,19 @@ def run_smart_future_vwap_update_gated() -> None:
     t = now.time()
     if t < dt_time(9, 15) or t > dt_time(15, 35):
         return
+    try:
+        from backend.database import get_db_pool_stats
+
+        pool = get_db_pool_stats()
+        if pool.get("stressed"):
+            logger.warning(
+                "⏭️ Skipping VWAP update: DB pool stressed (checked_out=%s/%s)",
+                pool.get("checked_out"),
+                pool.get("max_capacity"),
+            )
+            return
+    except Exception:
+        pass
     logger.info("🔧 Triggering VWAP Update job (5-min cadence, IST session gate)...")
     try:
         update_vwap_for_all_open_positions()

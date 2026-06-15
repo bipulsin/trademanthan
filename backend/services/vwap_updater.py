@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, or_
 
 # Add parent directory to path for imports
-from backend.database import SessionLocal
+from backend.database import SessionLocal, db_session, get_db_pool_stats, log_db_pool_pressure
 from backend.models.trading import IntradayStockOption, HistoricalMarketData
 
 logger = logging.getLogger(__name__)
@@ -526,6 +526,10 @@ def update_vwap_for_all_open_positions():
                 )
         except Exception as manual_block_err:
             logger.warning("Manual exit sell sync block failed: %s", manual_block_err)
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
         
         # ═══════════════════════════════════════════════════════════════
         # RE-EVALUATE "no_entry" TRADES: Check if conditions are now met
@@ -541,10 +545,17 @@ def update_vwap_for_all_open_positions():
             )
         ).all()
         
-        if no_entry_trades:
-            logger.info(f"🔍 Found {len(no_entry_trades)} 'no_entry' trades to re-evaluate")
-            
-            # Check index trends
+        no_entry_trade_ids = [int(t.id) for t in no_entry_trades] if no_entry_trades else []
+        if no_entry_trade_ids:
+            logger.info("🔍 Found %s 'no_entry' trades to re-evaluate", len(no_entry_trade_ids))
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
+            db.close()
+            db = None
+
+            # Check index trends (no DB held)
             index_trends = vwap_service.check_index_trends()
             nifty_trend = index_trends.get("nifty_trend", "unknown")
             banknifty_trend = index_trends.get("banknifty_trend", "unknown")
@@ -552,9 +563,16 @@ def update_vwap_for_all_open_positions():
             # Check if time is before 3:00 PM
             is_before_3pm = now.hour < 15
             
-            # Re-evaluate each no_entry trade
-            for no_entry_trade in no_entry_trades:
+            # Re-evaluate each no_entry trade (reload row per iteration)
+            for no_entry_trade_id in no_entry_trade_ids:
+                ne_db = SessionLocal()
                 try:
+                    db = ne_db
+                    no_entry_trade = ne_db.query(IntradayStockOption).filter(
+                        IntradayStockOption.id == no_entry_trade_id
+                    ).first()
+                    if not no_entry_trade or no_entry_trade.status != 'no_entry':
+                        continue
                     stock_name = no_entry_trade.stock_name
                     option_type = no_entry_trade.option_type or 'PE'
                     no_entry_date = no_entry_trade.buy_time or no_entry_trade.trade_date
@@ -796,327 +814,64 @@ def update_vwap_for_all_open_positions():
                         logger.debug(f"⚪ {stock_name} still 'no_entry': {', '.join(reasons)}")
                         
                 except Exception as e:
-                    logger.error(f"Error re-evaluating no_entry trade for {no_entry_trade.stock_name}: {str(e)}")
+                    logger.error("Error re-evaluating no_entry trade id=%s: %s", no_entry_trade_id, e)
                     import traceback
                     traceback.print_exc()
-        
+                    try:
+                        ne_db.rollback()
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        ne_db.commit()
+                    except Exception:
+                        ne_db.rollback()
+                finally:
+                    try:
+                        ne_db.close()
+                    except Exception:
+                        pass
+            db = SessionLocal()
+
         # Commit any re-entries before updating existing positions
-        db.commit()
+        if db is not None:
+            db.commit()
         
-        # Get all open positions from today (not sold/exited) - includes newly entered trades
-        open_positions = db.query(IntradayStockOption).filter(
-            and_(
-                IntradayStockOption.trade_date >= today,
-                IntradayStockOption.status == 'bought'
-            )
-        ).all()
-        
-        # Also get all trades (including no_entry) for historical data saving
-        all_trades_for_history = db.query(IntradayStockOption).filter(
-            and_(
-                IntradayStockOption.trade_date >= today,
-                IntradayStockOption.trade_date < today + timedelta(days=1)
-            )
-        ).all()
-        
-        if not open_positions:
+        open_position_ids = [
+            int(r[0])
+            for r in db.query(IntradayStockOption.id).filter(
+                and_(
+                    IntradayStockOption.trade_date >= today,
+                    IntradayStockOption.status == 'bought',
+                    IntradayStockOption.exit_reason == None,
+                )
+            ).all()
+        ]
+        if not open_position_ids:
             logger.info("No open positions found to update")
-            # Still save historical data even if no open positions
-            if all_trades_for_history:
-                logger.info(f"Saving historical data for {len(all_trades_for_history)} trades (including no_entry)")
         else:
-            logger.info(f"Found {len(open_positions)} open positions to update")
-        
-        # ═══════════════════════════════════════════════════════════════
-        # RE-EVALUATE "no_entry" TRADES: Check if conditions are now met
-        # ═══════════════════════════════════════════════════════════════
-        # If a trade had "no_entry" status due to VWAP slope or candle size
-        # conditions not being met at alert time, but conditions become
-        # favorable later, enter the trade with current time and prices
-        # ═══════════════════════════════════════════════════════════════
-        no_entry_trades = db.query(IntradayStockOption).filter(
-            and_(
-                IntradayStockOption.trade_date >= today,
-                IntradayStockOption.status == 'no_entry',
-                IntradayStockOption.exit_reason == None
-            )
-        ).all()
-        
-        if no_entry_trades:
-            logger.info(f"🔍 Found {len(no_entry_trades)} 'no_entry' trades to re-evaluate")
-            
-            # Check index trends
-            index_trends = vwap_service.check_index_trends()
-            nifty_trend = index_trends.get("nifty_trend", "unknown")
-            banknifty_trend = index_trends.get("banknifty_trend", "unknown")
-            
-            # Check if time is before 3:00 PM
-            is_before_3pm = now.hour < 15
-            
-            # Re-evaluate each no_entry trade
-            for no_entry_trade in no_entry_trades:
-                try:
-                    stock_name = no_entry_trade.stock_name
-                    option_type = no_entry_trade.option_type or 'PE'
-                    no_entry_date = no_entry_trade.buy_time or no_entry_trade.trade_date
-                    if live_trading.is_scan_option_tracking_disabled(no_entry_trade.option_contract, no_entry_date):
-                        logger.warning(
-                            "⏭️ Tracking disabled for %s (%s) — skipping no_entry re-evaluation",
-                            stock_name,
-                            no_entry_trade.option_contract,
-                        )
-                        continue
-                    
-                    # Fetch current stock LTP and VWAP
-                    stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
-                    if not stock_data:
-                        logger.warning(f"⚠️ Could not fetch stock data for {stock_name} - skipping re-evaluation")
-                        continue
-                    
-                    current_stock_ltp = stock_data.get('ltp', 0)
-                    current_stock_vwap = stock_data.get('vwap', 0)
-                    
-                    if current_stock_ltp <= 0 or current_stock_vwap <= 0:
-                        logger.warning(f"⚠️ Invalid stock data for {stock_name} (LTP: {current_stock_ltp}, VWAP: {current_stock_vwap}) - skipping")
-                        continue
-                    
-                    # ====================================================================
-                    # NEW ENTRY FILTERS: VWAP Slope + Option Candle Size
-                    # ====================================================================
-                    # Get previous hour VWAP (use stored if available, else fetch)
-                    stock_vwap_prev = no_entry_trade.stock_vwap_previous_hour
-                    stock_vwap_prev_time = no_entry_trade.stock_vwap_previous_hour_time
-                    
-                    # If not stored, fetch it
-                    if not stock_vwap_prev or not stock_vwap_prev_time:
-                        prev_vwap_data = vwap_service.get_stock_vwap_for_previous_hour(stock_name)
-                        if prev_vwap_data:
-                            stock_vwap_prev = prev_vwap_data.get('vwap')
-                            stock_vwap_prev_time = prev_vwap_data.get('time')
-                            # Update database
-                            no_entry_trade.stock_vwap_previous_hour = stock_vwap_prev
-                            no_entry_trade.stock_vwap_previous_hour_time = stock_vwap_prev_time
-                    
-                    # Check VWAP slope
-                    vwap_slope_passed = False
-                    if stock_vwap_prev and stock_vwap_prev > 0 and stock_vwap_prev_time and current_stock_vwap > 0:
-                        try:
-                            slope_result = vwap_service.vwap_slope(
-                                vwap1=stock_vwap_prev,
-                                time1=stock_vwap_prev_time,
-                                vwap2=current_stock_vwap,
-                                time2=now
-                            )
-                            vwap_slope_passed = live_trading.vwap_slope_status_passed(slope_result)
-                        except Exception as slope_error:
-                            logger.warning(f"Error calculating VWAP slope for {stock_name}: {str(slope_error)}")
-                    
-                    # Fetch option daily candles and check size (current day vs previous day)
-                    candle_size_passed = False
-                    if no_entry_trade.instrument_key:
-                        try:
-                            option_candles = vwap_service.get_option_daily_candles_current_and_previous(no_entry_trade.instrument_key)
-                            if option_candles:
-                                current_day_candle = option_candles.get('current_day_candle', {})
-                                previous_day_candle = option_candles.get('previous_day_candle', {})
-                                
-                                if current_day_candle and previous_day_candle:
-                                    current_size = abs(current_day_candle.get('high', 0) - current_day_candle.get('low', 0))
-                                    previous_size = abs(previous_day_candle.get('high', 0) - previous_day_candle.get('low', 0))
-                                    
-                                    if previous_size > 0:
-                                        size_ratio = current_size / previous_size
-                                        candle_size_passed = (size_ratio < 7.5)
-                                        
-                                        # Update database with daily candle data
-                                        no_entry_trade.option_current_candle_open = current_day_candle.get('open')
-                                        no_entry_trade.option_current_candle_high = current_day_candle.get('high')
-                                        no_entry_trade.option_current_candle_low = current_day_candle.get('low')
-                                        no_entry_trade.option_current_candle_close = current_day_candle.get('close')
-                                        no_entry_trade.option_current_candle_time = current_day_candle.get('time')
-                                        no_entry_trade.option_previous_candle_open = previous_day_candle.get('open')
-                                        no_entry_trade.option_previous_candle_high = previous_day_candle.get('high')
-                                        no_entry_trade.option_previous_candle_low = previous_day_candle.get('low')
-                                        no_entry_trade.option_previous_candle_close = previous_day_candle.get('close')
-                                        no_entry_trade.option_previous_candle_time = previous_day_candle.get('time')
-                        except Exception as candle_error:
-                            logger.warning(f"Error fetching option daily candles for {stock_name}: {str(candle_error)}")
-                    
-                    # Check index trends alignment
-                    # Rules:
-                    # 1. If both indices are Bullish → trade will be considered for both bullish & bearish alerts
-                    # 2. If both indices are Bearish → only Bearish scan alerts trade will be processed
-                    # 3. If indices are in opposite directions → no trade will be processed
-                    can_enter_by_index = False
-                    both_bullish = (nifty_trend == "bullish" and banknifty_trend == "bullish")
-                    both_bearish = (nifty_trend == "bearish" and banknifty_trend == "bearish")
-                    opposite_directions = not both_bullish and not both_bearish
-                    
-                    if option_type == 'PE':
-                        # Bearish alert
-                        if both_bullish or both_bearish:
-                            # Both indices bullish OR both bearish → bearish alerts can enter
-                            can_enter_by_index = True
-                        elif opposite_directions:
-                            # Indices in opposite directions → no trade
-                            can_enter_by_index = False
-                    elif option_type == 'CE':
-                        # Bullish alert
-                        if both_bullish:
-                            # Both indices bullish → bullish alerts can enter
-                            can_enter_by_index = True
-                        elif both_bearish or opposite_directions:
-                            # Both indices bearish OR opposite directions → bullish alerts cannot enter
-                            can_enter_by_index = False
-                    
-                    # CRITICAL: Don't block entry if VWAP slope or candle size is "Skipped" or None/blank
-                    # Check stored status first
-                    if no_entry_trade.vwap_slope_status in [None, "Skipped", ""]:
-                        vwap_slope_passed = True  # Don't block if skipped/blank
-                        logger.info(f"ℹ️ {stock_name}: VWAP slope status is '{no_entry_trade.vwap_slope_status}' - Not blocking entry")
-                    if no_entry_trade.candle_size_status in [None, "Skipped", ""]:
-                        candle_size_passed = True  # Don't block if skipped/blank
-                        logger.info(f"ℹ️ {stock_name}: Candle size status is '{no_entry_trade.candle_size_status}' - Not blocking entry")
-                    
-                    # Live entry is webhook-only within WEBHOOK_ENTRY_WINDOW_SEC — no deferred re-entry here.
-                    if not live_trading.deferred_vwap_entry_allowed():
-                        logger.debug(
-                            "⚪ %s still 'no_entry': deferred re-entry disabled (webhook-only policy)",
-                            stock_name,
-                        )
-                    # Check if all entry conditions are met
-                    elif (is_before_3pm and 
-                        can_enter_by_index and 
-                        vwap_slope_passed and 
-                        candle_size_passed and 
-                        no_entry_trade.option_contract and 
-                        no_entry_trade.instrument_key):
-                        
-                        # Fetch current option LTP
-                        option_quote = vwap_service.get_market_quote_by_key(no_entry_trade.instrument_key)
-                        if option_quote and option_quote.get('last_price', 0) > 0:
-                            current_option_ltp = float(option_quote.get('last_price', 0))
+            logger.info("Found %s open positions to update", len(open_position_ids))
 
-                            # Calculate stop loss BEFORE placing live order
-                            stop_loss_price = None
-                            try:
-                                option_candles = vwap_service.get_option_candles_current_and_previous(no_entry_trade.instrument_key)
-                                if option_candles and option_candles.get('current_candle'):
-                                    current_candle_open = option_candles.get('current_candle', {}).get('open', 0)
-                                    if current_candle_open and current_candle_open > 0:
-                                        stop_loss_price = current_candle_open * 0.95
-                                        logger.info(f"   Stop Loss: ₹{stop_loss_price:.2f} (5% below candle open: ₹{current_candle_open:.2f})")
-                                    else:
-                                        stop_loss_price = current_option_ltp * 0.95
-                                        logger.warning(f"   Stop Loss: ₹{stop_loss_price:.2f} (5% below buy price, candle open not available)")
-                                else:
-                                    stop_loss_price = current_option_ltp * 0.95
-                                    logger.warning(f"   Stop Loss: ₹{stop_loss_price:.2f} (5% below buy price, candles not available)")
-                            except Exception as sl_error:
-                                stop_loss_price = current_option_ltp * 0.95
-                                logger.warning(f"   Stop Loss: ₹{stop_loss_price:.2f} (5% below buy price, error fetching candles: {str(sl_error)})")
-
-                            live_entry_result = live_trading.place_live_upstox_entry_market_first(
-                                instrument_key=no_entry_trade.instrument_key,
-                                qty=no_entry_trade.qty or 0,
-                                stock_name=stock_name,
-                                option_contract=no_entry_trade.option_contract or "N/A",
-                                buy_price=current_option_ltp,
-                                stop_loss=stop_loss_price
-                            )
-                            if not live_entry_result.get("skipped") and not live_entry_result.get("success"):
-                                api_err = live_entry_result.get('error') or 'Unknown'
-                                no_entry_trade.no_entry_reason = ("Live order failed: " + api_err)[:255]
-                                no_entry_trade.exit_reason = api_err[:50]
-                                logger.error(f"🚨 LIVE RE-ENTRY FAILED for {stock_name}: {api_err}")
-                                continue
-
-                            afp = live_entry_result.get("average_fill_price")
-                            if afp is not None:
-                                try:
-                                    af = float(afp)
-                                    if af > 0:
-                                        current_option_ltp = af
-                                except (TypeError, ValueError):
-                                    pass
-
-                            # Enter the trade with CURRENT time and prices
-                            no_entry_trade.buy_price = current_option_ltp
-                            no_entry_trade.buy_time = now  # Use CURRENT time, not alert time
-                            no_entry_trade.stock_ltp = current_stock_ltp
-                            no_entry_trade.stock_vwap = current_stock_vwap
-                            no_entry_trade.option_ltp = current_option_ltp
-                            no_entry_trade.status = 'bought'
-                            no_entry_trade.pnl = 0.0
-                            if live_entry_result.get("success") and live_entry_result.get("order_id"):
-                                no_entry_trade.buy_order_id = live_entry_result.get("order_id")
-                            no_entry_trade.stop_loss = stop_loss_price
-                            
-                            re_entry_time_str = now.strftime('%Y-%m-%d %H:%M:%S IST')
-                            alert_time_str = no_entry_trade.alert_time.strftime('%H:%M:%S') if no_entry_trade.alert_time else 'N/A'
-                            logger.info(f"✅ RE-ENTERED TRADE: {stock_name} ({no_entry_trade.option_contract})")
-                            logger.info(f"   Entry Time: {re_entry_time_str} (was 'no_entry' at alert time: {alert_time_str})")
-                            logger.info(f"   Buy Price: ₹{current_option_ltp:.2f} (current LTP)")
-                            logger.info(f"   Stock LTP: ₹{current_stock_ltp:.2f}, VWAP: ₹{current_stock_vwap:.2f}")
-                            prev_vw = float(stock_vwap_prev) if stock_vwap_prev is not None else 0.0
-                            logger.info(f"   VWAP Slope: ✅ >= 45° (Previous: ₹{prev_vw:.2f}, Current: ₹{current_stock_vwap:.2f})")
-                            logger.info(f"   Candle Size: ✅ Passed")
-                            logger.info(f"   Index Trends: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
-                            print(f"✅ RE-ENTRY DECISION: {stock_name} ({no_entry_trade.option_contract})")
-                            print(f"   ⏰ Entry Time: {re_entry_time_str} (was 'no_entry' at alert time: {alert_time_str})")
-                            print(f"   📊 Entry Conditions:")
-                            print(f"      - Time Check: ✅ Before 3:00 PM ({now.strftime('%H:%M:%S')})")
-                            print(f"      - Index Trends: ✅ Aligned (NIFTY: {nifty_trend}, BANKNIFTY: {banknifty_trend})")
-                            prev_vw_p = float(stock_vwap_prev) if stock_vwap_prev is not None else 0.0
-                            print(f"      - VWAP Slope: ✅ >= 45° (Previous: ₹{prev_vw_p:.2f} at {stock_vwap_prev_time.strftime('%H:%M') if stock_vwap_prev_time else 'N/A'}, Current: ₹{current_stock_vwap:.2f})")
-                            print(f"      - Candle Size: ✅ Passed (now sufficient)")
-                            print(f"      - Option Data: ✅ Valid")
-                            print(f"   💰 Trade Details:")
-                            print(f"      - Buy Price: ₹{current_option_ltp:.2f} (current LTP at {now.strftime('%H:%M:%S')})")
-                            print(f"      - Quantity: {qty}")
-                            print(f"      - Stop Loss: ₹{no_entry_trade.stop_loss:.2f}")
-                            print(f"      - Stock LTP: ₹{current_stock_ltp:.2f}")
-                            print(f"      - Stock VWAP: ₹{current_stock_vwap:.2f}")
-                            logger.info(f"✅ RE-ENTRY DECISION: {stock_name} | Time: {re_entry_time_str} | Price: ₹{current_option_ltp:.2f} | VWAP Slope: ✅ | Candle Size: ✅ | Indices: NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend}")
-                        else:
-                            logger.warning(f"⚠️ Could not fetch option LTP for {stock_name} - cannot enter")
-                    else:
-                        # Log why entry conditions are not met
-                        reasons = []
-                        if not is_before_3pm:
-                            reasons.append("time >= 3:00 PM")
-                        if not can_enter_by_index:
-                            reasons.append(f"index trends not aligned (NIFTY={nifty_trend}, BANKNIFTY={banknifty_trend})")
-                        if not vwap_slope_passed:
-                            reasons.append("VWAP slope < 45°")
-                        if not candle_size_passed:
-                            reasons.append("candle size >= 7.5× previous")
-                        if not no_entry_trade.option_contract or not no_entry_trade.instrument_key:
-                            reasons.append("missing option data")
-                        
-                        logger.debug(f"⚪ {stock_name} still 'no_entry': {', '.join(reasons)}")
-                        
-                except Exception as e:
-                    logger.error(f"Error re-evaluating no_entry trade for {no_entry_trade.stock_name}: {str(e)}")
-                    import traceback
-                    traceback.print_exc()
-        
-        # Commit any re-entries before updating existing positions
-        db.commit()
-        
-        # Refresh open_positions query to include newly entered trades
-        open_positions = db.query(IntradayStockOption).filter(
-            and_(
-                IntradayStockOption.trade_date >= today,
-                IntradayStockOption.status == 'bought'
-            )
-        ).all()
+        # Release pool connection before per-position Upstox I/O
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+        db.close()
+        db = None
         
         # #region agent log
         try:
             status_breakdown = {}
             positions_detail = []
-            for pos in open_positions:
+            if open_position_ids:
+                with db_session() as qdb:
+                    preview_rows = qdb.query(IntradayStockOption).filter(
+                        IntradayStockOption.id.in_(open_position_ids)
+                    ).all()
+            else:
+                preview_rows = []
+            for pos in preview_rows:
                 status = pos.status or 'unknown'
                 status_breakdown[status] = status_breakdown.get(status, 0) + 1
                 positions_detail.append({
@@ -1139,7 +894,7 @@ def update_vwap_for_all_open_positions():
                     "location": "vwap_updater.py:730",
                     "message": "Open positions query result",
                     "data": {
-                        "total_count": len(open_positions),
+                        "total_count": len(open_position_ids),
                         "status_breakdown": status_breakdown,
                         "positions": positions_detail[:20]  # First 20 for detailed analysis
                     },
@@ -1150,13 +905,13 @@ def update_vwap_for_all_open_positions():
                 f.write(query_log)
                 f.flush()
             
-            logger.debug(f"🔍 DEBUG QUERY: Found {len(open_positions)} open positions. Status breakdown: {status_breakdown}")
-            logger.debug(f"🔍 DEBUG QUERY: Positions without sell_price: {sum(1 for p in open_positions if not p.sell_price or p.sell_price == 0)}")
-            logger.debug(f"🔍 DEBUG QUERY: Positions without instrument_key: {sum(1 for p in open_positions if not p.instrument_key)}")
+            logger.debug(f"🔍 DEBUG QUERY: Found {len(open_position_ids)} open positions. Status breakdown: {status_breakdown}")
+            logger.debug(f"🔍 DEBUG QUERY: Positions without sell_price: {sum(1 for p in preview_rows if not p.sell_price or p.sell_price == 0)}")
+            logger.debug(f"🔍 DEBUG QUERY: Positions without instrument_key: {sum(1 for p in preview_rows if not p.instrument_key)}")
             logger.debug(f"🔍 DEBUG QUERY: Sample positions: {positions_detail[:3]}")
             
             # CRITICAL: If no positions found, log this clearly (once only)
-            if len(open_positions) == 0:
+            if len(open_position_ids) == 0:
                 logger.debug(f"⚠️ No open positions found. Query filters: trade_date >= {today}, status != 'sold', exit_reason == None")
         except Exception as log_err:
             logger.error(f"❌ Failed to write query log: {str(log_err)}")
@@ -1169,13 +924,20 @@ def update_vwap_for_all_open_positions():
         failed_count = 0
         stocks_with_history_saved = set()
         
-        logger.debug(f"🔍 DEBUG: Starting to process {len(open_positions)} positions...")
+        logger.debug(f"🔍 DEBUG: Starting to process {len(open_position_ids)} positions...")
         
-        if len(open_positions) == 0:
+        if len(open_position_ids) == 0:
             logger.debug(f"⚠️ No positions to process (no trades entered today or all exited)")
         
-        for idx, position in enumerate(open_positions, 1):
+        for idx, position_id in enumerate(open_position_ids, 1):
+            pos_db = SessionLocal()
             try:
+                db = pos_db
+                position = pos_db.query(IntradayStockOption).filter(
+                    IntradayStockOption.id == position_id
+                ).first()
+                if not position or position.status != 'bought' or position.exit_reason is not None:
+                    continue
                 stock_name = position.stock_name
                 option_contract = position.option_contract
                 position_date = position.buy_time or position.trade_date
@@ -1186,7 +948,7 @@ def update_vwap_for_all_open_positions():
                         option_contract,
                     )
                     continue
-                logger.info(f"🔍 DEBUG: Processing position {idx}/{len(open_positions)}: {stock_name} (status={position.status}, sell_price={position.sell_price}, has_instrument_key={bool(position.instrument_key)})")
+                logger.info(f"🔍 DEBUG: Processing position {idx}/{len(open_position_ids)}: {stock_name} (status={position.status}, sell_price={position.sell_price}, has_instrument_key={bool(position.instrument_key)})")
                 
                 # ═══════════════════════════════════════════════════════════════
                 # SAFETY CHECK: Ensure trade is in HOLD status (still open)
@@ -1892,10 +1654,29 @@ def update_vwap_for_all_open_positions():
                     logger.info(f"✅ {stock_name}: Stock data updated (VWAP: ₹{new_vwap:.2f}, LTP: ₹{new_stock_ltp:.2f})")
                     
             except Exception as e:
-                logger.error(f"Error updating position for {position.stock_name}: {str(e)}")
+                logger.error(f"Error updating position for {getattr(position, 'stock_name', position_id)}: {str(e)}")
                 import traceback
                 traceback.print_exc()
                 failed_count += 1
+                try:
+                    pos_db.rollback()
+                except Exception:
+                    pass
+            else:
+                try:
+                    pos_db.commit()
+                except Exception as commit_err:
+                    logger.error("Commit failed for position id=%s: %s", position_id, commit_err)
+                    try:
+                        pos_db.rollback()
+                    except Exception:
+                        pass
+                    failed_count += 1
+            finally:
+                try:
+                    pos_db.close()
+                except Exception:
+                    pass
         
         # ═══════════════════════════════════════════════════════════════
         # SAVE HISTORICAL MARKET DATA FOR NO_ENTRY TRADES
@@ -1903,254 +1684,99 @@ def update_vwap_for_all_open_positions():
         # Save historical data for no_entry trades that weren't included in open_positions
         # This ensures we have historical data at every hourly update (9:15, 10:15, 11:15, etc.)
         try:
-            # Get all trades (including no_entry) for historical data saving
-            all_trades_for_history = db.query(IntradayStockOption).filter(
-                and_(
-                    IntradayStockOption.trade_date >= today,
-                    IntradayStockOption.trade_date < today + timedelta(days=1),
-                    IntradayStockOption.exit_reason == None  # Only include trades that haven't exited yet
-                )
-            ).all()
-            
-            # Track which stocks we've already saved historical data for (from open_positions)
-            stocks_with_history_saved = set()
-            for position in open_positions:
-                if hasattr(position, 'stock_name'):
-                    stocks_with_history_saved.add(position.stock_name)
-            
-            if all_trades_for_history:
-                no_entry_trades_for_history = [t for t in all_trades_for_history if t.stock_name not in stocks_with_history_saved and t.status == 'no_entry']
-                if no_entry_trades_for_history:
-                    logger.info(f"📊 Saving historical data for {len(no_entry_trades_for_history)} no_entry trades")
-                    for trade in no_entry_trades_for_history:
-                        try:
-                            stock_name = trade.stock_name
-                            stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
-                            if stock_data:
-                                current_stock_ltp = stock_data.get('ltp', 0)
-                                current_stock_vwap = stock_data.get('vwap', 0)
-                                
-                                # Get option LTP if available
-                                current_option_ltp = None
-                                if trade.instrument_key:
-                                    try:
-                                        option_quote = vwap_service.get_market_quote_by_key(trade.instrument_key)
-                                        if option_quote and option_quote.get('last_price', 0) > 0:
-                                            current_option_ltp = float(option_quote.get('last_price', 0))
-                                    except:
+            with db_session() as hist_db:
+                all_trades_for_history = hist_db.query(IntradayStockOption).filter(
+                    and_(
+                        IntradayStockOption.trade_date >= today,
+                        IntradayStockOption.trade_date < today + timedelta(days=1),
+                        IntradayStockOption.exit_reason == None,
+                    )
+                ).all()
+
+                stocks_with_history_saved = set()
+
+                if all_trades_for_history:
+                    no_entry_trades_for_history = [
+                        t for t in all_trades_for_history
+                        if t.stock_name not in stocks_with_history_saved and t.status == 'no_entry'
+                    ]
+                    if no_entry_trades_for_history:
+                        logger.info(
+                            "📊 Saving historical data for %s no_entry trades",
+                            len(no_entry_trades_for_history),
+                        )
+                        for trade in no_entry_trades_for_history:
+                            try:
+                                stock_name = trade.stock_name
+                                stock_data = vwap_service.get_stock_ltp_and_vwap(stock_name)
+                                if stock_data:
+                                    current_stock_ltp = stock_data.get('ltp', 0)
+                                    current_stock_vwap = stock_data.get('vwap', 0)
+
+                                    current_option_ltp = None
+                                    if trade.instrument_key:
+                                        try:
+                                            option_quote = vwap_service.get_market_quote_by_key(trade.instrument_key)
+                                            if option_quote and option_quote.get('last_price', 0) > 0:
+                                                current_option_ltp = float(option_quote.get('last_price', 0))
+                                        except Exception:
+                                            current_option_ltp = trade.option_ltp
+                                    else:
                                         current_option_ltp = trade.option_ltp
-                                else:
-                                    current_option_ltp = trade.option_ltp
-                                
-                                # Check if historical data already exists to prevent duplicates
-                                if not historical_data_exists(db, stock_name, now):
-                                    # Get VWAP slope from trade record if available
-                                    vwap_slope_angle = trade.vwap_slope_angle if hasattr(trade, 'vwap_slope_angle') else None
-                                    vwap_slope_status = trade.vwap_slope_status if hasattr(trade, 'vwap_slope_status') else None
-                                    vwap_slope_direction = trade.vwap_slope_direction if hasattr(trade, 'vwap_slope_direction') else None
-                                    vwap_slope_time = trade.vwap_slope_time if hasattr(trade, 'vwap_slope_time') else None
-                                    
-                                    # Get all available data from trade record
-                                    stock_vwap_prev = trade.stock_vwap_previous_hour if hasattr(trade, 'stock_vwap_previous_hour') else None
-                                    stock_vwap_prev_time = trade.stock_vwap_previous_hour_time if hasattr(trade, 'stock_vwap_previous_hour_time') else None
-                                    option_vwap_value = trade.option_vwap if hasattr(trade, 'option_vwap') and trade.option_vwap and trade.option_vwap > 0 else None
-                                    
-                                    historical_record = HistoricalMarketData(
-                                        stock_name=stock_name,
-                                        stock_vwap=current_stock_vwap if current_stock_vwap > 0 else None,
-                                        stock_ltp=current_stock_ltp if current_stock_ltp > 0 else None,
-                                        stock_vwap_previous_hour=stock_vwap_prev if stock_vwap_prev and stock_vwap_prev > 0 else None,
-                                        stock_vwap_previous_hour_time=stock_vwap_prev_time,
-                                        vwap_slope_angle=vwap_slope_angle,
-                                        vwap_slope_status=vwap_slope_status,
-                                        vwap_slope_direction=vwap_slope_direction,
-                                        vwap_slope_time=vwap_slope_time,
-                                        option_contract=trade.option_contract,
-                                        option_instrument_key=trade.instrument_key,
-                                        option_ltp=current_option_ltp if current_option_ltp and current_option_ltp > 0 else None,
-                                        option_vwap=option_vwap_value,
-                                        scan_date=now,
-                                        scan_time=now.strftime('%I:%M %p').lower()
-                                    )
-                                    db.add(historical_record)
-                                    logger.debug(f"📊 Saved historical data for no_entry trade {stock_name} at {now.strftime('%H:%M:%S')}")
-                            else:
-                                logger.debug(f"⏭️ Skipping duplicate historical data for no_entry trade {stock_name} at {now.strftime('%H:%M:%S')} (already exists)")
-                        except Exception as hist_error:
-                            logger.warning(f"⚠️ Failed to save historical data for no_entry trade {trade.stock_name}: {str(hist_error)}")
+
+                                    if not historical_data_exists(hist_db, stock_name, now):
+                                        vwap_slope_angle = getattr(trade, 'vwap_slope_angle', None)
+                                        vwap_slope_status = getattr(trade, 'vwap_slope_status', None)
+                                        vwap_slope_direction = getattr(trade, 'vwap_slope_direction', None)
+                                        vwap_slope_time = getattr(trade, 'vwap_slope_time', None)
+                                        stock_vwap_prev = getattr(trade, 'stock_vwap_previous_hour', None)
+                                        stock_vwap_prev_time = getattr(trade, 'stock_vwap_previous_hour_time', None)
+                                        option_vwap_value = (
+                                            trade.option_vwap
+                                            if getattr(trade, 'option_vwap', None) and trade.option_vwap > 0
+                                            else None
+                                        )
+                                        hist_db.add(
+                                            HistoricalMarketData(
+                                                stock_name=stock_name,
+                                                stock_vwap=current_stock_vwap if current_stock_vwap > 0 else None,
+                                                stock_ltp=current_stock_ltp if current_stock_ltp > 0 else None,
+                                                stock_vwap_previous_hour=stock_vwap_prev if stock_vwap_prev and stock_vwap_prev > 0 else None,
+                                                stock_vwap_previous_hour_time=stock_vwap_prev_time,
+                                                vwap_slope_angle=vwap_slope_angle,
+                                                vwap_slope_status=vwap_slope_status,
+                                                vwap_slope_direction=vwap_slope_direction,
+                                                vwap_slope_time=vwap_slope_time,
+                                                option_contract=trade.option_contract,
+                                                option_instrument_key=trade.instrument_key,
+                                                option_ltp=current_option_ltp if current_option_ltp and current_option_ltp > 0 else None,
+                                                option_vwap=option_vwap_value,
+                                                scan_date=now,
+                                                scan_time=now.strftime('%I:%M %p').lower(),
+                                            )
+                                        )
+                                        logger.debug(
+                                            "📊 Saved historical data for no_entry trade %s at %s",
+                                            stock_name,
+                                            now.strftime('%H:%M:%S'),
+                                        )
+                            except Exception as hist_error:
+                                logger.warning(
+                                    "⚠️ Failed to save historical data for no_entry trade %s: %s",
+                                    trade.stock_name,
+                                    hist_error,
+                                )
+                hist_db.commit()
         except Exception as e:
             logger.warning(f"⚠️ Error saving historical data for no_entry trades: {str(e)}")
-        
-        # Commit all updates
-        # #region agent log
-        try:
-            # Check which positions have pending changes before commit
-            pending_changes = []
-            for pos in open_positions:
-                if pos in db.dirty:
-                    pending_changes.append({
-                        "stock_name": pos.stock_name,
-                        "sell_price": pos.sell_price,
-                        "status": pos.status
-                    })
-            
-            os_module.makedirs(os_module.path.dirname(log_path), exist_ok=True)
-            with open(log_path, 'a') as f:
-                pre_commit_log = json_module.dumps({
-                    "id": f"log_pre_commit_{int(now.timestamp())}",
-                    "timestamp": int(now.timestamp() * 1000),
-                    "location": "vwap_updater.py:1360",
-                    "message": "Before database commit",
-                    "data": {
-                        "updated_count": updated_count,
-                        "failed_count": failed_count,
-                        "total_positions": len(open_positions),
-                        "dirty_objects_count": len(db.dirty),
-                        "pending_changes": pending_changes[:10]  # First 10 for brevity
-                    },
-                    "sessionId": "debug-session",
-                    "runId": "sell-price-fix",
-                    "hypothesisId": "PRE_COMMIT"
-                }) + "\n"
-                f.write(pre_commit_log)
-                f.flush()
-            logger.debug(f"🔍 DEBUG PRE-COMMIT: {len(db.dirty)} objects marked as dirty, {updated_count} positions updated")
-        except Exception as log_err:
-            logger.error(f"❌ Failed to write pre-commit log: {str(log_err)}")
-        # #endregion
-        
-        # SIMPLIFIED: Flush and commit all changes
-        try:
-            db.flush()
-            db.commit()
-            logger.debug(f"✅ Committed {updated_count} position updates to database")
-            
-            # #region agent log
-            try:
-                os_module.makedirs(os_module.path.dirname(log_path), exist_ok=True)
-                with open(log_path, 'a') as f:
-                    commit_success_log = json_module.dumps({
-                        "id": f"log_commit_success_{int(now.timestamp())}",
-                        "timestamp": int(now.timestamp() * 1000),
-                        "location": "vwap_updater.py:1455",
-                        "message": "Database commit successful",
-                        "data": {
-                            "updated_count": updated_count,
-                            "failed_count": failed_count
-                        },
-                        "sessionId": "debug-session",
-                        "runId": "sell-price-fix",
-                        "hypothesisId": "COMMIT_SUCCESS"
-                    }) + "\n"
-                    f.write(commit_success_log)
-                    f.flush()
-            except Exception:
-                pass
-            # #endregion
-        except Exception as commit_err:
-            logger.error(f"❌ Database commit failed: {str(commit_err)}")
-            import traceback
-            traceback.print_exc()
-            
-            # #region agent log
-            try:
-                os_module.makedirs(os_module.path.dirname(log_path), exist_ok=True)
-                with open(log_path, 'a') as f:
-                    commit_fail_log = json_module.dumps({
-                        "id": f"log_commit_failed_{int(now.timestamp())}",
-                        "timestamp": int(now.timestamp() * 1000),
-                        "location": "vwap_updater.py:1470",
-                        "message": "Database commit failed",
-                        "data": {
-                            "error": str(commit_err),
-                            "updated_count": updated_count,
-                            "failed_count": failed_count
-                        },
-                        "sessionId": "debug-session",
-                        "runId": "sell-price-fix",
-                        "hypothesisId": "COMMIT_FAILED"
-                    }) + "\n"
-                    f.write(commit_fail_log)
-                    f.flush()
-            except Exception:
-                pass
-            # #endregion
-            
-            db.rollback()
-            raise
-        
-        # #region agent log
-        try:
-            # CRITICAL: Refresh all positions from database to see what's actually persisted
-            # After commit, objects in the session might be stale, so refresh them
-            for pos in open_positions:
-                try:
-                    db.refresh(pos)
-                except Exception:
-                    pass  # If refresh fails, continue
-            
-            # Verify sell_price was actually saved
-            verification_positions = db.query(IntradayStockOption).filter(
-                and_(
-                    IntradayStockOption.trade_date >= today,
-                    IntradayStockOption.status != 'sold',
-                    IntradayStockOption.exit_reason == None
-                )
-            ).all()
-            
-            sell_price_status = {}
-            for pos in verification_positions:
-                has_sell_price = pos.sell_price is not None and pos.sell_price > 0
-                sell_price_status[pos.stock_name] = {
-                    "has_sell_price": has_sell_price,
-                    "sell_price": float(pos.sell_price) if pos.sell_price else None,
-                    "status": pos.status,
-                    "buy_price": float(pos.buy_price) if pos.buy_price else None,
-                    "pnl": float(pos.pnl) if pos.pnl else None,
-                    "has_instrument_key": bool(pos.instrument_key),
-                    "updated_at": str(pos.updated_at) if pos.updated_at else None
-                }
-            
-            with_sell_price_count = sum(1 for v in sell_price_status.values() if v["has_sell_price"])
-            without_sell_price_count = sum(1 for v in sell_price_status.values() if not v["has_sell_price"])
-            
-            os_module.makedirs(os_module.path.dirname(log_path), exist_ok=True)
-            with open(log_path, 'a') as f:
-                post_commit_log = json_module.dumps({
-                    "id": f"log_post_commit_{int(now.timestamp())}",
-                    "timestamp": int(now.timestamp() * 1000),
-                    "location": "vwap_updater.py:1520",
-                    "message": "After database commit - verification",
-                    "data": {
-                        "sell_price_status": sell_price_status,
-                        "positions_with_sell_price": with_sell_price_count,
-                        "positions_without_sell_price": without_sell_price_count,
-                        "total_positions": len(sell_price_status)
-                    },
-                    "sessionId": "debug-session",
-                    "runId": "sell-price-fix",
-                    "hypothesisId": "POST_COMMIT"
-                }) + "\n"
-                f.write(post_commit_log)
-                f.flush()
-            
-            logger.debug(f"🔍 DEBUG POST-COMMIT: {with_sell_price_count}/{len(sell_price_status)} positions have sell_price")
-            if without_sell_price_count > 0:
-                logger.warning(f"⚠️ POST-COMMIT WARNING: {without_sell_price_count} positions still missing sell_price!")
-                missing_details = [k for k, v in sell_price_status.items() if not v["has_sell_price"]]
-                logger.warning(f"   Missing sell_price: {missing_details[:5]}")
-        except Exception as log_err:
-            logger.error(f"❌ Failed to write post-commit log: {str(log_err)}")
-            import traceback
-            logger.error(traceback.format_exc())
-        # #endregion
         
         logger.info(f"📊 Hourly Update Complete: {updated_count} positions updated, {failed_count} failed")
         
         # #region agent log - Final summary
         try:
             # Final verification query after all updates
-            final_positions = db.query(IntradayStockOption).filter(
+            with db_session() as final_db:
+                final_positions = final_db.query(IntradayStockOption).filter(
                 and_(
                     IntradayStockOption.trade_date >= today,
                     IntradayStockOption.status != 'sold',
@@ -2199,8 +1825,7 @@ def update_vwap_for_all_open_positions():
             
             # CRITICAL: Direct database query to verify what's actually persisted
             # Query fresh from database (new session) to see what's actually saved
-            verification_db = SessionLocal()
-            try:
+            with db_session() as verification_db:
                 verification_query = verification_db.query(IntradayStockOption).filter(
                     and_(
                         IntradayStockOption.trade_date >= today,
@@ -2267,8 +1892,6 @@ def update_vwap_for_all_open_positions():
                 except Exception as verif_log_err:
                     logger.error(f"❌ Failed to write verification query log: {str(verif_log_err)}")
                 # #endregion
-            finally:
-                verification_db.close()
         except Exception as summary_err:
             logger.error(f"❌ Failed to write final summary log: {str(summary_err)}")
         # #endregion

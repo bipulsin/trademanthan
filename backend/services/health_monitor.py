@@ -224,8 +224,12 @@ class HealthMonitor:
                 logger.info("✅ Health check completed with no issues")
 
             try:
-                from backend.database import log_db_pool_pressure
-                log_db_pool_pressure(logger, "health_monitor")
+                from backend.database import log_db_pool_pressure, get_db_pool_stats
+                pool = log_db_pool_pressure(logger, "health_monitor")
+                if pool.get("stressed") and 9 <= now.hour <= 16 and now.weekday() < 5:
+                    issues.append(
+                        f"⚠️ DB connection pool stressed: {pool.get('checked_out')}/{pool.get('max_capacity')} checked out"
+                    )
             except Exception:
                 pass
             
