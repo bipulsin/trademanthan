@@ -409,6 +409,29 @@ class SmartFutureAlgoScheduler:
                 coalesce=True
             )
             logger.info("✅ Scheduled: Daily Health Report (4:00 PM)")
+
+            # Pool watchdog — every minute; exits process after sustained pool stress / DB failure
+            def run_pool_watchdog_job():
+                try:
+                    from backend.services.pool_watchdog import run_pool_watchdog_tick
+
+                    run_pool_watchdog_tick()
+                except SystemExit:
+                    raise
+                except Exception as e:
+                    logger.error("❌ Pool watchdog tick failed: %s", e, exc_info=True)
+
+            self.scheduler.add_job(
+                run_pool_watchdog_job,
+                trigger=IntervalTrigger(seconds=60),
+                id="smart_future_pool_watchdog",
+                name="DB pool watchdog (self-heal)",
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=120,
+                coalesce=True,
+            )
+            logger.info("✅ Scheduled: DB pool watchdog (every 60s, self-heal on sustained stress)")
             
             # 4. VWAP Updater — every 5 minutes in 9–15 IST (gated to 9:15–15:35 weekdays) so exits track UI
             self.scheduler.add_job(
