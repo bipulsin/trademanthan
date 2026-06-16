@@ -6010,7 +6010,7 @@ async def refresh_current_vwap():
         )
 
 @router.get("/index-prices")
-async def get_index_prices(db: Session = Depends(get_db)):
+async def get_index_prices():
     """
     Get current NIFTY and BANKNIFTY prices with trends
     - During market hours (9:15 AM - 3:30 PM): Fetches from Upstox API (real-time)
@@ -6035,9 +6035,11 @@ async def get_index_prices(db: Session = Depends(get_db)):
             logger.info(f"⏰ Market closed ({current_time.strftime('%H:%M:%S IST')}) - fetching stored prices from database")
             
             # Get latest stored prices from database
+            from backend.database import db_session
             from services.index_price_scheduler import index_price_scheduler
-            nifty_stored = index_price_scheduler.get_latest_stored_price('NIFTY50', db)
-            banknifty_stored = index_price_scheduler.get_latest_stored_price('BANKNIFTY', db)
+            with db_session() as db:
+                nifty_stored = index_price_scheduler.get_latest_stored_price('NIFTY50', db)
+                banknifty_stored = index_price_scheduler.get_latest_stored_price('BANKNIFTY', db)
             
             # Process NIFTY data from database
             if nifty_stored:

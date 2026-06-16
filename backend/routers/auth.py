@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 import logging
 
 import backend.models as models
-from backend.database import get_db
+from backend.database import db_session, get_db
 from backend.config import settings
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -242,14 +242,13 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
 async def google_oauth(
     request: GoogleOAuthRequest,
     req: Request,
-    db: Session = Depends(get_db),
 ):
     """Handle Google OAuth login/signup using JWT credential"""
     google_client_id = validate_google_id_token_login()
     try:
         # Verify the JWT credential with Google
         verify_url = f"https://oauth2.googleapis.com/tokeninfo?id_token={request.credential}"
-        response = requests.get(verify_url)
+        response = requests.get(verify_url, timeout=10)
         
         if response.status_code != 200:
             raise HTTPException(status_code=400, detail="Invalid Google credential")
@@ -260,36 +259,37 @@ async def google_oauth(
         if userinfo.get('aud') != google_client_id:
             raise HTTPException(status_code=400, detail="Invalid client ID")
         
-        # Check if user exists
-        user = db.query(models.User).filter(models.User.google_id == userinfo['sub']).first()
-        
-        if not user:
-            # Create new user
-            user = models.User(
-                google_id=userinfo['sub'],
-                email=userinfo['email'],
-                full_name=userinfo['name'],
-                avatar_url=userinfo.get('picture'),
-                created_at=datetime.utcnow()
-            )
-            db.add(user)
+        with db_session() as db:
+            # Check if user exists
+            user = db.query(models.User).filter(models.User.google_id == userinfo['sub']).first()
+
+            if not user:
+                # Create new user
+                user = models.User(
+                    google_id=userinfo['sub'],
+                    email=userinfo['email'],
+                    full_name=userinfo['name'],
+                    avatar_url=userinfo.get('picture'),
+                    created_at=datetime.utcnow()
+                )
+                db.add(user)
+                db.commit()
+                db.refresh(user)
+
+                # Create default strategies for new user
+                try:
+                    from utils.strategy_creator import create_default_strategies_for_user
+                    print(f"Creating default strategies for user: {user.id}")
+                    created_strategies = create_default_strategies_for_user(db, user.id)
+                    print(f"Successfully created {len(created_strategies)} default strategies")
+                except Exception as strategy_error:
+                    print(f"Warning: Failed to create default strategies: {strategy_error}")
+                    # Don't fail the user creation if strategy creation fails
+            else:
+                user.updated_at = datetime.utcnow()
+            _assert_not_blocked(user)
+            _register_login_metadata(user, req)
             db.commit()
-            db.refresh(user)
-            
-            # Create default strategies for new user
-            try:
-                from utils.strategy_creator import create_default_strategies_for_user
-                print(f"Creating default strategies for user: {user.id}")
-                created_strategies = create_default_strategies_for_user(db, user.id)
-                print(f"Successfully created {len(created_strategies)} default strategies")
-            except Exception as strategy_error:
-                print(f"Warning: Failed to create default strategies: {strategy_error}")
-                # Don't fail the user creation if strategy creation fails
-        else:
-            user.updated_at = datetime.utcnow()
-        _assert_not_blocked(user)
-        _register_login_metadata(user, req)
-        db.commit()
         
         # Create access token
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -417,7 +417,6 @@ async def google_oauth_verify(
 async def google_oauth_code(
     request: GoogleOAuthCodeRequest,
     req: Request,
-    db: Session = Depends(get_db),
 ):
     """Handle Google OAuth code exchange for mobile browsers"""
     google_client_id, google_client_secret = validate_google_code_exchange_login()
@@ -431,7 +430,7 @@ async def google_oauth_code(
             'code': request.code,
             'grant_type': 'authorization_code',
             'redirect_uri': redirect_uri
-        })
+        }, timeout=15)
         
         if token_response.status_code != 200:
             raise HTTPException(status_code=400, detail="Failed to exchange code for token")
@@ -445,7 +444,8 @@ async def google_oauth_code(
         # Get user info from Google
         userinfo_response = requests.get(
             GOOGLE_USERINFO_URL,
-            headers={'Authorization': f'Bearer {access_token}'}
+            headers={'Authorization': f'Bearer {access_token}'},
+            timeout=15,
         )
         
         if userinfo_response.status_code != 200:
@@ -453,35 +453,36 @@ async def google_oauth_code(
         
         userinfo = userinfo_response.json()
         
-        # Check if user exists
-        user = db.query(models.User).filter(models.User.google_id == userinfo['id']).first()
-        
-        if not user:
-            # Create new user
-            user = models.User(
-                google_id=userinfo['id'],
-                email=userinfo['email'],
-                full_name=userinfo['name'],
-                avatar_url=userinfo.get('picture'),
-                created_at=datetime.utcnow()
-            )
-            db.add(user)
+        with db_session() as db:
+            # Check if user exists
+            user = db.query(models.User).filter(models.User.google_id == userinfo['id']).first()
+
+            if not user:
+                # Create new user
+                user = models.User(
+                    google_id=userinfo['id'],
+                    email=userinfo['email'],
+                    full_name=userinfo['name'],
+                    avatar_url=userinfo.get('picture'),
+                    created_at=datetime.utcnow()
+                )
+                db.add(user)
+                db.commit()
+                db.refresh(user)
+
+                # Create default strategies for new user
+                try:
+                    from utils.strategy_creator import create_default_strategies_for_user
+                    print(f"Creating default strategies for user: {user.id}")
+                    created_strategies = create_default_strategies_for_user(db, user.id)
+                    print(f"Successfully created {len(created_strategies)} default strategies")
+                except Exception as strategy_error:
+                    print(f"Warning: Failed to create default strategies: {strategy_error}")
+            else:
+                user.updated_at = datetime.utcnow()
+            _assert_not_blocked(user)
+            _register_login_metadata(user, req)
             db.commit()
-            db.refresh(user)
-            
-            # Create default strategies for new user
-            try:
-                from utils.strategy_creator import create_default_strategies_for_user
-                print(f"Creating default strategies for user: {user.id}")
-                created_strategies = create_default_strategies_for_user(db, user.id)
-                print(f"Successfully created {len(created_strategies)} default strategies")
-            except Exception as strategy_error:
-                print(f"Warning: Failed to create default strategies: {strategy_error}")
-        else:
-            user.updated_at = datetime.utcnow()
-        _assert_not_blocked(user)
-        _register_login_metadata(user, req)
-        db.commit()
         
         # Create access token
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
