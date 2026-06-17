@@ -661,24 +661,122 @@ def _order_row_is_complete_buy(row: Dict[str, Any]) -> bool:
     return "complete" in st
 
 
-def cancel_open_buy_if_pending(order_id: Optional[str]) -> None:
-    """Best-effort cancel when a BUY did not fill (e.g. open LIMIT). No-op if already filled or gone."""
+def _order_row_is_active_buy(row: Dict[str, Any]) -> bool:
+    """
+    BUY order that is still active/open at broker (or just completed) and can indicate
+    an in-flight/duplicate entry attempt for the same instrument.
+    """
+    if (row.get("transaction_type") or "").upper() != "BUY":
+        return False
+    st = (row.get("status") or "").lower().strip()
+    if not st:
+        return False
+    if "cancel" in st or "reject" in st:
+        return False
+    return any(
+        k in st
+        for k in (
+            "open",
+            "pending",
+            "trigger",
+            "complete",
+            "filled",
+            "partially",
+            "put order request received",
+            "validation pending",
+        )
+    )
+
+
+def _broker_duplicate_entry_guard(
+    instrument_key: str,
+    recent_window_minutes: int = 90,
+) -> Dict[str, Any]:
+    """
+    Guard against accidental duplicate BUY entries for the same option instrument.
+    Used as a final gate inside live entry placement so all callers are protected.
+    """
+    ik = (instrument_key or "").strip()
+    if not ik or not upstox_service:
+        return {"block": False}
+
+    # Primary signal: if broker still has net long qty, never place another BUY.
+    try:
+        net = get_broker_net_long_qty_for_instrument(ik)
+        if net is not None and int(net) > 0:
+            return {"block": True, "reason": f"open_broker_position_qty={int(net)}"}
+    except Exception as e:
+        logger.warning("duplicate-entry guard: net qty check failed for %s: %s", ik, e)
+
+    # Secondary signal: an active/recent BUY exists on this instrument in order book.
+    # Covers short windows where positions API lags after a BUY.
+    try:
+        ob = upstox_service.get_order_book_today()
+        orders_list: List[Dict[str, Any]] = [
+            o for o in (ob.get("orders") or []) if isinstance(o, dict)
+        ]
+        if not orders_list:
+            return {"block": False}
+
+        cutoff = datetime.now() - timedelta(minutes=max(1, int(recent_window_minutes)))
+
+        def _ob_ts(o: Dict[str, Any]) -> datetime:
+            s = o.get("order_timestamp") or o.get("exchange_timestamp") or ""
+            try:
+                return datetime.strptime(str(s)[:19], "%Y-%m-%d %H:%M:%S")
+            except (TypeError, ValueError):
+                return datetime.min
+
+        for o in orders_list:
+            if not _instrument_key_match(ik, _order_row_instrument_token(o)):
+                continue
+            if not _order_row_is_active_buy(o):
+                continue
+            ts = _ob_ts(o)
+            if ts >= cutoff:
+                oid = str(o.get("order_id") or o.get("order_ref_id") or "").strip()
+                return {"block": True, "reason": f"recent_or_active_buy_order={oid or 'unknown'}"}
+    except Exception as e:
+        logger.warning("duplicate-entry guard: orderbook check failed for %s: %s", ik, e)
+
+    return {"block": False}
+
+
+def cancel_open_buy_if_pending(order_id: Optional[str]) -> Dict[str, Any]:
+    """
+    Best-effort cancel when a BUY did not fill (e.g. open LIMIT).
+    Returns a resolution dict so callers can decide whether market fallback is safe.
+    """
     if not order_id or not upstox_service:
-        return
+        return {"resolved": False, "state": "missing_order_or_service"}
     det = upstox_service.get_order_details(str(order_id))
     row = _row_from_order_details_api(det)
     if row:
         fq = int(float(row.get("filled_quantity") or 0))
         if _order_row_is_complete_buy(row) and fq > 0:
-            return
+            ap = _broker_buy_row_average_price(row)
+            return {
+                "resolved": True,
+                "state": "filled",
+                "filled_quantity": fq,
+                "average_price": ap,
+                "row": row,
+            }
         st = (row.get("status") or "").lower()
         if "cancel" in st or "reject" in st:
-            return
+            return {"resolved": True, "state": "cancelled_or_rejected", "row": row}
     r = upstox_service.cancel_order(str(order_id))
     if r.get("success"):
         logger.warning("Cancelled unfilled/pending BUY order %s", order_id)
+        return {"resolved": True, "state": "cancel_requested", "cancel_result": r}
     else:
         logger.warning("Could not cancel BUY order %s: %s", order_id, r.get("error"))
+        return {
+            "resolved": False,
+            "state": "cancel_failed",
+            "error": r.get("error"),
+            "cancel_result": r,
+        }
 
 
 def wait_for_buy_order_fill(
@@ -1874,6 +1972,23 @@ def _place_live_upstox_entry_market_first_locked(
     stop_loss: float,
     risk_reward: float = 2.5,
 ) -> Dict[str, Any]:
+    dup_guard = _broker_duplicate_entry_guard(instrument_key)
+    if dup_guard.get("block"):
+        reason = str(dup_guard.get("reason") or "duplicate_entry_blocked")
+        logger.warning(
+            "⏭️ LIVE ENTRY blocked by duplicate-entry guard: %s %s | instrument=%s | reason=%s",
+            stock_name,
+            option_contract,
+            instrument_key,
+            reason,
+        )
+        return {
+            "success": False,
+            "skipped": False,
+            "error": f"Duplicate-entry guard: {reason}",
+            "duplicate_blocked": True,
+        }
+
     # Step 1 (always): Delivery LIMIT BUY first, using intended buy_price.
     # If not filled within wait window, cancel and fall through to MARKET.
     lim_tag = f"entry_lmt_primary|{stock_name}"[:200]
@@ -1915,7 +2030,36 @@ def _place_live_upstox_entry_market_first_locked(
                 "limit_price": lim_first.get("limit_price"),
                 "limit_response": lim_first,
             }
-        cancel_open_buy_if_pending(str(oid))
+        cancel_info = cancel_open_buy_if_pending(str(oid))
+        if cancel_info.get("state") == "filled":
+            logger.warning(
+                "✅ LIMIT BUY filled near timeout for %s (%s) | order_id=%s | avg=₹%s qty=%s",
+                stock_name,
+                option_contract,
+                oid,
+                cancel_info.get("average_price"),
+                cancel_info.get("filled_quantity"),
+            )
+            return {
+                "success": True,
+                "order_id": oid,
+                "method": "limit_primary_delayed_fill",
+                "average_fill_price": cancel_info.get("average_price"),
+                "filled_quantity": cancel_info.get("filled_quantity"),
+                "limit_price": lim_first.get("limit_price"),
+                "limit_response": lim_first,
+            }
+        if not cancel_info.get("resolved"):
+            return {
+                "success": False,
+                "error": (
+                    "Primary limit unresolved (still open/cancel failed); "
+                    "market fallback blocked to prevent duplicate buys"
+                ),
+                "order_id": oid,
+                "limit_response": lim_first,
+                "cancel_info": cancel_info,
+            }
         logger.warning(
             "Primary limit not filled for %s (%s) within %ss (%s); trying MARKET",
             stock_name,
