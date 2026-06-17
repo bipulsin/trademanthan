@@ -473,6 +473,7 @@ def place_live_upstox_limit_buy_at_ltp(
     buy_price: float,
     tag: Optional[str] = None,
     product: str = UPSTOX_ORDER_PRODUCT,
+    validity: str = "DAY",
 ) -> Dict[str, Any]:
     """
     LIMIT BUY at the smallest tick >= LTP (aggressive) for scrips that reject MARKET orders.
@@ -500,7 +501,7 @@ def place_live_upstox_limit_buy_at_ltp(
         transaction_type="BUY",
         order_type="LIMIT",
         product=product,
-        validity="DAY",
+        validity=(validity or "DAY"),
         price=limit_px,
         tag=lim_tag,
     )
@@ -533,6 +534,7 @@ def place_live_upstox_limit_buy_at_price(
     limit_price: float,
     tag: Optional[str] = None,
     product: str = UPSTOX_ORDER_PRODUCT,
+    validity: str = "DAY",
 ) -> Dict[str, Any]:
     """
     LIMIT BUY at an explicit price (rounded to instrument tick).
@@ -561,7 +563,7 @@ def place_live_upstox_limit_buy_at_price(
         transaction_type="BUY",
         order_type="LIMIT",
         product=product,
-        validity="DAY",
+        validity=(validity or "DAY"),
         price=limit_px,
         tag=lim_tag,
     )
@@ -777,6 +779,31 @@ def cancel_open_buy_if_pending(order_id: Optional[str]) -> Dict[str, Any]:
             "error": r.get("error"),
             "cancel_result": r,
         }
+
+
+def _emit_entry_safety_alert(
+    *,
+    stock_name: str,
+    option_contract: str,
+    instrument_key: str,
+    order_id: Optional[str],
+    reason: str,
+    details: Optional[Dict[str, Any]] = None,
+) -> None:
+    """
+    Emit a high-severity alert line for entry duplicate-risk incidents.
+    Keeps payload compact so logs remain parseable.
+    """
+    payload = details or {}
+    logger.critical(
+        "ENTRY_SAFETY_ALERT stock=%s contract=%s instrument=%s order_id=%s reason=%s details=%s",
+        stock_name,
+        option_contract,
+        instrument_key,
+        order_id or "",
+        reason,
+        str(payload)[:500],
+    )
 
 
 def wait_for_buy_order_fill(
@@ -2050,6 +2077,14 @@ def _place_live_upstox_entry_market_first_locked(
                 "limit_response": lim_first,
             }
         if not cancel_info.get("resolved"):
+            _emit_entry_safety_alert(
+                stock_name=stock_name,
+                option_contract=option_contract,
+                instrument_key=instrument_key,
+                order_id=str(oid),
+                reason="primary_limit_unresolved_blocked_market_fallback",
+                details=cancel_info,
+            )
             return {
                 "success": False,
                 "error": (
@@ -2105,7 +2140,26 @@ def _place_live_upstox_entry_market_first_locked(
                 "filled_quantity": wf.get("filled_quantity"),
                 "market_response": market_res,
             }
-        cancel_open_buy_if_pending(str(oid))
+        cancel_info = cancel_open_buy_if_pending(str(oid))
+        if not cancel_info.get("resolved"):
+            _emit_entry_safety_alert(
+                stock_name=stock_name,
+                option_contract=option_contract,
+                instrument_key=instrument_key,
+                order_id=str(oid),
+                reason="market_buy_unresolved_after_no_fill",
+                details=cancel_info,
+            )
+            return {
+                "success": False,
+                "error": (
+                    "Market BUY unresolved (open/cancel failed); "
+                    "blocking further entry fallbacks to avoid duplicate buys"
+                ),
+                "order_id": oid,
+                "market_response": market_res,
+                "cancel_info": cancel_info,
+            }
         m_err = wf.get("error") or "Market BUY not filled in time"
         market_accepted_no_fill = True
         logger.warning(
@@ -2128,6 +2182,7 @@ def _place_live_upstox_entry_market_first_locked(
             buy_price=buy_price,
             tag=limit_tag,
             product=UPSTOX_ORDER_PRODUCT,
+            validity="IOC",
         )
         if limit_res.get("skipped"):
             return limit_res
@@ -2165,6 +2220,7 @@ def _place_live_upstox_entry_market_first_locked(
             buy_price=buy_price,
             tag=limit_tag,
             product=UPSTOX_ORDER_PRODUCT,
+            validity="IOC",
         )
         if limit_res.get("skipped"):
             return limit_res
