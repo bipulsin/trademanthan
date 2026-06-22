@@ -7,6 +7,118 @@
       ? 'http://localhost:8000'
       : window.location.origin;
 
+  let _dfChartEngineLoadPromise = null;
+  let _dfChartPayloadSeq = 0;
+  const _dfChartPayloadRegistry = {};
+
+  function ensureChartEngine() {
+    if (window.SecurityChartEngine) return Promise.resolve(window.SecurityChartEngine);
+    if (_dfChartEngineLoadPromise) return _dfChartEngineLoadPromise;
+    _dfChartEngineLoadPromise = new Promise(function (resolve, reject) {
+      const s = document.createElement('script');
+      s.src = 'security-chart/security-chart-engine.js?v=10';
+      s.async = true;
+      s.onload = function () {
+        if (window.SecurityChartEngine) resolve(window.SecurityChartEngine);
+        else reject(new Error('Chart module failed to initialize'));
+      };
+      s.onerror = function () { reject(new Error('Chart module failed to load')); };
+      document.head.appendChild(s);
+    });
+    return _dfChartEngineLoadPromise;
+  }
+
+  function registerChartPayload(payload) {
+    const id = 'df' + ++_dfChartPayloadSeq;
+    _dfChartPayloadRegistry[id] = payload || {};
+    return id;
+  }
+
+  function getChartPayload(id) {
+    return id ? _dfChartPayloadRegistry[id] || null : null;
+  }
+
+  function buildScreenerFromRow(r) {
+    return {
+      direction: r && r.direction_type,
+      conviction: r && (r.conviction_score_entry != null ? r.conviction_score_entry : r.conviction_score),
+      convictionLive: r && r.conviction_score_live,
+      ltp: r && r.ltp,
+      targetEntry: targetEntryPx(r),
+      stopLoss: r && r.stop_loss,
+      relativeStrength: r && r.relative_strength,
+      scanCount: r && r.scan_count,
+    };
+  }
+
+  function futureSymbolChartButtonHtml(r) {
+    const stock = String((r && r.underlying) || '').trim();
+    const ik = String((r && r.instrument_key) || '').trim();
+    const label = String((r && (r.future_symbol || r.underlying)) || '').trim();
+    if (!label) return '';
+    const direction = String((r && r.direction_type) || '').trim().toUpperCase();
+    const pid = registerChartPayload({
+      screenerData: buildScreenerFromRow(r),
+      direction: direction,
+    });
+    return (
+      '<button type="button" class="vajra-security-link" title="Open chart + intelligence" ' +
+      'data-chart-symbol="' + esc(stock || label) + '" ' +
+      'data-chart-instrument-key="' + esc(ik) + '" ' +
+      'data-chart-label="' + esc(label) + '" ' +
+      'data-chart-direction="' + esc(direction) + '" ' +
+      'data-chart-payload-id="' + esc(pid) + '">' +
+      esc(label) +
+      '</button>'
+    );
+  }
+
+  function openChartFromButton(btn) {
+    if (!btn) return;
+    const symbol = btn.getAttribute('data-chart-symbol') || '';
+    const instrumentKey = btn.getAttribute('data-chart-instrument-key') || '';
+    const displaySymbol = btn.getAttribute('data-chart-label') || symbol;
+    const stored = getChartPayload(btn.getAttribute('data-chart-payload-id'));
+    const screenerData = (stored && stored.screenerData) || {};
+    const direction =
+      (stored && stored.direction) ||
+      btn.getAttribute('data-chart-direction') ||
+      screenerData.direction ||
+      '';
+    ensureChartEngine()
+      .then(function (eng) {
+        if (!eng || typeof eng.openSecurityChart !== 'function') {
+          throw new Error('Chart module unavailable');
+        }
+        return eng.openSecurityChart({
+          symbol: symbol,
+          instrumentType: 'FUT',
+          instrumentKey: instrumentKey,
+          displaySymbol: displaySymbol,
+          exchange: 'NSE',
+          timeframe: '15m',
+          direction: direction,
+          screenerData: screenerData,
+          metadata: { algo: 'daily_futures' },
+        });
+      })
+      .catch(function (err) {
+        if (window.console && window.console.warn) window.console.warn('Premium Futures chart:', err);
+      });
+  }
+
+  function bindSecurityChartClicks(rootEl) {
+    if (!rootEl || rootEl._dfChartBound) return;
+    rootEl._dfChartBound = true;
+    rootEl.addEventListener('click', function (ev) {
+      const btn = ev.target.closest('.vajra-security-link');
+      if (!btn || !rootEl.contains(btn)) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      openChartFromButton(btn);
+    });
+  }
+
   function authHeaders() {
     const t = localStorage.getItem('trademanthan_token') || '';
     return {
@@ -1355,12 +1467,12 @@
   }
 
   function symbolWithDirectionHtml(r) {
-    var base = esc((r && (r.future_symbol || r.underlying)) ? String(r.future_symbol || r.underlying) : '');
+    var chartBtn = futureSymbolChartButtonHtml(r);
+    if (!chartBtn) return '';
     var dir = r && r.direction_type ? String(r.direction_type).trim().toUpperCase() : '';
-    if (!base) return '';
-    if (!dir) return base;
+    if (!dir) return chartBtn;
     var cls = dir === 'LONG' ? 'df-dir-long' : (dir === 'SHORT' ? 'df-dir-short' : 'df-dir-neutral');
-    return base + ' <span class="df-dir-pill ' + cls + '">' + esc(dir) + '</span>';
+    return chartBtn + ' <span class="df-dir-pill ' + cls + '">' + esc(dir) + '</span>';
   }
 
   function openBuyModal(screeningId, row, isBearish) {
@@ -1789,6 +1901,7 @@
   }
 
   document.addEventListener('DOMContentLoaded', function () {
+    bindSecurityChartClicks(document.body);
     bindModals();
     refresh();
     setInterval(refresh, 120 * 1000);

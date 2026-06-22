@@ -10,6 +10,132 @@
             ? 'http://localhost:8000'
             : window.location.origin;
 
+    let _sfChartEngineLoadPromise = null;
+    let _sfChartPayloadSeq = 0;
+    const _sfChartPayloadRegistry = {};
+
+    function ensureChartEngine() {
+        if (window.SecurityChartEngine) return Promise.resolve(window.SecurityChartEngine);
+        if (_sfChartEngineLoadPromise) return _sfChartEngineLoadPromise;
+        _sfChartEngineLoadPromise = new Promise(function (resolve, reject) {
+            const s = document.createElement('script');
+            s.src = 'security-chart/security-chart-engine.js?v=10';
+            s.async = true;
+            s.onload = function () {
+                if (window.SecurityChartEngine) resolve(window.SecurityChartEngine);
+                else reject(new Error('Chart module failed to initialize'));
+            };
+            s.onerror = function () { reject(new Error('Chart module failed to load')); };
+            document.head.appendChild(s);
+        });
+        return _sfChartEngineLoadPromise;
+    }
+
+    function registerChartPayload(payload) {
+        const id = 'sf' + ++_sfChartPayloadSeq;
+        _sfChartPayloadRegistry[id] = payload || {};
+        return id;
+    }
+
+    function getChartPayload(id) {
+        return id ? _sfChartPayloadRegistry[id] || null : null;
+    }
+
+    function buildScreenerFromRow(r) {
+        return {
+            direction: r && (r.side || r.direction),
+            score: r && r.final_cms,
+            sectorScore: r && r.sector_score,
+            sentiment: r && r.combined_sentiment,
+            entryPrice: r && (r.buy_price || r.entry_price),
+            stopLoss: r && (r.sl_price || r.stop_loss),
+            target: r && r.target_price,
+            tier: r && r.tier,
+            oiTag: r && r.oi_tag,
+        };
+    }
+
+    function renderSfSymbolChartButton(r, innerHtml, extraClass, titleText) {
+        const stock = String((r && (r.stock || r.symbol)) || '').trim();
+        const ik = String((r && r.fut_instrument_key) || '').trim();
+        const label = String((r && r.fut_symbol) || stock || '—').trim();
+        if (!label || label === '—') {
+            return innerHtml || '—';
+        }
+        const direction = String((r && r.side) || '').trim().toUpperCase();
+        const pid = registerChartPayload({
+            screenerData: buildScreenerFromRow(r),
+            direction: direction,
+        });
+        const title = titleText || 'Open chart + intelligence';
+        return (
+            '<button type="button" class="vajra-security-link' +
+            (extraClass ? ' ' + extraClass : '') +
+            '" title="' +
+            escapeAttr(title) +
+            '" ' +
+            'data-chart-symbol="' +
+            escapeAttr(stock || label) +
+            '" data-chart-instrument-key="' +
+            escapeAttr(ik) +
+            '" data-chart-label="' +
+            escapeAttr(label) +
+            '" data-chart-direction="' +
+            escapeAttr(direction) +
+            '" data-chart-payload-id="' +
+            escapeAttr(pid) +
+            '">' +
+            (innerHtml || escapeHtml(label)) +
+            '</button>'
+        );
+    }
+
+    function openChartFromButton(btn) {
+        if (!btn) return;
+        const symbol = btn.getAttribute('data-chart-symbol') || '';
+        const instrumentKey = btn.getAttribute('data-chart-instrument-key') || '';
+        const displaySymbol = btn.getAttribute('data-chart-label') || symbol;
+        const stored = getChartPayload(btn.getAttribute('data-chart-payload-id'));
+        const screenerData = (stored && stored.screenerData) || {};
+        const direction =
+            (stored && stored.direction) ||
+            btn.getAttribute('data-chart-direction') ||
+            screenerData.direction ||
+            '';
+        ensureChartEngine()
+            .then(function (eng) {
+                if (!eng || typeof eng.openSecurityChart !== 'function') {
+                    throw new Error('Chart module unavailable');
+                }
+                return eng.openSecurityChart({
+                    symbol: symbol,
+                    instrumentType: 'FUT',
+                    instrumentKey: instrumentKey,
+                    displaySymbol: displaySymbol,
+                    exchange: 'NSE',
+                    timeframe: '15m',
+                    direction: direction,
+                    screenerData: screenerData,
+                    metadata: { algo: 'smart_futures' },
+                });
+            })
+            .catch(function (err) {
+                if (window.console && window.console.warn) window.console.warn('Smart Futures chart:', err);
+            });
+    }
+
+    function bindSecurityChartClicks(rootEl) {
+        if (!rootEl || rootEl._sfChartBound) return;
+        rootEl._sfChartBound = true;
+        rootEl.addEventListener('click', function (ev) {
+            const btn = ev.target.closest('.vajra-security-link');
+            if (!btn || !rootEl.contains(btn)) return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            openChartFromButton(btn);
+        });
+    }
+
     function authHeaders() {
         const t = localStorage.getItem('trademanthan_token') || '';
         return {
@@ -762,13 +888,14 @@
         }
         const tip = tipParts.join(' ');
         const titleAttr = tip ? ' title="' + escapeAttr(tip) + '"' : '';
-        const label = sym === '—' ? sym : escapeHtml(sym);
         const fire =
             hot ? '<span class="sf-atr-fire" aria-hidden="true">🔥</span> ' : '';
         const chip = buildVelocityChip(r);
+        if (sym === '—') return '—' + chip;
+        const labelBtn = renderSfSymbolChartButton(r, fire + escapeHtml(sym));
         const core = tip
-            ? '<span class="sf-symbol-wrap"' + titleAttr + '>' + fire + label + '</span>'
-            : (fire ? fire + label : label);
+            ? '<span class="sf-symbol-wrap"' + titleAttr + '>' + labelBtn + '</span>'
+            : labelBtn;
         return core + chip;
     }
 
@@ -1245,8 +1372,6 @@
     }
 
     function closedTableRowHtml(r) {
-        const sym =
-            r && r.fut_symbol != null && r.fut_symbol !== '' ? escapeHtml(String(r.fut_symbol)) : '—';
         const buyT = fmtBuyTime(r.entry_at);
         const sellT = fmtSellTime(r.sell_time);
         return (
@@ -1254,7 +1379,7 @@
             r.id +
             '">' +
             '<td>' +
-            sym +
+            fmtSymbolCell(r) +
             '</td>' +
             '<td>' +
             escapeHtml(buyT || '—') +
@@ -2056,8 +2181,12 @@
         const chips = priorRows.map(function (r) {
             const sym = String(r.fut_symbol || r.symbol || '—');
             const date = String(r.trigger_date || '').slice(0, 10);
-            return '<span class="sf-carry-chip" title="Carry from ' + escapeAttr(date) + '">' +
-                escapeHtml(sym) + '</span>';
+            return renderSfSymbolChartButton(
+                r,
+                escapeHtml(sym),
+                'sf-carry-chip',
+                'Carry from ' + date + ' — open chart'
+            );
         }).join('');
         host.innerHTML =
             '<b>👁️ Carry-forward watchlist</b> — late-session clean signals from prior days. Monitor for a fresh trigger today:<br/>' +
@@ -2101,6 +2230,7 @@
     }
 
     document.addEventListener('DOMContentLoaded', function () {
+        bindSecurityChartClicks(document.body);
         const manualOpen = document.getElementById('sfManualEntryOpen');
         if (manualOpen) manualOpen.addEventListener('click', function () { openManualEntryModal(); });
         const manualModal = document.getElementById('sfManualModal');
