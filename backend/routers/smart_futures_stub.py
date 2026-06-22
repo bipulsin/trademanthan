@@ -1003,7 +1003,7 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
         else:
             r.pop("realized_pnl", None)
 
-    # Expose per-contract lot size (shares per lot) for UI; requires fut_instrument_key before pop.
+    # Expose per-contract lot size (shares per lot) for UI; uses fut_instrument_key on each row.
     try:
         from backend.services.smart_futures_picker.position_sizing import (
             get_futures_lot_size_by_instrument_key,
@@ -1035,7 +1035,9 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
                 r["exit_reason"] = "Intraday time exit window opened (>= 3:15 PM IST)"
 
     for r in serialized:
-        r.pop("fut_instrument_key", None)
+        if not str(r.get("stock") or "").strip() and r.get("fut_symbol"):
+            fs = str(r.get("fut_symbol") or "")
+            r["stock"] = (fs.split(" FUT")[0].strip() or fs.split()[0] or fs).strip()
 
     buckets: OrderedDict[str, List[Dict[str, Any]]] = OrderedDict()
     for r in serialized:

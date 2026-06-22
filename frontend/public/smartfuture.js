@@ -55,8 +55,18 @@
         };
     }
 
+    function sfUnderlyingFromRow(r) {
+        const stock = String((r && r.stock) || '').trim();
+        if (stock) return stock;
+        const fs = String((r && r.fut_symbol) || '').trim();
+        if (!fs) return '';
+        const m = fs.match(/^(.+?)\s+FUT\b/i);
+        if (m) return m[1].trim();
+        return fs.split(/\s+/)[0] || fs;
+    }
+
     function renderSfSymbolChartButton(r, innerHtml, extraClass, titleText) {
-        const stock = String((r && (r.stock || r.symbol)) || '').trim();
+        const stock = sfUnderlyingFromRow(r);
         const ik = String((r && r.fut_instrument_key) || '').trim();
         const label = String((r && r.fut_symbol) || stock || '—').trim();
         if (!label || label === '—') {
@@ -844,6 +854,50 @@
         );
     }
 
+    function fmtSideMark(r) {
+        const s = String((r && r.side) || '').trim().toUpperCase();
+        if (s === 'LONG') {
+            return '<span class="sf-side-mark sf-side-mark--long" title="Long">L</span> ';
+        }
+        if (s === 'SHORT') {
+            return '<span class="sf-side-mark sf-side-mark--short" title="Short">S</span> ';
+        }
+        return '';
+    }
+
+    function isShortRow(r) {
+        return String((r && r.side) || '').trim().toUpperCase() === 'SHORT';
+    }
+
+    /** Closed legs: buy_price/sell_price store entry/exit (not literal broker buy/sell). */
+    function fmtClosedLegTime(r, leg) {
+        const short = isShortRow(r);
+        const legLabel = leg === 'entry' ? (short ? 'Sell' : 'Buy') : (short ? 'Buy' : 'Sell');
+        const t = leg === 'entry' ? fmtBuyTime(r.entry_at) : fmtSellTime(r.sell_time);
+        return (
+            '<span class="sf-closed-leg">' +
+            '<span class="sf-closed-leg-type">' +
+            escapeHtml(legLabel) +
+            '</span> ' +
+            escapeHtml(t || '—') +
+            '</span>'
+        );
+    }
+
+    function fmtClosedLegPrice(r, leg) {
+        const short = isShortRow(r);
+        const legLabel = leg === 'entry' ? (short ? 'Sell' : 'Buy') : (short ? 'Buy' : 'Sell');
+        const px = leg === 'entry' ? r.buy_price : r.sell_price;
+        return (
+            '<span class="sf-closed-leg">' +
+            '<span class="sf-closed-leg-type">' +
+            escapeHtml(legLabel) +
+            '</span> ' +
+            fmtNum(px, 2) +
+            '</span>'
+        );
+    }
+
     function fmtSymbolCell(r) {
         const sym = r && r.fut_symbol != null && r.fut_symbol !== '' ? String(r.fut_symbol) : '—';
         const ratio = r && r.atr5_14_ratio != null && r.atr5_14_ratio !== '' ? Number(r.atr5_14_ratio) : NaN;
@@ -892,7 +946,7 @@
             hot ? '<span class="sf-atr-fire" aria-hidden="true">🔥</span> ' : '';
         const chip = buildVelocityChip(r);
         if (sym === '—') return '—' + chip;
-        const labelBtn = renderSfSymbolChartButton(r, fire + escapeHtml(sym));
+        const labelBtn = renderSfSymbolChartButton(r, fmtSideMark(r) + fire + escapeHtml(sym));
         const core = tip
             ? '<span class="sf-symbol-wrap"' + titleAttr + '>' + labelBtn + '</span>'
             : labelBtn;
@@ -1372,8 +1426,6 @@
     }
 
     function closedTableRowHtml(r) {
-        const buyT = fmtBuyTime(r.entry_at);
-        const sellT = fmtSellTime(r.sell_time);
         return (
             '<tr data-row-id="' +
             r.id +
@@ -1382,16 +1434,16 @@
             fmtSymbolCell(r) +
             '</td>' +
             '<td>' +
-            escapeHtml(buyT || '—') +
+            fmtClosedLegTime(r, 'entry') +
             '</td>' +
             '<td>' +
-            fmtNum(r.buy_price, 2) +
+            fmtClosedLegPrice(r, 'entry') +
             '</td>' +
             '<td>' +
-            escapeHtml(sellT || '—') +
+            fmtClosedLegTime(r, 'exit') +
             '</td>' +
             '<td>' +
-            fmtNum(r.sell_price, 2) +
+            fmtClosedLegPrice(r, 'exit') +
             '</td>' +
             '<td>' +
             fmtLotsCell(r) +
@@ -1465,7 +1517,11 @@
 
         const thead =
             '<thead><tr>' +
-            '<th>Symbol</th><th>Buy time</th><th>Buy price</th><th>Sell time</th><th>Sell price</th>' +
+            '<th>Symbol</th>' +
+            '<th title="Entry leg: Sell for SHORT, Buy for LONG">Entry time</th>' +
+            '<th title="Entry leg: Sell for SHORT, Buy for LONG">Entry price</th>' +
+            '<th title="Exit leg: Buy for SHORT, Sell for LONG">Exit time</th>' +
+            '<th title="Exit leg: Buy for SHORT, Sell for LONG">Exit price</th>' +
             '<th title="Number of lots (position sizing)">Lots</th>' +
             '<th title="Units per lot (from instruments)">Lot size</th>' +
             '<th>PnL</th><th>Win / Loss</th>' +

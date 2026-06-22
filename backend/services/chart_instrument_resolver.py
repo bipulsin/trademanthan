@@ -31,18 +31,23 @@ def normalize_instrument_type(value: Optional[str]) -> str:
 def _fut_from_arbitrage_master(stock: str) -> Optional[Dict[str, Any]]:
     db = SessionLocal()
     try:
+        sym_u = str(stock or "").strip().upper()
+        if not sym_u:
+            return None
+        base_u = sym_u.split(" FUT")[0].strip() or sym_u
         row = db.execute(
             text(
                 """
                 SELECT stock, currmth_future_symbol, currmth_future_instrument_key
                 FROM arbitrage_master
-                WHERE UPPER(TRIM(stock)) = :s
+                WHERE (UPPER(TRIM(stock)) IN (:sym, :base)
+                   OR UPPER(TRIM(currmth_future_symbol)) = :sym)
                   AND currmth_future_instrument_key IS NOT NULL
                   AND TRIM(currmth_future_instrument_key) <> ''
                 LIMIT 1
                 """
             ),
-            {"s": stock.upper()},
+            {"sym": sym_u, "base": base_u},
         ).fetchone()
         if not row:
             return None
