@@ -680,6 +680,19 @@
         return { allowed: true, reason: '' };
     }
 
+    function fmtSignalStatusBadge(r) {
+        const st = String((r && r.signal_status) || '').trim().toUpperCase();
+        if (!st || st === 'ACTIONABLE') return '';
+        const tip = escapeAttr(
+            String((r && r.signal_status_tooltip) || (r && r.signal_status_reason) || st)
+        );
+        let cls = 'sf-signal-badge';
+        if (st === 'SUPPRESSED') cls += ' sf-signal-badge--suppressed';
+        else if (st === 'INVALIDATED') cls += ' sf-signal-badge--invalidated';
+        else if (st === 'STALE') cls += ' sf-signal-badge--stale';
+        return ' <span class="' + cls + '" title="' + tip + '">' + escapeHtml(st) + '</span>';
+    }
+
     /** First section: status text for bought/sold — no Sell here. */
     function fmtTrendActionCell(r) {
         const ost = String(r.order_status || '').trim().toLowerCase();
@@ -704,6 +717,7 @@
             return hint + '<span class="sf-order-status">' + displayStatus + '</span>';
         }
         const sym = r && r.fut_symbol != null && r.fut_symbol !== '' ? String(r.fut_symbol) : '';
+        const sigStatus = String((r && r.signal_status) || '').trim().toUpperCase();
         const hasGateFields = r && (
             r.entry_gate_score_pass !== undefined ||
             r.entry_gate_time_pass !== undefined ||
@@ -732,6 +746,13 @@
             const legacy = trendOrderGateByVwap(r);
             blocked = !legacy.allowed;
             blockedReason = legacy.reason;
+        }
+        if (sigStatus === 'INVALIDATED' || sigStatus === 'STALE' || sigStatus === 'SUPPRESSED') {
+            blocked = true;
+            blockedReason =
+                (r && r.signal_status_reason) ||
+                (r && r.signal_status_tooltip) ||
+                ('Signal ' + sigStatus.toLowerCase());
         }
         const countdown = buildCountdownPill(r);
         const banners = [];
@@ -802,6 +823,7 @@
             : '';
         return (
             '<div class="sf-gate-block">' +
+                fmtSignalStatusBadge(r) +
                 gateHtml +
                 bannerHtml +
                 countdownHtml +
@@ -946,7 +968,12 @@
             hot ? '<span class="sf-atr-fire" aria-hidden="true">🔥</span> ' : '';
         const chip = buildVelocityChip(r);
         if (sym === '—') return '—' + chip;
-        const labelBtn = renderSfSymbolChartButton(r, fmtSideMark(r) + fire + escapeHtml(sym));
+        const labelBtn = renderSfSymbolChartButton(
+            r,
+            fmtSideMark(r) + fire + escapeHtml(sym),
+            '',
+            (r && r.signal_status_tooltip) || undefined
+        );
         const core = tip
             ? '<span class="sf-symbol-wrap"' + titleAttr + '>' + labelBtn + '</span>'
             : labelBtn;
@@ -1081,7 +1108,12 @@
             fmtNum(r.combined_sentiment, 3) +
             '</td>' +
             '<td>' +
-            fmtNum(r.buy_price, 2) +
+            fmtNum(
+                r.entry_price != null && r.entry_price !== ''
+                    ? r.entry_price
+                    : r.buy_price,
+                2
+            ) +
             '</td>' +
             '<td>' +
             fmtNum(r.sl_price, 2) +

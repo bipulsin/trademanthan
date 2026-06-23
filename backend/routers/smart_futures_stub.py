@@ -37,6 +37,10 @@ from backend.services.smart_futures_session_utils import (
     compute_atr14_wilder_5m_for_session,
     compute_atr5_14_ratio_for_session,
 )
+from backend.services.smart_futures_signal_gates import (
+    apply_live_signal_invalidation,
+    signal_status_tooltip,
+)
 from backend.services.upstox_service import UpstoxService
 
 logger = logging.getLogger(__name__)
@@ -251,7 +255,8 @@ _SQL_DAILY_FULL = """
                        oi_signal, oi_gate_passed, time_filter_passed, regime_filter_passed, ema_slope_norm,
                        premkt_rank, oi_heat_rank,
                        reclaim_score_last, reclaim_score_prev, reclaim_score_updated_at,
-                       manual_exit_reason, manual_exit_at
+                       manual_exit_reason, manual_exit_at,
+                       signal_status, scan_bar_high, scan_bar_low, m15_vwap_at_scan
                 FROM smart_futures_daily
                 WHERE session_date = :sd
                 ORDER BY entry_at DESC NULLS LAST, id DESC
@@ -306,6 +311,9 @@ def _fetch_daily_for_session(db: Session, sd: Any) -> List[Any]:
             or _missing_db_column_error(e, "reclaim_score_updated_at")
             or _missing_db_column_error(e, "manual_exit_reason")
             or _missing_db_column_error(e, "manual_exit_at")
+            or _missing_db_column_error(e, "signal_status")
+            or _missing_db_column_error(e, "scan_bar_high")
+            or _missing_db_column_error(e, "m15_vwap_at_scan")
         ):
             logger.warning(
                 "smart_futures /daily: entry-gate columns missing, using pre-gate query: %s", e
@@ -947,6 +955,37 @@ def get_smart_futures_daily(user: User = Depends(_require_user), db: Session = D
                                 pass
                 else:
                     r["reclaim_score_velocity"] = None
+
+                apply_live_signal_invalidation(r, m5, now_ist)
+                r["signal_status_tooltip"] = signal_status_tooltip(r)
+                ost_live = str(r.get("order_status") or "").strip().lower()
+                rid_live = r.get("id")
+                if rid_live is not None and ost_live not in ("bought", "sold"):
+                    try:
+                        db.execute(
+                            text(
+                                """
+                                UPDATE smart_futures_daily
+                                SET signal_status = :st,
+                                    trend_continuation = :tc,
+                                    updated_at = CURRENT_TIMESTAMP
+                                WHERE id = :id AND session_date = :sd
+                                """
+                            ),
+                            {
+                                "id": int(rid_live),
+                                "sd": sd,
+                                "st": str(r.get("signal_status") or "ACTIONABLE"),
+                                "tc": str(r.get("trend_continuation") or "Yes"),
+                            },
+                        )
+                        db.commit()
+                    except Exception as st_ex:
+                        logger.debug("smart_futures signal_status persist id=%s: %s", rid_live, st_ex)
+                        try:
+                            db.rollback()
+                        except Exception:
+                            pass
 
                 if (
                     bool(gate.get("eligible_watchlist"))

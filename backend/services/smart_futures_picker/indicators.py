@@ -383,10 +383,15 @@ def opening_long_sector_waiver(
     vwap: float,
     atr14: float,
     volume_surge: float,
+    sector_score: float = 0.0,
+    *,
+    min_sector: float = 0.0,
 ) -> bool:
-    """09:30–12:00 IST: waive daily sector gate when stock leads with price>VWAP + volume."""
+    """09:30–12:00 IST: waive daily sector gate when sector ≥ min and price>VWAP + volume."""
     from zoneinfo import ZoneInfo
 
+    if float(sector_score) < float(min_sector):
+        return False
     ist = bar_end.astimezone(ZoneInfo("Asia/Kolkata")) if bar_end.tzinfo else bar_end
     m = ist.hour * 60 + ist.minute
     if m < 9 * 60 + 30 or m > 12 * 60:

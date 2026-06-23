@@ -599,6 +599,20 @@ def _run_startup_schema_migrations(db_engine):
                         print(f"Applied migration: added smart_futures_daily.{_cname}")
                         _sfd_cols.add(_cname)
 
+                _sfd_signal_cols = [
+                    ("signal_status", "TEXT"),
+                    ("scan_bar_high", "DOUBLE PRECISION"),
+                    ("scan_bar_low", "DOUBLE PRECISION"),
+                    ("m15_vwap_at_scan", "DOUBLE PRECISION"),
+                ]
+                for _cname, _ctype in _sfd_signal_cols:
+                    if _cname not in _sfd_cols:
+                        conn.execute(
+                            text(f"ALTER TABLE smart_futures_daily ADD COLUMN {_cname} {_ctype}")
+                        )
+                        print(f"Applied migration: added smart_futures_daily.{_cname}")
+                        _sfd_cols.add(_cname)
+
             # Smart Futures carry-forward watchlist: late-session picks that passed score+VWAP.
             _insp_wl = inspect(db_engine)
             if "smart_futures_watchlist" not in _insp_wl.get_table_names():

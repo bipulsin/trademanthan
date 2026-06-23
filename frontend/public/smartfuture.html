@@ -277,6 +277,21 @@
         }
         body[data-theme="dark"] .sf-side-mark--long { background: #14532d; color: #86efac; }
         body[data-theme="dark"] .sf-side-mark--short { background: #7c2d12; color: #fdba74; }
+        .sf-signal-badge {
+            display: inline-block;
+            margin-bottom: 6px;
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 0.68rem;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+        }
+        .sf-signal-badge--suppressed { background: #fef3c7; color: #92400e; }
+        .sf-signal-badge--invalidated { background: #fee2e2; color: #991b1b; }
+        .sf-signal-badge--stale { background: #e2e8f0; color: #475569; }
+        body[data-theme="dark"] .sf-signal-badge--suppressed { background: #78350f; color: #fde68a; }
+        body[data-theme="dark"] .sf-signal-badge--invalidated { background: #7f1d1d; color: #fecaca; }
+        body[data-theme="dark"] .sf-signal-badge--stale { background: #334155; color: #cbd5e1; }
         body[data-theme="dark"] .sf-carry-banner {
             background: rgba(59, 130, 246, 0.12);
             border-color: rgba(59, 130, 246, 0.35);
@@ -594,6 +609,6 @@
         </div>
     </div>
     <script src="left-menu.js?v=3.24"></script>
-    <script src="smartfuture.js?v=54"></script>
+    <script src="smartfuture.js?v=55"></script>
 </body>
 </html>

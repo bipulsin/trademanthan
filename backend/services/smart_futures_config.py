@@ -110,6 +110,24 @@ CMS_PRIORITY_FILTER_ENABLED: bool = False
 CMS_PRIORITY_OI_MOVER_MAX_RANK: int = 20
 
 
+# --- Sentiment alignment (block directional picks against strong sentiment) ---
+SENTIMENT_LONG_BLOCK_BELOW: float = -0.4
+SENTIMENT_SHORT_BLOCK_ABOVE: float = 0.4
+
+# --- VWAP confirmation: consecutive 5m closes on favorable side ---
+VWAP_CONFIRM_BARS: int = 2
+
+# --- Early-session volume surge cap (minutes from 9:15 IST) ---
+VOLUME_SURGE_EARLY_CAP_MINUTES: int = 45
+VOLUME_SURGE_EARLY_MAX: float = 8.0
+
+# --- Break-of-structure invalidation window after scan ---
+BOS_INVALIDATION_MINUTES: int = 15
+
+# --- Opening sector waiver: minimum sector score (0 = non-negative) ---
+SECTOR_WAIVER_MIN_SECTOR: float = 0.0
+
+
 def cms_weights_active() -> Dict[str, float]:
     return OI_CMS_WEIGHTS if OI_IN_CMS_ENABLED else CMS_WEIGHTS
 

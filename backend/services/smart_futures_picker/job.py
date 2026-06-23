@@ -47,6 +47,7 @@ from backend.services.smart_futures_config import (
     REENTRY_NEUTRAL_RESET_THRESHOLD,
     RISK_PCT,
     SECTOR_ALIGN_MIN,
+    SECTOR_WAIVER_MIN_SECTOR,
     TIER1_THRESHOLD,
     TIER2_THRESHOLD,
     TIME_FILTER_ENABLED,
@@ -80,6 +81,14 @@ from backend.services.smart_futures_picker.position_sizing import (
     get_futures_lot_size_by_instrument_key,
 )
 from backend.services.smart_futures_picker.sector_score import compute_sector_score_for_stock
+from backend.services.smart_futures_signal_gates import (
+    cap_early_session_volume_surge,
+    evaluate_publish_signal_status,
+    gate_price_from_session_m5,
+    scan_bar_ohlc,
+    sentiment_blocks_side,
+    vwap_side_confirmed,
+)
 from backend.services.upstox_service import UpstoxService
 
 logger = logging.getLogger(__name__)
@@ -547,6 +556,10 @@ class ScoredPick:
     tier_sizing_mult: float = 1.0
     history_days_used: int = STANDARD_REQUIRED_DAYS
     history_status: str = "STANDARD"
+    gate_price: float = 0.0
+    m15_vwap: float = 0.0
+    scan_bar_high: Optional[float] = None
+    scan_bar_low: Optional[float] = None
 
 
 def _load_sentiment_map(db) -> Dict[str, float]:
@@ -699,16 +712,17 @@ def _score_symbol_outcome(
     vwap = session_vwap_close(m15_closes, m15_vols)
     m15_last_close = float(m15_closes[-1]) if m15_closes else 0.0
     last_close = closes[-1]
-    if len(m5_today_same_session) < 15:
+    gate_price = gate_price_from_session_m5(m5_today_same_session)
+    if gate_price is None:
         gate_price = _latest_same_session_5m_close_from_1m(upstox, fut_key, session_date, bar_end)
-        if gate_price is None:
-            gate_price = _gate_ltp_from_market_data(fut_key, upstox, last_close)
-    else:
+    if gate_price is None:
         gate_price = _gate_ltp_from_market_data(fut_key, upstox, last_close)
+    scan_hi, scan_lo = scan_bar_ohlc(m5_today_same_session)
     vwap_dev = vwap_deviation_atr_norm(gate_price, vwap, float(atr))
 
     frac = _session_elapsed_fraction(session_date, m5_today)
     vs = volume_surge_ratio(vols, avg_daily_vol, frac)
+    vs = cap_early_session_volume_surge(bar_end, vs)
     if vs < 1.5:
         return _fail("volume_surge_low", volume_surge=float(vs))
 
@@ -813,7 +827,16 @@ def _score_symbol_outcome(
         "close_gt_vwap": bool(gate_price > vwap),
         "m15_close_gt_vwap": bool(m15_last_close > vwap),
         "sector_gt_min": bool(sector_score > SECTOR_ALIGN_MIN)
-        or opening_long_sector_waiver(bar_end, float(gate_price), float(vwap), float(atr), float(vs)),
+        or opening_long_sector_waiver(
+            bar_end,
+            float(gate_price),
+            float(vwap),
+            float(atr),
+            float(vs),
+            float(sector_score),
+            min_sector=SECTOR_WAIVER_MIN_SECTOR,
+        ),
+        "vwap_two_bar": vwap_side_confirmed("LONG", m5_today_same_session, float(vwap)),
         "index_long_ok": bool(index_long_ok),
     }
     gs = {
@@ -822,6 +845,7 @@ def _score_symbol_outcome(
         "close_lt_vwap": bool(gate_price < vwap),
         "m15_close_lt_vwap": bool(m15_last_close < vwap),
         "sector_lt_neg_min": bool(sector_score < -SECTOR_ALIGN_MIN),
+        "vwap_two_bar": vwap_side_confirmed("SHORT", m5_today_same_session, float(vwap)),
         "index_short_ok": bool(index_short_ok),
     }
     long_ok = all(gl.values())
@@ -848,6 +872,21 @@ def _score_symbol_outcome(
         sig_tier, tier_mult = _tier_long(final_cms)
     else:
         sig_tier, tier_mult = _tier_short(final_cms)
+
+    sent_block = sentiment_blocks_side(side, comb)
+    if sent_block:
+        code = sent_block.split()[0]
+        return _fail(
+            code,
+            reject_note=sent_block,
+            final_cms=float(final_cms),
+            cms=float(cms),
+            volume_surge=float(vs),
+            sector_score=float(sector_score),
+            combined_sentiment=float(comb),
+            gate_long=gl,
+            gate_short=gs,
+        )
 
     premkt_r: Optional[int] = None
     oi_heat_r: Optional[int] = None
@@ -997,6 +1036,10 @@ def _score_symbol_outcome(
         oi_heat_rank=oi_heat_r,
         history_days_used=int(len(daily)),
         history_status=history_status,
+        gate_price=float(gate_price),
+        m15_vwap=float(vwap),
+        scan_bar_high=scan_hi,
+        scan_bar_low=scan_lo,
     )
     _log_sf_event(
         {
@@ -1035,6 +1078,9 @@ def _persist_pick(
     vix: Optional[float],
     entry_price: float,
     now_ist: datetime,
+    *,
+    signal_status: str = "ACTIONABLE",
+    m5_session: Optional[List[dict]] = None,
 ) -> bool:
     atr = pick.atr_14
     hold_type = "positional" if abs(pick.final_cms) > 1.2 else "intraday"
@@ -1129,6 +1175,8 @@ def _persist_pick(
 
     reentry_flag = bool(existing and existing.get("sell_time") is not None)
 
+    trend_cont = "Yes" if str(signal_status).upper() == "ACTIONABLE" else str(signal_status)
+
     params = {
         "session_date": session_date,
         "stock": pick.stock,
@@ -1177,6 +1225,11 @@ def _persist_pick(
         "reentry_apply": bool(reentry_flag),
         "premkt_rank": _to_pg_int32("premkt_rank", pick.premkt_rank),
         "oi_heat_rank": _to_pg_int32("oi_heat_rank", pick.oi_heat_rank),
+        "trend_continuation": trend_cont,
+        "signal_status": str(signal_status),
+        "scan_bar_high": pick.scan_bar_high,
+        "scan_bar_low": pick.scan_bar_low,
+        "m15_vwap_at_scan": float(pick.m15_vwap) if pick.m15_vwap else None,
     }
 
     ex = db.execute(
@@ -1217,7 +1270,7 @@ def _persist_pick(
                     target_price = :target_price,
                     hold_type = :hold_type,
                     entry_at = :entry_at,
-                    trend_continuation = 'Yes',
+                    trend_continuation = :trend_continuation,
                     scan_trigger = :scan_trigger,
                     vix_at_scan = :vix_at_scan,
                     signal_tier = :signal_tier,
@@ -1240,6 +1293,10 @@ def _persist_pick(
                     cms_final = :cms_final,
                     premkt_rank = :premkt_rank,
                     oi_heat_rank = :oi_heat_rank,
+                    signal_status = :signal_status,
+                    scan_bar_high = :scan_bar_high,
+                    scan_bar_low = :scan_bar_low,
+                    m15_vwap_at_scan = :m15_vwap_at_scan,
                     reentry_consumed = CASE WHEN :reentry_apply THEN TRUE ELSE reentry_consumed END,
                     order_status = CASE WHEN :reentry_apply THEN NULL ELSE order_status END,
                     buy_price = CASE WHEN :reentry_apply THEN NULL ELSE buy_price END,
@@ -1267,20 +1324,22 @@ def _persist_pick(
                     time_filter_passed, regime_filter_passed, regime_filter_reason,
                     oi_value, oi_change, oi_signal, oi_gate_passed, oi_gate_reason,
                     ema_slope_norm, cms_score_raw, cms_final, reentry_consumed,
-                    premkt_rank, oi_heat_rank
+                    premkt_rank, oi_heat_rank, signal_status, scan_bar_high, scan_bar_low,
+                    m15_vwap_at_scan
                 ) VALUES (
                     :session_date, :stock, :fut_symbol, :fut_instrument_key, :side,
                     :obv_slope, :volume_surge, :adx_14, :atr_14, :atr5_14_ratio,
                     :renko_momentum, :ha_trend, :macd_div, :rsi_div, :stoch_div,
                     :cms, :final_cms, :sector_score, :combined_sentiment,
                     :entry_price, :sl_price, :target_price, :hold_type,
-                    :entry_at, NULL, :scan_trigger, :vix_at_scan,
+                    :entry_at, :trend_continuation, :scan_trigger, :vix_at_scan,
                     :signal_tier, :tier_multiplier, :sizing_tier_mult, :calculated_lots,
                     :stop_loss_price, :stop_stage, :current_stop_price,
                     :time_filter_passed, :regime_filter_passed, :regime_filter_reason,
                     :oi_value, :oi_change, :oi_signal, :oi_gate_passed, :oi_gate_reason,
                     :ema_slope_norm, :cms_score_raw, :cms_final, FALSE,
-                    :premkt_rank, :oi_heat_rank
+                    :premkt_rank, :oi_heat_rank, :signal_status, :scan_bar_high, :scan_bar_low,
+                    :m15_vwap_at_scan
                 )
                 """
             ),
@@ -1300,6 +1359,135 @@ def _persist_pick(
         }
     )
     return True
+
+
+def _refresh_unpurchased_trend_rows(
+    db,
+    session_date: date,
+    upstox: UpstoxService,
+    sentiment_map: Dict[str, float],
+    scan_trigger: str,
+    now_ist: datetime,
+    *,
+    skip_instrument_keys: Optional[set] = None,
+) -> int:
+    """
+    Re-score unpurchased trend rows not updated in this scan; mark STALE or refresh side/CMS.
+    """
+    skip = skip_instrument_keys or set()
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT id, stock, fut_symbol, fut_instrument_key, side, order_status
+                FROM smart_futures_daily
+                WHERE session_date = :sd
+                  AND (order_status IS NULL OR LOWER(TRIM(COALESCE(order_status, ''))) NOT IN ('bought', 'sold'))
+                """
+            ),
+            {"sd": session_date},
+        ).mappings().all()
+    except Exception as e:
+        logger.debug("smart_futures_picker: refresh stale rows query failed: %s", e)
+        return 0
+
+    updated = 0
+    amap: Dict[str, Optional[str]] = {}
+    try:
+        am_rows = db.execute(
+            text(
+                """
+                SELECT stock, sector_index
+                FROM arbitrage_master
+                WHERE currmth_future_instrument_key IS NOT NULL
+                """
+            )
+        ).fetchall()
+        for st, sec in am_rows:
+            if st:
+                amap[str(st).strip().upper()] = str(sec).strip() if sec else None
+    except Exception:
+        pass
+
+    for row in rows:
+        ikey = str(row.get("fut_instrument_key") or "").strip()
+        if not ikey or ikey in skip:
+            continue
+        st = str(row.get("stock") or "").strip().upper()
+        if not st:
+            continue
+        try:
+            oc = _score_symbol_outcome(
+                upstox,
+                st,
+                str(row.get("fut_symbol") or ""),
+                ikey,
+                session_date,
+                sentiment_map,
+                amap.get(st),
+                index_long_ok=True,
+                index_short_ok=True,
+            )
+        except Exception as e:
+            logger.debug("smart_futures_picker: refresh %s failed: %s", st, e)
+            continue
+
+        if oc.pick:
+            entry = float(oc.pick.gate_price or 0)
+            if entry <= 0:
+                continue
+            m5_raw = upstox.get_historical_candles_by_instrument_key(
+                ikey, interval="minutes/5", days_back=6
+            )
+            m5_sess = [
+                b
+                for b in _sort_candles(m5_raw)
+                if _ist_date_from_ts(str(b.get("timestamp") or "")) == session_date
+            ]
+            signal_status = evaluate_publish_signal_status(
+                side=oc.pick.side,
+                entry_price=entry,
+                vwap15=float(oc.pick.m15_vwap),
+                entry_at_ist=now_ist,
+                m5_session=m5_sess,
+                sector_score=oc.pick.sector_score,
+            )
+            if _persist_pick(
+                db,
+                oc.pick,
+                session_date,
+                scan_trigger,
+                _vix_last_close_5m(upstox),
+                entry,
+                now_ist,
+                signal_status=signal_status,
+                m5_session=m5_sess,
+            ):
+                updated += 1
+        else:
+            try:
+                db.execute(
+                    text(
+                        """
+                        UPDATE smart_futures_daily
+                        SET signal_status = 'STALE',
+                            trend_continuation = 'STALE',
+                            scan_trigger = :scan_trigger,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = :id AND session_date = :sd
+                        """
+                    ),
+                    {"id": int(row["id"]), "sd": session_date, "scan_trigger": scan_trigger},
+                )
+                db.commit()
+                updated += 1
+            except Exception as ex:
+                logger.debug("smart_futures_picker: mark stale id=%s: %s", row.get("id"), ex)
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+    return updated
 
 
 def _log_smart_futures_diagnostics(
@@ -1568,15 +1756,53 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
                     ),
                 )
                 continue
-            entry = _entry_price_1m_close(upstox, pick.fut_instrument_key, now_ist)
-            if entry is None:
+            entry = float(pick.gate_price or 0)
+            if entry <= 0:
                 q = upstox.get_market_quote_by_key(pick.fut_instrument_key) or {}
                 entry = float(q.get("last_price") or 0)
             if not entry or entry <= 0:
                 logger.warning("smart_futures_picker: no entry for %s", pick.stock)
                 continue
-            if _persist_pick(dbw, pick, session_date, scan_trigger or "", vix, entry, now_ist):
+            m5_raw = upstox.get_historical_candles_by_instrument_key(
+                pick.fut_instrument_key, interval="minutes/5", days_back=6
+            )
+            m5_sess = [
+                b
+                for b in _sort_candles(m5_raw)
+                if _ist_date_from_ts(str(b.get("timestamp") or "")) == session_date
+            ]
+            signal_status = evaluate_publish_signal_status(
+                side=pick.side,
+                entry_price=entry,
+                vwap15=float(pick.m15_vwap),
+                entry_at_ist=now_ist,
+                m5_session=m5_sess,
+                sector_score=pick.sector_score,
+            )
+            if _persist_pick(
+                dbw,
+                pick,
+                session_date,
+                scan_trigger or "",
+                vix,
+                entry,
+                now_ist,
+                signal_status=signal_status,
+                m5_session=m5_sess,
+            ):
                 saved += 1
+
+        merged_keys = {p.fut_instrument_key for p in merged_picks[:publish_cap]}
+        _refresh_unpurchased_trend_rows(
+            dbw,
+            session_date,
+            upstox,
+            sentiment_map,
+            scan_trigger or "",
+            now_ist,
+            skip_instrument_keys=merged_keys,
+        )
+        dbw.commit()
 
         picked_long_syms = [p.stock for p in picked_longs]
         picked_short_syms = [p.stock for p in picked_shorts]
