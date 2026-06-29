@@ -216,23 +216,51 @@ def _compute_symbol_metrics(
     }
 
 
+def _is_market_live_ist() -> bool:
+    """True during NSE cash/derivatives session (Mon–Fri 09:15–15:30 IST)."""
+    now = datetime.now(IST)
+    if now.weekday() >= 5:
+        return False
+    minutes = now.hour * 60 + now.minute
+    return 555 <= minutes <= 930  # 09:15 .. 15:30
+
+
 def _nifty_change_pct(upstox: UpstoxService) -> Optional[float]:
-    """NIFTY 50 %% change = (current - previous DAY close) / previous DAY close.
+    """NIFTY 50 %% change = (current NIFTY price - previous DAY close) / previous DAY close.
 
-    Primary source is the 5m candle series (same previous-day-close basis as the
-    stocks, so RS is apples-to-apples). Falls back to the live quote only if
-    historical candles are unavailable.
+    The NIFTY index does not expose multi-day intraday candles, so previous-day
+    close is taken from *daily* candles. Current price is the live LTP during
+    market hours; after hours we use the last completed daily close vs the prior
+    daily close (so a manual/off-schedule run reflects the last session's close).
     """
-    candles = upstox.get_historical_candles_by_instrument_key(
-        NIFTY_KEY, interval=CANDLE_INTERVAL, days_back=CANDLE_DAYS_BACK
+    daily = upstox.get_historical_candles_by_instrument_key(
+        NIFTY_KEY, interval="days/1", days_back=12
     )
-    if candles:
-        split = _current_and_prev_day_close(_sorted_candles(candles))
-        if split is not None:
-            current, prev_day_close, _ = split
-            return (current - prev_day_close) / prev_day_close * 100.0
+    closes_dated: List[Tuple[str, float]] = []
+    if daily:
+        for c in _sorted_candles(daily):
+            cl = _f(c.get("close"))
+            d = _parse_ist_date(c.get("timestamp"))
+            if cl > 0 and d:
+                closes_dated.append((d, cl))
 
-    # Fallback: live quote (close_price = prior session close).
+    if len(closes_dated) >= 2:
+        last_date, last_close = closes_dated[-1]
+        prev_close = closes_dated[-2][1]
+        ist_today = datetime.now(IST).strftime("%Y-%m-%d")
+        quote = upstox.get_market_quote_by_key(NIFTY_KEY)
+        ltp = _f(quote.get("last_price")) if quote else 0.0
+
+        if last_date == ist_today and ltp > 0:
+            # Today's daily candle already present -> current=LTP, prev=prior day.
+            return (ltp - prev_close) / prev_close * 100.0
+        if last_date < ist_today and _is_market_live_ist() and ltp > 0:
+            # Live session, today's daily candle not yet in history.
+            return (ltp - last_close) / last_close * 100.0
+        # After hours / pre-open: last completed session vs the session before.
+        return (last_close - prev_close) / prev_close * 100.0
+
+    # Last resort: live quote (close_price = prior session close).
     quote = upstox.get_market_quote_by_key(NIFTY_KEY)
     if not quote:
         return None
