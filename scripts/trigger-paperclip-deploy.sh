@@ -16,30 +16,61 @@ NO_CACHE="${NO_CACHE:-0}"
 TRADEMANTHAN_REF="${TRADEMANTHAN_REF:-main}"
 TWCTO_DIR="${TWCTO_DIR:-/home/ubuntu/twcto}"
 
-echo "Deploying to paperclip-vm (REBUILD=${REBUILD}, NO_CACHE=${NO_CACHE}, TRADEMANTHAN_REF=${TRADEMANTHAN_REF})..."
+# Resolve branch tip to commit SHA so Docker src layers re-clone on every app push
+# (avoids stale frontend when TRADEMANTHAN_REF would otherwise stay the string "main").
+_resolve_trademanthan_ref() {
+  local ref="${1:-main}"
+  if [[ "$ref" == "main" || "$ref" == "master" ]]; then
+    if git -C "$ROOT" rev-parse "origin/${ref}" >/dev/null 2>&1; then
+      git -C "$ROOT" rev-parse "origin/${ref}"
+    elif git -C "$ROOT" rev-parse HEAD >/dev/null 2>&1; then
+      git -C "$ROOT" rev-parse HEAD
+    else
+      git ls-remote https://github.com/bipulsin/trademanthan.git "refs/heads/${ref}" | awk '{print $1}'
+    fi
+  else
+    echo "$ref"
+  fi
+}
 
-"${ROOT}/scripts/paperclip-ssh.sh" "REBUILD=${REBUILD} NO_CACHE=${NO_CACHE} TRADEMANTHAN_REF=${TRADEMANTHAN_REF} TWCTO_DIR=${TWCTO_DIR} bash -s" <<'REMOTE'
+TRADEMANTHAN_REF="$(_resolve_trademanthan_ref "${TRADEMANTHAN_REF}")"
+APP_SRC_REV="${APP_SRC_REV:-${TRADEMANTHAN_REF}}"
+FRONTEND_SRC_REV="${FRONTEND_SRC_REV:-${TRADEMANTHAN_REF}}"
+
+echo "Deploying to paperclip-vm (REBUILD=${REBUILD}, NO_CACHE=${NO_CACHE}, TRADEMANTHAN_REF=${TRADEMANTHAN_REF:0:12}...)..."
+
+"${ROOT}/scripts/paperclip-ssh.sh" "REBUILD=${REBUILD} NO_CACHE=${NO_CACHE} TRADEMANTHAN_REF=${TRADEMANTHAN_REF} APP_SRC_REV=${APP_SRC_REV} FRONTEND_SRC_REV=${FRONTEND_SRC_REV} TWCTO_DIR=${TWCTO_DIR} bash -s" <<'REMOTE'
 set -euo pipefail
 cd "${TWCTO_DIR:-/home/ubuntu/twcto}"
+
+export TRADEMANTHAN_REF="${TRADEMANTHAN_REF:-main}"
+export APP_SRC_REV="${APP_SRC_REV:-${TRADEMANTHAN_REF}}"
+export FRONTEND_SRC_REV="${FRONTEND_SRC_REV:-${TRADEMANTHAN_REF}}"
 
 echo "[deploy] git pull twcto_docker..."
 git fetch origin main
 git reset --hard origin/main
 
 if [[ "${REBUILD:-0}" == "1" ]]; then
-  TRADEMANTHAN_REF="${TRADEMANTHAN_REF:-main}"
   if [[ "${NO_CACHE:-0}" == "1" ]]; then
-    echo "[deploy] REBUILD=1 NO_CACHE=1: fresh app-src from Git (reuse pip/deps cache)..."
+    echo "[deploy] REBUILD=1 NO_CACHE=1: fresh src from Git rev ${TRADEMANTHAN_REF:0:12}..."
     docker buildx build -f Dockerfile.app \
       --no-cache-filter app-src \
       --build-arg "TRADEMANTHAN_REF=${TRADEMANTHAN_REF}" \
+      --build-arg "APP_SRC_REV=${APP_SRC_REV}" \
       -t ghcr.io/bipulsin/twcto-app:latest \
       --load \
       .
-    docker compose build nginx
+    docker buildx build -f Dockerfile.nginx \
+      --no-cache-filter frontend-src \
+      --build-arg "TRADEMANTHAN_REF=${TRADEMANTHAN_REF}" \
+      --build-arg "FRONTEND_SRC_REV=${FRONTEND_SRC_REV}" \
+      -t ghcr.io/bipulsin/twcto-nginx:latest \
+      --load \
+      .
   else
-    echo "[deploy] REBUILD=1: building app + nginx locally (TRADEMANTHAN_REF=${TRADEMANTHAN_REF})..."
-    TRADEMANTHAN_REF="${TRADEMANTHAN_REF}" docker compose build app nginx
+    echo "[deploy] REBUILD=1: building app + nginx (rev ${TRADEMANTHAN_REF:0:12})..."
+    docker compose build app nginx
   fi
 else
   echo "[deploy] pulling app + nginx from GHCR (linux/arm64)..."
