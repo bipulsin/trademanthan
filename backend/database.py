@@ -743,6 +743,69 @@ def _run_startup_schema_migrations(db_engine):
                     )
                     print("Applied migration: added premarket_watchlist.momentum")
 
+            # Relative Strength Scanner snapshot (Top-5 bullish/bearish vs NIFTY; 5-min job)
+            if "relative_strength_snapshot" not in table_names:
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE relative_strength_snapshot (
+                                id BIGSERIAL PRIMARY KEY,
+                                scan_time TIMESTAMPTZ NOT NULL,
+                                symbol TEXT NOT NULL,
+                                current_price DOUBLE PRECISION,
+                                previous_close DOUBLE PRECISION,
+                                stock_percent DOUBLE PRECISION,
+                                nifty_percent DOUBLE PRECISION,
+                                relative_strength DOUBLE PRECISION,
+                                ema5 DOUBLE PRECISION,
+                                ema9 DOUBLE PRECISION,
+                                ema10 DOUBLE PRECISION,
+                                vwap DOUBLE PRECISION,
+                                supertrend DOUBLE PRECISION,
+                                macd DOUBLE PRECISION,
+                                macd_signal DOUBLE PRECISION,
+                                macd_histogram DOUBLE PRECISION,
+                                adx DOUBLE PRECISION,
+                                volume DOUBLE PRECISION,
+                                avg_volume DOUBLE PRECISION,
+                                volume_ratio DOUBLE PRECISION,
+                                kavach_state TEXT,
+                                kavach_strength INTEGER,
+                                trade_score DOUBLE PRECISION,
+                                ranking_type TEXT NOT NULL,
+                                rank_position INTEGER NOT NULL,
+                                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                            )
+                            """
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_rss_scan_time "
+                            "ON relative_strength_snapshot (scan_time DESC)"
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_rss_symbol "
+                            "ON relative_strength_snapshot (symbol)"
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_rss_ranking_type "
+                            "ON relative_strength_snapshot (ranking_type)"
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_rss_trade_score "
+                            "ON relative_strength_snapshot (trade_score DESC)"
+                        )
+                    )
+                    print("Applied migration: created relative_strength_snapshot (PostgreSQL)")
+
             # Live OI heatmap snapshot (Upstox batch quotes; refreshed by oi_heatmap job)
             if "oi_heatmap_latest" not in table_names:
                 if db_engine.dialect.name == "postgresql":

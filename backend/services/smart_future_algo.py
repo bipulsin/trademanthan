@@ -1083,6 +1083,47 @@ class SmartFutureAlgoScheduler:
                 coalesce=True,
             )
 
+            # Relative Strength Scanner — every 5 min, 09:20–15:15 IST (Mon–Fri)
+            def _run_relative_strength_5m():
+                ist = pytz.timezone("Asia/Kolkata")
+                now = datetime.now(ist)
+                if _skip_ist_non_trading_job("Relative Strength scan", now):
+                    return
+                h, m = now.hour, now.minute
+                if h < 9 or (h == 9 and m < 20):
+                    return  # before 09:20
+                if h > 15 or (h == 15 and m > 15):
+                    return  # after 15:15
+                try:
+                    from backend.services.relative_strength_scanner import (
+                        run_relative_strength_scan,
+                    )
+
+                    run_relative_strength_scan(scan_trigger="5m_interval")
+                except Exception as e:
+                    logger.error(
+                        "❌ Relative Strength scan failed: %s", e, exc_info=True
+                    )
+
+            self.scheduler.add_job(
+                _run_relative_strength_5m,
+                trigger=CronTrigger(
+                    day_of_week="mon-fri",
+                    hour="9-15",
+                    minute="0,5,10,15,20,25,30,35,40,45,50,55",
+                    timezone="Asia/Kolkata",
+                ),
+                id="relative_strength_scanner_5m",
+                name="Relative Strength Scanner (every 5 min, 09:20–15:15 IST)",
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=120,
+                coalesce=True,
+            )
+            logger.info(
+                "✅ Scheduled: Relative Strength Scanner (every 5 min, 09:20–15:15 IST)"
+            )
+
             # Volume Mismatch Futures — 09:30:30 scan + 5m entry monitor
             def _run_vm_scan():
                 ist = pytz.timezone("Asia/Kolkata")
