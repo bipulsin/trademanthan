@@ -2497,14 +2497,8 @@ body[data-theme="dark"] .oi-heatmap-more-link {
 
 .rs-scanner-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-}
-
-@media (max-width: 900px) {
-    .rs-scanner-grid {
-        grid-template-columns: 1fr;
-    }
+    grid-template-columns: 1fr;
+    gap: 20px;
 }
 
 .rs-scanner-col-title {
@@ -2619,3 +2613,26 @@ body[data-theme="dark"] .rs-score--yellow { background: rgba(250, 204, 21, 0.28)
 body[data-theme="dark"] .rs-score--grey { background: rgba(148, 163, 184, 0.22); color: #cbd5e1; }
 body[data-theme="dark"] .rs-scanner-row:hover,
 body[data-theme="dark"] .rs-scanner-row:focus { background: rgba(59, 130, 246, 0.16); }
+
+/* Mobile: show only Symbol, RS%, Score, Vol×, Kavach (hide Rank, Price, VWAP, ST, MACD, ADX). */
+@media (max-width: 640px) {
+    .rs-scanner-table th:nth-child(1),
+    .rs-scanner-table td:nth-child(1),
+    .rs-scanner-table th:nth-child(3),
+    .rs-scanner-table td:nth-child(3),
+    .rs-scanner-table th:nth-child(7),
+    .rs-scanner-table td:nth-child(7),
+    .rs-scanner-table th:nth-child(8),
+    .rs-scanner-table td:nth-child(8),
+    .rs-scanner-table th:nth-child(9),
+    .rs-scanner-table td:nth-child(9),
+    .rs-scanner-table th:nth-child(10),
+    .rs-scanner-table td:nth-child(10) {
+        display: none;
+    }
+
+    .rs-scanner-table th,
+    .rs-scanner-table td {
+        padding: 6px 6px;
+    }
+}
