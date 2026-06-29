@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import pytz
 from sqlalchemy import text
 
+from backend.config import settings
 from backend.database import SessionLocal
 from backend.services.kavach_engine import (
     BEARISH_STATES,
@@ -329,7 +330,7 @@ def _persist(scan_time: datetime, ranked: List[Dict[str, Any]]) -> None:
 def run_relative_strength_scan(scan_trigger: str = "5m_interval") -> Dict[str, Any]:
     """Run one full scan and persist Top-5 Bullish / Bearish. Returns a summary."""
     started = time.time()
-    upstox = UpstoxService()
+    upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
 
     nifty_pct = _nifty_change_pct(upstox)
     if nifty_pct is None:
