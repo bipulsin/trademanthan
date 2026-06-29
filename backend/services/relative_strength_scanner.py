@@ -301,8 +301,9 @@ def _rank(rows: List[Dict[str, Any]]) -> Tuple[List[Dict], List[Dict]]:
         )
         bucket.append(r)
 
-    bullish.sort(key=lambda x: (-x["trade_score"], -x["relative_strength"]))
-    bearish.sort(key=lambda x: (-x["trade_score"], x["relative_strength"]))
+    # Bullish: highest RS%% on top. Bearish: lowest RS%% on top. Trade Score breaks ties.
+    bullish.sort(key=lambda x: (-x["relative_strength"], -x["trade_score"]))
+    bearish.sort(key=lambda x: (x["relative_strength"], -x["trade_score"]))
     bullish = bullish[:TOP_N]
     bearish = bearish[:TOP_N]
     for i, r in enumerate(bullish, start=1):
