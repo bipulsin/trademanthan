@@ -25,6 +25,11 @@ class UpdateBody(BaseModel):
     session_date: Optional[str] = None
 
 
+class SymbolBody(BaseModel):
+    symbol: str
+    session_date: Optional[str] = None
+
+
 @router.get("/data")
 def data(date: Optional[str] = None):
     try:
@@ -60,6 +65,17 @@ def populate():
         return svc.populate_from_rs()
     except Exception as exc:
         logger.warning("daily-checklist populate failed: %s", exc)
+        return {"error": str(exc)}
+
+
+@router.post("/sync")
+def sync(body: SymbolBody):
+    try:
+        return svc.sync_symbol_from_rs(body.symbol, body.session_date)
+    except ValueError as exc:
+        return {"error": str(exc)}
+    except Exception as exc:
+        logger.warning("daily-checklist sync failed: %s", exc)
         return {"error": str(exc)}
 
 

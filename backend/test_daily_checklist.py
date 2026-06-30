@@ -160,3 +160,20 @@ def test_adx_935_status_buckets():
     assert adx_935_status(22) == "recheck"
     assert adx_935_status(19.9) == "watch"
     assert adx_935_status(None) == ""
+
+
+def test_confidence_grade_from_score():
+    from backend.services.daily_checklist import _confidence_grade
+
+    assert _confidence_grade(95) == "A"
+    assert _confidence_grade(85) == "B"
+    assert _confidence_grade(75) == "C"
+    assert _confidence_grade(60) == "D"
+
+
+def test_volume_label_buckets():
+    from backend.services.daily_checklist import _volume_label
+
+    assert _volume_label(1.5) == "High"
+    assert _volume_label(0.8) == "Normal"
+    assert _volume_label(0.3) == "Low"

@@ -216,7 +216,188 @@ def _num(v: Any) -> Optional[float]:
         return None
 
 
-# --- persistence -------------------------------------------------------------
+# --- RS snapshot → checklist auto-fill ---------------------------------------
+
+_RS_ALL_SQL = text(
+    """
+    SELECT s.symbol, s.relative_strength, s.trade_score, s.volume_ratio,
+           s.kavach_state, s.ema5, s.vwap, s.supertrend, s.macd, s.macd_signal,
+           s.macd_histogram, s.adx, s.ranking_type
+    FROM relative_strength_snapshot s
+    WHERE s.scan_time = (SELECT MAX(scan_time) FROM relative_strength_snapshot)
+    ORDER BY s.ranking_type, s.rank_position
+    """
+)
+
+_RS_DETAIL_SQL = text(
+    """
+    SELECT s.symbol, s.relative_strength, s.trade_score, s.volume_ratio,
+           s.kavach_state, s.ema5, s.vwap, s.supertrend, s.macd, s.macd_signal,
+           s.macd_histogram, s.adx, s.ranking_type
+    FROM relative_strength_snapshot s
+    WHERE s.scan_time = (SELECT MAX(scan_time) FROM relative_strength_snapshot)
+      AND s.symbol = :sym
+    LIMIT 1
+    """
+)
+
+# User-owned fields preserved across RS sync/populate refreshes.
+_PRESERVE_ON_RS_SYNC = frozenset({"news_clean", "notes", "counter_rs"})
+
+
+def _direction_from_ranking(ranking_type: Optional[str]) -> str:
+    return SHORT if (ranking_type or "").upper() == "BEARISH" else LONG
+
+
+def _confidence_grade(score: Optional[float]) -> Optional[str]:
+    if score is None:
+        return None
+    s = int(round(score))
+    if s >= 90:
+        return "A"
+    if s >= 80:
+        return "B"
+    if s >= 70:
+        return "C"
+    return "D"
+
+
+def _trading_state_label(kavach_state: Optional[str], direction: str) -> Optional[str]:
+    if not kavach_state:
+        return None
+    k = kavach_state.upper().strip()
+    if k == "BUY":
+        return "BUY"
+    if k == "SELL":
+        return "SELL"
+    if k == "READY":
+        return "MANAGE LONG" if direction == LONG else "MANAGE SHORT"
+    if k == "READY SHORT":
+        return "MANAGE SHORT"
+    if k in ("WATCH", "WATCH SHORT", "NEUTRAL"):
+        return "HOLD/WATCH"
+    return None
+
+
+def _ema_vs_vwap_label(ema5: Optional[float], vwap: Optional[float]) -> Optional[str]:
+    if ema5 is None or vwap is None or vwap == 0:
+        return None
+    if abs(ema5 - vwap) / vwap < 0.0005:
+        return "At VWAP"
+    return "Above" if ema5 > vwap else "Below"
+
+
+def _supertrend_label(st: Optional[float]) -> Optional[str]:
+    if st is None:
+        return None
+    return "Bullish" if float(st) > 0 else "Bearish"
+
+
+def _macd_label(
+    macd: Optional[float], sig: Optional[float], hist: Optional[float]
+) -> Optional[str]:
+    if macd is None or sig is None:
+        return None
+    if hist is not None and abs(hist) < max(abs(macd), 1.0) * 0.03:
+        return "Crossing"
+    return "Bullish" if macd > sig else "Bearish"
+
+
+def _volume_label(ratio: Optional[float]) -> Optional[str]:
+    if ratio is None:
+        return None
+    r = float(ratio)
+    if r >= 1.2:
+        return "High"
+    if r >= 0.65:
+        return "Normal"
+    return "Low"
+
+
+def _current_entry_time_ist() -> Optional[str]:
+    now = datetime.now(IST)
+    m = now.hour * 60 + now.minute
+    if ENTRY_START_MIN <= m <= ENTRY_END_MIN:
+        return f"{now.hour:02d}:{now.minute:02d}"
+    return None
+
+
+def _auto_fields_from_rs(row: Any, direction: str) -> Dict[str, Any]:
+    """Map a relative_strength_snapshot row to checklist fields the system can fill."""
+    score = _num(row.trade_score)
+    adx = _num(row.adx)
+    ema5 = _num(row.ema5)
+    vwap = _num(row.vwap)
+    ema_lbl = _ema_vs_vwap_label(ema5, vwap)
+    di = None
+    if adx is not None and adx >= 25:
+        di = "DI+>DI-" if direction == LONG else "DI->DI+"
+    fields: Dict[str, Any] = {
+        "rs_pct": round(_num(row.relative_strength) or 0, 2),
+        "dashboard_score": int(round(score or 0)) if score is not None else None,
+        "dashboard_kavach": row.kavach_state,
+        "vol_multiplier": round(_num(row.volume_ratio) or 0, 2),
+        "kavach_score_entry": int(round(score or 0)) if score is not None else None,
+        "confidence": _confidence_grade(score),
+        "trading_state": _trading_state_label(row.kavach_state, direction),
+        "ema_vs_vwap": ema_lbl,
+        "supertrend": _supertrend_label(_num(row.supertrend)),
+        "macd": _macd_label(_num(row.macd), _num(row.macd_signal), _num(row.macd_histogram)),
+        "adx_entry": round(adx, 1) if adx is not None else None,
+        "adx_935": round(adx, 2) if adx is not None else None,
+        "di_alignment": di,
+        "volume": _volume_label(_num(row.volume_ratio)),
+        "entry_time": _current_entry_time_ist(),
+    }
+    return {k: v for k, v in fields.items() if v is not None}
+
+
+def _merge_rs_into_existing(existing: Optional[Dict[str, Any]], auto: Dict[str, Any]) -> Dict[str, Any]:
+    merged = dict(auto)
+    if existing:
+        for k in _PRESERVE_ON_RS_SYNC:
+            if existing.get(k) is not None:
+                merged[k] = existing[k]
+    if merged.get("news_clean") is None:
+        merged["news_clean"] = True
+    return merged
+
+
+_UPSERT_COLS = (
+    "rs_pct", "dashboard_score", "dashboard_kavach", "vol_multiplier",
+    "news_clean", "adx_935", "entry_time", "kavach_score_entry", "confidence",
+    "trading_state", "ema_vs_vwap", "supertrend", "macd", "adx_entry",
+    "di_alignment", "volume", "counter_rs", "notes",
+)
+
+
+def _upsert_stock(db, sd: str, symbol: str, direction: str, fields: Dict[str, Any]) -> None:
+    """Insert or update a checklist row, then derive decision flags."""
+    params: Dict[str, Any] = {
+        "d": sd, "sym": symbol, "dir": direction,
+        "dec": D_UNASSESSED, "sec": SEC_WATCH,
+    }
+    for c in _UPSERT_COLS:
+        params[c] = fields.get(c)
+    col_names = ", ".join(_UPSERT_COLS)
+    placeholders = ", ".join(f":{c}" for c in _UPSERT_COLS)
+    updates = ", ".join(f"{c} = EXCLUDED.{c}" for c in _UPSERT_COLS)
+    db.execute(
+        text(
+            f"""
+            INSERT INTO daily_checklist
+                (session_date, symbol, direction, {col_names}, decision, section, updated_at)
+            VALUES (:d, :sym, :dir, {placeholders}, :dec, :sec, NOW())
+            ON CONFLICT (session_date, symbol) DO UPDATE SET
+                direction = EXCLUDED.direction,
+                {updates},
+                updated_at = NOW()
+            """
+        ),
+        params,
+    )
+    _reevaluate_symbol(db, sd, symbol)
+
 
 _SELECT_COLS = """
     symbol, direction, rs_pct, dashboard_score, dashboard_kavach, vol_multiplier,
@@ -319,53 +500,45 @@ def get_state(session_date: Optional[str] = None) -> Dict[str, Any]:
 
 
 def populate_from_rs() -> Dict[str, Any]:
-    """Seed today's checklist from the latest RS snapshot.
-
-    Upserts dashboard-derived fields (symbol/direction/rs/score/kavach/vol) and
-    preserves any checklist inputs the user already filled in.
-    """
-    from backend.services.relative_strength_scanner import get_latest_snapshot
-
-    snap = get_latest_snapshot()
+    """Seed today's checklist from the latest RS snapshot with system auto-fill."""
     sd = today_ist()
-    seeded = 0
+    count = 0
     db = SessionLocal()
     try:
-        for direction, items in ((LONG, snap.get("bullish") or []), (SHORT, snap.get("bearish") or [])):
-            for it in items:
-                db.execute(
-                    text(
-                        """
-                        INSERT INTO daily_checklist
-                            (session_date, symbol, direction, rs_pct, dashboard_score,
-                             dashboard_kavach, vol_multiplier, decision, section, updated_at)
-                        VALUES (:d, :sym, :dir, :rs, :score, :kav, :vol, :dec, :sec, NOW())
-                        ON CONFLICT (session_date, symbol) DO UPDATE SET
-                            direction = EXCLUDED.direction,
-                            rs_pct = EXCLUDED.rs_pct,
-                            dashboard_score = EXCLUDED.dashboard_score,
-                            dashboard_kavach = EXCLUDED.dashboard_kavach,
-                            vol_multiplier = EXCLUDED.vol_multiplier,
-                            updated_at = NOW()
-                        """
-                    ),
-                    {
-                        "d": sd,
-                        "sym": it.get("symbol"),
-                        "dir": direction,
-                        "rs": it.get("rs_percent"),
-                        "score": int(round(_num(it.get("trade_score")) or 0)),
-                        "kav": it.get("kavach_state"),
-                        "vol": it.get("volume_ratio"),
-                        "dec": D_UNASSESSED,
-                        "sec": SEC_WATCH,
-                    },
-                )
-                seeded += 1
+        rows = db.execute(_RS_ALL_SQL).fetchall()
+        count = len(rows)
+        for row in rows:
+            direction = _direction_from_ranking(row.ranking_type)
+            existing = _load_raw(db, sd, row.symbol)
+            auto = _auto_fields_from_rs(row, direction)
+            merged = _merge_rs_into_existing(existing, auto)
+            _upsert_stock(db, sd, row.symbol, direction, merged)
         db.commit()
     finally:
         db.close()
-    logger.info("daily_checklist: populated %d stocks for %s", seeded, sd)
+    logger.info("daily_checklist: populated %d stocks for %s", count, sd)
+    return get_state(sd)
+
+
+def sync_symbol_from_rs(symbol: str, session_date: Optional[str] = None) -> Dict[str, Any]:
+    """Refresh one symbol's system-derived checklist fields from the latest RS scan."""
+    sd = session_date or today_ist()
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        raise ValueError("symbol required")
+    db = SessionLocal()
+    try:
+        row = db.execute(_RS_DETAIL_SQL, {"sym": sym}).fetchone()
+        if not row:
+            raise ValueError(f"no RS data for {sym}")
+        existing = _load_raw(db, sd, sym)
+        direction = (existing or {}).get("direction") or _direction_from_ranking(row.ranking_type)
+        auto = _auto_fields_from_rs(row, direction)
+        merged = _merge_rs_into_existing(existing, auto)
+        _upsert_stock(db, sd, sym, direction, merged)
+        db.commit()
+    finally:
+        db.close()
     return get_state(sd)
 
 
