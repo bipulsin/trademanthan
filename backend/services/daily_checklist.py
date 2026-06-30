@@ -24,8 +24,8 @@ logger = logging.getLogger(__name__)
 
 IST = pytz.timezone("Asia/Kolkata")
 
-# Entry window (hard rule): 10:15 – 14:30 IST.
-ENTRY_START_MIN = 10 * 60 + 15
+# Entry window (hard rule): 9:45 – 14:30 IST.
+ENTRY_START_MIN = 9 * 60 + 45
 ENTRY_END_MIN = 14 * 60 + 30
 
 LONG = "LONG"

@@ -47,7 +47,7 @@ def test_adverse_news_eliminates():
 
 
 def test_time_outside_window_hard_fails():
-    for bad in ("09:50", "14:31", "15:00"):
+    for bad in ("09:40", "14:31", "15:00"):
         row = _full_long_pass()
         row["entry_time"] = bad
         r = evaluate(row)
@@ -57,7 +57,7 @@ def test_time_outside_window_hard_fails():
 
 
 def test_time_window_boundaries_pass():
-    for ok in ("10:15", "14:30", "12:00"):
+    for ok in ("09:45", "14:30", "12:00"):
         row = _full_long_pass()
         row["entry_time"] = ok
         assert evaluate(row)["time_ok"] is True

@@ -107,7 +107,7 @@
         var v = stock[flag];
         if (v === true) return { text: "✓ PASS", cls: "dc-item-hint--ok" };
         if (v === false) {
-            if (field === "entry_time") return { text: "✗ HARD FAIL (outside 10:15–14:30)", cls: "dc-item-hint--bad" };
+            if (field === "entry_time") return { text: "✗ HARD FAIL (outside 9:45–14:30)", cls: "dc-item-hint--bad" };
             return { text: "✗ FAIL", cls: "dc-item-hint--bad" };
         }
         return null;
@@ -257,8 +257,10 @@
         var body = $("dcModalBody");
         body.innerHTML = "";
 
-        // recheck banner
-        var rc = el("div", "dc-recheck", "⏰ Recheck ADX at 10:00 AM");
+        var grid = el("div", "dc-modal-grid");
+
+        // recheck banner — full width
+        var rc = el("div", "dc-recheck dc-modal-span2", "⏰ Recheck ADX at 10:00 AM");
         if (stock.adx_935_status === "recheck") {
             rc.classList.add("show");
             var t = nowIST();
@@ -267,58 +269,58 @@
                 rc.textContent = "⏰ Now is 10:00 AM — recheck ADX for this stock";
             }
         }
-        body.appendChild(rc);
+        grid.appendChild(rc);
 
-        body.appendChild(el("div", "dc-group-title", "Pre-market"));
+        var preTitle = el("div", "dc-group-title dc-modal-span2", "Pre-market");
+        grid.appendChild(preTitle);
+        grid.appendChild(buildNewsItem(stock));
+        grid.appendChild(buildAdx935Item(stock));
 
-        // News — manual
-        body.appendChild(buildNewsItem(stock));
-
-        // ADX 9:35 — manual override (pre-filled from system)
-        body.appendChild(buildAdx935Item(stock));
-
-        body.appendChild(el("div", "dc-group-title", "Entry gate (auto from RS scanner)"));
+        var gateTitle = el("div", "dc-group-title dc-modal-span2", "Entry gate (auto from RS scanner)");
+        grid.appendChild(gateTitle);
 
         AUTO_FIELDS.forEach(function (field) {
-            body.appendChild(buildAutoItem(field, stock));
+            grid.appendChild(buildAutoItem(field, stock));
         });
 
-        // Counter-RS — manual
-        var cr = el("label", "dc-counter");
+        // Counter-RS — full width
+        var cr = el("label", "dc-counter dc-modal-span2");
         var cb = el("input"); cb.type = "checkbox";
         cb.checked = !!stock.counter_rs;
         cb.addEventListener("change", function () { onChange(stock.symbol, "counter_rs", cb.checked); });
         cr.appendChild(cb);
         cr.appendChild(el("span", null, "Counter-RS direction? (A-grade mandatory)"));
-        body.appendChild(cr);
+        grid.appendChild(cr);
 
-        // Progress
+        // Progress + decision — full width
         var gs = Number(stock.gate_score || 0);
-        var pw = el("div", "dc-progress-wrap");
+        var pw = el("div", "dc-progress-wrap dc-modal-span2");
         pw.appendChild(el("div", "dc-progress-label", gs + " / 9 entry conditions met"));
         var pbar = el("div", "dc-progress");
         var pfill = el("div", "dc-progress-fill");
         pfill.style.width = Math.round((gs / 9) * 100) + "%";
         pbar.appendChild(pfill);
         pw.appendChild(pbar);
-        body.appendChild(pw);
+        grid.appendChild(pw);
 
-        var dec = el("div", "dc-modal-decision dc-decision dc-decision--" + decisionClass(stock), stock.decision || "⬜ Not assessed");
-        body.appendChild(dec);
+        var dec = el("div", "dc-modal-decision dc-decision dc-decision--" + decisionClass(stock) + " dc-modal-span2");
+        dec.textContent = stock.decision || "⬜ Not assessed";
+        grid.appendChild(dec);
 
-        // Notes — manual
-        var notes = el("textarea", "dc-notes");
+        var notes = el("textarea", "dc-notes dc-modal-span2");
         notes.placeholder = "Trade notes…";
         notes.value = stock.notes || "";
         notes.addEventListener("input", function () { onChange(stock.symbol, "notes", notes.value); });
-        body.appendChild(notes);
+        grid.appendChild(notes);
 
         if (stock.updated_at) {
             var d = new Date(stock.updated_at);
-            body.appendChild(el("div", "dc-saved",
+            grid.appendChild(el("div", "dc-saved dc-modal-span2",
                 "Last saved: " + ("0" + d.getHours()).slice(-2) + ":" +
                 ("0" + d.getMinutes()).slice(-2) + ":" + ("0" + d.getSeconds()).slice(-2)));
         }
+
+        body.appendChild(grid);
     }
 
     function buildAutoItem(field, stock) {
@@ -415,9 +417,9 @@
 
     function tickClock() {
         var t = nowIST();
-        $("dcClock").textContent = t.str + " IST";
+        $("dcClock").textContent = t.str;
         var w = $("dcWindow");
-        var start = 10 * 60 + 15, end = 14 * 60 + 30;
+        var start = 9 * 60 + 45, end = 14 * 60 + 30;
         if (t.minutes < start) {
             var rem = (start * 60) - t.secs;
             w.textContent = "Entry opens in " + ("0" + Math.floor(rem / 60)).slice(-2) + ":" + ("0" + (rem % 60)).slice(-2);
