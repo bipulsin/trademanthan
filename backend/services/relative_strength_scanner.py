@@ -48,8 +48,10 @@ IST = pytz.timezone("Asia/Kolkata")
 NIFTY_KEY = "NSE_INDEX|Nifty 50"
 CANDLE_INTERVAL = "minutes/5"
 CANDLE_DAYS_BACK = 5
-# Accept market-data cache candles up to this old (refresh cadence is 5 min).
-CACHE_MAX_AGE_SEC = 420
+# Accept market-data cache candles up to this old. The centralized refresh cycle
+# can take ~8-9 min under Upstox rate limits, so use a window wide enough to
+# accumulate symbols across consecutive cycles rather than expiring them early.
+CACHE_MAX_AGE_SEC = 900
 VOLUME_EMA_PERIOD = 20
 ADX_LENGTH = 14
 TOP_N = 5
@@ -258,6 +260,47 @@ def _is_market_live_ist() -> bool:
     return 555 <= minutes <= 930  # 09:15 .. 15:30
 
 
+def _nifty_pct_from_index_db() -> Optional[float]:
+    """NIFTY %% from the ``index_prices`` table — current ltp vs the previous
+    trading day's stored close. Zero Upstox calls, so it is immune to the shared
+    historical-candle 429 storm (the index_price scheduler refreshes ltp ~5-min)."""
+    db = SessionLocal()
+    try:
+        cur = db.execute(
+            text(
+                "SELECT ltp FROM index_prices WHERE index_name='NIFTY50' AND ltp > 0 "
+                "ORDER BY price_time DESC LIMIT 1"
+            )
+        ).fetchone()
+        if not cur or not cur.ltp:
+            return None
+        today_ist = datetime.now(IST).date()
+        rows = db.execute(
+            text(
+                "SELECT close_price, price_time FROM index_prices "
+                "WHERE index_name='NIFTY50' AND close_price IS NOT NULL "
+                "ORDER BY price_time DESC LIMIT 20"
+            )
+        ).fetchall()
+        for r in rows:
+            pt = r.price_time
+            if pt is None:
+                continue
+            if pt.tzinfo is None:
+                pt = pytz.utc.localize(pt)
+            if pt.astimezone(IST).date() < today_ist:  # previous-day close
+                prev_close = float(r.close_price)
+                if prev_close > 0:
+                    return (float(cur.ltp) - prev_close) / prev_close * 100.0
+                break
+        return None
+    except Exception as exc:
+        logger.debug("nifty pct from index_prices failed: %s", exc)
+        return None
+    finally:
+        db.close()
+
+
 def _nifty_daily_closes(upstox: UpstoxService) -> List[Tuple[str, float]]:
     """NIFTY daily (date, close) list, fetched at most once per IST date."""
     global _NIFTY_DAILY_CACHE
@@ -285,12 +328,17 @@ def _nifty_daily_closes(upstox: UpstoxService) -> List[Tuple[str, float]]:
 def _nifty_change_pct(upstox: UpstoxService) -> Optional[float]:
     """NIFTY 50 %% change = (current NIFTY price - previous DAY close) / previous DAY close.
 
-    The NIFTY index does not expose multi-day intraday candles, so previous-day
-    close is taken from *daily* candles (cached per day). Current price is the live
-    LTP during market hours; after hours we use the last completed daily close vs
-    the prior daily close. A transient quote failure falls back to the last good %.
+    Primary source is the ``index_prices`` DB table (no Upstox call, immune to the
+    candle 429 storm). Falls back to *daily* candles / live quote when the DB has
+    no usable rows (e.g. before the index_price scheduler has run).
     """
     global _LAST_GOOD_NIFTY_PCT
+
+    db_pct = _nifty_pct_from_index_db()
+    if db_pct is not None:
+        _LAST_GOOD_NIFTY_PCT = db_pct
+        return db_pct
+
     closes_dated = _nifty_daily_closes(upstox)
 
     if len(closes_dated) >= 2:
