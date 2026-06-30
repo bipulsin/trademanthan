@@ -70,7 +70,7 @@ class SlidingWindowRateLimiter:
                 wait = max(wait, exit_event + window - now)
         return wait
 
-    def acquire(self, max_wait: float = 120.0) -> float:
+    def acquire(self, max_wait: float = 240.0) -> float:
         """Block (up to ``max_wait`` s) until a slot is free; record + return wait."""
         if not self._limits:
             return 0.0
@@ -148,7 +148,13 @@ def acquire_candle_slot() -> float:
     except Exception:
         pass
 
-    waited = _get_limiter().acquire()
+    try:
+        from backend.config import settings
+
+        max_wait = float(getattr(settings, "UPSTOX_CANDLE_RL_MAX_WAIT", 240) or 240)
+    except Exception:
+        max_wait = 240.0
+    waited = _get_limiter().acquire(max_wait=max_wait)
     _acquired += 1
     _total_wait += waited
     if waited > 0.01:
