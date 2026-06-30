@@ -34,14 +34,19 @@ class SlidingWindowRateLimiter:
     windows, then records the grant. Returns the seconds it waited (for metrics).
     """
 
-    def __init__(self, limits: List[Tuple[int, float]]):
+    def __init__(self, limits: List[Tuple[int, float]], min_interval: float = 0.0):
         # Keep only positive caps; sort by window for readability.
         self._limits = sorted(
             ((int(m), float(w)) for m, w in limits if int(m) > 0 and float(w) > 0),
             key=lambda x: x[1],
         )
         self._max_window = max((w for _, w in self._limits), default=0.0)
+        # Minimum spacing between consecutive grants — evens out bursts so a batch
+        # of worker threads can't fire N requests in the same instant and trip
+        # Upstox's per-second limit.
+        self._min_interval = max(0.0, float(min_interval))
         self._events: List[float] = []  # monotonic grant timestamps, ascending
+        self._last_grant: float = 0.0
         self._lock = threading.Lock()
 
     def _wait_needed(self, now: float) -> float:
@@ -53,6 +58,8 @@ class SlidingWindowRateLimiter:
             del self._events[:drop]
 
         wait = 0.0
+        if self._min_interval > 0.0 and self._last_grant:
+            wait = max(wait, self._last_grant + self._min_interval - now)
         for max_count, window in self._limits:
             start = now - window
             j = bisect.bisect_left(self._events, start)
@@ -74,12 +81,15 @@ class SlidingWindowRateLimiter:
                 wait = self._wait_needed(now)
                 if wait <= 0.0:
                     self._events.append(now)
+                    self._last_grant = now
                     return now - start_ts
             if (time.monotonic() - start_ts) + wait > max_wait:
                 # Give up waiting; record the grant anyway so we don't busy-loop and
                 # so the caller proceeds (Upstox 429 back-off remains the safety net).
                 with self._lock:
-                    self._events.append(time.monotonic())
+                    g = time.monotonic()
+                    self._events.append(g)
+                    self._last_grant = g
                 logger.warning(
                     "candle rate limiter: max_wait %.0fs exceeded; proceeding", max_wait
                 )
@@ -101,12 +111,17 @@ _throttled = 0
 def _build_limiter() -> SlidingWindowRateLimiter:
     from backend.config import settings
 
+    per_sec = max(1, int(getattr(settings, "UPSTOX_CANDLE_RL_PER_SEC", 5)))
+    configured_interval = float(getattr(settings, "UPSTOX_CANDLE_RL_MIN_INTERVAL", 0) or 0)
+    # Even spacing derived from the per-second cap unless explicitly overridden (>0).
+    min_interval = configured_interval if configured_interval > 0 else (1.0 / per_sec)
     return SlidingWindowRateLimiter(
         [
-            (getattr(settings, "UPSTOX_CANDLE_RL_PER_SEC", 9), 1.0),
-            (getattr(settings, "UPSTOX_CANDLE_RL_PER_MIN", 240), 60.0),
-            (getattr(settings, "UPSTOX_CANDLE_RL_PER_30MIN", 1900), 1800.0),
-        ]
+            (per_sec, 1.0),
+            (getattr(settings, "UPSTOX_CANDLE_RL_PER_MIN", 120), 60.0),
+            (getattr(settings, "UPSTOX_CANDLE_RL_PER_30MIN", 1500), 1800.0),
+        ],
+        min_interval=min_interval,
     )
 
 

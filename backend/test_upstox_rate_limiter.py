@@ -24,6 +24,15 @@ def test_no_limits_is_noop():
     assert (time.monotonic() - start) < 0.1
 
 
+def test_min_interval_evens_out_bursts():
+    # Even spacing of 0.1s -> 5 grants take ~0.4s (4 gaps), no instant burst.
+    rl = SlidingWindowRateLimiter([(100, 1.0)], min_interval=0.1)
+    start = time.monotonic()
+    for _ in range(5):
+        rl.acquire()
+    assert (time.monotonic() - start) >= 0.35
+
+
 def test_thread_safe_total_count_respects_cap():
     # 10/sec cap; 20 threads each acquire once -> at least ~1s of pacing total.
     rl = SlidingWindowRateLimiter([(10, 1.0)])

@@ -52,9 +52,11 @@ class Settings(BaseSettings):
         "true",
         "yes",
     )
-    UPSTOX_CANDLE_RL_PER_SEC: int = int(os.getenv("UPSTOX_CANDLE_RL_PER_SEC", "9"))
-    UPSTOX_CANDLE_RL_PER_MIN: int = int(os.getenv("UPSTOX_CANDLE_RL_PER_MIN", "240"))
-    UPSTOX_CANDLE_RL_PER_30MIN: int = int(os.getenv("UPSTOX_CANDLE_RL_PER_30MIN", "1900"))
+    UPSTOX_CANDLE_RL_PER_SEC: int = int(os.getenv("UPSTOX_CANDLE_RL_PER_SEC", "5"))
+    UPSTOX_CANDLE_RL_PER_MIN: int = int(os.getenv("UPSTOX_CANDLE_RL_PER_MIN", "120"))
+    UPSTOX_CANDLE_RL_PER_30MIN: int = int(os.getenv("UPSTOX_CANDLE_RL_PER_30MIN", "1500"))
+    # Minimum seconds between consecutive candle grants (0 -> derive from per-sec cap).
+    UPSTOX_CANDLE_RL_MIN_INTERVAL: float = float(os.getenv("UPSTOX_CANDLE_RL_MIN_INTERVAL", "0"))
 
     # Iron Condor advisory sizing (workspace UI no longer edits these; override via env on EC2)
     IRON_CONDOR_TRADING_CAPITAL_DEFAULT: float = float(os.getenv("IRON_CONDOR_TRADING_CAPITAL_DEFAULT", "500000"))
