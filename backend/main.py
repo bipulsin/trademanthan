@@ -35,6 +35,7 @@ import backend.routers.volume_mismatch_backtest as volume_mismatch_backtest
 import backend.routers.nk_vm_bull_backtest as nk_vm_bull_backtest
 import backend.routers.security_chart as security_chart
 import backend.routers.relative_strength as relative_strength
+import backend.routers.daily_checklist as daily_checklist
 # OLD SCHEDULERS - DISABLED - Migrated to smart_future_algo
 # from backend.services.master_stock_scheduler import start_scheduler, stop_scheduler
 # from backend.services.instruments_downloader import start_instruments_scheduler, stop_instruments_scheduler
@@ -317,6 +318,8 @@ app.include_router(security_chart.router, prefix="")
 # also mount bare so it works whether or not nginx strips /api.
 app.include_router(relative_strength.router)
 app.include_router(relative_strength.router, prefix="/scan")
+app.include_router(daily_checklist.router)
+app.include_router(daily_checklist.router, prefix="/scan")
 
 # Create/migrate tables in a daemon thread so import + uvicorn bind is not blocked by long DB locks
 # (idle-in-transaction + migrations used to delay port 8000 for minutes → nginx 502).

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <title>Daily Checklist · TWCTO Kavach</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
+    <script src="auth-check.js?v=1"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="dailyRSchecklist.css?v=1">
+</head>
+<body class="dc-body">
+
+    <!-- Section A: sticky header -->
+    <header class="dc-header">
+        <div class="dc-header-top">
+            <a class="dc-back" href="/dashboard.html" title="Back to dashboard" aria-label="Back to dashboard"><i class="fas fa-arrow-left"></i></a>
+            <h1 class="dc-title">TWCTO Kavach · Daily Checklist</h1>
+            <span class="dc-date" id="dcDate">—</span>
+        </div>
+        <div class="dc-subrow">
+            <span class="dc-clock" id="dcClock">--:--:--</span>
+            <span class="dc-window pre" id="dcWindow">Entry window —</span>
+            <span class="dc-nifty" id="dcNifty"></span>
+        </div>
+        <div class="dc-pills">
+            <span class="dc-pill" id="dcPillGo">🟢 0 GO</span>
+            <span class="dc-pill" id="dcPillWatch">🟡 0 WATCH</span>
+            <span class="dc-pill" id="dcPillOut">🔴 0 OUT</span>
+        </div>
+        <div class="dc-actions">
+            <button type="button" class="dc-btn dc-btn--primary" id="dcPull"><i class="fas fa-download"></i> Pull from RS Scanner</button>
+            <button type="button" class="dc-btn" id="dcSave"><i class="fas fa-floppy-disk"></i> Save Session</button>
+            <button type="button" class="dc-btn" id="dcPrint"><i class="fas fa-print"></i> Print</button>
+            <button type="button" class="dc-btn dc-btn--danger" id="dcReset"><i class="fas fa-rotate-left"></i> Reset Day</button>
+        </div>
+    </header>
+
+    <!-- Page-level: Nifty opening direction -->
+    <div class="dc-controls">
+        <div class="dc-control-row">
+            <label for="dcNiftyDir">Nifty Opening Direction</label>
+            <select class="dc-select" id="dcNiftyDir">
+                <option value="">— select —</option>
+                <option value="Gap sustained up">Gap sustained ↑</option>
+                <option value="Gap sustained down">Gap sustained ↓</option>
+                <option value="Gap reversed">Gap reversed</option>
+            </select>
+        </div>
+    </div>
+    <div class="dc-warn-banner" id="dcGapWarn">
+        ⚠ Gap reversal detected — RS+ stocks may be dragged lower. Wait for the 9:35 candle direction.
+    </div>
+
+    <!-- Section B: hard rules banner -->
+    <div class="dc-hardrules">
+        <span class="dc-hardrule">⚠ No entries before 10:15 AM</span>
+        <span class="dc-hardrule">✗ No entries after 2:30 PM</span>
+        <span class="dc-hardrule">✓ Square-off by 3:15 PM</span>
+    </div>
+
+    <!-- Section C: stock cards, bucketed -->
+    <main class="dc-sections" id="dcSections">
+        <div class="dc-empty" id="dcEmpty">
+            <div>No checklist for today yet.</div>
+            <button type="button" class="dc-btn" id="dcPullEmpty"><i class="fas fa-download"></i> Pull from RS Scanner</button>
+        </div>
+
+        <section id="dcGoSection" hidden>
+            <div class="dc-section-title">🟢 GO</div>
+            <div class="dc-grid" id="dcGoGrid"></div>
+        </section>
+
+        <section id="dcWatchSection" hidden>
+            <div class="dc-section-title">🟡 Watch</div>
+            <div class="dc-grid dc-grid--split" id="dcWatchGrid"></div>
+        </section>
+
+        <section id="dcOutSection" hidden>
+            <div class="dc-section-title">🔴 Eliminated / No Trade</div>
+            <div class="dc-grid dc-grid--split" id="dcOutGrid"></div>
+        </section>
+    </main>
+
+    <div class="dc-toast" id="dcToast"></div>
+
+    <!-- Card template -->
+    <template id="dcCardTpl">
+        <div class="dc-card" data-symbol="">
+            <div class="dc-card-face">
+                <div class="dc-face-left">
+                    <span class="dc-symbol"></span>
+                    <span class="dc-dir"></span>
+                    <span class="dc-rs"></span>
+                </div>
+                <div class="dc-face-center">
+                    <span class="dc-score"></span>
+                    <span class="dc-conf"></span>
+                    <span class="dc-volx"></span>
+                </div>
+                <span class="dc-decision dc-decision--NONE">⬜ Not assessed</span>
+                <i class="fas fa-chevron-down dc-chev"></i>
+            </div>
+            <div class="dc-card-body"></div>
+        </div>
+    </template>
+
+    <script src="dailyRSchecklist.js?v=1"></script>
+</body>
+</html>

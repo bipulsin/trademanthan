@@ -806,6 +806,64 @@ def _run_startup_schema_migrations(db_engine):
                     )
                     print("Applied migration: created relative_strength_snapshot (PostgreSQL)")
 
+            # Daily RS Trade Checklist (per-stock pre-trade entry checklist)
+            if "daily_checklist" not in table_names:
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE daily_checklist (
+                                id BIGSERIAL PRIMARY KEY,
+                                session_date DATE NOT NULL,
+                                symbol TEXT NOT NULL,
+                                direction TEXT NOT NULL,
+                                rs_pct DOUBLE PRECISION,
+                                dashboard_score INTEGER,
+                                dashboard_kavach TEXT,
+                                vol_multiplier DOUBLE PRECISION,
+                                news_clean BOOLEAN,
+                                adx_935 DOUBLE PRECISION,
+                                adx_935_status TEXT,
+                                nifty_open_direction TEXT,
+                                entry_time TEXT,
+                                time_ok BOOLEAN,
+                                kavach_score_entry INTEGER,
+                                score_ok BOOLEAN,
+                                confidence TEXT,
+                                confidence_ok BOOLEAN,
+                                trading_state TEXT,
+                                state_ok BOOLEAN,
+                                ema_vs_vwap TEXT,
+                                ema_ok BOOLEAN,
+                                supertrend TEXT,
+                                st_ok BOOLEAN,
+                                macd TEXT,
+                                macd_ok BOOLEAN,
+                                adx_entry DOUBLE PRECISION,
+                                di_alignment TEXT,
+                                adx_ok BOOLEAN,
+                                volume TEXT,
+                                volume_ok BOOLEAN,
+                                counter_rs BOOLEAN DEFAULT FALSE,
+                                gate_score INTEGER,
+                                decision TEXT,
+                                section TEXT,
+                                notes TEXT,
+                                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                                UNIQUE (session_date, symbol)
+                            )
+                            """
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_daily_checklist_date "
+                            "ON daily_checklist (session_date DESC)"
+                        )
+                    )
+                    print("Applied migration: created daily_checklist (PostgreSQL)")
+
             # Live OI heatmap snapshot (Upstox batch quotes; refreshed by oi_heatmap job)
             if "oi_heatmap_latest" not in table_names:
                 if db_engine.dialect.name == "postgresql":

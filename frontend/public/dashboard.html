@@ -30,6 +30,8 @@
         .sf-watchlist-card .sf-side-pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: 0.03em; }
         .sf-watchlist-card .sf-side-long { background: #dcfce7; color: #000000 !important; }
         .sf-watchlist-card .sf-side-short { background: #fee2e2; color: #991b1b; }
+        .rs-scanner-card .rs-checklist-link { font-size: 12px; font-weight: 700; color: #1976d2; text-decoration: none; margin-left: 10px; padding: 2px 8px; border: 1px solid #bfdbfe; border-radius: 999px; vertical-align: middle; white-space: nowrap; }
+        .rs-scanner-card .rs-checklist-link:hover { background: #eff6ff; }
     </style>
 </head>
 <body>
@@ -148,7 +150,9 @@
                 <!-- Relative Strength Scanner: current-month futures ranked vs NIFTY -->
                 <div class="dashboard-card rs-scanner-card full-width">
                     <div class="card-header compact">
-                        <h3><i class="fas fa-chart-line"></i> Relative Strength Scanner</h3>
+                        <h3><i class="fas fa-chart-line"></i> Relative Strength Scanner
+                            <a href="/dailyRSchecklist.html" class="rs-checklist-link" title="Open Daily Trade Checklist" aria-label="Open Daily Trade Checklist"><i class="fas fa-clipboard-check"></i> Checklist</a>
+                        </h3>
                         <div class="rs-scanner-toolbar">
                             <span class="rs-scanner-countdown" id="rsScannerCountdown" title="Next refresh">—</span>
                             <span class="rs-scanner-updated" id="rsScannerUpdated">—</span>
