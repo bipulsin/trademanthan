@@ -468,7 +468,7 @@
 
     function resetDay() {
         if (!confirm("Reset today's checklist? Saved values will be cleared (history is kept).")) return;
-        api("/reset", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
+        api("/reset", { method: "POST" })
             .then(function (s) { cardEls = {}; ["dcGoGrid","dcWatchGrid","dcOutGrid"].forEach(function(id){$(id).innerHTML="";}); applyState(s); toast("Day reset"); });
     }
 

@@ -46,10 +46,9 @@ def update(body: UpdateBody):
 
 
 @router.post("/reset")
-def reset(body: Optional[UpdateBody] = None):
-    sd = body.session_date if body else None
+def reset(date: Optional[str] = None):
     try:
-        return svc.reset_day(sd)
+        return svc.reset_day(date)
     except Exception as exc:
         logger.warning("daily-checklist reset failed: %s", exc)
         return {"error": str(exc)}
