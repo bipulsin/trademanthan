@@ -107,6 +107,15 @@ def _fetch_5m_indicators(upstox: Any, instrument_key: str) -> Optional[Dict[str,
             interval=CANDLE_INTERVAL,
             days_back=CANDLE_DAYS_BACK,
         )
+        # Share fetched candles so in-process consumers (e.g. Relative Strength
+        # Scanner) can reuse them instead of issuing duplicate Upstox requests.
+        if candles:
+            try:
+                from backend.services.market_data.candle_cache import put as _cache_put
+
+                _cache_put(instrument_key, candles)
+            except Exception:
+                pass
         return indicators_from_5m_candles(candles or [])
     except Exception as e:
         logger.debug("market_data candles %s: %s", instrument_key, e)

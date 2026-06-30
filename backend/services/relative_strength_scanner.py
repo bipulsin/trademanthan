@@ -2,7 +2,10 @@
 
 Pipeline (run once every 5 min by the scheduler, never by the dashboard):
   1. Load current-month futures universe from ``arbitrage_master``.
-  2. Fetch 5-minute candles per symbol (+ NIFTY quote).
+  2. Reuse the 5-minute candles the centralized market-data refresh already
+     fetched (shared in-process ``candle_cache``); only fall back to a direct
+     Upstox fetch on a cache miss. This keeps the scanner off the Upstox
+     rate-limit (429) hot path at market open.
   3. Compute indicators (EMA 5/9/10, VWAP, Supertrend, MACD, ADX, Volume Ratio).
   4. Compute Relative Strength = Stock %% - NIFTY %%.
   5. Evaluate Kavach state + composite Trade Score (see ``kavach_engine``).
@@ -33,6 +36,7 @@ from backend.services.kavach_engine import (
     compute_trade_score,
     evaluate_kavach,
 )
+from backend.services.market_data import candle_cache
 from backend.services.smart_futures_exit import _supertrend_dir_last_two
 from backend.services.smart_futures_picker.indicators import adx_value
 from backend.services.upstox_service import UpstoxService
@@ -44,9 +48,17 @@ IST = pytz.timezone("Asia/Kolkata")
 NIFTY_KEY = "NSE_INDEX|Nifty 50"
 CANDLE_INTERVAL = "minutes/5"
 CANDLE_DAYS_BACK = 5
+# Accept market-data cache candles up to this old (refresh cadence is 5 min).
+CACHE_MAX_AGE_SEC = 420
 VOLUME_EMA_PERIOD = 20
 ADX_LENGTH = 14
 TOP_N = 5
+
+# NIFTY daily closes change once per session — cache the (expensive) daily-candle
+# fetch per IST date so a transient 429 storm cannot zero out RS. Also remember the
+# last good NIFTY % as a fallback when the live quote momentarily fails.
+_NIFTY_DAILY_CACHE: Optional[Tuple[str, List[Tuple[str, float]]]] = None  # (fetched_date, closes_dated)
+_LAST_GOOD_NIFTY_PCT: Optional[float] = None
 # Minimum bars to compute MACD(12,26,9) / ADX(14) reliably.
 MIN_BARS = 40
 
@@ -119,18 +131,32 @@ def _macd_last(closes: List[float]) -> Tuple[float, float, float]:
     return line[-1], signal[-1], line[-1] - signal[-1]
 
 
+def _candles_for_symbol(
+    upstox: UpstoxService, instrument_key: str
+) -> Tuple[Optional[List[Dict]], bool]:
+    """Return (candles, from_cache). Prefer the shared market-data cache; on a
+    miss fall back to a direct Upstox fetch (and warm the cache for next time)."""
+    cached = candle_cache.get(instrument_key, CACHE_MAX_AGE_SEC)
+    if cached and len(cached) >= MIN_BARS:
+        return cached, True
+    fetched = upstox.get_historical_candles_by_instrument_key(
+        instrument_key, interval=CANDLE_INTERVAL, days_back=CANDLE_DAYS_BACK
+    )
+    if fetched:
+        candle_cache.put(instrument_key, fetched)
+    return fetched, False
+
+
 def _compute_symbol_metrics(
     upstox: UpstoxService, entry: Dict[str, str], nifty_pct: float
 ) -> Optional[Dict[str, Any]]:
-    """Fetch candles and compute all indicators + RS + Kavach for one symbol."""
+    """Compute all indicators + RS + Kavach for one symbol (cache-first candles)."""
     instrument_key = entry.get("instrument_key") or ""
     symbol = entry.get("stock") or ""
     if not instrument_key or not symbol:
         return None
 
-    candles = upstox.get_historical_candles_by_instrument_key(
-        instrument_key, interval=CANDLE_INTERVAL, days_back=CANDLE_DAYS_BACK
-    )
+    candles, from_cache = _candles_for_symbol(upstox, instrument_key)
     if not candles or len(candles) < MIN_BARS:
         return None
     candles = _sorted_candles(candles)
@@ -194,6 +220,7 @@ def _compute_symbol_metrics(
         "symbol": symbol,
         "instrument_key": instrument_key,
         "future_symbol": entry.get("future_symbol") or "",
+        "from_cache": from_cache,
         "current_price": current_price,
         "previous_close": previous_close,
         "stock_percent": stock_pct,
@@ -225,14 +252,12 @@ def _is_market_live_ist() -> bool:
     return 555 <= minutes <= 930  # 09:15 .. 15:30
 
 
-def _nifty_change_pct(upstox: UpstoxService) -> Optional[float]:
-    """NIFTY 50 %% change = (current NIFTY price - previous DAY close) / previous DAY close.
-
-    The NIFTY index does not expose multi-day intraday candles, so previous-day
-    close is taken from *daily* candles. Current price is the live LTP during
-    market hours; after hours we use the last completed daily close vs the prior
-    daily close (so a manual/off-schedule run reflects the last session's close).
-    """
+def _nifty_daily_closes(upstox: UpstoxService) -> List[Tuple[str, float]]:
+    """NIFTY daily (date, close) list, fetched at most once per IST date."""
+    global _NIFTY_DAILY_CACHE
+    ist_today = datetime.now(IST).strftime("%Y-%m-%d")
+    if _NIFTY_DAILY_CACHE and _NIFTY_DAILY_CACHE[0] == ist_today and len(_NIFTY_DAILY_CACHE[1]) >= 2:
+        return _NIFTY_DAILY_CACHE[1]
     daily = upstox.get_historical_candles_by_instrument_key(
         NIFTY_KEY, interval="days/1", days_back=12
     )
@@ -243,6 +268,24 @@ def _nifty_change_pct(upstox: UpstoxService) -> Optional[float]:
             d = _parse_ist_date(c.get("timestamp"))
             if cl > 0 and d:
                 closes_dated.append((d, cl))
+    if len(closes_dated) >= 2:
+        _NIFTY_DAILY_CACHE = (ist_today, closes_dated)
+    elif _NIFTY_DAILY_CACHE is not None:
+        # Daily fetch failed (e.g. 429) — reuse yesterday's closes rather than nothing.
+        return _NIFTY_DAILY_CACHE[1]
+    return closes_dated
+
+
+def _nifty_change_pct(upstox: UpstoxService) -> Optional[float]:
+    """NIFTY 50 %% change = (current NIFTY price - previous DAY close) / previous DAY close.
+
+    The NIFTY index does not expose multi-day intraday candles, so previous-day
+    close is taken from *daily* candles (cached per day). Current price is the live
+    LTP during market hours; after hours we use the last completed daily close vs
+    the prior daily close. A transient quote failure falls back to the last good %.
+    """
+    global _LAST_GOOD_NIFTY_PCT
+    closes_dated = _nifty_daily_closes(upstox)
 
     if len(closes_dated) >= 2:
         last_date, last_close = closes_dated[-1]
@@ -251,24 +294,31 @@ def _nifty_change_pct(upstox: UpstoxService) -> Optional[float]:
         quote = upstox.get_market_quote_by_key(NIFTY_KEY)
         ltp = _f(quote.get("last_price")) if quote else 0.0
 
+        pct: Optional[float] = None
         if last_date == ist_today and ltp > 0:
-            # Today's daily candle already present -> current=LTP, prev=prior day.
-            return (ltp - prev_close) / prev_close * 100.0
-        if last_date < ist_today and _is_market_live_ist() and ltp > 0:
-            # Live session, today's daily candle not yet in history.
-            return (ltp - last_close) / last_close * 100.0
-        # After hours / pre-open: last completed session vs the session before.
-        return (last_close - prev_close) / prev_close * 100.0
+            pct = (ltp - prev_close) / prev_close * 100.0
+        elif last_date < ist_today and _is_market_live_ist() and ltp > 0:
+            pct = (ltp - last_close) / last_close * 100.0
+        elif not _is_market_live_ist():
+            # After hours / pre-open: last completed session vs the one before.
+            pct = (last_close - prev_close) / prev_close * 100.0
+
+        if pct is not None:
+            _LAST_GOOD_NIFTY_PCT = pct
+            return pct
+        # Live session but quote failed — reuse last good % rather than abort.
+        if _LAST_GOOD_NIFTY_PCT is not None:
+            return _LAST_GOOD_NIFTY_PCT
 
     # Last resort: live quote (close_price = prior session close).
     quote = upstox.get_market_quote_by_key(NIFTY_KEY)
-    if not quote:
-        return None
-    last = _f(quote.get("last_price"))
-    prev = _f(quote.get("close_price")) or _f((quote.get("ohlc") or {}).get("close"))
-    if prev <= 0 or last <= 0:
-        return None
-    return (last - prev) / prev * 100.0
+    if quote:
+        last = _f(quote.get("last_price"))
+        prev = _f(quote.get("close_price")) or _f((quote.get("ohlc") or {}).get("close"))
+        if prev > 0 and last > 0:
+            _LAST_GOOD_NIFTY_PCT = (last - prev) / prev * 100.0
+            return _LAST_GOOD_NIFTY_PCT
+    return _LAST_GOOD_NIFTY_PCT
 
 
 # --- ranking -----------------------------------------------------------------
@@ -371,10 +421,13 @@ def run_relative_strength_scan(scan_trigger: str = "5m_interval") -> Dict[str, A
 
     universe = load_arbitrage_curr_mth_universe()
     rows: List[Dict[str, Any]] = []
+    cache_hits = 0
     for entry in universe:
         try:
             m = _compute_symbol_metrics(upstox, entry, nifty_pct)
             if m:
+                if m.pop("from_cache", False):
+                    cache_hits += 1
                 rows.append(m)
         except Exception as exc:  # one bad symbol must not abort the scan
             logger.warning(
@@ -387,15 +440,16 @@ def run_relative_strength_scan(scan_trigger: str = "5m_interval") -> Dict[str, A
 
     duration = time.time() - started
     logger.info(
-        "Relative Strength scan (%s): %d/%d symbols, NIFTY %+.2f%%, "
+        "Relative Strength scan (%s): %d/%d symbols (%d from cache), NIFTY %+.2f%%, "
         "%d bullish / %d bearish in %.1fs",
-        scan_trigger, len(rows), len(universe), nifty_pct, len(bullish), len(bearish),
-        duration,
+        scan_trigger, len(rows), len(universe), cache_hits, nifty_pct,
+        len(bullish), len(bearish), duration,
     )
     return {
         "ok": True,
         "scanned": len(rows),
         "universe": len(universe),
+        "cache_hits": cache_hits,
         "nifty_percent": nifty_pct,
         "bullish": len(bullish),
         "bearish": len(bearish),
