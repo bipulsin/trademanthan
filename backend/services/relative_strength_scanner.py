@@ -142,16 +142,15 @@ def _candles_for_symbol(
     Upstox fetch — the platform's historical-candle quota is shared and heavily
     rate-limited, so adding 200 fetches just starves the core refresh. Manual /
     off-hours runs may fall back to a direct fetch (and warm the cache)."""
-    cached = candle_cache.get(instrument_key, CACHE_MAX_AGE_SEC)
+    cached = candle_cache.get_recent(instrument_key, CANDLE_INTERVAL, CACHE_MAX_AGE_SEC)
     if cached and len(cached) >= MIN_BARS:
         return cached, True
     if cache_only:
         return None, False
+    # Off-hours / manual run: a direct fetch auto-populates the shared cache.
     fetched = upstox.get_historical_candles_by_instrument_key(
         instrument_key, interval=CANDLE_INTERVAL, days_back=CANDLE_DAYS_BACK
     )
-    if fetched:
-        candle_cache.put(instrument_key, fetched)
     return fetched, False
 
 

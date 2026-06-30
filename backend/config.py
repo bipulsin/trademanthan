@@ -62,6 +62,20 @@ class Settings(BaseSettings):
     # instead of bursting over the limit; skipped symbols refresh on a later cycle.
     UPSTOX_CANDLE_RL_MAX_WAIT: float = float(os.getenv("UPSTOX_CANDLE_RL_MAX_WAIT", "90"))
 
+    # Process-wide shared candle cache so all jobs fetch each (instrument,
+    # interval) once per TTL instead of once per job. Only the live fetch path
+    # (range_end_date unset) is cached; exits/backtests/premarket that pass an
+    # explicit end date bypass it entirely.
+    UPSTOX_CANDLE_SHARED_CACHE_ENABLED: bool = os.getenv("UPSTOX_CANDLE_SHARED_CACHE_ENABLED", "true").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    # Freshness the transparent cache layer requires before re-fetching. Intraday
+    # bars update every interval, so keep short; daily/weekly far longer.
+    UPSTOX_CANDLE_CACHE_TTL_INTRADAY_SEC: float = float(os.getenv("UPSTOX_CANDLE_CACHE_TTL_INTRADAY_SEC", "150"))
+    UPSTOX_CANDLE_CACHE_TTL_DAILY_SEC: float = float(os.getenv("UPSTOX_CANDLE_CACHE_TTL_DAILY_SEC", "900"))
+
     # Iron Condor advisory sizing (workspace UI no longer edits these; override via env on EC2)
     IRON_CONDOR_TRADING_CAPITAL_DEFAULT: float = float(os.getenv("IRON_CONDOR_TRADING_CAPITAL_DEFAULT", "500000"))
     IRON_CONDOR_TARGET_POSITION_SLOTS: int = int(os.getenv("IRON_CONDOR_TARGET_POSITION_SLOTS", "5"))

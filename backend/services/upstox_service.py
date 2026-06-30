@@ -1482,11 +1482,37 @@ class UpstoxService:
                     interval,
                 )
                 eff_days = span_cap
-            start_d = end_d - timedelta(days=eff_days)
             to_date = end_d.strftime("%Y-%m-%d")
-            from_date = start_d.strftime("%Y-%m-%d")
+            # Window the caller actually asked for (used for cache coverage + the
+            # exact slice returned, so indicator math is identical to a direct fetch).
+            req_from_date = (end_d - timedelta(days=eff_days)).strftime("%Y-%m-%d")
 
             iv = (interval or "").strip().lower()
+
+            # Shared candle cache: only the live path (range_end_date unset) is
+            # cached so exits/backtests/premarket that pass an explicit end date
+            # are unaffected. Fetch a canonical (widest) window so engine/picker/RS
+            # share one fetch; each caller still receives only its requested slice.
+            cache_ok = range_end_date is None and getattr(
+                settings, "UPSTOX_CANDLE_SHARED_CACHE_ENABLED", True
+            )
+            if cache_ok:
+                from backend.services.market_data import candle_cache
+
+                fetch_days = candle_cache.canonical_days_back(iv, eff_days)
+                if span_cap is not None and fetch_days > span_cap:
+                    fetch_days = span_cap
+                ttl = (
+                    getattr(settings, "UPSTOX_CANDLE_CACHE_TTL_INTRADAY_SEC", 150)
+                    if iv in _INTRADAY_MERGE_INTERVALS
+                    else getattr(settings, "UPSTOX_CANDLE_CACHE_TTL_DAILY_SEC", 900)
+                )
+                cached = candle_cache.get(instrument_key, iv, req_from_date, ttl)
+                if cached is not None:
+                    return cached
+                from_date = (end_d - timedelta(days=fetch_days)).strftime("%Y-%m-%d")
+            else:
+                from_date = req_from_date
 
             candles: Optional[List[Dict]] = None
             if use_v2:
@@ -1522,6 +1548,14 @@ class UpstoxService:
                     candles = _merge_historical_with_intraday(
                         candles, intra, session_date=end_d
                     )
+
+            # Populate the shared cache with the full (canonical) fetched span and
+            # return only the caller's requested slice.
+            if cache_ok and candles:
+                from backend.services.market_data import candle_cache
+
+                candle_cache.put(instrument_key, iv, from_date, to_date, candles)
+                return candle_cache.filter_from(candles, req_from_date)
             return candles
 
         except Exception as e:
