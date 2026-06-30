@@ -57,9 +57,10 @@ class Settings(BaseSettings):
     UPSTOX_CANDLE_RL_PER_30MIN: int = int(os.getenv("UPSTOX_CANDLE_RL_PER_30MIN", "1500"))
     # Minimum seconds between consecutive candle grants (0 -> derive from per-sec cap).
     UPSTOX_CANDLE_RL_MIN_INTERVAL: float = float(os.getenv("UPSTOX_CANDLE_RL_MIN_INTERVAL", "0"))
-    # Max seconds a candle request waits in the budget queue before proceeding anyway
-    # (higher = hold the line harder during the :00/:15/:30/:45 job pileups).
-    UPSTOX_CANDLE_RL_MAX_WAIT: float = float(os.getenv("UPSTOX_CANDLE_RL_MAX_WAIT", "240"))
+    # Max seconds a candle request waits for budget before it is skipped (denied,
+    # no Upstox call). Sheds excess demand during the :00/:15/:30/:45 job pileups
+    # instead of bursting over the limit; skipped symbols refresh on a later cycle.
+    UPSTOX_CANDLE_RL_MAX_WAIT: float = float(os.getenv("UPSTOX_CANDLE_RL_MAX_WAIT", "90"))
 
     # Iron Condor advisory sizing (workspace UI no longer edits these; override via env on EC2)
     IRON_CONDOR_TRADING_CAPITAL_DEFAULT: float = float(os.getenv("IRON_CONDOR_TRADING_CAPITAL_DEFAULT", "500000"))

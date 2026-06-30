@@ -437,7 +437,10 @@ class UpstoxService:
                     try:
                         from backend.services.upstox_rate_limiter import acquire_candle_slot
 
-                        acquire_candle_slot()
+                        if not acquire_candle_slot():
+                            # Shared candle budget exhausted — skip rather than blow
+                            # the per-user limit. Caller treats None as "no data".
+                            return None
                     except Exception:
                         pass
 

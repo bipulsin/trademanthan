@@ -10,7 +10,8 @@ def test_per_second_cap_paces_requests():
     rl = SlidingWindowRateLimiter([(5, 1.0)])
     start = time.monotonic()
     for _ in range(6):
-        rl.acquire()
+        granted, _ = rl.acquire()
+        assert granted
     elapsed = time.monotonic() - start
     # 6th request can only be granted ~1s after the first.
     assert elapsed >= 0.9, elapsed
@@ -20,7 +21,8 @@ def test_no_limits_is_noop():
     rl = SlidingWindowRateLimiter([])
     start = time.monotonic()
     for _ in range(100):
-        rl.acquire()
+        granted, _ = rl.acquire()
+        assert granted
     assert (time.monotonic() - start) < 0.1
 
 
@@ -33,21 +35,30 @@ def test_min_interval_evens_out_bursts():
     assert (time.monotonic() - start) >= 0.35
 
 
-def test_thread_safe_total_count_respects_cap():
-    # 10/sec cap; 20 threads each acquire once -> at least ~1s of pacing total.
+def test_denies_when_budget_exhausted_within_max_wait():
+    # 2/sec cap; after 2 immediate grants, a 3rd with tiny max_wait is denied
+    # (no slot consumed) rather than bursting over the limit.
+    rl = SlidingWindowRateLimiter([(2, 1.0)])
+    assert rl.acquire()[0] is True
+    assert rl.acquire()[0] is True
+    granted, _ = rl.acquire(max_wait=0.05)
+    assert granted is False
+
+
+def test_thread_safe_pacing_under_load():
+    # 10/sec cap; 20 threads each try once with generous max_wait -> ~1s pacing.
     rl = SlidingWindowRateLimiter([(10, 1.0)])
     start = time.monotonic()
 
     def worker():
-        rl.acquire()
+        rl.acquire(max_wait=10.0)
 
     threads = [threading.Thread(target=worker) for _ in range(20)]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
-    # 20 grants at 10/sec -> the last batch waits ~1s. (``_events`` is pruned of
-    # entries older than the widest window, so its length is not the total count.)
+    # 20 grants at 10/sec -> the last batch waits ~1s.
     assert (time.monotonic() - start) >= 0.9
 
 

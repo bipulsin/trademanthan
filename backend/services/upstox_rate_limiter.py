@@ -70,10 +70,17 @@ class SlidingWindowRateLimiter:
                 wait = max(wait, exit_event + window - now)
         return wait
 
-    def acquire(self, max_wait: float = 240.0) -> float:
-        """Block (up to ``max_wait`` s) until a slot is free; record + return wait."""
+    def acquire(self, max_wait: float = 90.0) -> Tuple[bool, float]:
+        """Try to reserve a slot, waiting up to ``max_wait`` s.
+
+        Returns ``(granted, waited_seconds)``. When the budget can't free a slot
+        within ``max_wait`` the request is **denied** (``granted=False``) and *no*
+        slot is consumed — the caller should skip the request entirely rather than
+        sending it to Upstox. This sheds excess demand cleanly instead of bursting
+        over the limit and triggering 429s.
+        """
         if not self._limits:
-            return 0.0
+            return True, 0.0
         start_ts = time.monotonic()
         while True:
             with self._lock:
@@ -82,18 +89,10 @@ class SlidingWindowRateLimiter:
                 if wait <= 0.0:
                     self._events.append(now)
                     self._last_grant = now
-                    return now - start_ts
+                    return True, now - start_ts
             if (time.monotonic() - start_ts) + wait > max_wait:
-                # Give up waiting; record the grant anyway so we don't busy-loop and
-                # so the caller proceeds (Upstox 429 back-off remains the safety net).
-                with self._lock:
-                    g = time.monotonic()
-                    self._events.append(g)
-                    self._last_grant = g
-                logger.warning(
-                    "candle rate limiter: max_wait %.0fs exceeded; proceeding", max_wait
-                )
-                return time.monotonic() - start_ts
+                # Budget exhausted: deny without sending (caller skips this request).
+                return False, time.monotonic() - start_ts
             time.sleep(min(wait, 0.25))
 
 
@@ -106,6 +105,7 @@ _INIT_LOCK = threading.Lock()
 _acquired = 0
 _total_wait = 0.0
 _throttled = 0
+_denied = 0
 
 
 def _build_limiter() -> SlidingWindowRateLimiter:
@@ -134,39 +134,44 @@ def _get_limiter() -> SlidingWindowRateLimiter:
     return _LIMITER
 
 
-def acquire_candle_slot() -> float:
-    """Block until a candle-request slot is available under the shared budget.
+def acquire_candle_slot() -> bool:
+    """Reserve a candle-request slot under the shared budget.
 
-    No-op (returns 0.0) when disabled via ``UPSTOX_CANDLE_RATE_LIMIT_ENABLED``.
+    Returns True if the caller may send the request, or False if the budget is
+    exhausted and the request should be skipped (no Upstox call). Always returns
+    True when disabled via ``UPSTOX_CANDLE_RATE_LIMIT_ENABLED``.
     """
-    global _acquired, _total_wait, _throttled
+    global _acquired, _total_wait, _throttled, _denied
     try:
         from backend.config import settings
 
         if not getattr(settings, "UPSTOX_CANDLE_RATE_LIMIT_ENABLED", True):
-            return 0.0
+            return True
+        max_wait = float(getattr(settings, "UPSTOX_CANDLE_RL_MAX_WAIT", 90) or 90)
     except Exception:
-        pass
+        max_wait = 90.0
 
-    try:
-        from backend.config import settings
-
-        max_wait = float(getattr(settings, "UPSTOX_CANDLE_RL_MAX_WAIT", 240) or 240)
-    except Exception:
-        max_wait = 240.0
-    waited = _get_limiter().acquire(max_wait=max_wait)
-    _acquired += 1
+    granted, waited = _get_limiter().acquire(max_wait=max_wait)
     _total_wait += waited
-    if waited > 0.01:
-        _throttled += 1
-    # Periodic visibility into how hard we are throttling.
-    if _acquired % 500 == 0:
+    if not granted:
+        _denied += 1
+    else:
+        _acquired += 1
+        if waited > 0.01:
+            _throttled += 1
+    # Periodic visibility into pacing + how much demand is being shed.
+    if (_acquired + _denied) % 500 == 0:
         logger.info(
-            "candle rate limiter: %d requests paced, %d throttled, %.1fs total wait",
-            _acquired, _throttled, _total_wait,
+            "candle rate limiter: %d granted, %d denied(skipped), %d throttled, %.1fs total wait",
+            _acquired, _denied, _throttled, _total_wait,
         )
-    return waited
+    return granted
 
 
 def stats() -> dict:
-    return {"acquired": _acquired, "throttled": _throttled, "total_wait_sec": round(_total_wait, 1)}
+    return {
+        "acquired": _acquired,
+        "denied": _denied,
+        "throttled": _throttled,
+        "total_wait_sec": round(_total_wait, 1),
+    }
