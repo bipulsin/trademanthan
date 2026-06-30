@@ -43,6 +43,19 @@ class Settings(BaseSettings):
         "yes",
     )
 
+    # Process-wide budget for Upstox historical/intraday candle requests so all
+    # in-process jobs share one limit instead of collectively triggering 429s.
+    # Defaults sit safely under Upstox caps (~50/s, 500/min, 2000/30-min; 10/s for
+    # the algo-retail category), leaving headroom for non-candle calls.
+    UPSTOX_CANDLE_RATE_LIMIT_ENABLED: bool = os.getenv("UPSTOX_CANDLE_RATE_LIMIT_ENABLED", "true").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    UPSTOX_CANDLE_RL_PER_SEC: int = int(os.getenv("UPSTOX_CANDLE_RL_PER_SEC", "9"))
+    UPSTOX_CANDLE_RL_PER_MIN: int = int(os.getenv("UPSTOX_CANDLE_RL_PER_MIN", "240"))
+    UPSTOX_CANDLE_RL_PER_30MIN: int = int(os.getenv("UPSTOX_CANDLE_RL_PER_30MIN", "1900"))
+
     # Iron Condor advisory sizing (workspace UI no longer edits these; override via env on EC2)
     IRON_CONDOR_TRADING_CAPITAL_DEFAULT: float = float(os.getenv("IRON_CONDOR_TRADING_CAPITAL_DEFAULT", "500000"))
     IRON_CONDOR_TARGET_POSITION_SLOTS: int = int(os.getenv("IRON_CONDOR_TARGET_POSITION_SLOTS", "5"))

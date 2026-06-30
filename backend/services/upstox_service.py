@@ -426,9 +426,21 @@ class UpstoxService:
             API response data or None
         """
         last_error = None
-        
+
+        # Pace candle requests through the shared process-wide budget so all jobs
+        # don't collectively blow Upstox's per-user historical-candle rate limit.
+        _rate_limited_url = "/historical-candle" in url
+
         for attempt in range(max_retries):
             try:
+                if _rate_limited_url:
+                    try:
+                        from backend.services.upstox_rate_limiter import acquire_candle_slot
+
+                        acquire_candle_slot()
+                    except Exception:
+                        pass
+
                 headers = self.get_headers()
                 
                 # Make request
