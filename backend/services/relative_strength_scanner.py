@@ -132,13 +132,19 @@ def _macd_last(closes: List[float]) -> Tuple[float, float, float]:
 
 
 def _candles_for_symbol(
-    upstox: UpstoxService, instrument_key: str
+    upstox: UpstoxService, instrument_key: str, *, cache_only: bool
 ) -> Tuple[Optional[List[Dict]], bool]:
-    """Return (candles, from_cache). Prefer the shared market-data cache; on a
-    miss fall back to a direct Upstox fetch (and warm the cache for next time)."""
+    """Return (candles, from_cache). Prefer the shared market-data cache.
+
+    When ``cache_only`` (scheduled market-hours runs) we never issue our own
+    Upstox fetch — the platform's historical-candle quota is shared and heavily
+    rate-limited, so adding 200 fetches just starves the core refresh. Manual /
+    off-hours runs may fall back to a direct fetch (and warm the cache)."""
     cached = candle_cache.get(instrument_key, CACHE_MAX_AGE_SEC)
     if cached and len(cached) >= MIN_BARS:
         return cached, True
+    if cache_only:
+        return None, False
     fetched = upstox.get_historical_candles_by_instrument_key(
         instrument_key, interval=CANDLE_INTERVAL, days_back=CANDLE_DAYS_BACK
     )
@@ -148,7 +154,7 @@ def _candles_for_symbol(
 
 
 def _compute_symbol_metrics(
-    upstox: UpstoxService, entry: Dict[str, str], nifty_pct: float
+    upstox: UpstoxService, entry: Dict[str, str], nifty_pct: float, *, cache_only: bool
 ) -> Optional[Dict[str, Any]]:
     """Compute all indicators + RS + Kavach for one symbol (cache-first candles)."""
     instrument_key = entry.get("instrument_key") or ""
@@ -156,7 +162,7 @@ def _compute_symbol_metrics(
     if not instrument_key or not symbol:
         return None
 
-    candles, from_cache = _candles_for_symbol(upstox, instrument_key)
+    candles, from_cache = _candles_for_symbol(upstox, instrument_key, cache_only=cache_only)
     if not candles or len(candles) < MIN_BARS:
         return None
     candles = _sorted_candles(candles)
@@ -406,8 +412,17 @@ def _persist(scan_time: datetime, ranked: List[Dict[str, Any]]) -> None:
 # --- orchestrator ------------------------------------------------------------
 
 
-def run_relative_strength_scan(scan_trigger: str = "5m_interval") -> Dict[str, Any]:
-    """Run one full scan and persist Top-5 Bullish / Bearish. Returns a summary."""
+def run_relative_strength_scan(
+    scan_trigger: str = "5m_interval", *, cache_only: Optional[bool] = None
+) -> Dict[str, Any]:
+    """Run one full scan and persist Top-5 Bullish / Bearish. Returns a summary.
+
+    ``cache_only`` controls whether the scan may issue its own Upstox candle
+    fetches. Default: cache-only during a live session (to stay off the shared,
+    rate-limited historical-candle quota), fetch-allowed off-hours / manual runs.
+    """
+    if cache_only is None:
+        cache_only = _is_market_live_ist()
     started = time.time()
     upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
 
@@ -424,7 +439,7 @@ def run_relative_strength_scan(scan_trigger: str = "5m_interval") -> Dict[str, A
     cache_hits = 0
     for entry in universe:
         try:
-            m = _compute_symbol_metrics(upstox, entry, nifty_pct)
+            m = _compute_symbol_metrics(upstox, entry, nifty_pct, cache_only=cache_only)
             if m:
                 if m.pop("from_cache", False):
                     cache_hits += 1
@@ -440,15 +455,16 @@ def run_relative_strength_scan(scan_trigger: str = "5m_interval") -> Dict[str, A
 
     duration = time.time() - started
     logger.info(
-        "Relative Strength scan (%s): %d/%d symbols (%d from cache), NIFTY %+.2f%%, "
-        "%d bullish / %d bearish in %.1fs",
-        scan_trigger, len(rows), len(universe), cache_hits, nifty_pct,
+        "Relative Strength scan (%s, cache_only=%s): %d/%d symbols (%d from cache), "
+        "NIFTY %+.2f%%, %d bullish / %d bearish in %.1fs",
+        scan_trigger, cache_only, len(rows), len(universe), cache_hits, nifty_pct,
         len(bullish), len(bearish), duration,
     )
     return {
         "ok": True,
         "scanned": len(rows),
         "universe": len(universe),
+        "cache_only": cache_only,
         "cache_hits": cache_hits,
         "nifty_percent": nifty_pct,
         "bullish": len(bullish),
