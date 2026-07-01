@@ -11,7 +11,7 @@ set the 09:10 success flag, so 09:20 logic is unchanged.
 
 Tasks (full daily setup):
 1) Updates instrument/symbol fields in arbitrage_master from instruments JSON.
-2) After IST calendar day > 21 and until the front contract's expiry in that month,
+2) After IST calendar day > 20 and until the front contract's expiry in that month,
    currmth_* / nextmth_* use the 2nd and 3rd upcoming expiries (roll window);
    otherwise the 1st and 2nd. Missing contracts leave those columns NULL.
 3) Updates LTP columns using Upstox API by instrument key.
@@ -324,8 +324,10 @@ def _build_mappings(instruments: List[Dict]) -> Tuple[Dict[str, str], Dict[str, 
 
 def _futures_roll_window_ist(ist_now: datetime, first_upcoming: Optional[Dict]) -> bool:
     """
-    After the 21st (IST) through the end of the front contract's listing month, and before
+    After the 20th (IST) through the end of the front contract's listing month, and before
     that contract expires, use the 2nd/3rd serial expiries (skip the about-to-expire month).
+    On the first trading day on/after the 21st, nextmth becomes the new currmth and the
+    following serial expiry becomes nextmth.
     """
     if not first_upcoming:
         return False
@@ -337,7 +339,7 @@ def _futures_roll_window_ist(ist_now: datetime, first_upcoming: Optional[Dict]) 
     else:
         ist_now = ist_now.astimezone(IST)
     first_exp_ist = datetime.fromtimestamp(exp_ms / 1000.0, tz=IST)
-    if ist_now.day <= 21:
+    if ist_now.day <= 20:
         return False
     if (ist_now.year, ist_now.month) != (first_exp_ist.year, first_exp_ist.month):
         return False
@@ -350,7 +352,7 @@ def _pick_current_next_futures(
     """
     Select currmth / nextmth from not-yet-expired FUTs only. No fallback to fully expired
     chains — leave blank (None) if nothing qualifies.
-    In the roll window (day > 21 IST, same month as front expiry, before expiry), cur/nm are
+    In the roll window (day > 20 IST, same month as front expiry, before expiry), cur/nm are
     the 2nd and 3rd upcoming; otherwise the 1st and 2nd.
     """
     if not contracts:
@@ -428,6 +430,62 @@ def run_arbitrage_daily_setup(execution: _Execution = None) -> Dict:
         }
 
 
+def _build_arbitrage_metadata_updates(
+    stocks: List[str],
+    eq_map: Dict[str, str],
+    fut_map: Dict[str, List[Dict]],
+    *,
+    apply_roll_window: bool,
+) -> List[Dict]:
+    fno_sector_map = load_fno_sector_index_map()
+    metadata_updates: List[Dict] = []
+    for stock in stocks:
+        stock_key = eq_map.get(stock)
+        current_fut, next_fut = _pick_current_next_futures(
+            fut_map.get(stock, []),
+            apply_roll_window=apply_roll_window,
+        )
+        sym_u = str(stock or "").strip().upper()
+        sector_idx = normalize_sector_instrument_key(
+            fno_sector_map.get(sym_u) or equity_sector_index_instrument_key(stock)
+        )
+        metadata_updates.append(
+            {
+                "stock": stock,
+                "stock_key": stock_key,
+                "cm_symbol": current_fut.get("trading_symbol") if current_fut else None,
+                "cm_key": current_fut.get("instrument_key") if current_fut else None,
+                "nm_symbol": next_fut.get("trading_symbol") if next_fut else None,
+                "nm_key": next_fut.get("instrument_key") if next_fut else None,
+                "sector_index": sector_idx,
+            }
+        )
+    return metadata_updates
+
+
+def _apply_arbitrage_metadata_updates(metadata_updates: List[Dict]) -> int:
+    if not metadata_updates:
+        return 0
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                UPDATE arbitrage_master
+                SET
+                    stock_instrument_key = :stock_key,
+                    currmth_future_symbol = :cm_symbol,
+                    currmth_future_instrument_key = :cm_key,
+                    nextmth_future_symbol = :nm_symbol,
+                    nextmth_future_instrement_key = :nm_key,
+                    sector_index = :sector_index
+                WHERE stock = :stock
+                """
+            ),
+            metadata_updates,
+        )
+    return len(metadata_updates)
+
+
 def _run_arbitrage_daily_setup_impl(execution: _Execution = None) -> Dict:
     _ensure_arbitrage_table()
     _ensure_arbitrage_sector_index_column()
@@ -435,7 +493,7 @@ def _run_arbitrage_daily_setup_impl(execution: _Execution = None) -> Dict:
     instruments = _load_instruments()
     eq_map, fut_map = _build_mappings(instruments)
 
-    with engine.begin() as conn:
+    with engine.connect() as conn:
         stocks = [
             row[0]
             for row in conn.execute(
@@ -450,53 +508,18 @@ def _run_arbitrage_daily_setup_impl(execution: _Execution = None) -> Dict:
             ).fetchall()
         ]
 
-        fno_sector_map = load_fno_sector_index_map()
-        metadata_updates: List[Dict] = []
-        for stock in stocks:
-            stock_key = eq_map.get(stock)
-            # Rollover (skip-front after 21st until expiry) is intentionally morning-flow only.
-            apply_roll_window = execution in ("morning_910", "morning_920")
-            current_fut, next_fut = _pick_current_next_futures(
-                fut_map.get(stock, []),
-                apply_roll_window=apply_roll_window,
-            )
-            sym_u = str(stock or "").strip().upper()
-            sector_idx = normalize_sector_instrument_key(
-                fno_sector_map.get(sym_u) or equity_sector_index_instrument_key(stock)
-            )
-            metadata_updates.append(
-                {
-                    "stock": stock,
-                    "stock_key": stock_key,
-                    "cm_symbol": current_fut.get("trading_symbol") if current_fut else None,
-                    "cm_key": current_fut.get("instrument_key") if current_fut else None,
-                    "nm_symbol": next_fut.get("trading_symbol") if next_fut else None,
-                    "nm_key": next_fut.get("instrument_key") if next_fut else None,
-                    "sector_index": sector_idx,
-                }
-            )
+    # Rollover (skip-front after 20th until expiry) is intentionally morning-flow only.
+    apply_roll_window = execution in ("morning_910", "morning_920")
+    metadata_updates = _build_arbitrage_metadata_updates(
+        stocks, eq_map, fut_map, apply_roll_window=apply_roll_window
+    )
+    metadata_rows = _apply_arbitrage_metadata_updates(metadata_updates)
 
-        if metadata_updates:
-            conn.execute(
-                text(
-                    """
-                    UPDATE arbitrage_master
-                    SET
-                        stock_instrument_key = :stock_key,
-                        currmth_future_symbol = :cm_symbol,
-                        currmth_future_instrument_key = :cm_key,
-                        nextmth_future_symbol = :nm_symbol,
-                        nextmth_future_instrement_key = :nm_key,
-                        sector_index = :sector_index
-                    WHERE stock = :stock
-                    """
-                ),
-                metadata_updates,
-            )
-
-        upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+    upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+    with engine.begin() as conn:
         ltp_updated = _refresh_arbitrage_master_ltps(conn, upstox)
 
+    with engine.connect() as conn:
         total_rows = conn.execute(text('SELECT COUNT(*) FROM arbitrage_master')).scalar() or 0
         populated_stock_key = conn.execute(
             text("SELECT COUNT(*) FROM arbitrage_master WHERE stock_instrument_key IS NOT NULL")
@@ -524,6 +547,7 @@ def _run_arbitrage_daily_setup_impl(execution: _Execution = None) -> Dict:
         "success": True,
         "job_name": "arbitrage_dailySetup",
         "execution": execution,
+        "metadata_rows_updated": int(metadata_rows),
         "ltp_rows_updated": int(ltp_updated),
         "updated_at_ist": datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S"),
         "total_rows": int(total_rows),
@@ -656,6 +680,48 @@ def stop_arbitrage_daily_setup_scheduler() -> None:
 def run_arbitrage_daily_setup_now() -> Dict:
     """On-demand run; does not participate in morning-state success tracking."""
     return run_arbitrage_daily_setup(execution=None)
+
+
+def run_arbitrage_metadata_roll_now(*, apply_roll_window: bool = True) -> Dict:
+    """Refresh currmth/nextmth instrument keys only (no LTP/candles)."""
+    try:
+        _ensure_arbitrage_table()
+        _ensure_arbitrage_sector_index_column()
+        instruments = _load_instruments()
+        eq_map, fut_map = _build_mappings(instruments)
+        with engine.connect() as conn:
+            stocks = [
+                row[0]
+                for row in conn.execute(
+                    text(
+                        """
+                        SELECT stock
+                        FROM arbitrage_master
+                        WHERE stock IS NOT NULL AND TRIM(stock) <> ''
+                        ORDER BY stock
+                        """
+                    )
+                ).fetchall()
+            ]
+        metadata_updates = _build_arbitrage_metadata_updates(
+            stocks, eq_map, fut_map, apply_roll_window=apply_roll_window
+        )
+        n = _apply_arbitrage_metadata_updates(metadata_updates)
+        return {
+            "success": True,
+            "job_name": "arbitrage_metadataRoll",
+            "metadata_rows_updated": n,
+            "apply_roll_window": apply_roll_window,
+            "updated_at_ist": datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S"),
+        }
+    except Exception as e:
+        logger.error("run_arbitrage_metadata_roll_now failed: %s", e, exc_info=True)
+        return {
+            "success": False,
+            "job_name": "arbitrage_metadataRoll",
+            "error": str(e),
+            "updated_at_ist": datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S"),
+        }
 
 
 def run_arbitrage_ltp_refresh_now() -> Dict:
