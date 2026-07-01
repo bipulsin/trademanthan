@@ -154,6 +154,13 @@
                             <a href="/dailyRSchecklist.html" class="rs-checklist-link" title="Open Daily Trade Checklist" aria-label="Open Daily Trade Checklist"><i class="fas fa-clipboard-check"></i> Checklist</a>
                         </h3>
                         <div class="rs-scanner-toolbar">
+                            <label class="rs-scanner-sort" for="rsScannerSort">
+                                Sort by:
+                                <select id="rsScannerSort" aria-label="Sort scanner rows">
+                                    <option value="score" selected>Score</option>
+                                    <option value="maturity">Maturity</option>
+                                </select>
+                            </label>
                             <span class="rs-scanner-countdown" id="rsScannerCountdown" title="Next refresh">—</span>
                             <span class="rs-scanner-updated" id="rsScannerUpdated">—</span>
                             <button type="button" class="btn-icon" id="rsScannerRefresh" title="Refresh scanner" aria-label="Refresh relative strength scanner">

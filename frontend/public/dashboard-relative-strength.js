@@ -7,11 +7,18 @@
 (function () {
     const API = "/api/dashboard/relative-strength";
     const POLL_MS = 5 * 60 * 1000;
-    const COLUMNS = ["Rank", "Symbol", "Price", "RS %", "Score", "Vol×", "VWAP", "ST", "MACD", "ADX", "Kavach"];
+    const MATURITY_TOOLTIP =
+        "FRESH = first day on this list, highest continuation odds. " +
+        "CONTINUING = been here before but no exhaustion signal. " +
+        "EXTENDED = yesterday's move was unusually large for this stock — higher chance of profit-taking today. " +
+        "STRETCHED = 4+ consecutive days on the list — treat with reduced conviction regardless of setup quality.";
+    const MATURITY_ORDER = { FRESH: 0, CONTINUING: 1, EXTENDED: 2, STRETCHED: 3 };
     let timer = null;
     let countdownTimer = null;
     let nextRefreshAt = 0;
     let chartEnginePromise = null;
+    let sortMode = "score";
+    let lastData = null;
 
     function escapeHtml(s) {
         const d = document.createElement("div");
@@ -57,11 +64,53 @@
         return `<span class="rs-badge ${cls}">${escapeHtml(state || "—")}</span>`;
     }
 
+    function maturityBadge(tag, days) {
+        const t = (tag || "FRESH").toUpperCase();
+        let cls = "rs-maturity--fresh";
+        let text = "FRESH";
+        if (t === "CONTINUING") {
+            cls = "rs-maturity--continuing";
+            text = "DAY " + (days || 2);
+        } else if (t === "EXTENDED") {
+            cls = "rs-maturity--extended";
+            text = "EXTENDED";
+        } else if (t === "STRETCHED") {
+            cls = "rs-maturity--stretched";
+            text = "STRETCHED · " + (days || 4) + "D";
+        }
+        return `<span class="rs-maturity-badge ${cls}">${escapeHtml(text)}</span>`;
+    }
+
+    function rowClass(tag) {
+        const t = (tag || "").toUpperCase();
+        if (t === "EXTENDED") return "rs-scanner-row rs-scanner-row--extended";
+        if (t === "STRETCHED") return "rs-scanner-row rs-scanner-row--stretched";
+        return "rs-scanner-row";
+    }
+
+    function sortRows(rows) {
+        if (!rows || !rows.length) return rows || [];
+        const list = rows.slice();
+        if (sortMode === "maturity") {
+            list.sort(function (a, b) {
+                const oa = MATURITY_ORDER[(a.maturity_tag || "FRESH").toUpperCase()] != null
+                    ? MATURITY_ORDER[(a.maturity_tag || "FRESH").toUpperCase()] : 9;
+                const ob = MATURITY_ORDER[(b.maturity_tag || "FRESH").toUpperCase()] != null
+                    ? MATURITY_ORDER[(b.maturity_tag || "FRESH").toUpperCase()] : 9;
+                if (oa !== ob) return oa - ob;
+                return Number(b.trade_score || 0) - Number(a.trade_score || 0);
+            });
+        }
+        return list;
+    }
+
     function rowHtml(r) {
         const rsCls = Number(r.rs_percent) >= 0 ? "rs-pos" : "rs-neg";
         const vwapCls = r.above_vwap ? "rs-pos" : "rs-neg";
+        const matTag = (r.maturity_tag || "FRESH").toUpperCase();
+        const days = r.consecutive_days_on_list || 1;
         return (
-            `<tr class="rs-scanner-row" tabindex="0" role="button"` +
+            `<tr class="${rowClass(matTag)}" tabindex="0" role="button"` +
             ` data-symbol="${escapeAttr(r.symbol)}"` +
             ` data-instrument-key="${escapeAttr(r.instrument_key)}"` +
             ` data-label="${escapeAttr(r.future_symbol || r.symbol)}"` +
@@ -77,21 +126,35 @@
             `<td>${dirBadge(r.macd_bullish, "Bull", "Bear")}</td>` +
             `<td class="num">${fmtNum(r.adx, 1)}</td>` +
             `<td>${kavachBadge(r.kavach_state)}</td>` +
+            `<td class="rs-maturity-col">${maturityBadge(matTag, days)}</td>` +
             `</tr>`
+        );
+    }
+
+    function maturityHeaderHtml() {
+        return (
+            'Maturity <span class="rs-maturity-info" title="' + escapeAttr(MATURITY_TOOLTIP) + '" aria-label="Maturity legend">ⓘ</span>'
         );
     }
 
     function renderTable(host, rows) {
         if (!host) return;
-        if (!rows || !rows.length) {
+        const sorted = sortRows(rows);
+        if (!sorted || !sorted.length) {
             host.innerHTML = '<p class="rs-scanner-empty">No data yet — scanner runs every 5 min during market hours.</p>';
             return;
         }
+        const columns = ["Rank", "Symbol", "Price", "RS %", "Score", "Vol×", "VWAP", "ST", "MACD", "ADX", "Kavach", "Maturity"];
         host.innerHTML =
             '<table class="rs-scanner-table"><thead><tr>' +
-            COLUMNS.map((c) => `<th>${c}</th>`).join("") +
+            columns.map(function (c) {
+                if (c === "Maturity") {
+                    return '<th class="rs-maturity-col">' + maturityHeaderHtml() + "</th>";
+                }
+                return "<th>" + c + "</th>";
+            }).join("") +
             "</tr></thead><tbody>" +
-            rows.map(rowHtml).join("") +
+            sorted.map(rowHtml).join("") +
             "</tbody></table>";
     }
 
@@ -172,6 +235,7 @@
     }
 
     function render(data) {
+        lastData = data;
         renderTable(document.getElementById("rsScannerBullish"), data && data.bullish);
         renderTable(document.getElementById("rsScannerBearish"), data && data.bearish);
         setUpdated(data && data.last_updated);
@@ -209,6 +273,13 @@
         if (!document.getElementById("rsScannerBullish")) return;
         bindRowClicks(document.getElementById("rsScannerBullish"));
         bindRowClicks(document.getElementById("rsScannerBearish"));
+        const sortSel = document.getElementById("rsScannerSort");
+        if (sortSel) {
+            sortSel.addEventListener("change", function () {
+                sortMode = sortSel.value === "maturity" ? "maturity" : "score";
+                if (lastData) render(lastData);
+            });
+        }
         fetchScanner();
         startPolling();
         const btn = document.getElementById("rsScannerRefresh");

@@ -865,6 +865,58 @@ def _run_startup_schema_migrations(db_engine):
                     )
                     print("Applied migration: created daily_checklist (PostgreSQL)")
 
+            # RS Scanner move-maturity daily history (one row per symbol per session)
+            if "rs_scanner_history" not in table_names:
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE rs_scanner_history (
+                                id BIGSERIAL PRIMARY KEY,
+                                date DATE NOT NULL,
+                                symbol TEXT NOT NULL,
+                                direction TEXT NOT NULL,
+                                rs_pct DOUBLE PRECISION,
+                                daily_range_pct DOUBLE PRECISION,
+                                atr14_pct DOUBLE PRECISION,
+                                range_vs_atr_ratio DOUBLE PRECISION,
+                                consecutive_days_on_list INTEGER NOT NULL DEFAULT 1,
+                                maturity_tag TEXT NOT NULL DEFAULT 'FRESH',
+                                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                                UNIQUE (date, symbol)
+                            )
+                            """
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_rs_hist_date "
+                            "ON rs_scanner_history (date DESC)"
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_rs_hist_symbol_date "
+                            "ON rs_scanner_history (symbol, date DESC)"
+                        )
+                    )
+                    print("Applied migration: created rs_scanner_history (PostgreSQL)")
+
+            # daily_checklist: move-maturity fields from RS scanner history
+            if "daily_checklist" in table_names and db_engine.dialect.name == "postgresql":
+                _dc_cols = {c["name"] for c in inspect(db_engine).get_columns("daily_checklist")}
+                for col, typ in (
+                    ("maturity_tag", "TEXT"),
+                    ("consecutive_days_on_list", "INTEGER"),
+                    ("range_vs_atr_ratio", "DOUBLE PRECISION"),
+                    ("eligibility_note", "TEXT"),
+                ):
+                    if col not in _dc_cols:
+                        conn.execute(
+                            text(f"ALTER TABLE daily_checklist ADD COLUMN {col} {typ}")
+                        )
+                        print(f"Applied migration: added daily_checklist.{col}")
+
             # Live OI heatmap snapshot (Upstox batch quotes; refreshed by oi_heatmap job)
             if "oi_heatmap_latest" not in table_names:
                 if db_engine.dialect.name == "postgresql":

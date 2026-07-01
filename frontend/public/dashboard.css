@@ -2478,8 +2478,26 @@ body[data-theme="dark"] .oi-heatmap-more-link {
 /* --- Relative Strength Scanner ------------------------------------------- */
 .rs-scanner-toolbar {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 12px;
+}
+
+.rs-scanner-sort {
+    font-size: 12px;
+    color: var(--theme-muted, #64748b);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.rs-scanner-sort select {
+    font-size: 12px;
+    padding: 2px 6px;
+    border-radius: 6px;
+    border: 1px solid #cbd5e1;
+    background: #fff;
+    color: #334155;
 }
 
 .rs-scanner-countdown,
@@ -2563,6 +2581,43 @@ body[data-theme="dark"] .oi-heatmap-more-link {
     transition: background 0.12s ease;
 }
 
+.rs-scanner-row--extended {
+    border-left: 3px solid #f59e0b;
+}
+
+.rs-scanner-row--stretched {
+    border-left: 3px solid #ef4444;
+}
+
+.rs-kavach-cell {
+    white-space: nowrap;
+}
+
+.rs-maturity-badge {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 700;
+    vertical-align: middle;
+    letter-spacing: 0.02em;
+}
+
+.rs-maturity--fresh { background: #ccfbf1; color: #0f766e; }
+.rs-maturity--continuing { background: #e2e8f0; color: #475569; }
+.rs-maturity--extended { background: #ffedd5; color: #c2410c; }
+.rs-maturity--stretched { background: #fee2e2; color: #b91c1c; }
+
+.rs-maturity-info {
+    display: inline-block;
+    margin-left: 4px;
+    font-size: 11px;
+    color: #94a3b8;
+    cursor: help;
+    font-weight: 400;
+}
+
 .rs-scanner-row:hover,
 .rs-scanner-row:focus {
     background: rgba(59, 130, 246, 0.08);
@@ -2613,8 +2668,19 @@ body[data-theme="dark"] .rs-score--yellow { background: rgba(250, 204, 21, 0.28)
 body[data-theme="dark"] .rs-score--grey { background: rgba(148, 163, 184, 0.22); color: #cbd5e1; }
 body[data-theme="dark"] .rs-scanner-row:hover,
 body[data-theme="dark"] .rs-scanner-row:focus { background: rgba(59, 130, 246, 0.16); }
+body[data-theme="dark"] .rs-scanner-sort select {
+    background: #1e293b;
+    border-color: #475569;
+    color: #e2e8f0;
+}
+body[data-theme="dark"] .rs-maturity--fresh { background: rgba(20, 184, 166, 0.28); color: #5eead4; }
+body[data-theme="dark"] .rs-maturity--continuing { background: rgba(100, 116, 139, 0.35); color: #cbd5e1; }
+body[data-theme="dark"] .rs-maturity--extended { background: rgba(245, 158, 11, 0.28); color: #fdba74; }
+body[data-theme="dark"] .rs-maturity--stretched { background: rgba(239, 68, 68, 0.28); color: #fca5a5; }
+body[data-theme="dark"] .rs-scanner-row--extended { border-left-color: #f59e0b; }
+body[data-theme="dark"] .rs-scanner-row--stretched { border-left-color: #ef4444; }
 
-/* Mobile: show only Symbol, RS%, Score, Vol×, Kavach (hide Rank, Price, VWAP, ST, MACD, ADX). */
+/* Mobile: show only Symbol, RS%, Score, Vol×, Kavach+Maturity (hide Rank, Price, VWAP, ST, MACD, ADX). */
 @media (max-width: 640px) {
     .rs-scanner-table th:nth-child(1),
     .rs-scanner-table td:nth-child(1),
@@ -2627,7 +2693,9 @@ body[data-theme="dark"] .rs-scanner-row:focus { background: rgba(59, 130, 246, 0
     .rs-scanner-table th:nth-child(9),
     .rs-scanner-table td:nth-child(9),
     .rs-scanner-table th:nth-child(10),
-    .rs-scanner-table td:nth-child(10) {
+    .rs-scanner-table td:nth-child(10),
+    .rs-scanner-table th:nth-child(11),
+    .rs-scanner-table td:nth-child(11) {
         display: none;
     }
 

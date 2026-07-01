@@ -36,6 +36,10 @@ from backend.services.kavach_engine import (
     compute_trade_score,
     evaluate_kavach,
 )
+from backend.services.rs_scanner_maturity import (
+    default_maturity_fields,
+    load_today_maturity_map,
+)
 from backend.services.market_data import candle_cache
 from backend.services.smart_futures_exit import _supertrend_dir_last_two
 from backend.services.smart_futures_picker.indicators import adx_value
@@ -497,8 +501,16 @@ def run_relative_strength_scan(
             )
 
     bullish, bearish = _rank(rows)
+    ranked = bullish + bearish
+    try:
+        from backend.services.rs_scanner_maturity import enrich_ranked_with_maturity
+
+        enrich_ranked_with_maturity(ranked, upstox)
+    except Exception as exc:
+        logger.warning("Relative Strength scan: maturity enrichment failed: %s", exc)
+
     scan_time = datetime.now(IST)
-    _persist(scan_time, bullish + bearish)
+    _persist(scan_time, ranked)
 
     duration = time.time() - started
     logger.info(
@@ -538,9 +550,10 @@ _LATEST_SQL = text(
 )
 
 
-def _row_to_dict(r) -> Dict[str, Any]:
+def _row_to_dict(r, maturity: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     price = _f(r.current_price)
     vwap = _f(r.vwap)
+    mat = maturity or default_maturity_fields()
     return {
         "rank": int(r.rank_position),
         "symbol": r.symbol,
@@ -559,6 +572,9 @@ def _row_to_dict(r) -> Dict[str, Any]:
         "adx": round(_f(r.adx), 1),
         "kavach_state": r.kavach_state,
         "kavach_strength": int(r.kavach_strength or 0),
+        "maturity_tag": mat.get("maturity_tag", "FRESH"),
+        "consecutive_days_on_list": int(mat.get("consecutive_days_on_list") or 1),
+        "range_vs_atr_ratio": round(_f(mat.get("range_vs_atr_ratio")), 2),
     }
 
 
@@ -570,13 +586,16 @@ def get_latest_snapshot() -> Dict[str, Any]:
     finally:
         db.close()
 
+    maturity_map = load_today_maturity_map()
+
     bullish: List[Dict] = []
     bearish: List[Dict] = []
     last_updated = ""
     for r in rows:
         if not last_updated and r.scan_time is not None:
             last_updated = r.scan_time.isoformat()
-        item = _row_to_dict(r)
+        mat = maturity_map.get(r.symbol) or default_maturity_fields()
+        item = _row_to_dict(r, mat)
         if r.ranking_type == RANKING_BULLISH:
             bullish.append(item)
         else:

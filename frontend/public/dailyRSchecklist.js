@@ -86,6 +86,23 @@
         return "dc-score--red";
     }
 
+    function maturityBadgeHtml(tag, days) {
+        var t = (tag || "FRESH").toUpperCase();
+        var cls = "dc-maturity--fresh";
+        var text = "FRESH";
+        if (t === "CONTINUING") {
+            cls = "dc-maturity--continuing";
+            text = "DAY " + (days || 2);
+        } else if (t === "EXTENDED") {
+            cls = "dc-maturity--extended";
+            text = "EXTENDED";
+        } else if (t === "STRETCHED") {
+            cls = "dc-maturity--stretched";
+            text = "STRETCHED · " + (days || 4) + "D";
+        }
+        return '<span class="dc-maturity-badge ' + cls + '">' + text + "</span>";
+    }
+
     function currentStock(symbol) {
         if (!state || !state.stocks) return null;
         for (var i = 0; i < state.stocks.length; i++) {
@@ -150,6 +167,10 @@
         } else { score.style.display = "none"; }
         var conf = card.querySelector(".dc-conf");
         conf.textContent = stock.confidence || stock.dashboard_kavach || "";
+        var mat = card.querySelector(".dc-maturity");
+        if (mat) {
+            mat.innerHTML = maturityBadgeHtml(stock.maturity_tag, stock.consecutive_days_on_list);
+        }
         var dec = card.querySelector(".dc-decision");
         dec.textContent = stock.decision || "⬜ Not assessed";
         dec.className = "dc-decision dc-decision--" + dcls;
@@ -275,6 +296,7 @@
         grid.appendChild(preTitle);
         grid.appendChild(buildNewsItem(stock));
         grid.appendChild(buildAdx935Item(stock));
+        grid.appendChild(buildMaturityItem(stock));
 
         var gateTitle = el("div", "dc-group-title dc-modal-span2", "Entry gate (auto from RS scanner)");
         grid.appendChild(gateTitle);
@@ -306,6 +328,10 @@
         var dec = el("div", "dc-modal-decision dc-decision dc-decision--" + decisionClass(stock) + " dc-modal-span2");
         dec.textContent = stock.decision || "⬜ Not assessed";
         grid.appendChild(dec);
+
+        if (stock.eligibility_note) {
+            grid.appendChild(el("div", "dc-eligibility-note dc-modal-span2", stock.eligibility_note));
+        }
 
         var notes = el("textarea", "dc-notes dc-modal-span2");
         notes.placeholder = "Trade notes…";
@@ -375,6 +401,18 @@
         inp.value = stock.adx_935 == null ? "" : stock.adx_935;
         inp.addEventListener("input", function () { onChange(stock.symbol, "adx_935", inp.value); });
         it.appendChild(inp);
+        return it;
+    }
+
+    function buildMaturityItem(stock) {
+        var it = el("div", "dc-item");
+        var lab = el("div", "dc-item-label");
+        lab.appendChild(el("span", null, "Maturity"));
+        lab.appendChild(el("span", "dc-sys-badge", "System"));
+        it.appendChild(lab);
+        var val = el("div", "dc-auto-val neutral");
+        val.innerHTML = maturityBadgeHtml(stock.maturity_tag, stock.consecutive_days_on_list);
+        it.appendChild(val);
         return it;
     }
 

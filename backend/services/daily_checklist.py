@@ -56,7 +56,7 @@ PAGE_LEVEL_FIELDS = {"nifty_open_direction"}  # one value applied to all stocks
 DERIVED_COLS = (
     "adx_935_status", "time_ok", "score_ok", "confidence_ok", "state_ok",
     "ema_ok", "st_ok", "macd_ok", "adx_ok", "volume_ok", "gate_score",
-    "decision", "section",
+    "decision", "section", "eligibility_note",
 )
 
 
@@ -92,6 +92,8 @@ def evaluate(row: Dict[str, Any]) -> Dict[str, Any]:
     direction = (row.get("direction") or LONG).upper()
     is_long = direction == LONG
     counter = bool(row.get("counter_rs"))
+    maturity = (row.get("maturity_tag") or "").strip().upper()
+    maturity_a_only = maturity in ("EXTENDED", "STRETCHED")
 
     # --- pre-market: news + ADX(9:35) ---
     news_clean = row.get("news_clean")  # True=clean, False=adverse, None=unset
@@ -111,11 +113,11 @@ def evaluate(row: Dict[str, Any]) -> Dict[str, Any]:
     score = _num(row.get("kavach_score_entry"))
     score_ok = (score >= 70) if score is not None else None
 
-    # 6. Confidence: same-direction A/B; counter-RS A only.
+    # 6. Confidence: same-direction A/B; counter-RS or EXTENDED/STRETCHED → A only.
     conf = (row.get("confidence") or "").strip().upper() or None
     if conf is None:
         confidence_ok = None
-    elif counter:
+    elif counter or maturity_a_only:
         confidence_ok = conf == "A"
     else:
         confidence_ok = conf in ("A", "B")
@@ -190,6 +192,13 @@ def evaluate(row: Dict[str, Any]) -> Dict[str, Any]:
     else:
         decision, section = D_UNASSESSED, SEC_WATCH
 
+    eligibility_note = ""
+    if confidence_ok is False and conf == "B":
+        if counter:
+            eligibility_note = "Requires A-grade — counter-RS direction"
+        elif maturity_a_only:
+            eligibility_note = f"Requires A-grade — {maturity} move maturity"
+
     return {
         "adx_935_status": adx_935_status(a935),
         "time_ok": time_ok,
@@ -204,6 +213,7 @@ def evaluate(row: Dict[str, Any]) -> Dict[str, Any]:
         "gate_score": gate_score,
         "decision": decision,
         "section": section,
+        "eligibility_note": eligibility_note or None,
     }
 
 
@@ -222,8 +232,12 @@ _RS_ALL_SQL = text(
     """
     SELECT s.symbol, s.relative_strength, s.trade_score, s.volume_ratio,
            s.kavach_state, s.ema5, s.vwap, s.supertrend, s.macd, s.macd_signal,
-           s.macd_histogram, s.adx, s.ranking_type
+           s.macd_histogram, s.adx, s.ranking_type,
+           h.maturity_tag, h.consecutive_days_on_list, h.range_vs_atr_ratio
     FROM relative_strength_snapshot s
+    LEFT JOIN rs_scanner_history h
+      ON h.symbol = s.symbol
+     AND h.date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date
     WHERE s.scan_time = (SELECT MAX(scan_time) FROM relative_strength_snapshot)
     ORDER BY s.ranking_type, s.rank_position
     """
@@ -233,8 +247,12 @@ _RS_DETAIL_SQL = text(
     """
     SELECT s.symbol, s.relative_strength, s.trade_score, s.volume_ratio,
            s.kavach_state, s.ema5, s.vwap, s.supertrend, s.macd, s.macd_signal,
-           s.macd_histogram, s.adx, s.ranking_type
+           s.macd_histogram, s.adx, s.ranking_type,
+           h.maturity_tag, h.consecutive_days_on_list, h.range_vs_atr_ratio
     FROM relative_strength_snapshot s
+    LEFT JOIN rs_scanner_history h
+      ON h.symbol = s.symbol
+     AND h.date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date
     WHERE s.scan_time = (SELECT MAX(scan_time) FROM relative_strength_snapshot)
       AND s.symbol = :sym
     LIMIT 1
@@ -332,6 +350,9 @@ def _auto_fields_from_rs(row: Any, direction: str) -> Dict[str, Any]:
     di = None
     if adx is not None and adx >= 25:
         di = "DI+>DI-" if direction == LONG else "DI->DI+"
+    maturity_tag = getattr(row, "maturity_tag", None) or "FRESH"
+    consecutive = getattr(row, "consecutive_days_on_list", None)
+    range_ratio = _num(getattr(row, "range_vs_atr_ratio", None))
     fields: Dict[str, Any] = {
         "rs_pct": round(_num(row.relative_strength) or 0, 2),
         "dashboard_score": int(round(score or 0)) if score is not None else None,
@@ -348,6 +369,9 @@ def _auto_fields_from_rs(row: Any, direction: str) -> Dict[str, Any]:
         "di_alignment": di,
         "volume": _volume_label(_num(row.volume_ratio)),
         "entry_time": _current_entry_time_ist(),
+        "maturity_tag": maturity_tag,
+        "consecutive_days_on_list": int(consecutive) if consecutive is not None else 1,
+        "range_vs_atr_ratio": round(range_ratio, 2) if range_ratio is not None else 0.0,
     }
     return {k: v for k, v in fields.items() if v is not None}
 
@@ -368,6 +392,7 @@ _UPSERT_COLS = (
     "news_clean", "adx_935", "entry_time", "kavach_score_entry", "confidence",
     "trading_state", "ema_vs_vwap", "supertrend", "macd", "adx_entry",
     "di_alignment", "volume", "counter_rs", "notes",
+    "maturity_tag", "consecutive_days_on_list", "range_vs_atr_ratio",
 )
 
 
@@ -405,6 +430,7 @@ _SELECT_COLS = """
     kavach_score_entry, score_ok, confidence, confidence_ok, trading_state, state_ok,
     ema_vs_vwap, ema_ok, supertrend, st_ok, macd, macd_ok, adx_entry, di_alignment,
     adx_ok, volume, volume_ok, counter_rs, gate_score, decision, section, notes,
+    maturity_tag, consecutive_days_on_list, range_vs_atr_ratio, eligibility_note,
     updated_at
 """
 
@@ -422,6 +448,8 @@ def _row_to_dict(r) -> Dict[str, Any]:
         "ema_vs_vwap", "ema_ok", "supertrend", "st_ok", "macd", "macd_ok",
         "adx_entry", "di_alignment", "adx_ok", "volume", "volume_ok", "counter_rs",
         "gate_score", "decision", "section", "notes",
+        "maturity_tag", "consecutive_days_on_list", "range_vs_atr_ratio",
+        "eligibility_note",
     )}
     d["updated_at"] = r.updated_at.isoformat() if r.updated_at else None
     return d

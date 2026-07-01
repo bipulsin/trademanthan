@@ -141,7 +141,7 @@ button.dc-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
 body[data-theme="dark"] .dc-rs--pos { color: #4ade80 !important; }
 body[data-theme="dark"] .dc-rs--neg { color: #f87171 !important; }
 
-.dc-face-center { display: flex; gap: 5px; align-items: center; }
+.dc-face-center { display: flex; flex-direction: column; align-items: center; gap: 2px; }
 /* Score badges — high contrast in both themes */
 .dc-score {
     font-size: 11px; font-weight: 800; padding: 2px 7px; border-radius: 5px;
@@ -151,6 +151,32 @@ body[data-theme="dark"] .dc-rs--neg { color: #f87171 !important; }
 .dc-score--amber { background: #b45309 !important; }
 .dc-score--red { background: #b91c1c !important; }
 .dc-conf { font-size: 11px; font-weight: 700; color: var(--theme-muted, #64748b); }
+
+.dc-maturity-badge {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 700;
+    vertical-align: middle;
+}
+.dc-maturity--fresh { background: #ccfbf1; color: #0f766e; }
+.dc-maturity--continuing { background: #e2e8f0; color: #475569; }
+.dc-maturity--extended { background: #ffedd5; color: #c2410c; }
+.dc-maturity--stretched { background: #fee2e2; color: #b91c1c; }
+body[data-theme="dark"] .dc-maturity--fresh { background: rgba(20, 184, 166, 0.28); color: #5eead4; }
+body[data-theme="dark"] .dc-maturity--continuing { background: rgba(100, 116, 139, 0.35); color: #cbd5e1; }
+body[data-theme="dark"] .dc-maturity--extended { background: rgba(245, 158, 11, 0.28); color: #fdba74; }
+body[data-theme="dark"] .dc-maturity--stretched { background: rgba(239, 68, 68, 0.28); color: #fca5a5; }
+
+.dc-eligibility-note {
+    font-size: 12px;
+    color: #c2410c;
+    font-weight: 600;
+    padding: 4px 0 0;
+}
+body[data-theme="dark"] .dc-eligibility-note { color: #fdba74; }
 
 .dc-empty { text-align: center; color: var(--theme-muted, #64748b); }
 .dc-empty p { margin: 0 0 10px; }

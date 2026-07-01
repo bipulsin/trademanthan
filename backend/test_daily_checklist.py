@@ -99,6 +99,36 @@ def test_counter_rs_requires_a_grade():
     assert r["confidence_ok"] is False
     assert r["gate_score"] == 8
     assert r["decision"] == D_WATCH  # 8/9 -> watch
+    assert r["eligibility_note"] == "Requires A-grade — counter-RS direction"
+
+
+def test_extended_maturity_requires_a_grade():
+    row = _full_long_pass()
+    row["maturity_tag"] = "EXTENDED"
+    row["confidence"] = "B"
+    r = evaluate(row)
+    assert r["confidence_ok"] is False
+    assert r["gate_score"] == 8
+    assert r["decision"] == D_WATCH
+    assert r["eligibility_note"] == "Requires A-grade — EXTENDED move maturity"
+
+
+def test_stretched_maturity_requires_a_grade():
+    row = _full_long_pass()
+    row["maturity_tag"] = "STRETCHED"
+    row["confidence"] = "B"
+    r = evaluate(row)
+    assert r["confidence_ok"] is False
+    assert "STRETCHED move maturity" in (r["eligibility_note"] or "")
+
+
+def test_fresh_maturity_allows_b_grade():
+    row = _full_long_pass()
+    row["maturity_tag"] = "FRESH"
+    row["confidence"] = "B"
+    r = evaluate(row)
+    assert r["confidence_ok"] is True
+    assert not r.get("eligibility_note")
 
 
 def test_confidence_cd_fails():
