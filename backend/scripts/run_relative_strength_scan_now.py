@@ -1,6 +1,8 @@
-# One-shot Relative Strength scan (full arbitrage_master universe → Top-5 snapshot).
-# Also invoked by deploy-paperclip GitHub Actions workflow after production deploy.
-from __future__ import annotations
+#!/usr/bin/env python3
+"""One-shot Relative Strength scan (full arbitrage_master universe → Top-5 snapshot).
+
+Also invoked by deploy-paperclip GitHub Actions workflow after production deploy.
+"""
 
 import argparse
 import json
