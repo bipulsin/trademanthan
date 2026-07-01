@@ -49,6 +49,13 @@ jobs:
           echo "sha=$REF" >> "$GITHUB_OUTPUT"
           echo "Deploying trademanthan ref: $REF"
 
+      - name: Check SSH secret
+        run: |
+          if [[ -z "${{ secrets.PAPERCLIP_SSH_PRIVATE_KEY }}" && -z "${{ secrets.EC2_SSH_KEY }}" ]]; then
+            echo "::error::Missing GitHub secret. Add PAPERCLIP_SSH_PRIVATE_KEY (paperclip_key PEM) in repo Settings → Secrets → Actions."
+            exit 1
+          fi
+
       - name: Deploy on paperclip-vm
         uses: appleboy/ssh-action@v1.2.0
         env:
@@ -59,7 +66,7 @@ jobs:
         with:
           host: 140.245.14.17
           username: ubuntu
-          key: ${{ secrets.PAPERCLIP_SSH_PRIVATE_KEY }}
+          key: ${{ secrets.PAPERCLIP_SSH_PRIVATE_KEY || secrets.EC2_SSH_KEY }}
           envs: REBUILD,TRADEMANTHAN_REF,APP_SRC_REV,FRONTEND_SRC_REV
           command_timeout: 40m
           script: |
@@ -99,12 +106,17 @@ jobs:
         with:
           host: 140.245.14.17
           username: ubuntu
-          key: ${{ secrets.PAPERCLIP_SSH_PRIVATE_KEY }}
+          key: ${{ secrets.PAPERCLIP_SSH_PRIVATE_KEY || secrets.EC2_SSH_KEY }}
           command_timeout: 30m
           script: |
             set -euo pipefail
             cd /home/ubuntu/twcto
-            docker compose exec -T app python3 backend/scripts/run_relative_strength_scan_now.py --fetch
+            docker compose exec -T app python3 backend/scripts/run_relative_strength_scan_now.py --fetch || \
+              docker compose exec -T app python3 -c "
+from backend.services.relative_strength_scanner import run_relative_strength_scan
+import json
+print(json.dumps(run_relative_strength_scan(scan_trigger='manual_gha', cache_only=False), default=str))
+"
 
       - name: Verify public health
         run: |
