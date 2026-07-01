@@ -1,5 +1,8 @@
 name: Deploy to paperclip-vm
-# Requires repo secret PAPERCLIP_SSH_PRIVATE_KEY or EC2_SSH_KEY (paperclip_key PEM).
+# Repository secret required (one of):
+#   PAPERCLIP_SSH_PRIVATE_KEY  (preferred)
+#   EC2_SSH_KEY, SSH_PRIVATE_KEY, PAPERCLIP_KEY
+# Value: full PEM contents of ~/.ssh/paperclip_key
 
 on:
   workflow_dispatch:
@@ -25,6 +28,7 @@ on:
       - "scripts/trigger-paperclip-deploy.sh"
       - "scripts/paperclip-ssh.sh"
       - "scripts/setup-paperclip-ssh.sh"
+      - "scripts/deploy-paperclip-now.sh"
       - ".github/workflows/deploy-paperclip.yml"
 
 concurrency:
@@ -50,62 +54,83 @@ jobs:
           echo "sha=$REF" >> "$GITHUB_OUTPUT"
           echo "Deploying trademanthan ref: $REF"
 
+      - name: Setup SSH key from repository secrets
+        id: ssh
+        env:
+          K_PAPERCLIP: ${{ secrets.PAPERCLIP_SSH_PRIVATE_KEY }}
+          K_EC2: ${{ secrets.EC2_SSH_KEY }}
+          K_SSH: ${{ secrets.SSH_PRIVATE_KEY }}
+          K_SIMPLE: ${{ secrets.PAPERCLIP_KEY }}
+        run: |
+          set -euo pipefail
+          KEY=""
+          NAME=""
+          if [ -n "$K_PAPERCLIP" ]; then KEY="$K_PAPERCLIP"; NAME="PAPERCLIP_SSH_PRIVATE_KEY"
+          elif [ -n "$K_EC2" ]; then KEY="$K_EC2"; NAME="EC2_SSH_KEY"
+          elif [ -n "$K_SSH" ]; then KEY="$K_SSH"; NAME="SSH_PRIVATE_KEY"
+          elif [ -n "$K_SIMPLE" ]; then KEY="$K_SIMPLE"; NAME="PAPERCLIP_KEY"
+          fi
+          if [ -z "$KEY" ]; then
+            echo "::error::No SSH repository secret found. Add PAPERCLIP_SSH_PRIVATE_KEY (preferred) with the full paperclip_key PEM in Settings → Secrets and variables → Actions → Repository secrets."
+            exit 1
+          fi
+          echo "Using repository secret: $NAME"
+          mkdir -p ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/paperclip_key
+          chmod 600 ~/.ssh/paperclip_key
+          ssh-keyscan -H 140.245.14.17 >> ~/.ssh/known_hosts 2>/dev/null || true
+          ssh-keygen -y -f ~/.ssh/paperclip_key >/dev/null
+
       - name: Deploy on paperclip-vm
-        uses: appleboy/ssh-action@v1.2.0
         env:
           REBUILD: ${{ github.event_name == 'push' && '1' || (github.event.inputs.rebuild == false && '0' || '1') }}
           TRADEMANTHAN_REF: ${{ steps.ref.outputs.sha }}
           APP_SRC_REV: ${{ steps.ref.outputs.sha }}
           FRONTEND_SRC_REV: ${{ steps.ref.outputs.sha }}
-        with:
-          host: 140.245.14.17
-          username: ubuntu
-          key: ${{ secrets.EC2_SSH_KEY || secrets.PAPERCLIP_SSH_PRIVATE_KEY }}
-          envs: REBUILD,TRADEMANTHAN_REF,APP_SRC_REV,FRONTEND_SRC_REV
-          command_timeout: 40m
-          script: |
-            set -euo pipefail
-            cd /home/ubuntu/twcto
-            export REBUILD="${REBUILD:-1}"
-            export TRADEMANTHAN_REF="${TRADEMANTHAN_REF:-main}"
-            export APP_SRC_REV="${APP_SRC_REV:-${TRADEMANTHAN_REF}}"
-            export FRONTEND_SRC_REV="${FRONTEND_SRC_REV:-${TRADEMANTHAN_REF}}"
-            echo "[gha] git pull twcto_docker..."
-            git fetch origin main
-            git reset --hard origin/main
-            if [[ "${REBUILD}" == "1" ]]; then
-              echo "[gha] REBUILD=1 building app + nginx (rev ${TRADEMANTHAN_REF:0:12})..."
-              docker compose build app nginx
-            else
-              echo "[gha] pulling app + nginx from GHCR..."
-              docker compose pull app nginx
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/paperclip_key -o ConnectTimeout=25 ubuntu@140.245.14.17 \
+            "REBUILD=${REBUILD} TRADEMANTHAN_REF=${TRADEMANTHAN_REF} APP_SRC_REV=${APP_SRC_REV} FRONTEND_SRC_REV=${FRONTEND_SRC_REV} bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd /home/ubuntu/twcto
+          export REBUILD="${REBUILD:-1}"
+          export TRADEMANTHAN_REF="${TRADEMANTHAN_REF:-main}"
+          export APP_SRC_REV="${APP_SRC_REV:-${TRADEMANTHAN_REF}}"
+          export FRONTEND_SRC_REV="${FRONTEND_SRC_REV:-${TRADEMANTHAN_REF}}"
+          echo "[gha] git pull twcto_docker..."
+          git fetch origin main
+          git reset --hard origin/main
+          if [[ "${REBUILD}" == "1" ]]; then
+            echo "[gha] REBUILD=1 building app + nginx (rev ${TRADEMANTHAN_REF:0:12})..."
+            docker compose build app nginx
+          else
+            echo "[gha] pulling app + nginx from GHCR..."
+            docker compose pull app nginx
+          fi
+          docker compose up -d --force-recreate app nginx
+          for _ in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:8080/scan/health >/dev/null 2>&1; then
+              echo "[gha] healthy"
+              curl -fsS http://127.0.0.1:8080/scan/health | head -c 300
+              echo ""
+              exit 0
             fi
-            docker compose up -d --force-recreate app nginx
-            for _ in $(seq 1 40); do
-              if curl -fsS http://127.0.0.1:8080/scan/health >/dev/null 2>&1; then
-                echo "[gha] healthy"
-                curl -fsS http://127.0.0.1:8080/scan/health | head -c 300
-                echo ""
-                exit 0
-              fi
-              sleep 3
-            done
-            echo "[gha] health check timed out" >&2
-            docker compose ps
-            exit 1
+            sleep 3
+          done
+          echo "[gha] health check timed out" >&2
+          docker compose ps
+          exit 1
+          REMOTE
 
       - name: Run Relative Strength scan
         if: github.event_name == 'push' || github.event.inputs.run_rs_scan != false
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: 140.245.14.17
-          username: ubuntu
-          key: ${{ secrets.EC2_SSH_KEY || secrets.PAPERCLIP_SSH_PRIVATE_KEY }}
-          command_timeout: 30m
-          script: |
-            set -euo pipefail
-            cd /home/ubuntu/twcto
-            docker compose exec -T app python3 -c 'from backend.services.relative_strength_scanner import run_relative_strength_scan; import json; print(json.dumps(run_relative_strength_scan(scan_trigger="manual_gha", cache_only=False), default=str))'
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/paperclip_key -o ConnectTimeout=25 ubuntu@140.245.14.17 bash -s <<'REMOTE'
+          set -euo pipefail
+          cd /home/ubuntu/twcto
+          docker compose exec -T app python3 -c 'from backend.services.relative_strength_scanner import run_relative_strength_scan; import json; print(json.dumps(run_relative_strength_scan(scan_trigger="manual_gha", cache_only=False), default=str))'
+          REMOTE
 
       - name: Verify public health
         run: |
