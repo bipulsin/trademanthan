@@ -27,12 +27,20 @@ Requires `~/.ssh/paperclip_key` or `Host paperclip` in `~/.ssh/config`.
 
 ### GitHub Actions deploy
 
-Repository secret: **`PAPERCLIP_SSH_PRIVATE_KEY`** (same PEM as local `paperclip_key`).
+Repository secrets (one-time, from a machine with `~/.ssh/paperclip_key`):
 
 ```bash
-# Manual deploy + RS scan from GitHub Actions
-gh workflow run deploy-paperclip.yml -f rebuild=true -f run_rs_scan=true
+./scripts/configure-paperclip-github-secret.sh --deploy
 ```
+
+Or manually:
+
+```bash
+gh secret set PAPERCLIP_SSH_PRIVATE_KEY < ~/.ssh/paperclip_key -R bipulsin/trademanthan
+gh workflow run deploy-paperclip.yml -R bipulsin/trademanthan -f rebuild=true -f run_rs_scan=true
+```
+
+**paperclip-vm firewall:** allow inbound SSH (port 22) from GitHub Actions runners (or use a self-hosted runner on paperclip). GitHub-hosted runner IPs change; many setups allow `0.0.0.0/0` on port 22 for `ubuntu` key-only auth.
 
 Workflow also runs on `main` pushes that touch `backend/`, `frontend/`, or deploy scripts.
 
