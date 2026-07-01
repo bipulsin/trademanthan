@@ -1457,6 +1457,19 @@
         };
     }
 
+    function fmtJournalCell(r) {
+        const n = String(r.exit_journal_note || '').trim();
+        if (!n) return '—';
+        const short = n.length > 56 ? n.slice(0, 53) + '…' : n;
+        return (
+            '<span class="sf-journal-snippet" title="' +
+            escapeAttr(n) +
+            '">' +
+            escapeHtml(short) +
+            '</span>'
+        );
+    }
+
     function closedTableRowHtml(r) {
         return (
             '<tr data-row-id="' +
@@ -1489,6 +1502,9 @@
             '<td>' +
             winLossLabel(r.realized_pnl) +
             '</td>' +
+            '<td>' +
+            fmtJournalCell(r) +
+            '</td>' +
             '</tr>'
         );
     }
@@ -1512,7 +1528,7 @@
 
         if (!sold.length) {
             host.innerHTML =
-                '<div class="sf-table-wrap"><table class="sf-table sf-closed-table"><tbody><tr><td colspan="9" style="padding:14px;">No closed positions this session</td></tr></tbody></table></div>';
+                '<div class="sf-table-wrap"><table class="sf-table sf-closed-table"><tbody><tr><td colspan="10" style="padding:14px;">No closed positions this session</td></tr></tbody></table></div>';
             return;
         }
 
@@ -1557,6 +1573,7 @@
             '<th title="Number of lots (position sizing)">Lots</th>' +
             '<th title="Units per lot (from instruments)">Lot size</th>' +
             '<th>PnL</th><th>Win / Loss</th>' +
+            '<th title="Journal note recorded at square-off">Journal</th>' +
             '</tr></thead>';
         let body = '';
         sold.forEach(function (r) {
@@ -1571,6 +1588,7 @@
             '<td><strong>' +
             escapeHtml(ratioStr) +
             '</strong><div class="sf-meta" style="margin-top:4px;">Win ratio</div></td>' +
+            '<td></td>' +
             '</tr></tfoot>';
         host.innerHTML =
             '<div class="sf-table-wrap"><table class="sf-table sf-closed-table">' +
@@ -1993,6 +2011,8 @@
             inp.value = String(n);
         }
         if (timeInp) timeInp.value = istTimeInputHHMMForNow();
+        const journalInp = document.getElementById('sfSellJournalInput');
+        if (journalInp) journalInp.value = '';
         modal.classList.add('sf-modal--open');
         modal.setAttribute('aria-hidden', 'false');
         setTimeout(function () {
@@ -2011,6 +2031,8 @@
         _sfSellPendingReason = null;
         const tInp = document.getElementById('sfSellTimeInput');
         if (tInp) tInp.value = '';
+        const jInp = document.getElementById('sfSellJournalInput');
+        if (jInp) jInp.value = '';
         const c = document.getElementById('sfSellModalConfirm');
         if (c) c.disabled = false;
     }
@@ -2019,6 +2041,7 @@
         const modal = document.getElementById('sfSellModal');
         const inp = document.getElementById('sfSellPriceInput');
         const timeInp = document.getElementById('sfSellTimeInput');
+        const journalInp = document.getElementById('sfSellJournalInput');
         const errEl = document.getElementById('sfSellModalErr');
         const confirmBtn = document.getElementById('sfSellModalConfirm');
         const id = modal && modal.dataset.sellRowId;
@@ -2046,6 +2069,10 @@
         payloadObj.sell_time = timeVal.length === 5 ? timeVal + ':00' : timeVal;
         if (_sfSellPendingReason) {
             payloadObj.manual_exit_reason = _sfSellPendingReason;
+        }
+        if (journalInp) {
+            const note = String(journalInp.value || '').trim();
+            if (note) payloadObj.exit_journal_note = note;
         }
         const payload = JSON.stringify(payloadObj);
         for (const p of paths) {

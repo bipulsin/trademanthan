@@ -360,6 +360,20 @@
             background: var(--theme-bg, #fff);
             color: var(--theme-text, #0f172a);
         }
+        .sf-modal-textarea {
+            width: 100%;
+            box-sizing: border-box;
+            min-height: 72px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 1px solid var(--theme-border, #cbd5e1);
+            font-size: 0.9rem;
+            line-height: 1.4;
+            resize: vertical;
+            background: var(--theme-bg, #fff);
+            color: var(--theme-text, #0f172a);
+        }
+        .sf-journal-snippet { font-size: 0.82rem; color: var(--theme-muted, #64748b); cursor: help; }
         .sf-modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; flex-wrap: wrap; }
         .sf-btn-modal-cancel {
             padding: 8px 16px;
@@ -522,6 +536,8 @@
             <input type="number" id="sfSellPriceInput" class="sf-modal-input" inputmode="decimal" step="any" min="0" placeholder="Execution price" autocomplete="off" />
             <label for="sfSellTimeInput" style="margin-top:12px;">Exit time (IST)</label>
             <input type="time" id="sfSellTimeInput" class="sf-modal-input" step="60" autocomplete="off" />
+            <label for="sfSellJournalInput" style="margin-top:12px;">Journal note <span class="sf-meta" style="font-weight:400;">(optional)</span></label>
+            <textarea id="sfSellJournalInput" class="sf-modal-textarea" rows="3" maxlength="4000" placeholder="What worked, what didn’t, setup quality, emotions, lessons for next time…" autocomplete="off"></textarea>
             <p id="sfSellModalErr" aria-live="polite"></p>
             <div class="sf-modal-actions">
                 <button type="button" class="sf-btn-modal-cancel" id="sfSellModalCancel">Cancel</button>
@@ -609,6 +625,6 @@
         </div>
     </div>
     <script src="left-menu.js?v=3.24"></script>
-    <script src="smartfuture.js?v=55"></script>
+    <script src="smartfuture.js?v=56"></script>
 </body>
 </html>

@@ -118,6 +118,11 @@ class SmartFuturesSellBody(BaseModel):
             "(e.g. 'rules', 'emotion'). Persisted on smart_futures_daily.manual_exit_reason."
         ),
     )
+    exit_journal_note: Optional[str] = Field(
+        default=None,
+        max_length=4000,
+        description="Free-text trade journal at square-off for post-session analysis.",
+    )
 
 
 class SmartFuturesOrderBody(BaseModel):
@@ -255,7 +260,7 @@ _SQL_DAILY_FULL = """
                        oi_signal, oi_gate_passed, time_filter_passed, regime_filter_passed, ema_slope_norm,
                        premkt_rank, oi_heat_rank,
                        reclaim_score_last, reclaim_score_prev, reclaim_score_updated_at,
-                       manual_exit_reason, manual_exit_at,
+                       manual_exit_reason, manual_exit_at, exit_journal_note,
                        signal_status, scan_bar_high, scan_bar_low, m15_vwap_at_scan
                 FROM smart_futures_daily
                 WHERE session_date = :sd
@@ -311,6 +316,7 @@ def _fetch_daily_for_session(db: Session, sd: Any) -> List[Any]:
             or _missing_db_column_error(e, "reclaim_score_updated_at")
             or _missing_db_column_error(e, "manual_exit_reason")
             or _missing_db_column_error(e, "manual_exit_at")
+            or _missing_db_column_error(e, "exit_journal_note")
             or _missing_db_column_error(e, "signal_status")
             or _missing_db_column_error(e, "scan_bar_high")
             or _missing_db_column_error(e, "m15_vwap_at_scan")
@@ -1266,7 +1272,16 @@ def post_smart_futures_daily_sell(
     manual_reason_in = (body.manual_exit_reason or "").strip().lower() or None
     if manual_reason_in is not None and manual_reason_in not in {"rules", "emotion"}:
         manual_reason_in = manual_reason_in[:32]
-    sell_bind = {"id": row_id, "ltp": ltp, "mer": manual_reason_in, "sell_ts": parsed_sell_dt}
+    journal_note_in = (body.exit_journal_note or "").strip() or None
+    if journal_note_in is not None:
+        journal_note_in = journal_note_in[:4000]
+    sell_bind = {
+        "id": row_id,
+        "ltp": ltp,
+        "mer": manual_reason_in,
+        "ejn": journal_note_in,
+        "sell_ts": parsed_sell_dt,
+    }
     try:
         res = db.execute(
             text(
@@ -1275,6 +1290,7 @@ def post_smart_futures_daily_sell(
                 SET order_status = 'sold', sell_price = :ltp,
                     sell_time = COALESCE(CAST(:sell_ts AS TIMESTAMP WITH TIME ZONE), CURRENT_TIMESTAMP),
                     manual_exit_reason = :mer,
+                    exit_journal_note = :ejn,
                     manual_exit_at = CASE
                         WHEN :mer IS NULL THEN manual_exit_at
                         ELSE COALESCE(CAST(:sell_ts AS TIMESTAMP WITH TIME ZONE), CURRENT_TIMESTAMP)
@@ -1296,11 +1312,13 @@ def post_smart_futures_daily_sell(
     except HTTPException:
         raise
     except Exception as e:
-        if _missing_db_column_error(e, "manual_exit_reason") or _missing_db_column_error(
-            e, "manual_exit_at"
+        if (
+            _missing_db_column_error(e, "manual_exit_reason")
+            or _missing_db_column_error(e, "manual_exit_at")
+            or _missing_db_column_error(e, "exit_journal_note")
         ):
             logger.warning(
-                "smart_futures sell: manual_exit_reason missing, falling back: %s", e
+                "smart_futures sell: entry-gate columns missing, falling back: %s", e
             )
             try:
                 db.rollback()
@@ -1403,6 +1421,7 @@ def post_smart_futures_daily_sell(
         "sell_price": ltp,
         "sell_time": sell_time_iso,
         "manual_exit_reason": manual_reason_in,
+        "exit_journal_note": journal_note_in,
     }
 
 

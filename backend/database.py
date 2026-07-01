@@ -590,6 +590,7 @@ def _run_startup_schema_migrations(db_engine):
                     ("reclaim_score_updated_at", "TIMESTAMP WITH TIME ZONE"),
                     ("manual_exit_reason", "VARCHAR(32)"),
                     ("manual_exit_at", "TIMESTAMP WITH TIME ZONE"),
+                    ("exit_journal_note", "TEXT"),
                 ]
                 for _cname, _ctype in _sfd_entry_gate_cols:
                     if _cname not in _sfd_cols:
