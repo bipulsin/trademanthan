@@ -19,6 +19,10 @@ on:
         description: "Run Relative Strength scan after deploy"
         type: boolean
         default: true
+      environment:
+        description: "GitHub Environment name if SSH secret is stored there (optional)"
+        type: string
+        default: ""
   push:
     branches: [main]
     paths:
@@ -61,17 +65,25 @@ jobs:
           K_EC2: ${{ secrets.EC2_SSH_KEY }}
           K_SSH: ${{ secrets.SSH_PRIVATE_KEY }}
           K_SIMPLE: ${{ secrets.PAPERCLIP_KEY }}
+          K_PAPERCLIP2: ${{ secrets.PAPERCLIP_SSH_KEY }}
+          K_DEPLOY: ${{ secrets.DEPLOY_SSH_KEY }}
+          K_GENERIC: ${{ secrets.SSH_KEY }}
         run: |
           set -euo pipefail
           KEY=""
           NAME=""
           if [ -n "$K_PAPERCLIP" ]; then KEY="$K_PAPERCLIP"; NAME="PAPERCLIP_SSH_PRIVATE_KEY"
           elif [ -n "$K_EC2" ]; then KEY="$K_EC2"; NAME="EC2_SSH_KEY"
+          elif [ -n "$K_PAPERCLIP2" ]; then KEY="$K_PAPERCLIP2"; NAME="PAPERCLIP_SSH_KEY"
           elif [ -n "$K_SSH" ]; then KEY="$K_SSH"; NAME="SSH_PRIVATE_KEY"
           elif [ -n "$K_SIMPLE" ]; then KEY="$K_SIMPLE"; NAME="PAPERCLIP_KEY"
+          elif [ -n "$K_DEPLOY" ]; then KEY="$K_DEPLOY"; NAME="DEPLOY_SSH_KEY"
+          elif [ -n "$K_GENERIC" ]; then KEY="$K_GENERIC"; NAME="SSH_KEY"
           fi
           if [ -z "$KEY" ]; then
-            echo "::error::No SSH repository secret found. Add PAPERCLIP_SSH_PRIVATE_KEY (preferred) with the full paperclip_key PEM in Settings → Secrets and variables → Actions → Repository secrets."
+            echo "::error::No SSH repository secret visible to Actions on bipulsin/trademanthan."
+            echo "::error::Add Settings → Secrets and variables → Actions → Repository secrets (not Dependabot/Codespaces)."
+            echo "::error::Name must be exactly PAPERCLIP_SSH_PRIVATE_KEY (full paperclip_key PEM, including BEGIN/END lines)."
             exit 1
           fi
           echo "Using repository secret: $NAME"
