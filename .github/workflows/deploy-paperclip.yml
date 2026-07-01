@@ -1,0 +1,112 @@
+name: Deploy to paperclip-vm
+
+on:
+  workflow_dispatch:
+    inputs:
+      rebuild:
+        description: "REBUILD=1 local docker build on paperclip (fallback when GHCR pull is stale)"
+        type: boolean
+        default: true
+      trademanthan_ref:
+        description: "trademanthan git ref or SHA to deploy"
+        type: string
+        default: main
+      run_rs_scan:
+        description: "Run Relative Strength scan after deploy"
+        type: boolean
+        default: true
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "algos/**"
+      - "scripts/trigger-paperclip-deploy.sh"
+      - "scripts/paperclip-ssh.sh"
+      - "scripts/setup-paperclip-ssh.sh"
+      - ".github/workflows/deploy-paperclip.yml"
+
+concurrency:
+  group: deploy-paperclip
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Resolve trademanthan ref
+        id: ref
+        run: |
+          REF="${{ github.event.inputs.trademanthan_ref || 'main' }}"
+          if [[ "$REF" == "main" || "$REF" == "master" ]]; then
+            REF="${{ github.sha }}"
+          fi
+          echo "sha=$REF" >> "$GITHUB_OUTPUT"
+          echo "Deploying trademanthan ref: $REF"
+
+      - name: Deploy on paperclip-vm
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          REBUILD: ${{ github.event_name == 'push' && '1' || (github.event.inputs.rebuild == false && '0' || '1') }}
+          TRADEMANTHAN_REF: ${{ steps.ref.outputs.sha }}
+          APP_SRC_REV: ${{ steps.ref.outputs.sha }}
+          FRONTEND_SRC_REV: ${{ steps.ref.outputs.sha }}
+        with:
+          host: 140.245.14.17
+          username: ubuntu
+          key: ${{ secrets.PAPERCLIP_SSH_PRIVATE_KEY }}
+          envs: REBUILD,TRADEMANTHAN_REF,APP_SRC_REV,FRONTEND_SRC_REV
+          command_timeout: 40m
+          script: |
+            set -euo pipefail
+            cd /home/ubuntu/twcto
+            export REBUILD="${REBUILD:-1}"
+            export TRADEMANTHAN_REF="${TRADEMANTHAN_REF:-main}"
+            export APP_SRC_REV="${APP_SRC_REV:-${TRADEMANTHAN_REF}}"
+            export FRONTEND_SRC_REV="${FRONTEND_SRC_REV:-${TRADEMANTHAN_REF}}"
+            echo "[gha] git pull twcto_docker..."
+            git fetch origin main
+            git reset --hard origin/main
+            if [[ "${REBUILD}" == "1" ]]; then
+              echo "[gha] REBUILD=1 building app + nginx (rev ${TRADEMANTHAN_REF:0:12})..."
+              docker compose build app nginx
+            else
+              echo "[gha] pulling app + nginx from GHCR..."
+              docker compose pull app nginx
+            fi
+            docker compose up -d --force-recreate app nginx
+            for _ in $(seq 1 40); do
+              if curl -fsS http://127.0.0.1:8080/scan/health >/dev/null 2>&1; then
+                echo "[gha] healthy"
+                curl -fsS http://127.0.0.1:8080/scan/health | head -c 300
+                echo ""
+                exit 0
+              fi
+              sleep 3
+            done
+            echo "[gha] health check timed out" >&2
+            docker compose ps
+            exit 1
+
+      - name: Run Relative Strength scan
+        if: github.event_name == 'push' || github.event.inputs.run_rs_scan != false
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: 140.245.14.17
+          username: ubuntu
+          key: ${{ secrets.PAPERCLIP_SSH_PRIVATE_KEY }}
+          command_timeout: 30m
+          script: |
+            set -euo pipefail
+            cd /home/ubuntu/twcto
+            docker compose exec -T app python3 backend/scripts/run_relative_strength_scan_now.py --fetch
+
+      - name: Verify public health
+        run: |
+          curl -fsS --max-time 30 "https://www.tradewithcto.com/scan/health" | head -c 300
+          echo ""

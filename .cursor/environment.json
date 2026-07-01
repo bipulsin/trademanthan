@@ -1,0 +1,4 @@
+{
+  "install": "./scripts/setup-paperclip-ssh.sh || true",
+  "start": "./scripts/setup-paperclip-ssh.sh || true"
+}

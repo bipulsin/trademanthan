@@ -7,8 +7,15 @@
 #   ./scripts/paperclip-ssh.sh 'docker ps'
 #
 # Override: PAPERCLIP_HOST, PAPERCLIP_USER, PAPERCLIP_KEY, PAPERCLIP_SSH_HOST (ssh config alias)
+# Cloud Agent / CI: set Runtime Secret PAPERCLIP_SSH_PRIVATE_KEY (see setup-paperclip-ssh.sh).
 
 set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Materialize key from PAPERCLIP_SSH_PRIVATE_KEY when present (no-op if key file exists).
+if [[ -x "${ROOT}/scripts/setup-paperclip-ssh.sh" ]]; then
+  "${ROOT}/scripts/setup-paperclip-ssh.sh" 2>/dev/null || true
+fi
 
 export PAPERCLIP_HOST="${PAPERCLIP_HOST:-140.245.14.17}"
 export PAPERCLIP_USER="${PAPERCLIP_USER:-ubuntu}"
@@ -21,7 +28,8 @@ fi
 
 if [[ ! -f "$PAPERCLIP_KEY" ]]; then
   echo "Paperclip SSH key not found: $PAPERCLIP_KEY" >&2
-  echo "Add Host paperclip to ~/.ssh/config or set PAPERCLIP_KEY." >&2
+  echo "Run ./scripts/setup-paperclip-ssh.sh after adding PAPERCLIP_SSH_PRIVATE_KEY secret," >&2
+  echo "or add Host paperclip to ~/.ssh/config." >&2
   exit 1
 fi
 

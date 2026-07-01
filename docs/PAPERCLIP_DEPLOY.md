@@ -19,6 +19,23 @@ ssh paperclip
 
 Requires `~/.ssh/paperclip_key` or `Host paperclip` in `~/.ssh/config`.
 
+### Cloud Agents / CI SSH
+
+1. Add **Runtime Secret** `PAPERCLIP_SSH_PRIVATE_KEY` in [Cursor Cloud Agents → Secrets](https://cursor.com/dashboard/cloud-agents) (raw PEM contents of `paperclip_key`).
+2. `.cursor/environment.json` runs `./scripts/setup-paperclip-ssh.sh` on start to write `~/.ssh/paperclip_key` and `Host paperclip` in `~/.ssh/config`.
+3. Allow Cursor Cloud Agent egress IPs on paperclip-vm port 22 — see [Cursor egress IP ranges](https://cursor.com/docs/cloud-agent/egress-ip-ranges).
+
+### GitHub Actions deploy
+
+Repository secret: **`PAPERCLIP_SSH_PRIVATE_KEY`** (same PEM as local `paperclip_key`).
+
+```bash
+# Manual deploy + RS scan from GitHub Actions
+gh workflow run deploy-paperclip.yml -f rebuild=true -f run_rs_scan=true
+```
+
+Workflow also runs on `main` pushes that touch `backend/`, `frontend/`, or deploy scripts.
+
 ## Deploy after app changes (TradeManthan)
 
 GHCR images are **multi-arch** (amd64 + arm64). Fast path: CI builds in GitHub, paperclip **pulls** (~1 min).
