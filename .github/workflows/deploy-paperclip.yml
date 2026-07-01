@@ -1,4 +1,5 @@
 name: Deploy to paperclip-vm
+# Requires repo secret PAPERCLIP_SSH_PRIVATE_KEY or EC2_SSH_KEY (paperclip_key PEM).
 
 on:
   workflow_dispatch:

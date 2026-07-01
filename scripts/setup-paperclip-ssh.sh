@@ -22,7 +22,11 @@ mkdir -p "$HOME/.ssh"
 chmod 700 "$HOME/.ssh"
 
 _write_key_from_env() {
-  local raw="${PAPERCLIP_SSH_PRIVATE_KEY:-}"
+  local raw=""
+  for var in PAPERCLIP_SSH_PRIVATE_KEY EC2_SSH_KEY SSH_PRIVATE_KEY; do
+    raw="${!var:-}"
+    [[ -n "$raw" ]] && break
+  done
   [[ -n "$raw" ]] || return 1
   if [[ "$raw" == *"BEGIN"* ]]; then
     printf '%s\n' "$raw" >"$PAPERCLIP_KEY"

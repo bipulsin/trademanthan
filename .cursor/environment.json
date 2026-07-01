@@ -1,4 +1,5 @@
 {
-  "install": "./scripts/setup-paperclip-ssh.sh || true",
+  "install": "chmod +x scripts/setup-paperclip-ssh.sh scripts/paperclip-ssh.sh scripts/trigger-paperclip-deploy.sh",
+  "update": "./scripts/setup-paperclip-ssh.sh || true",
   "start": "./scripts/setup-paperclip-ssh.sh || true"
 }
