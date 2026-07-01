@@ -1,13 +1,19 @@
 """Relative Strength Scanner dashboard API.
 
-Read-only endpoint that serves the latest persisted scan snapshot. It never
-recalculates indicators — the 5-minute scheduler owns all computation.
+Read endpoint serves the latest persisted scan snapshot. The 5-minute scheduler
+and the EOD (15:32 IST) job own scheduled computation; ``POST …/run`` triggers
+an on-demand full-universe recalculation.
 """
 import logging
+from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
+from fastapi.responses import JSONResponse
 
-from backend.services.relative_strength_scanner import get_latest_snapshot
+from backend.services.relative_strength_scanner import (
+    get_latest_snapshot,
+    run_relative_strength_scan,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,3 +28,31 @@ def relative_strength():
     except Exception as exc:
         logger.warning("relative-strength endpoint failed: %s", exc)
         return {"last_updated": "", "bullish": [], "bearish": [], "error": str(exc)}
+
+
+@router.post("/relative-strength/run")
+def relative_strength_run_now(
+    cache_only: Optional[bool] = Query(
+        None,
+        description=(
+            "When true, use only in-process candle cache (market-hours default). "
+            "When false, allow direct Upstox fetches. Omit to auto-detect from session."
+        ),
+    ),
+):
+    """On-demand RS scan over the full arbitrage_master universe (same job as scheduler).
+
+    Scans all current-month futures, ranks Top 5 Bullish / Bearish, and persists
+    a new snapshot. Can take several minutes off-hours when ``cache_only`` is false.
+    """
+    logger.info("relative_strength_run_now: cache_only=%s", cache_only)
+    try:
+        kwargs = {}
+        if cache_only is not None:
+            kwargs["cache_only"] = cache_only
+        result = run_relative_strength_scan(scan_trigger="manual_api", **kwargs)
+        status = 200 if result.get("ok") else 503
+        return JSONResponse(status_code=status, content={"success": result.get("ok", False), **result})
+    except Exception as exc:
+        logger.exception("relative_strength_run_now failed: %s", exc)
+        return JSONResponse(status_code=500, content={"success": False, "message": str(exc)})

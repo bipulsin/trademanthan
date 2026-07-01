@@ -1124,6 +1124,62 @@ class SmartFutureAlgoScheduler:
                 "✅ Scheduled: Relative Strength Scanner (every 5 min, 09:20–15:15 IST)"
             )
 
+            # EOD Relative Strength — after index close (15:30) so NIFTY % uses final close.
+            def _run_relative_strength_eod(trigger_label: str):
+                if _skip_ist_non_trading_job("Relative Strength EOD scan", datetime.now(pytz.timezone("Asia/Kolkata"))):
+                    return
+                logger.info("🔧 Relative Strength EOD scan (%s)...", trigger_label)
+                try:
+                    from backend.services.relative_strength_scanner import (
+                        run_relative_strength_scan,
+                    )
+
+                    out = run_relative_strength_scan(
+                        scan_trigger=trigger_label, cache_only=False
+                    )
+                    logger.info("✅ Relative Strength EOD scan (%s): %s", trigger_label, out)
+                except Exception as e:
+                    logger.error(
+                        "❌ Relative Strength EOD scan (%s) failed: %s",
+                        trigger_label,
+                        e,
+                        exc_info=True,
+                    )
+
+            self.scheduler.add_job(
+                lambda: _run_relative_strength_eod("eod_15_32"),
+                trigger=CronTrigger(
+                    day_of_week="mon-fri",
+                    hour=15,
+                    minute=32,
+                    timezone="Asia/Kolkata",
+                ),
+                id="relative_strength_scanner_eod_1532",
+                name="Relative Strength Scanner EOD (15:32 IST)",
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=600,
+                coalesce=True,
+            )
+            self.scheduler.add_job(
+                lambda: _run_relative_strength_eod("eod_15_37"),
+                trigger=CronTrigger(
+                    day_of_week="mon-fri",
+                    hour=15,
+                    minute=37,
+                    timezone="Asia/Kolkata",
+                ),
+                id="relative_strength_scanner_eod_1537",
+                name="Relative Strength Scanner EOD backup (15:37 IST)",
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=600,
+                coalesce=True,
+            )
+            logger.info(
+                "✅ Scheduled: Relative Strength Scanner EOD (15:32 & 15:37 IST, Mon–Fri)"
+            )
+
             # Volume Mismatch Futures — 09:30:30 scan + 5m entry monitor
             def _run_vm_scan():
                 ist = pytz.timezone("Asia/Kolkata")
