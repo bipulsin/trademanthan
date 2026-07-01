@@ -6388,6 +6388,32 @@ async def premarket_watchlist_run_now():
         return JSONResponse(status_code=500, content={"success": False, "message": str(e)})
 
 
+@router.post("/relative-strength/run")
+def relative_strength_run_now(
+    cache_only: Optional[bool] = Query(
+        None,
+        description=(
+            "When true, use only in-process candle cache. When false, allow direct Upstox "
+            "fetches (recommended off-hours / EOD). Omit to auto-detect from session."
+        ),
+    ),
+):
+    """On-demand Relative Strength scan (full arbitrage_master universe → Top-5 snapshot)."""
+    logger.info("relative_strength_run_now (scan): cache_only=%s", cache_only)
+    try:
+        from backend.services.relative_strength_scanner import run_relative_strength_scan
+
+        kwargs: Dict[str, Any] = {}
+        if cache_only is not None:
+            kwargs["cache_only"] = cache_only
+        result = run_relative_strength_scan(scan_trigger="manual_api", **kwargs)
+        status = 200 if result.get("ok") else 503
+        return JSONResponse(status_code=status, content={"success": result.get("ok", False), **result})
+    except Exception as e:
+        logger.exception("relative_strength_run_now: %s", e)
+        return JSONResponse(status_code=500, content={"success": False, "message": str(e)})
+
+
 @router.get("/upstox-market-feed/status")
 async def upstox_market_feed_status():
     """Production health: Upstox v3 WebSocket market feed (live OI for heatmap + Smart Futures fallback)."""
