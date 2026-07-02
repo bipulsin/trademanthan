@@ -1100,6 +1100,17 @@ class SmartFutureAlgoScheduler:
                     )
 
                     run_relative_strength_scan(scan_trigger="5m_interval")
+                    hm = f"{h:02d}:{m:02d}"
+                    try:
+                        from backend.services.rs_scanner_anchors import (
+                            ANCHOR_LABELS,
+                            capture_anchor_snapshot,
+                        )
+
+                        if hm in ANCHOR_LABELS:
+                            capture_anchor_snapshot(hm)
+                    except Exception as anchor_exc:
+                        logger.warning("RS anchor capture failed: %s", anchor_exc)
                 except Exception as e:
                     logger.error(
                         "❌ Relative Strength scan failed: %s", e, exc_info=True
@@ -1178,6 +1189,44 @@ class SmartFutureAlgoScheduler:
             )
             logger.info(
                 "✅ Scheduled: Relative Strength Scanner EOD (15:32 & 15:37 IST, Mon–Fri)"
+            )
+
+            def _run_daily_checklist_refresh():
+                ist = pytz.timezone("Asia/Kolkata")
+                now = datetime.now(ist)
+                if _skip_ist_non_trading_job("Daily checklist refresh", now):
+                    return
+                h, m = now.hour, now.minute
+                if h < 9 or (h == 9 and m < 15):
+                    return
+                if h > 15 or (h == 15 and m > 30):
+                    return
+                try:
+                    from backend.services.daily_checklist import refresh_checklist_from_rs
+
+                    refresh_checklist_from_rs()
+                except Exception as e:
+                    logger.error(
+                        "❌ Daily checklist refresh failed: %s", e, exc_info=True
+                    )
+
+            self.scheduler.add_job(
+                _run_daily_checklist_refresh,
+                trigger=CronTrigger(
+                    day_of_week="mon-fri",
+                    hour="9-15",
+                    minute="0,5,10,15,20,25,30,35,40,45,50,55",
+                    timezone="Asia/Kolkata",
+                ),
+                id="daily_checklist_refresh_5m",
+                name="Daily RS Checklist refresh (every 5 min, 09:15–15:30 IST)",
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=120,
+                coalesce=True,
+            )
+            logger.info(
+                "✅ Scheduled: Daily RS Checklist refresh (every 5 min, 09:15–15:30 IST)"
             )
 
             # Volume Mismatch Futures — 09:30:30 scan + 5m entry monitor

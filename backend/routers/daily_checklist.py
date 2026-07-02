@@ -86,3 +86,13 @@ def history(limit: int = 30):
     except Exception as exc:
         logger.warning("daily-checklist history failed: %s", exc)
         return {"days": [], "error": str(exc)}
+
+
+@router.post("/refresh")
+def refresh():
+    """On-demand checklist refresh from latest RS snapshot (same as 5m job)."""
+    try:
+        return svc.refresh_checklist_from_rs()
+    except Exception as exc:
+        logger.warning("daily-checklist refresh failed: %s", exc)
+        return {"error": str(exc)}

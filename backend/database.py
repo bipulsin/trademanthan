@@ -917,7 +917,93 @@ def _run_startup_schema_migrations(db_engine):
                         )
                         print(f"Applied migration: added daily_checklist.{col}")
 
-            # Live OI heatmap snapshot (Upstox batch quotes; refreshed by oi_heatmap job)
+            # relative_strength_snapshot: Kavach volume/confidence columns
+            if "relative_strength_snapshot" in table_names and db_engine.dialect.name == "postgresql":
+                _rss_cols = {c["name"] for c in inspect(db_engine).get_columns("relative_strength_snapshot")}
+                for col, typ in (
+                    ("volume_tod_ratio", "DOUBLE PRECISION"),
+                    ("volume_label", "TEXT"),
+                    ("vwap_purity_pct", "DOUBLE PRECISION"),
+                    ("market_regime", "TEXT"),
+                    ("confidence_grade", "TEXT"),
+                ):
+                    if col not in _rss_cols:
+                        conn.execute(
+                            text(f"ALTER TABLE relative_strength_snapshot ADD COLUMN {col} {typ}")
+                        )
+                        print(f"Applied migration: added relative_strength_snapshot.{col}")
+
+            # RS anchor snapshots at fixed IST decision times
+            if "rs_anchor_snapshot" not in table_names:
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE rs_anchor_snapshot (
+                                id BIGSERIAL PRIMARY KEY,
+                                session_date DATE NOT NULL,
+                                capture_label TEXT NOT NULL,
+                                capture_time TIMESTAMPTZ NOT NULL,
+                                rank_position INTEGER NOT NULL,
+                                symbol TEXT NOT NULL,
+                                direction TEXT NOT NULL,
+                                current_price DOUBLE PRECISION,
+                                relative_strength DOUBLE PRECISION,
+                                trade_score DOUBLE PRECISION,
+                                confidence_grade TEXT,
+                                market_regime TEXT,
+                                adx DOUBLE PRECISION,
+                                volume_label TEXT,
+                                volume_ratio DOUBLE PRECISION,
+                                vwap_purity_pct DOUBLE PRECISION,
+                                supertrend DOUBLE PRECISION,
+                                macd DOUBLE PRECISION,
+                                macd_signal DOUBLE PRECISION,
+                                ema5 DOUBLE PRECISION,
+                                vwap DOUBLE PRECISION,
+                                maturity_tag TEXT,
+                                sector TEXT,
+                                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                                UNIQUE (session_date, capture_label, symbol, direction)
+                            )
+                            """
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_rs_anchor_date_label "
+                            "ON rs_anchor_snapshot (session_date DESC, capture_label)"
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_rs_anchor_symbol "
+                            "ON rs_anchor_snapshot (symbol, session_date DESC)"
+                        )
+                    )
+                    print("Applied migration: created rs_anchor_snapshot (PostgreSQL)")
+
+            # daily_checklist: Kavach quality + rotation + live RS fields
+            if "daily_checklist" in table_names and db_engine.dialect.name == "postgresql":
+                _dc_cols2 = {c["name"] for c in inspect(db_engine).get_columns("daily_checklist")}
+                for col, typ in (
+                    ("vwap_purity_pct", "DOUBLE PRECISION"),
+                    ("market_regime", "TEXT"),
+                    ("quality_display", "TEXT"),
+                    ("live_rs_direction", "TEXT"),
+                    ("live_rs_updated_at", "TIMESTAMPTZ"),
+                    ("rotation_day_type", "TEXT"),
+                    ("carryover_warning", "BOOLEAN DEFAULT FALSE"),
+                    ("sector_badge", "TEXT"),
+                    ("data_refreshed_at", "TIMESTAMPTZ"),
+                ):
+                    if col not in _dc_cols2:
+                        conn.execute(
+                            text(f"ALTER TABLE daily_checklist ADD COLUMN {col} {typ}")
+                        )
+                        print(f"Applied migration: added daily_checklist.{col}")
+
+            # rs_scanner_history: CLIMACTIC maturity tag support (no schema change needed — TEXT tag)
             if "oi_heatmap_latest" not in table_names:
                 if db_engine.dialect.name == "postgresql":
                     conn.execute(

@@ -90,7 +90,10 @@
         var t = (tag || "FRESH").toUpperCase();
         var cls = "dc-maturity--fresh";
         var text = "FRESH";
-        if (t === "CONTINUING") {
+        if (t === "CLIMACTIC") {
+            cls = "dc-maturity--climactic";
+            text = "CLIMACTIC";
+        } else if (t === "CONTINUING") {
             cls = "dc-maturity--continuing";
             text = "DAY " + (days || 2);
         } else if (t === "EXTENDED") {
@@ -101,6 +104,22 @@
             text = "STRETCHED · " + (days || 4) + "D";
         }
         return '<span class="dc-maturity-badge ' + cls + '">' + text + "</span>";
+    }
+
+    function fmtDataAsOf(iso) {
+        if (!iso) return "—";
+        var d = new Date(iso);
+        if (isNaN(d.getTime())) return "—";
+        return ("0" + d.getHours()).slice(-2) + ":" +
+            ("0" + d.getMinutes()).slice(-2) + ":" +
+            ("0" + d.getSeconds()).slice(-2) + " IST";
+    }
+
+    function dataAgeMinutes(iso) {
+        if (!iso) return 999;
+        var d = new Date(iso);
+        if (isNaN(d.getTime())) return 999;
+        return (Date.now() - d.getTime()) / 60000;
     }
 
     function currentStock(symbol) {
@@ -154,7 +173,14 @@
         card.className = "dc-card";
         if (dcls === "GO") card.classList.add("dc-card--go");
         if (dcls === "OUT") card.classList.add("dc-card--out");
+        if (stock.carryover_warning) card.classList.add("dc-card--carryover");
+        else card.classList.remove("dc-card--carryover");
         card.querySelector(".dc-symbol").textContent = stock.symbol;
+        var sb = card.querySelector(".dc-sector-badge");
+        if (sb) {
+            sb.textContent = stock.sector_badge || "";
+            sb.style.display = stock.sector_badge ? "" : "none";
+        }
         var rsv = stock.rs_pct;
         var rs = card.querySelector(".dc-rs");
         rs.textContent = rsv == null ? "" : "RS " + (rsv > 0 ? "+" : "") + Number(rsv).toFixed(2) + "%";
@@ -200,6 +226,31 @@
         var sel = $("dcNiftyDir");
         if (document.activeElement !== sel) sel.value = state.nifty_open_direction || "";
         $("dcGapWarn").classList.toggle("show", (state.nifty_open_direction || "") === "Gap reversed");
+
+        var rot = state.rotation_day || {};
+        var rotEl = $("dcRotationBanner");
+        if (rot.rotation_day_type === "CONTINUATION") {
+            rotEl.hidden = false;
+            rotEl.className = "dc-rotation-banner dc-rotation--continuation";
+            rotEl.textContent = "CONTINUATION day — " + (rot.bull_overlap || 0) + " bull / " +
+                (rot.bear_overlap || 0) + " bear overlap with yesterday. Dual-scan rules apply.";
+        } else if (rot.rotation_day_type === "ROTATION") {
+            rotEl.hidden = false;
+            rotEl.className = "dc-rotation-banner dc-rotation--rotation";
+            rotEl.textContent = "ROTATION day — fresh scan is primary. Yesterday carryover names may mean-revert.";
+        } else if (rot.rotation_day_type === "MIXED") {
+            rotEl.hidden = false;
+            rotEl.className = "dc-rotation-banner dc-rotation--mixed";
+            rotEl.textContent = "MIXED day — overlap names (" + (rot.bull_overlap || 0) + " bull / " +
+                (rot.bear_overlap || 0) + " bear) are highest conviction.";
+        } else {
+            rotEl.hidden = true;
+        }
+
+        var asofEl = $("dcDataAsOf");
+        var asofIso = state.data_refreshed_at || null;
+        asofEl.textContent = "Data as of " + fmtDataAsOf(asofIso);
+        asofEl.classList.toggle("dc-data-asof--stale", dataAgeMinutes(asofIso) > 6);
 
         var stocks = state.stocks || [];
         var empty = stocks.length === 0;
@@ -297,6 +348,21 @@
         grid.appendChild(buildNewsItem(stock));
         grid.appendChild(buildAdx935Item(stock));
         grid.appendChild(buildMaturityItem(stock));
+
+        if (stock.quality_display) {
+            var qrow = el("div", "dc-quality-row dc-modal-span2");
+            qrow.innerHTML = "<strong>Quality</strong> " + stock.quality_display;
+            grid.appendChild(qrow);
+        }
+        if (stock.live_rs_direction) {
+            var live = el("div", "dc-live-rs dc-modal-span2");
+            live.textContent = "Live RS direction: " + stock.live_rs_direction +
+                (stock.live_rs_updated_at ? " (as of " + fmtDataAsOf(stock.live_rs_updated_at) + ")" : "");
+            grid.appendChild(live);
+        }
+        if (stock.carryover_warning) {
+            grid.appendChild(el("div", "dc-carryover-chip dc-modal-span2", "⚠ CARRYOVER — not on today's 09:25 fresh scan"));
+        }
 
         var gateTitle = el("div", "dc-group-title dc-modal-span2", "Entry gate (auto from RS scanner)");
         grid.appendChild(gateTitle);
@@ -502,6 +568,9 @@
 
         tickClock();
         setInterval(tickClock, 1000);
+        setInterval(function () {
+            api("/data").then(applyState).catch(function () {});
+        }, 60000);
     }
 
     if (document.readyState === "loading") {

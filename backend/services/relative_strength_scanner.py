@@ -27,6 +27,19 @@ from sqlalchemy import text
 
 from backend.config import settings
 from backend.database import SessionLocal
+from backend.services.kavach_confidence import (
+    REGIME_TREND,
+    compute_confidence_grade,
+    compute_vwap_purity_pct,
+    detect_market_regime,
+    format_confidence_display,
+)
+from backend.services.kavach_volume import (
+    closed_bar_volume_ratio,
+    cumulative_volume_tod_ratio,
+    last_closed_bar_index,
+    volume_participation_label,
+)
 from backend.services.kavach_engine import (
     BEARISH_STATES,
     BULLISH_STATES,
@@ -199,26 +212,59 @@ def _compute_symbol_metrics(
 
     macd, macd_signal, macd_hist = _macd_last(closes)
 
-    st_dir, _ = _supertrend_dir_last_two(highs, lows, closes)
-    supertrend_bullish: Optional[bool] = None if st_dir is None else (st_dir > 0)
-
     adx = adx_value(highs, lows, closes, ADX_LENGTH) or 0.0
 
-    cur_volume = volumes[-1]
-    vol_ema = ema_series(volumes, VOLUME_EMA_PERIOD)[-1] if volumes else 0.0
-    volume_ratio = (cur_volume / vol_ema) if vol_ema > 0 else 0.0
+    closed_idx = last_closed_bar_index(candles)
+    if closed_idx < 0:
+        return None
+    closed_price = closes[closed_idx]
+    cur_volume, vol_ema, volume_ratio = closed_bar_volume_ratio(volumes, closed_idx=closed_idx)
+    volume_tod_ratio = cumulative_volume_tod_ratio(candles, closed_idx=closed_idx)
+    vol_label = volume_participation_label(volume_ratio, volume_tod_ratio)
 
-    stock_pct = (current_price - previous_close) / previous_close * 100.0
+    # Session VWAP series for today (for purity on 10m-equivalent bars).
+    t_highs_full = highs[first_today : closed_idx + 1]
+    t_lows_full = lows[first_today : closed_idx + 1]
+    t_closes_full = closes[first_today : closed_idx + 1]
+    t_vols_full = volumes[first_today : closed_idx + 1]
+    vwap_series_today = (
+        cumulative_vwap(t_highs_full, t_lows_full, t_closes_full, t_vols_full)
+        if t_closes_full
+        else [vwap]
+    )
+
+    # Regime: compare last two closed bars.
+    prev_idx = max(first_today, closed_idx - 1)
+    st_prev_dir, st_curr_dir = _supertrend_dir_last_two(
+        highs[: closed_idx + 1], lows[: closed_idx + 1], closes[: closed_idx + 1]
+    )
+    st_prev = None if st_prev_dir is None else (st_prev_dir > 0)
+    st_curr = None if st_curr_dir is None else (st_curr_dir > 0)
+    macd_prev, sig_prev, _ = _macd_last(closes[:prev_idx + 1]) if prev_idx >= 26 else (macd, macd_signal, 0.0)
+    regime = detect_market_regime(
+        st_prev=st_prev,
+        st_curr=st_curr,
+        macd_prev=macd_prev,
+        macd_sig_prev=sig_prev,
+        macd_curr=macd,
+        macd_sig_curr=macd_signal,
+        ema5_prev=ema5_s[prev_idx] if prev_idx < len(ema5_s) else ema5,
+        vwap_prev=vwap_series_today[-2] if len(vwap_series_today) >= 2 else vwap,
+        ema5_curr=ema5,
+        vwap_curr=vwap,
+    )
+
+    stock_pct = (closed_price - previous_close) / previous_close * 100.0
     relative_strength = stock_pct - nifty_pct
 
     kav = evaluate_kavach(
         KavachInput(
-            price=current_price,
+            price=closed_price,
             ema5=ema5,
             ema9=ema9,
             ema9_slope=ema9_slope,
             vwap=vwap,
-            supertrend_bullish=supertrend_bullish,
+            supertrend_bullish=st_curr,
             macd=macd,
             macd_signal=macd_signal,
             macd_histogram=macd_hist,
@@ -227,12 +273,17 @@ def _compute_symbol_metrics(
         )
     )
 
+    purity_dir = "SHORT" if kav.state in BEARISH_STATES else "LONG"
+    vwap_purity = compute_vwap_purity_pct(
+        t_closes_full, vwap_series_today, direction=purity_dir
+    )
+
     return {
         "symbol": symbol,
         "instrument_key": instrument_key,
         "future_symbol": entry.get("future_symbol") or "",
         "from_cache": from_cache,
-        "current_price": current_price,
+        "current_price": closed_price,
         "previous_close": previous_close,
         "stock_percent": stock_pct,
         "nifty_percent": nifty_pct,
@@ -241,7 +292,7 @@ def _compute_symbol_metrics(
         "ema9": ema9,
         "ema10": ema10,
         "vwap": vwap,
-        "supertrend": (1.0 if supertrend_bullish else (-1.0 if supertrend_bullish is False else 0.0)),
+        "supertrend": (1.0 if st_curr else (-1.0 if st_curr is False else 0.0)),
         "macd": macd,
         "macd_signal": macd_signal,
         "macd_histogram": macd_hist,
@@ -249,6 +300,10 @@ def _compute_symbol_metrics(
         "volume": cur_volume,
         "avg_volume": vol_ema,
         "volume_ratio": volume_ratio,
+        "volume_tod_ratio": volume_tod_ratio,
+        "volume_label": vol_label,
+        "vwap_purity_pct": vwap_purity,
+        "market_regime": regime,
         "kavach_state": kav.state,
         "kavach_strength": kav.strength,
     }
@@ -406,6 +461,13 @@ def _rank(rows: List[Dict[str, Any]]) -> Tuple[List[Dict], List[Dict]]:
             vwap=r["vwap"],
             ranking_type=ranking_type,
         )
+        grade, floor = compute_confidence_grade(
+            r["trade_score"],
+            r.get("volume_label") or "Low",
+            r.get("vwap_purity_pct") or 0.0,
+            r.get("market_regime") or REGIME_TREND,
+        )
+        r["confidence_grade"] = format_confidence_display(grade, floor)
         bucket.append(r)
 
     # Bullish: highest RS%% on top. Bearish: lowest RS%% on top. Trade Score breaks ties.
@@ -428,11 +490,13 @@ _INSERT_SQL = text(
         scan_time, symbol, current_price, previous_close, stock_percent,
         nifty_percent, relative_strength, ema5, ema9, ema10, vwap, supertrend,
         macd, macd_signal, macd_histogram, adx, volume, avg_volume, volume_ratio,
+        volume_tod_ratio, volume_label, vwap_purity_pct, market_regime, confidence_grade,
         kavach_state, kavach_strength, trade_score, ranking_type, rank_position
     ) VALUES (
         :scan_time, :symbol, :current_price, :previous_close, :stock_percent,
         :nifty_percent, :relative_strength, :ema5, :ema9, :ema10, :vwap, :supertrend,
         :macd, :macd_signal, :macd_histogram, :adx, :volume, :avg_volume, :volume_ratio,
+        :volume_tod_ratio, :volume_label, :vwap_purity_pct, :market_regime, :confidence_grade,
         :kavach_state, :kavach_strength, :trade_score, :ranking_type, :rank_position
     )
     """
@@ -442,7 +506,9 @@ _PERSIST_COLS = (
     "symbol", "current_price", "previous_close", "stock_percent", "nifty_percent",
     "relative_strength", "ema5", "ema9", "ema10", "vwap", "supertrend", "macd",
     "macd_signal", "macd_histogram", "adx", "volume", "avg_volume", "volume_ratio",
-    "kavach_state", "kavach_strength", "trade_score", "ranking_type", "rank_position",
+    "volume_tod_ratio", "volume_label", "vwap_purity_pct", "market_regime",
+    "confidence_grade", "kavach_state", "kavach_strength", "trade_score",
+    "ranking_type", "rank_position",
 )
 
 
@@ -538,7 +604,9 @@ _LATEST_SQL = text(
     """
     SELECT s.scan_time, s.symbol, s.current_price, s.relative_strength, s.stock_percent,
            s.nifty_percent, s.vwap, s.supertrend, s.macd, s.macd_signal,
-           s.macd_histogram, s.adx, s.volume_ratio, s.kavach_state,
+           s.macd_histogram, s.adx, s.volume_ratio, s.volume_tod_ratio, s.volume_label,
+           s.vwap_purity_pct, s.market_regime, s.confidence_grade,
+           s.kavach_state,
            s.kavach_strength, s.trade_score, s.ranking_type, s.rank_position,
            am.currmth_future_instrument_key AS instrument_key,
            am.currmth_future_symbol AS future_symbol
@@ -565,6 +633,11 @@ def _row_to_dict(r, maturity: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
         "nifty_percent": round(_f(r.nifty_percent), 2),
         "trade_score": round(_f(r.trade_score)),
         "volume_ratio": round(_f(r.volume_ratio), 2),
+        "volume_tod_ratio": round(_f(getattr(r, "volume_tod_ratio", 0) or 0), 2),
+        "volume_label": getattr(r, "volume_label", None) or "",
+        "vwap_purity_pct": round(_f(getattr(r, "vwap_purity_pct", 0) or 0), 1),
+        "market_regime": getattr(r, "market_regime", None) or REGIME_TREND,
+        "confidence_grade": getattr(r, "confidence_grade", None) or "",
         "vwap": round(vwap, 2),
         "above_vwap": price > vwap,
         "supertrend_bullish": _f(r.supertrend) > 0,

@@ -18,6 +18,13 @@ from typing import Any, Dict, List, Optional, Tuple
 import pytz
 from sqlalchemy import text
 
+from backend.services.kavach_confidence import (
+    confidence_passes_gate,
+    format_quality_row,
+)
+from backend.services.rs_scanner_anchors import anchor_overlap_at_0925
+from backend.services.rs_scanner_maturity import MATURITY_CLIMACTIC
+
 from backend.database import SessionLocal
 
 logger = logging.getLogger(__name__)
@@ -82,47 +89,67 @@ def adx_935_status(adx: Optional[float]) -> str:
     return "watch"
 
 
+def _clock_minutes_now() -> int:
+    now = datetime.now(IST)
+    return now.hour * 60 + now.minute
+
+
 def evaluate(row: Dict[str, Any]) -> Dict[str, Any]:
     """Derive per-condition flags + gate score + decision/section from raw inputs.
 
     ``row`` carries the raw field values plus ``direction`` and ``counter_rs``.
-    Returns a dict of the derived columns (booleans are True/False/None where None
-    means "not yet assessed").
+    When ``server_eval`` is True (background refresh), entry-time gate uses the
+    live IST clock instead of a stale stored entry_time.
     """
     direction = (row.get("direction") or LONG).upper()
     is_long = direction == LONG
     counter = bool(row.get("counter_rs"))
     maturity = (row.get("maturity_tag") or "").strip().upper()
-    maturity_a_only = maturity in ("EXTENDED", "STRETCHED")
+    maturity_a_only = maturity in ("EXTENDED", "STRETCHED", MATURITY_CLIMACTIC)
+    climactic = maturity == MATURITY_CLIMACTIC
 
-    # --- pre-market: news + ADX(9:35) ---
-    news_clean = row.get("news_clean")  # True=clean, False=adverse, None=unset
+    news_clean = row.get("news_clean")
     adverse_news = news_clean is False
     a935 = _num(row.get("adx_935"))
 
-    # --- entry gate (conditions 4-12) ---
-    # 4. Entry time window (also a hard fail when outside).
-    t_min = _to_min(row.get("entry_time"))
+    # Entry time gate — server refresh always uses live clock.
+    if row.get("server_eval"):
+        t_min = _clock_minutes_now()
+    else:
+        t_min = _to_min(row.get("entry_time"))
+        if t_min is None:
+            t_min = _clock_minutes_now()
+
     time_ok: Optional[bool] = None
     time_hardfail = False
+    time_wait = False
     if t_min is not None:
-        time_ok = ENTRY_START_MIN <= t_min <= ENTRY_END_MIN
-        time_hardfail = not time_ok
+        if t_min < ENTRY_START_MIN:
+            time_ok = False
+            time_wait = True
+        elif t_min > ENTRY_END_MIN:
+            time_ok = False
+            time_hardfail = True
+        else:
+            time_ok = True
 
-    # 5. Kavach score >= 70.
     score = _num(row.get("kavach_score_entry"))
     score_ok = (score >= 70) if score is not None else None
 
-    # 6. Confidence: same-direction A/B; counter-RS or EXTENDED/STRETCHED → A only.
-    conf = (row.get("confidence") or "").strip().upper() or None
+    conf = (row.get("confidence") or "").strip().upper().replace("*", "") or None
+    conf_display = (row.get("confidence") or "").strip().upper() or None
     if conf is None:
         confidence_ok = None
-    elif counter or maturity_a_only:
-        confidence_ok = conf == "A"
     else:
-        confidence_ok = conf in ("A", "B")
+        confidence_ok = confidence_passes_gate(
+            conf_display or conf,
+            counter_rs=counter,
+            maturity_a_only=maturity_a_only and not climactic,
+            climactic=climactic,
+        )
+        if climactic and conf in ("A+", "A") and (row.get("volume") or "").strip().lower() != "high":
+            confidence_ok = False
 
-    # 7. Trading state aligned with direction (misalignment is a hard fail).
     state = (row.get("trading_state") or "").strip().upper() or None
     state_ok: Optional[bool] = None
     state_hardfail = False
@@ -133,21 +160,18 @@ def evaluate(row: Dict[str, Any]) -> Dict[str, Any]:
             state_ok = state in ("SELL", "MANAGE SHORT")
         state_hardfail = not state_ok
 
-    # 8. EMA5 vs VWAP.
     ema = (row.get("ema_vs_vwap") or "").strip().lower() or None
     if ema is None:
         ema_ok = None
     else:
         ema_ok = ema == "above" if is_long else ema == "below"
 
-    # 9. Supertrend.
     st = (row.get("supertrend") or "").strip().lower() or None
     if st is None:
         st_ok = None
     else:
         st_ok = st == "bullish" if is_long else st == "bearish"
 
-    # 10. MACD (Crossing counts toward the trade direction).
     macd = (row.get("macd") or "").strip().lower() or None
     if macd is None:
         macd_ok = None
@@ -156,7 +180,6 @@ def evaluate(row: Dict[str, Any]) -> Dict[str, Any]:
     else:
         macd_ok = macd in ("bearish", "crossing")
 
-    # 11. ADX >= 25 with DI alignment.
     adx_e = _num(row.get("adx_entry"))
     di = (row.get("di_alignment") or "").strip() or None
     if adx_e is None:
@@ -167,12 +190,11 @@ def evaluate(row: Dict[str, Any]) -> Dict[str, Any]:
             di_ok = di == "DI+>DI-" if is_long else di == "DI->DI+"
         adx_ok = (adx_e >= 25) and di_ok
 
-    # 12. Volume (soft fail — Low fails the gate but is not a hard fail).
     vol = (row.get("volume") or "").strip().lower() or None
     if vol is None:
         volume_ok = None
     else:
-        volume_ok = vol in ("high", "normal")
+        volume_ok = vol in ("high", "normal", "average")
 
     gate_flags = [time_ok, score_ok, confidence_ok, state_ok, ema_ok, st_ok, macd_ok, adx_ok, volume_ok]
     gate_score = sum(1 for f in gate_flags if f is True)
@@ -183,8 +205,13 @@ def evaluate(row: Dict[str, Any]) -> Dict[str, Any]:
         decision, section = D_ELIMINATED, SEC_OUT
     elif time_hardfail or state_hardfail:
         decision, section = D_NOTRADE, SEC_OUT
+    elif time_wait:
+        decision, section = "🟡 WAIT — entry window not yet open", SEC_WATCH
     elif gate_score == 9:
-        decision, section = D_GO, SEC_GO
+        if climactic and not (conf in ("A+", "A") and vol == "high"):
+            decision, section = D_WATCH, SEC_WATCH
+        else:
+            decision, section = D_GO, SEC_GO
     elif gate_score >= 6:
         decision, section = D_WATCH, SEC_WATCH
     elif gate_score > 0:
@@ -193,11 +220,15 @@ def evaluate(row: Dict[str, Any]) -> Dict[str, Any]:
         decision, section = D_UNASSESSED, SEC_WATCH
 
     eligibility_note = ""
-    if confidence_ok is False and conf == "B":
-        if counter:
+    if confidence_ok is False:
+        if climactic:
+            eligibility_note = "CLIMACTIC — requires A-grade and High volume for GO"
+        elif counter:
             eligibility_note = "Requires A-grade — counter-RS direction"
         elif maturity_a_only:
             eligibility_note = f"Requires A-grade — {maturity} move maturity"
+        elif conf == "B":
+            eligibility_note = "Requires A-grade — counter-RS direction"
 
     return {
         "adx_935_status": adx_935_status(a935),
@@ -231,8 +262,9 @@ def _num(v: Any) -> Optional[float]:
 _RS_ALL_SQL = text(
     """
     SELECT s.symbol, s.relative_strength, s.trade_score, s.volume_ratio,
+           s.volume_label, s.vwap_purity_pct, s.market_regime, s.confidence_grade,
            s.kavach_state, s.ema5, s.vwap, s.supertrend, s.macd, s.macd_signal,
-           s.macd_histogram, s.adx, s.ranking_type,
+           s.macd_histogram, s.adx, s.ranking_type, s.scan_time,
            h.maturity_tag, h.consecutive_days_on_list, h.range_vs_atr_ratio
     FROM relative_strength_snapshot s
     LEFT JOIN rs_scanner_history h
@@ -246,8 +278,9 @@ _RS_ALL_SQL = text(
 _RS_DETAIL_SQL = text(
     """
     SELECT s.symbol, s.relative_strength, s.trade_score, s.volume_ratio,
+           s.volume_label, s.vwap_purity_pct, s.market_regime, s.confidence_grade,
            s.kavach_state, s.ema5, s.vwap, s.supertrend, s.macd, s.macd_signal,
-           s.macd_histogram, s.adx, s.ranking_type,
+           s.macd_histogram, s.adx, s.ranking_type, s.scan_time,
            h.maturity_tag, h.consecutive_days_on_list, h.range_vs_atr_ratio
     FROM relative_strength_snapshot s
     LEFT JOIN rs_scanner_history h
@@ -259,6 +292,15 @@ _RS_DETAIL_SQL = text(
     """
 )
 
+_RS_LIVE_DIRECTION_SQL = text(
+    """
+    SELECT symbol, ranking_type, scan_time
+    FROM relative_strength_snapshot
+    WHERE scan_time = (SELECT MAX(scan_time) FROM relative_strength_snapshot)
+      AND rank_position <= 5
+    """
+)
+
 # User-owned fields preserved across RS sync/populate refreshes.
 _PRESERVE_ON_RS_SYNC = frozenset({"news_clean", "notes", "counter_rs"})
 
@@ -267,7 +309,9 @@ def _direction_from_ranking(ranking_type: Optional[str]) -> str:
     return SHORT if (ranking_type or "").upper() == "BEARISH" else LONG
 
 
-def _confidence_grade(score: Optional[float]) -> Optional[str]:
+def _confidence_grade(score: Optional[float], rs_row: Any = None) -> Optional[str]:
+    if rs_row is not None and getattr(rs_row, "confidence_grade", None):
+        return str(rs_row.confidence_grade).strip().upper() or None
     if score is None:
         return None
     s = int(round(score))
@@ -321,14 +365,22 @@ def _macd_label(
     return "Bullish" if macd > sig else "Bearish"
 
 
-def _volume_label(ratio: Optional[float]) -> Optional[str]:
+def _volume_label(ratio: Optional[float], label: Optional[str] = None) -> Optional[str]:
+    if label:
+        lv = str(label).strip().lower()
+        if lv == "average":
+            return "Average"
+        if lv == "high":
+            return "High"
+        if lv == "low":
+            return "Low"
     if ratio is None:
         return None
     r = float(ratio)
     if r >= 1.2:
         return "High"
     if r >= 0.65:
-        return "Normal"
+        return "Average"
     return "Low"
 
 
@@ -340,7 +392,7 @@ def _current_entry_time_ist() -> Optional[str]:
     return None
 
 
-def _auto_fields_from_rs(row: Any, direction: str) -> Dict[str, Any]:
+def _auto_fields_from_rs(row: Any, direction: str, live_map: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """Map a relative_strength_snapshot row to checklist fields the system can fill."""
     score = _num(row.trade_score)
     adx = _num(row.adx)
@@ -353,13 +405,19 @@ def _auto_fields_from_rs(row: Any, direction: str) -> Dict[str, Any]:
     maturity_tag = getattr(row, "maturity_tag", None) or "FRESH"
     consecutive = getattr(row, "consecutive_days_on_list", None)
     range_ratio = _num(getattr(row, "range_vs_atr_ratio", None))
+    vol_lbl = _volume_label(_num(row.volume_ratio), getattr(row, "volume_label", None))
+    purity = _num(getattr(row, "vwap_purity_pct", None)) or 0.0
+    regime = getattr(row, "market_regime", None) or "TREND"
+    conf = _confidence_grade(score, row)
+    sym = getattr(row, "symbol", "") or ""
+    live_dir = (live_map or {}).get(sym)
     fields: Dict[str, Any] = {
         "rs_pct": round(_num(row.relative_strength) or 0, 2),
         "dashboard_score": int(round(score or 0)) if score is not None else None,
         "dashboard_kavach": row.kavach_state,
         "vol_multiplier": round(_num(row.volume_ratio) or 0, 2),
         "kavach_score_entry": int(round(score or 0)) if score is not None else None,
-        "confidence": _confidence_grade(score),
+        "confidence": conf,
         "trading_state": _trading_state_label(row.kavach_state, direction),
         "ema_vs_vwap": ema_lbl,
         "supertrend": _supertrend_label(_num(row.supertrend)),
@@ -367,11 +425,21 @@ def _auto_fields_from_rs(row: Any, direction: str) -> Dict[str, Any]:
         "adx_entry": round(adx, 1) if adx is not None else None,
         "adx_935": round(adx, 2) if adx is not None else None,
         "di_alignment": di,
-        "volume": _volume_label(_num(row.volume_ratio)),
+        "volume": vol_lbl,
         "entry_time": _current_entry_time_ist(),
         "maturity_tag": maturity_tag,
         "consecutive_days_on_list": int(consecutive) if consecutive is not None else 1,
         "range_vs_atr_ratio": round(range_ratio, 2) if range_ratio is not None else 0.0,
+        "vwap_purity_pct": round(purity, 1),
+        "market_regime": regime,
+        "quality_display": format_quality_row(
+            "High" if vol_lbl == "High" else ("Average" if vol_lbl == "Average" else "Low"),
+            purity,
+            score or 0,
+            regime,
+        ),
+        "live_rs_direction": live_dir,
+        "live_rs_updated_at": getattr(row, "scan_time", None),
     }
     return {k: v for k, v in fields.items() if v is not None}
 
@@ -387,12 +455,37 @@ def _merge_rs_into_existing(existing: Optional[Dict[str, Any]], auto: Dict[str, 
     return merged
 
 
+def _live_direction_map(db) -> Dict[str, str]:
+    rows = db.execute(_RS_LIVE_DIRECTION_SQL).fetchall()
+    out: Dict[str, str] = {}
+    for r in rows:
+        out[r.symbol] = (r.ranking_type or "BULLISH").upper()
+    return out
+
+
+def _rotation_carryover_flags(
+    rotation: Dict[str, Any], symbol: str, direction: str
+) -> Tuple[bool, Optional[str]]:
+    """Dim cards on ROTATION days when symbol was on yesterday but not today's 09:25."""
+    if rotation.get("rotation_day_type") != "ROTATION":
+        return False, rotation.get("rotation_day_type")
+    sym = symbol.upper()
+    is_long = direction == LONG
+    today_set = set(rotation.get("today_bull" if is_long else "today_bear") or [])
+    yday_set = set(rotation.get("yesterday_bull" if is_long else "yesterday_bear") or [])
+    carry = sym in yday_set and sym not in today_set
+    return carry, rotation.get("rotation_day_type")
+
+
 _UPSERT_COLS = (
     "rs_pct", "dashboard_score", "dashboard_kavach", "vol_multiplier",
     "news_clean", "adx_935", "entry_time", "kavach_score_entry", "confidence",
     "trading_state", "ema_vs_vwap", "supertrend", "macd", "adx_entry",
     "di_alignment", "volume", "counter_rs", "notes",
     "maturity_tag", "consecutive_days_on_list", "range_vs_atr_ratio",
+    "vwap_purity_pct", "market_regime", "quality_display",
+    "live_rs_direction", "live_rs_updated_at", "rotation_day_type",
+    "carryover_warning", "sector_badge", "data_refreshed_at",
 )
 
 
@@ -431,7 +524,9 @@ _SELECT_COLS = """
     ema_vs_vwap, ema_ok, supertrend, st_ok, macd, macd_ok, adx_entry, di_alignment,
     adx_ok, volume, volume_ok, counter_rs, gate_score, decision, section, notes,
     maturity_tag, consecutive_days_on_list, range_vs_atr_ratio, eligibility_note,
-    updated_at
+    vwap_purity_pct, market_regime, quality_display, live_rs_direction,
+    live_rs_updated_at, rotation_day_type, carryover_warning, sector_badge,
+    data_refreshed_at, updated_at
 """
 
 
@@ -449,8 +544,15 @@ def _row_to_dict(r) -> Dict[str, Any]:
         "adx_entry", "di_alignment", "adx_ok", "volume", "volume_ok", "counter_rs",
         "gate_score", "decision", "section", "notes",
         "maturity_tag", "consecutive_days_on_list", "range_vs_atr_ratio",
-        "eligibility_note",
+        "eligibility_note", "vwap_purity_pct", "market_regime", "quality_display",
+        "live_rs_direction", "rotation_day_type", "carryover_warning", "sector_badge",
     )}
+    d["live_rs_updated_at"] = (
+        r.live_rs_updated_at.isoformat() if getattr(r, "live_rs_updated_at", None) else None
+    )
+    d["data_refreshed_at"] = (
+        r.data_refreshed_at.isoformat() if getattr(r, "data_refreshed_at", None) else None
+    )
     d["updated_at"] = r.updated_at.isoformat() if r.updated_at else None
     return d
 
@@ -517,6 +619,12 @@ def get_state(session_date: Optional[str] = None) -> Dict[str, Any]:
             nifty_dir = s["nifty_open_direction"]
             break
     levels = _nifty_levels()
+    rotation = anchor_overlap_at_0925()
+    latest_refresh = None
+    for s in stocks:
+        if s.get("data_refreshed_at"):
+            latest_refresh = s["data_refreshed_at"]
+            break
     return {
         "session_date": sd,
         "nifty_open_direction": nifty_dir,
@@ -524,27 +632,69 @@ def get_state(session_date: Optional[str] = None) -> Dict[str, Any]:
         "banknifty": levels["banknifty"],
         "stocks": stocks,
         "counts": _counts(stocks),
+        "rotation_day": rotation,
+        "data_refreshed_at": latest_refresh,
     }
 
 
 def populate_from_rs() -> Dict[str, Any]:
     """Seed today's checklist from the latest RS snapshot with system auto-fill."""
+    return _refresh_checklist_from_rs(full_populate=True)
+
+
+def refresh_checklist_from_rs() -> Dict[str, Any]:
+    """Background job: re-sync all checklist rows from latest RS + re-evaluate."""
+    return _refresh_checklist_from_rs(full_populate=False)
+
+
+def _sector_badges_for_top5(db) -> Dict[str, str]:
+    """S1/S2/S3 for bullish top-gainer sectors, W1/W2/W3 for bearish."""
+    try:
+        from backend.services.rs_scanner_sectors import compute_sector_badges
+
+        return compute_sector_badges(db)
+    except Exception as exc:
+        logger.debug("sector badges skipped: %s", exc)
+        return {}
+
+
+def _refresh_checklist_from_rs(*, full_populate: bool) -> Dict[str, Any]:
     sd = today_ist()
-    count = 0
     db = SessionLocal()
     try:
         rows = db.execute(_RS_ALL_SQL).fetchall()
-        count = len(rows)
+        live_map = _live_direction_map(db)
+        rotation = anchor_overlap_at_0925()
+        badges = _sector_badges_for_top5(db)
+        now = datetime.now(IST)
+        symbols_seen = set()
         for row in rows:
+            symbols_seen.add(row.symbol)
             direction = _direction_from_ranking(row.ranking_type)
             existing = _load_raw(db, sd, row.symbol)
-            auto = _auto_fields_from_rs(row, direction)
+            auto = _auto_fields_from_rs(row, direction, live_map)
             merged = _merge_rs_into_existing(existing, auto)
+            carry, rtype = _rotation_carryover_flags(rotation, row.symbol, direction)
+            merged["rotation_day_type"] = rtype
+            merged["carryover_warning"] = carry
+            merged["sector_badge"] = badges.get(row.symbol)
+            merged["data_refreshed_at"] = now
             _upsert_stock(db, sd, row.symbol, direction, merged)
+        if full_populate:
+            logger.info("daily_checklist: populated %d stocks for %s", len(rows), sd)
+        else:
+            # Re-evaluate rows not in latest top-5 but still on checklist.
+            all_syms = db.execute(
+                text("SELECT symbol FROM daily_checklist WHERE session_date = :d"),
+                {"d": sd},
+            ).fetchall()
+            for r in all_syms:
+                if r.symbol not in symbols_seen:
+                    _reevaluate_symbol(db, sd, r.symbol)
+            logger.info("daily_checklist: refreshed %d stocks for %s", len(rows), sd)
         db.commit()
     finally:
         db.close()
-    logger.info("daily_checklist: populated %d stocks for %s", count, sd)
     return get_state(sd)
 
 
@@ -561,8 +711,10 @@ def sync_symbol_from_rs(symbol: str, session_date: Optional[str] = None) -> Dict
             raise ValueError(f"no RS data for {sym}")
         existing = _load_raw(db, sd, sym)
         direction = (existing or {}).get("direction") or _direction_from_ranking(row.ranking_type)
-        auto = _auto_fields_from_rs(row, direction)
+        live_map = _live_direction_map(db)
+        auto = _auto_fields_from_rs(row, direction, live_map)
         merged = _merge_rs_into_existing(existing, auto)
+        merged["data_refreshed_at"] = datetime.now(IST)
         _upsert_stock(db, sd, sym, direction, merged)
         db.commit()
     finally:
@@ -639,6 +791,7 @@ def _reevaluate_symbol(db, sd: str, symbol: str) -> None:
     raw = _load_raw(db, sd, symbol)
     if not raw:
         return
+    raw["server_eval"] = True
     _persist_derived(db, sd, symbol, evaluate(raw))
 
 

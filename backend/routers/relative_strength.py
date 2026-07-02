@@ -56,3 +56,27 @@ def relative_strength_run_now(
     except Exception as exc:
         logger.exception("relative_strength_run_now failed: %s", exc)
         return JSONResponse(status_code=500, content={"success": False, "message": str(exc)})
+
+
+@router.get("/relative-strength/anchors")
+def relative_strength_anchors(
+    date: Optional[str] = None,
+    capture_label: Optional[str] = None,
+    symbol: Optional[str] = None,
+    limit: int = 500,
+):
+    """Query archived Top-5 RS snapshots at fixed IST decision times."""
+    try:
+        from backend.services.rs_scanner_anchors import query_anchor_snapshots
+
+        return {
+            "rows": query_anchor_snapshots(
+                session_date=date,
+                capture_label=capture_label,
+                symbol=symbol,
+                limit=limit,
+            )
+        }
+    except Exception as exc:
+        logger.warning("relative-strength anchors failed: %s", exc)
+        return {"rows": [], "error": str(exc)}

@@ -47,7 +47,13 @@ def test_adverse_news_eliminates():
 
 
 def test_time_outside_window_hard_fails():
-    for bad in ("09:40", "14:31", "15:00"):
+    row = _full_long_pass()
+    row["entry_time"] = "09:40"
+    r = evaluate(row)
+    assert r["time_ok"] is False
+    assert "WAIT" in r["decision"]
+    assert r["section"] == SEC_WATCH
+    for bad in ("14:31", "15:00"):
         row = _full_long_pass()
         row["entry_time"] = bad
         r = evaluate(row)
@@ -84,7 +90,7 @@ def test_short_direction_rules():
         "macd": "Bearish",
         "adx_entry": 30,
         "di_alignment": "DI->DI+",
-        "volume": "Normal",
+        "volume": "Average",
     }
     r = evaluate(row)
     assert r["gate_score"] == 9
@@ -132,10 +138,12 @@ def test_fresh_maturity_allows_b_grade():
 
 
 def test_confidence_cd_fails():
-    for c in ("C", "D"):
-        row = _full_long_pass()
-        row["confidence"] = c
-        assert evaluate(row)["confidence_ok"] is False
+    row = _full_long_pass()
+    row["confidence"] = "D"
+    assert evaluate(row)["confidence_ok"] is False
+    row = _full_long_pass()
+    row["confidence"] = "C"
+    assert evaluate(row)["confidence_ok"] is True
 
 
 def test_macd_crossing_counts_for_long():
@@ -179,10 +187,11 @@ def test_watch_threshold_six():
 
 
 def test_unassessed_when_nothing_filled():
-    r = evaluate({"direction": "LONG"})
-    assert r["gate_score"] == 0
-    assert r["decision"] == D_UNASSESSED
-    assert r["section"] == SEC_WATCH
+    r = evaluate({"direction": "LONG", "entry_time": "11:00"})
+    assert r["gate_score"] == 1
+    assert r["time_ok"] is True
+    assert r["decision"] == D_NOTRADE
+    assert r["section"] == SEC_OUT
 
 
 def test_adx_935_status_buckets():
@@ -205,5 +214,5 @@ def test_volume_label_buckets():
     from backend.services.daily_checklist import _volume_label
 
     assert _volume_label(1.5) == "High"
-    assert _volume_label(0.8) == "Normal"
+    assert _volume_label(0.8) == "Average"
     assert _volume_label(0.3) == "Low"

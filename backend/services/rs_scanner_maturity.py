@@ -24,11 +24,14 @@ MATURITY_CONTINUING = "CONTINUING"
 MATURITY_EXTENDED = "EXTENDED"
 MATURITY_STRETCHED = "STRETCHED"
 
+MATURITY_CLIMACTIC = "CLIMACTIC"
+
 MATURITY_SORT_ORDER = {
     MATURITY_FRESH: 0,
     MATURITY_CONTINUING: 1,
     MATURITY_EXTENDED: 2,
     MATURITY_STRETCHED: 3,
+    MATURITY_CLIMACTIC: 4,
 }
 
 _DIRECTION_BULLISH = "bullish"
@@ -62,6 +65,26 @@ def _parse_ist_date(ts: Any) -> Optional[str]:
 
 def direction_from_ranking(ranking_type: Optional[str]) -> str:
     return _DIRECTION_BEARISH if (ranking_type or "").upper() == RANKING_BEARISH else _DIRECTION_BULLISH
+
+
+def is_climactic(
+    consecutive_days: int,
+    range_vs_atr_ratio: float,
+    rs_pct: float,
+    peer_rs_pcts: List[float],
+) -> bool:
+    """Day-1 exceptional prior move — mean-reversion risk."""
+    if consecutive_days > 1:
+        return False
+    if range_vs_atr_ratio >= 2.0:
+        return True
+    peers = [abs(x) for x in peer_rs_pcts if x is not None]
+    if len(peers) >= 2:
+        peers_sorted = sorted(peers)
+        median = peers_sorted[len(peers_sorted) // 2]
+        if median > 0 and abs(rs_pct) >= 2.0 * median:
+            return True
+    return False
 
 
 def classify_maturity_tag(consecutive_days: int, range_vs_atr_ratio: float) -> str:
@@ -232,6 +255,10 @@ def enrich_ranked_with_maturity(
     daily_cache: Dict[str, List[Dict]] = {}
 
     try:
+        by_dir: Dict[str, List[Dict[str, Any]]] = {_DIRECTION_BULLISH: [], _DIRECTION_BEARISH: []}
+        for row in ranked:
+            by_dir[direction_from_ranking(row.get("ranking_type"))].append(row)
+
         for row in ranked:
             symbol = row.get("symbol") or ""
             direction = direction_from_ranking(row.get("ranking_type"))
@@ -271,6 +298,18 @@ def enrich_ranked_with_maturity(
                 range_vs_atr_ratio=range_vs_atr_ratio,
                 session_date=sd,
             )
+            peers = [
+                _f(r.get("relative_strength"))
+                for r in by_dir.get(direction, [])
+                if (r.get("symbol") or "") != symbol
+            ]
+            if is_climactic(
+                record["consecutive_days_on_list"],
+                range_vs_atr_ratio,
+                _f(row.get("relative_strength")),
+                peers,
+            ):
+                record["maturity_tag"] = MATURITY_CLIMACTIC
             db.execute(_UPSERT_HISTORY_SQL, record)
 
             out = dict(row)

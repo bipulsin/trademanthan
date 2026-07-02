@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="settings.css">
     <link rel="stylesheet" href="left-menu.css?v=3.24">
     <link rel="stylesheet" href="theme.css?v=1.3">
-    <link rel="stylesheet" href="dailyRSchecklist.css?v=4">
+    <link rel="stylesheet" href="dailyRSchecklist.css?v=5">
 </head>
 <body class="theme-page">
     <div class="mobile-title-bar">
@@ -44,6 +44,7 @@
                         <div class="dc-toolbar-meta">
                             <span class="dc-date" id="dcDate">—</span>
                             <span class="dc-clock" id="dcClock">--:--:--</span>
+                            <span class="dc-data-asof" id="dcDataAsOf">Data as of —</span>
                             <span class="dc-window pre" id="dcWindow">Entry window —</span>
                         </div>
                     </div>
@@ -67,6 +68,7 @@
                     <div class="dc-warn-banner" id="dcGapWarn">
                         ⚠ Gap reversal detected — RS+ stocks may be dragged lower. Wait for the 9:35 candle direction.
                     </div>
+                    <div class="dc-rotation-banner" id="dcRotationBanner" hidden></div>
                 </div>
 
                 <!-- Hard rules -->
@@ -119,6 +121,7 @@
             <div class="dc-card-face">
                 <div class="dc-face-left">
                     <span class="dc-symbol"></span>
+                    <span class="dc-sector-badge"></span>
                     <span class="dc-rs"></span>
                 </div>
                 <div class="dc-face-center">
@@ -132,6 +135,6 @@
     </template>
 
     <script src="left-menu.js?v=3.24"></script>
-    <script src="dailyRSchecklist.js?v=3"></script>
+    <script src="dailyRSchecklist.js?v=4"></script>
 </body>
 </html>
