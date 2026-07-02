@@ -1,0 +1,215 @@
+Daily Checklist & RS Scanner — Technical Notes
+==============================================
+Generated: 2026-07-02
+TradeManthan / tradewithcto.com
+
+
+================================================================================
+TOPIC 1: Does dailyRSchecklist.html auto-refresh on a defined timeframe?
+================================================================================
+
+ANSWER: No — the daily checklist does NOT auto-refresh on a timer.
+
+Unlike the RS Scanner dashboard (which polls every 5 minutes), dailyRSchecklist.html
+loads data once and only updates when something explicitly triggers a server
+round-trip.
+
+
+WHAT ACTUALLY RUNS ON A TIMER
+-----------------------------
+The only interval in dailyRSchecklist.js is a 1-second clock tick:
+
+    tickClock();
+    setInterval(tickClock, 1000);
+
+That updates:
+  - The IST clock (dcClock)
+  - The entry-window label ("Entry opens in…", "Entry window open", "Entry window closed")
+  - The 10:00 AM ADX recheck banner inside an open modal
+
+It does NOT re-fetch checklist data or re-run the GO/WATCH/OUT decision logic.
+
+
+WHEN STATUS DOES CHANGE
+-----------------------
+Trigger                          | What happens
+---------------------------------|---------------------------------------------
+Page load                        | GET /data → if empty, POST /populate from latest RS snapshot
+"Refresh from RS" button         | POST /populate — refreshes all stocks from RS scanner
+Opening a stock modal            | POST /sync — refreshes that one symbol from RS
+Editing a field (news, ADX, etc.)| Debounced POST /update → server evaluate() → new decision
+
+There is NO setInterval polling /data or /populate, and NO backend scheduler that
+updates daily_checklist on its own.
+
+
+PRACTICAL IMPACT
+----------------
+  - GO/WATCH/OUT badges on cards stay frozen until you edit something, pull from RS,
+    or open a stock (sync).
+  - RS-derived fields (Kavach score, confidence, entry time, maturity, etc.) won't
+    track the 5-minute RS scanner unless you hit "Refresh from RS" or open a symbol.
+  - Entry-time hard fail (outside 9:45–14:30) is evaluated server-side at
+    update/populate/sync time — the page won't flip a stock to OUT when the clock
+    crosses 2:30 PM unless something triggers a re-evaluation.
+
+
+COMPARISON
+----------
+Page                              | Auto-refresh? | Interval
+----------------------------------|---------------|------------------
+RS Scanner (dashboard-relative-   | Yes           | Every 5 minutes
+strength.js)                      |               |
+Daily Checklist (dailyRSchecklist | No            | Manual / on user action only
+.js)                              |               |
+
+
+================================================================================
+TOPIC 2: Vol× in RS Scanner → High/Normal/Low in checklist popup
+================================================================================
+
+HOW Vol× IS COMPUTED (RS SCANNER)
+---------------------------------
+The RS scanner uses 5-minute futures candles (minutes/5), roughly 5 trading days of
+history (CANDLE_DAYS_BACK = 5), from the shared candle cache / Upstox.
+
+Code (relative_strength_scanner.py):
+
+    cur_volume = volumes[-1]
+    vol_ema = ema_series(volumes, VOLUME_EMA_PERIOD)[-1]  # VOLUME_EMA_PERIOD = 20
+    volume_ratio = (cur_volume / vol_ema) if vol_ema > 0 else 0.0
+
+Piece              | What it is
+-------------------|----------------------------------------------------------
+Numerator          | Volume of the LAST bar in the sorted 5m series (volumes[-1]).
+(cur_volume)       | During market hours this is normally the CURRENT, STILL-
+                   | FORMING 5m candle — not a completed prior bar.
+Denominator        | EMA(20) of volume over the FULL continuous 5m series in the
+(vol_ema)          | window (~5 days, including prior sessions + today).
+Vol×               | cur_volume / vol_ema — stored in relative_strength_snapshot
+(volume_ratio)     | and shown on the RS dashboard as "Vol×".
+
+Summary: 5-minute bar, forming/latest bar vs 20-bar EMA of 5m volumes.
+NOT daily volume, NOT session-only.
+
+That ratio also feeds Kavach (volume_ratio > 1 in state rules) and the trade score
+via volume_ratio_score() (thresholds at 1.0 / 1.5 / 2.0 in kavach_engine.py).
+
+
+HOW THE CHECKLIST POPUP GETS High / Normal / Low
+------------------------------------------------
+On populate or sync, the checklist reads volume_ratio from the latest
+relative_strength_snapshot (NOT from rs_scanner_history) and maps it to a label.
+
+Mapping (daily_checklist.py — _volume_label):
+
+    ratio >= 1.2  →  "High"
+    ratio >= 0.65 →  "Normal"
+    else          →  "Low"
+
+Stored on checklist row:
+  - vol_multiplier  = numeric Vol× (e.g. 1.35) — shown in modal subtitle
+  - volume          = text label High / Normal / Low — shown in popup "Volume" row
+
+Gate rule: volume_ok passes only for High or Normal; Low fails (soft fail, not
+hard OUT).
+
+Timing: Vol× uses the latest 5m bar, so the popup label is only as fresh as the
+last RS scan (or last "Refresh from RS" / modal sync). The checklist does NOT poll
+every 5 minutes on its own.
+
+
+================================================================================
+TOPIC 3: Is rs_scanner_history / maturity ATR logic live in the checklist?
+================================================================================
+
+ANSWER: Yes — the full maturity pipeline is wired in, not just days-on-list.
+The checklist does NOT recompute ATR; it reads the pre-classified result from
+rs_scanner_history.
+
+
+AT RS SCAN TIME (enrich_ranked_with_maturity)
+---------------------------------------------
+For each Top-5 symbol:
+
+  1. Days on list
+     - Reads yesterday's rs_scanner_history row (same symbol)
+     - Streak resets if direction flipped (bullish → bearish or vice versa)
+
+  2. ATR / range (daily candles: days/1, 30 days back; YESTERDAY's completed session)
+     - daily_range_pct   = (yesterday high − low) / prior close
+     - atr14_pct         = Wilder ATR(14) on daily bars / yesterday close
+     - range_vs_atr_ratio = daily_range_pct / atr14_pct
+
+  3. Tag classification
+     - FRESH       = first day on list (consecutive_days == 1)
+     - CONTINUING  = day 2–3, yesterday range < 1.5× ATR
+     - EXTENDED    = day 2+, yesterday range >= 1.5× ATR
+     - STRETCHED   = 4+ consecutive days (overrides CONTINUING/EXTENDED)
+
+  4. All fields written to rs_scanner_history table.
+
+
+WHEN CHECKLIST LOADS (populate / sync)
+--------------------------------------
+SQL joins relative_strength_snapshot with rs_scanner_history for today's IST date:
+
+    h.maturity_tag
+    h.consecutive_days_on_list
+    h.range_vs_atr_ratio
+
+These three fields are copied into daily_checklist:
+  - maturity_tag              → badge on card + modal
+  - consecutive_days_on_list  → badge text (e.g. "DAY 3", "STRETCHED · 4D")
+  - range_vs_atr_ratio        → stored on row (not shown separately in UI)
+
+
+ELIGIBILITY GATING (uses tag, which already embeds ATR logic)
+-------------------------------------------------------------
+In evaluate() (daily_checklist.py):
+
+    maturity = row.get("maturity_tag")
+    maturity_a_only = maturity in ("EXTENDED", "STRETCHED")
+
+EXTENDED (driven by yesterday's range >= 1.5× ATR on day 2+) and STRETCHED (4+ days)
+both enforce A-grade only for confidence (mirrors counter-RS rule).
+
+Eligibility note shown in modal when B-grade blocked:
+  "Requires A-grade — EXTENDED move maturity"
+  "Requires A-grade — STRETCHED move maturity"
+
+
+IF HISTORY IS MISSING
+---------------------
+If today's rs_scanner_history row doesn't exist yet (no scan since deploy, or
+maturity step failed), the JOIN returns null and defaults apply:
+  - maturity_tag = FRESH
+  - consecutive_days_on_list = 1
+  - range_vs_atr_ratio = 0.0
+
+EXTENDED/STRETCHED gating won't trigger until a successful RS scan writes history.
+
+
+QUICK COMPARISON: Vol× vs Maturity
+----------------------------------
+                        | Vol× / Volume label      | Maturity
+------------------------|--------------------------|---------------------------
+Source table            | relative_strength_       | rs_scanner_history
+                        | snapshot                 | (joined at populate/sync)
+Candle type             | 5m, latest bar           | Daily, yesterday's bar for
+                        |                          | ATR/range
+Used in checklist gate  | Volume = High/Normal     | Tag = EXTENDED/STRETCHED
+                        |                          | → A-grade only
+Auto-refresh on         | No — only on Pull /      | Same
+checklist page          | sync / modal open        |
+
+
+================================================================================
+KEY FILES
+================================================================================
+  backend/services/relative_strength_scanner.py  — Vol× computation, scan pipeline
+  backend/services/daily_checklist.py            — _volume_label, populate/sync, evaluate()
+  backend/services/rs_scanner_maturity.py        — ATR/range, maturity tags, history table
+  backend/services/kavach_engine.py              — volume_ratio_score for trade score
+  frontend/public/dailyRSchecklist.js            — checklist UI (no auto-poll)
+  frontend/public/dashboard-relative-strength.js — RS dashboard (5-min poll)
