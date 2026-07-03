@@ -24,6 +24,16 @@ from backend.services.kavach_confidence import (
 )
 from backend.services.rs_scanner_anchors import anchor_overlap_at_0925
 from backend.services.rs_scanner_maturity import MATURITY_CLIMACTIC
+from backend.services.daily_checklist_snapshot import (
+    at_or_after_lock_time,
+    clear_snapshot_for_date,
+    get_lock_info,
+    get_locked_symbol_rows,
+    get_locked_symbols,
+    is_snapshot_locked,
+    lock_morning_snapshot,
+    sort_by_snapshot_rank,
+)
 
 from backend.database import SessionLocal
 
@@ -264,13 +274,14 @@ _RS_ALL_SQL = text(
     SELECT s.symbol, s.relative_strength, s.trade_score, s.volume_ratio,
            s.volume_label, s.vwap_purity_pct, s.market_regime, s.confidence_grade,
            s.kavach_state, s.ema5, s.vwap, s.supertrend, s.macd, s.macd_signal,
-           s.macd_histogram, s.adx, s.ranking_type, s.scan_time,
+           s.macd_histogram, s.adx, s.ranking_type, s.scan_time, s.rank_position,
            h.maturity_tag, h.consecutive_days_on_list, h.range_vs_atr_ratio
     FROM relative_strength_snapshot s
     LEFT JOIN rs_scanner_history h
       ON h.symbol = s.symbol
      AND h.date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date
     WHERE s.scan_time = (SELECT MAX(scan_time) FROM relative_strength_snapshot)
+      AND s.rank_position <= 5
     ORDER BY s.ranking_type, s.rank_position
     """
 )
@@ -597,10 +608,14 @@ def _nifty_levels() -> Dict[str, Optional[float]]:
 
 
 def get_state(session_date: Optional[str] = None) -> Dict[str, Any]:
-    """Full page state for a date: stocks (bullish first), counts, nifty levels."""
+    """Full page state: locked today list, carryover, preview (pre-lock), counts."""
     sd = session_date or today_ist()
     db = SessionLocal()
     try:
+        lock_info = get_lock_info(db, sd)
+        locked = lock_info is not None
+        locked_syms = set(get_locked_symbols(db, sd)) if locked else set()
+
         rows = db.execute(
             text(
                 f"SELECT {_SELECT_COLS} FROM daily_checklist WHERE session_date = :d "
@@ -609,32 +624,113 @@ def get_state(session_date: Optional[str] = None) -> Dict[str, Any]:
             ),
             {"d": sd},
         ).fetchall()
+        all_stocks = [_row_to_dict(r) for r in rows]
+
+        rank_map: Dict[str, Tuple[int, int]] = {}
+        for r in get_locked_symbol_rows(db, sd):
+            bucket = 0 if r.direction == "BULL" else 1
+            rank_map[r.symbol] = (bucket, int(r.rank))
+
+        today_stocks: List[Dict[str, Any]] = []
+        carryover_stocks: List[Dict[str, Any]] = []
+        preview_stocks: List[Dict[str, Any]] = []
+
+        if locked:
+            today_stocks = sort_by_snapshot_rank(
+                [s for s in all_stocks if s["symbol"] in locked_syms],
+                rank_map,
+            )
+            carryover_stocks = [s for s in all_stocks if s["symbol"] not in locked_syms]
+            for s in carryover_stocks:
+                s["is_carryover"] = True
+        else:
+            preview_stocks = _preview_stocks_from_rs(db)
+            for s in preview_stocks:
+                s["is_preview"] = True
     finally:
         db.close()
 
-    stocks = [_row_to_dict(r) for r in rows]
+    display_stocks = today_stocks if locked else preview_stocks
     nifty_dir = ""
-    for s in stocks:
+    for s in all_stocks:
         if s.get("nifty_open_direction"):
             nifty_dir = s["nifty_open_direction"]
             break
     levels = _nifty_levels()
     rotation = anchor_overlap_at_0925()
     latest_refresh = None
-    for s in stocks:
+    for s in display_stocks:
         if s.get("data_refreshed_at"):
             latest_refresh = s["data_refreshed_at"]
             break
+
+    live_setups: List[Dict[str, Any]] = []
+    radar_map: Dict[str, Dict[str, Any]] = {}
+    try:
+        from backend.services.rs_setup_radar import get_live_setups, get_radar_for_symbols
+
+        syms = [s["symbol"] for s in display_stocks]
+        radar_map = get_radar_for_symbols(syms)
+        live_setups = get_live_setups()
+    except Exception as exc:
+        logger.debug("checklist radar enrichment failed: %s", exc)
+
+    _LIVE_SETUP = frozenset({"CONVERGING", "TRIGGERED", "TRIGGERED_CHOP", "LATE"})
+    for s in display_stocks:
+        radar = radar_map.get(s["symbol"], {})
+        setup = (radar.get("setup_state") or "NEUTRAL").upper()
+        s["setup_state"] = setup
+        s["sl_pct"] = radar.get("sl_pct")
+        s["sl_rupees"] = radar.get("sl_rupees")
+        s["grade_gate_locked"] = setup in _LIVE_SETUP and (
+            s.get("section") == SEC_OUT or s.get("confidence_ok") is False
+        )
+
     return {
         "session_date": sd,
+        "locked": locked,
+        "locked_at": lock_info["locked_at"] if lock_info else None,
+        "locked_by": lock_info["locked_by"] if lock_info else None,
         "nifty_open_direction": nifty_dir,
         "nifty50": levels["nifty50"],
         "banknifty": levels["banknifty"],
-        "stocks": stocks,
-        "counts": _counts(stocks),
+        "today": today_stocks,
+        "carryover": carryover_stocks,
+        "preview": preview_stocks,
+        "stocks": display_stocks,
+        "counts": _counts(today_stocks if locked else preview_stocks),
         "rotation_day": rotation,
         "data_refreshed_at": latest_refresh,
+        "live_setups": live_setups,
     }
+
+
+def _preview_stocks_from_rs(db) -> List[Dict[str, Any]]:
+    """Build read-only preview cards from latest RS top-5+5 (no DB writes)."""
+    rows = db.execute(_RS_ALL_SQL).fetchall()
+    if not rows:
+        return []
+    live_map = _live_direction_map(db)
+    out: List[Dict[str, Any]] = []
+    for row in rows:
+        direction = _direction_from_ranking(row.ranking_type)
+        auto = _auto_fields_from_rs(row, direction, live_map)
+        merged = dict(auto)
+        merged["symbol"] = row.symbol
+        merged["direction"] = direction
+        merged["news_clean"] = True
+        merged["decision"] = D_UNASSESSED
+        merged["section"] = SEC_WATCH
+        merged["gate_score"] = 0
+        derived = evaluate({**merged, "server_eval": True})
+        out.append({**merged, **{k: derived[k] for k in DERIVED_COLS if k in derived}})
+    return sort_by_snapshot_rank(
+        out,
+        {
+            r.symbol: (0 if (r.ranking_type or "").upper() != "BEARISH" else 1, int(r.rank_position or 99))
+            for r in rows
+        },
+    )
 
 
 def populate_from_rs() -> Dict[str, Any]:
@@ -659,43 +755,98 @@ def _sector_badges_for_top5(db) -> Dict[str, str]:
 
 
 def _refresh_checklist_from_rs(*, full_populate: bool) -> Dict[str, Any]:
+    """Sync checklist from RS. Locks Top-5+5 once at/after 09:25; then refreshes locked only."""
     sd = today_ist()
+    now = datetime.now(IST)
     db = SessionLocal()
     try:
         rows = db.execute(_RS_ALL_SQL).fetchall()
         live_map = _live_direction_map(db)
         rotation = anchor_overlap_at_0925()
         badges = _sector_badges_for_top5(db)
-        now = datetime.now(IST)
-        symbols_seen = set()
-        for row in rows:
-            symbols_seen.add(row.symbol)
+
+        locked = is_snapshot_locked(db, sd)
+        if not locked and at_or_after_lock_time(now) and rows:
+            # Prefer conviction Core board if already seeded; else lock raw top-5+5
+            try:
+                from backend.services.rs_conviction_board import (
+                    SIDE_BEAR,
+                    SIDE_BULL,
+                    _load_core_board,
+                    run_conviction_board_cycle,
+                )
+
+                run_conviction_board_cycle(force=True)
+                bull_core = _load_core_board(db, sd, SIDE_BULL)
+                bear_core = _load_core_board(db, sd, SIDE_BEAR)
+                if bull_core or bear_core:
+                    bull_rows = [r for r in rows if (r.ranking_type or "").upper() != "BEARISH"]
+                    bear_rows = [r for r in rows if (r.ranking_type or "").upper() == "BEARISH"]
+                    lock_morning_snapshot(
+                        db, sd, bull_rows, bear_rows, locked_by="manual" if full_populate else "auto",
+                    )
+                    locked = True
+                else:
+                    bull_rows = [r for r in rows if (r.ranking_type or "").upper() != "BEARISH"]
+                    bear_rows = [r for r in rows if (r.ranking_type or "").upper() == "BEARISH"]
+                    lock_morning_snapshot(
+                        db, sd, bull_rows, bear_rows, locked_by="manual" if full_populate else "auto",
+                    )
+                    locked = True
+            except Exception as exc:
+                logger.warning("conviction lock fallback: %s", exc)
+                bull_rows = [r for r in rows if (r.ranking_type or "").upper() != "BEARISH"]
+                bear_rows = [r for r in rows if (r.ranking_type or "").upper() == "BEARISH"]
+                lock_morning_snapshot(
+                    db, sd, bull_rows, bear_rows, locked_by="manual" if full_populate else "auto",
+                )
+                locked = True
+
+        if locked:
+            try:
+                from backend.services.rs_conviction_board import SIDE_BEAR, SIDE_BULL, _load_core_board
+
+                core_syms = {c["symbol"] for c in _load_core_board(db, sd, SIDE_BULL) + _load_core_board(db, sd, SIDE_BEAR)}
+                locked_syms = core_syms if core_syms else set(get_locked_symbols(db, sd))
+            except Exception:
+                locked_syms = set(get_locked_symbols(db, sd))
+        else:
+            logger.debug("daily_checklist: pre-09:25 lock — skip persist for %s", sd)
+            db.commit()
+            state = get_state(sd)
+            state["refresh_status"] = "no_lock"
+            state["refresh_message"] = "Morning snapshot not yet taken (locks at/after 09:25 IST)"
+            return state
+
+        row_by_sym = {r.symbol: r for r in rows}
+        refreshed = 0
+
+        for sym in locked_syms:
+            row = row_by_sym.get(sym)
+            if row is None:
+                row = db.execute(_RS_DETAIL_SQL, {"sym": sym}).fetchone()
+            if row is None:
+                _reevaluate_symbol(db, sd, sym)
+                continue
             direction = _direction_from_ranking(row.ranking_type)
-            existing = _load_raw(db, sd, row.symbol)
+            existing = _load_raw(db, sd, sym)
             auto = _auto_fields_from_rs(row, direction, live_map)
             merged = _merge_rs_into_existing(existing, auto)
-            carry, rtype = _rotation_carryover_flags(rotation, row.symbol, direction)
+            carry, rtype = _rotation_carryover_flags(rotation, sym, direction)
             merged["rotation_day_type"] = rtype
             merged["carryover_warning"] = carry
-            merged["sector_badge"] = badges.get(row.symbol)
+            merged["sector_badge"] = badges.get(sym)
             merged["data_refreshed_at"] = now
-            _upsert_stock(db, sd, row.symbol, direction, merged)
-        if full_populate:
-            logger.info("daily_checklist: populated %d stocks for %s", len(rows), sd)
-        else:
-            # Re-evaluate rows not in latest top-5 but still on checklist.
-            all_syms = db.execute(
-                text("SELECT symbol FROM daily_checklist WHERE session_date = :d"),
-                {"d": sd},
-            ).fetchall()
-            for r in all_syms:
-                if r.symbol not in symbols_seen:
-                    _reevaluate_symbol(db, sd, r.symbol)
-            logger.info("daily_checklist: refreshed %d stocks for %s", len(rows), sd)
+            _upsert_stock(db, sd, sym, direction, merged)
+            refreshed += 1
+
+        logger.info("daily_checklist: refreshed %d locked stocks for %s", refreshed, sd)
         db.commit()
     finally:
         db.close()
-    return get_state(sd)
+    state = get_state(sd)
+    state["refresh_status"] = "ok"
+    return state
 
 
 def sync_symbol_from_rs(symbol: str, session_date: Optional[str] = None) -> Dict[str, Any]:
@@ -706,6 +857,10 @@ def sync_symbol_from_rs(symbol: str, session_date: Optional[str] = None) -> Dict
         raise ValueError("symbol required")
     db = SessionLocal()
     try:
+        if is_snapshot_locked(db, sd):
+            locked_syms = set(get_locked_symbols(db, sd))
+            if sym not in locked_syms:
+                raise ValueError(f"{sym} is not on today's locked watchlist")
         row = db.execute(_RS_DETAIL_SQL, {"sym": sym}).fetchone()
         if not row:
             raise ValueError(f"no RS data for {sym}")
@@ -804,14 +959,21 @@ def _reevaluate_all(db, sd: str) -> None:
 
 
 def reset_day(session_date: Optional[str] = None) -> Dict[str, Any]:
-    """Delete today's checklist rows (history table retains prior days)."""
+    """Delete today's checklist rows and clear morning snapshot + conviction board."""
     sd = session_date or today_ist()
     db = SessionLocal()
     try:
         db.execute(text("DELETE FROM daily_checklist WHERE session_date = :d"), {"d": sd})
+        clear_snapshot_for_date(db, sd)
         db.commit()
     finally:
         db.close()
+    try:
+        from backend.services.rs_conviction_board import reset_conviction_day
+
+        reset_conviction_day(sd)
+    except Exception as exc:
+        logger.warning("conviction board reset failed: %s", exc)
     return get_state(sd)
 
 

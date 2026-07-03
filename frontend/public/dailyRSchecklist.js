@@ -10,6 +10,7 @@
     var saveTimers = {};
     var cardEls = {};
     var modalSymbol = null;
+    var lastAdxRecheckAlertKey = null;
 
     var AUTO_FIELDS = [
         "entry_time", "kavach_score_entry", "confidence", "trading_state",
@@ -64,6 +65,38 @@
         var h = parseInt(o.hour, 10), m = parseInt(o.minute, 10), s = parseInt(o.second, 10);
         return { minutes: h * 60 + m, secs: h * 3600 + m * 60 + s,
                  str: o.hour + ":" + o.minute + ":" + o.second };
+    }
+
+    // ADX recheck alert windows: show banner only in the 10 minutes before each target (IST).
+    var ADX_RECHECK_TARGETS = [10 * 60, 10 * 60 + 30]; // 10:00, 10:30
+    var ADX_RECHECK_LEAD_MIN = 10;
+    var ADX_RECHECK_FLASH_MIN = 2; // flash in the last 2 minutes before target
+
+    function fmtIstAmPm(totalMinutes) {
+        var h24 = Math.floor(totalMinutes / 60);
+        var mm = totalMinutes % 60;
+        var h12 = h24 % 12;
+        if (h12 === 0) h12 = 12;
+        return h12 + ":" + ("0" + mm).slice(-2) + " " + (h24 < 12 ? "AM" : "PM");
+    }
+
+    function adxRecheckAlert(nowMinutes) {
+        for (var i = 0; i < ADX_RECHECK_TARGETS.length; i++) {
+            var target = ADX_RECHECK_TARGETS[i];
+            var start = target - ADX_RECHECK_LEAD_MIN;
+            if (nowMinutes >= start && nowMinutes < target) {
+                var minsLeft = target - nowMinutes;
+                var label = fmtIstAmPm(target);
+                return {
+                    show: true,
+                    flash: minsLeft <= ADX_RECHECK_FLASH_MIN,
+                    text: minsLeft <= ADX_RECHECK_FLASH_MIN
+                        ? "⏰ Now is " + label + " — recheck ADX for this stock"
+                        : "⏰ Recheck ADX at " + label
+                };
+            }
+        }
+        return { show: false };
     }
 
     function fmtDate(iso) {
@@ -123,11 +156,20 @@
     }
 
     function currentStock(symbol) {
-        if (!state || !state.stocks) return null;
-        for (var i = 0; i < state.stocks.length; i++) {
-            if (state.stocks[i].symbol === symbol) return state.stocks[i];
+        if (!state) return null;
+        var pools = [state.today, state.carryover, state.preview, state.stocks];
+        for (var p = 0; p < pools.length; p++) {
+            var list = pools[p];
+            if (!list) continue;
+            for (var i = 0; i < list.length; i++) {
+                if (list[i].symbol === symbol) return list[i];
+            }
         }
         return null;
+    }
+
+    function isActionableStock(stock) {
+        return stock && !stock.is_carryover && !stock.is_preview;
     }
 
     function hintFor(field, stock) {
@@ -168,9 +210,11 @@
         return node;
     }
 
-    function patchCard(card, stock) {
+    function patchCard(card, stock, opts) {
+        opts = opts || {};
         var dcls = decisionClass(stock);
         card.className = "dc-card";
+        if (opts.preview || stock.is_preview) card.classList.add("dc-card--preview");
         if (dcls === "GO") card.classList.add("dc-card--go");
         if (dcls === "OUT") card.classList.add("dc-card--out");
         if (stock.carryover_warning) card.classList.add("dc-card--carryover");
@@ -200,6 +244,20 @@
         var dec = card.querySelector(".dc-decision");
         dec.textContent = stock.decision || "⬜ Not assessed";
         dec.className = "dc-decision dc-decision--" + dcls;
+        var setupEl = card.querySelector(".dc-setup");
+        if (setupEl) {
+            var st = (stock.setup_state || "NEUTRAL").toUpperCase();
+            if (st === "NEUTRAL" || st === "EXPIRED") {
+                setupEl.textContent = "";
+                setupEl.className = "dc-setup";
+            } else {
+                setupEl.textContent = st.replace("_", "·");
+                setupEl.className = "dc-setup dc-setup--" + st.toLowerCase().replace("_", "-");
+                if (stock.sl_pct != null) setupEl.textContent += " · SL " + Number(stock.sl_pct).toFixed(2) + "%";
+            }
+        }
+        var lockEl = card.querySelector(".dc-grade-lock");
+        if (lockEl) lockEl.hidden = !stock.grade_gate_locked;
     }
 
     function sortStocks(list) {
@@ -209,6 +267,24 @@
             if (oa !== ob) return oa - ob;
             return (b.rs_pct || 0) - (a.rs_pct || 0);
         });
+    }
+
+    function renderLiveSetups() {
+        var wrap = $("dcLiveSetups");
+        var chips = $("dcLiveSetupsChips");
+        if (!wrap || !chips) return;
+        var setups = (state && state.live_setups) || [];
+        if (!setups.length) {
+            wrap.hidden = true;
+            chips.innerHTML = "";
+            return;
+        }
+        wrap.hidden = false;
+        chips.innerHTML = setups.map(function (s) {
+            var cls = "dc-live-chip dc-live-chip--" + String(s.state || "").toLowerCase();
+            return '<span class="' + cls + '">' + s.symbol + " · " + s.side + " · " + s.state +
+                (s.sl_pct != null ? " · SL " + Number(s.sl_pct).toFixed(2) + "%" : "") + "</span>";
+        }).join("");
     }
 
     function render() {
@@ -252,8 +328,40 @@
         asofEl.textContent = "Data as of " + fmtDataAsOf(asofIso);
         asofEl.classList.toggle("dc-data-asof--stale", dataAgeMinutes(asofIso) > 6);
 
-        var stocks = state.stocks || [];
-        var empty = stocks.length === 0;
+        var stocks = state.stocks || state.today || state.preview || [];
+        var carry = state.carryover || [];
+        var locked = !!state.locked;
+        var preview = !locked && (state.preview || []).length > 0;
+
+        $("dcPendingLock").hidden = locked;
+        if (!locked) {
+            var start = 9 * 60 + 25;
+            var t = nowIST();
+            if (t.minutes < start) {
+                var rem = (start * 60) - t.secs;
+                $("dcLockCountdown").textContent =
+                    ("0" + Math.floor(rem / 60)).slice(-2) + ":" + ("0" + (rem % 60)).slice(-2);
+            } else {
+                $("dcLockCountdown").textContent = "pending next scan";
+            }
+        }
+
+        var lockedTitle = $("dcLockedTitle");
+        if (locked) {
+            lockedTitle.innerHTML = '<i class="fas fa-lock"></i> Today\'s Kavach List';
+            var atEl = $("dcLockedAt");
+            atEl.textContent = state.locked_at
+                ? "Locked at " + fmtDataAsOf(state.locked_at)
+                : "";
+        } else if (preview) {
+            lockedTitle.innerHTML = '<i class="fas fa-eye"></i> Preview — unconfirmed until 09:25 lock';
+            $("dcLockedAt").textContent = "";
+        } else {
+            lockedTitle.innerHTML = '<i class="fas fa-clock"></i> Today\'s Kavach List';
+            $("dcLockedAt").textContent = "";
+        }
+
+        var empty = stocks.length === 0 && carry.length === 0;
         $("dcEmpty").hidden = !empty;
         $("dcColumns").hidden = empty;
 
@@ -263,15 +371,14 @@
         var bearGrid = $("dcBearGrid");
         bull.forEach(function (stock) {
             var card = ensureCard(stock.symbol);
-            patchCard(card, stock);
+            patchCard(card, stock, { preview: preview });
             if (card.parentNode !== bullGrid) bullGrid.appendChild(card);
         });
         bear.forEach(function (stock) {
             var card = ensureCard(stock.symbol);
-            patchCard(card, stock);
+            patchCard(card, stock, { preview: preview });
             if (card.parentNode !== bearGrid) bearGrid.appendChild(card);
         });
-        // remove stale cards
         [bullGrid, bearGrid].forEach(function (grid) {
             var syms = {};
             stocks.forEach(function (s) { syms[s.symbol] = true; });
@@ -279,6 +386,38 @@
                 if (!syms[ch.dataset.symbol]) grid.removeChild(ch);
             });
         });
+
+        var coSec = $("dcCarryoverSection");
+        var coGrid = $("dcCarryoverGrid");
+        if (carry.length > 0) {
+            coSec.hidden = false;
+            $("dcCarryoverCount").textContent = String(carry.length);
+            carry.forEach(function (stock) {
+                var row = coGrid.querySelector('[data-symbol="' + stock.symbol + '"]');
+                if (!row) {
+                    row = $("dcCarryTpl").content.firstElementChild.cloneNode(true);
+                    row.dataset.symbol = stock.symbol;
+                    coGrid.appendChild(row);
+                }
+                row.querySelector(".dc-carry-sym").textContent = stock.symbol + " · " + stock.direction;
+                var rsv = stock.rs_pct;
+                row.querySelector(".dc-carry-rs").textContent = rsv == null ? "—" :
+                    "RS " + (rsv > 0 ? "+" : "") + Number(rsv).toFixed(2) + "%";
+                row.querySelector(".dc-carry-conf").textContent = stock.confidence || "—";
+                var mat = row.querySelector(".dc-carry-maturity");
+                if (mat) mat.innerHTML = maturityBadgeHtml(stock.maturity_tag, stock.consecutive_days_on_list);
+            });
+            var carrySyms = {};
+            carry.forEach(function (s) { carrySyms[s.symbol] = true; });
+            Array.prototype.slice.call(coGrid.children).forEach(function (ch) {
+                if (!carrySyms[ch.dataset.symbol]) coGrid.removeChild(ch);
+            });
+        } else {
+            coSec.hidden = true;
+            coGrid.innerHTML = "";
+        }
+
+        renderLiveSetups();
 
         if (modalSymbol) renderModal(currentStock(modalSymbol));
     }
@@ -293,10 +432,16 @@
 
     // ---- modal ----
     function openModal(symbol) {
+        var stock = currentStock(symbol);
+        if (stock && stock.is_carryover) return;
         modalSymbol = symbol;
         $("dcModal").hidden = false;
         $("dcModal").setAttribute("aria-hidden", "false");
         document.body.style.overflow = "hidden";
+        if (stock && stock.is_preview) {
+            renderModal(stock);
+            return;
+        }
         toast("Refreshing from RS…");
         api("/sync", {
             method: "POST",
@@ -305,13 +450,14 @@
         }).then(function (s) {
             applyState(s);
             renderModal(currentStock(symbol));
-        }).catch(function () {
+        }).catch(function (e) {
             renderModal(currentStock(symbol));
         });
     }
 
     function closeModal() {
         modalSymbol = null;
+        lastAdxRecheckAlertKey = null;
         $("dcModal").hidden = true;
         $("dcModal").setAttribute("aria-hidden", "true");
         document.body.style.overflow = "";
@@ -331,14 +477,14 @@
 
         var grid = el("div", "dc-modal-grid");
 
-        // recheck banner — full width
-        var rc = el("div", "dc-recheck dc-modal-span2", "⏰ Recheck ADX at 10:00 AM");
+        // recheck banner — only in 10-min windows before 10:00 / 10:30 IST
+        var rc = el("div", "dc-recheck dc-modal-span2");
         if (stock.adx_935_status === "recheck") {
-            rc.classList.add("show");
-            var t = nowIST();
-            if (t.minutes >= 600) {
-                rc.classList.add("flash");
-                rc.textContent = "⏰ Now is 10:00 AM — recheck ADX for this stock";
+            var alert = adxRecheckAlert(nowIST().minutes);
+            if (alert.show) {
+                rc.classList.add("show");
+                rc.textContent = alert.text;
+                if (alert.flash) rc.classList.add("flash");
             }
         }
         grid.appendChild(rc);
@@ -362,6 +508,17 @@
         }
         if (stock.carryover_warning) {
             grid.appendChild(el("div", "dc-carryover-chip dc-modal-span2", "⚠ CARRYOVER — not on today's 09:25 fresh scan"));
+        }
+        var setupSt = (stock.setup_state || "NEUTRAL").toUpperCase();
+        if (setupSt !== "NEUTRAL" && setupSt !== "EXPIRED") {
+            var setupRow = el("div", "dc-setup-row dc-modal-span2");
+            setupRow.textContent = "Setup radar: " + setupSt.replace("_", "·");
+            if (stock.sl_pct != null) setupRow.textContent += " · SL " + Number(stock.sl_pct).toFixed(2) + "%";
+            grid.appendChild(setupRow);
+        }
+        if (stock.grade_gate_locked) {
+            grid.appendChild(el("div", "dc-grade-lock-banner dc-modal-span2",
+                "🔒 Setup live but grade gate failed — wait for A-grade or GO section"));
         }
 
         var gateTitle = el("div", "dc-group-title dc-modal-span2", "Entry gate (auto from RS scanner)");
@@ -502,12 +659,19 @@
     }
 
     function pull() {
-        toast("Refreshing from RS scanner…");
-        api("/populate", { method: "POST" }).then(applyState).catch(function () { toast("Refresh failed"); });
+        toast("Refreshing Kavach data for locked watchlist…");
+        api("/refresh", { method: "POST" }).then(function (s) {
+            applyState(s);
+            if (s.refresh_status === "no_lock") {
+                toast(s.refresh_message || "Morning snapshot not yet taken");
+            } else if (s.refresh_status === "ok") {
+                toast("Watchlist updated");
+            }
+        }).catch(function () { toast("Refresh failed"); });
     }
 
     function resetDay() {
-        if (!confirm("Reset today's checklist? Saved values will be cleared (history is kept).")) return;
+        if (!confirm("Reset today's checklist and morning snapshot lock? All saved values will be cleared.")) return;
         api("/reset", { method: "POST" })
             .then(function (s) {
                 cardEls = {};
@@ -537,7 +701,16 @@
         }
         if (modalSymbol) {
             var stock = currentStock(modalSymbol);
-            if (stock && stock.adx_935_status === "recheck") renderModal(stock);
+            if (stock && stock.adx_935_status === "recheck") {
+                var alert = adxRecheckAlert(t.minutes);
+                var key = alert.show ? alert.text + (alert.flash ? "|flash" : "") : "hidden";
+                if (key !== lastAdxRecheckAlertKey) {
+                    lastAdxRecheckAlertKey = key;
+                    renderModal(stock);
+                }
+            } else {
+                lastAdxRecheckAlertKey = null;
+            }
         }
     }
 
@@ -560,11 +733,28 @@
         });
         $("dcModalClose").addEventListener("click", closeModal);
         $("dcModalBackdrop").addEventListener("click", closeModal);
+        $("dcCarryoverToggle").addEventListener("click", function () {
+            var body = $("dcCarryoverBody");
+            var open = body.hidden;
+            body.hidden = !open;
+            this.setAttribute("aria-expanded", open ? "true" : "false");
+            this.querySelector(".dc-carryover-chevron").classList.toggle("dc-carryover-chevron--open", open);
+        });
 
         api("/data").then(function (s) {
-            if (!s.stocks || s.stocks.length === 0) return api("/populate", { method: "POST" });
+            if (s.locked && (!s.stocks || s.stocks.length === 0)) {
+                return api("/refresh", { method: "POST" });
+            }
+            if (!s.locked && atOrAfter925() && (!s.preview || s.preview.length === 0)) {
+                return api("/refresh", { method: "POST" });
+            }
             return s;
         }).then(applyState).catch(function () { $("dcEmpty").querySelector("p").textContent = "Could not load checklist."; });
+
+        function atOrAfter925() {
+            var t = nowIST();
+            return t.minutes >= 9 * 60 + 25;
+        }
 
         tickClock();
         setInterval(tickClock, 1000);

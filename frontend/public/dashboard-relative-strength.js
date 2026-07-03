@@ -7,6 +7,7 @@
 (function () {
     const API = "/api/dashboard/relative-strength";
     const POLL_MS = 5 * 60 * 1000;
+    const RADAR_POLL_MS = 5 * 60 * 1000;
     const MATURITY_TOOLTIP =
         "FRESH = first day on this list, highest continuation odds. " +
         "CONTINUING = been here before but no exhaustion signal. " +
@@ -19,6 +20,8 @@
     let chartEnginePromise = null;
     let sortMode = "score";
     let lastData = null;
+    let rsCfg = { show_ema10_passive: true, alert_sound_enabled: true };
+    let seenTriggered = new Set();
 
     function escapeHtml(s) {
         const d = document.createElement("div");
@@ -28,6 +31,64 @@
 
     function escapeAttr(s) {
         return escapeHtml(s).replace(/"/g, "&quot;");
+    }
+
+    function istMinutesNow() {
+        var parts = new Intl.DateTimeFormat("en-GB", {
+            timeZone: "Asia/Kolkata", hour12: false, hour: "2-digit", minute: "2-digit",
+        }).formatToParts(new Date());
+        var h = 0, m = 0;
+        parts.forEach(function (p) {
+            if (p.type === "hour") h = parseInt(p.value, 10);
+            if (p.type === "minute") m = parseInt(p.value, 10);
+        });
+        return h * 60 + m;
+    }
+
+    function playTriggerSound() {
+        try {
+            var ctx = new (window.AudioContext || window.webkitAudioContext)();
+            var o = ctx.createOscillator();
+            var g = ctx.createGain();
+            o.connect(g);
+            g.connect(ctx.destination);
+            o.frequency.value = 880;
+            g.gain.value = 0.08;
+            o.start();
+            o.stop(ctx.currentTime + 0.25);
+        } catch (_) {}
+    }
+
+    function checkTriggeredAlerts(setups) {
+        if (!setups || !setups.length) return;
+        var start = Number(rsCfg.alert_window_start_min || 9 * 60 + 25);
+        var end = Number(rsCfg.alert_window_end_min || 14 * 60 + 30);
+        var mins = istMinutesNow();
+        if (mins < start || mins > end) return;
+        setups.forEach(function (s) {
+            var st = (s.state || "").toUpperCase();
+            if (st !== "TRIGGERED" && st !== "TRIGGERED_CHOP") return;
+            var key = s.symbol + ":" + st;
+            if (seenTriggered.has(key)) return;
+            seenTriggered.add(key);
+            if (typeof Notification !== "undefined") {
+                if (Notification.permission === "granted") {
+                    new Notification("RS Setup TRIGGERED", {
+                        body: s.symbol + " · " + s.side + " · SL " + fmtNum(s.sl_pct, 2) + "%",
+                    });
+                } else if (Notification.permission !== "denied") {
+                    Notification.requestPermission();
+                }
+            }
+            if (rsCfg.alert_sound_enabled !== false) playTriggerSound();
+        });
+    }
+
+    async function loadRsCfg() {
+        try {
+            var res = await fetch("/api/dashboard/relative-strength/config", { credentials: "same-origin" });
+            rsCfg = await res.json();
+        } catch (_) {}
     }
 
     function fmtNum(n, dp) {
@@ -104,11 +165,34 @@
         return list;
     }
 
+    function convictionChips(r) {
+        const chips = [];
+        if (r.has_anchor) chips.push('<span class="rs-chip rs-chip--anchor">ANCHOR</span>');
+        if (r.accum_active) chips.push('<span class="rs-chip rs-chip--accum">ACCUM</span>');
+        if (r.chop_flag || (r.whip_penalty || 0) >= 60) chips.push('<span class="rs-chip rs-chip--chop">CHOP</span>');
+        return chips.join(" ");
+    }
+
+    function setupBadge(r) {
+        const st = (r.setup_state || "NEUTRAL").toUpperCase();
+        if (st === "NEUTRAL" || st === "EXPIRED") return "";
+        let cls = "rs-setup--neutral";
+        if (st === "CONVERGING") cls = "rs-setup--conv";
+        else if (st === "TRIGGERED") cls = "rs-setup--trig";
+        else if (st === "TRIGGERED_CHOP" || st === "LATE") cls = "rs-setup--chop";
+        let sl = "";
+        if (r.sl_rupees != null && r.sl_pct != null) {
+            sl = ' <span class="rs-sl-cost">SL ₹' + fmtNum(r.sl_rupees, 2) + " · " + fmtNum(r.sl_pct, 2) + "%</span>";
+        }
+        return '<span class="rs-setup ' + cls + '">' + escapeHtml(st.replace("_", "·")) + "</span>" + sl;
+    }
+
     function rowHtml(r) {
         const rsCls = Number(r.rs_percent) >= 0 ? "rs-pos" : "rs-neg";
         const vwapCls = r.above_vwap ? "rs-pos" : "rs-neg";
         const matTag = (r.maturity_tag || "FRESH").toUpperCase();
         const days = r.consecutive_days_on_list || 1;
+        const conv = r.conviction_score != null ? fmtNum(r.conviction_score, 0) : "—";
         return (
             `<tr class="${rowClass(matTag)}" tabindex="0" role="button"` +
             ` data-symbol="${escapeAttr(r.symbol)}"` +
@@ -116,10 +200,14 @@
             ` data-label="${escapeAttr(r.future_symbol || r.symbol)}"` +
             ` title="Open chart for ${escapeAttr(r.symbol)}">` +
             `<td class="rs-rank">${escapeHtml(r.rank)}</td>` +
-            `<td class="rs-sym">${escapeHtml(r.symbol)}</td>` +
-            `<td class="num">${fmtNum(r.price, 2)}</td>` +
+            `<td class="rs-sym">${escapeHtml(r.symbol)} ${convictionChips(r)}</td>` +
+            `<td class="num rs-conv">${conv}</td>` +
             `<td class="num ${rsCls}">${fmtSignedPct(r.rs_percent)}</td>` +
             `<td class="num"><span class="rs-score ${tradeScoreClass(r.trade_score)}">${escapeHtml(r.trade_score)}</span></td>` +
+            `<td class="rs-setup-col">${setupBadge(r)}</td>` +
+            (rsCfg.show_ema10_passive !== false
+                ? `<td class="num rs-ema10">${r.ema10_10m != null ? fmtNum(r.ema10_10m, 2) : "—"}</td>`
+                : "") +
             `<td class="num">${fmtNum(r.volume_ratio, 2)}</td>` +
             `<td class="num ${vwapCls}">${fmtNum(r.vwap, 2)}</td>` +
             `<td>${dirBadge(r.supertrend_bullish, "Bull", "Bear")}</td>` +
@@ -127,6 +215,17 @@
             `<td class="num">${fmtNum(r.adx, 1)}</td>` +
             `<td>${kavachBadge(r.kavach_state)}</td>` +
             `<td class="rs-maturity-col">${maturityBadge(matTag, days)}</td>` +
+            `</tr>`
+        );
+    }
+
+    function benchRowHtml(r) {
+        return (
+            `<tr class="rs-scanner-row rs-scanner-row--bench">` +
+            `<td class="rs-sym">${escapeHtml(r.symbol)}</td>` +
+            `<td class="num">${fmtNum(r.conviction_score, 0)}</td>` +
+            `<td class="num">${fmtNum(r.persistence_credit, 0)}</td>` +
+            `<td>${setupBadge(r)}</td>` +
             `</tr>`
         );
     }
@@ -144,7 +243,9 @@
             host.innerHTML = '<p class="rs-scanner-empty">No data yet — scanner runs every 5 min during market hours.</p>';
             return;
         }
-        const columns = ["Rank", "Symbol", "Price", "RS %", "Score", "Vol×", "VWAP", "ST", "MACD", "ADX", "Kavach", "Maturity"];
+        const columns = ["Rank", "Symbol", "Conv", "RS %", "Score", "Setup"];
+        if (rsCfg.show_ema10_passive !== false) columns.push("EMA10");
+        columns.push("Vol×", "VWAP", "ST", "MACD", "ADX", "Kavach", "Maturity");
         host.innerHTML =
             '<table class="rs-scanner-table"><thead><tr>' +
             columns.map(function (c) {
@@ -234,11 +335,107 @@
         });
     }
 
+    function renderBenchTable(host, rows) {
+        if (!host) return;
+        if (!rows || !rows.length) {
+            host.innerHTML = "";
+            return;
+        }
+        host.innerHTML =
+            '<table class="rs-scanner-table rs-scanner-table--bench"><thead><tr>' +
+            "<th>Symbol</th><th>Conv</th><th>Persist</th><th>Setup</th></tr></thead><tbody>" +
+            rows.map(benchRowHtml).join("") +
+            "</tbody></table>";
+    }
+
+    function renderLiveSetups(setups) {
+        const empty = document.getElementById("rsLiveSetupsEmpty");
+        const chips = document.getElementById("rsLiveSetupsChips");
+        if (!chips) return;
+        if (!setups || !setups.length) {
+            if (empty) empty.hidden = false;
+            chips.innerHTML = "";
+            return;
+        }
+        if (empty) empty.hidden = true;
+        chips.innerHTML = setups.map(function (s) {
+            return (
+                '<span class="rs-setup-chip rs-setup-chip--' + escapeAttr((s.state || "").toLowerCase()) + '">' +
+                escapeHtml(s.symbol) + " · " + escapeHtml(s.side) + " · " + escapeHtml(s.state) +
+                (s.sl_pct != null ? " · SL " + fmtNum(s.sl_pct, 2) + "%" : "") +
+                "</span>"
+            );
+        }).join("");
+    }
+
+    function renderPromoEvents(events) {
+        const el = document.getElementById("rsPromoEvents");
+        if (!el) return;
+        if (!events || !events.length) {
+            el.hidden = true;
+            el.innerHTML = "";
+            return;
+        }
+        el.hidden = false;
+        el.innerHTML = events.map(function (e) {
+            const t = e.time ? new Date(e.time).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : "—";
+            if (e.type === "promote") {
+                return '<div class="rs-promo-banner">' + t + " — " + escapeHtml(e.symbol) +
+                    " promoted to " + escapeHtml(e.side) + " Core (replaced " + escapeHtml(e.replaced || "—") + ")</div>";
+            }
+            return '<div class="rs-promo-banner rs-promo-banner--eject">' + t + " — " + escapeHtml(e.symbol) + " ejected</div>";
+        }).join("");
+    }
+
+    function renderPending(pending, side, hostId) {
+        const el = document.getElementById(hostId);
+        if (!el || !pending) return;
+        el.textContent = pending.challenger + " challenging " + pending.displaced +
+            " — promotes next scan if sustained (" + pending.cycles_won + "/" + pending.cycles_required + ")";
+    }
+
+    function normalizeData(data) {
+        if (!data) return { bullish: [], bearish: [] };
+        if (data.bullish_core || data.bearish_core) {
+            return {
+                bullish: data.bullish_core || data.bullish || [],
+                bearish: data.bearish_core || data.bearish || [],
+                bullish_bench: data.bullish_bench || [],
+                bearish_bench: data.bearish_bench || [],
+                live_setups: data.live_setups || [],
+                promotion_events: data.promotion_events || [],
+                bullish_pending: data.bullish_pending,
+                bearish_pending: data.bearish_pending,
+                last_updated: data.last_updated || data.last_board_cycle,
+            };
+        }
+        return data;
+    }
+
     function render(data) {
-        lastData = data;
-        renderTable(document.getElementById("rsScannerBullish"), data && data.bullish);
-        renderTable(document.getElementById("rsScannerBearish"), data && data.bearish);
-        setUpdated(data && data.last_updated);
+        const d = normalizeData(data);
+        lastData = d;
+        renderTable(document.getElementById("rsScannerBullish"), d.bullish);
+        renderTable(document.getElementById("rsScannerBearish"), d.bearish);
+        renderBenchTable(document.getElementById("rsScannerBullBench"), d.bullish_bench);
+        renderBenchTable(document.getElementById("rsScannerBearBench"), d.bearish_bench);
+        const bc = document.getElementById("rsBullCount");
+        const brc = document.getElementById("rsBearCount");
+        if (bc) bc.textContent = (d.bullish ? d.bullish.length : 0) + "/5";
+        if (brc) brc.textContent = (d.bearish ? d.bearish.length : 0) + "/5";
+        const bbw = document.getElementById("rsBullBenchWrap");
+        const brw = document.getElementById("rsBearBenchWrap");
+        if (bbw) bbw.hidden = !(d.bullish_bench && d.bullish_bench.length);
+        if (brw) brw.hidden = !(d.bearish_bench && d.bearish_bench.length);
+        const bbc = document.getElementById("rsBullBenchCount");
+        const brbc = document.getElementById("rsBearBenchCount");
+        if (bbc) bbc.textContent = String((d.bullish_bench || []).length);
+        if (brbc) brbc.textContent = String((d.bearish_bench || []).length);
+        renderLiveSetups(d.live_setups);
+        checkTriggeredAlerts(d.live_setups);
+        renderPromoEvents(d.promotion_events);
+        renderPending(d.bullish_pending, "BULL", "rsPendingChallenges");
+        setUpdated(d.last_updated);
         nextRefreshAt = Date.now() + POLL_MS;
         tickCountdown();
     }
@@ -262,9 +459,21 @@
         }
     }
 
+    async function fetchLiveSetups() {
+        try {
+            const res = await fetch(API + "/live-setups", { cache: "no-store", credentials: "same-origin" });
+            const data = await res.json();
+            renderLiveSetups(data.live_setups || []);
+            checkTriggeredAlerts(data.live_setups || []);
+        } catch (_) {}
+    }
+
     function startPolling() {
         if (timer) clearInterval(timer);
-        timer = setInterval(fetchScanner, POLL_MS);
+        timer = setInterval(function () {
+            fetchScanner();
+            fetchLiveSetups();
+        }, POLL_MS);
         if (countdownTimer) clearInterval(countdownTimer);
         countdownTimer = setInterval(tickCountdown, 1000);
     }
@@ -280,8 +489,10 @@
                 if (lastData) render(lastData);
             });
         }
-        fetchScanner();
-        startPolling();
+        loadRsCfg().then(function () {
+            fetchScanner();
+            startPolling();
+        });
         const btn = document.getElementById("rsScannerRefresh");
         if (btn) {
             btn.addEventListener("click", () => {

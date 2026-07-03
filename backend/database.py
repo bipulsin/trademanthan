@@ -1003,6 +1003,244 @@ def _run_startup_schema_migrations(db_engine):
                         )
                         print(f"Applied migration: added daily_checklist.{col}")
 
+            # Daily checklist morning snapshot lock (Top 5+5 at/after 09:25 IST)
+            if "daily_snapshot" not in table_names:
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE daily_snapshot (
+                                id BIGSERIAL PRIMARY KEY,
+                                snapshot_date DATE NOT NULL,
+                                symbol TEXT NOT NULL,
+                                direction TEXT NOT NULL CHECK (direction IN ('BULL', 'BEAR')),
+                                rank INTEGER NOT NULL,
+                                rs_score DOUBLE PRECISION,
+                                locked_at TIMESTAMPTZ DEFAULT NOW(),
+                                UNIQUE (snapshot_date, symbol, direction)
+                            )
+                            """
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_daily_snapshot_date "
+                            "ON daily_snapshot (snapshot_date DESC)"
+                        )
+                    )
+                    print("Applied migration: created daily_snapshot (PostgreSQL)")
+
+            if "snapshot_lock" not in table_names:
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE snapshot_lock (
+                                lock_date DATE PRIMARY KEY,
+                                locked_at TIMESTAMPTZ,
+                                locked_by TEXT DEFAULT 'auto'
+                            )
+                            """
+                        )
+                    )
+                    print("Applied migration: created snapshot_lock (PostgreSQL)")
+
+            # RS Conviction Score board + Setup Radar
+            if "rs_conviction_config" not in table_names:
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE rs_conviction_config (
+                                key TEXT PRIMARY KEY,
+                                value TEXT NOT NULL,
+                                updated_at TIMESTAMPTZ DEFAULT NOW()
+                            )
+                            """
+                        )
+                    )
+                    print("Applied migration: created rs_conviction_config (PostgreSQL)")
+
+            if "rs_conviction_state" not in table_names:
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE rs_conviction_state (
+                                id BIGSERIAL PRIMARY KEY,
+                                session_date DATE NOT NULL,
+                                symbol TEXT NOT NULL,
+                                side TEXT NOT NULL CHECK (side IN ('BULL', 'BEAR')),
+                                persistence_credit DOUBLE PRECISION DEFAULT 0,
+                                opening_anchor DOUBLE PRECISION DEFAULT 0,
+                                rs_component DOUBLE PRECISION DEFAULT 0,
+                                slope_component DOUBLE PRECISION DEFAULT 0,
+                                accum_component DOUBLE PRECISION DEFAULT 0,
+                                whip_penalty DOUBLE PRECISION DEFAULT 0,
+                                conviction_score DOUBLE PRECISION DEFAULT 0,
+                                whipsaw_cross_count INTEGER DEFAULT 0,
+                                accum_active BOOLEAN DEFAULT FALSE,
+                                updated_at TIMESTAMPTZ DEFAULT NOW(),
+                                UNIQUE (session_date, symbol, side)
+                            )
+                            """
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_rs_conviction_state_date "
+                            "ON rs_conviction_state (session_date DESC)"
+                        )
+                    )
+                    print("Applied migration: created rs_conviction_state (PostgreSQL)")
+
+            if "rs_conviction_board" not in table_names:
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE rs_conviction_board (
+                                id BIGSERIAL PRIMARY KEY,
+                                session_date DATE NOT NULL,
+                                side TEXT NOT NULL CHECK (side IN ('BULL', 'BEAR')),
+                                rank INTEGER NOT NULL,
+                                symbol TEXT NOT NULL,
+                                conviction_score DOUBLE PRECISION,
+                                promoted_at TIMESTAMPTZ,
+                                UNIQUE (session_date, side, rank),
+                                UNIQUE (session_date, side, symbol)
+                            )
+                            """
+                        )
+                    )
+                    print("Applied migration: created rs_conviction_board (PostgreSQL)")
+
+            if "rs_conviction_challenger" not in table_names:
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE rs_conviction_challenger (
+                                session_date DATE NOT NULL,
+                                side TEXT NOT NULL,
+                                challenger_symbol TEXT NOT NULL,
+                                displaced_symbol TEXT NOT NULL,
+                                cycles_won INTEGER DEFAULT 1,
+                                PRIMARY KEY (session_date, side)
+                            )
+                            """
+                        )
+                    )
+                    print("Applied migration: created rs_conviction_challenger (PostgreSQL)")
+
+            if "rs_conviction_promotion_log" not in table_names:
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE rs_conviction_promotion_log (
+                                id BIGSERIAL PRIMARY KEY,
+                                session_date DATE NOT NULL,
+                                event_time TIMESTAMPTZ NOT NULL,
+                                side TEXT NOT NULL,
+                                event_type TEXT NOT NULL,
+                                symbol TEXT NOT NULL,
+                                replaced_symbol TEXT,
+                                detail_json TEXT
+                            )
+                            """
+                        )
+                    )
+                    print("Applied migration: created rs_conviction_promotion_log (PostgreSQL)")
+
+            if "rs_conviction_scoring_log" not in table_names:
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE rs_conviction_scoring_log (
+                                id BIGSERIAL PRIMARY KEY,
+                                session_date DATE NOT NULL,
+                                cycle_time TIMESTAMPTZ NOT NULL,
+                                symbol TEXT NOT NULL,
+                                side TEXT NOT NULL,
+                                rs_component DOUBLE PRECISION,
+                                opening_anchor DOUBLE PRECISION,
+                                persistence_credit DOUBLE PRECISION,
+                                slope_component DOUBLE PRECISION,
+                                accum_component DOUBLE PRECISION,
+                                whip_penalty DOUBLE PRECISION,
+                                conviction_score DOUBLE PRECISION,
+                                in_raw_top5 BOOLEAN
+                            )
+                            """
+                        )
+                    )
+                    print("Applied migration: created rs_conviction_scoring_log (PostgreSQL)")
+
+            if "rs_setup_radar" not in table_names:
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE rs_setup_radar (
+                                id BIGSERIAL PRIMARY KEY,
+                                session_date DATE NOT NULL,
+                                symbol TEXT NOT NULL,
+                                side TEXT NOT NULL,
+                                setup_state TEXT DEFAULT 'NEUTRAL',
+                                display_state TEXT DEFAULT 'NEUTRAL',
+                                gap_atr DOUBLE PRECISION,
+                                sl_rupees DOUBLE PRECISION,
+                                sl_pct DOUBLE PRECISION,
+                                ema5 DOUBLE PRECISION,
+                                vwap DOUBLE PRECISION,
+                                price DOUBLE PRECISION,
+                                state_since TIMESTAMPTZ,
+                                updated_at TIMESTAMPTZ DEFAULT NOW(),
+                                UNIQUE (session_date, symbol)
+                            )
+                            """
+                        )
+                    )
+                    print("Applied migration: created rs_setup_radar (PostgreSQL)")
+
+            if "rs_setup_radar_log" not in table_names:
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE rs_setup_radar_log (
+                                id BIGSERIAL PRIMARY KEY,
+                                session_date DATE NOT NULL,
+                                event_time TIMESTAMPTZ NOT NULL,
+                                symbol TEXT NOT NULL,
+                                side TEXT NOT NULL,
+                                state_from TEXT,
+                                state_to TEXT,
+                                gap_atr DOUBLE PRECISION,
+                                sl_pct DOUBLE PRECISION,
+                                whipsaw_count INTEGER
+                            )
+                            """
+                        )
+                    )
+                    print("Applied migration: created rs_setup_radar_log (PostgreSQL)")
+
+                    print("Applied migration: created rs_setup_radar_log (PostgreSQL)")
+
+            if "rs_conviction_state" in table_names:
+                rs_state_cols = {col["name"] for col in inspector.get_columns("rs_conviction_state")}
+                if "ema10_10m" not in rs_state_cols and db_engine.dialect.name == "postgresql":
+                    conn.execute(text("ALTER TABLE rs_conviction_state ADD COLUMN ema10_10m DOUBLE PRECISION"))
+                    print("Applied migration: rs_conviction_state.ema10_10m")
+
+            if "rs_setup_radar" in table_names:
+                radar_cols = {col["name"] for col in inspector.get_columns("rs_setup_radar")}
+                if "gap_prev1" not in radar_cols and db_engine.dialect.name == "postgresql":
+                    conn.execute(text("ALTER TABLE rs_setup_radar ADD COLUMN gap_prev1 DOUBLE PRECISION"))
+                    print("Applied migration: rs_setup_radar.gap_prev1")
+
             # rs_scanner_history: CLIMACTIC maturity tag support (no schema change needed — TEXT tag)
             if "oi_heatmap_latest" not in table_names:
                 if db_engine.dialect.name == "postgresql":

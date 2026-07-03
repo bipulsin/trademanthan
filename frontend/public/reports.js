@@ -463,7 +463,17 @@ function filterReports() {
     window.reportsManager.filterReports();
 }
 
+function rsExportCsv(kind) {
+    var dateEl = document.getElementById('rsExportDate');
+    var q = dateEl && dateEl.value ? '?date=' + encodeURIComponent(dateEl.value) : '';
+    window.location.href = '/api/dashboard/relative-strength/export/' + kind + q;
+}
+
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
     window.reportsManager = new ReportsManager();
+    var rsDate = document.getElementById('rsExportDate');
+    if (rsDate && !rsDate.value) {
+        rsDate.value = new Date().toISOString().slice(0, 10);
+    }
 });

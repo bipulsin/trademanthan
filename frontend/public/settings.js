@@ -14,6 +14,8 @@ class SettingsManager {
                     this.loadSettings();
         this.setupEventListeners();
         this.setupMobileMenu();
+        this.loadRsConvictionConfig();
+        this.setupRsConfigListeners();
         });
     }
 
@@ -468,6 +470,100 @@ class SettingsManager {
         } catch (error) {
             console.error('Settings: WhatsApp test failed:', error);
             this.showNotification('WhatsApp connection failed. Please check your credentials.', 'error');
+        }
+    }
+
+    async loadRsConvictionConfig() {
+        if (!document.getElementById('rsConvictionSettings')) return;
+        try {
+            const res = await fetch('/api/dashboard/relative-strength/config', { credentials: 'same-origin' });
+            const cfg = await res.json();
+            this.applyRsConvictionConfig(cfg);
+        } catch (e) {
+            console.warn('Settings: RS config load failed', e);
+        }
+    }
+
+    applyRsConvictionConfig(cfg) {
+        if (!cfg) return;
+        const map = {
+            rs_W_rs: 'W_rs', rs_W_anchor: 'W_anchor', rs_W_persist: 'W_persist',
+            rs_W_slope: 'W_slope', rs_W_accum: 'W_accum', rs_W_whip: 'W_whip',
+            rs_convergence_atr: 'convergence_atr', rs_convergence_bars: 'convergence_bars',
+            rs_expiry_atr: 'expiry_atr', rs_sl_buffer_atr: 'sl_buffer_atr',
+            rs_sl_late_pct: 'sl_late_pct', rs_chop_warning_crosses: 'chop_warning_crosses',
+            rs_alert_window_start_min: 'alert_window_start_min',
+            rs_alert_window_end_min: 'alert_window_end_min',
+        };
+        Object.keys(map).forEach(function (id) {
+            const el = document.getElementById(id);
+            if (el && cfg[map[id]] != null) el.value = cfg[map[id]];
+        });
+        const snd = document.getElementById('rs_alert_sound_enabled');
+        if (snd) snd.checked = !!cfg.alert_sound_enabled;
+        const ema = document.getElementById('rs_show_ema10_passive');
+        if (ema) ema.checked = cfg.show_ema10_passive !== false;
+    }
+
+    collectRsConvictionConfig() {
+        const body = {};
+        const map = {
+            rs_W_rs: 'W_rs', rs_W_anchor: 'W_anchor', rs_W_persist: 'W_persist',
+            rs_W_slope: 'W_slope', rs_W_accum: 'W_accum', rs_W_whip: 'W_whip',
+            rs_convergence_atr: 'convergence_atr', rs_convergence_bars: 'convergence_bars',
+            rs_expiry_atr: 'expiry_atr', rs_sl_buffer_atr: 'sl_buffer_atr',
+            rs_sl_late_pct: 'sl_late_pct', rs_chop_warning_crosses: 'chop_warning_crosses',
+            rs_alert_window_start_min: 'alert_window_start_min',
+            rs_alert_window_end_min: 'alert_window_end_min',
+        };
+        Object.keys(map).forEach(function (id) {
+            const el = document.getElementById(id);
+            if (!el || el.value === '') return;
+            const v = Number(el.value);
+            body[map[id]] = Number.isNaN(v) ? el.value : v;
+        });
+        const snd = document.getElementById('rs_alert_sound_enabled');
+        if (snd) body.alert_sound_enabled = snd.checked;
+        const ema = document.getElementById('rs_show_ema10_passive');
+        if (ema) body.show_ema10_passive = ema.checked;
+        return body;
+    }
+
+    setupRsConfigListeners() {
+        const saveBtn = document.getElementById('rsConfigSave');
+        const resetBtn = document.getElementById('rsConfigReset');
+        if (saveBtn) {
+            saveBtn.addEventListener('click', async () => {
+                try {
+                    const res = await fetch('/api/dashboard/relative-strength/config', {
+                        credentials: 'same-origin',
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(this.collectRsConvictionConfig()),
+                    });
+                    const cfg = await res.json();
+                    this.applyRsConvictionConfig(cfg);
+                    this.showNotification('RS conviction config saved', 'success');
+                } catch (e) {
+                    this.showNotification('Failed to save RS config', 'error');
+                }
+            });
+        }
+        if (resetBtn) {
+            resetBtn.addEventListener('click', async () => {
+                if (!confirm('Reset RS conviction settings to defaults?')) return;
+                try {
+                    const res = await fetch('/api/dashboard/relative-strength/config/reset', {
+                        credentials: 'same-origin',
+                        method: 'POST',
+                    });
+                    await res.json();
+                    await this.loadRsConvictionConfig();
+                    this.showNotification('RS config reset to defaults', 'info');
+                } catch (e) {
+                    this.showNotification('Reset failed', 'error');
+                }
+            });
         }
     }
 

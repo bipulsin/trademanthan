@@ -1111,6 +1111,22 @@ class SmartFutureAlgoScheduler:
                             capture_anchor_snapshot(hm)
                     except Exception as anchor_exc:
                         logger.warning("RS anchor capture failed: %s", anchor_exc)
+                    try:
+                        from backend.services.rs_setup_radar import run_setup_radar_cycle
+
+                        run_setup_radar_cycle()
+                    except Exception as radar_exc:
+                        logger.warning("Setup radar cycle failed: %s", radar_exc)
+                    try:
+                        from backend.services.rs_conviction_board import (
+                            is_board_cycle_minute,
+                            run_conviction_board_cycle,
+                        )
+
+                        if is_board_cycle_minute(now):
+                            run_conviction_board_cycle()
+                    except Exception as conv_exc:
+                        logger.warning("Conviction board cycle failed: %s", conv_exc)
                 except Exception as e:
                     logger.error(
                         "❌ Relative Strength scan failed: %s", e, exc_info=True

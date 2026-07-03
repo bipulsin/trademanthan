@@ -559,6 +559,81 @@
                     </div>
                 </div>
 
+                <!-- RS Conviction Board + Setup Radar -->
+                <div class="settings-section" id="rsConvictionSettings">
+                    <div class="section-header">
+                        <h2><i class="fas fa-layer-group"></i> RS Conviction &amp; Setup Radar</h2>
+                        <p>Weights and thresholds for the 10-min conviction board and 5-min EMA×VWAP setup radar</p>
+                    </div>
+                    <div class="settings-grid">
+                        <div class="setting-card">
+                            <div class="setting-header">
+                                <div class="setting-icon"><i class="fas fa-weight-hanging"></i></div>
+                                <div class="setting-info">
+                                    <h3>Conviction weights</h3>
+                                    <p>Composite score weights (positive weights should sum to ~1.0)</p>
+                                </div>
+                            </div>
+                            <div class="setting-config rs-config-grid">
+                                <div class="form-group"><label>W RS</label><input type="number" step="0.05" id="rs_W_rs" class="rs-cfg"></div>
+                                <div class="form-group"><label>W Anchor</label><input type="number" step="0.05" id="rs_W_anchor" class="rs-cfg"></div>
+                                <div class="form-group"><label>W Persist</label><input type="number" step="0.05" id="rs_W_persist" class="rs-cfg"></div>
+                                <div class="form-group"><label>W Slope</label><input type="number" step="0.05" id="rs_W_slope" class="rs-cfg"></div>
+                                <div class="form-group"><label>W Accum</label><input type="number" step="0.05" id="rs_W_accum" class="rs-cfg"></div>
+                                <div class="form-group"><label>W Whip (penalty)</label><input type="number" step="0.05" id="rs_W_whip" class="rs-cfg"></div>
+                            </div>
+                        </div>
+                        <div class="setting-card">
+                            <div class="setting-header">
+                                <div class="setting-icon"><i class="fas fa-radar"></i></div>
+                                <div class="setting-info">
+                                    <h3>Setup radar</h3>
+                                    <p>EMA5×VWAP convergence and stop-loss thresholds</p>
+                                </div>
+                            </div>
+                            <div class="setting-config rs-config-grid">
+                                <div class="form-group"><label>Convergence (ATR)</label><input type="number" step="0.05" id="rs_convergence_atr" class="rs-cfg"></div>
+                                <div class="form-group"><label>Convergence bars</label><input type="number" step="1" id="rs_convergence_bars" class="rs-cfg"></div>
+                                <div class="form-group"><label>Expiry (ATR)</label><input type="number" step="0.1" id="rs_expiry_atr" class="rs-cfg"></div>
+                                <div class="form-group"><label>SL buffer (ATR)</label><input type="number" step="0.05" id="rs_sl_buffer_atr" class="rs-cfg"></div>
+                                <div class="form-group"><label>Late entry SL %</label><input type="number" step="0.1" id="rs_sl_late_pct" class="rs-cfg"></div>
+                                <div class="form-group"><label>Chop warning crosses</label><input type="number" step="1" id="rs_chop_warning_crosses" class="rs-cfg"></div>
+                            </div>
+                        </div>
+                        <div class="setting-card">
+                            <div class="setting-header">
+                                <div class="setting-icon"><i class="fas fa-bell"></i></div>
+                                <div class="setting-info">
+                                    <h3>Alerts &amp; display</h3>
+                                    <p>Browser notifications on TRIGGERED setups during the alert window</p>
+                                </div>
+                            </div>
+                            <div class="setting-config">
+                                <div class="toggle-group">
+                                    <label class="switch">
+                                        <input type="checkbox" id="rs_alert_sound_enabled" class="rs-cfg-bool">
+                                        <span class="slider round"></span>
+                                    </label>
+                                    <span class="toggle-label">Play sound on TRIGGERED</span>
+                                </div>
+                                <div class="toggle-group">
+                                    <label class="switch">
+                                        <input type="checkbox" id="rs_show_ema10_passive" class="rs-cfg-bool">
+                                        <span class="slider round"></span>
+                                    </label>
+                                    <span class="toggle-label">Show EMA(10) passive column on dashboard</span>
+                                </div>
+                                <div class="form-group"><label>Alert window start (min from midnight IST)</label><input type="number" id="rs_alert_window_start_min" class="rs-cfg"></div>
+                                <div class="form-group"><label>Alert window end (min from midnight IST)</label><input type="number" id="rs_alert_window_end_min" class="rs-cfg"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="settings-actions" style="margin-top:1rem;">
+                        <button type="button" class="btn btn-primary" id="rsConfigSave"><i class="fas fa-save"></i> Save RS Config</button>
+                        <button type="button" class="btn btn-secondary" id="rsConfigReset"><i class="fas fa-undo"></i> Reset RS Defaults</button>
+                    </div>
+                </div>
+
                 <!-- Application Settings Section -->
                 <div class="settings-section">
                     <div class="section-header">
@@ -671,7 +746,7 @@
 
     <!-- Scripts -->
     <script src="left-menu.js?v=3.23"></script>
-    <script src="settings.js?v=1.3"></script>
+    <script src="settings.js?v=1.4"></script>
     <script src="version.js?v=1.0"></script>
     <script src="cache-manager.js?v=1.1"></script>
 </body>

@@ -36,7 +36,7 @@ def data(date: Optional[str] = None):
         return svc.get_state(date)
     except Exception as exc:
         logger.warning("daily-checklist data failed: %s", exc)
-        return {"session_date": svc.today_ist(), "stocks": [], "counts": {"go": 0, "watch": 0, "out": 0}, "error": str(exc)}
+        return {"session_date": svc.today_ist(), "locked": False, "today": [], "carryover": [], "preview": [], "stocks": [], "counts": {"go": 0, "watch": 0, "out": 0}, "error": str(exc)}
 
 
 @router.post("/update")

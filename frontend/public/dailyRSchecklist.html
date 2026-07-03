@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="settings.css">
     <link rel="stylesheet" href="left-menu.css?v=3.24">
     <link rel="stylesheet" href="theme.css?v=1.3">
-    <link rel="stylesheet" href="dailyRSchecklist.css?v=5">
+    <link rel="stylesheet" href="dailyRSchecklist.css?v=7">
 </head>
 <body class="theme-page">
     <div class="mobile-title-bar">
@@ -78,20 +78,46 @@
                     <span class="dc-hardrule">✓ Square-off by 3:15 PM</span>
                 </div>
 
-                <!-- Bullish | Bearish columns -->
+                <!-- Live setup radar strip -->
+                <div class="dc-live-setups" id="dcLiveSetups" hidden>
+                    <span class="dc-live-setups-label"><i class="fas fa-radar"></i> Live setups</span>
+                    <div class="dc-live-setups-chips" id="dcLiveSetupsChips"></div>
+                </div>
+
+                <!-- Pre-9:25 pending lock -->
+                <div class="dc-pending-lock-banner" id="dcPendingLock" hidden>
+                    Waiting for 09:25 scan to lock today's watchlist… Entry opens in <span id="dcLockCountdown">—</span>
+                </div>
+
+                <!-- Bullish | Bearish columns (today's locked or preview) -->
                 <div class="dc-empty dc-card" id="dcEmpty">
                     <p>Loading checklist…</p>
                     <button type="button" class="dc-btn dc-btn--primary" id="dcPullEmpty"><i class="fas fa-sync-alt"></i> Pull from RS Scanner</button>
                 </div>
 
                 <div class="dc-columns" id="dcColumns" hidden>
-                    <section class="dc-col dc-col--bull">
-                        <h2 class="dc-col-title"><i class="fas fa-arrow-trend-up"></i> Bullish · LONG</h2>
-                        <div class="dc-card-list" id="dcBullGrid"></div>
-                    </section>
-                    <section class="dc-col dc-col--bear">
-                        <h2 class="dc-col-title"><i class="fas fa-arrow-trend-down"></i> Bearish · SHORT</h2>
-                        <div class="dc-card-list" id="dcBearGrid"></div>
+                    <div class="dc-locked-header" id="dcLockedHeader">
+                        <h2 class="dc-section-title" id="dcLockedTitle"><i class="fas fa-lock"></i> Today's Kavach List</h2>
+                        <span class="dc-locked-at" id="dcLockedAt"></span>
+                    </div>
+                    <div class="dc-columns-grid">
+                        <section class="dc-col dc-col--bull">
+                            <h3 class="dc-col-title"><i class="fas fa-arrow-trend-up"></i> Bullish · LONG</h3>
+                            <div class="dc-card-list" id="dcBullGrid"></div>
+                        </section>
+                        <section class="dc-col dc-col--bear">
+                            <h3 class="dc-col-title"><i class="fas fa-arrow-trend-down"></i> Bearish · SHORT</h3>
+                            <div class="dc-card-list" id="dcBearGrid"></div>
+                        </section>
+                    </div>
+                    <section class="dc-carryover-section" id="dcCarryoverSection" hidden>
+                        <button type="button" class="dc-carryover-toggle" id="dcCarryoverToggle" aria-expanded="false">
+                            <i class="fas fa-chevron-right dc-carryover-chevron"></i>
+                            Carry-over from previous scans (<span id="dcCarryoverCount">0</span>)
+                        </button>
+                        <div class="dc-carryover-body" id="dcCarryoverBody" hidden>
+                            <div class="dc-carryover-grid" id="dcCarryoverGrid"></div>
+                        </div>
                     </section>
                 </div>
             </div>
@@ -128,13 +154,27 @@
                     <span class="dc-score"></span>
                     <span class="dc-conf"></span>
                     <span class="dc-maturity"></span>
+                    <span class="dc-setup"></span>
+                </div>
+                <div class="dc-face-right">
+                    <span class="dc-grade-lock" hidden title="Setup live but grade gate failed">🔒</span>
                 </div>
                 <span class="dc-decision dc-decision--NONE">⬜ Not assessed</span>
             </div>
         </button>
     </template>
 
+    <!-- Carry-over compact row (no modal) -->
+    <template id="dcCarryTpl">
+        <div class="dc-carry-row" data-symbol="">
+            <span class="dc-carry-sym"></span>
+            <span class="dc-carry-rs"></span>
+            <span class="dc-carry-conf"></span>
+            <span class="dc-carry-maturity"></span>
+        </div>
+    </template>
+
     <script src="left-menu.js?v=3.24"></script>
-    <script src="dailyRSchecklist.js?v=4"></script>
+    <script src="dailyRSchecklist.js?v=7"></script>
 </body>
 </html>

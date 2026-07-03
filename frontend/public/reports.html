@@ -340,6 +340,35 @@
                     </div>
                 </div>
             </details>
+
+            <!-- RS Conviction log exports -->
+            <details class="reports-accordion">
+                <summary class="reports-accordion-summary">
+                    <span class="reports-accordion-title"><i class="fas fa-table"></i> RS Conviction Logs</span>
+                    <span class="reports-accordion-hint">Scoring, promotions, setup radar transitions</span>
+                </summary>
+                <div class="reports-accordion-body">
+                    <div class="intraday-filters">
+                        <div class="intraday-filter-row">
+                            <div class="intraday-filter-group">
+                                <label for="rsExportDate">Session date</label>
+                                <input type="date" id="rsExportDate" />
+                            </div>
+                            <div class="intraday-filter-actions">
+                                <button type="button" class="intraday-btn intraday-btn-success" onclick="rsExportCsv('scoring')">
+                                    <i class="fas fa-download"></i> Scoring log CSV
+                                </button>
+                                <button type="button" class="intraday-btn intraday-btn-success" onclick="rsExportCsv('promotions')">
+                                    <i class="fas fa-download"></i> Promotions CSV
+                                </button>
+                                <button type="button" class="intraday-btn intraday-btn-success" onclick="rsExportCsv('radar-log')">
+                                    <i class="fas fa-download"></i> Radar log CSV
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </details>
         </main>
     </div>
 
