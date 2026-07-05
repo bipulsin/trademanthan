@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <title>Ignition Diagnostics - Tradentical</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
+    <script src="auth-check.js?v=1"></script>
+    <script>
+        (async function () {
+            try {
+                const API_BASE_URL =
+                    window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+                        ? 'http://localhost:8000'
+                        : window.location.origin;
+                const token = localStorage.getItem('trademanthan_token') || '';
+                if (!token || !token.includes('.')) {
+                    window.location.replace('index.html');
+                    return;
+                }
+                let meRes = await fetch(`${API_BASE_URL}/api/auth/me`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                    cache: 'no-store'
+                });
+                if (!meRes.ok) {
+                    meRes = await fetch(`${API_BASE_URL}/auth/me`, {
+                        headers: { Authorization: `Bearer ${token}` },
+                        cache: 'no-store'
+                    });
+                }
+                if (!meRes.ok) {
+                    window.location.replace('index.html');
+                    return;
+                }
+                const me = await meRes.json();
+                const merged = Object.assign({}, JSON.parse(localStorage.getItem('trademanthan_user') || '{}'), me || {});
+                localStorage.setItem('trademanthan_user', JSON.stringify(merged));
+                const raw = merged.isAdmin != null ? merged.isAdmin : merged.is_admin;
+                if (String(raw || '').trim().toLowerCase() !== 'yes') {
+                    window.location.replace('dashboard.html');
+                }
+            } catch (e) {
+                window.location.replace('index.html');
+            }
+        })();
+    </script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="settings.css">
+    <link rel="stylesheet" href="left-menu.css?v=3.24">
+    <link rel="stylesheet" href="theme.css?v=1.3">
+    <link rel="stylesheet" href="kavachIgnitionDiag.css?v=1">
+</head>
+<body class="theme-page app-with-left-menu">
+    <div id="left-menu-container"></div>
+    <main class="kid-main">
+        <div class="kid-wrap">
+            <header class="kid-header">
+                <h1><i class="fas fa-bolt"></i> Kavach Momentum Ignition — Diagnostics</h1>
+                <p class="kid-sub">
+                    Read-only validation tools. Does not change <code>ignition_ui_enabled</code> or live jobs.
+                </p>
+            </header>
+
+            <section class="kid-card" id="backtestSection">
+                <h2>Run Historical Backtest</h2>
+                <p class="kid-hint">
+                    REST 5m candles per symbol. Order-flow imbalance is N/A (WS only). Background job ~7–15 min for 20 symbols.
+                </p>
+                <div class="kid-grid">
+                    <label class="kid-field">
+                        <span>Days</span>
+                        <input type="number" id="btDays" value="10" min="1" max="31">
+                    </label>
+                    <label class="kid-field">
+                        <span>Symbols</span>
+                        <input type="number" id="btSymbols" value="20" min="1" max="50">
+                    </label>
+                    <label class="kid-field">
+                        <span>Side</span>
+                        <select id="btSide">
+                            <option value="BULL">BULL</option>
+                            <option value="BEAR">BEAR</option>
+                        </select>
+                    </label>
+                </div>
+                <div class="kid-actions">
+                    <button type="button" class="kid-btn kid-btn-primary" id="btnRunBacktest">
+                        <i class="fas fa-play"></i> Run Backtest
+                    </button>
+                    <span class="kid-status" id="btStatus">Idle</span>
+                </div>
+                <div class="kid-output-tools" id="btTools" hidden>
+                    <button type="button" class="kid-btn kid-btn-ghost" id="btCopy"><i class="fas fa-copy"></i> Copy</button>
+                    <button type="button" class="kid-btn kid-btn-ghost" id="btDownload"><i class="fas fa-download"></i> Download</button>
+                </div>
+                <pre class="kid-pre" id="btOutput" hidden></pre>
+                <div class="kid-table-wrap" id="btTableWrap" hidden></div>
+            </section>
+
+            <section class="kid-card" id="liveSection">
+                <h2>View Live Ignition Log</h2>
+                <p class="kid-hint">
+                    Latest <code>rs_momentum_ignition_log</code> rows, WS order-flow table stats, and feed thread status.
+                </p>
+                <div class="kid-grid">
+                    <label class="kid-field">
+                        <span>Row limit</span>
+                        <input type="number" id="logLimit" value="50" min="1" max="500">
+                    </label>
+                </div>
+                <div class="kid-actions">
+                    <button type="button" class="kid-btn kid-btn-primary" id="btnLoadLog">
+                        <i class="fas fa-sync"></i> Refresh Live Log
+                    </button>
+                    <span class="kid-status" id="logStatus">Idle</span>
+                </div>
+                <div class="kid-output-tools" id="logTools" hidden>
+                    <button type="button" class="kid-btn kid-btn-ghost" id="logCopy"><i class="fas fa-copy"></i> Copy</button>
+                    <button type="button" class="kid-btn kid-btn-ghost" id="logDownload"><i class="fas fa-download"></i> Download</button>
+                </div>
+                <pre class="kid-pre" id="logOutput" hidden></pre>
+                <div class="kid-table-wrap" id="logTableWrap" hidden></div>
+            </section>
+        </div>
+    </main>
+    <script src="left-menu.js?v=3.25"></script>
+    <script src="kavachIgnitionDiag.js?v=1"></script>
+</body>
+</html>

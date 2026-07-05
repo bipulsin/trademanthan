@@ -36,6 +36,7 @@ import backend.routers.nk_vm_bull_backtest as nk_vm_bull_backtest
 import backend.routers.security_chart as security_chart
 import backend.routers.relative_strength as relative_strength
 import backend.routers.daily_checklist as daily_checklist
+import backend.routers.kavach_ignition_diagnostics as kavach_ignition_diagnostics
 # OLD SCHEDULERS - DISABLED - Migrated to smart_future_algo
 # from backend.services.master_stock_scheduler import start_scheduler, stop_scheduler
 # from backend.services.instruments_downloader import start_instruments_scheduler, stop_instruments_scheduler
@@ -320,6 +321,8 @@ app.include_router(relative_strength.router)
 app.include_router(relative_strength.router, prefix="/scan")
 app.include_router(daily_checklist.router)
 app.include_router(daily_checklist.router, prefix="/scan")
+app.include_router(kavach_ignition_diagnostics.router, prefix="/api/kavach-ignition-diagnostics")
+app.include_router(kavach_ignition_diagnostics.router, prefix="/kavach-ignition-diagnostics")
 
 # Create/migrate tables in a daemon thread so import + uvicorn bind is not blocked by long DB locks
 # (idle-in-transaction + migrations used to delay port 8000 for minutes → nginx 502).

@@ -34,7 +34,7 @@ class LeftMenu {
 
     isThemePage() {
         const path = window.location.pathname;
-        return /dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc/.test(path);
+        return /dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag/.test(path);
     }
 
     getCurrentPage() {
@@ -55,6 +55,7 @@ class LeftMenu {
         if (path.includes('arbitrage')) return 'arbitrage';
         if (path.includes('carsetup') || path.includes('cargpt')) return 'cargpt';
         if (path.includes('admintwc')) return 'admin';
+        if (path.includes('kavachIgnitionDiag')) return 'kavachIgnitionDiag';
         return 'dashboard';
     }
 
@@ -206,7 +207,7 @@ class LeftMenu {
 
     /** Redirect non-admins away from admin-only pages (direct URL access). */
     enforceAdminOnlyPageAccess() {
-        const adminOnly = new Set(['settings', 'admin']);
+        const adminOnly = new Set(['settings', 'admin', 'kavachIgnitionDiag']);
         if (!adminOnly.has(this.currentPage)) return;
         let user = {};
         try {
@@ -280,6 +281,7 @@ class LeftMenu {
                 <li class="nav-item" data-page="reports.html"><i class="fas fa-chart-bar"></i><span>Reports</span></li>
                 <li class="nav-item nav-item-admin" data-page="settings.html" style="display: none;" title="Administrator only"><i class="fas fa-cog"></i><span>Settings</span></li>
                 <li class="nav-item nav-item-admin" data-page="admintwc.html" style="display: none;" title="Administrator only"><i class="fas fa-user-shield"></i><span>Admin</span></li>
+                <li class="nav-item nav-item-admin" data-page="kavachIgnitionDiag.html" style="display: none;" title="Administrator only"><i class="fas fa-bolt"></i><span>Ignition Diag</span></li>
             </ul>
         </nav>
         <div class="panel-footer">
