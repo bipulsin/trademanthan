@@ -67,6 +67,7 @@ table.kid-table th, table.kid-table td {
     text-align: left; padding: 7px 6px;
 }
 table.kid-table th { color: var(--theme-muted, #64748b); font-weight: 600; }
+.kid-baseline-row td { background: var(--theme-bg-soft, rgba(248, 250, 252, 0.6)); }
 .kid-feed-pill {
     display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 0.78rem; font-weight: 600;
 }

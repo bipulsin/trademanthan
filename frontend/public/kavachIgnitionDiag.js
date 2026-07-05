@@ -51,10 +51,28 @@
         URL.revokeObjectURL(a.href);
     }
 
+    function liftPp(v) {
+        if (v == null || v === '') return '—';
+        const n = Number(v) * 100;
+        return (n >= 0 ? '+' : '') + n.toFixed(1) + 'pp';
+    }
+
+    function liftRatio(v) {
+        if (v == null || v === '') return '—';
+        return Number(v).toFixed(2) + '×';
+    }
+
     function renderBacktestTable(result) {
         const wrap = document.getElementById('btTableWrap');
         if (!wrap || !result || !result.components) return;
         const comps = result.components;
+        const baseline = result.baseline || {};
+        const blRate = pct(baseline.favorable_rate_3bar);
+        const blDetail =
+            (baseline.favorable_moves != null ? baseline.favorable_moves : '—') +
+            ' / ' +
+            (baseline.bar_samples != null ? baseline.bar_samples : '—') +
+            ' bars';
         const labels = {
             order_flow_imbalance: 'Order-flow imbalance',
             oi_triangulation: 'OI-price-volume triangulation',
@@ -62,22 +80,42 @@
             absorption: 'Absorption',
             vwap_slope: 'VWAP slope',
         };
-        let rows = '';
+        let rows =
+            '<tr class="kid-baseline-row"><td><strong>Baseline (unconditional)</strong></td><td>' +
+            blRate +
+            '</td><td>—</td><td>—</td><td>' +
+            blDetail +
+            '</td></tr>';
         Object.keys(labels).forEach(function (key) {
             const c = comps[key] || {};
             let prec = '—';
+            let liftPpVal = '—';
+            let liftX = '—';
             let detail = '';
             if (c.status === 'not_applicable') {
                 prec = 'N/A';
                 detail = c.note || 'WS only';
             } else {
                 prec = pct(c.precision_3bar);
+                liftPpVal = liftPp(c.lift_pp);
+                liftX = liftRatio(c.lift_ratio);
                 detail = (c.hits || 0) + ' / ' + (c.signals || 0) + ' hits';
             }
-            rows += '<tr><td>' + labels[key] + '</td><td>' + prec + '</td><td>' + detail + '</td></tr>';
+            rows +=
+                '<tr><td>' +
+                labels[key] +
+                '</td><td>' +
+                prec +
+                '</td><td>' +
+                liftPpVal +
+                '</td><td>' +
+                liftX +
+                '</td><td>' +
+                detail +
+                '</td></tr>';
         });
         wrap.innerHTML =
-            '<table class="kid-table"><thead><tr><th>Component</th><th>3-bar precision</th><th>Detail</th></tr></thead><tbody>' +
+            '<table class="kid-table"><thead><tr><th>Component</th><th>3-bar precision</th><th>Lift (pp)</th><th>Lift (× baseline)</th><th>Detail</th></tr></thead><tbody>' +
             rows +
             '</tbody></table>';
         wrap.hidden = false;

@@ -102,6 +102,14 @@ def _record_hit(hits: Dict[str, int], key: str, fired: bool, moved: bool) -> Non
         hits[f"{key}_hits"] += 1
 
 
+def _lift_fields(precision: Optional[float], baseline_rate: Optional[float]) -> Dict[str, Optional[float]]:
+    if precision is None or baseline_rate is None:
+        return {"lift_pp": None, "lift_ratio": None}
+    lift_pp = round(precision - baseline_rate, 4)
+    lift_ratio = round(precision / baseline_rate, 4) if baseline_rate > 0 else None
+    return {"lift_pp": lift_pp, "lift_ratio": lift_ratio}
+
+
 def _precision(hits: Dict[str, int], key: str) -> Optional[float]:
     n = hits.get(f"{key}_signals", 0)
     if not n:
@@ -109,7 +117,9 @@ def _precision(hits: Dict[str, int], key: str) -> Optional[float]:
     return round(hits.get(f"{key}_hits", 0) / n, 4)
 
 
-def _aggregate_precision(per_symbol: Dict[str, Dict[str, int]]) -> Dict[str, Any]:
+def _aggregate_precision(
+    per_symbol: Dict[str, Dict[str, int]], baseline_rate: Optional[float]
+) -> Dict[str, Any]:
     totals = _empty_hits()
     for sym_hits in per_symbol.values():
         for k, v in sym_hits.items():
@@ -121,6 +131,8 @@ def _aggregate_precision(per_symbol: Dict[str, Dict[str, int]]) -> Dict[str, Any
                 "precision_3bar": None,
                 "signals": 0,
                 "hits": 0,
+                "lift_pp": None,
+                "lift_ratio": None,
                 "status": "not_applicable",
                 "note": (
                     "Live WS depth/tbq/tsq only — validate via View Live Ignition Log during market hours."
@@ -128,12 +140,23 @@ def _aggregate_precision(per_symbol: Dict[str, Dict[str, int]]) -> Dict[str, Any
             }
             continue
         prec = _precision(totals, key)
+        lifts = _lift_fields(prec, baseline_rate)
         out[key] = {
             "precision_3bar": prec,
             "signals": totals.get(f"{key}_signals", 0),
             "hits": totals.get(f"{key}_hits", 0),
+            **lifts,
         }
     return out
+
+
+def _compute_baseline(bar_samples: int, favorable_moves: int) -> Dict[str, Any]:
+    rate = round(favorable_moves / bar_samples, 4) if bar_samples else None
+    return {
+        "bar_samples": bar_samples,
+        "favorable_moves": favorable_moves,
+        "favorable_rate_3bar": rate,
+    }
 
 
 def _load_universe(db: Session, limit: int) -> List[Tuple[str, str]]:
@@ -154,9 +177,10 @@ def _load_universe(db: Session, limit: int) -> List[Tuple[str, str]]:
 
 def _analyze_symbol_candles(
     candles: List[Dict], side: str, cfg: Dict[str, Any], atr_pct: float = 1.2
-) -> Tuple[Dict[str, int], int]:
+) -> Tuple[Dict[str, int], int, int]:
     hits = _empty_hits()
     samples = 0
+    favorable_moves = 0
     for i in range(WARMUP_BARS, len(candles) - FORWARD_BARS):
         window = candles[: i + 1]
         fwd = _forward_return(candles, i)
@@ -164,6 +188,8 @@ def _analyze_symbol_candles(
             continue
         samples += 1
         moved = _moved_favorably(fwd, side)
+        if moved:
+            favorable_moves += 1
 
         slope = normalized_vwap_slope(window, atr_pct, cfg)
         accum, _, _ = accumulation_signal(window, side, cfg)
@@ -176,7 +202,7 @@ def _analyze_symbol_candles(
         _record_hit(hits, "oi_triangulation", oi_sc >= THRESHOLD_OI_TRI, moved)
         # order_flow_imbalance: never fired in REST backtest
 
-    return hits, samples
+    return hits, samples, favorable_moves
 
 
 def run_momentum_ignition_backtest(
@@ -205,6 +231,7 @@ def run_momentum_ignition_backtest(
     cfg = DEFAULTS
     per_symbol: Dict[str, Dict[str, int]] = {}
     total_samples = 0
+    total_favorable = 0
     symbols_fetched = 0
     errors: List[str] = []
 
@@ -226,14 +253,16 @@ def run_momentum_ignition_backtest(
         if not candles or len(candles) < MIN_CANDLES:
             continue
         symbols_fetched += 1
-        sym_hits, samples = _analyze_symbol_candles(candles, side, cfg)
+        sym_hits, samples, favorable = _analyze_symbol_candles(candles, side, cfg)
         per_symbol[sym] = sym_hits
         total_samples += samples
+        total_favorable += favorable
 
-    components = _aggregate_precision(per_symbol)
+    baseline = _compute_baseline(total_samples, total_favorable)
+    components = _aggregate_precision(per_symbol, baseline.get("favorable_rate_3bar"))
     finished_at = _now_ist_iso()
 
-    return {
+    result_body = {
         "ok": True,
         "started_at": started_at,
         "finished_at": finished_at,
@@ -241,6 +270,7 @@ def run_momentum_ignition_backtest(
         "universe_requested": len(universe),
         "symbols_with_data": symbols_fetched,
         "bar_samples": total_samples,
+        "baseline": baseline,
         "forward_bars": FORWARD_BARS,
         "forward_move_pct": FORWARD_MOVE_PCT,
         "thresholds": {
@@ -254,24 +284,11 @@ def run_momentum_ignition_backtest(
         "fetch_errors": errors[:20],
         "recommendation": (
             "Keep ignition_ui_enabled=false until live WS order-flow validation completes. "
-            "Enable 5m REST components if precision >= 0.55 on slope+absorption."
-        ),
-        "plain_text": format_backtest_plain_text(
-            {
-                "ok": True,
-                "started_at": started_at,
-                "finished_at": finished_at,
-                "parameters": {"days": days, "symbols": symbols, "side": side.upper()},
-                "universe_requested": len(universe),
-                "symbols_with_data": symbols_fetched,
-                "bar_samples": total_samples,
-                "components": components,
-                "recommendation": (
-                    "Keep ignition_ui_enabled=false until live WS order-flow validation completes."
-                ),
-            }
+            "Compare component lift_pp vs 0: positive = beats unconditional base rate."
         ),
     }
+    result_body["plain_text"] = format_backtest_plain_text(result_body)
+    return result_body
 
 
 def format_backtest_plain_text(result: Dict[str, Any]) -> str:
@@ -287,8 +304,18 @@ def format_backtest_plain_text(result: Dict[str, Any]) -> str:
         f"Universe: {result.get('symbols_with_data', 0)}/{result.get('universe_requested', 0)} symbols, "
         f"{result.get('bar_samples', 0)} bar samples"
     )
+    baseline = result.get("baseline") or {}
+    bl_rate = baseline.get("favorable_rate_3bar")
+    bl_moves = baseline.get("favorable_moves", 0)
+    bl_bars = baseline.get("bar_samples", 0)
+    bl_s = f"{bl_rate:.1%}" if bl_rate is not None else "—"
     lines.append("")
-    lines.append("Per-component precision (3-bar forward, favorably moved):")
+    lines.append(
+        f"Baseline (unconditional {params.get('side', 'BULL')}-favorable 3-bar move): "
+        f"{bl_s} ({bl_moves}/{bl_bars} bars, no signal filter)"
+    )
+    lines.append("")
+    lines.append("Per-component precision vs baseline:")
     comps = result.get("components") or {}
     labels = {
         "order_flow_imbalance": "Order-flow imbalance (WS)",
@@ -306,8 +333,14 @@ def format_backtest_plain_text(result: Dict[str, Any]) -> str:
         prec = c.get("precision_3bar")
         sig = c.get("signals", 0)
         hit = c.get("hits", 0)
+        lift_pp = c.get("lift_pp")
+        lift_ratio = c.get("lift_ratio")
         prec_s = f"{prec:.1%}" if prec is not None else "—"
-        lines.append(f"  {label}: precision={prec_s} ({hit}/{sig} hits)")
+        lift_pp_s = f"{lift_pp:+.1%}pp" if lift_pp is not None else "—"
+        lift_x_s = f"{lift_ratio:.2f}×" if lift_ratio is not None else "—"
+        lines.append(
+            f"  {label}: precision={prec_s} ({hit}/{sig}) | lift={lift_pp_s} | {lift_x_s} baseline"
+        )
     rec = result.get("recommendation")
     if rec:
         lines.append("")

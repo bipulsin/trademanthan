@@ -39,19 +39,28 @@ def test_oi_triangulation_from_candles_long_buildup():
 
 def test_analyze_symbol_candles_counts_samples():
     candles = _make_candles(80)
-    hits, samples = _analyze_symbol_candles(candles, "BULL", {})
+    hits, samples, favorable = _analyze_symbol_candles(candles, "BULL", {})
     assert samples > 0
+    assert favorable >= 0
     assert hits["vwap_slope_signals"] >= 0
 
 
 def test_aggregate_precision_order_flow_na():
     per = {"RELIANCE": _empty_hits()}
-    agg = _aggregate_precision(per)
+    agg = _aggregate_precision(per, baseline_rate=0.25)
     assert agg["order_flow_imbalance"]["status"] == "not_applicable"
     assert agg["order_flow_imbalance"]["precision_3bar"] is None
 
 
-def test_format_backtest_plain_text_includes_components():
+def test_lift_fields_positive_when_precision_beats_baseline():
+    from backend.services.kavach_momentum_ignition_validate import _lift_fields
+
+    lifts = _lift_fields(0.30, 0.20)
+    assert lifts["lift_pp"] == 0.10
+    assert lifts["lift_ratio"] == 1.5
+
+
+def test_format_backtest_plain_text_includes_baseline():
     text = format_backtest_plain_text({
         "started_at": "2026-06-01T10:00:00",
         "finished_at": "2026-06-01T10:05:00",
@@ -59,7 +68,9 @@ def test_format_backtest_plain_text_includes_components():
         "symbols_with_data": 5,
         "universe_requested": 20,
         "bar_samples": 100,
-        "components": _aggregate_precision({}),
+        "baseline": {"bar_samples": 100, "favorable_moves": 25, "favorable_rate_3bar": 0.25},
+        "components": _aggregate_precision({}, baseline_rate=0.25),
     })
+    assert "Baseline (unconditional" in text
     assert "Order-flow imbalance" in text
     assert "OI-price-volume" in text
