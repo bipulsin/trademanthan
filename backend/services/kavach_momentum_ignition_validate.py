@@ -18,9 +18,10 @@ from backend.config import settings
 from backend.services.kavach_momentum_ignition import (
     classify_oi_price_volume,
     coincident_confirmation,
+    ignition_component_weights,
     pullback_depth_contraction,
 )
-from backend.services.rs_conviction_config import DEFAULTS
+from backend.services.rs_conviction_config import DEFAULTS, get_config
 from backend.services.rs_conviction_signals import accumulation_signal, normalized_vwap_slope
 from backend.services.upstox_service import UpstoxService
 
@@ -46,10 +47,7 @@ COMPONENT_KEYS = (
     "vwap_slope",
 )
 
-COMPOSITE_KEYS = (
-    "composite_full",
-    "composite_no_pullback",
-)
+COMPOSITE_KEYS = ("composite_full",)
 
 
 def _wilson_ci(hits: int, n: int, z: float = 1.96) -> Tuple[Optional[float], Optional[float]]:
@@ -83,28 +81,29 @@ def _credibility_label(hits: int, n: int, baseline_rate: Optional[float]) -> str
 
 
 def _rest_composite_score(
+    side: str,
     oi_sc: float,
     accum: float,
     slope: float,
     pb: float,
     conf: float,
     cfg: Dict[str, Any],
-    *,
-    include_pullback: bool = True,
 ) -> float:
     """
-    REST backtest composite: order-flow excluded (0); remaining weights renormalized to 0–100.
-    Matches live tier weights from rs_conviction_config when WS order-flow is absent.
+    REST backtest composite: order-flow=0; renormalize remaining tier weights to 0–100.
+    Uses side-aware weights (BULL pullback=0 per W_ignition_pullback_bull).
     """
-    w_oi = float(cfg.get("W_ignition_oi_tri") or 0.25)
-    w_acc = float(cfg.get("W_ignition_absorption") or 0.15)
-    w_slope = float(cfg.get("W_ignition_slope") or 0.10)
-    w_pb = float(cfg.get("W_ignition_pullback") or 0.10) if include_pullback else 0.0
-    w_conf = float(cfg.get("W_ignition_confirm") or 0.05)
-    w_sum = w_oi + w_acc + w_slope + w_pb + w_conf
+    w = ignition_component_weights(side, cfg)
+    w_sum = w["oi"] + w["absorption"] + w["slope"] + w["pullback"] + w["confirm"]
     if w_sum <= 0:
         return 0.0
-    raw = (w_oi * oi_sc + w_acc * accum + w_slope * slope + w_pb * pb + w_conf * conf) / w_sum
+    raw = (
+        w["oi"] * oi_sc
+        + w["absorption"] * accum
+        + w["slope"] * slope
+        + w["pullback"] * pb
+        + w["confirm"] * conf
+    ) / w_sum
     return min(100.0, max(0.0, raw))
 
 
@@ -291,12 +290,8 @@ def _analyze_symbol_candles(
         _record_hit(hits, "pullback_depth", pb >= THRESHOLD_PULLBACK, moved)
         _record_hit(hits, "oi_triangulation", oi_sc >= THRESHOLD_OI_TRI, moved)
 
-        comp_full = _rest_composite_score(oi_sc, accum, slope, pb, conf, cfg, include_pullback=True)
-        comp_no_pb = _rest_composite_score(oi_sc, accum, slope, pb, conf, cfg, include_pullback=False)
-        _record_hit(hits, "composite_full", comp_full >= threshold, moved)
-        if is_bull:
-            _record_hit(hits, "composite_no_pullback", comp_no_pb >= threshold, moved)
-
+        comp = _rest_composite_score(side, oi_sc, accum, slope, pb, conf, cfg)
+        _record_hit(hits, "composite_full", comp >= threshold, moved)
         if is_bull:
             pattern = (pb_meta or {}).get("pattern")
             if pattern == "CONTRACTING" and pb >= THRESHOLD_PULLBACK:
@@ -360,7 +355,7 @@ def run_momentum_ignition_backtest(
         }
 
     universe = _load_universe(db, symbols)
-    cfg = DEFAULTS
+    cfg = get_config()
     per_symbol: Dict[str, Dict[str, int]] = {}
     per_symbol_pb: Dict[str, Dict[str, int]] = {}
     total_samples = 0
@@ -412,9 +407,10 @@ def run_momentum_ignition_backtest(
         "forward_bars": FORWARD_BARS,
         "forward_move_pct": FORWARD_MOVE_PCT,
         "composite_note": (
-            "REST composite renormalizes OI/absorption/slope/pullback/confirm weights "
-            "(order-flow=0). Threshold from ignition_flag_threshold (default 65)."
+            "REST composite: order-flow=0; renormalizes OI/absorption/slope/pullback/confirm "
+            "using side-aware weights (BULL pullback=0). Threshold ignition_flag_threshold."
         ),
+        "ignition_weights": ignition_component_weights(side, cfg),
         "thresholds": {
             "vwap_slope": THRESHOLD_VWAP_SLOPE,
             "absorption": THRESHOLD_ABSORPTION,
@@ -467,12 +463,9 @@ def format_backtest_plain_text(result: Dict[str, Any]) -> str:
         "pullback_depth": "Pullback-depth contraction",
         "absorption": "Absorption",
         "vwap_slope": "VWAP slope",
-        "composite_full": "Composite (REST, incl. pullback)",
-        "composite_no_pullback": "Composite (REST, BULL no-pullback)",
+        "composite_full": "Composite (REST, reweighted)",
     }
     for key in COMPONENT_KEYS + COMPOSITE_KEYS:
-        if key == "composite_no_pullback" and (params.get("side") or "").upper() != "BULL":
-            continue
         c = comps.get(key) or {}
         label = labels.get(key, key)
         if c.get("status") == "not_applicable":

@@ -38,6 +38,23 @@ def _is_bull_side(side: str) -> bool:
     return (side or "").upper() in (SIDE_BULL, "LONG", "BULLISH")
 
 
+def ignition_component_weights(side: str, cfg: Dict[str, Any]) -> Dict[str, float]:
+    """Tier weights for ignition composite; BULL pullback uses W_ignition_pullback_bull (0 = excluded)."""
+    bull = _is_bull_side(side)
+    if bull:
+        w_pb = float(cfg.get("W_ignition_pullback_bull", 0.0))
+    else:
+        w_pb = float(cfg.get("W_ignition_pullback") or 0.10)
+    return {
+        "orderflow": float(cfg.get("W_ignition_orderflow") or 0.35),
+        "oi": float(cfg.get("W_ignition_oi_tri") or 0.03),
+        "absorption": float(cfg.get("W_ignition_absorption") or 0.15),
+        "slope": float(cfg.get("W_ignition_slope") or 0.10),
+        "pullback": w_pb,
+        "confirm": float(cfg.get("W_ignition_confirm") or 0.05),
+    }
+
+
 def _f(v: Any, default: float = 0.0) -> float:
     try:
         return float(v)
@@ -254,20 +271,14 @@ def compute_ignition(
     pullback_sc, pb_meta = pullback_depth_contraction(candles, side, atr_pct)
     confirm_sc, confirm_meta = coincident_confirmation(candles, side)
 
-    w_of = float(cfg.get("W_ignition_orderflow") or 0.35)
-    w_oi = float(cfg.get("W_ignition_oi_tri") or 0.25)
-    w_acc = float(cfg.get("W_ignition_absorption") or 0.15)
-    w_slope = float(cfg.get("W_ignition_slope") or 0.10)
-    w_pb = float(cfg.get("W_ignition_pullback") or 0.10)
-    w_conf = float(cfg.get("W_ignition_confirm") or 0.05)
-
+    w = ignition_component_weights(side, cfg)
     raw = (
-        w_of * orderflow_sc
-        + w_oi * oi_sc
-        + w_acc * accum_sc
-        + w_slope * slope_sc
-        + w_pb * pullback_sc
-        + w_conf * confirm_sc
+        w["orderflow"] * orderflow_sc
+        + w["oi"] * oi_sc
+        + w["absorption"] * accum_sc
+        + w["slope"] * slope_sc
+        + w["pullback"] * pullback_sc
+        + w["confirm"] * confirm_sc
     )
     fii_mult = get_fii_dii_multiplier(sd)
     ctx_w = float(cfg.get("W_ignition_fii_context") or 0.05)

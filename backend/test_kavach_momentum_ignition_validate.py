@@ -45,6 +45,18 @@ def test_analyze_symbol_candles_counts_samples():
     assert hits["vwap_slope_signals"] >= 0
 
 
+def test_ignition_component_weights_bull_zero_pullback():
+    from backend.services.kavach_momentum_ignition import ignition_component_weights
+    from backend.services.rs_conviction_config import DEFAULTS
+
+    w_bull = ignition_component_weights("BULL", DEFAULTS)
+    w_bear = ignition_component_weights("BEAR", DEFAULTS)
+    assert w_bull["pullback"] == 0.0
+    assert w_bear["pullback"] == 0.10
+    assert w_bull["oi"] == 0.03
+    assert w_bear["oi"] == 0.03
+
+
 def test_wilson_ci_and_credibility():
     from backend.services.kavach_momentum_ignition_validate import (
         _credibility_label,

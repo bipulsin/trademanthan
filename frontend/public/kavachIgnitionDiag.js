@@ -79,8 +79,7 @@
             pullback_depth: 'Pullback-depth contraction',
             absorption: 'Absorption',
             vwap_slope: 'VWAP slope',
-            composite_full: 'Composite (incl. pullback)',
-            composite_no_pullback: 'Composite (no pullback, BULL)',
+            composite_full: 'Composite (reweighted)',
         };
         const side = ((result.parameters || {}).side || '').toUpperCase();
         let rows =
@@ -90,7 +89,6 @@
             blDetail +
             '</td></tr>';
         Object.keys(labels).forEach(function (key) {
-            if (key === 'composite_no_pullback' && side !== 'BULL') return;
             const c = comps[key] || {};
             let prec = '—';
             let liftPpVal = '—';
