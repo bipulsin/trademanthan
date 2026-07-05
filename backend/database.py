@@ -996,6 +996,7 @@ def _run_startup_schema_migrations(db_engine):
                     ("carryover_warning", "BOOLEAN DEFAULT FALSE"),
                     ("sector_badge", "TEXT"),
                     ("data_refreshed_at", "TIMESTAMPTZ"),
+                    ("fii_dii_flow", "TEXT"),
                 ):
                     if col not in _dc_cols2:
                         conn.execute(
@@ -1310,6 +1311,70 @@ def _run_startup_schema_migrations(db_engine):
                     )
                 )
                 print("Applied migration: created upstox_ws_intraday_1m (PostgreSQL)")
+
+                print("Applied migration: created upstox_ws_intraday_1m (PostgreSQL)")
+
+            if "upstox_ws_intraday_1m" in inspect(db_engine).get_table_names():
+                _ws1m_cols = {c["name"] for c in inspect(db_engine).get_columns("upstox_ws_intraday_1m")}
+                for col, typ in (
+                    ("volume", "BIGINT DEFAULT 0"),
+                    ("bid_depth_qty", "BIGINT DEFAULT 0"),
+                    ("ask_depth_qty", "BIGINT DEFAULT 0"),
+                    ("tbq", "BIGINT DEFAULT 0"),
+                    ("tsq", "BIGINT DEFAULT 0"),
+                    ("candle_source", "TEXT DEFAULT 'ltp_tick'"),
+                ):
+                    if col not in _ws1m_cols and db_engine.dialect.name == "postgresql":
+                        conn.execute(text(f"ALTER TABLE upstox_ws_intraday_1m ADD COLUMN {col} {typ}"))
+                        print(f"Applied migration: upstox_ws_intraday_1m.{col}")
+
+            if "upstox_ws_orderflow_latest" not in table_names and db_engine.dialect.name == "postgresql":
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE upstox_ws_orderflow_latest (
+                            instrument_key TEXT PRIMARY KEY,
+                            bid_depth_qty BIGINT DEFAULT 0,
+                            ask_depth_qty BIGINT DEFAULT 0,
+                            depth_imbalance_ratio DOUBLE PRECISION,
+                            tbq BIGINT DEFAULT 0,
+                            tsq BIGINT DEFAULT 0,
+                            pressure_ratio DOUBLE PRECISION,
+                            oi BIGINT,
+                            ltp DOUBLE PRECISION,
+                            oi_change INTEGER DEFAULT 0,
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                        )
+                        """
+                    )
+                )
+                print("Applied migration: created upstox_ws_orderflow_latest")
+
+            if "rs_momentum_ignition_log" not in table_names and db_engine.dialect.name == "postgresql":
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE rs_momentum_ignition_log (
+                            id BIGSERIAL PRIMARY KEY,
+                            session_date DATE NOT NULL,
+                            computed_at TIMESTAMPTZ NOT NULL,
+                            symbol TEXT NOT NULL,
+                            side TEXT NOT NULL,
+                            ignition_score DOUBLE PRECISION,
+                            ignition_building BOOLEAN DEFAULT FALSE,
+                            components_json TEXT,
+                            created_at TIMESTAMPTZ DEFAULT NOW()
+                        )
+                        """
+                    )
+                )
+                conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS idx_rs_momentum_ignition_log "
+                        "ON rs_momentum_ignition_log (session_date DESC, symbol, computed_at DESC)"
+                    )
+                )
+                print("Applied migration: created rs_momentum_ignition_log")
 
             # NSE (India) closed dates — IST calendar; scheduled market-data jobs skip these days.
             _insp_h = inspect(db_engine)

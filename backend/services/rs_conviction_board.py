@@ -243,12 +243,26 @@ def _score_universe(db, session_date: str, cfg: Dict[str, Any], now: datetime) -
             ema10 = prev.get("ema10_10m")
         whip_pen = _compute_whipsaw_penalty(whip_cross, cfg)
 
+        ignition_sc = 0.0
+        if cfg.get("ignition_conviction_enabled"):
+            try:
+                from backend.services.kavach_momentum_ignition import compute_ignition
+
+                ign = compute_ignition(
+                    sym, side, ikey_map.get(sym, ""),
+                    candles=candles, atr_pct=atr_pct, cfg=cfg,
+                )
+                ignition_sc = float(ign.get("ignition_score") or 0)
+            except Exception as exc:
+                logger.debug("ignition conviction component failed %s: %s", sym, exc)
+
         w_rs = float(cfg.get("W_rs") or 0.3)
         w_anchor = float(cfg.get("W_anchor") or 0.2)
         w_persist = float(cfg.get("W_persist") or 0.2)
         w_slope = float(cfg.get("W_slope") or 0.15)
         w_accum = float(cfg.get("W_accum") or 0.15)
         w_whip = float(cfg.get("W_whip") or 0.1)
+        w_ign = float(cfg.get("W_ignition_conviction") or 0) if cfg.get("ignition_conviction_enabled") else 0.0
 
         composite = (
             w_rs * rs_comp
@@ -256,6 +270,7 @@ def _score_universe(db, session_date: str, cfg: Dict[str, Any], now: datetime) -
             + w_persist * (persist / 100.0 * 100.0)
             + w_slope * slope_comp
             + w_accum * accum_comp
+            + w_ign * ignition_sc
             - w_whip * whip_pen
         )
         composite = max(0.0, min(100.0, composite))

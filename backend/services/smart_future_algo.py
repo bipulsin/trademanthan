@@ -1118,6 +1118,30 @@ class SmartFutureAlgoScheduler:
                     except Exception as radar_exc:
                         logger.warning("Setup radar cycle failed: %s", radar_exc)
                     try:
+                        from backend.database import SessionLocal
+                        from backend.services.kavach_momentum_ignition import run_ignition_cycle
+                        from backend.services.rs_conviction_board import (
+                            SIDE_BEAR,
+                            SIDE_BULL,
+                            _load_core_board,
+                            today_ist as conv_sd,
+                        )
+
+                        sd_conv = conv_sd()
+                        db_ign = SessionLocal()
+                        try:
+                            bull_c = _load_core_board(db_ign, sd_conv, SIDE_BULL)
+                            bear_c = _load_core_board(db_ign, sd_conv, SIDE_BEAR)
+                        finally:
+                            db_ign.close()
+                        pairs = [(c["symbol"], SIDE_BULL) for c in bull_c] + [
+                            (c["symbol"], SIDE_BEAR) for c in bear_c
+                        ]
+                        if pairs:
+                            run_ignition_cycle(pairs)
+                    except Exception as ign_exc:
+                        logger.warning("Momentum ignition cycle failed: %s", ign_exc)
+                    try:
                         from backend.services.rs_conviction_board import (
                             is_board_cycle_minute,
                             run_conviction_board_cycle,

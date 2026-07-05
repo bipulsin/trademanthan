@@ -62,12 +62,12 @@ SEC_OUT = "OUT"  # eliminated + hard-fail + low-score no-trade
 
 # Raw fields the client may update (whitelist for safe casting/persistence).
 TEXT_FIELDS = {
-    "nifty_open_direction", "entry_time", "confidence", "trading_state",
+    "nifty_open_direction", "fii_dii_flow", "entry_time", "confidence", "trading_state",
     "ema_vs_vwap", "supertrend", "macd", "di_alignment", "volume", "notes",
 }
 NUM_FIELDS = {"adx_935", "kavach_score_entry", "adx_entry", "rs_pct", "vol_multiplier", "dashboard_score"}
 BOOL_FIELDS = {"news_clean", "counter_rs"}
-PAGE_LEVEL_FIELDS = {"nifty_open_direction"}  # one value applied to all stocks
+PAGE_LEVEL_FIELDS = {"nifty_open_direction", "fii_dii_flow"}  # one value applied to all stocks
 
 # Columns the evaluator derives and persists.
 DERIVED_COLS = (
@@ -530,7 +530,7 @@ def _upsert_stock(db, sd: str, symbol: str, direction: str, fields: Dict[str, An
 
 _SELECT_COLS = """
     symbol, direction, rs_pct, dashboard_score, dashboard_kavach, vol_multiplier,
-    news_clean, adx_935, adx_935_status, nifty_open_direction, entry_time, time_ok,
+    news_clean, adx_935, adx_935_status, nifty_open_direction, fii_dii_flow, entry_time, time_ok,
     kavach_score_entry, score_ok, confidence, confidence_ok, trading_state, state_ok,
     ema_vs_vwap, ema_ok, supertrend, st_ok, macd, macd_ok, adx_entry, di_alignment,
     adx_ok, volume, volume_ok, counter_rs, gate_score, decision, section, notes,
@@ -652,9 +652,13 @@ def get_state(session_date: Optional[str] = None) -> Dict[str, Any]:
 
     display_stocks = today_stocks if locked else preview_stocks
     nifty_dir = ""
+    fii_dii = ""
     for s in all_stocks:
         if s.get("nifty_open_direction"):
             nifty_dir = s["nifty_open_direction"]
+        if s.get("fii_dii_flow"):
+            fii_dii = s["fii_dii_flow"]
+        if nifty_dir and fii_dii:
             break
     levels = _nifty_levels()
     rotation = anchor_overlap_at_0925()
@@ -686,12 +690,25 @@ def get_state(session_date: Optional[str] = None) -> Dict[str, Any]:
             s.get("section") == SEC_OUT or s.get("confidence_ok") is False
         )
 
+    ignition_map: Dict[str, Dict[str, Any]] = {}
+    try:
+        from backend.services.kavach_momentum_ignition import get_ignition_for_symbols
+
+        ignition_map = get_ignition_for_symbols([s["symbol"] for s in display_stocks], sd)
+    except Exception as exc:
+        logger.debug("checklist ignition enrichment failed: %s", exc)
+    for s in display_stocks:
+        ig = ignition_map.get(s["symbol"], {})
+        s["ignition_score"] = ig.get("ignition_score")
+        s["ignition_building"] = bool(ig.get("ignition_building"))
+
     return {
         "session_date": sd,
         "locked": locked,
         "locked_at": lock_info["locked_at"] if lock_info else None,
         "locked_by": lock_info["locked_by"] if lock_info else None,
         "nifty_open_direction": nifty_dir,
+        "fii_dii_flow": fii_dii,
         "nifty50": levels["nifty50"],
         "banknifty": levels["banknifty"],
         "today": today_stocks,
@@ -901,9 +918,8 @@ def update_field(symbol: str, field: str, value: Any, session_date: Optional[str
     db = SessionLocal()
     try:
         if field in PAGE_LEVEL_FIELDS:
-            # Apply to every stock for the day, then re-evaluate all.
             db.execute(
-                text("UPDATE daily_checklist SET nifty_open_direction = :v, updated_at = NOW() WHERE session_date = :d"),
+                text(f"UPDATE daily_checklist SET {field} = :v, updated_at = NOW() WHERE session_date = :d"),
                 {"v": casted, "d": sd},
             )
             db.commit()

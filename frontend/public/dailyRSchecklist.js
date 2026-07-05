@@ -258,6 +258,16 @@
         }
         var lockEl = card.querySelector(".dc-grade-lock");
         if (lockEl) lockEl.hidden = !stock.grade_gate_locked;
+        var ignEl = card.querySelector(".dc-ignition");
+        if (ignEl) {
+            if (stock.ignition_building) {
+                ignEl.hidden = false;
+                ignEl.textContent = "Ignition Building" +
+                    (stock.ignition_score != null ? " · " + Math.round(stock.ignition_score) : "");
+            } else {
+                ignEl.hidden = true;
+            }
+        }
     }
 
     function sortStocks(list) {
@@ -301,6 +311,8 @@
 
         var sel = $("dcNiftyDir");
         if (document.activeElement !== sel) sel.value = state.nifty_open_direction || "";
+        var fiiSel = $("dcFiiDii");
+        if (fiiSel && document.activeElement !== fiiSel) fiiSel.value = state.fii_dii_flow || "";
         $("dcGapWarn").classList.toggle("show", (state.nifty_open_direction || "") === "Gap reversed");
 
         var rot = state.rotation_day || {};
@@ -723,6 +735,12 @@
         $("dcNiftyDir").addEventListener("change", function () {
             onChange("", "nifty_open_direction", this.value);
         });
+        var fiiEl = $("dcFiiDii");
+        if (fiiEl) {
+            fiiEl.addEventListener("change", function () {
+                onChange("", "fii_dii_flow", this.value);
+            });
+        }
         $("dcPull").addEventListener("click", pull);
         $("dcPullEmpty").addEventListener("click", pull);
         $("dcReset").addEventListener("click", resetDay);

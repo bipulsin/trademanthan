@@ -71,6 +71,12 @@ def _persist_ws_1m_candle(ik: str, minute_iso: str, candle: Dict[str, Any]) -> N
                     oi_high,
                     oi_low,
                     oi_close,
+                    volume,
+                    bid_depth_qty,
+                    ask_depth_qty,
+                    tbq,
+                    tsq,
+                    candle_source,
                     updated_at
                 )
                 VALUES (
@@ -84,6 +90,12 @@ def _persist_ws_1m_candle(ik: str, minute_iso: str, candle: Dict[str, Any]) -> N
                     :oi_high,
                     :oi_low,
                     :oi_close,
+                    :volume,
+                    :bid_q,
+                    :ask_q,
+                    :tbq,
+                    :tsq,
+                    :source,
                     NOW()
                 )
                 ON CONFLICT (instrument_key, candle_time)
@@ -94,6 +106,12 @@ def _persist_ws_1m_candle(ik: str, minute_iso: str, candle: Dict[str, Any]) -> N
                     oi_high = GREATEST(upstox_ws_intraday_1m.oi_high, EXCLUDED.oi_high),
                     oi_low = LEAST(upstox_ws_intraday_1m.oi_low, EXCLUDED.oi_low),
                     oi_close = EXCLUDED.oi_close,
+                    volume = GREATEST(COALESCE(upstox_ws_intraday_1m.volume, 0), EXCLUDED.volume),
+                    bid_depth_qty = EXCLUDED.bid_depth_qty,
+                    ask_depth_qty = EXCLUDED.ask_depth_qty,
+                    tbq = EXCLUDED.tbq,
+                    tsq = EXCLUDED.tsq,
+                    candle_source = EXCLUDED.candle_source,
                     updated_at = NOW()
                 """
             ),
@@ -108,6 +126,12 @@ def _persist_ws_1m_candle(ik: str, minute_iso: str, candle: Dict[str, Any]) -> N
                 "oi_high": int(candle["oi_high"]),
                 "oi_low": int(candle["oi_low"]),
                 "oi_close": int(candle["oi_close"]),
+                "volume": int(candle.get("volume") or 0),
+                "bid_q": int(candle.get("bid_depth_qty") or 0),
+                "ask_q": int(candle.get("ask_depth_qty") or 0),
+                "tbq": int(candle.get("tbq") or 0),
+                "tsq": int(candle.get("tsq") or 0),
+                "source": str(candle.get("candle_source") or "ltp_tick"),
             },
         )
         db.commit()
@@ -118,7 +142,19 @@ def _persist_ws_1m_candle(ik: str, minute_iso: str, candle: Dict[str, Any]) -> N
         db.close()
 
 
-def _update_ws_1m_candle(ik: str, ltp: float, oi: int, now_mono: float) -> None:
+def _update_ws_1m_candle(
+    ik: str,
+    ltp: float,
+    oi: int,
+    now_mono: float,
+    *,
+    volume: int = 0,
+    bid_depth_qty: int = 0,
+    ask_depth_qty: int = 0,
+    tbq: int = 0,
+    tsq: int = 0,
+    candle_source: str = "ltp_tick",
+) -> None:
     now_ist = datetime.now(IST)
     minute_start = now_ist.replace(second=0, microsecond=0)
     minute_iso = minute_start.isoformat()
@@ -135,6 +171,12 @@ def _update_ws_1m_candle(ik: str, ltp: float, oi: int, now_mono: float) -> None:
                 "oi_high": int(oi),
                 "oi_low": int(oi),
                 "oi_close": int(oi),
+                "volume": int(volume),
+                "bid_depth_qty": int(bid_depth_qty),
+                "ask_depth_qty": int(ask_depth_qty),
+                "tbq": int(tbq),
+                "tsq": int(tsq),
+                "candle_source": candle_source,
             }
             _WS_1M_STATE[k] = c
         else:
@@ -144,10 +186,68 @@ def _update_ws_1m_candle(ik: str, ltp: float, oi: int, now_mono: float) -> None:
             c["oi_high"] = max(int(c["oi_high"]), int(oi))
             c["oi_low"] = min(int(c["oi_low"]), int(oi))
             c["oi_close"] = int(oi)
+            if volume > 0:
+                c["volume"] = max(int(c.get("volume") or 0), int(volume))
+            if bid_depth_qty > 0:
+                c["bid_depth_qty"] = int(bid_depth_qty)
+            if ask_depth_qty > 0:
+                c["ask_depth_qty"] = int(ask_depth_qty)
+            if tbq > 0:
+                c["tbq"] = int(tbq)
+            if tsq > 0:
+                c["tsq"] = int(tsq)
+            if candle_source == "i1":
+                c["candle_source"] = "i1"
         last_flush = float(_WS_1M_LAST_FLUSH.get(k) or 0.0)
         if now_mono - last_flush >= _flush_debounce_sec():
             _persist_ws_1m_candle(ik, minute_iso, c)
             _WS_1M_LAST_FLUSH[k] = now_mono
+
+
+def _persist_orderflow_latest(ik: str, fields: Dict[str, Any]) -> None:
+    db = SessionLocal()
+    try:
+        db.execute(
+            text(
+                """
+                INSERT INTO upstox_ws_orderflow_latest (
+                    instrument_key, bid_depth_qty, ask_depth_qty, depth_imbalance_ratio,
+                    tbq, tsq, pressure_ratio, oi, ltp, oi_change, updated_at
+                ) VALUES (
+                    :ik, :bid, :ask, :dr, :tbq, :tsq, :pr, :oi, :ltp, :oic, NOW()
+                )
+                ON CONFLICT (instrument_key) DO UPDATE SET
+                    bid_depth_qty = EXCLUDED.bid_depth_qty,
+                    ask_depth_qty = EXCLUDED.ask_depth_qty,
+                    depth_imbalance_ratio = EXCLUDED.depth_imbalance_ratio,
+                    tbq = EXCLUDED.tbq,
+                    tsq = EXCLUDED.tsq,
+                    pressure_ratio = EXCLUDED.pressure_ratio,
+                    oi = EXCLUDED.oi,
+                    ltp = EXCLUDED.ltp,
+                    oi_change = EXCLUDED.oi_change,
+                    updated_at = NOW()
+                """
+            ),
+            {
+                "ik": ik,
+                "bid": int(fields.get("bid_depth_qty") or 0),
+                "ask": int(fields.get("ask_depth_qty") or 0),
+                "dr": float(fields.get("depth_imbalance_ratio") or 1.0),
+                "tbq": int(fields.get("tbq") or 0),
+                "tsq": int(fields.get("tsq") or 0),
+                "pr": float(fields.get("pressure_ratio") or 1.0),
+                "oi": fields.get("oi"),
+                "ltp": fields.get("ltp"),
+                "oic": int(fields.get("oi_change") or 0),
+            },
+        )
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.debug("upstox_market_feed: orderflow persist failed %s: %s", ik, e)
+    finally:
+        db.close()
 
 
 def _stale_after_sec() -> float:
@@ -156,6 +256,104 @@ def _stale_after_sec() -> float:
 
 def _normalize_ik(key: str) -> str:
     return (key or "").strip().replace(":", "|")
+
+
+def _market_ff_from_feed(feed_val: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(feed_val, dict):
+        return None
+    ff = feed_val.get("fullFeed") or feed_val.get("full_feed")
+    if not isinstance(ff, dict):
+        return None
+    mff = ff.get("marketFF") or ff.get("marketFf") or ff.get("market_ff")
+    return mff if isinstance(mff, dict) else None
+
+
+def _depth_from_mff(mff: Dict[str, Any], *, levels: int = 5) -> Tuple[int, int, float]:
+    """Sum bid/ask quantity at top N levels; return (bid_qty, ask_qty, imbalance ratio)."""
+    ml = mff.get("marketLevel") or mff.get("market_level") or {}
+    quotes = ml.get("bidAskQuote") or ml.get("bid_ask_quote") or []
+    if not isinstance(quotes, list):
+        return 0, 0, 1.0
+    bid_q = 0
+    ask_q = 0
+    for q in quotes[:levels]:
+        if not isinstance(q, dict):
+            continue
+        try:
+            bid_q += int(float(q.get("bidQ") or q.get("bid_q") or 0))
+            ask_q += int(float(q.get("askQ") or q.get("ask_q") or 0))
+        except (TypeError, ValueError):
+            continue
+    if ask_q <= 0:
+        ratio = 2.0 if bid_q > 0 else 1.0
+    else:
+        ratio = bid_q / ask_q
+    return bid_q, ask_q, ratio
+
+
+def _extract_i1_bars_from_feed_value(feed_val: Any) -> List[Dict[str, Any]]:
+    """Parse WS I1 OHLC bars from marketOHLC."""
+    mff = _market_ff_from_feed(feed_val)
+    if not mff:
+        return []
+    moh = mff.get("marketOHLC") or mff.get("market_ohlc") or {}
+    arr = moh.get("ohlc") if isinstance(moh, dict) else None
+    if not isinstance(arr, list):
+        return []
+    out: List[Dict[str, Any]] = []
+    for row in arr:
+        if not isinstance(row, dict):
+            continue
+        interval = str(row.get("interval") or "").strip().upper()
+        if interval not in ("I1", "1MIN", "1M"):
+            continue
+        try:
+            o = float(row.get("open") or 0)
+            cl = float(row.get("close") or 0)
+            vol = int(float(row.get("vol") or row.get("volume") or 0))
+        except (TypeError, ValueError):
+            continue
+        if o <= 0 or cl <= 0:
+            continue
+        out.append(
+            {
+                "timestamp": row.get("ts") or row.get("timestamp"),
+                "open": o,
+                "high": float(row.get("high") or cl),
+                "low": float(row.get("low") or o),
+                "close": cl,
+                "volume": vol,
+            }
+        )
+    return out
+
+
+def _extract_feed_fields(feed_val: Any) -> Dict[str, Any]:
+    """Parse OI, LTP, depth, tbq/tsq from one WS feed entry."""
+    oi, ltp = _extract_oi_ltp_from_feed_value(feed_val)
+    mff = _market_ff_from_feed(feed_val)
+    bid_q = ask_q = 0
+    depth_ratio = 1.0
+    tbq = tsq = 0
+    if mff:
+        bid_q, ask_q, depth_ratio = _depth_from_mff(mff)
+        try:
+            tbq = int(float(mff.get("tbq") or 0))
+            tsq = int(float(mff.get("tsq") or 0))
+        except (TypeError, ValueError):
+            tbq = tsq = 0
+    pressure = (tbq / tsq) if tsq > 0 else (2.0 if tbq > 0 else 1.0)
+    return {
+        "oi": oi,
+        "ltp": ltp,
+        "bid_depth_qty": bid_q,
+        "ask_depth_qty": ask_q,
+        "depth_imbalance_ratio": depth_ratio,
+        "tbq": tbq,
+        "tsq": tsq,
+        "pressure_ratio": pressure,
+        "i1_bars": _extract_i1_bars_from_feed_value(feed_val),
+    }
 
 
 def _extract_oi_ltp_from_feed_value(feed_val: Any) -> Tuple[Optional[int], Optional[float]]:
@@ -207,8 +405,10 @@ def _ingest_feed_response_dict(d: Dict[str, Any]) -> None:
     with _CACHE_LOCK:
         for raw_key, feed_val in feeds.items():
             ik = _normalize_ik(str(raw_key))
-            oi, ltp = _extract_oi_ltp_from_feed_value(feed_val)
-            if oi is None and ltp is None:
+            parsed = _extract_feed_fields(feed_val)
+            oi = parsed.get("oi")
+            ltp = parsed.get("ltp")
+            if oi is None and ltp is None and not parsed.get("i1_bars"):
                 continue
             prev = _OI_LTP_BY_KEY.get(ik, {})
             eff_oi = int(oi) if oi is not None else prev.get("oi")
@@ -223,13 +423,65 @@ def _ingest_feed_response_dict(d: Dict[str, Any]) -> None:
                 "oi": eff_oi,
                 "ltp": eff_ltp,
                 "oi_change": oi_chg_tick,
+                "bid_depth_qty": parsed.get("bid_depth_qty", prev.get("bid_depth_qty", 0)),
+                "ask_depth_qty": parsed.get("ask_depth_qty", prev.get("ask_depth_qty", 0)),
+                "depth_imbalance_ratio": parsed.get("depth_imbalance_ratio", prev.get("depth_imbalance_ratio", 1.0)),
+                "tbq": parsed.get("tbq", prev.get("tbq", 0)),
+                "tsq": parsed.get("tsq", prev.get("tsq", 0)),
+                "pressure_ratio": parsed.get("pressure_ratio", prev.get("pressure_ratio", 1.0)),
                 "ts_mono": now,
             }
             if row.get("oi") is None and row.get("ltp") is None:
                 continue
             _OI_LTP_BY_KEY[ik] = row
             if eff_oi is not None and eff_ltp is not None:
-                _update_ws_1m_candle(ik, float(eff_ltp), int(eff_oi), now)
+                _update_ws_1m_candle(
+                    ik,
+                    float(eff_ltp),
+                    int(eff_oi),
+                    now,
+                    bid_depth_qty=int(row.get("bid_depth_qty") or 0),
+                    ask_depth_qty=int(row.get("ask_depth_qty") or 0),
+                    tbq=int(row.get("tbq") or 0),
+                    tsq=int(row.get("tsq") or 0),
+                )
+            for i1 in parsed.get("i1_bars") or []:
+                ts_raw = i1.get("timestamp")
+                if not ts_raw:
+                    continue
+                try:
+                    dt = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
+                    if dt.tzinfo is None:
+                        dt = IST.localize(dt)
+                    else:
+                        dt = dt.astimezone(IST)
+                    minute_iso = dt.replace(second=0, microsecond=0).isoformat()
+                except (TypeError, ValueError):
+                    continue
+                oi_val = int(eff_oi or prev.get("oi") or 0)
+                candle = {
+                    "open": i1["open"],
+                    "high": i1["high"],
+                    "low": i1["low"],
+                    "close": i1["close"],
+                    "oi_open": oi_val,
+                    "oi_high": oi_val,
+                    "oi_low": oi_val,
+                    "oi_close": oi_val,
+                    "volume": int(i1.get("volume") or 0),
+                    "bid_depth_qty": int(row.get("bid_depth_qty") or 0),
+                    "ask_depth_qty": int(row.get("ask_depth_qty") or 0),
+                    "tbq": int(row.get("tbq") or 0),
+                    "tsq": int(row.get("tsq") or 0),
+                    "candle_source": "i1",
+                }
+                with _CANDLE_LOCK:
+                    _WS_1M_STATE[(ik, minute_iso)] = candle
+                _persist_ws_1m_candle(ik, minute_iso, candle)
+            try:
+                _persist_orderflow_latest(ik, {**row, "oi": eff_oi, "ltp": eff_ltp})
+            except Exception:
+                pass
 
 
 def _decode_and_ingest(binary: bytes) -> None:
@@ -384,6 +636,22 @@ def ensure_market_feed_running(instrument_keys: List[str]) -> None:
         len(keys),
         len(batches),
     )
+
+
+def get_ws_feed_row(instrument_key: str) -> Optional[Dict[str, Any]]:
+    """Latest full WS row (OI/LTP/depth/tbq/tsq) if fresh."""
+    if not getattr(settings, "UPSTOX_MARKET_FEED_ENABLED", True):
+        return None
+    ik = _normalize_ik(instrument_key)
+    with _CACHE_LOCK:
+        row = _OI_LTP_BY_KEY.get(ik)
+        if not row:
+            return None
+        ts = float(row.get("ts_mono") or 0)
+        age = time.monotonic() - ts
+        if age > _stale_after_sec():
+            return None
+        return dict(row, age_sec=round(age, 2))
 
 
 def get_ws_quote_for_instrument(instrument_key: str) -> Optional[Dict[str, Any]]:

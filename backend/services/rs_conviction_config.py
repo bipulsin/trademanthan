@@ -60,6 +60,18 @@ DEFAULTS: Dict[str, Any] = {
     "alert_window_end_min": 14 * 60 + 30,
     # Display
     "show_ema10_passive": True,
+    # Momentum ignition (Phase 1) — disabled until validation gate passes
+    "ignition_ui_enabled": False,
+    "ignition_conviction_enabled": False,
+    "ignition_flag_threshold": 65,
+    "W_ignition_orderflow": 0.35,
+    "W_ignition_oi_tri": 0.25,
+    "W_ignition_absorption": 0.15,
+    "W_ignition_slope": 0.10,
+    "W_ignition_pullback": 0.10,
+    "W_ignition_confirm": 0.05,
+    "W_ignition_fii_context": 0.05,
+    "W_ignition_conviction": 0.08,
 }
 
 
