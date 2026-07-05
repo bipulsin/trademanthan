@@ -79,18 +79,23 @@
             pullback_depth: 'Pullback-depth contraction',
             absorption: 'Absorption',
             vwap_slope: 'VWAP slope',
+            composite_full: 'Composite (incl. pullback)',
+            composite_no_pullback: 'Composite (no pullback, BULL)',
         };
+        const side = ((result.parameters || {}).side || '').toUpperCase();
         let rows =
             '<tr class="kid-baseline-row"><td><strong>Baseline (unconditional)</strong></td><td>' +
             blRate +
-            '</td><td>—</td><td>—</td><td>' +
+            '</td><td>—</td><td>—</td><td>—</td><td>' +
             blDetail +
             '</td></tr>';
         Object.keys(labels).forEach(function (key) {
+            if (key === 'composite_no_pullback' && side !== 'BULL') return;
             const c = comps[key] || {};
             let prec = '—';
             let liftPpVal = '—';
             let liftX = '—';
+            let cred = '—';
             let detail = '';
             if (c.status === 'not_applicable') {
                 prec = 'N/A';
@@ -99,6 +104,7 @@
                 prec = pct(c.precision_3bar);
                 liftPpVal = liftPp(c.lift_pp);
                 liftX = liftRatio(c.lift_ratio);
+                cred = c.credibility || '—';
                 detail = (c.hits || 0) + ' / ' + (c.signals || 0) + ' hits';
             }
             rows +=
@@ -111,11 +117,13 @@
                 '</td><td>' +
                 liftX +
                 '</td><td>' +
+                cred +
+                '</td><td>' +
                 detail +
                 '</td></tr>';
         });
         wrap.innerHTML =
-            '<table class="kid-table"><thead><tr><th>Component</th><th>3-bar precision</th><th>Lift (pp)</th><th>Lift (× baseline)</th><th>Detail</th></tr></thead><tbody>' +
+            '<table class="kid-table"><thead><tr><th>Component</th><th>3-bar precision</th><th>Lift (pp)</th><th>Lift (×)</th><th>Credibility</th><th>Detail</th></tr></thead><tbody>' +
             rows +
             '</tbody></table>';
         wrap.hidden = false;

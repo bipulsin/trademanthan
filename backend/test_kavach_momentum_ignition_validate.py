@@ -39,10 +39,22 @@ def test_oi_triangulation_from_candles_long_buildup():
 
 def test_analyze_symbol_candles_counts_samples():
     candles = _make_candles(80)
-    hits, samples, favorable = _analyze_symbol_candles(candles, "BULL", {})
+    hits, samples, favorable, _pb = _analyze_symbol_candles(candles, "BULL", {})
     assert samples > 0
     assert favorable >= 0
     assert hits["vwap_slope_signals"] >= 0
+
+
+def test_wilson_ci_and_credibility():
+    from backend.services.kavach_momentum_ignition_validate import (
+        _credibility_label,
+        _wilson_ci,
+    )
+
+    lo, hi = _wilson_ci(50, 100)
+    assert lo is not None and hi is not None and lo < hi
+    assert _credibility_label(50, 100, 0.20) == "credible_positive"
+    assert _credibility_label(20, 100, 0.30) == "credible_negative"
 
 
 def test_aggregate_precision_order_flow_na():
