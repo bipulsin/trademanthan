@@ -2,7 +2,35 @@
   'use strict';
 
   const API = ['/api/btst-backtest', '/btst-backtest'];
-  const state = { rows: [], summary: {}, run: null, pending: null };
+  const TABLE_COLS = [
+    { key: 'trade_date', label: 'Date', type: 'date' },
+    { key: 'stock_symbol', label: 'Stock', type: 'string' },
+    { key: 'sector', label: 'Sector', type: 'string' },
+    { key: 'change_pct', label: 'Chg%', type: 'number' },
+    { key: 'direction', label: 'Dir', type: 'string' },
+    { key: 'atm_strike', label: 'ATM', type: 'number' },
+    { key: 'option_symbol', label: 'Option', type: 'string' },
+    { key: 'data_mode', label: 'Mode', type: 'string' },
+    { key: 'supertrend_pass', label: 'ST', type: 'bool' },
+    { key: 'hull_pass', label: 'Hull', type: 'bool' },
+    { key: 'eligible_final', label: 'Eligible', type: 'bool' },
+    { key: 'entry_premium', label: 'Entry', type: 'number' },
+    { key: 'buy_cost', label: 'Buy cost', type: 'number' },
+    { key: 'exit_a_premium', label: 'Exit A', type: 'number' },
+    { key: 'exit_a_pnl', label: 'PnL A', type: 'number' },
+    { key: 'exit_b_premium', label: 'Exit B', type: 'number' },
+    { key: 'exit_b_pnl', label: 'PnL B', type: 'number' },
+    { key: 'no_data_reason', label: 'Note', type: 'string' },
+  ];
+
+  const state = {
+    rows: [],
+    summary: {},
+    run: null,
+    pending: null,
+    sortKey: 'trade_date',
+    sortDir: 'desc',
+  };
 
   function apiBase(path) {
     return API.map(function (p) { return p + path; });
@@ -75,11 +103,47 @@
   }
 
   function isHiddenRow(r) {
-    return rowReason(r) === 'no_data_holiday_or_gap';
+    var reason = rowReason(r);
+    if (reason === 'no_data_holiday_or_gap') return true;
+    if (!r.stock_symbol || String(r.stock_symbol).trim() === '') return true;
+    return false;
   }
 
   function visibleRows(rows) {
     return (rows || []).filter(function (r) { return !isHiddenRow(r); });
+  }
+
+  function sortValue(row, col) {
+    var v = row[col.key];
+    if (col.type === 'date') {
+      return v ? String(v) : '';
+    }
+    if (col.type === 'number') {
+      if (v === null || v === undefined || v === '') return null;
+      var n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    }
+    if (col.type === 'bool') {
+      if (v === true) return 2;
+      if (v === false) return 1;
+      return 0;
+    }
+    return (v == null ? '' : String(v)).toLowerCase();
+  }
+
+  function sortedRows(rows) {
+    var col = TABLE_COLS.find(function (c) { return c.key === state.sortKey; }) || TABLE_COLS[0];
+    var dir = state.sortDir === 'asc' ? 1 : -1;
+    return rows.slice().sort(function (a, b) {
+      var av = sortValue(a, col);
+      var bv = sortValue(b, col);
+      if (av === null && bv === null) return 0;
+      if (av === null) return 1;
+      if (bv === null) return -1;
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      return String(a.stock_symbol || '').localeCompare(String(b.stock_symbol || ''));
+    });
   }
 
   function computeSummaryFromRows(rows) {
@@ -170,19 +234,45 @@
     return '—';
   }
 
-  function renderTable() {
+  function renderTableHead() {
     var head = document.getElementById('tableHead');
+    if (!head) return;
+    head.innerHTML = '<tr>' + TABLE_COLS.map(function (col) {
+      var active = col.key === state.sortKey;
+      var cls = 'sortable' + (active ? ' sorted-' + state.sortDir : '');
+      var arrow = active ? (state.sortDir === 'asc' ? '▲' : '▼') : '⇅';
+      return '<th class="' + cls + '" data-sort-key="' + esc(col.key) + '" scope="col">' +
+        esc(col.label) + '<span class="sort-ind" aria-hidden="true">' + arrow + '</span></th>';
+    }).join('') + '</tr>';
+    head.querySelectorAll('th.sortable').forEach(function (th) {
+      th.addEventListener('click', function () {
+        var key = th.getAttribute('data-sort-key');
+        if (state.sortKey === key) {
+          state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+          state.sortKey = key;
+          state.sortDir = colDefaultDir(key);
+        }
+        renderTable();
+      });
+    });
+  }
+
+  function colDefaultDir(key) {
+    if (key === 'trade_date') return 'desc';
+    if (key === 'stock_symbol' || key === 'sector' || key === 'option_symbol') return 'asc';
+    return 'desc';
+  }
+
+  function renderTableBody() {
     var body = document.getElementById('tableBody');
-    if (!head || !body) return;
-    var cols = [
-      'Date', 'Stock', 'Sector', 'Chg%', 'Dir', 'ATM', 'Option', 'Mode',
-      'ST', 'Hull', 'Eligible', 'Entry', 'Buy cost', 'Exit A', 'PnL A', 'Exit B', 'PnL B', 'Note'
-    ];
-    head.innerHTML = '<tr>' + cols.map(function (c) { return '<th>' + esc(c) + '</th>'; }).join('') + '</tr>';
-    body.innerHTML = state.rows.map(function (r) {
+    if (!body) return;
+    var rows = sortedRows(state.rows);
+    body.innerHTML = rows.map(function (r) {
       var mode = r.data_mode === 'manual_fill' ? '<span class="pill pill-manual">manual</span>' :
         r.data_mode === 'full' ? '<span class="pill pill-full">full</span>' : '—';
       var rowCls = r.eligible_final ? '' : ' class="ineligible"';
+      var note = rowReason(r);
       return '<tr' + rowCls + ' data-row-id="' + r.id + '">' +
         '<td>' + esc(r.trade_date) + '</td>' +
         '<td>' + esc(r.stock_symbol || '—') + '</td>' +
@@ -201,10 +291,15 @@
         '<td class="num ' + pnlCls(r.exit_a_pnl) + '">' + fmtRs(r.exit_a_pnl) + '</td>' +
         '<td class="num">' + premiumCell(r, 'exit_b_premium') + '</td>' +
         '<td class="num ' + pnlCls(r.exit_b_pnl) + '">' + fmtRs(r.exit_b_pnl) + '</td>' +
-        '<td>' + esc(r.no_data_reason || '') + '</td>' +
+        '<td>' + esc(note) + '</td>' +
         '</tr>';
     }).join('');
     bindManualInputs();
+  }
+
+  function renderTable() {
+    renderTableHead();
+    renderTableBody();
   }
 
   function updateRowInState(updated) {
@@ -230,7 +325,7 @@
           updateRowInState(res.row);
           state.summary = computeSummaryFromRows(state.rows);
           renderSummary(state.summary);
-          renderTable();
+          renderTableBody();
         } catch (e) {
           showErr('Save failed: ' + e.message);
         }
@@ -278,6 +373,7 @@
       if (btn) btn.disabled = !(state.pending && state.pending.row_count > 0);
       if (el) el.textContent = st.error ? 'Error: ' + st.error : (st.run_id ? 'Done run #' + st.run_id : '');
       if (st.run_id && !st.error) loadLatest();
+      else if (!st.running) loadLatest();
     }
   }
 
