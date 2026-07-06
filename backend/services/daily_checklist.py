@@ -26,6 +26,7 @@ from backend.services.rs_scanner_anchors import anchor_overlap_at_0925
 from backend.services.rs_scanner_maturity import MATURITY_CLIMACTIC
 from backend.services.daily_checklist_snapshot import (
     at_or_after_lock_time,
+    audit_checklist_lock_coverage,
     clear_snapshot_for_date,
     get_lock_info,
     get_locked_symbol_rows,
@@ -820,13 +821,10 @@ def _refresh_checklist_from_rs(*, full_populate: bool) -> Dict[str, Any]:
                 locked = True
 
         if locked:
-            try:
-                from backend.services.rs_conviction_board import SIDE_BEAR, SIDE_BULL, _load_core_board
-
-                core_syms = {c["symbol"] for c in _load_core_board(db, sd, SIDE_BULL) + _load_core_board(db, sd, SIDE_BEAR)}
-                locked_syms = core_syms if core_syms else set(get_locked_symbols(db, sd))
-            except Exception:
-                locked_syms = set(get_locked_symbols(db, sd))
+            # Morning daily_snapshot is the checklist source of truth — not conviction Core board.
+            # Core board can diverge (hysteresis, bench, pre-market state); using it here dropped
+            # valid BULL names when board membership != 09:25 RS top-5 lock (2026-07-06).
+            locked_syms = set(get_locked_symbols(db, sd))
         else:
             logger.debug("daily_checklist: pre-09:25 lock — skip persist for %s", sd)
             db.commit()
@@ -858,6 +856,7 @@ def _refresh_checklist_from_rs(*, full_populate: bool) -> Dict[str, Any]:
             refreshed += 1
 
         logger.info("daily_checklist: refreshed %d locked stocks for %s", refreshed, sd)
+        audit_checklist_lock_coverage(db, sd, rs_rows=rows)
         db.commit()
     finally:
         db.close()

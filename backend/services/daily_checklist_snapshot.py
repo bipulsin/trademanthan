@@ -59,6 +59,68 @@ def get_locked_symbols(db, session_date: str) -> List[str]:
     return [r.symbol for r in get_locked_symbol_rows(db, session_date)]
 
 
+def snapshot_lock_counts(db, session_date: str) -> Dict[str, int]:
+    """Per-side counts from morning daily_snapshot (BULL / BEAR)."""
+    rows = db.execute(
+        text(
+            """
+            SELECT direction, COUNT(*)::int AS n
+            FROM daily_snapshot
+            WHERE snapshot_date = :d
+            GROUP BY direction
+            """
+        ),
+        {"d": session_date},
+    ).fetchall()
+    return {str(r.direction): int(r.n) for r in rows}
+
+
+def audit_checklist_lock_coverage(
+    db,
+    session_date: str,
+    *,
+    rs_rows: Optional[List[Any]] = None,
+) -> List[str]:
+    """Warn when persisted checklist rows fall short of the morning snapshot lock."""
+    snap = snapshot_lock_counts(db, session_date)
+    cl = {
+        r.direction: int(r.n)
+        for r in db.execute(
+            text(
+                """
+                SELECT direction, COUNT(*)::int AS n
+                FROM daily_checklist
+                WHERE session_date = :d
+                GROUP BY direction
+                """
+            ),
+            {"d": session_date},
+        ).fetchall()
+    }
+    warnings: List[str] = []
+    for snap_dir, cl_dir in (("BULL", "LONG"), ("BEAR", "SHORT")):
+        snap_n = snap.get(snap_dir, 0)
+        cl_n = cl.get(cl_dir, 0)
+        if snap_n >= 5 and cl_n < snap_n:
+            warnings.append(
+                f"{cl_dir} checklist has {cl_n} rows but morning snapshot locked {snap_n} ({snap_dir})"
+            )
+    if rs_rows is not None:
+        rs_bull = sum(1 for r in rs_rows if (getattr(r, "ranking_type", None) or "").upper() != "BEARISH")
+        rs_bear = sum(1 for r in rs_rows if (getattr(r, "ranking_type", None) or "").upper() == "BEARISH")
+        if rs_bull >= 5 and snap.get("BULL", 0) < 5:
+            warnings.append(
+                f"morning snapshot locked only {snap.get('BULL', 0)} BULL names despite {rs_bull} in RS top-5"
+            )
+        if rs_bear >= 5 and snap.get("BEAR", 0) < 5:
+            warnings.append(
+                f"morning snapshot locked only {snap.get('BEAR', 0)} BEAR names despite {rs_bear} in RS top-5"
+            )
+    for msg in warnings:
+        logger.warning("daily_checklist lock coverage mismatch: %s", msg)
+    return warnings
+
+
 def lock_morning_snapshot(
     db,
     session_date: str,
