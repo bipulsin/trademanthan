@@ -1143,14 +1143,30 @@ class SmartFutureAlgoScheduler:
                         logger.warning("Momentum ignition cycle failed: %s", ign_exc)
                     try:
                         from backend.services.rs_conviction_board import (
-                            is_board_cycle_minute,
+                            is_board_cycle_for_scheduled_minute,
                             run_conviction_board_cycle,
                         )
 
-                        if is_board_cycle_minute(now):
-                            run_conviction_board_cycle()
+                        if is_board_cycle_for_scheduled_minute(h, m):
+                            conv = run_conviction_board_cycle(
+                                force=True,
+                                scheduled_hour=h,
+                                scheduled_minute=m,
+                            )
+                            logger.info(
+                                "Conviction board after RS scan %02d:%02d: %s",
+                                h,
+                                m,
+                                conv,
+                            )
                     except Exception as conv_exc:
-                        logger.warning("Conviction board cycle failed: %s", conv_exc)
+                        logger.error(
+                            "Conviction board cycle failed after RS scan %02d:%02d: %s",
+                            h,
+                            m,
+                            conv_exc,
+                            exc_info=True,
+                        )
                 except Exception as e:
                     logger.error(
                         "❌ Relative Strength scan failed: %s", e, exc_info=True

@@ -28,17 +28,26 @@ def today_ist() -> str:
     return datetime.now(IST).strftime("%Y-%m-%d")
 
 
-def is_board_cycle_minute(now: Optional[datetime] = None) -> bool:
-    now = now or datetime.now(IST)
-    if now.weekday() >= 5:
-        return False
-    m = now.hour * 60 + now.minute
-    cfg = get_config()
+def is_board_cycle_for_scheduled_minute(hour: int, minute: int, cfg: Optional[Dict[str, Any]] = None) -> bool:
+    """True when the RS 5m job's scheduled (hour, minute) is a board-close cycle.
+
+    Uses the cron-fired minute captured at job start — not wall clock after a long RS
+  scan — so APScheduler misfire/coalesce does not silently skip logging.
+    """
+    cfg = cfg or get_config()
+    m = int(hour) * 60 + int(minute)
     if m > int(cfg.get("board_cutoff_min") or 915):
         return False
     if m < 9 * 60 + 25:
         return False
-    return now.minute in _BOARD_CLOSE_MINUTES
+    return int(minute) in _BOARD_CLOSE_MINUTES
+
+
+def is_board_cycle_minute(now: Optional[datetime] = None) -> bool:
+    now = now or datetime.now(IST)
+    if now.weekday() >= 5:
+        return False
+    return is_board_cycle_for_scheduled_minute(now.hour, now.minute)
 
 
 def _load_opening_anchor_map(db, session_date: str, cfg: Dict[str, Any]) -> Dict[Tuple[str, str], float]:
@@ -439,16 +448,28 @@ def _apply_hysteresis(
     return events
 
 
-def run_conviction_board_cycle(force: bool = False) -> Dict[str, Any]:
+def run_conviction_board_cycle(
+    force: bool = False,
+    *,
+    scheduled_hour: Optional[int] = None,
+    scheduled_minute: Optional[int] = None,
+) -> Dict[str, Any]:
     now = datetime.now(IST)
-    if not force and not is_board_cycle_minute(now):
-        return {"ok": False, "reason": "not_board_minute"}
+    if now.weekday() >= 5 and not force:
+        return {"ok": False, "reason": "weekend"}
+    cfg = get_config()
+    if not force:
+        if scheduled_hour is not None and scheduled_minute is not None:
+            if not is_board_cycle_for_scheduled_minute(scheduled_hour, scheduled_minute, cfg):
+                return {"ok": False, "reason": "not_board_minute"}
+        elif not is_board_cycle_minute(now):
+            return {"ok": False, "reason": "not_board_minute"}
 
     sd = today_ist()
-    cfg = get_config()
     db = SessionLocal()
     scored: Dict[Tuple[str, str], Dict[str, Any]] = {}
     events: List[Dict[str, Any]] = []
+    log_rows = 0
     try:
         scored = _score_universe(db, sd, cfg, now)
         for side in (SIDE_BULL, SIDE_BEAR):
@@ -473,12 +494,26 @@ def run_conviction_board_cycle(force: bool = False) -> Dict[str, Any]:
                     "conv": st["conviction_score"], "raw": st["in_raw_top5"],
                 },
             )
+            log_rows += 1
         db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.error("Conviction board cycle failed for %s: %s", sd, exc, exc_info=True)
+        raise
     finally:
         db.close()
 
-    logger.info("Conviction board cycle %s: %d symbols, %d events", sd, len(scored), len(events))
-    return {"ok": True, "session_date": sd, "scored": len(scored), "events": events}
+    logger.info(
+        "Conviction board cycle %s: %d symbols scored, %d scoring_log rows, %d events",
+        sd, len(scored), log_rows, len(events),
+    )
+    return {
+        "ok": True,
+        "session_date": sd,
+        "scored": len(scored),
+        "scoring_log_rows": log_rows,
+        "events": events,
+    }
 
 
 def get_bench_symbols(db, session_date: str, side: str, cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
