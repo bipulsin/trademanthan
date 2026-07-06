@@ -107,6 +107,9 @@ _total_wait = 0.0
 _throttled = 0
 _denied = 0
 
+# Thread-local: BTST bulk prefetch waits longer for a slot instead of denying at 90s.
+_bt_local = threading.local()
+
 
 def _build_limiter() -> SlidingWindowRateLimiter:
     from backend.config import settings
@@ -134,6 +137,15 @@ def _get_limiter() -> SlidingWindowRateLimiter:
     return _LIMITER
 
 
+def set_backtest_bulk_prefetch_mode(enabled: bool) -> None:
+    """When True, candle acquire waits up to 5 min (BTST bulk prefetch only)."""
+    _bt_local.backtest_bulk = bool(enabled)
+
+
+def _is_backtest_bulk_prefetch() -> bool:
+    return bool(getattr(_bt_local, "backtest_bulk", False))
+
+
 def acquire_candle_slot() -> bool:
     """Reserve a candle-request slot under the shared budget.
 
@@ -147,9 +159,12 @@ def acquire_candle_slot() -> bool:
 
         if not getattr(settings, "UPSTOX_CANDLE_RATE_LIMIT_ENABLED", True):
             return True
-        max_wait = float(getattr(settings, "UPSTOX_CANDLE_RL_MAX_WAIT", 90) or 90)
+        if _is_backtest_bulk_prefetch():
+            max_wait = float(getattr(settings, "UPSTOX_BTST_PREFETCH_RL_MAX_WAIT", 300) or 300)
+        else:
+            max_wait = float(getattr(settings, "UPSTOX_CANDLE_RL_MAX_WAIT", 90) or 90)
     except Exception:
-        max_wait = 90.0
+        max_wait = 300.0 if _is_backtest_bulk_prefetch() else 90.0
 
     granted, waited = _get_limiter().acquire(max_wait=max_wait)
     _total_wait += waited

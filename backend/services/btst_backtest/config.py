@@ -13,9 +13,7 @@ from backend.database import SessionLocal
 logger = logging.getLogger(__name__)
 
 DEFAULTS: Dict[str, Any] = {
-    "trading_days_default": 30,
-    "nifty_instrument_key": "NSE_INDEX|Nifty 50",
-    "nifty_flat_epsilon_pct": 0.0,
+    "trading_days_default": 15,
     "rsi_bull_min": 55,
     "rsi_bull_max": 70,
     "rsi_bear_min": 25,

@@ -1,11 +1,10 @@
 """3:00–3:15 PM option premium gate evaluation."""
 from __future__ import annotations
 
-from datetime import date
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict
 
 from backend.services.btst_backtest.atm import resolve_atm_option
-from backend.services.btst_backtest.data_access import BtstDataAccess
+from backend.services.btst_backtest.data_access import BtstDataAccess, FetchOutcome
 from backend.services.btst_backtest.gates import check_hull_gate, check_supertrend_gate
 from backend.services.btst_backtest.timing import close_at_or_before, ist_dt
 
@@ -15,25 +14,23 @@ def evaluate_entry(
     candidate: Dict[str, Any],
     cfg: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """
-    Resolve ATM option and run Supertrend + Hull on premium candles.
-    Returns fields to merge into the result row.
-    """
-    trade_date: date = candidate["trade_date"]
+    trade_date = candidate["trade_date"]
     sym = candidate["stock_symbol"]
     direction = candidate["direction"]
+    side = candidate.get("side") or ("gainer" if direction == "bullish" else "loser")
     opt_type = "CE" if direction == "bullish" else "PE"
     spot_1500 = data.spot_at(candidate["instrument_key"], trade_date, cfg["atm_hhmm"])
     if spot_1500 is None:
         return {
+            "side": side,
             "atm_strike": None,
             "option_symbol": None,
-            "data_mode": "manual_fill",
+            "data_mode": None,
             "premium_at_1500": None,
             "supertrend_pass": None,
             "hull_pass": None,
             "eligible_final": False,
-            "no_eligible_reason": "atm_spot_unavailable",
+            "no_eligible_reason": "api_fetch_failed",
             "lot_size": None,
             "direction": direction,
         }
@@ -41,6 +38,7 @@ def evaluate_entry(
         sym, spot_1500, trade_date, opt_type
     )
     base = {
+        "side": side,
         "atm_strike": atm_strike,
         "option_symbol": option_symbol,
         "direction": direction,
@@ -56,11 +54,25 @@ def evaluate_entry(
             "eligible_final": False,
             "no_eligible_reason": "atm_option_unresolved",
         }
-    premium_m5 = data.get_candles_5m(option_key, trade_date, days_back=5)
+    fetch_out, premium_m5 = data.get_option_m5(option_key, trade_date, days_back=5)
+    if fetch_out == FetchOutcome.FAILED:
+        return {
+            **base,
+            "data_mode": None,
+            "eligible_final": False,
+            "no_eligible_reason": "api_fetch_failed",
+        }
     prem_1500 = close_at_or_before(premium_m5, trade_date, cfg["atm_hhmm"])
     base["premium_at_1500"] = prem_1500
-    full = data.option_premium_history_usable(option_key, trade_date)
-    if not full:
+    fetch_out2, usable = data.option_premium_history_usable(option_key, trade_date)
+    if fetch_out2 == FetchOutcome.FAILED:
+        return {
+            **base,
+            "data_mode": None,
+            "eligible_final": False,
+            "no_eligible_reason": "api_fetch_failed",
+        }
+    if not usable:
         return {
             **base,
             "data_mode": "manual_fill",

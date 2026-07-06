@@ -1,18 +1,49 @@
-"""Persist BTST backtest runs and per-day rows."""
+"""Persist BTST backtest runs and per-day per-side rows."""
 from __future__ import annotations
 
-from datetime import date, datetime
-from typing import Any, Dict, List, Optional
+from datetime import date
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import text
 
 from backend.database import SessionLocal
 
-
-def _serialize_dt(v: Any) -> Any:
-    if isinstance(v, datetime):
-        return v
-    return v
+RESULT_COLS = [
+    "run_id",
+    "trade_date",
+    "side",
+    "stock_symbol",
+    "change_pct_at_1445",
+    "rank_type",
+    "scan_rank",
+    "spot_price_1445",
+    "cpr_pivot",
+    "cpr_tc",
+    "cpr_bc",
+    "cpr_gate_pass",
+    "rsi_14_5min",
+    "rsi_gate_pass",
+    "liquidity_gate_pass",
+    "direction",
+    "atm_strike",
+    "option_symbol",
+    "data_mode",
+    "premium_at_1500",
+    "supertrend_pass",
+    "hull_pass",
+    "entry_time",
+    "entry_premium",
+    "lot_size",
+    "buy_cost",
+    "exit_a_time",
+    "exit_a_premium",
+    "exit_a_pnl",
+    "exit_b_time",
+    "exit_b_premium",
+    "exit_b_pnl",
+    "eligible_final",
+    "no_eligible_reason",
+]
 
 
 def create_run(start_date: date, end_date: date, notes: str = "") -> int:
@@ -34,55 +65,24 @@ def create_run(start_date: date, end_date: date, notes: str = "") -> int:
         db.close()
 
 
-def insert_result(run_id: int, row: Dict[str, Any]) -> int:
-    cols = [
-        "run_id",
-        "trade_date",
-        "nifty_change_pct",
-        "scan_side",
-        "stock_symbol",
-        "change_pct_at_1445",
-        "rank_type",
-        "scan_rank",
-        "spot_price_1445",
-        "cpr_pivot",
-        "cpr_tc",
-        "cpr_bc",
-        "cpr_gate_pass",
-        "rsi_14_5min",
-        "rsi_gate_pass",
-        "liquidity_gate_pass",
-        "direction",
-        "atm_strike",
-        "option_symbol",
-        "data_mode",
-        "premium_at_1500",
-        "supertrend_pass",
-        "hull_pass",
-        "entry_time",
-        "entry_premium",
-        "lot_size",
-        "buy_cost",
-        "exit_a_time",
-        "exit_a_premium",
-        "exit_a_pnl",
-        "exit_b_time",
-        "exit_b_premium",
-        "exit_b_pnl",
-        "eligible_final",
-        "no_eligible_reason",
-    ]
+def upsert_result(run_id: int, row: Dict[str, Any]) -> int:
     params = {"run_id": run_id}
-    for c in cols:
+    for c in RESULT_COLS:
         if c == "run_id":
             continue
         params[c] = row.get(c)
+    sets = ", ".join(f"{c} = EXCLUDED.{c}" for c in RESULT_COLS if c not in ("trade_date", "side"))
     db = SessionLocal()
     try:
-        placeholders = ", ".join(f":{c}" for c in cols)
-        colnames = ", ".join(cols)
         r = db.execute(
-            text(f"INSERT INTO btst_backtest_results ({colnames}) VALUES ({placeholders}) RETURNING id"),
+            text(
+                f"""
+                INSERT INTO btst_backtest_results ({", ".join(RESULT_COLS)})
+                VALUES ({", ".join(":" + c for c in RESULT_COLS)})
+                ON CONFLICT (trade_date, side) DO UPDATE SET {sets}
+                RETURNING id
+                """
+            ),
             params,
         ).fetchone()
         db.commit()
@@ -133,21 +133,54 @@ def fetch_result(result_id: int) -> Optional[Dict[str, Any]]:
         db.close()
 
 
-def fetch_latest_run() -> Optional[Dict[str, Any]]:
+def fetch_all_results() -> List[Dict[str, Any]]:
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            text(
+                "SELECT * FROM btst_backtest_results ORDER BY trade_date DESC, side ASC"
+            )
+        ).mappings().fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        db.close()
+
+
+def fetch_latest_run_meta() -> Optional[Dict[str, Any]]:
     db = SessionLocal()
     try:
         run = db.execute(
             text("SELECT * FROM btst_backtest_runs ORDER BY id DESC LIMIT 1")
         ).mappings().fetchone()
-        if not run:
-            return None
+        return dict(run) if run else None
+    finally:
+        db.close()
+
+
+def fetch_earliest_trade_date() -> Optional[date]:
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text("SELECT MIN(trade_date) AS d FROM btst_backtest_results")
+        ).fetchone()
+        return row.d if row and row.d else None
+    finally:
+        db.close()
+
+
+def fetch_failed_row_keys() -> List[Tuple[date, str]]:
+    db = SessionLocal()
+    try:
         rows = db.execute(
             text(
-                "SELECT * FROM btst_backtest_results WHERE run_id = :rid ORDER BY trade_date"
-            ),
-            {"rid": run["id"]},
-        ).mappings().fetchall()
-        return {"run": dict(run), "rows": [dict(r) for r in rows]}
+                """
+                SELECT trade_date, side FROM btst_backtest_results
+                WHERE no_eligible_reason = 'api_fetch_failed'
+                ORDER BY trade_date DESC, side
+                """
+            )
+        ).fetchall()
+        return [(r.trade_date, r.side) for r in rows if r.trade_date and r.side]
     finally:
         db.close()
 
@@ -184,6 +217,7 @@ def compute_summary(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         )
     )
     manual_total = sum(1 for r in rows if r.get("data_mode") == "manual_fill")
+    api_failed = sum(1 for r in rows if r.get("no_eligible_reason") == "api_fetch_failed")
     return {
         "ce_scenario_a_total": ce_a,
         "ce_scenario_b_total": ce_b,
@@ -193,5 +227,6 @@ def compute_summary(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         "final_scenario_b_total": ce_b + pe_b,
         "manual_fill_needs_data": manual_needs,
         "manual_fill_total": manual_total,
+        "api_fetch_failed_count": api_failed,
         "row_count": len(rows),
     }

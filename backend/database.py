@@ -1535,9 +1535,8 @@ def _run_startup_schema_migrations(db_engine):
                         CREATE TABLE btst_backtest_results (
                             id SERIAL PRIMARY KEY,
                             run_id INT REFERENCES btst_backtest_runs(id),
-                            trade_date DATE,
-                            nifty_change_pct NUMERIC,
-                            scan_side TEXT,
+                            trade_date DATE NOT NULL,
+                            side TEXT NOT NULL,
                             stock_symbol TEXT,
                             change_pct_at_1445 NUMERIC,
                             rank_type TEXT,
@@ -1568,7 +1567,8 @@ def _run_startup_schema_migrations(db_engine):
                             exit_b_premium NUMERIC,
                             exit_b_pnl NUMERIC,
                             eligible_final BOOLEAN,
-                            no_eligible_reason TEXT
+                            no_eligible_reason TEXT,
+                            UNIQUE (trade_date, side)
                         )
                         """
                     )
@@ -1580,6 +1580,32 @@ def _run_startup_schema_migrations(db_engine):
                     )
                 )
                 print("Applied migration: created btst_backtest tables (PostgreSQL)")
+
+            if "btst_backtest_results" in table_names and db_engine.dialect.name == "postgresql":
+                btst_cols = {c["name"] for c in inspect(db_engine).get_columns("btst_backtest_results")}
+                if "side" not in btst_cols:
+                    conn.execute(text("ALTER TABLE btst_backtest_results ADD COLUMN side TEXT"))
+                    conn.execute(
+                        text(
+                            """
+                            UPDATE btst_backtest_results
+                            SET side = CASE
+                                WHEN scan_side ILIKE '%loser%' THEN 'loser'
+                                WHEN scan_side ILIKE '%gainer%' THEN 'gainer'
+                                ELSE 'gainer'
+                            END
+                            WHERE side IS NULL
+                            """
+                        )
+                    )
+                    conn.execute(text("UPDATE btst_backtest_results SET side = 'gainer' WHERE side IS NULL"))
+                    print("Applied migration: btst_backtest_results.side column")
+                conn.execute(
+                    text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS uq_btst_trade_date_side "
+                        "ON btst_backtest_results (trade_date, side)"
+                    )
+                )
 
             # Legacy Smart Futures DB tables removed (screener rebuild); drop if still present.
             _sf_tables = (

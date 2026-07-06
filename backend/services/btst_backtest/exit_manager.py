@@ -31,7 +31,7 @@ def compute_exits(
 
     # Scenario B — next trading day 9:20 AM
     nd = next_trading_day(trade_date)
-    nd_candles = data.get_candles_5m(option_key, nd, days_back=3)
+    _outcome, nd_candles = data.get_option_m5(option_key, nd, days_back=3)
     exit_b_time = ist_dt(nd, cfg["exit_b_hhmm"])
     exit_b_prem = close_at_or_before(nd_candles, nd, cfg["exit_b_hhmm"])
     out["exit_b_time"] = exit_b_time

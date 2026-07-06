@@ -91,3 +91,7 @@ input.manual-in {
   font-size: 12px;
 }
 .ineligible { opacity: 0.75; }
+.api-failed { background: rgba(239, 68, 68, 0.08); }
+.days-label { color: var(--muted); font-size: 0.9rem; display: inline-flex; align-items: center; gap: 6px; }
+.days-label input { width: 56px; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 6px 8px; }
+.btn-secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }

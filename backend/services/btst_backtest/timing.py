@@ -37,6 +37,36 @@ def next_trading_day(d: date) -> date:
     return n
 
 
+def recent_trading_days(n: int, *, end: Optional[date] = None) -> List[date]:
+    """Return the most recent N trading days, newest first."""
+    return list(reversed(last_n_trading_days(n, end=end)))
+
+
+def trading_days_before(n: int, before: date) -> List[date]:
+    """N trading days strictly before ``before``, newest first."""
+    out: List[date] = []
+    d = before - timedelta(days=1)
+    while len(out) < n:
+        if d.weekday() < 5:
+            out.append(d)
+        d -= timedelta(days=1)
+    return out
+
+
+def full_trading_calendar_span(days: List[date]) -> List[date]:
+    """Sorted ascending trading days covering [min(days), max(days)] weekdays."""
+    if not days:
+        return []
+    start, end = min(days), max(days)
+    out: List[date] = []
+    d = start
+    while d <= end:
+        if d.weekday() < 5:
+            out.append(d)
+        d += timedelta(days=1)
+    return out
+
+
 def bar_session_date(ts: str) -> Optional[date]:
     if not ts:
         return None

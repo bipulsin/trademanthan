@@ -30,19 +30,26 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
+  function isNil(v) {
+    return v === null || v === undefined || v === '';
+  }
+
   function fmtNum(v, d) {
+    if (isNil(v)) return '—';
     const n = Number(v);
     if (!Number.isFinite(n)) return '—';
     return n.toFixed(d == null ? 2 : d);
   }
 
   function fmtPct(v) {
+    if (isNil(v)) return '—';
     const n = Number(v);
     if (!Number.isFinite(n)) return '—';
     return (n > 0 ? '+' : '') + n.toFixed(2) + '%';
   }
 
   function fmtRs(v) {
+    if (isNil(v)) return '—';
     const n = Number(v);
     if (!Number.isFinite(n)) return '—';
     const sign = n > 0 ? '+' : n < 0 ? '-' : '';
@@ -50,6 +57,7 @@
   }
 
   function pnlCls(v) {
+    if (isNil(v)) return '';
     const n = Number(v);
     if (!Number.isFinite(n)) return '';
     return n > 0 ? 'pnl-pos' : n < 0 ? 'pnl-neg' : '';
@@ -59,6 +67,21 @@
     if (pass === true) return '<span class="gate-pass">✓</span>';
     if (pass === false) return '<span class="gate-fail">✗</span>';
     return '—';
+  }
+
+  function clearErr() {
+    const b = document.getElementById('errBanner');
+    if (b) {
+      b.style.display = 'none';
+      b.textContent = '';
+    }
+  }
+
+  function showErr(msg) {
+    const b = document.getElementById('errBanner');
+    if (!b) return;
+    b.style.display = 'block';
+    b.textContent = msg;
   }
 
   function renderSummary(s) {
@@ -73,6 +96,7 @@
       ['Final · Scenario B', s.final_scenario_b_total],
       ['Manual fill progress', (s.manual_fill_total - s.manual_fill_needs_data) + ' / ' + s.manual_fill_total + ' complete'],
       ['Rows needing data', s.manual_fill_needs_data + ' of ' + (s.row_count || 0)],
+      ['API fetch failed (retryable)', String(s.api_fetch_failed_count || 0)],
     ];
     el.innerHTML = items.map(function (pair) {
       const v = pair[1];
@@ -91,12 +115,18 @@
     return '<span class="num">' + fmtNum(row[field]) + '</span>';
   }
 
+  function sidePill(side) {
+    if (side === 'gainer') return '<span class="pill pill-ce">gainer</span>';
+    if (side === 'loser') return '<span class="pill pill-pe">loser</span>';
+    return '—';
+  }
+
   function renderTable() {
     const head = document.getElementById('tableHead');
     const body = document.getElementById('tableBody');
     if (!head || !body) return;
     const cols = [
-      'Date', 'NIFTY %', 'Side', 'Stock', 'Dir', 'ATM', 'Option', 'Chg%', 'CPR', 'RSI', 'Liq',
+      'Date', 'Side', 'Stock', 'Dir', 'ATM', 'Option', 'Chg%', 'CPR', 'RSI', 'Liq',
       'ST', 'Hull', 'Mode', 'Entry', 'Buy cost', 'Exit A', 'PnL A', 'Exit B', 'PnL B', 'Eligible', 'Reason'
     ];
     head.innerHTML = '<tr>' + cols.map(function (c) { return '<th>' + esc(c) + '</th>'; }).join('') + '</tr>';
@@ -105,18 +135,19 @@
         r.direction === 'bearish' ? '<span class="pill pill-pe">PE</span>' : '—';
       const mode = r.data_mode === 'manual_fill' ? '<span class="pill pill-manual">manual</span>' :
         r.data_mode === 'full' ? '<span class="pill pill-full">full</span>' : '—';
-      const rowCls = r.eligible_final ? '' : ' class="ineligible"';
+      const failApi = r.no_eligible_reason === 'api_fetch_failed';
+      const rowCls = r.eligible_final ? '' : (failApi ? ' class="api-failed"' : ' class="ineligible"');
+      const rsiTxt = isNil(r.rsi_14_5min) ? '' : fmtNum(r.rsi_14_5min, 1);
       return '<tr' + rowCls + ' data-row-id="' + r.id + '">' +
         '<td>' + esc(r.trade_date) + '</td>' +
-        '<td class="num">' + fmtPct(r.nifty_change_pct) + '</td>' +
-        '<td>' + esc(r.scan_side || '—') + '</td>' +
+        '<td>' + sidePill(r.side) + '</td>' +
         '<td>' + esc(r.stock_symbol || '—') + '</td>' +
         '<td>' + dir + '</td>' +
         '<td class="num">' + fmtNum(r.atm_strike, 0) + '</td>' +
         '<td title="' + esc(r.option_symbol) + '">' + esc((r.option_symbol || '—').slice(0, 18)) + '</td>' +
         '<td class="num">' + fmtPct(r.change_pct_at_1445) + '</td>' +
         '<td>' + gateCell(r.cpr_gate_pass) + '</td>' +
-        '<td>' + gateCell(r.rsi_gate_pass) + ' ' + fmtNum(r.rsi_14_5min, 1) + '</td>' +
+        '<td>' + gateCell(r.rsi_gate_pass) + (rsiTxt ? ' ' + rsiTxt : '') + '</td>' +
         '<td>' + gateCell(r.liquidity_gate_pass) + '</td>' +
         '<td>' + gateCell(r.supertrend_pass) + '</td>' +
         '<td>' + gateCell(r.hull_pass) + '</td>' +
@@ -157,15 +188,6 @@
           updateRowInState(res.row);
           state.summary = res.summary;
           renderSummary(state.summary);
-          const tr = document.querySelector('tr[data-row-id="' + id + '"]');
-          if (tr) {
-            const cells = tr.querySelectorAll('td');
-            if (cells[15]) cells[15].innerHTML = '<span class="num">' + fmtRs(res.row.buy_cost) + '</span>';
-            if (cells[17]) cells[17].className = 'num ' + pnlCls(res.row.exit_a_pnl);
-            if (cells[17]) cells[17].textContent = fmtRs(res.row.exit_a_pnl);
-            if (cells[19]) cells[19].className = 'num ' + pnlCls(res.row.exit_b_pnl);
-            if (cells[19]) cells[19].textContent = fmtRs(res.row.exit_b_pnl);
-          }
         } catch (e) {
           showErr('Save failed: ' + e.message);
         }
@@ -173,11 +195,11 @@
     });
   }
 
-  function showErr(msg) {
-    const b = document.getElementById('errBanner');
-    if (!b) return;
-    b.style.display = 'block';
-    b.textContent = msg;
+  function updateToolbar(st) {
+    const earlier = document.getElementById('btnEarlier');
+    const retry = document.getElementById('btnRetry');
+    if (earlier) earlier.style.display = st.earliest_trade_date ? 'inline-block' : 'none';
+    if (retry) retry.style.display = (st.failed_row_count > 0) ? 'inline-block' : 'none';
   }
 
   async function loadLatest() {
@@ -186,6 +208,7 @@
       state.rows = doc.rows || [];
       state.summary = doc.summary || {};
       state.run = doc.run;
+      clearErr();
       renderSummary(state.summary);
       renderTable();
     } catch (e) {
@@ -197,26 +220,59 @@
     const st = await fetchJson('/status');
     const el = document.getElementById('runStatus');
     const btn = document.getElementById('btnRun');
+    const btnEarlier = document.getElementById('btnEarlier');
+    const btnRetry = document.getElementById('btnRetry');
+    updateToolbar(st);
     if (st.running) {
-      if (el) el.textContent = 'Running… (this may take a while)';
+      if (el) el.textContent = 'Running… (prefetch + screen; may take several minutes)';
       if (btn) btn.disabled = true;
+      if (btnEarlier) btnEarlier.disabled = true;
+      if (btnRetry) btnRetry.disabled = true;
       setTimeout(pollStatus, 5000);
     } else {
       if (btn) btn.disabled = false;
+      if (btnEarlier) btnEarlier.disabled = false;
+      if (btnRetry) btnRetry.disabled = false;
       if (el) el.textContent = st.error ? 'Error: ' + st.error : (st.run_id ? 'Done run #' + st.run_id : '');
       if (st.run_id && !st.error) loadLatest();
+      else updateToolbar(st);
     }
+  }
+
+  function daysVal() {
+    const inp = document.getElementById('daysInput');
+    return Math.max(1, Math.min(60, parseInt(inp && inp.value, 10) || 15));
   }
 
   document.getElementById('btnRun').addEventListener('click', async function () {
     try {
-      await fetchJson('/run?days=30', { method: 'POST' });
+      clearErr();
+      await fetchJson('/run?days=' + daysVal(), { method: 'POST' });
       pollStatus();
     } catch (e) {
       showErr(e.message);
     }
   });
 
-  loadLatest();
-  pollStatus();
+  document.getElementById('btnEarlier').addEventListener('click', async function () {
+    try {
+      clearErr();
+      await fetchJson('/run-earlier?days=' + daysVal(), { method: 'POST' });
+      pollStatus();
+    } catch (e) {
+      showErr(e.message);
+    }
+  });
+
+  document.getElementById('btnRetry').addEventListener('click', async function () {
+    try {
+      clearErr();
+      await fetchJson('/retry-failed', { method: 'POST' });
+      pollStatus();
+    } catch (e) {
+      showErr(e.message);
+    }
+  });
+
+  loadLatest().then(function () { pollStatus(); });
 })();

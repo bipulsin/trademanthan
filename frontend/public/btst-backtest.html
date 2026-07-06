@@ -5,18 +5,23 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <title>BTST Stock Options Backtest | TradeWithCTO</title>
-<link rel="stylesheet" href="btst-backtest.css?v=1" />
+<link rel="stylesheet" href="btst-backtest.css?v=2" />
 </head>
 <body>
 <div class="wrap">
   <h1>BTST Stock Options Backtest</h1>
   <p class="lede">
-    Read-only 30-trading-day replay: 2:45 PM F&amp;O universe scan (NIFTY-sentiment side),
-    CPR + RSI + liquidity gates, ATM CE/PE at 3:00 PM, Supertrend(10,3) + Hull(32) on premium
-  3:00–3:15 PM. One hypothetical lot per day. Scenario A exit 3:25 PM; Scenario B 9:20 AM next day.
+    Up to two hypothetical trades per day — gainer side (CE) and loser side (PE), screened independently at 2:45 PM.
+    Gates: CPR, RSI, liquidity on underlying; Supertrend + Hull on option premium 3:00–3:15 PM.
+    Scenario A exit 3:25 PM same day; Scenario B 9:20 AM next day.
   </p>
   <div class="toolbar">
-    <button type="button" id="btnRun" class="btn">Run backtest (30 days)</button>
+    <label class="days-label">Trading days
+      <input type="number" id="daysInput" min="1" max="60" value="15" />
+    </label>
+    <button type="button" id="btnRun" class="btn">Run backtest</button>
+    <button type="button" id="btnEarlier" class="btn btn-secondary" style="display:none">Run earlier N days</button>
+    <button type="button" id="btnRetry" class="btn btn-secondary" style="display:none">Retry failed rows</button>
     <span id="runStatus" class="status-text"></span>
   </div>
   <div class="callout" id="errBanner" style="display:none;"></div>
@@ -28,6 +33,6 @@
     </table>
   </div>
 </div>
-<script src="btst-backtest.js?v=1"></script>
+<script src="btst-backtest.js?v=2"></script>
 </body>
 </html>
