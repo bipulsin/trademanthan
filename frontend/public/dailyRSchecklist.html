@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="settings.css">
     <link rel="stylesheet" href="left-menu.css?v=3.24">
     <link rel="stylesheet" href="theme.css?v=1.3">
-    <link rel="stylesheet" href="dailyRSchecklist.css?v=9">
+    <link rel="stylesheet" href="dailyRSchecklist.css?v=10">
 </head>
 <body class="theme-page">
     <div class="mobile-title-bar">
@@ -164,23 +164,21 @@
     <template id="dcCardTpl">
         <button type="button" class="dc-card" data-symbol="">
             <div class="dc-card-face">
-                <div class="dc-face-left">
+                <div class="dc-card-row">
                     <span class="dc-symbol"></span>
-                    <span class="dc-sector-badge"></span>
                     <span class="dc-rs"></span>
-                </div>
-                <div class="dc-face-center">
-                    <span class="dc-score"></span>
                     <span class="dc-conf"></span>
+                    <span class="dc-score"></span>
                     <span class="dc-maturity"></span>
+                    <span class="dc-sector-badge"></span>
                     <span class="dc-setup"></span>
                     <span class="dc-ignition" hidden>Ignition Building</span>
-                </div>
-                <div class="dc-face-right">
                     <span class="dc-grade-lock" hidden title="Setup live but grade gate failed">🔒</span>
+                    <span class="dc-decision dc-decision--NONE">⬜ Not assessed</span>
                 </div>
-                <span class="dc-decision dc-decision--NONE">⬜ Not assessed</span>
-                <span class="dc-go-timing" hidden></span>
+                <div class="dc-card-meta" hidden>
+                    <span class="dc-go-timing" hidden></span>
+                </div>
             </div>
         </button>
     </template>
@@ -196,6 +194,6 @@
     </template>
 
     <script src="left-menu.js?v=3.24"></script>
-    <script src="dailyRSchecklist.js?v=9"></script>
+    <script src="dailyRSchecklist.js?v=10"></script>
 </body>
 </html>

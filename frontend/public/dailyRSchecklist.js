@@ -317,6 +317,7 @@
             }
         }
         var gt = card.querySelector(".dc-go-timing");
+        var meta = card.querySelector(".dc-card-meta");
         if (gt) {
             if (dcls === "GO" && stock.go_enter_first_at) {
                 var parts = ["GO @ " + fmtGoTime(stock.go_enter_first_at)];
@@ -327,9 +328,11 @@
                 if (stock.indicator_stale) parts.push("⚠ stale");
                 gt.textContent = parts.join(" · ");
                 gt.hidden = false;
+                if (meta) meta.hidden = false;
             } else {
                 gt.hidden = true;
                 gt.textContent = "";
+                if (meta) meta.hidden = true;
             }
         }
     }
