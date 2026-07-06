@@ -70,6 +70,57 @@
     return '—';
   }
 
+  function rowReason(r) {
+    return r.no_data_reason || r.no_eligible_reason || '';
+  }
+
+  function isHiddenRow(r) {
+    return rowReason(r) === 'no_data_holiday_or_gap';
+  }
+
+  function visibleRows(rows) {
+    return (rows || []).filter(function (r) { return !isHiddenRow(r); });
+  }
+
+  function computeSummaryFromRows(rows) {
+    function hasPnl(r) { return r.entry_premium != null; }
+    function sumPnl(dir) {
+      var a = 0;
+      var b = 0;
+      rows.forEach(function (r) {
+        if (r.direction !== dir || !hasPnl(r)) return;
+        if (r.exit_a_pnl != null) a += Number(r.exit_a_pnl);
+        if (r.exit_b_pnl != null) b += Number(r.exit_b_pnl);
+      });
+      return [a, b];
+    }
+    var ce = sumPnl('CE');
+    var pe = sumPnl('PE');
+    var manualTotal = 0;
+    var manualNeeds = 0;
+    rows.forEach(function (r) {
+      if (r.data_mode !== 'manual_fill') return;
+      manualTotal++;
+      if (r.entry_premium == null || r.exit_a_premium == null || r.exit_b_premium == null) {
+        manualNeeds++;
+      }
+    });
+    return {
+      ce_scenario_a_total: ce[0],
+      ce_scenario_b_total: ce[1],
+      pe_scenario_a_total: pe[0],
+      pe_scenario_b_total: pe[1],
+      final_scenario_a_total: ce[0] + pe[0],
+      final_scenario_b_total: ce[1] + pe[1],
+      manual_fill_needs_data: manualNeeds,
+      manual_fill_total: manualTotal,
+      api_fetch_failed_count: rows.filter(function (r) {
+        return rowReason(r) === 'option_premium_fetch_failed';
+      }).length,
+      row_count: rows.length,
+    };
+  }
+
   function clearErr() {
     var b = document.getElementById('errBanner');
     if (b) { b.style.display = 'none'; b.textContent = ''; }
@@ -177,7 +228,7 @@
             body: JSON.stringify(body),
           });
           updateRowInState(res.row);
-          state.summary = res.summary;
+          state.summary = computeSummaryFromRows(state.rows);
           renderSummary(state.summary);
           renderTable();
         } catch (e) {
@@ -190,8 +241,8 @@
   async function loadLatest() {
     try {
       var doc = await fetchJson('/latest');
-      state.rows = doc.rows || [];
-      state.summary = doc.summary || {};
+      state.rows = visibleRows(doc.rows || []);
+      state.summary = computeSummaryFromRows(state.rows);
       state.run = doc.run;
       clearErr();
       renderSummary(state.summary);
