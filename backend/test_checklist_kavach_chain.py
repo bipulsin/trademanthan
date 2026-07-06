@@ -32,7 +32,6 @@ def _passing_long_row():
         "adx_entry": 34.5,
         "di_alignment": "DI+>DI-",
         "volume": "High",
-        "server_eval": True,
     }
 
 

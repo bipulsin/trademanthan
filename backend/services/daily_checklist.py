@@ -585,11 +585,15 @@ def _parse_iso_dt(v: Any) -> Optional[datetime]:
 
 
 def _latest_rs_scan_time(db) -> Optional[datetime]:
-    row = db.execute(text("SELECT MAX(scan_time) AS t FROM relative_strength_snapshot")).fetchone()
-    if row and row.t:
-        t = row.t
-        return t.astimezone(IST) if t.tzinfo else t.replace(tzinfo=IST)
-    return None
+    row = db.execute(
+        text("SELECT MAX(scan_time) AS latest_scan FROM relative_strength_snapshot")
+    ).fetchone()
+    if not row:
+        return None
+    t = row._mapping.get("latest_scan") if hasattr(row, "_mapping") else row[0]
+    if not isinstance(t, datetime):
+        return None
+    return t.astimezone(IST) if t.tzinfo else t.replace(tzinfo=IST)
 
 
 def _apply_live_recompute(db, sd: str, symbol: str, direction: str, merged: Dict[str, Any], rs_row) -> None:
