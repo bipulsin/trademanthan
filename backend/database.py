@@ -1628,15 +1628,15 @@ def _run_startup_schema_migrations(db_engine):
                         )
                     )
                 if "spot_price_1445" in btst_cols:
-                        conn.execute(
-                            text(
-                                """
-                                UPDATE btst_backtest_results
-                                SET reference_price = spot_price_1445
-                                WHERE reference_price IS NULL AND spot_price_1445 IS NOT NULL
-                                """
-                            )
+                    conn.execute(
+                        text(
+                            """
+                            UPDATE btst_backtest_results
+                            SET reference_price = spot_price_1445
+                            WHERE reference_price IS NULL AND spot_price_1445 IS NOT NULL
+                            """
                         )
+                    )
                 conn.execute(text("DROP INDEX IF EXISTS uq_btst_trade_date_side"))
                 conn.execute(
                     text(

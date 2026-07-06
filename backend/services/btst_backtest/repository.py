@@ -61,6 +61,9 @@ def upsert_result(run_id: int, row: Dict[str, Any]) -> int:
     sets = ", ".join(
         f"{c} = EXCLUDED.{c}" for c in RESULT_COLS if c not in ("trade_date", "stock_symbol")
     )
+    conflict_where = (
+        "WHERE stock_symbol IS NOT NULL AND TRIM(stock_symbol) <> ''"
+    )
     db = SessionLocal()
     try:
         r = db.execute(
@@ -68,7 +71,8 @@ def upsert_result(run_id: int, row: Dict[str, Any]) -> int:
                 f"""
                 INSERT INTO btst_backtest_results ({", ".join(RESULT_COLS)})
                 VALUES ({", ".join(":" + c for c in RESULT_COLS)})
-                ON CONFLICT (trade_date, stock_symbol) DO UPDATE SET {sets}
+                ON CONFLICT (trade_date, stock_symbol) {conflict_where}
+                DO UPDATE SET {sets}
                 RETURNING id
                 """
             ),
