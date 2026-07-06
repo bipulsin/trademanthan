@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<title>BTST Stock Options Backtest | TradeWithCTO</title>
+<link rel="stylesheet" href="btst-backtest.css?v=1" />
+</head>
+<body>
+<div class="wrap">
+  <h1>BTST Stock Options Backtest</h1>
+  <p class="lede">
+    Read-only 30-trading-day replay: 2:45 PM F&amp;O universe scan (NIFTY-sentiment side),
+    CPR + RSI + liquidity gates, ATM CE/PE at 3:00 PM, Supertrend(10,3) + Hull(32) on premium
+  3:00–3:15 PM. One hypothetical lot per day. Scenario A exit 3:25 PM; Scenario B 9:20 AM next day.
+  </p>
+  <div class="toolbar">
+    <button type="button" id="btnRun" class="btn">Run backtest (30 days)</button>
+    <span id="runStatus" class="status-text"></span>
+  </div>
+  <div class="callout" id="errBanner" style="display:none;"></div>
+  <div class="summary" id="summaryGrid"></div>
+  <div class="table-wrap">
+    <table id="resultsTable">
+      <thead id="tableHead"></thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+  </div>
+</div>
+<script src="btst-backtest.js?v=1"></script>
+</body>
+</html>

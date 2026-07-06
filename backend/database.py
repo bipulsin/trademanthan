@@ -1503,6 +1503,84 @@ def _run_startup_schema_migrations(db_engine):
                 )
                 print("Applied migration: created vajra_futures_rating (PostgreSQL)")
 
+            # BTST stock-options backtest (read-only analysis)
+            if "btst_backtest_runs" not in table_names and db_engine.dialect.name == "postgresql":
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE btst_backtest_runs (
+                            id SERIAL PRIMARY KEY,
+                            run_date TIMESTAMP DEFAULT NOW(),
+                            start_date DATE,
+                            end_date DATE,
+                            notes TEXT
+                        )
+                        """
+                    )
+                )
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE btst_strategy_config (
+                            key TEXT PRIMARY KEY,
+                            value TEXT NOT NULL,
+                            updated_at TIMESTAMP DEFAULT NOW()
+                        )
+                        """
+                    )
+                )
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE btst_backtest_results (
+                            id SERIAL PRIMARY KEY,
+                            run_id INT REFERENCES btst_backtest_runs(id),
+                            trade_date DATE,
+                            nifty_change_pct NUMERIC,
+                            scan_side TEXT,
+                            stock_symbol TEXT,
+                            change_pct_at_1445 NUMERIC,
+                            rank_type TEXT,
+                            scan_rank INT,
+                            spot_price_1445 NUMERIC,
+                            cpr_pivot NUMERIC,
+                            cpr_tc NUMERIC,
+                            cpr_bc NUMERIC,
+                            cpr_gate_pass BOOLEAN,
+                            rsi_14_5min NUMERIC,
+                            rsi_gate_pass BOOLEAN,
+                            liquidity_gate_pass BOOLEAN,
+                            direction TEXT,
+                            atm_strike NUMERIC,
+                            option_symbol TEXT,
+                            data_mode TEXT,
+                            premium_at_1500 NUMERIC,
+                            supertrend_pass BOOLEAN,
+                            hull_pass BOOLEAN,
+                            entry_time TIMESTAMP,
+                            entry_premium NUMERIC,
+                            lot_size INT,
+                            buy_cost NUMERIC,
+                            exit_a_time TIMESTAMP,
+                            exit_a_premium NUMERIC,
+                            exit_a_pnl NUMERIC,
+                            exit_b_time TIMESTAMP,
+                            exit_b_premium NUMERIC,
+                            exit_b_pnl NUMERIC,
+                            eligible_final BOOLEAN,
+                            no_eligible_reason TEXT
+                        )
+                        """
+                    )
+                )
+                conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS idx_btst_results_run_date "
+                        "ON btst_backtest_results (run_id, trade_date)"
+                    )
+                )
+                print("Applied migration: created btst_backtest tables (PostgreSQL)")
+
             # Legacy Smart Futures DB tables removed (screener rebuild); drop if still present.
             _sf_tables = (
                 "smart_futures_order_audit",

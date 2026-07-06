@@ -25,6 +25,7 @@ import backend.routers.market_data as market_data_router
 import backend.routers.smart_futures_stub as smart_futures
 import backend.routers.smart_futures_backtest_router as smart_futures_backtest
 import backend.routers.nks_intraday as nks_intraday
+import backend.routers.btst_backtest as btst_backtest
 import backend.routers.fno_bullish as fno_bullish
 import backend.routers.daily_futures as daily_futures
 import backend.routers.futures_reports as futures_reports
@@ -296,6 +297,8 @@ app.include_router(smart_futures_backtest.router, prefix="/api/smart-futures-bac
 app.include_router(smart_futures_backtest.router, prefix="/smart-futures-backtest")
 app.include_router(nks_intraday.router, prefix="/api/nks-intraday")
 app.include_router(nks_intraday.router, prefix="/nks-intraday")
+app.include_router(btst_backtest.router, prefix="/api/btst-backtest")
+app.include_router(btst_backtest.router, prefix="/btst-backtest")
 app.include_router(fno_bullish.router, prefix="/api/fno-bullish")
 app.include_router(fno_bullish.router, prefix="/fno-bullish")
 app.include_router(daily_futures.router, prefix="/api")
