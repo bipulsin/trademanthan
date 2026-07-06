@@ -33,6 +33,7 @@ from backend.services.daily_checklist_snapshot import (
     get_locked_symbols,
     is_snapshot_locked,
     lock_morning_snapshot,
+    locked_direction_map,
     sort_by_snapshot_rank,
 )
 
@@ -300,6 +301,24 @@ _RS_DETAIL_SQL = text(
      AND h.date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date
     WHERE s.scan_time = (SELECT MAX(scan_time) FROM relative_strength_snapshot)
       AND s.symbol = :sym
+    LIMIT 1
+    """
+)
+
+_RS_LOCKED_FALLBACK_SQL = text(
+    """
+    SELECT s.symbol, s.relative_strength, s.trade_score, s.volume_ratio,
+           s.volume_label, s.vwap_purity_pct, s.market_regime, s.confidence_grade,
+           s.kavach_state, s.ema5, s.vwap, s.supertrend, s.macd, s.macd_signal,
+           s.macd_histogram, s.adx, s.ranking_type, s.scan_time, s.rank_position,
+           h.maturity_tag, h.consecutive_days_on_list, h.range_vs_atr_ratio
+    FROM relative_strength_snapshot s
+    LEFT JOIN rs_scanner_history h
+      ON h.symbol = s.symbol
+     AND h.date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date
+    WHERE s.symbol = :sym
+      AND s.scan_time::date = :d
+    ORDER BY s.scan_time DESC
     LIMIT 1
     """
 )
@@ -834,16 +853,17 @@ def _refresh_checklist_from_rs(*, full_populate: bool) -> Dict[str, Any]:
             return state
 
         row_by_sym = {r.symbol: r for r in rows}
+        lock_dirs = locked_direction_map(db, sd)
         refreshed = 0
 
         for sym in locked_syms:
             row = row_by_sym.get(sym)
             if row is None:
-                row = db.execute(_RS_DETAIL_SQL, {"sym": sym}).fetchone()
+                row = db.execute(_RS_LOCKED_FALLBACK_SQL, {"sym": sym, "d": sd}).fetchone()
             if row is None:
                 _reevaluate_symbol(db, sd, sym)
                 continue
-            direction = _direction_from_ranking(row.ranking_type)
+            direction = lock_dirs.get(sym) or _direction_from_ranking(row.ranking_type)
             existing = _load_raw(db, sd, sym)
             auto = _auto_fields_from_rs(row, direction, live_map)
             merged = _merge_rs_into_existing(existing, auto)

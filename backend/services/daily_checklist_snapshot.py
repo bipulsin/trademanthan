@@ -59,6 +59,14 @@ def get_locked_symbols(db, session_date: str) -> List[str]:
     return [r.symbol for r in get_locked_symbol_rows(db, session_date)]
 
 
+def locked_direction_map(db, session_date: str) -> Dict[str, str]:
+    """Morning-lock direction per symbol (LONG / SHORT from daily_snapshot)."""
+    return {
+        r.symbol: "LONG" if (r.direction or "").upper() == "BULL" else "SHORT"
+        for r in get_locked_symbol_rows(db, session_date)
+    }
+
+
 def snapshot_lock_counts(db, session_date: str) -> Dict[str, int]:
     """Per-side counts from morning daily_snapshot (BULL / BEAR)."""
     rows = db.execute(
