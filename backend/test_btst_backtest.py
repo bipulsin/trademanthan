@@ -1,14 +1,19 @@
-"""Unit tests for BTST gate and indicator pure functions."""
+"""Unit tests for BTST CSV-fed backtest."""
 from datetime import date
 
+from backend.services.btst_backtest.csv_import import parse_btst_csv
 from backend.services.btst_backtest.gates import (
-    check_cpr_gate,
     check_hull_gate,
     check_liquidity_gate,
-    check_rsi_gate,
     check_supertrend_gate,
 )
 from backend.services.btst_backtest.indicators import compute_cpr
+from backend.services.btst_backtest.row_processor import (
+    compute_change_pct,
+    compute_pnl,
+    direction_from_change_pct,
+    is_within_premium_history_window,
+)
 
 
 def test_cpr_formula():
@@ -18,25 +23,38 @@ def test_cpr_formula():
     assert tc == pivot + (pivot - bc)
 
 
-def test_cpr_gate_bullish():
-    ohlc = {"high": 110, "low": 90, "close": 100}
-    pivot, _, _ = compute_cpr(110, 90, 100)
-    passed, _, _tc, _bc = check_cpr_gate("bullish", pivot + 1, ohlc)
-    assert passed is True
-    passed2, _, _, _ = check_cpr_gate("bullish", pivot - 1, ohlc)
-    assert passed2 is False
+def test_parse_btst_csv_minimal():
+    csv = "trade_date,stock_symbol,sector\n2026-06-02,RELIANCE,Banks\n"
+    rows, warnings = parse_btst_csv(csv)
+    assert len(rows) == 1
+    assert rows[0]["trade_date"] == date(2026, 6, 2)
+    assert rows[0]["stock_symbol"] == "RELIANCE"
+    assert rows[0]["sector"] == "Banks"
+    assert not warnings
 
 
-def test_cpr_gate_bearish():
-    ohlc = {"high": 110, "low": 90, "close": 100}
-    pivot, _, _ = compute_cpr(110, 90, 100)
-    assert check_cpr_gate("bearish", pivot - 1, ohlc)[0] is True
-    assert check_cpr_gate("bearish", pivot + 1, ohlc)[0] is False
+def test_parse_btst_csv_date_time_header():
+    csv = "Date Time,Name,sector\n02-06-2026,TCS,IT\n"
+    rows, _ = parse_btst_csv(csv)
+    assert rows[0]["stock_symbol"] == "TCS"
 
 
-def test_liquidity_gate():
-    assert check_liquidity_gate(600_000, 500_000) is True
-    assert check_liquidity_gate(400_000, 500_000) is False
+def test_change_pct_and_direction():
+    assert abs(compute_change_pct(100, 103) - 3.0) < 0.001
+    assert direction_from_change_pct(2.5) == "CE"
+    assert direction_from_change_pct(-1.0) == "PE"
+
+
+def test_compute_pnl():
+    p = compute_pnl(10.0, 12.0, 9.0, 500)
+    assert p["buy_cost"] == 5000.0
+    assert p["exit_a_pnl"] == 1000.0
+    assert p["exit_b_pnl"] == -500.0
+
+
+def test_premium_history_window():
+    recent = date(2026, 7, 1)
+    assert is_within_premium_history_window(recent, window_days=24) is True
 
 
 def _m5_bar(trade_date: date, hh: int, mm: int, close: float, vol: float = 1000) -> dict:
@@ -50,18 +68,9 @@ def _m5_bar(trade_date: date, hh: int, mm: int, close: float, vol: float = 1000)
     }
 
 
-def test_rsi_gate_bullish_band():
-    d = date(2026, 7, 1)
-    candles = []
-    price = 100.0
-    for i in range(20):
-        mm = 15 + (i * 5) % 60
-        hh = 9 + (15 + i * 5) // 60
-        price += 0.3
-        candles.append(_m5_bar(d, hh, mm, price))
-    passed, rsi = check_rsi_gate("bullish", candles, d, "14:45", bull_min=50, bull_max=80)
-    assert rsi is not None
-    assert isinstance(passed, bool)
+def test_liquidity_gate():
+    assert check_liquidity_gate(600_000, 500_000) is True
+    assert check_liquidity_gate(400_000, 500_000) is False
 
 
 def test_supertrend_and_hull_smoke():

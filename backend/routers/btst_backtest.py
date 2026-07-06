@@ -1,5 +1,5 @@
 """
-Public BTST stock-options backtest API.
+Public BTST stock-options backtest API (CSV-fed).
 
 No authentication — page at ``/btst-backtest.html``.
 """
@@ -7,41 +7,37 @@ from __future__ import annotations
 
 import logging
 import threading
-from datetime import date
-from typing import Any, Dict, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from backend.services.btst_backtest import progress as btst_progress
+from backend.services.btst_backtest.csv_import import parse_btst_csv
 from backend.services.btst_backtest.exit_manager import recalc_pnls
 from backend.services.btst_backtest.repository import (
     compute_summary,
     count_results_for_run,
     fetch_all_results,
-    fetch_earliest_trade_date,
-    fetch_failed_row_keys,
     fetch_latest_run_meta,
     fetch_result,
     update_manual_fill,
 )
-from backend.services.btst_backtest.runner import run_btst_backtest, run_btst_retry_failed
+from backend.services.btst_backtest.runner import run_csv_backtest
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["btst-backtest"])
 
 _run_lock = threading.Lock()
-_run_status: Dict[str, Any] = {"running": False, "run_id": None, "error": None, "mode": None}
+_run_status: Dict[str, Any] = {"running": False, "run_id": None, "error": None}
+_pending_csv: Dict[str, Any] = {"rows": [], "filename": "", "warnings": []}
 
 
 def _jsonify_row(r: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(r)
-    for k in ("trade_date", "start_date", "end_date", "run_date"):
-        v = out.get(k)
-        if v is not None and hasattr(v, "isoformat"):
-            out[k] = v.isoformat()
-    for k in ("entry_time", "exit_a_time", "exit_b_time"):
+    for k in ("trade_date", "run_date"):
         v = out.get(k)
         if v is not None and hasattr(v, "isoformat"):
             out[k] = v.isoformat()
@@ -54,65 +50,99 @@ def _jsonify_row(r: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def _run_job(mode: str, trading_days: int, end_date: Optional[date], notes: str) -> None:
+def _run_job(csv_rows: List[Dict[str, Any]], csv_filename: str, notes: str) -> None:
     global _run_status
     try:
-        if mode == "retry":
-            result = run_btst_retry_failed(notes=notes)
-        elif mode == "earlier":
-            result = run_btst_backtest(
-                trading_days=trading_days, end_date=end_date, notes=notes, mode="earlier"
-            )
-        else:
-            result = run_btst_backtest(
-                trading_days=trading_days, end_date=end_date, notes=notes, mode="recent"
-            )
-        if result.get("error") and not result.get("result_ids"):
-            _run_status = {
-                "running": False,
-                "run_id": result.get("run_id"),
-                "error": result["error"],
-                "mode": mode,
-            }
+        btst_progress.reset_for_job(len(csv_rows), csv_filename)
+        result = run_csv_backtest(csv_rows, csv_filename=csv_filename, notes=notes)
+        if result.get("error"):
+            _run_status = {"running": False, "run_id": result.get("run_id"), "error": result["error"]}
         else:
             _run_status = {
                 "running": False,
                 "run_id": result.get("run_id"),
-                "error": result.get("error"),
-                "mode": mode,
+                "error": None,
             }
     except Exception as exc:
-        logger.exception("btst backtest failed")
-        _run_status = {"running": False, "run_id": None, "error": str(exc), "mode": mode}
+        logger.exception("btst csv backtest failed")
+        _run_status = {"running": False, "run_id": None, "error": str(exc)}
     finally:
         btst_progress.set_idle()
 
 
-def _start_job(mode: str, trading_days: int, end_date: Optional[date], notes: str) -> Dict[str, Any]:
+@router.post("/upload")
+async def upload_csv(file: UploadFile = File(...)) -> Dict[str, Any]:
+    """Parse CSV and stage rows for the next Run backtest click."""
+    global _pending_csv
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Empty file")
+    try:
+        rows, warnings = parse_btst_csv(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    with _run_lock:
+        _pending_csv = {
+            "rows": rows,
+            "filename": file.filename or "upload.csv",
+            "warnings": warnings,
+        }
+    return {
+        "ok": True,
+        "filename": _pending_csv["filename"],
+        "row_count": len(rows),
+        "warnings": warnings,
+        "preview": [
+            {
+                "trade_date": r["trade_date"].isoformat(),
+                "stock_symbol": r["stock_symbol"],
+                "sector": r.get("sector"),
+            }
+            for r in rows[:5]
+        ],
+    }
+
+
+@router.get("/pending")
+def pending_csv() -> Dict[str, Any]:
+    with _run_lock:
+        rows = _pending_csv.get("rows") or []
+        return {
+            "filename": _pending_csv.get("filename") or "",
+            "row_count": len(rows),
+            "warnings": _pending_csv.get("warnings") or [],
+        }
+
+
+@router.post("/run")
+def start_backtest(
+    background_tasks: BackgroundTasks,
+    notes: str = "",
+) -> Dict[str, Any]:
     with _run_lock:
         if _run_status.get("running"):
             raise HTTPException(status_code=409, detail="Backtest already running")
-        _run_status.update({"running": True, "run_id": None, "error": None, "mode": mode})
-        btst_progress.reset_for_job(mode)
-    return {"started": True, "days": trading_days, "mode": mode}
+        rows = list(_pending_csv.get("rows") or [])
+        if not rows:
+            raise HTTPException(status_code=400, detail="Upload a CSV first")
+        filename = _pending_csv.get("filename") or "upload.csv"
+        _run_status.update({"running": True, "run_id": None, "error": None})
+    background_tasks.add_task(_run_job, rows, filename, notes)
+    return {"started": True, "row_count": len(rows), "filename": filename}
 
 
 @router.get("/status")
 def backtest_status() -> Dict[str, Any]:
-    from datetime import datetime, timezone
-
     from backend.services.upstox_rate_limiter import stats as rl_stats
 
     out = dict(_run_status)
     prog = btst_progress.snapshot()
     out["progress"] = prog
     active_run_id = prog.get("active_run_id")
-    if active_run_id:
-        out["active_run_id"] = active_run_id
-        out["rows_written_this_run"] = count_results_for_run(int(active_run_id))
-    else:
-        out["active_run_id"] = None
-        out["rows_written_this_run"] = 0
+    out["active_run_id"] = active_run_id
+    out["rows_written_this_run"] = (
+        count_results_for_run(int(active_run_id)) if active_run_id else 0
+    )
     started = prog.get("started_at")
     if started and out.get("running"):
         try:
@@ -122,64 +152,11 @@ def backtest_status() -> Dict[str, Any]:
             )
         except (TypeError, ValueError):
             pass
-        last = prog.get("last_activity_at")
-        if last:
-            try:
-                t1 = datetime.fromisoformat(str(last).replace("Z", "+00:00"))
-                stale = (
-                    datetime.now(timezone.utc) - t1.astimezone(timezone.utc)
-                ).total_seconds()
-                out["seconds_since_activity"] = int(stale)
-                if stale > 600:
-                    out["stale_warning"] = (
-                        "No progress update in 10+ minutes — may be rate-limited "
-                        "or stuck; check logs or retry after live traffic eases."
-                    )
-            except (TypeError, ValueError):
-                pass
     if out.get("running"):
         out["candle_rate_limiter"] = rl_stats()
-    out["failed_row_count"] = len(fetch_failed_row_keys())
-    out["earliest_trade_date"] = (
-        fetch_earliest_trade_date().isoformat() if fetch_earliest_trade_date() else None
-    )
-    return out
-
-
-@router.post("/run")
-def start_backtest(
-    background_tasks: BackgroundTasks,
-    days: int = Query(15, ge=1, le=60),
-    end_date: Optional[date] = None,
-    notes: str = "",
-) -> Dict[str, Any]:
-    out = _start_job("recent", days, end_date, notes)
-    background_tasks.add_task(_run_job, "recent", days, end_date, notes)
-    return out
-
-
-@router.post("/run-earlier")
-def start_earlier_backtest(
-    background_tasks: BackgroundTasks,
-    days: int = Query(15, ge=1, le=60),
-    notes: str = "",
-) -> Dict[str, Any]:
-    if fetch_earliest_trade_date() is None:
-        raise HTTPException(status_code=400, detail="No existing rows — run recent days first")
-    out = _start_job("earlier", days, None, notes)
-    background_tasks.add_task(_run_job, "earlier", days, None, notes)
-    return out
-
-
-@router.post("/retry-failed")
-def retry_failed_rows(
-    background_tasks: BackgroundTasks,
-    notes: str = "retry_failed",
-) -> Dict[str, Any]:
-    if not fetch_failed_row_keys():
-        raise HTTPException(status_code=400, detail="No api_fetch_failed rows to retry")
-    out = _start_job("retry", 0, None, notes)
-    background_tasks.add_task(_run_job, "retry", 0, None, notes)
+    with _run_lock:
+        out["pending_csv_rows"] = len(_pending_csv.get("rows") or [])
+        out["pending_csv_filename"] = _pending_csv.get("filename") or ""
     return out
 
 
@@ -189,14 +166,10 @@ def latest_results() -> Dict[str, Any]:
     if not rows:
         raise HTTPException(status_code=404, detail="No backtest results yet")
     run = fetch_latest_run_meta()
-    summary = compute_summary(rows)
     return {
         "run": _jsonify_row(run) if run else None,
         "rows": [_jsonify_row(r) for r in rows],
-        "summary": summary,
-        "earliest_trade_date": (
-            fetch_earliest_trade_date().isoformat() if fetch_earliest_trade_date() else None
-        ),
+        "summary": compute_summary(rows),
     }
 
 
@@ -231,5 +204,4 @@ def patch_manual_fill(result_id: int, body: ManualFillBody) -> Dict[str, Any]:
     updates.update(pnls)
     updated = update_manual_fill(result_id, updates)
     all_rows = fetch_all_results()
-    summary = compute_summary(all_rows)
-    return {"row": _jsonify_row(updated), "summary": summary}
+    return {"row": _jsonify_row(updated), "summary": compute_summary(all_rows)}

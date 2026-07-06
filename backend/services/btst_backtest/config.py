@@ -13,22 +13,16 @@ from backend.database import SessionLocal
 logger = logging.getLogger(__name__)
 
 DEFAULTS: Dict[str, Any] = {
-    "trading_days_default": 15,
-    "rsi_bull_min": 55,
-    "rsi_bull_max": 70,
-    "rsi_bear_min": 25,
-    "rsi_bear_max": 40,
     "supertrend_period": 10,
     "supertrend_multiplier": 3.0,
     "hull_length": 32,
-    "liquidity_min_volume_1445": 500_000,
     "snapshot_hhmm": "14:45",
     "atm_hhmm": "15:00",
-    "entry_hhmm": "15:10",
+    "entry_hhmm": "15:00",
     "premium_gate_hhmm": "15:15",
-    "exit_a_hhmm": "15:25",
-    "exit_b_hhmm": "09:20",
-    "top_n_per_side": 3,
+    "exit_a_hhmm": "15:30",
+    "exit_b_hhmm": "09:30",
+    "premium_history_trading_days": 24,
 }
 
 
@@ -38,6 +32,8 @@ def get_config() -> Dict[str, Any]:
     try:
         rows = db.execute(text("SELECT key, value FROM btst_strategy_config")).fetchall()
         for r in rows:
+            if r.key not in DEFAULTS:
+                continue
             try:
                 cfg[r.key] = json.loads(r.value)
             except (json.JSONDecodeError, TypeError):

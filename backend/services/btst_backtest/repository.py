@@ -1,8 +1,7 @@
-"""Persist BTST backtest runs and per-day per-side rows."""
+"""Persist CSV-fed BTST backtest runs and per-stock rows."""
 from __future__ import annotations
 
-from datetime import date
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
 
@@ -11,53 +10,41 @@ from backend.database import SessionLocal
 RESULT_COLS = [
     "run_id",
     "trade_date",
-    "side",
     "stock_symbol",
-    "change_pct_at_1445",
-    "rank_type",
-    "scan_rank",
-    "spot_price_1445",
-    "cpr_pivot",
-    "cpr_tc",
-    "cpr_bc",
-    "cpr_gate_pass",
-    "rsi_14_5min",
-    "rsi_gate_pass",
-    "liquidity_gate_pass",
-    "direction",
+    "sector",
+    "change_pct",
+    "reference_price",
     "atm_strike",
+    "direction",
     "option_symbol",
+    "numeric_instrument_key",
     "data_mode",
-    "premium_at_1500",
     "supertrend_pass",
     "hull_pass",
-    "entry_time",
+    "eligible_final",
     "entry_premium",
+    "exit_a_premium",
+    "exit_b_premium",
     "lot_size",
     "buy_cost",
-    "exit_a_time",
-    "exit_a_premium",
     "exit_a_pnl",
-    "exit_b_time",
-    "exit_b_premium",
     "exit_b_pnl",
-    "eligible_final",
-    "no_eligible_reason",
+    "no_data_reason",
 ]
 
 
-def create_run(start_date: date, end_date: date, notes: str = "") -> int:
+def create_run(*, csv_filename: str = "", notes: str = "") -> int:
     db = SessionLocal()
     try:
         row = db.execute(
             text(
                 """
-                INSERT INTO btst_backtest_runs (start_date, end_date, notes)
-                VALUES (:s, :e, :n)
+                INSERT INTO btst_backtest_runs (csv_filename, notes)
+                VALUES (:f, :n)
                 RETURNING id
                 """
             ),
-            {"s": start_date, "e": end_date, "n": notes},
+            {"f": csv_filename or None, "n": notes or None},
         ).fetchone()
         db.commit()
         return int(row.id)
@@ -71,7 +58,9 @@ def upsert_result(run_id: int, row: Dict[str, Any]) -> int:
         if c == "run_id":
             continue
         params[c] = row.get(c)
-    sets = ", ".join(f"{c} = EXCLUDED.{c}" for c in RESULT_COLS if c not in ("trade_date", "side"))
+    sets = ", ".join(
+        f"{c} = EXCLUDED.{c}" for c in RESULT_COLS if c not in ("trade_date", "stock_symbol")
+    )
     db = SessionLocal()
     try:
         r = db.execute(
@@ -79,7 +68,7 @@ def upsert_result(run_id: int, row: Dict[str, Any]) -> int:
                 f"""
                 INSERT INTO btst_backtest_results ({", ".join(RESULT_COLS)})
                 VALUES ({", ".join(":" + c for c in RESULT_COLS)})
-                ON CONFLICT (trade_date, side) DO UPDATE SET {sets}
+                ON CONFLICT (trade_date, stock_symbol) DO UPDATE SET {sets}
                 RETURNING id
                 """
             ),
@@ -138,7 +127,7 @@ def fetch_all_results() -> List[Dict[str, Any]]:
     try:
         rows = db.execute(
             text(
-                "SELECT * FROM btst_backtest_results ORDER BY trade_date DESC, side ASC"
+                "SELECT * FROM btst_backtest_results ORDER BY trade_date DESC, stock_symbol ASC"
             )
         ).mappings().fetchall()
         return [dict(r) for r in rows]
@@ -157,17 +146,6 @@ def fetch_latest_run_meta() -> Optional[Dict[str, Any]]:
         db.close()
 
 
-def fetch_earliest_trade_date() -> Optional[date]:
-    db = SessionLocal()
-    try:
-        row = db.execute(
-            text("SELECT MIN(trade_date) AS d FROM btst_backtest_results")
-        ).fetchone()
-        return row.d if row and row.d else None
-    finally:
-        db.close()
-
-
 def count_results_for_run(run_id: int) -> int:
     db = SessionLocal()
     try:
@@ -180,35 +158,14 @@ def count_results_for_run(run_id: int) -> int:
         db.close()
 
 
-def fetch_failed_row_keys() -> List[Tuple[date, str]]:
-    db = SessionLocal()
-    try:
-        rows = db.execute(
-            text(
-                """
-                SELECT trade_date, side FROM btst_backtest_results
-                WHERE no_eligible_reason = 'api_fetch_failed'
-                ORDER BY trade_date DESC, side
-                """
-            )
-        ).fetchall()
-        return [(r.trade_date, r.side) for r in rows if r.trade_date and r.side]
-    finally:
-        db.close()
-
-
 def compute_summary(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    def _counts_for_pnl(r: Dict[str, Any]) -> bool:
-        if r.get("direction") not in ("bullish", "bearish"):
-            return False
-        if r.get("data_mode") == "manual_fill":
-            return r.get("entry_premium") is not None
-        return bool(r.get("eligible_final"))
+    def _has_pnl(r: Dict[str, Any]) -> bool:
+        return r.get("entry_premium") is not None
 
     def _sum(filter_fn):
         a = b = 0.0
         for r in rows:
-            if not filter_fn(r):
+            if not filter_fn(r) or not _has_pnl(r):
                 continue
             if r.get("exit_a_pnl") is not None:
                 a += float(r["exit_a_pnl"])
@@ -216,8 +173,8 @@ def compute_summary(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
                 b += float(r["exit_b_pnl"])
         return a, b
 
-    ce_a, ce_b = _sum(lambda r: r.get("direction") == "bullish" and _counts_for_pnl(r))
-    pe_a, pe_b = _sum(lambda r: r.get("direction") == "bearish" and _counts_for_pnl(r))
+    ce_a, ce_b = _sum(lambda r: r.get("direction") == "CE")
+    pe_a, pe_b = _sum(lambda r: r.get("direction") == "PE")
     manual_needs = sum(
         1
         for r in rows
@@ -229,7 +186,7 @@ def compute_summary(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         )
     )
     manual_total = sum(1 for r in rows if r.get("data_mode") == "manual_fill")
-    api_failed = sum(1 for r in rows if r.get("no_eligible_reason") == "api_fetch_failed")
+    api_failed = sum(1 for r in rows if r.get("no_data_reason") == "option_premium_fetch_failed")
     return {
         "ce_scenario_a_total": ce_a,
         "ce_scenario_b_total": ce_b,

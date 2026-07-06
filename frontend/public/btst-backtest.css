@@ -32,6 +32,12 @@ h1 { font-size: 1.45rem; margin: 0 0 6px; }
   font-weight: 600;
   cursor: pointer;
 }
+.btn-secondary {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.file-label { cursor: pointer; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .status-text { color: var(--muted); }
 .callout {

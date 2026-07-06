@@ -1503,7 +1503,7 @@ def _run_startup_schema_migrations(db_engine):
                 )
                 print("Applied migration: created vajra_futures_rating (PostgreSQL)")
 
-            # BTST stock-options backtest (read-only analysis)
+            # BTST stock-options backtest (CSV-fed, read-only analysis)
             if "btst_backtest_runs" not in table_names and db_engine.dialect.name == "postgresql":
                 conn.execute(
                     text(
@@ -1511,8 +1511,7 @@ def _run_startup_schema_migrations(db_engine):
                         CREATE TABLE btst_backtest_runs (
                             id SERIAL PRIMARY KEY,
                             run_date TIMESTAMP DEFAULT NOW(),
-                            start_date DATE,
-                            end_date DATE,
+                            csv_filename TEXT,
                             notes TEXT
                         )
                         """
@@ -1536,39 +1535,26 @@ def _run_startup_schema_migrations(db_engine):
                             id SERIAL PRIMARY KEY,
                             run_id INT REFERENCES btst_backtest_runs(id),
                             trade_date DATE NOT NULL,
-                            side TEXT NOT NULL,
-                            stock_symbol TEXT,
-                            change_pct_at_1445 NUMERIC,
-                            rank_type TEXT,
-                            scan_rank INT,
-                            spot_price_1445 NUMERIC,
-                            cpr_pivot NUMERIC,
-                            cpr_tc NUMERIC,
-                            cpr_bc NUMERIC,
-                            cpr_gate_pass BOOLEAN,
-                            rsi_14_5min NUMERIC,
-                            rsi_gate_pass BOOLEAN,
-                            liquidity_gate_pass BOOLEAN,
-                            direction TEXT,
+                            stock_symbol TEXT NOT NULL,
+                            sector TEXT,
+                            change_pct NUMERIC,
+                            reference_price NUMERIC,
                             atm_strike NUMERIC,
+                            direction TEXT,
                             option_symbol TEXT,
+                            numeric_instrument_key TEXT,
                             data_mode TEXT,
-                            premium_at_1500 NUMERIC,
                             supertrend_pass BOOLEAN,
                             hull_pass BOOLEAN,
-                            entry_time TIMESTAMP,
+                            eligible_final BOOLEAN,
                             entry_premium NUMERIC,
+                            exit_a_premium NUMERIC,
+                            exit_b_premium NUMERIC,
                             lot_size INT,
                             buy_cost NUMERIC,
-                            exit_a_time TIMESTAMP,
-                            exit_a_premium NUMERIC,
                             exit_a_pnl NUMERIC,
-                            exit_b_time TIMESTAMP,
-                            exit_b_premium NUMERIC,
                             exit_b_pnl NUMERIC,
-                            eligible_final BOOLEAN,
-                            no_eligible_reason TEXT,
-                            UNIQUE (trade_date, side)
+                            no_data_reason TEXT
                         )
                         """
                     )
@@ -1579,31 +1565,86 @@ def _run_startup_schema_migrations(db_engine):
                         "ON btst_backtest_results (run_id, trade_date)"
                     )
                 )
+                conn.execute(
+                    text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS uq_btst_trade_date_symbol "
+                        "ON btst_backtest_results (trade_date, stock_symbol)"
+                    )
+                )
                 print("Applied migration: created btst_backtest tables (PostgreSQL)")
 
             if "btst_backtest_results" in table_names and db_engine.dialect.name == "postgresql":
                 btst_cols = {c["name"] for c in inspect(db_engine).get_columns("btst_backtest_results")}
-                if "side" not in btst_cols:
-                    conn.execute(text("ALTER TABLE btst_backtest_results ADD COLUMN side TEXT"))
+                run_cols = (
+                    {c["name"] for c in inspect(db_engine).get_columns("btst_backtest_runs")}
+                    if "btst_backtest_runs" in table_names
+                    else set()
+                )
+                if "csv_filename" not in run_cols and "btst_backtest_runs" in table_names:
+                    conn.execute(text("ALTER TABLE btst_backtest_runs ADD COLUMN csv_filename TEXT"))
+                    print("Applied migration: btst_backtest_runs.csv_filename")
+                for col, typ in (
+                    ("sector", "TEXT"),
+                    ("reference_price", "NUMERIC"),
+                    ("numeric_instrument_key", "TEXT"),
+                    ("change_pct", "NUMERIC"),
+                    ("no_data_reason", "TEXT"),
+                ):
+                    if col not in btst_cols:
+                        conn.execute(text(f"ALTER TABLE btst_backtest_results ADD COLUMN {col} {typ}"))
+                        print(f"Applied migration: btst_backtest_results.{col}")
+                if "change_pct_at_1445" in btst_cols:
                     conn.execute(
                         text(
                             """
                             UPDATE btst_backtest_results
-                            SET side = CASE
-                                WHEN scan_side ILIKE '%loser%' THEN 'loser'
-                                WHEN scan_side ILIKE '%gainer%' THEN 'gainer'
-                                ELSE 'gainer'
-                            END
-                            WHERE side IS NULL
+                            SET change_pct = change_pct_at_1445
+                            WHERE change_pct IS NULL AND change_pct_at_1445 IS NOT NULL
                             """
                         )
                     )
-                    conn.execute(text("UPDATE btst_backtest_results SET side = 'gainer' WHERE side IS NULL"))
-                    print("Applied migration: btst_backtest_results.side column")
+                if "no_eligible_reason" in btst_cols:
+                    conn.execute(
+                        text(
+                            """
+                            UPDATE btst_backtest_results
+                            SET no_data_reason = no_eligible_reason
+                            WHERE no_data_reason IS NULL AND no_eligible_reason IS NOT NULL
+                            """
+                        )
+                    )
+                if "direction" in btst_cols:
+                    conn.execute(
+                        text(
+                            """
+                            UPDATE btst_backtest_results
+                            SET direction = CASE
+                                WHEN direction ILIKE 'bullish' THEN 'CE'
+                                WHEN direction ILIKE 'bearish' THEN 'PE'
+                                ELSE direction
+                            END
+                            WHERE direction IS NOT NULL
+                            """
+                        )
+                    )
+                if "spot_price_1445" in btst_cols:
+                        conn.execute(
+                            text(
+                                """
+                                UPDATE btst_backtest_results
+                                SET reference_price = spot_price_1445
+                                WHERE reference_price IS NULL AND spot_price_1445 IS NOT NULL
+                                """
+                            )
+                        )
+                conn.execute(text("DROP INDEX IF EXISTS uq_btst_trade_date_side"))
                 conn.execute(
                     text(
-                        "CREATE UNIQUE INDEX IF NOT EXISTS uq_btst_trade_date_side "
-                        "ON btst_backtest_results (trade_date, side)"
+                        """
+                        CREATE UNIQUE INDEX IF NOT EXISTS uq_btst_trade_date_symbol
+                        ON btst_backtest_results (trade_date, stock_symbol)
+                        WHERE stock_symbol IS NOT NULL AND TRIM(stock_symbol) <> ''
+                        """
                     )
                 )
 
