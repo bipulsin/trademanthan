@@ -168,6 +168,18 @@ def fetch_earliest_trade_date() -> Optional[date]:
         db.close()
 
 
+def count_results_for_run(run_id: int) -> int:
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text("SELECT COUNT(*) AS n FROM btst_backtest_results WHERE run_id = :rid"),
+            {"rid": int(run_id)},
+        ).fetchone()
+        return int(row.n) if row else 0
+    finally:
+        db.close()
+
+
 def fetch_failed_row_keys() -> List[Tuple[date, str]]:
     db = SessionLocal()
     try:

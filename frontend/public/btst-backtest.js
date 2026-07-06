@@ -216,6 +216,29 @@
     }
   }
 
+  function formatRunStatus(st) {
+    if (!st.running) {
+      return st.error ? 'Error: ' + st.error : (st.run_id ? 'Done run #' + st.run_id : '');
+    }
+    const p = st.progress || {};
+    const parts = [];
+    if (p.message) parts.push(p.message);
+    if (p.phase === 'prefetch' && p.prefetch_total) {
+      parts.push('prefetch ' + (p.prefetch_done || 0) + '/' + p.prefetch_total);
+    }
+    if (p.phase === 'screening' && p.days_total) {
+      parts.push('days ' + (p.days_done || 0) + '/' + p.days_total);
+    }
+    if (st.rows_written_this_run != null) {
+      parts.push('rows written: ' + st.rows_written_this_run);
+    }
+    if (st.elapsed_sec != null) {
+      parts.push('elapsed ' + Math.floor(st.elapsed_sec / 60) + 'm');
+    }
+    if (st.stale_warning) parts.push('⚠ ' + st.stale_warning);
+    return parts.length ? parts.join(' · ') : 'Running…';
+  }
+
   async function pollStatus() {
     const st = await fetchJson('/status');
     const el = document.getElementById('runStatus');
@@ -224,10 +247,13 @@
     const btnRetry = document.getElementById('btnRetry');
     updateToolbar(st);
     if (st.running) {
-      if (el) el.textContent = 'Running… (prefetch + screen; may take several minutes)';
+      if (el) el.textContent = formatRunStatus(st);
       if (btn) btn.disabled = true;
       if (btnEarlier) btnEarlier.disabled = true;
       if (btnRetry) btnRetry.disabled = true;
+      if (st.progress && st.progress.phase === 'screening' && st.rows_written_this_run > 0) {
+        loadLatest();
+      }
       setTimeout(pollStatus, 5000);
     } else {
       if (btn) btn.disabled = false;

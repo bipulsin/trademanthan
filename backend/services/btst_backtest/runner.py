@@ -14,6 +14,7 @@ from backend.services.btst_backtest.data_access import BtstDataAccess
 from backend.services.btst_backtest.entry_evaluator import evaluate_entry
 from backend.services.btst_backtest.exit_manager import compute_exits
 from backend.services.btst_backtest.gates import select_daily_candidate
+from backend.services.btst_backtest import progress as btst_progress
 from backend.services.btst_backtest.repository import (
     create_run,
     fetch_earliest_trade_date,
@@ -222,6 +223,13 @@ def run_btst_backtest(
     trading_calendar = full_trading_calendar_span(days)
     window_start = min(trading_calendar) if trading_calendar else min(days)
     window_end = max(days)
+    btst_progress.set_run_created(
+        run_id,
+        days_total=len(days),
+        prefetch_total=len(universe),
+        window_start=window_start.isoformat(),
+        window_end=window_end.isoformat(),
+    )
     logger.info("BTST prefetch window %s .. %s (%s instruments)", window_start, window_end, len(universe))
     prefetch = data.prefetch_universe(universe, window_start, window_end)
     gate_cfg = {
@@ -235,6 +243,7 @@ def run_btst_backtest(
     row_ids: List[int] = []
     retry_set = set(retry_keys or [])
     for i, trade_date in enumerate(days):
+        btst_progress.set_screening(i + 1, len(days), trade_date.isoformat())
         logger.info("BTST day %s/%s: %s", i + 1, len(days), trade_date)
         day_reason = _day_skip_reason(trade_date, holidays, data, universe)
         sides_to_run = list(SIDES)

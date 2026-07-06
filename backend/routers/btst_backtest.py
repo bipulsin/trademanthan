@@ -13,9 +13,11 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel
 
+from backend.services.btst_backtest import progress as btst_progress
 from backend.services.btst_backtest.exit_manager import recalc_pnls
 from backend.services.btst_backtest.repository import (
     compute_summary,
+    count_results_for_run,
     fetch_all_results,
     fetch_earliest_trade_date,
     fetch_failed_row_keys,
@@ -82,6 +84,8 @@ def _run_job(mode: str, trading_days: int, end_date: Optional[date], notes: str)
     except Exception as exc:
         logger.exception("btst backtest failed")
         _run_status = {"running": False, "run_id": None, "error": str(exc), "mode": mode}
+    finally:
+        btst_progress.set_idle()
 
 
 def _start_job(mode: str, trading_days: int, end_date: Optional[date], notes: str) -> Dict[str, Any]:
@@ -89,12 +93,52 @@ def _start_job(mode: str, trading_days: int, end_date: Optional[date], notes: st
         if _run_status.get("running"):
             raise HTTPException(status_code=409, detail="Backtest already running")
         _run_status.update({"running": True, "run_id": None, "error": None, "mode": mode})
+        btst_progress.reset_for_job(mode)
     return {"started": True, "days": trading_days, "mode": mode}
 
 
 @router.get("/status")
 def backtest_status() -> Dict[str, Any]:
+    from datetime import datetime, timezone
+
+    from backend.services.upstox_rate_limiter import stats as rl_stats
+
     out = dict(_run_status)
+    prog = btst_progress.snapshot()
+    out["progress"] = prog
+    active_run_id = prog.get("active_run_id")
+    if active_run_id:
+        out["active_run_id"] = active_run_id
+        out["rows_written_this_run"] = count_results_for_run(int(active_run_id))
+    else:
+        out["active_run_id"] = None
+        out["rows_written_this_run"] = 0
+    started = prog.get("started_at")
+    if started and out.get("running"):
+        try:
+            t0 = datetime.fromisoformat(str(started).replace("Z", "+00:00"))
+            out["elapsed_sec"] = int(
+                (datetime.now(timezone.utc) - t0.astimezone(timezone.utc)).total_seconds()
+            )
+        except (TypeError, ValueError):
+            pass
+        last = prog.get("last_activity_at")
+        if last:
+            try:
+                t1 = datetime.fromisoformat(str(last).replace("Z", "+00:00"))
+                stale = (
+                    datetime.now(timezone.utc) - t1.astimezone(timezone.utc)
+                ).total_seconds()
+                out["seconds_since_activity"] = int(stale)
+                if stale > 600:
+                    out["stale_warning"] = (
+                        "No progress update in 10+ minutes — may be rate-limited "
+                        "or stuck; check logs or retry after live traffic eases."
+                    )
+            except (TypeError, ValueError):
+                pass
+    if out.get("running"):
+        out["candle_rate_limiter"] = rl_stats()
     out["failed_row_count"] = len(fetch_failed_row_keys())
     out["earliest_trade_date"] = (
         fetch_earliest_trade_date().isoformat() if fetch_earliest_trade_date() else None

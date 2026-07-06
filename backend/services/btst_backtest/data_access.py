@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from backend.config import settings
 from backend.services.btst_backtest.timing import bars_on_session, bar_minutes, close_at_or_before
+from backend.services.btst_backtest import progress as btst_progress
 from backend.services.upstox_rate_limiter import set_backtest_bulk_prefetch_mode
 from backend.services.upstox_service import UpstoxService, _upstox_v3_max_calendar_span_days
 
@@ -114,7 +115,8 @@ class BtstDataAccess:
                 ik = row["instrument_key"]
                 if ik in self._m5_outcome and ik in self._daily_outcome:
                     continue
-                if (i + 1) % 25 == 0:
+                btst_progress.set_prefetch(i + 1, len(universe), instrument=row.get("symbol"))
+                if (i + 1) % 10 == 0 or i + 1 == len(universe):
                     logger.info("BTST prefetch %s/%s instruments", i + 1, len(universe))
                 m5_out, m5_bars = self._fetch_candles_with_retry(ik, self.M5_INTERVAL, window_end, days_back_m5)
                 self._m5_outcome[ik] = m5_out
