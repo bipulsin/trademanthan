@@ -395,6 +395,49 @@ body[data-theme="light"] .dc-modal-panel {
     .dc-modal-body { max-height: 75vh; }
 }
 
+.dc-go-timing {
+    display: block;
+    width: 100%;
+    font-size: 0.72rem;
+    color: var(--text-muted, #64748b);
+    margin-top: 2px;
+    text-align: left;
+}
+.dc-go-alert-toggle {
+    font-size: 0.8rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-right: 8px;
+    color: var(--text-muted, #64748b);
+}
+.dc-fast-watch {
+    margin: 8px 0;
+    padding: 8px 12px;
+    border: 1px dashed var(--border, #cbd5e1);
+    border-radius: 8px;
+    font-size: 0.85rem;
+}
+.dc-fast-watch-label { font-weight: 600; margin-right: 8px; }
+.dc-beta {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    background: #fef3c7;
+    color: #92400e;
+    padding: 1px 4px;
+    border-radius: 3px;
+    margin-left: 4px;
+}
+.dc-fast-watch-hint { color: var(--text-muted, #64748b); font-size: 0.75rem; }
+.dc-fast-watch-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.dc-fast-watch-chip {
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: rgba(251, 191, 36, 0.15);
+    border: 1px solid rgba(251, 191, 36, 0.4);
+    font-size: 0.75rem;
+}
+
 @media print {
     #left-menu-container, .mobile-title-bar, .dc-actions, .dc-modal, .dc-toast { display: none !important; }
     button.dc-card { break-inside: avoid; }

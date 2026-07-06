@@ -1004,6 +1004,49 @@ def _run_startup_schema_migrations(db_engine):
                         )
                         print(f"Applied migration: added daily_checklist.{col}")
 
+            # daily_checklist: Kavach live recompute + GO timing
+            if "daily_checklist" in table_names and db_engine.dialect.name == "postgresql":
+                _dc_cols3 = {c["name"] for c in inspect(db_engine).get_columns("daily_checklist")}
+                for col, typ in (
+                    ("go_enter_first_at", "TIMESTAMPTZ"),
+                    ("go_sticky_until", "TIMESTAMPTZ"),
+                    ("indicator_as_of", "TIMESTAMPTZ"),
+                    ("indicator_source", "TEXT"),
+                    ("indicator_stale", "BOOLEAN DEFAULT FALSE"),
+                ):
+                    if col not in _dc_cols3:
+                        conn.execute(
+                            text(f"ALTER TABLE daily_checklist ADD COLUMN {col} {typ}")
+                        )
+                        print(f"Applied migration: added daily_checklist.{col}")
+
+            if "rs_fast_watch" not in table_names:
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE rs_fast_watch (
+                                id BIGSERIAL PRIMARY KEY,
+                                session_date DATE NOT NULL,
+                                symbol TEXT NOT NULL,
+                                direction TEXT NOT NULL,
+                                first_flip_at TIMESTAMPTZ NOT NULL,
+                                kavach_state TEXT,
+                                trade_score DOUBLE PRECISION,
+                                confidence_grade TEXT,
+                                UNIQUE (session_date, symbol, direction)
+                            )
+                            """
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_rs_fast_watch_date "
+                            "ON rs_fast_watch (session_date DESC)"
+                        )
+                    )
+                    print("Applied migration: created rs_fast_watch (PostgreSQL)")
+
             # Daily checklist morning snapshot lock (Top 5+5 at/after 09:25 IST)
             if "daily_snapshot" not in table_names:
                 if db_engine.dialect.name == "postgresql":

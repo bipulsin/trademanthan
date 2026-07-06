@@ -11,6 +11,8 @@
     var cardEls = {};
     var modalSymbol = null;
     var lastAdxRecheckAlertKey = null;
+    var lastGoAlertKey = null;
+    var goAlertEnabled = false;
 
     var AUTO_FIELDS = [
         "entry_time", "kavach_score_entry", "confidence", "trading_state",
@@ -71,6 +73,52 @@
     var ADX_RECHECK_TARGETS = [10 * 60, 10 * 60 + 30]; // 10:00, 10:30
     var ADX_RECHECK_LEAD_MIN = 10;
     var ADX_RECHECK_FLASH_MIN = 2; // flash in the last 2 minutes before target
+
+    function fmtGoTime(iso) {
+        if (!iso) return "";
+        try {
+            var d = new Date(iso);
+            return new Intl.DateTimeFormat("en-GB", {
+                timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false
+            }).format(d);
+        } catch (e) { return ""; }
+    }
+
+    function stickyCountdownSec(untilIso) {
+        if (!untilIso) return 0;
+        try {
+            var end = new Date(untilIso).getTime();
+            return Math.max(0, Math.floor((end - Date.now()) / 1000));
+        } catch (e) { return 0; }
+    }
+
+    function playGoAlert() {
+        if (!goAlertEnabled) return;
+        try {
+            var ctx = new (window.AudioContext || window.webkitAudioContext)();
+            [880, 1100].forEach(function (freq, i) {
+                var o = ctx.createOscillator();
+                var g = ctx.createGain();
+                o.frequency.value = freq;
+                g.gain.value = 0.08;
+                o.connect(g);
+                g.connect(ctx.destination);
+                o.start(ctx.currentTime + i * 0.15);
+                o.stop(ctx.currentTime + i * 0.15 + 0.12);
+            });
+        } catch (e) { /* muted */ }
+    }
+
+    function checkGoAlerts(stocks) {
+        if (!goAlertEnabled || !stocks) return;
+        stocks.forEach(function (s) {
+            if (s.section !== "GO" || !s.go_enter_first_at) return;
+            var key = s.symbol + "|" + s.go_enter_first_at;
+            if (lastGoAlertKey === key) return;
+            lastGoAlertKey = key;
+            playGoAlert();
+        });
+    }
 
     function fmtIstAmPm(totalMinutes) {
         var h24 = Math.floor(totalMinutes / 60);
@@ -268,6 +316,22 @@
                 ignEl.hidden = true;
             }
         }
+        var gt = card.querySelector(".dc-go-timing");
+        if (gt) {
+            if (dcls === "GO" && stock.go_enter_first_at) {
+                var parts = ["GO @ " + fmtGoTime(stock.go_enter_first_at)];
+                if (stock.go_sticky_active && stock.go_sticky_until) {
+                    var rem = stickyCountdownSec(stock.go_sticky_until);
+                    parts.push("sticky " + ("0" + Math.floor(rem / 60)).slice(-2) + ":" + ("0" + (rem % 60)).slice(-2));
+                }
+                if (stock.indicator_stale) parts.push("⚠ stale");
+                gt.textContent = parts.join(" · ");
+                gt.hidden = false;
+            } else {
+                gt.hidden = true;
+                gt.textContent = "";
+            }
+        }
     }
 
     function sortStocks(list) {
@@ -430,14 +494,41 @@
         }
 
         renderLiveSetups();
+        renderFastWatch();
+        checkGoAlerts(stocks);
 
         if (modalSymbol) renderModal(currentStock(modalSymbol));
+    }
+
+    function renderFastWatch() {
+        var wrap = $("dcFastWatch");
+        var chips = $("dcFastWatchChips");
+        if (!wrap || !chips) return;
+        var cfg = (state && state.checklist_config) || {};
+        var items = (state && state.fast_watch) || [];
+        if (!cfg.fast_watch_ui_enabled || !items.length) {
+            wrap.hidden = true;
+            chips.innerHTML = "";
+            return;
+        }
+        wrap.hidden = false;
+        chips.innerHTML = "";
+        items.forEach(function (fw) {
+            var chip = el("span", "dc-fast-watch-chip");
+            chip.textContent = fw.symbol + " · " + (fw.kavach_state || "?") +
+                " @ " + fmtGoTime(fw.first_flip_at);
+            chips.appendChild(chip);
+        });
     }
 
     function applyState(s) {
         if (!s) return;
         if (s.error) { toast("Error: " + s.error); return; }
         state = s;
+        if (s.checklist_config && $("dcGoAlertSound") && localStorage.getItem("dc_go_alert_sound") == null) {
+            goAlertEnabled = !!s.checklist_config.go_alert_sound_enabled;
+            $("dcGoAlertSound").checked = goAlertEnabled;
+        }
         try { localStorage.setItem(lsKey(), JSON.stringify(s)); } catch (e) {}
         render();
     }
@@ -758,6 +849,19 @@
             this.setAttribute("aria-expanded", open ? "true" : "false");
             this.querySelector(".dc-carryover-chevron").classList.toggle("dc-carryover-chevron--open", open);
         });
+        var goAlertEl = $("dcGoAlertSound");
+        if (goAlertEl) {
+            try {
+                goAlertEnabled = localStorage.getItem("dc_go_alert_sound") === "1";
+            } catch (e) { goAlertEnabled = false; }
+            goAlertEl.checked = goAlertEnabled;
+            goAlertEl.addEventListener("change", function () {
+                goAlertEnabled = !!this.checked;
+                try {
+                    localStorage.setItem("dc_go_alert_sound", goAlertEnabled ? "1" : "0");
+                } catch (e) { /* ignore */ }
+            });
+        }
 
         api("/data").then(function (s) {
             if (s.locked && (!s.stocks || s.stocks.length === 0)) {

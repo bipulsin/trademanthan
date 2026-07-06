@@ -54,8 +54,13 @@ DEFAULTS: Dict[str, Any] = {
     "sl_late_pct": 0.6,
     "chop_warning_crosses": 3,
     "bench_persist_floor": 30,
-    # Alerts
-    "alert_sound_enabled": True,
+    # Alerts (default muted until user opts in after first live session)
+    "alert_sound_enabled": False,
+    "go_alert_sound_enabled": False,
+    "fast_watch_sound_enabled": False,
+    "fast_watch_ui_enabled": False,
+    "fast_watch_enabled": True,
+    "go_sticky_minutes": 6,
     "alert_window_start_min": 9 * 60 + 25,
     "alert_window_end_min": 14 * 60 + 30,
     # Display

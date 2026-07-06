@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="settings.css">
     <link rel="stylesheet" href="left-menu.css?v=3.24">
     <link rel="stylesheet" href="theme.css?v=1.3">
-    <link rel="stylesheet" href="dailyRSchecklist.css?v=8">
+    <link rel="stylesheet" href="dailyRSchecklist.css?v=9">
 </head>
 <body class="theme-page">
     <div class="mobile-title-bar">
@@ -68,6 +68,9 @@
                             </select>
                         </div>
                         <div class="dc-actions">
+                            <label class="dc-go-alert-toggle" title="Off by default — enable after reviewing first live session">
+                                <input type="checkbox" id="dcGoAlertSound"> GO alert sound
+                            </label>
                             <button type="button" class="dc-btn dc-btn--primary" id="dcPull"><i class="fas fa-sync-alt"></i> Refresh from RS</button>
                             <button type="button" class="dc-btn" id="dcSave"><i class="fas fa-floppy-disk"></i> Save</button>
                             <button type="button" class="dc-btn" id="dcPrint"><i class="fas fa-print"></i> Print</button>
@@ -91,6 +94,13 @@
                 <div class="dc-live-setups" id="dcLiveSetups" hidden>
                     <span class="dc-live-setups-label"><i class="fas fa-radar"></i> Live setups</span>
                     <div class="dc-live-setups-chips" id="dcLiveSetupsChips"></div>
+                </div>
+
+                <!-- Fast Watch (beta, default off via rs_conviction_config) -->
+                <div class="dc-fast-watch" id="dcFastWatch" hidden>
+                    <span class="dc-fast-watch-label"><i class="fas fa-bolt"></i> Fast Watch <span class="dc-beta">beta</span></span>
+                    <span class="dc-fast-watch-hint">Unconfirmed — Core did not promote</span>
+                    <div class="dc-fast-watch-chips" id="dcFastWatchChips"></div>
                 </div>
 
                 <!-- Pre-9:25 pending lock -->
@@ -170,6 +180,7 @@
                     <span class="dc-grade-lock" hidden title="Setup live but grade gate failed">🔒</span>
                 </div>
                 <span class="dc-decision dc-decision--NONE">⬜ Not assessed</span>
+                <span class="dc-go-timing" hidden></span>
             </div>
         </button>
     </template>
@@ -185,6 +196,6 @@
     </template>
 
     <script src="left-menu.js?v=3.24"></script>
-    <script src="dailyRSchecklist.js?v=8"></script>
+    <script src="dailyRSchecklist.js?v=9"></script>
 </body>
 </html>

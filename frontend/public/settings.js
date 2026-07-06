@@ -501,6 +501,12 @@ class SettingsManager {
         });
         const snd = document.getElementById('rs_alert_sound_enabled');
         if (snd) snd.checked = !!cfg.alert_sound_enabled;
+        const goSnd = document.getElementById('rs_go_alert_sound_enabled');
+        if (goSnd) goSnd.checked = !!cfg.go_alert_sound_enabled;
+        const fwSnd = document.getElementById('rs_fast_watch_sound_enabled');
+        if (fwSnd) fwSnd.checked = !!cfg.fast_watch_sound_enabled;
+        const fwUi = document.getElementById('rs_fast_watch_ui_enabled');
+        if (fwUi) fwUi.checked = !!cfg.fast_watch_ui_enabled;
         const ema = document.getElementById('rs_show_ema10_passive');
         if (ema) ema.checked = cfg.show_ema10_passive !== false;
     }
@@ -524,6 +530,12 @@ class SettingsManager {
         });
         const snd = document.getElementById('rs_alert_sound_enabled');
         if (snd) body.alert_sound_enabled = snd.checked;
+        const goSnd = document.getElementById('rs_go_alert_sound_enabled');
+        if (goSnd) body.go_alert_sound_enabled = goSnd.checked;
+        const fwSnd = document.getElementById('rs_fast_watch_sound_enabled');
+        if (fwSnd) body.fast_watch_sound_enabled = fwSnd.checked;
+        const fwUi = document.getElementById('rs_fast_watch_ui_enabled');
+        if (fwUi) body.fast_watch_ui_enabled = fwUi.checked;
         const ema = document.getElementById('rs_show_ema10_passive');
         if (ema) body.show_ema10_passive = ema.checked;
         return body;

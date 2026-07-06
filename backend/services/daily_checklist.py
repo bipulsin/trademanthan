@@ -77,6 +77,10 @@ DERIVED_COLS = (
     "ema_ok", "st_ok", "macd_ok", "adx_ok", "volume_ok", "gate_score",
     "decision", "section", "eligibility_note",
 )
+TIMING_COLS = (
+    "go_enter_first_at", "go_sticky_until", "indicator_stale",
+)
+PERSIST_EVAL_COLS = DERIVED_COLS + TIMING_COLS
 
 
 def _to_min(hhmm: Optional[str]) -> Optional[int]:
@@ -517,6 +521,7 @@ _UPSERT_COLS = (
     "vwap_purity_pct", "market_regime", "quality_display",
     "live_rs_direction", "live_rs_updated_at", "rotation_day_type",
     "carryover_warning", "sector_badge", "data_refreshed_at",
+    "indicator_as_of", "indicator_source",
 )
 
 
@@ -557,12 +562,70 @@ _SELECT_COLS = """
     maturity_tag, consecutive_days_on_list, range_vs_atr_ratio, eligibility_note,
     vwap_purity_pct, market_regime, quality_display, live_rs_direction,
     live_rs_updated_at, rotation_day_type, carryover_warning, sector_badge,
-    data_refreshed_at, updated_at
+    data_refreshed_at, go_enter_first_at, go_sticky_until, indicator_as_of,
+    indicator_source, indicator_stale, updated_at
 """
 
 
 def today_ist() -> str:
     return datetime.now(IST).strftime("%Y-%m-%d")
+
+
+def _parse_iso_dt(v: Any) -> Optional[datetime]:
+    if v is None:
+        return None
+    if isinstance(v, datetime):
+        return v.astimezone(IST) if v.tzinfo else v.replace(tzinfo=IST)
+    try:
+        s = str(v).replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s)
+        return dt.astimezone(IST) if dt.tzinfo else dt.replace(tzinfo=IST)
+    except (TypeError, ValueError):
+        return None
+
+
+def _latest_rs_scan_time(db) -> Optional[datetime]:
+    row = db.execute(text("SELECT MAX(scan_time) AS t FROM relative_strength_snapshot")).fetchone()
+    if row and row.t:
+        t = row.t
+        return t.astimezone(IST) if t.tzinfo else t.replace(tzinfo=IST)
+    return None
+
+
+def _apply_live_recompute(db, sd: str, symbol: str, direction: str, merged: Dict[str, Any], rs_row) -> None:
+    """L1: refresh indicator fields from candle cache when possible."""
+    from backend.services.daily_checklist_live import recompute_locked_symbol
+
+    if not is_snapshot_locked(db, sd) or symbol not in set(get_locked_symbols(db, sd)):
+        if rs_row is not None and getattr(rs_row, "scan_time", None):
+            merged["indicator_as_of"] = rs_row.scan_time
+            merged["indicator_source"] = "rs_snapshot"
+        return
+    live = recompute_locked_symbol(db, symbol, direction)
+    if live:
+        merged.update(live["fields"])
+        merged["indicator_as_of"] = live["indicator_as_of"]
+        merged["indicator_source"] = live["source"]
+    elif rs_row is not None and getattr(rs_row, "scan_time", None):
+        merged["indicator_as_of"] = rs_row.scan_time
+        merged["indicator_source"] = "rs_fallback"
+
+
+def _derive_with_timing(db, raw: Dict[str, Any], *, prev: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Evaluate + L2/L3 staleness cap and GO sticky timing."""
+    from backend.services.daily_checklist_live import is_indicator_stale
+    from backend.services.daily_checklist_timing import apply_go_timing, apply_staleness_cap
+
+    prev = prev or raw
+    ia = _parse_iso_dt(raw.get("indicator_as_of"))
+    latest = _latest_rs_scan_time(db)
+    stale = is_indicator_stale(ia, latest)
+    ev_row = dict(raw)
+    ev_row["server_eval"] = True
+    derived = evaluate(ev_row)
+    derived = apply_staleness_cap(derived, stale=stale)
+    derived = apply_go_timing(derived, prev=prev, stale=stale)
+    return derived
 
 
 def _row_to_dict(r) -> Dict[str, Any]:
@@ -577,6 +640,7 @@ def _row_to_dict(r) -> Dict[str, Any]:
         "maturity_tag", "consecutive_days_on_list", "range_vs_atr_ratio",
         "eligibility_note", "vwap_purity_pct", "market_regime", "quality_display",
         "live_rs_direction", "rotation_day_type", "carryover_warning", "sector_badge",
+        "indicator_source", "indicator_stale",
     )}
     d["live_rs_updated_at"] = (
         r.live_rs_updated_at.isoformat() if getattr(r, "live_rs_updated_at", None) else None
@@ -584,6 +648,20 @@ def _row_to_dict(r) -> Dict[str, Any]:
     d["data_refreshed_at"] = (
         r.data_refreshed_at.isoformat() if getattr(r, "data_refreshed_at", None) else None
     )
+    d["go_enter_first_at"] = (
+        r.go_enter_first_at.isoformat() if getattr(r, "go_enter_first_at", None) else None
+    )
+    d["go_sticky_until"] = (
+        r.go_sticky_until.isoformat() if getattr(r, "go_sticky_until", None) else None
+    )
+    d["indicator_as_of"] = (
+        r.indicator_as_of.isoformat() if getattr(r, "indicator_as_of", None) else None
+    )
+    d["go_sticky_active"] = False
+    if d.get("go_sticky_until") and d.get("section") == SEC_GO:
+        sticky = _parse_iso_dt(d["go_sticky_until"])
+        if sticky and sticky > datetime.now(IST):
+            d["go_sticky_active"] = True
     d["updated_at"] = r.updated_at.isoformat() if r.updated_at else None
     return d
 
@@ -722,6 +800,21 @@ def get_state(session_date: Optional[str] = None) -> Dict[str, Any]:
         s["ignition_score"] = ig.get("ignition_score")
         s["ignition_building"] = bool(ig.get("ignition_building"))
 
+    fast_watch: List[Dict[str, Any]] = []
+    checklist_cfg: Dict[str, Any] = {}
+    try:
+        from backend.services.rs_conviction_config import get_config
+        from backend.services.rs_fast_watch import get_fast_watch
+
+        checklist_cfg = {
+            "go_alert_sound_enabled": bool(get_config().get("go_alert_sound_enabled")),
+            "fast_watch_ui_enabled": bool(get_config().get("fast_watch_ui_enabled")),
+        }
+        if checklist_cfg.get("fast_watch_ui_enabled"):
+            fast_watch = get_fast_watch(sd)
+    except Exception as exc:
+        logger.debug("checklist fast watch enrichment failed: %s", exc)
+
     return {
         "session_date": sd,
         "locked": locked,
@@ -739,6 +832,8 @@ def get_state(session_date: Optional[str] = None) -> Dict[str, Any]:
         "rotation_day": rotation,
         "data_refreshed_at": latest_refresh,
         "live_setups": live_setups,
+        "fast_watch": fast_watch,
+        "checklist_config": checklist_cfg,
     }
 
 
@@ -872,8 +967,21 @@ def _refresh_checklist_from_rs(*, full_populate: bool) -> Dict[str, Any]:
             merged["carryover_warning"] = carry
             merged["sector_badge"] = badges.get(sym)
             merged["data_refreshed_at"] = now
+            _apply_live_recompute(db, sd, sym, direction, merged, row)
             _upsert_stock(db, sd, sym, direction, merged)
             refreshed += 1
+
+        flip_updates = []
+        for sym in locked_syms:
+            raw = _load_raw(db, sd, sym)
+            if raw:
+                flip_updates.append(raw)
+        try:
+            from backend.services.rs_fast_watch import record_fast_watch_flips
+
+            record_fast_watch_flips(sd, flip_updates)
+        except Exception as exc:
+            logger.debug("fast watch record skipped: %s", exc)
 
         logger.info("daily_checklist: refreshed %d locked stocks for %s", refreshed, sd)
         audit_checklist_lock_coverage(db, sd, rs_rows=rows)
@@ -968,8 +1076,13 @@ def _load_raw(db, sd: str, symbol: str) -> Optional[Dict[str, Any]]:
 
 
 def _persist_derived(db, sd: str, symbol: str, derived: Dict[str, Any]) -> None:
-    sets = ", ".join(f"{c} = :{c}" for c in DERIVED_COLS)
-    params = {c: derived[c] for c in DERIVED_COLS}
+    sets = ", ".join(f"{c} = :{c}" for c in PERSIST_EVAL_COLS)
+    params: Dict[str, Any] = {}
+    for c in PERSIST_EVAL_COLS:
+        val = derived.get(c)
+        if c in ("go_enter_first_at", "go_sticky_until") and val is not None:
+            val = _parse_iso_dt(val)
+        params[c] = val
     params.update({"d": sd, "s": symbol})
     db.execute(
         text(f"UPDATE daily_checklist SET {sets}, updated_at = NOW() WHERE session_date=:d AND symbol=:s"),
@@ -981,8 +1094,15 @@ def _reevaluate_symbol(db, sd: str, symbol: str) -> None:
     raw = _load_raw(db, sd, symbol)
     if not raw:
         return
-    raw["server_eval"] = True
-    _persist_derived(db, sd, symbol, evaluate(raw))
+    direction = raw.get("direction") or LONG
+    if is_snapshot_locked(db, sd) and symbol in set(get_locked_symbols(db, sd)):
+        merged = dict(raw)
+        _apply_live_recompute(db, sd, symbol, direction, merged, None)
+        for k in _UPSERT_COLS:
+            if k in merged and merged.get(k) is not None:
+                raw[k] = merged[k]
+    derived = _derive_with_timing(db, raw, prev=raw)
+    _persist_derived(db, sd, symbol, derived)
 
 
 def _reevaluate_all(db, sd: str) -> None:

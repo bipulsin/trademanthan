@@ -20,7 +20,7 @@
     let chartEnginePromise = null;
     let sortMode = "score";
     let lastData = null;
-    let rsCfg = { show_ema10_passive: true, alert_sound_enabled: true };
+    let rsCfg = { show_ema10_passive: true, alert_sound_enabled: false };
     let seenTriggered = new Set();
 
     function escapeHtml(s) {
