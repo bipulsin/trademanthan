@@ -503,6 +503,32 @@ def _attach_prev_signal_for_api(rows: List[Dict[str, Any]], current_updated_at_i
     return out
 
 
+def _load_ws_session_volumes(keys: List[str]) -> Dict[str, int]:
+    """Fallback session volume from WS 1m archive when REST quote volume is zero."""
+    if not keys:
+        return {}
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT instrument_key, COALESCE(SUM(volume), 0)::bigint AS vol
+                FROM upstox_ws_intraday_1m
+                WHERE instrument_key = ANY(:keys)
+                  AND candle_time::date = CURRENT_DATE
+                GROUP BY instrument_key
+                """
+            ),
+            {"keys": keys},
+        ).fetchall()
+        return {str(r.instrument_key): int(r.vol or 0) for r in rows}
+    except Exception as e:
+        logger.debug("oi_heatmap: ws session volume fallback failed: %s", e)
+        return {}
+    finally:
+        db.close()
+
+
 def refresh_oi_heatmap_live() -> Dict[str, Any]:
     """
     Fetch batch quotes for universe keys, sort by |oi_change|, update memory cache + DB.
@@ -552,11 +578,14 @@ def refresh_oi_heatmap_live() -> Dict[str, Any]:
     raw = load_nse_instruments_json()
     ik_meta = {((r.get("instrument_key") or "").strip()): r for r in raw if isinstance(r, dict)}
 
+    ws_session_volumes = _load_ws_session_volumes(keys)
     rows: List[Dict[str, Any]] = []
     for ik in keys:
         s = merged.get(ik) or {}
         lp = float(s.get("last_price") or 0)
         vol = float(s.get("volume") or 0)
+        if vol <= 0:
+            vol = float(ws_session_volumes.get(ik, 0))
         oi = int(s.get("oi") or 0)
         if _feed_get_ws:
             wsq = _feed_get_ws(ik)
@@ -619,6 +648,15 @@ def refresh_oi_heatmap_live() -> Dict[str, Any]:
         _sess_oi_prev_by_instrument[_ik] = _eff
 
     rows = finalize_heatmap_rows_for_store(rows)
+    try:
+        from backend.services.market_data_volume_audit import log_volume_audit
+
+        log_volume_audit(
+            [int(r.get("volume") or 0) for r in rows],
+            context="oi_heatmap_live",
+        )
+    except Exception:
+        pass
     _underlying_rank = {str(r.get("underlying_symbol") or "").upper(): int(r["rank"]) for r in rows if r.get("underlying_symbol")}
 
     now_dt = datetime.now(IST)

@@ -47,11 +47,45 @@ _CHUNK = 100
 _CANDLE_LOCK = threading.Lock()
 _WS_1M_STATE: Dict[Tuple[str, str], Dict[str, Any]] = {}
 _WS_1M_LAST_FLUSH: Dict[Tuple[str, str], float] = {}
+# Per-minute sum of last-traded quantities (ltq) when I1 bar volume is absent.
+_MINUTE_LTQ_VOL: Dict[Tuple[str, str], int] = {}
 IST = pytz.timezone("Asia/Kolkata")
 
 
 def _flush_debounce_sec() -> float:
     return float(getattr(settings, "UPSTOX_WS_1M_FLUSH_DEBOUNCE_SEC", 2.0) or 2.0)
+
+
+def _ltq_from_mff(mff: Optional[Dict[str, Any]]) -> int:
+    if not isinstance(mff, dict):
+        return 0
+    ltpc = mff.get("ltpc")
+    if not isinstance(ltpc, dict):
+        return 0
+    try:
+        return int(float(ltpc.get("ltq") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _accumulate_ltq_volume(ik: str, minute_iso: str, ltq: int) -> int:
+    """Sum ltq per instrument-minute as bar volume when I1 vol is missing."""
+    if ltq <= 0:
+        k = (ik, minute_iso)
+        return int(_MINUTE_LTQ_VOL.get(k, 0))
+    k = (ik, minute_iso)
+    _MINUTE_LTQ_VOL[k] = int(_MINUTE_LTQ_VOL.get(k, 0)) + int(ltq)
+    return _MINUTE_LTQ_VOL[k]
+
+
+def _reset_ltq_volume_caches_if_new_ist_day() -> None:
+    global _MINUTE_LTQ_VOL
+    now = datetime.now(IST)
+    day_key = now.strftime("%Y-%m-%d")
+    if getattr(_reset_ltq_volume_caches_if_new_ist_day, "_day", None) == day_key:
+        return
+    _MINUTE_LTQ_VOL = {}
+    _reset_ltq_volume_caches_if_new_ist_day._day = day_key  # type: ignore[attr-defined]
 
 
 def _persist_ws_1m_candle(ik: str, minute_iso: str, candle: Dict[str, Any]) -> None:
@@ -396,8 +430,10 @@ def _extract_feed_fields(feed_val: Any) -> Dict[str, Any]:
     bid_q = ask_q = 0
     depth_ratio = 1.0
     tbq = tsq = 0
+    ltq = 0
     if mff:
         bid_q, ask_q, depth_ratio = _depth_from_mff(mff)
+        ltq = _ltq_from_mff(mff)
         try:
             tbq = int(float(mff.get("tbq") or 0))
             tsq = int(float(mff.get("tsq") or 0))
@@ -407,6 +443,7 @@ def _extract_feed_fields(feed_val: Any) -> Dict[str, Any]:
     return {
         "oi": oi,
         "ltp": ltp,
+        "ltq": ltq,
         "bid_depth_qty": bid_q,
         "ask_depth_qty": ask_q,
         "depth_imbalance_ratio": depth_ratio,
@@ -462,7 +499,10 @@ def _ingest_feed_response_dict(d: Dict[str, Any]) -> None:
     feeds = d.get("feeds")
     if not isinstance(feeds, dict):
         return
+    _reset_ltq_volume_caches_if_new_ist_day()
     now = time.monotonic()
+    now_ist = datetime.now(IST)
+    minute_iso = now_ist.replace(second=0, microsecond=0).isoformat()
     with _CACHE_LOCK:
         for raw_key, feed_val in feeds.items():
             ik = _normalize_ik(str(raw_key))
@@ -495,16 +535,19 @@ def _ingest_feed_response_dict(d: Dict[str, Any]) -> None:
             if row.get("oi") is None and row.get("ltp") is None:
                 continue
             _OI_LTP_BY_KEY[ik] = row
+            tick_vol = _accumulate_ltq_volume(ik, minute_iso, int(parsed.get("ltq") or 0))
             if eff_oi is not None and eff_ltp is not None:
                 _update_ws_1m_candle(
                     ik,
                     float(eff_ltp),
                     int(eff_oi),
                     now,
+                    volume=tick_vol,
                     bid_depth_qty=int(row.get("bid_depth_qty") or 0),
                     ask_depth_qty=int(row.get("ask_depth_qty") or 0),
                     tbq=int(row.get("tbq") or 0),
                     tsq=int(row.get("tsq") or 0),
+                    candle_source="ltp_tick" if tick_vol <= 0 else "ltp_ltq",
                 )
             for i1 in parsed.get("i1_bars") or []:
                 ts_raw = i1.get("timestamp")

@@ -2620,7 +2620,15 @@ class UpstoxService:
                 if not qd:
                     continue
                 lp = float(qd.get("last_price") or 0)
-                vol = float(qd.get("volume") or 0)
+                vol = float(qd.get("volume") or qd.get("vol") or qd.get("total_traded_volume") or 0)
+                ohlc_pre = qd.get("ohlc") if isinstance(qd.get("ohlc"), dict) else {}
+                if vol <= 0 and ohlc_pre:
+                    vol = float(
+                        ohlc_pre.get("volume")
+                        or ohlc_pre.get("vol")
+                        or ohlc_pre.get("traded_volume")
+                        or 0
+                    )
                 oi_v = _qi(qd, "oi", "open_interest", "openInterest")
                 oi_chg = _qi(
                     qd,
