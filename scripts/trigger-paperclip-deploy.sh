@@ -83,7 +83,21 @@ else
 fi
 
 echo "[deploy] recreating app + nginx..."
-docker compose up -d --force-recreate app nginx
+# Stop/remove first to avoid compose force-recreate name conflicts (stale hashed container names).
+docker compose stop app nginx 2>/dev/null || true
+docker compose rm -f app nginx 2>/dev/null || true
+# Prune exited compose orphans that can block recreate (e.g. a833cd75c4cd_twcto-app-1).
+while read -r cid; do
+  [[ -n "$cid" ]] && docker rm -f "$cid" 2>/dev/null || true
+done < <(docker ps -aq --filter "name=twcto-app" --filter "status=exited")
+while read -r cid; do
+  [[ -n "$cid" ]] && docker rm -f "$cid" 2>/dev/null || true
+done < <(docker ps -aq --filter "name=twcto-nginx" --filter "status=exited")
+if ! docker compose up -d --force-recreate --remove-orphans app nginx; then
+  echo "[deploy] compose up failed" >&2
+  docker compose ps -a
+  exit 1
+fi
 
 echo "[deploy] waiting for health..."
 for _ in $(seq 1 40); do
