@@ -2630,6 +2630,7 @@ body[data-theme="dark"] .oi-heatmap-more-link {
     color: var(--theme-muted, #64748b);
     padding: 12px 4px;
 }
+.rs-scanner-error { color: #b45309; font-weight: 600; }
 
 /* Conviction board + Setup Radar */
 .rs-live-setups {

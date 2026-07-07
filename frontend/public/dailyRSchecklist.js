@@ -123,11 +123,9 @@
         card.appendChild(document.createTextNode(
             " · " + (fw.kavach_state || fw.live_kavach || "?") +
             (fw.confidence_grade || fw.live_grade ? " · " + (fw.confidence_grade || fw.live_grade) : "") +
-            (fw.trade_score != null ? " · Score " + fw.trade_score : "")
+            (fw.trade_score != null ? " · Score " + fw.trade_score : "") +
+            " · " + (fw.direction === "SHORT" ? "SHORT" : "LONG") + " · " + fmtFwElapsed(fw)
         ));
-        var meta = el("div", "dc-fw-meta");
-        meta.textContent = (fw.direction === "SHORT" ? "SHORT" : "LONG") + " · " + fmtFwElapsed(fw);
-        card.appendChild(meta);
         return card;
     }
 
@@ -562,8 +560,6 @@
         var wrap = $("dcFastWatch");
         var bullStack = $("dcFastWatchBull");
         var bearStack = $("dcFastWatchBear");
-        var bullLabel = $("dcFastWatchBullLabel");
-        var bearLabel = $("dcFastWatchBearLabel");
         var expandBtn = $("dcFastWatchExpand");
         var allWrap = $("dcFastWatchAll");
         var allBull = $("dcFastWatchAllBull");
@@ -585,8 +581,6 @@
             return;
         }
         wrap.hidden = false;
-        if (bullLabel) bullLabel.textContent = "Bullish · top " + longs.length;
-        if (bearLabel) bearLabel.textContent = "Bearish · top " + shorts.length;
         fillFastWatchStack(bullStack, longs);
         fillFastWatchStack(bearStack, shorts);
         if (expandBtn) {

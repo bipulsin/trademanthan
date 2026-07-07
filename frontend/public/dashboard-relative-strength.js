@@ -23,6 +23,27 @@
     let rsCfg = { show_ema10_passive: true, alert_sound_enabled: false };
     let seenTriggered = new Set();
 
+    function getAuthHeaders() {
+        const headers = { Accept: "application/json" };
+        try {
+            const token =
+                (window.localStorage && window.localStorage.getItem("trademanthan_token")) ||
+                (window.sessionStorage && window.sessionStorage.getItem("trademanthan_token"));
+            if (token) headers.Authorization = "Bearer " + token;
+        } catch (_) {}
+        return headers;
+    }
+
+    function pickSideRows(data, coreKey, legacyKey) {
+        const core = data[coreKey];
+        const legacy = data[legacyKey];
+        if (Array.isArray(core) && core.length) return core;
+        if (Array.isArray(legacy) && legacy.length) return legacy;
+        if (Array.isArray(core)) return core;
+        if (Array.isArray(legacy)) return legacy;
+        return [];
+    }
+
     function escapeHtml(s) {
         const d = document.createElement("div");
         d.textContent = s == null ? "" : String(s);
@@ -86,8 +107,16 @@
 
     async function loadRsCfg() {
         try {
-            var res = await fetch("/api/dashboard/relative-strength/config", { credentials: "same-origin" });
-            rsCfg = await res.json();
+            var res = await fetch("/api/dashboard/relative-strength/config", {
+                credentials: "same-origin",
+                headers: getAuthHeaders(),
+                cache: "no-store",
+            });
+            if (!res.ok) return;
+            const cfg = await res.json();
+            if (cfg && typeof cfg === "object" && !Array.isArray(cfg)) {
+                rsCfg = Object.assign({ show_ema10_passive: true, alert_sound_enabled: false }, cfg);
+            }
         } catch (_) {}
     }
 
@@ -397,10 +426,10 @@
 
     function normalizeData(data) {
         if (!data) return { bullish: [], bearish: [] };
-        if (data.bullish_core || data.bearish_core) {
+        if ("bullish_core" in data || "bearish_core" in data) {
             return {
-                bullish: data.bullish_core || data.bullish || [],
-                bearish: data.bearish_core || data.bearish || [],
+                bullish: pickSideRows(data, "bullish_core", "bullish"),
+                bearish: pickSideRows(data, "bearish_core", "bearish"),
                 bullish_bench: data.bullish_bench || [],
                 bearish_bench: data.bearish_bench || [],
                 live_setups: data.live_setups || [],
@@ -541,22 +570,39 @@
         tickCountdown();
     }
 
+    function renderFetchError(message) {
+        const host = document.getElementById("rsScannerBullish");
+        if (host) {
+            host.innerHTML =
+                '<p class="rs-scanner-empty rs-scanner-error">' + escapeHtml(message) + "</p>";
+        }
+        const bear = document.getElementById("rsScannerBearish");
+        if (bear) bear.innerHTML = "";
+    }
+
     async function fetchScanner() {
         const host = document.getElementById("rsScannerBullish");
         if (!host) return;
         try {
-            const res = await fetch(API, { cache: "no-store", credentials: "same-origin" });
+            const res = await fetch(API, {
+                cache: "no-store",
+                credentials: "same-origin",
+                headers: getAuthHeaders(),
+            });
             const raw = await res.text();
             const ct = (res.headers.get("content-type") || "").toLowerCase();
             const looksJson = ct.includes("application/json") || /^\s*[\[{]/.test(raw.slice(0, 40));
-            if (!looksJson) {
-                render({ bullish: [], bearish: [] });
+            if (!res.ok || !looksJson) {
+                const hint = res.status === 401
+                    ? "Session expired — refresh the page to sign in again."
+                    : "Scanner unavailable (HTTP " + res.status + "). Try refresh.";
+                renderFetchError(hint);
                 return;
             }
             render(JSON.parse(raw));
         } catch (e) {
             window.console && console.warn("dashboard-relative-strength:", e);
-            render({ bullish: [], bearish: [] });
+            renderFetchError("Scanner failed to load — try refresh.");
         }
     }
 
@@ -590,9 +636,10 @@
                 if (lastData) render(lastData);
             });
         }
+        fetchScanner();
+        startPolling();
         loadRsCfg().then(function () {
-            fetchScanner();
-            startPolling();
+            if (lastData) render(lastData);
         });
         const btn = document.getElementById("rsScannerRefresh");
         if (btn) {
