@@ -455,32 +455,41 @@
 
     let fastWatchExpanded = false;
 
+    function fillFastWatchStack(stackEl, items) {
+        if (!stackEl) return;
+        stackEl.innerHTML = (items || []).map(fastWatchCardHtml).join("");
+    }
+
     function renderFastWatch(fwPayload) {
         const wrap = document.getElementById("rsFastWatch");
-        const grid = document.getElementById("rsFastWatchGrid");
+        const bullStack = document.getElementById("rsFastWatchBull");
+        const bearStack = document.getElementById("rsFastWatchBear");
+        const bullLabel = document.getElementById("rsFastWatchBullLabel");
+        const bearLabel = document.getElementById("rsFastWatchBearLabel");
         const expandBtn = document.getElementById("rsFastWatchExpand");
         const allWrap = document.getElementById("rsFastWatchAll");
-        if (!wrap || !grid) return;
+        const allBull = document.getElementById("rsFastWatchAllBull");
+        const allBear = document.getElementById("rsFastWatchAllBear");
+        if (!wrap || !bullStack || !bearStack) return;
         const fw = normalizeFastWatch(fwPayload);
-        const featured = (fw.featured.long || []).concat(fw.featured.short || []);
+        const longs = fw.featured.long || [];
+        const shorts = fw.featured.short || [];
+        const featured = longs.concat(shorts);
         if (!fw.total_count) {
             wrap.hidden = true;
-            grid.innerHTML = "";
+            fillFastWatchStack(bullStack, []);
+            fillFastWatchStack(bearStack, []);
             if (expandBtn) expandBtn.hidden = true;
-            if (allWrap) { allWrap.hidden = true; allWrap.innerHTML = ""; }
+            if (allWrap) allWrap.hidden = true;
+            fillFastWatchStack(allBull, []);
+            fillFastWatchStack(allBear, []);
             return;
         }
         wrap.hidden = false;
-        let html = "";
-        if ((fw.featured.long || []).length) {
-            html += '<div class="rs-fast-watch-side-label">Bullish · top ' + fw.featured.long.length + "</div>";
-            html += fw.featured.long.map(fastWatchCardHtml).join("");
-        }
-        if ((fw.featured.short || []).length) {
-            html += '<div class="rs-fast-watch-side-label">Bearish · top ' + fw.featured.short.length + "</div>";
-            html += fw.featured.short.map(fastWatchCardHtml).join("");
-        }
-        grid.innerHTML = html;
+        if (bullLabel) bullLabel.textContent = "Bullish · top " + longs.length;
+        if (bearLabel) bearLabel.textContent = "Bearish · top " + shorts.length;
+        fillFastWatchStack(bullStack, longs);
+        fillFastWatchStack(bearStack, shorts);
         if (expandBtn) {
             const extra = fw.total_count - featured.length;
             if (extra > 0) {
@@ -495,10 +504,14 @@
         if (allWrap) {
             if (fastWatchExpanded && fw.all.length) {
                 allWrap.hidden = false;
-                allWrap.innerHTML = fw.all.map(fastWatchCardHtml).join("");
+                const allLongs = fw.all.filter(function (x) { return (x.direction || "LONG") !== "SHORT"; });
+                const allShorts = fw.all.filter(function (x) { return (x.direction || "LONG") === "SHORT"; });
+                fillFastWatchStack(allBull, allLongs);
+                fillFastWatchStack(allBear, allShorts);
             } else {
                 allWrap.hidden = true;
-                allWrap.innerHTML = "";
+                fillFastWatchStack(allBull, []);
+                fillFastWatchStack(allBear, []);
             }
         }
     }

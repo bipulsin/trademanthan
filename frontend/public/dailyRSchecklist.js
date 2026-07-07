@@ -552,33 +552,43 @@
         if (modalSymbol) renderModal(currentStock(modalSymbol));
     }
 
+    function fillFastWatchStack(stackEl, items) {
+        if (!stackEl) return;
+        stackEl.innerHTML = "";
+        (items || []).forEach(function (item) { stackEl.appendChild(buildFastWatchCard(item)); });
+    }
+
     function renderFastWatch() {
         var wrap = $("dcFastWatch");
-        var grid = $("dcFastWatchChips");
+        var bullStack = $("dcFastWatchBull");
+        var bearStack = $("dcFastWatchBear");
+        var bullLabel = $("dcFastWatchBullLabel");
+        var bearLabel = $("dcFastWatchBearLabel");
         var expandBtn = $("dcFastWatchExpand");
         var allWrap = $("dcFastWatchAll");
-        if (!wrap || !grid) return;
+        var allBull = $("dcFastWatchAllBull");
+        var allBear = $("dcFastWatchAllBear");
+        if (!wrap || !bullStack || !bearStack) return;
         var cfg = (state && state.checklist_config) || {};
         var fw = normalizeFastWatch(state && state.fast_watch);
-        var featured = (fw.featured.long || []).concat(fw.featured.short || []);
+        var longs = fw.featured.long || [];
+        var shorts = fw.featured.short || [];
+        var featured = longs.concat(shorts);
         if (!cfg.fast_watch_ui_enabled || !fw.total_count) {
             wrap.hidden = true;
-            grid.innerHTML = "";
+            fillFastWatchStack(bullStack, []);
+            fillFastWatchStack(bearStack, []);
             if (expandBtn) expandBtn.hidden = true;
-            if (allWrap) { allWrap.hidden = true; allWrap.innerHTML = ""; }
+            if (allWrap) { allWrap.hidden = true; }
+            fillFastWatchStack(allBull, []);
+            fillFastWatchStack(allBear, []);
             return;
         }
         wrap.hidden = false;
-        grid.innerHTML = "";
-        function appendSide(label, items) {
-            if (!items.length) return;
-            var head = el("div", "dc-fast-watch-side-label");
-            head.textContent = label;
-            grid.appendChild(head);
-            items.forEach(function (item) { grid.appendChild(buildFastWatchCard(item)); });
-        }
-        appendSide("Bullish · top " + (fw.featured.long || []).length, fw.featured.long || []);
-        appendSide("Bearish · top " + (fw.featured.short || []).length, fw.featured.short || []);
+        if (bullLabel) bullLabel.textContent = "Bullish · top " + longs.length;
+        if (bearLabel) bearLabel.textContent = "Bearish · top " + shorts.length;
+        fillFastWatchStack(bullStack, longs);
+        fillFastWatchStack(bearStack, shorts);
         if (expandBtn) {
             var extra = fw.total_count - featured.length;
             if (extra > 0) {
@@ -593,11 +603,14 @@
         if (allWrap) {
             if (fastWatchExpanded && fw.all && fw.all.length) {
                 allWrap.hidden = false;
-                allWrap.innerHTML = "";
-                fw.all.forEach(function (item) { allWrap.appendChild(buildFastWatchCard(item)); });
+                var allLongs = fw.all.filter(function (x) { return (x.direction || "LONG") !== "SHORT"; });
+                var allShorts = fw.all.filter(function (x) { return (x.direction || "LONG") === "SHORT"; });
+                fillFastWatchStack(allBull, allLongs);
+                fillFastWatchStack(allBear, allShorts);
             } else {
                 allWrap.hidden = true;
-                allWrap.innerHTML = "";
+                fillFastWatchStack(allBull, []);
+                fillFastWatchStack(allBear, []);
             }
         }
     }
