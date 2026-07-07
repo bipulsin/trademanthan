@@ -83,20 +83,29 @@ else
 fi
 
 echo "[deploy] recreating app + nginx..."
-# Stop/remove first to avoid compose force-recreate name conflicts (stale hashed container names).
+# Stop and fully remove app/nginx (including hashed compose orphans) before recreate.
 docker compose stop app nginx 2>/dev/null || true
-docker compose rm -f app nginx 2>/dev/null || true
-# Prune exited compose orphans that can block recreate (e.g. a833cd75c4cd_twcto-app-1).
+sleep 2
 while read -r cid; do
   [[ -n "$cid" ]] && docker rm -f "$cid" 2>/dev/null || true
-done < <(docker ps -aq --filter "name=twcto-app" --filter "status=exited")
+done < <(docker ps -aq --filter "name=twcto-app")
 while read -r cid; do
   [[ -n "$cid" ]] && docker rm -f "$cid" 2>/dev/null || true
-done < <(docker ps -aq --filter "name=twcto-nginx" --filter "status=exited")
-if ! docker compose up -d --force-recreate --remove-orphans app nginx; then
-  echo "[deploy] compose up failed" >&2
-  docker compose ps -a
-  exit 1
+done < <(docker ps -aq --filter "name=twcto-nginx")
+if ! docker compose up -d --remove-orphans app nginx; then
+  echo "[deploy] compose up failed — retrying after orphan cleanup" >&2
+  while read -r cid; do
+    [[ -n "$cid" ]] && docker rm -f "$cid" 2>/dev/null || true
+  done < <(docker ps -aq --filter "name=twcto-app")
+  while read -r cid; do
+    [[ -n "$cid" ]] && docker rm -f "$cid" 2>/dev/null || true
+  done < <(docker ps -aq --filter "name=twcto-nginx")
+  sleep 2
+  docker compose up -d --remove-orphans app nginx || {
+    echo "[deploy] compose up failed after retry" >&2
+    docker compose ps -a
+    exit 1
+  }
 fi
 
 echo "[deploy] waiting for health..."
