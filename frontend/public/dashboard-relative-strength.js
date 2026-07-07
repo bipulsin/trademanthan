@@ -450,7 +450,7 @@
         return '<div class="rs-fast-watch-card rs-fast-watch-card--' + side + '">' +
             "<strong>" + escapeHtml(fw.symbol) + "</strong>" + fwMomentumHtml(fw.momentum) +
             " · " + kav + grade + score +
-            '<div class="rs-fw-meta">' + escapeHtml(fmtFwElapsed(fw)) + "</div></div>";
+            ' <span class="rs-fw-meta">· ' + escapeHtml(fmtFwElapsed(fw)) + "</span></div>";
     }
 
     let fastWatchExpanded = false;
@@ -464,8 +464,6 @@
         const wrap = document.getElementById("rsFastWatch");
         const bullStack = document.getElementById("rsFastWatchBull");
         const bearStack = document.getElementById("rsFastWatchBear");
-        const bullLabel = document.getElementById("rsFastWatchBullLabel");
-        const bearLabel = document.getElementById("rsFastWatchBearLabel");
         const expandBtn = document.getElementById("rsFastWatchExpand");
         const allWrap = document.getElementById("rsFastWatchAll");
         const allBull = document.getElementById("rsFastWatchAllBull");
@@ -486,8 +484,6 @@
             return;
         }
         wrap.hidden = false;
-        if (bullLabel) bullLabel.textContent = "Bullish · top " + longs.length;
-        if (bearLabel) bearLabel.textContent = "Bearish · top " + shorts.length;
         fillFastWatchStack(bullStack, longs);
         fillFastWatchStack(bearStack, shorts);
         if (expandBtn) {
