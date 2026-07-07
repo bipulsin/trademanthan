@@ -1112,6 +1112,16 @@ class SmartFutureAlgoScheduler:
                     except Exception as anchor_exc:
                         logger.warning("RS anchor capture failed: %s", anchor_exc)
                     try:
+                        from backend.services.rs_shadow_selection import (
+                            SHADOW_CHECKPOINTS,
+                            run_shadow_selection_log,
+                        )
+
+                        if hm in SHADOW_CHECKPOINTS:
+                            run_shadow_selection_log(hm)
+                    except Exception as shadow_exc:
+                        logger.warning("RS shadow selection log failed: %s", shadow_exc)
+                    try:
                         from backend.services.rs_setup_radar import run_setup_radar_cycle
 
                         run_setup_radar_cycle()
@@ -1239,6 +1249,40 @@ class SmartFutureAlgoScheduler:
             )
             logger.info(
                 "✅ Scheduled: Relative Strength Scanner EOD (15:32 & 15:37 IST, Mon–Fri)"
+            )
+
+            def _run_universe_kavach_archive():
+                ist = pytz.timezone("Asia/Kolkata")
+                now = datetime.now(ist)
+                if _skip_ist_non_trading_job("Universe Kavach archive", now):
+                    return
+                try:
+                    from backend.services.rs_universe_kavach_archive import (
+                        run_universe_kavach_archive,
+                    )
+
+                    out = run_universe_kavach_archive()
+                    logger.info("✅ Universe Kavach archive: %s", out)
+                except Exception as e:
+                    logger.error("❌ Universe Kavach archive failed: %s", e, exc_info=True)
+
+            self.scheduler.add_job(
+                _run_universe_kavach_archive,
+                trigger=CronTrigger(
+                    day_of_week="mon-fri",
+                    hour=15,
+                    minute=40,
+                    timezone="Asia/Kolkata",
+                ),
+                id="rs_universe_kavach_archive_eod",
+                name="RS full-universe Kavach archive (15:40 IST, research)",
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=900,
+                coalesce=True,
+            )
+            logger.info(
+                "✅ Scheduled: RS full-universe Kavach archive (15:40 IST, Mon–Fri)"
             )
 
             def _run_daily_checklist_refresh():

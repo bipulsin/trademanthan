@@ -1475,6 +1475,121 @@ def _run_startup_schema_migrations(db_engine):
                 )
                 print("Applied migration: created rs_momentum_ignition_log")
 
+            if "rs_universe_kavach_archive" not in table_names and db_engine.dialect.name == "postgresql":
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE rs_universe_kavach_archive (
+                            session_date DATE NOT NULL,
+                            symbol TEXT NOT NULL,
+                            instrument_key TEXT NOT NULL DEFAULT '',
+                            future_symbol TEXT,
+                            archive_time TIMESTAMPTZ NOT NULL,
+                            kavach_state TEXT,
+                            kavach_strength TEXT,
+                            relative_strength DOUBLE PRECISION,
+                            stock_percent DOUBLE PRECISION,
+                            nifty_percent DOUBLE PRECISION,
+                            volume_ratio DOUBLE PRECISION,
+                            volume_tod_ratio DOUBLE PRECISION,
+                            volume_label TEXT,
+                            adx DOUBLE PRECISION,
+                            trade_score DOUBLE PRECISION,
+                            confidence_grade TEXT,
+                            ranking_side TEXT,
+                            would_be_rank_bull INTEGER,
+                            would_be_rank_bear INTEGER,
+                            universe_size INTEGER,
+                            PRIMARY KEY (session_date, symbol)
+                        )
+                        """
+                    )
+                )
+                conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS idx_rs_univ_kavach_archive_date "
+                        "ON rs_universe_kavach_archive (session_date DESC)"
+                    )
+                )
+                print("Applied migration: created rs_universe_kavach_archive")
+
+            if "rs_universe_kavach_archive_run" not in table_names and db_engine.dialect.name == "postgresql":
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE rs_universe_kavach_archive_run (
+                            session_date DATE PRIMARY KEY,
+                            archive_time TIMESTAMPTZ NOT NULL,
+                            universe_size INTEGER,
+                            symbols_archived INTEGER,
+                            directional_bull INTEGER,
+                            directional_bear INTEGER,
+                            contract_month_hint TEXT,
+                            instrument_key_sample TEXT,
+                            prev_session_instrument_key_sample TEXT,
+                            rollover_detected BOOLEAN DEFAULT FALSE
+                        )
+                        """
+                    )
+                )
+                print("Applied migration: created rs_universe_kavach_archive_run")
+
+            if "rs_shadow_selection_log" not in table_names and db_engine.dialect.name == "postgresql":
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE rs_shadow_selection_log (
+                            id BIGSERIAL PRIMARY KEY,
+                            session_date DATE NOT NULL,
+                            checkpoint_label TEXT NOT NULL,
+                            checkpoint_time TIMESTAMPTZ NOT NULL,
+                            side TEXT NOT NULL,
+                            selection_method TEXT NOT NULL,
+                            rank_position INTEGER NOT NULL,
+                            symbol TEXT NOT NULL,
+                            relative_strength DOUBLE PRECISION,
+                            volume_ratio DOUBLE PRECISION,
+                            vw_score DOUBLE PRECISION,
+                            trade_score DOUBLE PRECISION,
+                            kavach_state TEXT,
+                            instrument_key TEXT,
+                            scan_time TIMESTAMPTZ,
+                            UNIQUE (session_date, checkpoint_label, side, selection_method, rank_position)
+                        )
+                        """
+                    )
+                )
+                conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS idx_rs_shadow_sel_log_date "
+                        "ON rs_shadow_selection_log (session_date DESC, checkpoint_label)"
+                    )
+                )
+                print("Applied migration: created rs_shadow_selection_log")
+
+            if "rs_shadow_tardy_addendum" not in table_names and db_engine.dialect.name == "postgresql":
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE rs_shadow_tardy_addendum (
+                            session_date DATE NOT NULL,
+                            checkpoint_label TEXT NOT NULL DEFAULT '10:15',
+                            symbol TEXT NOT NULL,
+                            side TEXT NOT NULL,
+                            relative_strength DOUBLE PRECISION,
+                            volume_ratio DOUBLE PRECISION,
+                            trade_score DOUBLE PRECISION,
+                            kavach_state TEXT,
+                            instrument_key TEXT,
+                            on_morning_lock BOOLEAN DEFAULT FALSE,
+                            logged_at TIMESTAMPTZ NOT NULL,
+                            PRIMARY KEY (session_date, symbol, side)
+                        )
+                        """
+                    )
+                )
+                print("Applied migration: created rs_shadow_tardy_addendum")
+
             # NSE (India) closed dates — IST calendar; scheduled market-data jobs skip these days.
             _insp_h = inspect(db_engine)
             _tables_h = _insp_h.get_table_names()
