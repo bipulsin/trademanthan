@@ -115,6 +115,7 @@
     }
 
     function dirBadge(isBull, bullLabel, bearLabel) {
+        if (isBull === null || isBull === undefined) return "—";
         const cls = isBull ? "rs-badge--up" : "rs-badge--down";
         return `<span class="rs-badge ${cls}">${isBull ? bullLabel : bearLabel}</span>`;
     }
@@ -403,6 +404,7 @@
                 bullish_bench: data.bullish_bench || [],
                 bearish_bench: data.bearish_bench || [],
                 live_setups: data.live_setups || [],
+                fast_watch: data.fast_watch || [],
                 promotion_events: data.promotion_events || [],
                 bullish_pending: data.bullish_pending,
                 bearish_pending: data.bearish_pending,
@@ -410,6 +412,31 @@
             };
         }
         return data;
+    }
+
+    function renderFastWatch(items) {
+        const wrap = document.getElementById("rsFastWatch");
+        const grid = document.getElementById("rsFastWatchGrid");
+        if (!wrap || !grid) return;
+        const list = items || [];
+        if (!list.length) {
+            wrap.hidden = true;
+            grid.innerHTML = "";
+            return;
+        }
+        wrap.hidden = false;
+        grid.innerHTML = list.map(function (fw) {
+            const side = fw.direction === "SHORT" ? "short" : "long";
+            const grade = fw.confidence_grade ? " · " + escapeHtml(fw.confidence_grade) : "";
+            const score = fw.trade_score != null ? " · Score " + escapeHtml(fw.trade_score) : "";
+            const t = fw.first_flip_at ? new Date(fw.first_flip_at).toLocaleTimeString(undefined, {
+                hour: "2-digit", minute: "2-digit",
+            }) : "—";
+            return '<div class="rs-fast-watch-card rs-fast-watch-card--' + side + '">' +
+                "<strong>" + escapeHtml(fw.symbol) + "</strong> · " + escapeHtml(fw.kavach_state || "?") +
+                grade + score +
+                '<div class="rs-fw-meta">' + escapeHtml(fw.direction || "LONG") + " · first flip " + t + "</div></div>";
+        }).join("");
     }
 
     function render(data) {
@@ -432,6 +459,7 @@
         if (bbc) bbc.textContent = String((d.bullish_bench || []).length);
         if (brbc) brbc.textContent = String((d.bearish_bench || []).length);
         renderLiveSetups(d.live_setups);
+        renderFastWatch(d.fast_watch);
         checkTriggeredAlerts(d.live_setups);
         renderPromoEvents(d.promotion_events);
         renderPending(d.bullish_pending, "BULL", "rsPendingChallenges");

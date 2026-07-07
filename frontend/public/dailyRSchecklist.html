@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="settings.css">
     <link rel="stylesheet" href="left-menu.css?v=3.24">
     <link rel="stylesheet" href="theme.css?v=1.3">
-    <link rel="stylesheet" href="dailyRSchecklist.css?v=10">
+    <link rel="stylesheet" href="dailyRSchecklist.css?v=11">
 </head>
 <body class="theme-page">
     <div class="mobile-title-bar">
@@ -96,12 +96,16 @@
                     <div class="dc-live-setups-chips" id="dcLiveSetupsChips"></div>
                 </div>
 
-                <!-- Fast Watch (beta, default off via rs_conviction_config) -->
-                <div class="dc-fast-watch" id="dcFastWatch" hidden>
-                    <span class="dc-fast-watch-label"><i class="fas fa-bolt"></i> Fast Watch <span class="dc-beta">beta</span></span>
-                    <span class="dc-fast-watch-hint">Unconfirmed — Core did not promote</span>
-                    <div class="dc-fast-watch-chips" id="dcFastWatchChips"></div>
-                </div>
+                <!-- Fast Watch: new signals not on 09:25 lock (beta, default off) -->
+                <section class="dc-fast-watch-section" id="dcFastWatch" hidden aria-label="Fast Watch unconfirmed signals">
+                    <div class="dc-fast-watch-head">
+                        <div>
+                            <span class="dc-fast-watch-label"><i class="fas fa-bolt"></i> Fast Watch <span class="dc-beta">beta</span></span>
+                            <p class="dc-fast-watch-sub">Unconfirmed — not on today's 09:25 lock · no entry authority</p>
+                        </div>
+                    </div>
+                    <div class="dc-fast-watch-grid" id="dcFastWatchChips"></div>
+                </section>
 
                 <!-- Pre-9:25 pending lock -->
                 <div class="dc-pending-lock-banner" id="dcPendingLock" hidden>
@@ -194,6 +198,6 @@
     </template>
 
     <script src="left-menu.js?v=3.24"></script>
-    <script src="dailyRSchecklist.js?v=10"></script>
+    <script src="dailyRSchecklist.js?v=11"></script>
 </body>
 </html>

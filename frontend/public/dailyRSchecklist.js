@@ -505,22 +505,33 @@
 
     function renderFastWatch() {
         var wrap = $("dcFastWatch");
-        var chips = $("dcFastWatchChips");
-        if (!wrap || !chips) return;
+        var grid = $("dcFastWatchChips");
+        if (!wrap || !grid) return;
         var cfg = (state && state.checklist_config) || {};
         var items = (state && state.fast_watch) || [];
         if (!cfg.fast_watch_ui_enabled || !items.length) {
             wrap.hidden = true;
-            chips.innerHTML = "";
+            grid.innerHTML = "";
             return;
         }
         wrap.hidden = false;
-        chips.innerHTML = "";
+        grid.innerHTML = "";
         items.forEach(function (fw) {
-            var chip = el("span", "dc-fast-watch-chip");
-            chip.textContent = fw.symbol + " · " + (fw.kavach_state || "?") +
-                " @ " + fmtGoTime(fw.first_flip_at);
-            chips.appendChild(chip);
+            var card = el("div", "dc-fast-watch-card dc-fast-watch-card--" +
+                (fw.direction === "SHORT" ? "short" : "long"));
+            var dir = fw.direction === "SHORT" ? "SHORT" : "LONG";
+            var title = el("strong");
+            title.textContent = fw.symbol || "?";
+            card.appendChild(title);
+            card.appendChild(document.createTextNode(
+                " · " + (fw.kavach_state || "?") +
+                (fw.confidence_grade ? " · " + fw.confidence_grade : "") +
+                (fw.trade_score != null ? " · Score " + fw.trade_score : "")
+            ));
+            var meta = el("div", "dc-fw-meta");
+            meta.textContent = dir + " · first flip " + fmtGoTime(fw.first_flip_at);
+            card.appendChild(meta);
+            grid.appendChild(card);
         });
     }
 

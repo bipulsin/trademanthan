@@ -1,4 +1,8 @@
-"""Fast Watch — unconfirmed chart-level BUY flips for locked checklist symbols."""
+"""Fast Watch — unconfirmed chart-level BUY flips outside morning lock visibility.
+
+Scope (default): morning-locked checklist symbols ∪ current RS top-5 per side.
+Records first BUY/READY flip per symbol/day; UI highlights symbols not on the lock.
+"""
 from __future__ import annotations
 
 import logging
@@ -18,6 +22,8 @@ IST = pytz.timezone("Asia/Kolkata")
 
 BULL_FLIP = frozenset({"BUY", "READY"})
 BEAR_FLIP = frozenset({"SELL", "READY SHORT"})
+SCOPE_LOCKED_ONLY = "locked_only"
+SCOPE_LOCKED_OR_TOP5 = "locked_or_top5"
 
 
 def today_ist() -> str:
@@ -38,24 +44,72 @@ def _conflict(kavach_state: Optional[str], direction: str) -> bool:
     return k in BEARISH_STATES
 
 
+def _direction_from_ranking(ranking_type: Optional[str]) -> str:
+    return "SHORT" if (ranking_type or "").upper() == "BEARISH" else "LONG"
+
+
+def fast_watch_scope() -> str:
+    scope = (get_config().get("fast_watch_scope") or SCOPE_LOCKED_OR_TOP5).strip().lower()
+    if scope in (SCOPE_LOCKED_ONLY, SCOPE_LOCKED_OR_TOP5):
+        return scope
+    return SCOPE_LOCKED_OR_TOP5
+
+
+def universe_symbols(
+    session_date: str,
+    *,
+    locked: Optional[Set[str]] = None,
+    top5_symbols: Optional[Set[str]] = None,
+    db=None,
+) -> Set[str]:
+    """Symbols eligible for Fast Watch recording this cycle."""
+    scope = fast_watch_scope()
+    if locked is None:
+        own_db = db is None
+        if own_db:
+            db = SessionLocal()
+        try:
+            locked = set(get_locked_symbols(db, session_date))
+        finally:
+            if own_db and db is not None:
+                db.close()
+    else:
+        locked = set(locked)
+    if scope == SCOPE_LOCKED_ONLY:
+        return locked
+    top5 = set(top5_symbols or ())
+    return locked | top5
+
+
 def record_fast_watch_flips(
     session_date: str,
     updates: List[Dict[str, Any]],
     *,
-    locked_only: bool = True,
+    locked_symbols: Optional[Set[str]] = None,
+    top5_symbols: Optional[Set[str]] = None,
 ) -> int:
-    """Insert first-flip rows for locked symbols. Returns count of new rows."""
+    """Insert first-flip rows for symbols in the configured universe. Returns new row count."""
     if not get_config().get("fast_watch_enabled", True):
         return 0
+    eligible = universe_symbols(session_date, locked=locked_symbols, top5_symbols=top5_symbols)
+    locked_set = set(locked_symbols or ())
+    if not locked_set:
+        db = SessionLocal()
+        try:
+            locked_set = set(get_locked_symbols(db, session_date))
+        finally:
+            db.close()
+
     db = SessionLocal()
     inserted = 0
     try:
-        locked: Set[str] = set(get_locked_symbols(db, session_date)) if locked_only else set()
         for u in updates:
             sym = (u.get("symbol") or "").strip().upper()
-            direction = (u.get("direction") or "LONG").upper()
-            if locked_only and sym not in locked:
+            if not sym or sym not in eligible:
                 continue
+            direction = (u.get("direction") or "LONG").upper()
+            if direction not in ("LONG", "SHORT"):
+                direction = "SHORT" if direction == "BEAR" else "LONG"
             kav = u.get("dashboard_kavach") or u.get("kavach_state")
             if not _flip_state(kav, direction):
                 continue
@@ -90,7 +144,7 @@ def record_fast_watch_flips(
                     "t": now,
                     "k": kav,
                     "score": u.get("kavach_score_entry") or u.get("trade_score"),
-                    "grade": u.get("confidence"),
+                    "grade": u.get("confidence") or u.get("confidence_grade"),
                 },
             )
             inserted += 1
@@ -100,10 +154,16 @@ def record_fast_watch_flips(
     return inserted
 
 
-def get_fast_watch(session_date: Optional[str] = None) -> List[Dict[str, Any]]:
+def get_fast_watch(
+    session_date: Optional[str] = None,
+    *,
+    off_lock_only: bool = True,
+) -> List[Dict[str, Any]]:
+    """Return today's Fast Watch flips. Default: symbols not on morning lock (visibility gap)."""
     sd = session_date or today_ist()
     db = SessionLocal()
     try:
+        locked = set(get_locked_symbols(db, sd))
         rows = db.execute(
             text(
                 """
@@ -118,6 +178,9 @@ def get_fast_watch(session_date: Optional[str] = None) -> List[Dict[str, Any]]:
         ).fetchall()
         out = []
         for r in rows:
+            on_lock = r.symbol in locked
+            if off_lock_only and on_lock:
+                continue
             out.append(
                 {
                     "symbol": r.symbol,
@@ -126,6 +189,7 @@ def get_fast_watch(session_date: Optional[str] = None) -> List[Dict[str, Any]]:
                     "kavach_state": r.kavach_state,
                     "trade_score": r.trade_score,
                     "confidence_grade": r.confidence_grade,
+                    "on_locked_list": on_lock,
                     "label": "unconfirmed",
                 }
             )

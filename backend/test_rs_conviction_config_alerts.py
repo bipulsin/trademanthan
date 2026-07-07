@@ -10,6 +10,7 @@ def test_alerts_default_muted():
 
 def test_fast_watch_ui_default_off():
     assert DEFAULTS["fast_watch_ui_enabled"] is False
+    assert DEFAULTS["fast_watch_scope"] == "locked_or_top5"
     assert DEFAULTS.get("fast_watch_enabled") is True
 
 

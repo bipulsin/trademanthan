@@ -976,14 +976,26 @@ def _refresh_checklist_from_rs(*, full_populate: bool) -> Dict[str, Any]:
             refreshed += 1
 
         flip_updates = []
-        for sym in locked_syms:
+        eligible_fw = set(locked_syms) | {r.symbol for r in rows if r.symbol}
+        for sym in eligible_fw:
+            row = row_by_sym.get(sym)
+            if row is not None:
+                direction = lock_dirs.get(sym) or _direction_from_ranking(row.ranking_type)
+                auto = _auto_fields_from_rs(row, direction, live_map)
+                flip_updates.append({**auto, "symbol": sym, "direction": direction})
+                continue
             raw = _load_raw(db, sd, sym)
             if raw:
                 flip_updates.append(raw)
         try:
             from backend.services.rs_fast_watch import record_fast_watch_flips
 
-            record_fast_watch_flips(sd, flip_updates)
+            record_fast_watch_flips(
+                sd,
+                flip_updates,
+                locked_symbols=locked_syms,
+                top5_symbols={r.symbol for r in rows if r.symbol},
+            )
         except Exception as exc:
             logger.debug("fast watch record skipped: %s", exc)
 

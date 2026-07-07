@@ -598,6 +598,17 @@ def get_conviction_board_payload() -> Dict[str, Any]:
             })
         return out
 
+    fast_watch: List[Dict[str, Any]] = []
+    checklist_cfg: Dict[str, Any] = {}
+    if cfg.get("fast_watch_ui_enabled"):
+        try:
+            from backend.services.rs_fast_watch import get_fast_watch
+
+            fast_watch = get_fast_watch(sd, off_lock_only=True)
+            checklist_cfg["fast_watch_ui_enabled"] = True
+        except Exception as exc:
+            logger.debug("conviction board fast_watch: %s", exc)
+
     return {
         "session_date": sd,
         "last_board_cycle": rs_snap.get("last_updated"),
@@ -613,6 +624,8 @@ def get_conviction_board_payload() -> Dict[str, Any]:
             for e in events
         ],
         "live_setups": get_live_setups(),
+        "fast_watch": fast_watch,
+        "checklist_config": checklist_cfg,
         "bullish": enrich_core(bull_core, SIDE_BULL),
         "bearish": enrich_core(bear_core, SIDE_BEAR),
         "last_updated": rs_snap.get("last_updated"),
