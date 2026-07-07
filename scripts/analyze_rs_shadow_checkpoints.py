@@ -20,12 +20,6 @@ if str(_ROOT) not in sys.path:
 from sqlalchemy import text  # noqa: E402
 
 from backend.database import SessionLocal  # noqa: E402
-from scripts.analyze_kavach_combined_research import (  # noqa: E402
-    _flip_rate_by_maturity,
-    _full_universe_discard_proxy,
-    _relock_timing_backtest,
-    _volume_weighted_backtest,
-)
 
 SHADOW_START_FALLBACK = "2026-07-08"
 CHECKPOINT_2W_TRADING_DAYS = 10
