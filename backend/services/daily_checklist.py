@@ -804,7 +804,7 @@ def get_state(session_date: Optional[str] = None) -> Dict[str, Any]:
         s["ignition_score"] = ig.get("ignition_score")
         s["ignition_building"] = bool(ig.get("ignition_building"))
 
-    fast_watch: List[Dict[str, Any]] = []
+    fast_watch: Dict[str, Any] = {"featured": {"long": [], "short": []}, "all": [], "total_count": 0}
     checklist_cfg: Dict[str, Any] = {}
     try:
         from backend.services.rs_conviction_config import get_config

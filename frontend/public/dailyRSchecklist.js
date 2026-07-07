@@ -84,6 +84,55 @@
         } catch (e) { return ""; }
     }
 
+    function fmtFwElapsed(fw) {
+        var t = fmtGoTime(fw.first_flip_at);
+        var mins = fw.minutes_since_flip != null ? fw.minutes_since_flip : 0;
+        if (!t) return "";
+        return "first flip " + t + " · " + mins + " min ago";
+    }
+
+    function fwMomentumLabel(m) {
+        if (m === "rising") return "↑ rising";
+        if (m === "fading") return "↓ fading";
+        return "→ flat";
+    }
+
+    function normalizeFastWatch(fw) {
+        if (!fw) return { featured: { long: [], short: [] }, all: [], total_count: 0 };
+        if (Array.isArray(fw)) {
+            var longs = fw.filter(function (x) { return (x.direction || "LONG") !== "SHORT"; });
+            var shorts = fw.filter(function (x) { return (x.direction || "LONG") === "SHORT"; });
+            return { featured: { long: longs, short: shorts }, all: fw, total_count: fw.length };
+        }
+        return {
+            featured: fw.featured || { long: [], short: [] },
+            all: fw.all || [],
+            total_count: fw.total_count != null ? fw.total_count : (fw.all || []).length,
+        };
+    }
+
+    function buildFastWatchCard(fw) {
+        var card = el("div", "dc-fast-watch-card dc-fast-watch-card--" +
+            (fw.direction === "SHORT" ? "short" : "long"));
+        var title = el("strong");
+        title.textContent = fw.symbol || "?";
+        card.appendChild(title);
+        var mom = el("span", "dc-fw-momentum dc-fw-momentum--" + (fw.momentum || "flat"));
+        mom.textContent = fwMomentumLabel(fw.momentum);
+        card.appendChild(mom);
+        card.appendChild(document.createTextNode(
+            " · " + (fw.kavach_state || fw.live_kavach || "?") +
+            (fw.confidence_grade || fw.live_grade ? " · " + (fw.confidence_grade || fw.live_grade) : "") +
+            (fw.trade_score != null ? " · Score " + fw.trade_score : "")
+        ));
+        var meta = el("div", "dc-fw-meta");
+        meta.textContent = (fw.direction === "SHORT" ? "SHORT" : "LONG") + " · " + fmtFwElapsed(fw);
+        card.appendChild(meta);
+        return card;
+    }
+
+    var fastWatchExpanded = false;
+
     function stickyCountdownSec(untilIso) {
         if (!untilIso) return 0;
         try {
@@ -506,33 +555,51 @@
     function renderFastWatch() {
         var wrap = $("dcFastWatch");
         var grid = $("dcFastWatchChips");
+        var expandBtn = $("dcFastWatchExpand");
+        var allWrap = $("dcFastWatchAll");
         if (!wrap || !grid) return;
         var cfg = (state && state.checklist_config) || {};
-        var items = (state && state.fast_watch) || [];
-        if (!cfg.fast_watch_ui_enabled || !items.length) {
+        var fw = normalizeFastWatch(state && state.fast_watch);
+        var featured = (fw.featured.long || []).concat(fw.featured.short || []);
+        if (!cfg.fast_watch_ui_enabled || !fw.total_count) {
             wrap.hidden = true;
             grid.innerHTML = "";
+            if (expandBtn) expandBtn.hidden = true;
+            if (allWrap) { allWrap.hidden = true; allWrap.innerHTML = ""; }
             return;
         }
         wrap.hidden = false;
         grid.innerHTML = "";
-        items.forEach(function (fw) {
-            var card = el("div", "dc-fast-watch-card dc-fast-watch-card--" +
-                (fw.direction === "SHORT" ? "short" : "long"));
-            var dir = fw.direction === "SHORT" ? "SHORT" : "LONG";
-            var title = el("strong");
-            title.textContent = fw.symbol || "?";
-            card.appendChild(title);
-            card.appendChild(document.createTextNode(
-                " · " + (fw.kavach_state || "?") +
-                (fw.confidence_grade ? " · " + fw.confidence_grade : "") +
-                (fw.trade_score != null ? " · Score " + fw.trade_score : "")
-            ));
-            var meta = el("div", "dc-fw-meta");
-            meta.textContent = dir + " · first flip " + fmtGoTime(fw.first_flip_at);
-            card.appendChild(meta);
-            grid.appendChild(card);
-        });
+        function appendSide(label, items) {
+            if (!items.length) return;
+            var head = el("div", "dc-fast-watch-side-label");
+            head.textContent = label;
+            grid.appendChild(head);
+            items.forEach(function (item) { grid.appendChild(buildFastWatchCard(item)); });
+        }
+        appendSide("Bullish · top " + (fw.featured.long || []).length, fw.featured.long || []);
+        appendSide("Bearish · top " + (fw.featured.short || []).length, fw.featured.short || []);
+        if (expandBtn) {
+            var extra = fw.total_count - featured.length;
+            if (extra > 0) {
+                expandBtn.hidden = false;
+                expandBtn.textContent = (fastWatchExpanded ? "Hide" : "Show") +
+                    " all flips (" + fw.total_count + ")";
+            } else {
+                expandBtn.hidden = true;
+                fastWatchExpanded = false;
+            }
+        }
+        if (allWrap) {
+            if (fastWatchExpanded && fw.all && fw.all.length) {
+                allWrap.hidden = false;
+                allWrap.innerHTML = "";
+                fw.all.forEach(function (item) { allWrap.appendChild(buildFastWatchCard(item)); });
+            } else {
+                allWrap.hidden = true;
+                allWrap.innerHTML = "";
+            }
+        }
     }
 
     function applyState(s) {
@@ -863,6 +930,13 @@
             this.setAttribute("aria-expanded", open ? "true" : "false");
             this.querySelector(".dc-carryover-chevron").classList.toggle("dc-carryover-chevron--open", open);
         });
+        var fwExpand = $("dcFastWatchExpand");
+        if (fwExpand) {
+            fwExpand.addEventListener("click", function () {
+                fastWatchExpanded = !fastWatchExpanded;
+                renderFastWatch();
+            });
+        }
         var goAlertEl = $("dcGoAlertSound");
         if (goAlertEl) {
             try {

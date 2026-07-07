@@ -414,29 +414,93 @@
         return data;
     }
 
-    function renderFastWatch(items) {
+    function fwMomentumHtml(m) {
+        if (m === "rising") return '<span class="rs-fw-momentum rs-fw-momentum--rising">↑ rising</span>';
+        if (m === "fading") return '<span class="rs-fw-momentum rs-fw-momentum--fading">↓ fading</span>';
+        return '<span class="rs-fw-momentum rs-fw-momentum--flat">→ flat</span>';
+    }
+
+    function normalizeFastWatch(fw) {
+        if (!fw) return { featured: { long: [], short: [] }, all: [], total_count: 0 };
+        if (Array.isArray(fw)) {
+            const longs = fw.filter((x) => (x.direction || "LONG") !== "SHORT");
+            const shorts = fw.filter((x) => (x.direction || "LONG") === "SHORT");
+            return { featured: { long: longs, short: shorts }, all: fw, total_count: fw.length };
+        }
+        return {
+            featured: fw.featured || { long: [], short: [] },
+            all: fw.all || [],
+            total_count: fw.total_count != null ? fw.total_count : (fw.all || []).length,
+        };
+    }
+
+    function fmtFwElapsed(fw) {
+        const t = fw.first_flip_at ? new Date(fw.first_flip_at).toLocaleTimeString(undefined, {
+            hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata",
+        }) : "—";
+        const mins = fw.minutes_since_flip != null ? fw.minutes_since_flip : 0;
+        return (fw.direction || "LONG") + " · first flip " + t + " · " + mins + " min ago";
+    }
+
+    function fastWatchCardHtml(fw) {
+        const side = fw.direction === "SHORT" ? "short" : "long";
+        const grade = fw.confidence_grade || fw.live_grade ? " · " + escapeHtml(fw.confidence_grade || fw.live_grade) : "";
+        const score = fw.trade_score != null ? " · Score " + escapeHtml(fw.trade_score) : "";
+        const kav = escapeHtml(fw.kavach_state || fw.live_kavach || "?");
+        return '<div class="rs-fast-watch-card rs-fast-watch-card--' + side + '">' +
+            "<strong>" + escapeHtml(fw.symbol) + "</strong>" + fwMomentumHtml(fw.momentum) +
+            " · " + kav + grade + score +
+            '<div class="rs-fw-meta">' + escapeHtml(fmtFwElapsed(fw)) + "</div></div>";
+    }
+
+    let fastWatchExpanded = false;
+
+    function renderFastWatch(fwPayload) {
         const wrap = document.getElementById("rsFastWatch");
         const grid = document.getElementById("rsFastWatchGrid");
+        const expandBtn = document.getElementById("rsFastWatchExpand");
+        const allWrap = document.getElementById("rsFastWatchAll");
         if (!wrap || !grid) return;
-        const list = items || [];
-        if (!list.length) {
+        const fw = normalizeFastWatch(fwPayload);
+        const featured = (fw.featured.long || []).concat(fw.featured.short || []);
+        if (!fw.total_count) {
             wrap.hidden = true;
             grid.innerHTML = "";
+            if (expandBtn) expandBtn.hidden = true;
+            if (allWrap) { allWrap.hidden = true; allWrap.innerHTML = ""; }
             return;
         }
         wrap.hidden = false;
-        grid.innerHTML = list.map(function (fw) {
-            const side = fw.direction === "SHORT" ? "short" : "long";
-            const grade = fw.confidence_grade ? " · " + escapeHtml(fw.confidence_grade) : "";
-            const score = fw.trade_score != null ? " · Score " + escapeHtml(fw.trade_score) : "";
-            const t = fw.first_flip_at ? new Date(fw.first_flip_at).toLocaleTimeString(undefined, {
-                hour: "2-digit", minute: "2-digit",
-            }) : "—";
-            return '<div class="rs-fast-watch-card rs-fast-watch-card--' + side + '">' +
-                "<strong>" + escapeHtml(fw.symbol) + "</strong> · " + escapeHtml(fw.kavach_state || "?") +
-                grade + score +
-                '<div class="rs-fw-meta">' + escapeHtml(fw.direction || "LONG") + " · first flip " + t + "</div></div>";
-        }).join("");
+        let html = "";
+        if ((fw.featured.long || []).length) {
+            html += '<div class="rs-fast-watch-side-label">Bullish · top ' + fw.featured.long.length + "</div>";
+            html += fw.featured.long.map(fastWatchCardHtml).join("");
+        }
+        if ((fw.featured.short || []).length) {
+            html += '<div class="rs-fast-watch-side-label">Bearish · top ' + fw.featured.short.length + "</div>";
+            html += fw.featured.short.map(fastWatchCardHtml).join("");
+        }
+        grid.innerHTML = html;
+        if (expandBtn) {
+            const extra = fw.total_count - featured.length;
+            if (extra > 0) {
+                expandBtn.hidden = false;
+                expandBtn.textContent = (fastWatchExpanded ? "Hide" : "Show") +
+                    " all flips (" + fw.total_count + ")";
+            } else {
+                expandBtn.hidden = true;
+                fastWatchExpanded = false;
+            }
+        }
+        if (allWrap) {
+            if (fastWatchExpanded && fw.all.length) {
+                allWrap.hidden = false;
+                allWrap.innerHTML = fw.all.map(fastWatchCardHtml).join("");
+            } else {
+                allWrap.hidden = true;
+                allWrap.innerHTML = "";
+            }
+        }
     }
 
     function render(data) {
@@ -528,6 +592,13 @@
                 fetchScanner().finally(() => {
                     btn.disabled = false;
                 });
+            });
+        }
+        const fwExpand = document.getElementById("rsFastWatchExpand");
+        if (fwExpand) {
+            fwExpand.addEventListener("click", () => {
+                fastWatchExpanded = !fastWatchExpanded;
+                if (lastData) render(lastData);
             });
         }
         document.addEventListener("visibilitychange", () => {

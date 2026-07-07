@@ -528,6 +528,20 @@ body[data-theme="dark"] .dc-beta { background: rgba(251, 191, 36, 0.25); color: 
 .dc-fast-watch-card .dc-fw-meta { color: var(--theme-muted, #64748b); font-size: 11px; margin-top: 4px; }
 .dc-fast-watch-card--long { border-left: 3px solid #16a34a; }
 .dc-fast-watch-card--short { border-left: 3px solid #dc2626; }
+.dc-fast-watch-side-label {
+    font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--theme-muted, #64748b); margin: 10px 0 6px;
+}
+.dc-fast-watch-side-label:first-child { margin-top: 0; }
+.dc-fw-momentum { font-size: 10px; font-weight: 700; margin-left: 6px; }
+.dc-fw-momentum--rising { color: #16a34a; }
+.dc-fw-momentum--fading { color: #dc2626; }
+.dc-fw-momentum--flat { color: var(--theme-muted, #64748b); }
+.dc-fast-watch-expand {
+    margin-top: 8px; font-size: 11px; font-weight: 700; color: var(--theme-link, #2563eb);
+    background: none; border: none; cursor: pointer; padding: 0;
+}
+.dc-fast-watch-all { margin-top: 8px; opacity: 0.85; }
 
 @media print {
     #left-menu-container, .mobile-title-bar, .dc-actions, .dc-modal, .dc-toast { display: none !important; }

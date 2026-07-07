@@ -61,6 +61,8 @@ DEFAULTS: Dict[str, Any] = {
     "fast_watch_ui_enabled": False,
     "fast_watch_enabled": True,
     "fast_watch_scope": "locked_or_top5",
+    "fast_watch_top_n": 2,
+    "fast_watch_retention_minutes": 12,
     "go_sticky_minutes": 6,
     "alert_window_start_min": 9 * 60 + 25,
     "alert_window_end_min": 14 * 60 + 30,
