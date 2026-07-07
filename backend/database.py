@@ -1393,6 +1393,62 @@ def _run_startup_schema_migrations(db_engine):
                 )
                 print("Applied migration: created upstox_ws_orderflow_latest")
 
+            if "upstox_ws_orderflow_1m" not in table_names and db_engine.dialect.name == "postgresql":
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE upstox_ws_orderflow_1m (
+                            instrument_key TEXT NOT NULL,
+                            bucket_time TIMESTAMPTZ NOT NULL,
+                            oi BIGINT,
+                            oi_change INTEGER DEFAULT 0,
+                            bid_depth_qty BIGINT DEFAULT 0,
+                            ask_depth_qty BIGINT DEFAULT 0,
+                            depth_imbalance_ratio DOUBLE PRECISION,
+                            tbq BIGINT DEFAULT 0,
+                            tsq BIGINT DEFAULT 0,
+                            pressure_ratio DOUBLE PRECISION,
+                            ltp DOUBLE PRECISION,
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            CONSTRAINT pk_upstox_ws_orderflow_1m PRIMARY KEY (instrument_key, bucket_time)
+                        )
+                        """
+                    )
+                )
+                conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS idx_upstox_ws_orderflow_1m_time "
+                        "ON upstox_ws_orderflow_1m (bucket_time DESC)"
+                    )
+                )
+                print("Applied migration: created upstox_ws_orderflow_1m")
+
+            if "rs_silent_accumulation_log" not in table_names and db_engine.dialect.name == "postgresql":
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE rs_silent_accumulation_log (
+                            id BIGSERIAL PRIMARY KEY,
+                            session_date DATE NOT NULL,
+                            computed_at TIMESTAMPTZ NOT NULL,
+                            symbol TEXT NOT NULL,
+                            side TEXT NOT NULL,
+                            accum_score DOUBLE PRECISION,
+                            active BOOLEAN DEFAULT FALSE,
+                            detail_json TEXT,
+                            created_at TIMESTAMPTZ DEFAULT NOW()
+                        )
+                        """
+                    )
+                )
+                conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS idx_rs_silent_accumulation_log "
+                        "ON rs_silent_accumulation_log (session_date DESC, symbol, computed_at DESC)"
+                    )
+                )
+                print("Applied migration: created rs_silent_accumulation_log")
+
             if "rs_momentum_ignition_log" not in table_names and db_engine.dialect.name == "postgresql":
                 conn.execute(
                     text(
@@ -1638,12 +1694,14 @@ def _run_startup_schema_migrations(db_engine):
                         )
                     )
                 conn.execute(text("DROP INDEX IF EXISTS uq_btst_trade_date_side"))
+                conn.execute(text("DROP INDEX IF EXISTS uq_btst_trade_date_symbol"))
                 conn.execute(
                     text(
                         """
-                        CREATE UNIQUE INDEX IF NOT EXISTS uq_btst_trade_date_symbol
-                        ON btst_backtest_results (trade_date, stock_symbol)
+                        CREATE UNIQUE INDEX IF NOT EXISTS uq_btst_trade_date_symbol_dir
+                        ON btst_backtest_results (trade_date, stock_symbol, direction)
                         WHERE stock_symbol IS NOT NULL AND TRIM(stock_symbol) <> ''
+                          AND direction IS NOT NULL
                         """
                     )
                 )

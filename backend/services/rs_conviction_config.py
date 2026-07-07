@@ -63,6 +63,13 @@ DEFAULTS: Dict[str, Any] = {
     "fast_watch_scope": "locked_or_top5",
     "fast_watch_top_n": 2,
     "fast_watch_retention_minutes": 12,
+    # Momentum ignition universe + silent accumulation (logging only until validated)
+    "ignition_scope": "locked_or_top5",
+    "silent_accumulation_enabled": True,
+    "silent_accum_window_1m": 15,
+    "silent_accum_price_band_atr": 0.3,
+    "silent_accum_min_oi_rise_pct": 1.5,
+    "silent_accum_min_vol_ratio": 1.0,
     "go_sticky_minutes": 6,
     "alert_window_start_min": 9 * 60 + 25,
     "alert_window_end_min": 14 * 60 + 30,

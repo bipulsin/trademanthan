@@ -140,6 +140,67 @@ def _persist_ws_1m_candle(ik: str, minute_iso: str, candle: Dict[str, Any]) -> N
         logger.debug("upstox_market_feed: ws 1m persist failed for %s %s: %s", ik, minute_iso, e)
     finally:
         db.close()
+    _persist_orderflow_1m(ik, minute_iso, candle)
+
+
+def _persist_orderflow_1m(ik: str, minute_iso: str, candle: Dict[str, Any]) -> None:
+    """1-minute order-flow archive (OI, depth, TBQ/TSQ) for backtest / silent accumulation."""
+    bid = int(candle.get("bid_depth_qty") or 0)
+    ask = int(candle.get("ask_depth_qty") or 0)
+    tbq = int(candle.get("tbq") or 0)
+    tsq = int(candle.get("tsq") or 0)
+    depth_ratio = bid / max(ask, 1)
+    pressure = tbq / max(tsq, 1)
+    oi_close = int(candle.get("oi_close") or 0)
+    oi_open = int(candle.get("oi_open") or oi_close)
+    oi_change = oi_close - oi_open
+    ltp = float(candle.get("close") or 0)
+    db = SessionLocal()
+    try:
+        db.execute(
+            text(
+                """
+                INSERT INTO upstox_ws_orderflow_1m (
+                    instrument_key, bucket_time, oi, oi_change,
+                    bid_depth_qty, ask_depth_qty, depth_imbalance_ratio,
+                    tbq, tsq, pressure_ratio, ltp, updated_at
+                ) VALUES (
+                    :ik, :bt, :oi, :oic, :bid, :ask, :dr, :tbq, :tsq, :pr, :ltp, NOW()
+                )
+                ON CONFLICT (instrument_key, bucket_time)
+                DO UPDATE SET
+                    oi = EXCLUDED.oi,
+                    oi_change = EXCLUDED.oi_change,
+                    bid_depth_qty = EXCLUDED.bid_depth_qty,
+                    ask_depth_qty = EXCLUDED.ask_depth_qty,
+                    depth_imbalance_ratio = EXCLUDED.depth_imbalance_ratio,
+                    tbq = EXCLUDED.tbq,
+                    tsq = EXCLUDED.tsq,
+                    pressure_ratio = EXCLUDED.pressure_ratio,
+                    ltp = EXCLUDED.ltp,
+                    updated_at = NOW()
+                """
+            ),
+            {
+                "ik": ik,
+                "bt": minute_iso,
+                "oi": oi_close,
+                "oic": oi_change,
+                "bid": bid,
+                "ask": ask,
+                "dr": depth_ratio,
+                "tbq": tbq,
+                "tsq": tsq,
+                "pr": pressure,
+                "ltp": ltp,
+            },
+        )
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.debug("upstox_market_feed: orderflow 1m persist failed %s %s: %s", ik, minute_iso, e)
+    finally:
+        db.close()
 
 
 def _update_ws_1m_candle(

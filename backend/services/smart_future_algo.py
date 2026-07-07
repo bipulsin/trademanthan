@@ -1119,26 +1119,20 @@ class SmartFutureAlgoScheduler:
                         logger.warning("Setup radar cycle failed: %s", radar_exc)
                     try:
                         from backend.database import SessionLocal
+                        from backend.services.kavach_ignition_universe import load_ignition_pairs
                         from backend.services.kavach_momentum_ignition import run_ignition_cycle
-                        from backend.services.rs_conviction_board import (
-                            SIDE_BEAR,
-                            SIDE_BULL,
-                            _load_core_board,
-                            today_ist as conv_sd,
-                        )
+                        from backend.services.kavach_silent_accumulation import run_silent_accumulation_cycle
+                        from backend.services.rs_conviction_board import today_ist as conv_sd
 
                         sd_conv = conv_sd()
                         db_ign = SessionLocal()
                         try:
-                            bull_c = _load_core_board(db_ign, sd_conv, SIDE_BULL)
-                            bear_c = _load_core_board(db_ign, sd_conv, SIDE_BEAR)
+                            pairs = load_ignition_pairs(db_ign, sd_conv)
                         finally:
                             db_ign.close()
-                        pairs = [(c["symbol"], SIDE_BULL) for c in bull_c] + [
-                            (c["symbol"], SIDE_BEAR) for c in bear_c
-                        ]
                         if pairs:
                             run_ignition_cycle(pairs)
+                            run_silent_accumulation_cycle(pairs, sd_conv)
                     except Exception as ign_exc:
                         logger.warning("Momentum ignition cycle failed: %s", ign_exc)
                     try:
