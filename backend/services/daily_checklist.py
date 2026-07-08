@@ -55,7 +55,7 @@ D_GO = "🟢 GO — ENTER"
 D_WATCH = "🟡 WATCH — WAIT"
 D_NOTRADE = "🔴 NO TRADE"
 D_ELIMINATED = "🔴 ELIMINATED"
-D_UNASSESSED = "⬜ Not assessed"
+D_CHART_REVERSED = "🔄 CHART REVERSED"
 
 # Section buckets the page renders into.
 SEC_GO = "GO"
@@ -216,9 +216,12 @@ def evaluate(row: Dict[str, Any]) -> Dict[str, Any]:
     gate_score = sum(1 for f in gate_flags if f is True)
 
     hard_fail = adverse_news or time_hardfail or state_hardfail
+    chart_reversed = bool(row.get("chart_reversed"))
 
     if adverse_news:
         decision, section = D_ELIMINATED, SEC_OUT
+    elif chart_reversed:
+        decision, section = D_CHART_REVERSED, SEC_WATCH
     elif time_hardfail or state_hardfail:
         decision, section = D_NOTRADE, SEC_OUT
     elif time_wait:
@@ -521,7 +524,7 @@ _UPSERT_COLS = (
     "vwap_purity_pct", "market_regime", "quality_display",
     "live_rs_direction", "live_rs_updated_at", "rotation_day_type",
     "carryover_warning", "sector_badge", "data_refreshed_at",
-    "indicator_as_of", "indicator_source",
+    "indicator_as_of", "indicator_source", "chart_reversed",
 )
 
 
@@ -563,7 +566,7 @@ _SELECT_COLS = """
     vwap_purity_pct, market_regime, quality_display, live_rs_direction,
     live_rs_updated_at, rotation_day_type, carryover_warning, sector_badge,
     data_refreshed_at, go_enter_first_at, go_sticky_until, indicator_as_of,
-    indicator_source, indicator_stale, updated_at
+    indicator_source, indicator_stale, chart_reversed, updated_at
 """
 
 
@@ -813,11 +816,22 @@ def get_state(session_date: Optional[str] = None) -> Dict[str, Any]:
         checklist_cfg = {
             "go_alert_sound_enabled": bool(get_config().get("go_alert_sound_enabled")),
             "fast_watch_ui_enabled": bool(get_config().get("fast_watch_ui_enabled")),
+            "go_board_ui_enabled": bool(get_config().get("go_board_ui_enabled")),
         }
         if checklist_cfg.get("fast_watch_ui_enabled"):
             fast_watch = get_fast_watch(sd)
     except Exception as exc:
         logger.debug("checklist fast watch enrichment failed: %s", exc)
+
+    go_board: Dict[str, Any] = {"symbols": [], "empty": True, "window": None}
+    try:
+        from backend.services.rs_go_board import get_go_board
+
+        if bool(get_config().get("go_board_ui_enabled")):
+            go_board = get_go_board(sd)
+            checklist_cfg["go_board_ui_enabled"] = True
+    except Exception as exc:
+        logger.debug("checklist go board enrichment failed: %s", exc)
 
     return {
         "session_date": sd,
@@ -837,6 +851,7 @@ def get_state(session_date: Optional[str] = None) -> Dict[str, Any]:
         "data_refreshed_at": latest_refresh,
         "live_setups": live_setups,
         "fast_watch": fast_watch,
+        "go_board": go_board,
         "checklist_config": checklist_cfg,
     }
 
@@ -978,15 +993,15 @@ def _refresh_checklist_from_rs(*, full_populate: bool) -> Dict[str, Any]:
         flip_updates = []
         eligible_fw = set(locked_syms) | {r.symbol for r in rows if r.symbol}
         for sym in eligible_fw:
+            if sym in locked_syms:
+                raw = _load_raw(db, sd, sym)
+                if raw:
+                    flip_updates.append({**raw, "lock_direction": lock_dirs.get(sym)})
+                continue
             row = row_by_sym.get(sym)
             if row is not None:
-                direction = lock_dirs.get(sym) or _direction_from_ranking(row.ranking_type)
-                auto = _auto_fields_from_rs(row, direction, live_map)
-                flip_updates.append({**auto, "symbol": sym, "direction": direction})
-                continue
-            raw = _load_raw(db, sd, sym)
-            if raw:
-                flip_updates.append(raw)
+                auto = _auto_fields_from_rs(row, _direction_from_ranking(row.ranking_type), live_map)
+                flip_updates.append({**auto, "symbol": sym, "direction": _direction_from_ranking(row.ranking_type)})
         try:
             from backend.services.rs_fast_watch import record_fast_watch_flips
 

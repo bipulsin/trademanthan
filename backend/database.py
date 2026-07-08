@@ -1013,6 +1013,7 @@ def _run_startup_schema_migrations(db_engine):
                     ("indicator_as_of", "TIMESTAMPTZ"),
                     ("indicator_source", "TEXT"),
                     ("indicator_stale", "BOOLEAN DEFAULT FALSE"),
+                    ("chart_reversed", "BOOLEAN DEFAULT FALSE"),
                 ):
                     if col not in _dc_cols3:
                         conn.execute(
@@ -1046,6 +1047,92 @@ def _run_startup_schema_migrations(db_engine):
                         )
                     )
                     print("Applied migration: created rs_fast_watch (PostgreSQL)")
+
+            if "rs_fast_watch" in table_names:
+                _fw_cols = {col["name"] for col in inspector.get_columns("rs_fast_watch")}
+                for col, typ in (
+                    ("is_reversal", "BOOLEAN DEFAULT FALSE"),
+                    ("lock_direction", "TEXT"),
+                    ("prev_kavach_state", "TEXT"),
+                    ("flip_price", "DOUBLE PRECISION"),
+                ):
+                    if col not in _fw_cols and db_engine.dialect.name == "postgresql":
+                        conn.execute(text(f"ALTER TABLE rs_fast_watch ADD COLUMN {col} {typ}"))
+                        print(f"Applied migration: rs_fast_watch.{col}")
+
+            if "rs_live_kavach_audit" not in table_names:
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE rs_live_kavach_audit (
+                                id BIGSERIAL PRIMARY KEY,
+                                session_date DATE NOT NULL,
+                                computed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                                symbol TEXT NOT NULL,
+                                lock_direction TEXT,
+                                bar_evaluated_at TIMESTAMPTZ NOT NULL,
+                                kavach_state TEXT,
+                                prev_kavach_state TEXT,
+                                trade_score DOUBLE PRECISION,
+                                confidence_grade TEXT,
+                                volume_label TEXT,
+                                vwap_purity_pct DOUBLE PRECISION,
+                                market_regime TEXT,
+                                adx DOUBLE PRECISION,
+                                ema5 DOUBLE PRECISION,
+                                ema10 DOUBLE PRECISION,
+                                vwap DOUBLE PRECISION,
+                                price DOUBLE PRECISION,
+                                timeframe TEXT DEFAULT '10m'
+                            )
+                            """
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_rs_live_kavach_audit_sym_date "
+                            "ON rs_live_kavach_audit (session_date DESC, symbol, bar_evaluated_at)"
+                        )
+                    )
+                    print("Applied migration: created rs_live_kavach_audit (PostgreSQL)")
+
+            if "rs_go_board_shadow_log" not in table_names:
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE rs_go_board_shadow_log (
+                                id BIGSERIAL PRIMARY KEY,
+                                session_date DATE NOT NULL,
+                                evaluated_at TIMESTAMPTZ NOT NULL,
+                                symbol TEXT NOT NULL,
+                                side TEXT NOT NULL,
+                                outcome TEXT NOT NULL,
+                                filter_reason TEXT,
+                                is_reversal BOOLEAN DEFAULT FALSE,
+                                confidence_grade TEXT,
+                                kavach_state TEXT,
+                                price DOUBLE PRECISION,
+                                freshness_pct DOUBLE PRECISION,
+                                stop_pct DOUBLE PRECISION,
+                                stop_inr_1lot DOUBLE PRECISION,
+                                vwap_slope DOUBLE PRECISION,
+                                adx DOUBLE PRECISION,
+                                regime TEXT,
+                                window_label TEXT,
+                                detail_json TEXT
+                            )
+                            """
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_rs_go_board_shadow_date "
+                            "ON rs_go_board_shadow_log (session_date DESC, evaluated_at)"
+                        )
+                    )
+                    print("Applied migration: created rs_go_board_shadow_log (PostgreSQL)")
 
             # Daily checklist morning snapshot lock (Top 5+5 at/after 09:25 IST)
             if "daily_snapshot" not in table_names:

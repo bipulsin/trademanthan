@@ -117,6 +117,11 @@
         var title = el("strong");
         title.textContent = fw.symbol || "?";
         card.appendChild(title);
+        if (fw.is_reversal) {
+            var rev = el("span", "dc-fw-reversal");
+            rev.textContent = "REVERSAL";
+            card.appendChild(rev);
+        }
         var mom = el("span", "dc-fw-momentum dc-fw-momentum--" + (fw.momentum || "flat"));
         mom.textContent = fwMomentumLabel(fw.momentum);
         card.appendChild(mom);
@@ -314,6 +319,8 @@
         if (dcls === "OUT") card.classList.add("dc-card--out");
         if (stock.carryover_warning) card.classList.add("dc-card--carryover");
         else card.classList.remove("dc-card--carryover");
+        if ((stock.decision || "").indexOf("CHART REVERSED") >= 0) card.classList.add("dc-card--reversed");
+        else card.classList.remove("dc-card--reversed");
         card.querySelector(".dc-symbol").textContent = stock.symbol;
         var sb = card.querySelector(".dc-sector-badge");
         if (sb) {
@@ -544,6 +551,7 @@
         }
 
         renderLiveSetups();
+        renderGoBoard();
         renderFastWatch();
         checkGoAlerts(stocks);
 
@@ -554,6 +562,41 @@
         if (!stackEl) return;
         stackEl.innerHTML = "";
         (items || []).forEach(function (item) { stackEl.appendChild(buildFastWatchCard(item)); });
+    }
+
+    function renderGoBoard() {
+        var wrap = $("dcGoBoard");
+        var stack = $("dcGoBoardStack");
+        var empty = $("dcGoBoardEmpty");
+        var winEl = $("dcGoBoardWindow");
+        if (!wrap || !stack) return;
+        var cfg = (state && state.checklist_config) || {};
+        var gb = (state && state.go_board) || {};
+        var items = gb.symbols || [];
+        if (!cfg.go_board_ui_enabled) {
+            wrap.hidden = true;
+            stack.innerHTML = "";
+            if (empty) empty.hidden = true;
+            return;
+        }
+        wrap.hidden = false;
+        if (winEl) winEl.textContent = gb.window ? ("Window " + gb.window) : "";
+        stack.innerHTML = "";
+        if (!items.length) {
+            if (empty) empty.hidden = false;
+            return;
+        }
+        if (empty) empty.hidden = true;
+        items.forEach(function (item) {
+            var card = el("div", "dc-go-board-card dc-go-board-card--" + (item.side === "SHORT" ? "short" : "long"));
+            card.innerHTML = "<strong>" + (item.symbol || "?") + "</strong>" +
+                (item.is_reversal ? " <span class=\"dc-fw-reversal\">REVERSAL</span>" : "") +
+                " · " + (item.kavach_state || "?") +
+                " · Stop " + (item.stop_pct != null ? item.stop_pct + "%" : "—") +
+                " · ₹" + (item.stop_inr_1lot != null ? item.stop_inr_1lot : "—") + " / lot" +
+                (item.confidence_grade ? " · " + item.confidence_grade : "");
+            stack.appendChild(card);
+        });
     }
 
     function renderFastWatch() {

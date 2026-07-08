@@ -96,7 +96,17 @@
                     <div class="dc-live-setups-chips" id="dcLiveSetupsChips"></div>
                 </div>
 
-                <!-- Fast Watch: new signals not on 09:25 lock (beta, default off) -->
+                <!-- GO Board: curated entry panel -->
+                <section class="dc-go-board-section" id="dcGoBoard" hidden aria-label="GO Board entry panel">
+                    <div class="dc-go-board-head">
+                        <span class="dc-go-board-label"><i class="fas fa-crosshairs"></i> GO Board</span>
+                        <span class="dc-go-board-window" id="dcGoBoardWindow"></span>
+                    </div>
+                    <div class="dc-go-board-empty" id="dcGoBoardEmpty" hidden>No qualifying entries this window</div>
+                    <div class="dc-go-board-stack" id="dcGoBoardStack"></div>
+                </section>
+
+                <!-- Fast Watch: reversals + off-lock flips -->
                 <section class="dc-fast-watch-section" id="dcFastWatch" hidden aria-label="Fast Watch unconfirmed signals">
                     <div class="dc-fast-watch-head">
                         <span class="dc-fast-watch-label"><i class="fas fa-bolt"></i> Fast Watch <span class="dc-beta">beta</span></span>
