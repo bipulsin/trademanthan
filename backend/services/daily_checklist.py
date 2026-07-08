@@ -55,6 +55,7 @@ D_GO = "🟢 GO — ENTER"
 D_WATCH = "🟡 WATCH — WAIT"
 D_NOTRADE = "🔴 NO TRADE"
 D_ELIMINATED = "🔴 ELIMINATED"
+D_UNASSESSED = "⬜ Not assessed"
 D_CHART_REVERSED = "🔄 CHART REVERSED"
 
 # Section buckets the page renders into.
