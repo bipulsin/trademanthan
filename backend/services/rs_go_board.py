@@ -77,12 +77,15 @@ def evaluate_go_candidate(
         return False, "direction_mismatch", {}
 
     regime = (metrics.get("market_regime") or "").upper()
-    if regime != REGIME_TREND:
+    edge = is_edge_flip(prev_kavach, new_kavach)
+    if regime != REGIME_TREND and not (is_reversal and edge):
         return False, "regime_transition", {"regime": regime}
 
     adx = float(metrics.get("adx") or 0)
     adx_min = float(cfg.get("go_board_adx_min") or 20)
     adx_max = float(cfg.get("go_board_adx_max") or 45)
+    if is_reversal:
+        adx_max = float(cfg.get("go_board_reversal_adx_max") or 60)
     if adx < adx_min or adx > adx_max:
         return False, "adx_out_of_band", {"adx": adx}
 
@@ -91,10 +94,11 @@ def evaluate_go_candidate(
     if candles:
         slope = normalized_vwap_slope(candles, atr_daily_pct, cfg)
     slope_min = float(cfg.get("go_board_slope_min") or 25)
-    if side == "LONG" and slope < slope_min:
-        return False, "vwap_slope_weak", {"slope": slope}
-    if side == "SHORT" and slope < slope_min:
-        return False, "vwap_slope_weak", {"slope": slope}
+    if not is_reversal:
+        if side == "LONG" and slope < slope_min:
+            return False, "vwap_slope_weak", {"slope": slope}
+        if side == "SHORT" and slope < slope_min:
+            return False, "vwap_slope_weak", {"slope": slope}
 
     origin = float(flip_price or price)
     freshness_pct = abs(price - origin) / origin * 100.0 if origin > 0 else 999.0

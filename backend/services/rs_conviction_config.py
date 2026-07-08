@@ -69,6 +69,7 @@ DEFAULTS: Dict[str, Any] = {
     "go_board_stop_pct_cap": 1.0,
     "go_board_adx_min": 20,
     "go_board_adx_max": 45,
+    "go_board_reversal_adx_max": 60,
     "go_board_slope_min": 25,
     "go_board_ui_enabled": True,
     # Momentum ignition universe + silent accumulation (logging only until validated)

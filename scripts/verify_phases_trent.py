@@ -18,6 +18,12 @@ IST = pytz.timezone("Asia/Kolkata")
 def _load_candles(symbol: str, session_date: str):
     from backend.database import SessionLocal
     from backend.services.rs_conviction_candles import candles_cache_only, load_instrument_atr_maps
+    from backend.services.relative_strength_scanner import (
+        CANDLE_DAYS_BACK,
+        CANDLE_INTERVAL,
+        MIN_BARS,
+        _sorted_candles,
+    )
 
     db = SessionLocal()
     try:
@@ -26,7 +32,19 @@ def _load_candles(symbol: str, session_date: str):
         if not ikey:
             return None, None
         candles = candles_cache_only(ikey)
-        return candles, ikey
+        if candles and len(candles) >= MIN_BARS:
+            return candles, ikey
+        try:
+            from backend.services.upstox_service import UpstoxService
+
+            fetched = UpstoxService().get_historical_candles_by_instrument_key(
+                ikey, interval=CANDLE_INTERVAL, days_back=CANDLE_DAYS_BACK
+            )
+            if fetched and len(fetched) >= MIN_BARS:
+                return _sorted_candles(fetched), ikey
+        except Exception:
+            pass
+        return None, ikey
     finally:
         db.close()
 

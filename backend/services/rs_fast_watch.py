@@ -197,6 +197,9 @@ def record_edge_flip(
     if not sym or not direction:
         return False
     reversal = _is_reversal(new_kavach, lock_direction)
+    # Counter-lock reversals require confirmed BUY/SELL (not READY) to avoid early weak flips.
+    if reversal and new_kavach.upper() not in (CONFIRMED_LONG | CONFIRMED_SHORT):
+        return False
     exists = db.execute(
         text(
             """
