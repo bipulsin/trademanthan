@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <title>RS–Confidence Divergence Lookup</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a222c;
+      --panel-2: #232d3a;
+      --border: #334155;
+      --text: #e8eef4;
+      --muted: #94a3b8;
+      --accent: #0d9488;
+      --miss: #ea580c;
+      --font: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+      --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: var(--font); color: var(--text); font-size: 13px; line-height: 1.4;
+      background: radial-gradient(1200px 600px at 10% -10%, #1a2a32 0%, var(--bg) 55%);
+      min-height: 100vh;
+    }
+    .wrap { max-width: 1180px; margin: 0 auto; padding: 16px 18px 48px; }
+    header {
+      display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px;
+      border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 14px;
+    }
+    h1 { margin: 0; font-size: 1.25rem; font-weight: 700; }
+    .sub { margin: 4px 0 0; color: var(--muted); font-size: 12px; max-width: 60ch; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    button, .file-btn {
+      appearance: none; border: 1px solid var(--border); background: var(--panel-2);
+      color: var(--text); border-radius: 6px; padding: 6px 10px; font: inherit; font-weight: 600; cursor: pointer;
+    }
+    button:hover, .file-btn:hover { border-color: var(--accent); }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #042f2e; }
+    button:disabled { opacity: 0.5; cursor: wait; }
+    button.danger { border-color: #7f1d1d; color: #fecaca; }
+    button.ghost { background: transparent; }
+    .file-btn { display: inline-block; position: relative; overflow: hidden; }
+    .file-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+
+    .agg { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-bottom: 14px; }
+    .agg-card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+    .agg-card .k { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+    .agg-card .v { font-size: 1.35rem; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; }
+    .agg-card .s { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .tag-miss { color: #fdba74; }
+    .tag-flip { color: #f0abfc; }
+    .tag-notpromoted { color: #fcd34d; }
+    .tag-laggard { color: #cbd5e1; }
+    .tag-confirmed { color: #5eead4; }
+
+    .lookup {
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: end;
+      background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+      padding: 12px; margin-bottom: 12px;
+    }
+    .lookup .field { margin: 0; min-width: 140px; }
+    .lookup .field.grow { flex: 1; min-width: 160px; }
+    label { display: block; font-size: 11px; color: var(--muted); font-weight: 600; margin-bottom: 3px; }
+    input, select, textarea {
+      width: 100%; background: var(--panel-2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 6px; padding: 7px 8px; font: inherit;
+    }
+    textarea { resize: vertical; min-height: 56px; }
+
+    details.panel {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+      margin-bottom: 12px;
+    }
+    details.panel > summary {
+      cursor: pointer; padding: 10px 12px; font-weight: 700; list-style: none;
+      display: flex; justify-content: space-between; gap: 8px; align-items: center;
+    }
+    details.panel > summary::-webkit-details-marker { display: none; }
+    details.panel[open] > summary { border-bottom: 1px solid var(--border); }
+    .panel-body { padding: 12px; }
+
+    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
+    .mono { font-family: var(--mono); font-size: 12px; }
+    .pill {
+      display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 10px;
+      font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;
+    }
+    .pill-miss { background: rgba(234, 88, 12, 0.2); color: #fdba74; }
+    .pill-laggard { background: rgba(100, 116, 139, 0.35); color: #cbd5e1; }
+    .pill-confirmed { background: rgba(13, 148, 136, 0.25); color: #5eead4; }
+    .pill-flip { background: rgba(192, 38, 211, 0.22); color: #f0abfc; }
+    .pill-notpromoted { background: rgba(202, 138, 4, 0.22); color: #fcd34d; }
+    .suggest-btn { margin: 2px 4px 2px 0; padding: 4px 8px; font-size: 12px; cursor: pointer; }
+    .empty { color: var(--muted); font-style: italic; }
+    .warn {
+      background: rgba(217, 119, 6, 0.15); border: 1px solid rgba(217, 119, 6, 0.4);
+      color: #fde68a; padding: 8px 10px; border-radius: 6px; margin-bottom: 10px;
+    }
+    .meta { color: var(--muted); font-size: 12px; }
+    .prog { font-family: var(--mono); }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    @media (max-width: 800px) { .grid-2 { grid-template-columns: 1fr; } }
+    .row-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .toast {
+      position: fixed; bottom: 16px; right: 16px; background: #134e4a; color: #ccfbf1;
+      padding: 8px 12px; border-radius: 8px; font-weight: 600; display: none; z-index: 50;
+    }
+    .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: #64748b; }
+    .status-dot.on { background: #34d399; }
+    .upstox-box {
+      border: 1px dashed #64748b; border-radius: 8px; padding: 10px; margin-top: 10px;
+      background: rgba(100, 116, 139, 0.12);
+    }
+    .report-head {
+      display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 10px;
+    }
+    .report-head h2 { margin: 0; font-size: 1.1rem; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>RS–Confidence Divergence Lookup</h1>
+        <p class="sub">Auto-fetch from lock / RS scans / 10m audit · read-only · your trade notes stay local · 22-Jul Top-5 widening checkpoint</p>
+      </div>
+      <div class="toolbar">
+        <button type="button" class="ghost" id="btnExportJson">Export JSON</button>
+        <label class="file-btn">Import JSON<input type="file" id="importJson" accept="application/json,.json"></label>
+        <button type="button" class="ghost" id="btnExportCsv">Export CSV</button>
+      </div>
+    </header>
+
+    <div class="lookup">
+      <div class="field grow">
+        <label for="fSymbol">Symbol</label>
+        <input type="text" id="fSymbol" placeholder="e.g. TRENT" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="fDate">Date</label>
+        <input type="date" id="fDate">
+      </div>
+      <div class="field">
+        <label for="closeMissThreshold">Close-miss ≤ rank</label>
+        <input type="number" id="closeMissThreshold" min="1" max="50" value="8">
+      </div>
+      <div class="field">
+        <label>&nbsp;</label>
+        <button type="button" class="primary" id="btnCheck">Check</button>
+      </div>
+      <div class="field">
+        <label>&nbsp;</label>
+        <label style="display:flex;align-items:center;gap:6px;margin:0;font-weight:600;color:var(--text);">
+          <input type="checkbox" id="forceUpstox" style="width:auto"> Force Upstox OHLC
+        </label>
+      </div>
+    </div>
+
+    <section class="agg" id="agg"></section>
+
+    <details class="panel" id="reportPanel" open>
+      <summary>
+        <span>Lookup report</span>
+        <span class="meta" id="reportHint">enter symbol + date → Check</span>
+      </summary>
+      <div class="panel-body" id="reportBody">
+        <p class="empty">No lookup yet.</p>
+      </div>
+    </details>
+
+    <details class="panel" open>
+      <summary>
+        <span>Saved cumulative table</span>
+        <span class="meta" id="tableCount">0 entries</span>
+      </summary>
+      <div class="panel-body" style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th><th>Symbol</th><th>Confidence</th><th>RS class</th>
+              <th>Best RS</th><th>Trade</th><th>Outcome</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="cumBody"></tbody>
+        </table>
+        <p class="empty" id="cumEmpty">Save a trade note on a lookup to accumulate rows here.</p>
+      </div>
+    </details>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <script>
+(function () {
+  "use strict";
+
+  var STORAGE_KEY = "rs_confidence_divergence_v2";
+  var SETTINGS_KEY = "rs_confidence_divergence_settings_v2";
+  var API = "/api/dashboard/rs-divergence/lookup";
+
+  var state = loadState();
+  var settings = loadSettings();
+  var currentReport = null;
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  function loadState() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) {
+        // migrate v1 if present (keep any trade notes if symbol/date filled)
+        var v1 = localStorage.getItem("rs_confidence_divergence_v1");
+        if (v1) {
+          var p = JSON.parse(v1);
+          return { entries: Array.isArray(p.entries) ? p.entries.filter(function (e) { return e && e.symbol && e.date; }) : [] };
+        }
+        return { entries: [] };
+      }
+      var parsed = JSON.parse(raw);
+      return { entries: Array.isArray(parsed.entries) ? parsed.entries : [] };
+    } catch (e) { return { entries: [] }; }
+  }
+  function saveState() { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+  function loadSettings() {
+    try {
+      var p = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
+      return { closeMissThreshold: Number(p.closeMissThreshold) || 8 };
+    } catch (e) { return { closeMissThreshold: 8 }; }
+  }
+  function saveSettings() {
+    settings.closeMissThreshold = Math.max(1, Number($("closeMissThreshold").value) || 8);
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    renderAgg();
+    renderTable();
+  }
+
+  function todayISO() {
+    var d = new Date(), off = d.getTimezoneOffset();
+    return new Date(d.getTime() - off * 60000).toISOString().slice(0, 10);
+  }
+  function toast(msg) {
+    var el = $("toast");
+    el.textContent = msg; el.style.display = "block";
+    clearTimeout(toast._t);
+    toast._t = setTimeout(function () { el.style.display = "none"; }, 2200);
+  }
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;");
+  }
+  function uid() { return "e_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7); }
+
+  function classifyLocal(entry, thr) {
+    if (entry.classification) return entry.classification;
+    if (entry.lock && entry.lock.symbol_in_lock) return "RS confirmed";
+    var cps = entry.rs_checkpoints || [];
+    var everTop5 = entry.ever_in_top5;
+    if (everTop5 == null) everTop5 = cps.some(function (c) { return c.in_top5; });
+    if (everTop5) {
+      var sides = {};
+      cps.forEach(function (c) {
+        if (!c.in_top5 || !c.ranking_type) return;
+        sides[String(c.ranking_type).toUpperCase()] = true;
+      });
+      var sideList = Object.keys(sides);
+      var lockSide = (entry.lock_direction_0925 || "").toUpperCase();
+      if (lockSide === "BEAR") lockSide = "BEARISH";
+      if (lockSide === "BULL") lockSide = "BULLISH";
+      var flipped = sideList.length >= 2 || (lockSide && sideList.some(function (s) { return s !== lockSide; }));
+      if (flipped) return "RS confirmed but not promoted / direction flip";
+      return "RS confirmed but not promoted";
+    }
+    var best = entry.best_rs_rank;
+    if (best != null && best <= thr) return "RS close miss";
+    return "RS genuine laggard";
+  }
+  function pillClass(cls) {
+    if (cls === "RS close miss") return "pill-miss";
+    if (cls === "RS confirmed") return "pill-confirmed";
+    if (cls === "RS confirmed but not promoted / direction flip") return "pill-flip";
+    if (cls === "RS confirmed but not promoted") return "pill-notpromoted";
+    return "pill-laggard";
+  }
+  function classBucket(cls) {
+    if (cls === "RS close miss") return "miss";
+    if (cls === "RS confirmed") return "confirmed";
+    if (cls.indexOf("not promoted") >= 0) return "notpromoted";
+    return "laggard";
+  }
+  function tradeOutcome(entry) {
+    var t = entry.trade || {};
+    if (!t.taken) return { taken: false, win: null, label: "—" };
+    var n = t.pnl == null || t.pnl === "" ? null : Number(t.pnl);
+    var win = n == null || isNaN(n) ? null : n > 0;
+    return { taken: true, win: win, label: n == null || isNaN(n) ? "taken" : ((n >= 0 ? "+" : "") + n) };
+  }
+
+  function renderAgg() {
+    var thr = settings.closeMissThreshold;
+    var counts = { total: 0, miss: 0, laggard: 0, confirmed: 0, notpromoted: 0 };
+    var trades = {
+      miss: {n:0,w:0,l:0}, laggard:{n:0,w:0,l:0}, confirmed:{n:0,w:0,l:0}, notpromoted:{n:0,w:0,l:0}
+    };
+    state.entries.forEach(function (e) {
+      counts.total++;
+      var c = classifyLocal(e, thr);
+      var key = classBucket(c);
+      counts[key]++;
+      var o = tradeOutcome(e);
+      if (o.taken) {
+        trades[key].n++;
+        if (o.win === true) trades[key].w++;
+        if (o.win === false) trades[key].l++;
+      }
+    });
+    function tl(t) {
+      if (!t.n) return "0 trades";
+      return t.n + " trades · " + ((t.w + t.l) ? (t.w + "W / " + t.l + "L") : "P&L unset");
+    }
+    $("agg").innerHTML =
+      '<div class="agg-card"><div class="k">Saved</div><div class="v">' + counts.total + '</div><div class="s">lookups with notes</div></div>' +
+      '<div class="agg-card"><div class="k">RS close miss</div><div class="v tag-miss">' + counts.miss + '</div><div class="s">' + tl(trades.miss) + '</div></div>' +
+      '<div class="agg-card"><div class="k">Not promoted / flip</div><div class="v tag-flip">' + counts.notpromoted + '</div><div class="s">' + tl(trades.notpromoted) + '</div></div>' +
+      '<div class="agg-card"><div class="k">RS genuine laggard</div><div class="v tag-laggard">' + counts.laggard + '</div><div class="s">' + tl(trades.laggard) + '</div></div>' +
+      '<div class="agg-card"><div class="k">RS confirmed</div><div class="v tag-confirmed">' + counts.confirmed + '</div><div class="s">' + tl(trades.confirmed) + '</div></div>';
+  }
+
+  function renderTable() {
+    var thr = settings.closeMissThreshold;
+    var body = $("cumBody");
+    body.innerHTML = "";
+    $("tableCount").textContent = state.entries.length + " entries";
+    $("cumEmpty").style.display = state.entries.length ? "none" : "";
+    state.entries.forEach(function (e) {
+      var cls = classifyLocal(e, thr);
+      var prog = e.confidence_progression_label || (e.confidence_progression || []).join(" → ") || "—";
+      var best = e.best_rs_rank_label || (e.best_rs_rank != null ? "#" + e.best_rs_rank : "not visible");
+      var o = tradeOutcome(e);
+      var tr = document.createElement("tr");
+      tr.innerHTML =
+        "<td class='mono'>" + esc(e.date) + "</td>" +
+        "<td><strong>" + esc(e.symbol) + "</strong></td>" +
+        "<td class='prog mono'>" + esc(prog) + "</td>" +
+        "<td><span class='pill " + pillClass(cls) + "'>" + esc(cls) + "</span></td>" +
+        "<td class='mono'>" + esc(best) + "</td>" +
+        "<td>" + (o.taken ? ("Y · " + esc(o.label)) : "N") + "</td>" +
+        "<td>" + (o.taken ? (o.win == null ? "taken" : (o.win ? "win" : "loss")) : esc((e.trade && e.trade.note) || "—")) + "</td>" +
+        "<td><button type='button' class='ghost reopen-btn' data-sym='" + esc(e.symbol) + "' data-date='" + esc(e.date) + "'>Open</button> " +
+        "<button type='button' class='ghost del-btn' data-id='" + esc(e.id) + "'>×</button></td>";
+      body.appendChild(tr);
+    });
+  }
+
+  function ynDot(on) {
+    return '<span class="status-dot' + (on ? ' on' : '') + '"></span>' + (on ? "Yes" : "No");
+  }
+
+  function renderReport(data) {
+    currentReport = data;
+    $("reportHint").textContent = data.symbol + " · " + data.date;
+    var html = "";
+
+    if (!data.ok) {
+      $("reportBody").innerHTML = '<div class="warn">' + esc(data.error || "Lookup failed") + "</div>";
+      return;
+    }
+
+    if (!data.data_found) {
+      html += '<div class="warn">' + esc(data.message || "No Kavach data found") + "</div>";
+      var sug = (data.symbol_resolution && data.symbol_resolution.suggestions) || [];
+      if (sug.length) {
+        html += '<p class="meta">Nearby symbols: ';
+        sug.forEach(function (s) {
+          html += '<button type="button" class="ghost suggest-btn" data-suggest="' + esc(s) + '">' + esc(s) + '</button>';
+        });
+        html += '</p>';
+      }
+    }
+
+    html += '<div class="report-head">' +
+      '<h2>' + esc(data.symbol) + ' <span class="meta">' + esc(data.date) + '</span></h2>' +
+      '<span class="pill ' + pillClass(data.classification) + '">' + esc(data.classification) + '</span>' +
+      '<span class="meta">Best RS: <span class="mono">' + esc(data.best_rs_rank_label) + '</span></span>' +
+      '<span class="meta">Progression: <span class="prog mono">' + esc(data.confidence_progression_label || "—") + '</span></span>' +
+      '</div>';
+
+    if (data.classification_note) {
+      html += '<p class="meta" style="margin:0 0 10px;max-width:920px;line-height:1.45">' + esc(data.classification_note) + '</p>';
+    }
+    if (data.input_symbol && data.input_symbol !== data.symbol) {
+      html += '<p class="meta" style="margin:0 0 8px">Resolved from <span class="mono">' + esc(data.input_symbol) +
+        '</span> → <span class="mono">' + esc(data.symbol) + '</span>' +
+        (data.symbol_resolution && data.symbol_resolution.matched_via ? (' (' + esc(data.symbol_resolution.matched_via) + ')') : '') +
+        '</p>';
+    }
+
+    var lock = data.lock || {};
+    html += '<div class="meta" style="margin-bottom:10px">' +
+      'Morning lock day: ' + ynDot(!!lock.day_locked) +
+      ' · Symbol in Top-5 lock: ' + ynDot(!!lock.symbol_in_lock) +
+      (lock.direction ? (' · ' + esc(lock.direction) + ' #' + esc(lock.rank) + (lock.rs_score != null ? (' · RS ' + esc(lock.rs_score) + '%') : '')) : '') +
+      ' · Fast Watch: ' + ynDot(!!(data.fast_watch && data.fast_watch.present)) +
+      ' · GO Board shown: ' + ynDot(!!(data.go_board && data.go_board.present)) +
+      '</div>';
+
+    // RS checkpoints
+    html += '<h3 style="margin:12px 0 6px;font-size:13px;">RS checkpoints (auto)</h3>';
+    var cps = data.rs_checkpoints || [];
+    if (!cps.length) {
+      html += '<p class="empty">Not visible in Top-5 RS scans / lock for this date (scan stores Top-5 only).</p>';
+    } else {
+      html += '<div style="overflow-x:auto"><table><thead><tr><th>Checkpoint</th><th>Time</th><th>Side</th><th>Rank</th><th>RS%</th><th>Top-5</th><th>Locked</th><th>Source</th></tr></thead><tbody>';
+      cps.forEach(function (c) {
+        html += '<tr><td>' + esc(c.checkpoint) + '</td><td class="mono">' + esc((c.scan_time || "").slice(11, 16) || "—") +
+          '</td><td>' + esc(c.ranking_type || "—") + '</td><td class="mono">' + (c.rank != null ? "#" + esc(c.rank) : "—") +
+          '</td><td class="mono">' + (c.rs_pct != null ? esc(c.rs_pct) : "—") +
+          '</td><td>' + (c.in_top5 ? "Yes" : "No") + '</td><td>' + (c.locked ? "Yes" : "No") +
+          '</td><td class="meta">' + esc(c.source) + '</td></tr>';
+      });
+      html += '</tbody></table></div>';
+    }
+
+    // Confidence bars
+    html += '<h3 style="margin:14px 0 6px;font-size:13px;">Kavach confidence bars (auto)</h3>';
+    var bars = data.confidence_bars || [];
+    var secondary = false;
+    if (!bars.length && (data.confidence_from_scans || []).length) {
+      bars = data.confidence_from_scans;
+      secondary = true;
+    }
+    if (!bars.length) {
+      html += '<p class="empty">No rs_live_kavach_audit rows (audit is written for locked symbols during live 10m recompute).</p>';
+    } else {
+      if (secondary) html += '<p class="meta">Showing grades from RS top-5 scan rows — not original 10m audit.</p>';
+      html += '<div style="overflow-x:auto"><table><thead><tr><th>Bar</th><th>Grade</th><th>Score</th><th>Regime</th><th>Vol</th><th>ADX</th><th>State</th><th>Price</th></tr></thead><tbody>';
+      bars.forEach(function (b) {
+        html += '<tr><td class="mono">' + esc(b.time_label || (b.bar_evaluated_at || "").slice(11, 16) || "—") +
+          '</td><td>' + esc(b.confidence_grade || "—") +
+          '</td><td class="mono">' + (b.trade_score != null ? esc(b.trade_score) : "—") +
+          '</td><td>' + esc(b.market_regime || "—") +
+          '</td><td>' + esc(b.volume_label || "—") +
+          '</td><td class="mono">' + (b.adx != null ? esc(b.adx) : "—") +
+          '</td><td>' + esc(b.kavach_state || "—") +
+          '</td><td class="mono">' + (b.price != null ? esc(b.price) : "—") + '</td></tr>';
+      });
+      html += '</tbody></table></div>';
+    }
+
+    // Fast Watch / GO detail
+    if (data.fast_watch && data.fast_watch.rows && data.fast_watch.rows.length) {
+      html += '<h3 style="margin:14px 0 6px;font-size:13px;">Fast Watch</h3><div style="overflow-x:auto"><table><thead><tr><th>Flip</th><th>Dir</th><th>State</th><th>Prev</th><th>Reversal</th><th>Grade</th></tr></thead><tbody>';
+      data.fast_watch.rows.forEach(function (r) {
+        html += '<tr><td class="mono">' + esc((r.first_flip_at || "").slice(11, 19)) + '</td><td>' + esc(r.direction) +
+          '</td><td>' + esc(r.kavach_state) + '</td><td>' + esc(r.prev_kavach_state || "—") +
+          '</td><td>' + (r.is_reversal ? "Yes" : "No") + '</td><td>' + esc(r.confidence_grade || "—") + '</td></tr>';
+      });
+      html += '</tbody></table></div>';
+    }
+    if (data.go_board && data.go_board.rows && data.go_board.rows.length) {
+      html += '<h3 style="margin:14px 0 6px;font-size:13px;">GO Board shadow log</h3><div style="overflow-x:auto"><table><thead><tr><th>At</th><th>Side</th><th>Outcome</th><th>Reason</th><th>Window</th></tr></thead><tbody>';
+      data.go_board.rows.forEach(function (r) {
+        html += '<tr><td class="mono">' + esc((r.evaluated_at || "").slice(11, 19)) + '</td><td>' + esc(r.side) +
+          '</td><td>' + esc(r.outcome) + '</td><td>' + esc(r.filter_reason || "—") +
+          '</td><td>' + esc(r.window_label || "—") + '</td></tr>';
+      });
+      html += '</tbody></table></div>';
+    } else if (data.go_board && data.go_board.note) {
+      html += '<p class="meta" style="margin-top:8px">' + esc(data.go_board.note) + '</p>';
+    }
+
+    // Upstox fallback
+    var ux = data.upstox_fallback;
+    if (ux) {
+      html += '<div class="upstox-box"><strong>' + esc(ux.label || "Upstox fallback") + '</strong>';
+      if (!ux.available) {
+        html += '<p class="empty" style="margin:6px 0 0">' + esc(ux.error || "unavailable") + '</p>';
+      } else {
+        var o = ux.session_ohlc || {};
+        html += '<p class="meta" style="margin:6px 0">Instrument ' + esc(ux.instrument_key) +
+          ' · ' + esc(ux.bar_count) + ' × 5m bars · O ' + esc(o.open) + ' H ' + esc(o.high) +
+          ' L ' + esc(o.low) + ' C ' + esc(o.close) +
+          (o.move_pct != null ? (' · move ' + esc(o.move_pct) + '%') : '') +
+          ' · vol ' + esc(o.volume) + '</p>';
+      }
+      html += '</div>';
+    }
+
+    // System trades if any
+    if (data.trades_system && data.trades_system.length) {
+      html += '<h3 style="margin:14px 0 6px;font-size:13px;">Linked system trades (Daily Futures)</h3>';
+      html += '<div style="overflow-x:auto"><table><thead><tr><th>Dir</th><th>Entry</th><th>Exit</th><th>P&L ₹</th></tr></thead><tbody>';
+      data.trades_system.forEach(function (t) {
+        html += '<tr><td>' + esc(t.direction) + '</td><td class="mono">' + esc(t.entry_price) +
+          '</td><td class="mono">' + esc(t.exit_price) + '</td><td class="mono">' + esc(t.pnl_rupees) + '</td></tr>';
+      });
+      html += '</tbody></table></div>';
+      html += '<p class="meta">Prefill buttons use the first linked trade when you save a note.</p>';
+    }
+
+    // Manual trade note section
+    var saved = findSaved(data.symbol, data.date);
+    var trade = (saved && saved.trade) || {};
+    var taken = trade.taken ? "yes" : "no";
+    html += '<h3 style="margin:16px 0 6px;font-size:13px;">Your trade note (manual — local only)</h3>';
+    html += '<div class="grid-2">' +
+      '<div><label for="tTaken">Trade taken?</label><select id="tTaken"><option value="no"' + (taken==="no"?" selected":"") + '>No</option><option value="yes"' + (taken==="yes"?" selected":"") + '>Yes</option></select></div>' +
+      '<div><label for="tNote">Note</label><input id="tNote" value="' + esc(trade.note || "") + '" placeholder="waited for EMA5 pullback / qty too high…"></div>' +
+      '</div>';
+    html += '<div class="grid-2" id="tTradeFields" style="' + (taken==="yes"?"":"display:none") + '">' +
+      '<div><label for="tEntry">Entry</label><input type="number" step="0.01" id="tEntry" value="' + esc(trade.entry != null ? trade.entry : "") + '"></div>' +
+      '<div><label for="tExit">Exit</label><input type="number" step="0.01" id="tExit" value="' + esc(trade.exit != null ? trade.exit : "") + '"></div>' +
+      '<div><label for="tPnl">INR P&amp;L</label><input type="number" step="1" id="tPnl" value="' + esc(trade.pnl != null ? trade.pnl : "") + '"></div>' +
+      '</div>';
+    html += '<div class="row-actions">' +
+      '<button type="button" class="primary" id="btnSaveNote">Save to cumulative log</button>' +
+      (data.trades_system && data.trades_system[0] ? '<button type="button" class="ghost" id="btnPrefillTrade">Prefill from system trade</button>' : '') +
+      (saved ? '<button type="button" class="danger" id="btnRemoveSaved">Remove saved entry</button>' : '') +
+      '</div>';
+
+    if (data.notes) {
+      html += '<p class="meta" style="margin-top:12px">' + esc(data.notes.rs_scan_scope) + ' · ' + esc(data.notes.audit_scope) + '</p>';
+      if (data.notes.promotion_note && String(data.classification || "").indexOf("not promoted") >= 0) {
+        html += '<p class="meta" style="margin-top:6px;max-width:920px;line-height:1.45">' + esc(data.notes.promotion_note) + '</p>';
+      }
+    }
+
+    $("reportBody").innerHTML = html;
+
+    $("tTaken").addEventListener("change", function () {
+      $("tTradeFields").style.display = $("tTaken").value === "yes" ? "" : "none";
+    });
+    $("btnSaveNote").addEventListener("click", saveCurrentNote);
+    var pref = $("btnPrefillTrade");
+    if (pref) pref.addEventListener("click", function () {
+      var t = (currentReport.trades_system || [])[0];
+      if (!t) return;
+      $("tTaken").value = "yes";
+      $("tTradeFields").style.display = "";
+      if (t.entry_price != null) $("tEntry").value = t.entry_price;
+      if (t.exit_price != null) $("tExit").value = t.exit_price;
+      if (t.pnl_rupees != null) $("tPnl").value = t.pnl_rupees;
+      toast("Prefills from first system trade");
+    });
+    var rm = $("btnRemoveSaved");
+    if (rm) rm.addEventListener("click", function () {
+      var s = findSaved(currentReport.symbol, currentReport.date);
+      if (!s) return;
+      if (!confirm("Remove saved entry?")) return;
+      state.entries = state.entries.filter(function (e) { return e.id !== s.id; });
+      saveState(); renderAgg(); renderTable();
+      renderReport(currentReport);
+      toast("Removed");
+    });
+    document.querySelectorAll(".suggest-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        $("fSymbol").value = btn.getAttribute("data-suggest") || "";
+        runCheck();
+      });
+    });
+  }
+
+  function findSaved(sym, date) {
+    sym = String(sym || "").toUpperCase();
+    return state.entries.find(function (e) { return e.symbol === sym && e.date === date; }) || null;
+  }
+
+  function saveCurrentNote() {
+    if (!currentReport || !currentReport.ok) return;
+    var taken = $("tTaken").value === "yes";
+    var existing = findSaved(currentReport.symbol, currentReport.date);
+    var entry = {
+      id: existing ? existing.id : uid(),
+      symbol: currentReport.symbol,
+      date: currentReport.date,
+      classification: currentReport.classification,
+      classification_note: currentReport.classification_note,
+      ever_in_top5: currentReport.ever_in_top5,
+      lock_direction_0925: currentReport.lock_direction_0925,
+      best_rs_rank: currentReport.best_rs_rank,
+      best_rs_rank_label: currentReport.best_rs_rank_label,
+      confidence_progression: currentReport.confidence_progression || [],
+      confidence_progression_label: currentReport.confidence_progression_label,
+      lock: currentReport.lock,
+      rs_checkpoints: currentReport.rs_checkpoints,
+      confidence_bars: currentReport.confidence_bars,
+      confidence_from_scans: currentReport.confidence_from_scans,
+      fast_watch: currentReport.fast_watch,
+      go_board: currentReport.go_board,
+      close_miss_threshold: currentReport.close_miss_threshold,
+      trade: {
+        taken: taken,
+        entry: taken ? numOrNull($("tEntry").value) : null,
+        exit: taken ? numOrNull($("tExit").value) : null,
+        pnl: taken ? numOrNull($("tPnl").value) : null,
+        note: ($("tNote").value || "").trim()
+      },
+      saved_at: new Date().toISOString(),
+      snapshot: {
+        data_found: currentReport.data_found,
+        message: currentReport.message
+      }
+    };
+    if (existing) {
+      state.entries = state.entries.map(function (e) { return e.id === entry.id ? entry : e; });
+    } else {
+      state.entries.push(entry);
+    }
+    state.entries.sort(function (a, b) {
+      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+      return a.symbol.localeCompare(b.symbol);
+    });
+    saveState();
+    renderAgg();
+    renderTable();
+    toast("Saved " + entry.symbol);
+  }
+
+  function numOrNull(v) {
+    if (v == null || String(v).trim() === "") return null;
+    var n = Number(v);
+    return isNaN(n) ? null : n;
+  }
+
+  async function runCheck(sym, date) {
+    sym = (sym || $("fSymbol").value || "").trim().toUpperCase();
+    date = (date || $("fDate").value || "").trim();
+    if (!sym || !date) { alert("Enter symbol and date"); return; }
+    $("fSymbol").value = sym;
+    $("fDate").value = date;
+    var thr = Math.max(1, Number($("closeMissThreshold").value) || 8);
+    settings.closeMissThreshold = thr;
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+
+    $("btnCheck").disabled = true;
+    $("reportBody").innerHTML = '<p class="empty">Loading…</p>';
+    $("reportPanel").open = true;
+    try {
+      var q = API + "?symbol=" + encodeURIComponent(sym) +
+        "&date=" + encodeURIComponent(date) +
+        "&close_miss_threshold=" + encodeURIComponent(thr) +
+        "&include_upstox=" + ($("forceUpstox").checked || false);
+      // If no data expected, server also auto-fetches Upstox when empty
+      var res = await fetch(q, { cache: "no-store" });
+      var data = await res.json();
+      if (!data.data_found && !(data.upstox_fallback && data.upstox_fallback.available) && !$("forceUpstox").checked) {
+        // one retry with upstox forced when empty
+        var res2 = await fetch(q.replace("include_upstox=false", "include_upstox=true"), { cache: "no-store" });
+        data = await res2.json();
+      }
+      renderReport(data);
+    } catch (err) {
+      $("reportBody").innerHTML = '<div class="warn">Lookup failed: ' + esc(err.message || err) + '</div>';
+    } finally {
+      $("btnCheck").disabled = false;
+    }
+  }
+
+  function download(filename, text, mime) {
+    var blob = new Blob([text], { type: mime || "text/plain" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function exportJson() {
+    download("rs-confidence-divergence-" + todayISO() + ".json", JSON.stringify({
+      exported_at: new Date().toISOString(),
+      close_miss_threshold: settings.closeMissThreshold,
+      entries: state.entries
+    }, null, 2), "application/json");
+    toast("JSON exported");
+  }
+
+  function exportCsv() {
+    var thr = settings.closeMissThreshold;
+    var headers = ["date","symbol","confidence_progression","rs_classification","best_rs_rank","trade_taken","note","entry","exit","pnl_inr","outcome"];
+    var lines = [headers.join(",")];
+    state.entries.forEach(function (e) {
+      var cls = classifyLocal(e, thr);
+      var o = tradeOutcome(e);
+      var outcome = o.taken ? (o.win == null ? "taken" : (o.win ? "win" : "loss")) : "skipped";
+      lines.push([
+        e.date, e.symbol, e.confidence_progression_label || "", cls,
+        e.best_rs_rank != null ? e.best_rs_rank : "not_visible",
+        o.taken ? "yes" : "no", (e.trade && e.trade.note) || "",
+        (e.trade && e.trade.entry != null) ? e.trade.entry : "",
+        (e.trade && e.trade.exit != null) ? e.trade.exit : "",
+        (e.trade && e.trade.pnl != null) ? e.trade.pnl : "",
+        outcome
+      ].map(function (v) {
+        var s = String(v == null ? "" : v);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      }).join(","));
+    });
+    download("rs-confidence-divergence-" + todayISO() + ".csv", lines.join("\n"), "text/csv");
+    toast("CSV exported");
+  }
+
+  function importJson(file) {
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        var data = JSON.parse(reader.result);
+        var incoming = Array.isArray(data) ? data : (data.entries || []);
+        var byId = {};
+        state.entries.forEach(function (e) { byId[e.id] = e; });
+        var added = 0, updated = 0;
+        incoming.forEach(function (e) {
+          if (!e || !e.symbol || !e.date) return;
+          if (!e.id) e.id = uid();
+          e.symbol = String(e.symbol).toUpperCase();
+          if (byId[e.id]) updated++; else added++;
+          byId[e.id] = e;
+        });
+        state.entries = Object.keys(byId).map(function (k) { return byId[k]; });
+        if (data.close_miss_threshold) {
+          settings.closeMissThreshold = Number(data.close_miss_threshold) || settings.closeMissThreshold;
+          $("closeMissThreshold").value = settings.closeMissThreshold;
+          localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+        }
+        saveState(); renderAgg(); renderTable();
+        toast("Imported +" + added + " / updated " + updated);
+      } catch (err) { alert("Import failed: " + err.message); }
+    };
+    reader.readAsText(file);
+  }
+
+  // events
+  $("fDate").value = todayISO();
+  $("closeMissThreshold").value = settings.closeMissThreshold;
+  $("closeMissThreshold").addEventListener("change", saveSettings);
+  $("btnCheck").addEventListener("click", function () { runCheck(); });
+  $("fSymbol").addEventListener("keydown", function (ev) { if (ev.key === "Enter") runCheck(); });
+  $("fDate").addEventListener("keydown", function (ev) { if (ev.key === "Enter") runCheck(); });
+  $("btnExportJson").addEventListener("click", exportJson);
+  $("btnExportCsv").addEventListener("click", exportCsv);
+  $("importJson").addEventListener("change", function (ev) {
+    var f = ev.target.files && ev.target.files[0];
+    if (f) importJson(f);
+    ev.target.value = "";
+  });
+  document.addEventListener("click", function (ev) {
+    var open = ev.target.closest(".reopen-btn");
+    if (open) {
+      runCheck(open.getAttribute("data-sym"), open.getAttribute("data-date"));
+      return;
+    }
+    var del = ev.target.closest(".del-btn");
+    if (del) {
+      var id = del.getAttribute("data-id");
+      if (!confirm("Delete saved entry?")) return;
+      state.entries = state.entries.filter(function (e) { return e.id !== id; });
+      saveState(); renderAgg(); renderTable();
+      toast("Deleted");
+    }
+  });
+
+  renderAgg();
+  renderTable();
+})();
+  </script>
+</body>
+</html>
