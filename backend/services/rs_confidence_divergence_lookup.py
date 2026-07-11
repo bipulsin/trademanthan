@@ -733,6 +733,13 @@ def lookup_symbol_day(
                     "Top-5 presence flipped vs 09:25 side but daily_snapshot never gained the symbol — "
                     "likely a promotion/re-lock gap for opposite-direction candidates."
                 ),
+                "empty_data_caveat": (
+                    "No rows in lock / Top-5 RS snapshot / anchors / Kavach audit / Fast Watch / "
+                    "GO Board / checklist for this symbol+date. That is not proof the name was "
+                    "outside the F&O scan universe — it can also mean never made Top-5 (scan "
+                    "persists Top-5 only), never locked for audit, a symbol-format miss, or a "
+                    "pipeline/logging gap. These cases are indistinguishable from this lookup alone."
+                ),
             },
         }
     finally:

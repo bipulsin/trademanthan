@@ -369,6 +369,11 @@
 
     if (!data.data_found) {
       html += '<div class="warn">' + esc(data.message || "No Kavach data found") + "</div>";
+      var caveat = (data.notes && data.notes.empty_data_caveat) ||
+        "Empty result ≠ proof the stock was outside that day's F&O universe. " +
+        "RS tables only persist Top-5; no rows can also mean never Top-5 / never locked for audit, " +
+        "a symbol-format miss, or a pipeline/logging gap — indistinguishable here.";
+      html += '<p class="meta" style="margin:6px 0 12px;max-width:920px;line-height:1.45">' + esc(caveat) + '</p>';
       var sug = (data.symbol_resolution && data.symbol_resolution.suggestions) || [];
       if (sug.length) {
         html += '<p class="meta">Nearby symbols: ';
