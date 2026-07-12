@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 
 import pytz
@@ -12,6 +13,9 @@ logger = logging.getLogger(__name__)
 
 IST = pytz.timezone("Asia/Kolkata")
 LOCK_MINUTES_IST = 9 * 60 + 25  # 09:25
+# Intraday promote cutoff matches checklist hard entry window end (14:30 IST).
+PROMOTION_CUTOFF_MIN = 14 * 60 + 30
+PROMOTION_SCANS_REQUIRED = 2  # consecutive Top-5 RS scans, either side
 
 
 def at_or_after_lock_time(now: Optional[datetime] = None) -> bool:
@@ -198,6 +202,223 @@ def lock_morning_snapshot(
 def clear_snapshot_for_date(db, session_date: str) -> None:
     db.execute(text("DELETE FROM daily_snapshot WHERE snapshot_date = :d"), {"d": session_date})
     db.execute(text("DELETE FROM snapshot_lock WHERE lock_date = :d"), {"d": session_date})
+
+
+def _snap_side_from_ranking(ranking_type: Optional[str]) -> str:
+    return "BEAR" if (ranking_type or "").upper() == "BEARISH" else "BULL"
+
+
+def _top5_by_scan(db, session_date: str, scan_time) -> Dict[Tuple[str, str], Dict[str, Any]]:
+    """Map (symbol, BULL|BEAR) → {rank, rs_score} for one RS scan."""
+    rows = db.execute(
+        text(
+            """
+            SELECT UPPER(symbol) AS symbol, ranking_type, rank_position, relative_strength
+            FROM relative_strength_snapshot
+            WHERE scan_time = :st
+              AND scan_time::date = CAST(:d AS date)
+              AND rank_position IS NOT NULL
+              AND rank_position <= 5
+            """
+        ),
+        {"st": scan_time, "d": session_date},
+    ).fetchall()
+    out: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for r in rows:
+        sym = (r.symbol or "").strip().upper()
+        if not sym:
+            continue
+        side = _snap_side_from_ranking(r.ranking_type)
+        out[(sym, side)] = {
+            "rank": int(r.rank_position) if r.rank_position is not None else 99,
+            "rs_score": r.relative_strength,
+        }
+    return out
+
+
+def _eligible_consecutive_top5(
+    db,
+    session_date: str,
+    *,
+    now: Optional[datetime] = None,
+) -> Dict[Tuple[str, str], Dict[str, Any]]:
+    """Symbols on Top-5 for 2 consecutive RS scans (same side), through 14:30 / now."""
+    now = now or datetime.now(IST)
+    if now.tzinfo is None:
+        now = IST.localize(now)
+    else:
+        now = now.astimezone(IST)
+
+    scan_rows = db.execute(
+        text(
+            """
+            SELECT DISTINCT scan_time
+            FROM relative_strength_snapshot
+            WHERE scan_time::date = CAST(:d AS date)
+              AND scan_time <= :now
+            ORDER BY scan_time
+            """
+        ),
+        {"d": session_date, "now": now},
+    ).fetchall()
+
+    times = []
+    for r in scan_rows:
+        st = r.scan_time
+        if st is None:
+            continue
+        t = st.astimezone(IST) if getattr(st, "tzinfo", None) else IST.localize(st)
+        if (t.hour * 60 + t.minute) > PROMOTION_CUTOFF_MIN:
+            continue
+        times.append(st)
+
+    if len(times) < PROMOTION_SCANS_REQUIRED:
+        return {}
+
+    eligible: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for i in range(len(times) - 1):
+        a = _top5_by_scan(db, session_date, times[i])
+        b = _top5_by_scan(db, session_date, times[i + 1])
+        for key in set(a) & set(b):
+            # Prefer later scan's rank/rs (times[i+1])
+            meta = dict(b[key])
+            meta["qualified_at"] = times[i + 1]
+            eligible[key] = meta
+    return eligible
+
+
+def _upsert_snapshot_row(
+    db,
+    session_date: str,
+    symbol: str,
+    direction: str,
+    rank: int,
+    rs_score: Any,
+    locked_at: datetime,
+) -> None:
+    db.execute(
+        text(
+            """
+            INSERT INTO daily_snapshot
+                (snapshot_date, symbol, direction, rank, rs_score, locked_at)
+            VALUES (:d, :sym, :dir, :rank, :rs, :now)
+            ON CONFLICT (snapshot_date, symbol, direction) DO UPDATE SET
+                rank = EXCLUDED.rank,
+                rs_score = EXCLUDED.rs_score,
+                locked_at = EXCLUDED.locked_at
+            """
+        ),
+        {
+            "d": session_date,
+            "sym": symbol,
+            "dir": direction,
+            "rank": rank,
+            "rs": rs_score,
+            "now": locked_at,
+        },
+    )
+
+
+def promote_intraday_from_rs(
+    db,
+    session_date: str,
+    *,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Promote Top-5 RS names (either side) into daily_snapshot after 2 consecutive scans.
+
+    Morning lock remains the initial set. This adds late/same-side and direction-flip
+    promotions through 14:30 IST so checklist / Fast Watch / GO Board can see them.
+    Does not loosen the 2-scan threshold — only removes the 09:25-only membership freeze.
+    """
+    now = now or datetime.now(IST)
+    if now.tzinfo is None:
+        now = IST.localize(now)
+    else:
+        now = now.astimezone(IST)
+
+    if not is_snapshot_locked(db, session_date):
+        return {"promoted": [], "flipped": [], "updated": [], "reason": "not_locked"}
+    if (now.hour * 60 + now.minute) > PROMOTION_CUTOFF_MIN:
+        return {"promoted": [], "flipped": [], "updated": [], "reason": "past_cutoff"}
+
+    eligible = _eligible_consecutive_top5(db, session_date, now=now)
+    if not eligible:
+        return {"promoted": [], "flipped": [], "updated": [], "reason": "no_eligible"}
+
+    existing_rows = get_locked_symbol_rows(db, session_date)
+    # One active direction per symbol (prefer existing row if somehow duplicated)
+    by_sym: Dict[str, Any] = {}
+    for r in existing_rows:
+        by_sym[str(r.symbol).upper()] = r
+
+    promoted: List[Dict[str, Any]] = []
+    flipped: List[Dict[str, Any]] = []
+    updated: List[Dict[str, Any]] = []
+
+    for (sym, side), meta in sorted(
+        eligible.items(),
+        key=lambda kv: (
+            kv[1].get("qualified_at") or now,
+            kv[1].get("rank") or 99,
+            kv[0][0],
+            kv[0][1],
+        ),
+    ):
+        rank = int(meta.get("rank") or 99)
+        rs = meta.get("rs_score")
+        locked_at = meta.get("qualified_at") or now
+        cur = by_sym.get(sym)
+
+        if cur is None:
+            _upsert_snapshot_row(db, session_date, sym, side, rank, rs, locked_at)
+            by_sym[sym] = SimpleNamespace(symbol=sym, direction=side, rank=rank, rs_score=rs)
+            promoted.append({"symbol": sym, "direction": side, "rank": rank})
+            continue
+
+        cur_dir = (cur.direction or "").upper()
+        if cur_dir == side:
+            # Already locked same side — refresh rank/score only
+            _upsert_snapshot_row(db, session_date, sym, side, rank, rs, locked_at)
+            updated.append({"symbol": sym, "direction": side, "rank": rank})
+            continue
+
+        # Direction flip: drop old side, write new side (one direction per symbol)
+        db.execute(
+            text(
+                """
+                DELETE FROM daily_snapshot
+                WHERE snapshot_date = CAST(:d AS date)
+                  AND UPPER(symbol) = :sym
+                  AND direction = :old
+                """
+            ),
+            {"d": session_date, "sym": sym, "old": cur_dir},
+        )
+        _upsert_snapshot_row(db, session_date, sym, side, rank, rs, locked_at)
+        by_sym[sym] = SimpleNamespace(symbol=sym, direction=side, rank=rank, rs_score=rs)
+        flipped.append(
+            {
+                "symbol": sym,
+                "from_direction": cur_dir,
+                "to_direction": side,
+                "rank": rank,
+            }
+        )
+
+    if promoted or flipped:
+        logger.info(
+            "daily_checklist: intraday promote %s promoted=%s flipped=%s",
+            session_date,
+            [p["symbol"] for p in promoted],
+            [f["symbol"] for f in flipped],
+        )
+    return {
+        "promoted": promoted,
+        "flipped": flipped,
+        "updated": updated,
+        "reason": "ok",
+    }
 
 
 def sort_by_snapshot_rank(stocks: List[Dict[str, Any]], rank_map: Dict[str, Tuple[int, int]]) -> List[Dict[str, Any]]:

@@ -34,6 +34,7 @@ from backend.services.daily_checklist_snapshot import (
     is_snapshot_locked,
     lock_morning_snapshot,
     locked_direction_map,
+    promote_intraday_from_rs,
     sort_by_snapshot_rank,
 )
 
@@ -907,7 +908,12 @@ def _sector_badges_for_top5(db) -> Dict[str, str]:
 
 
 def _refresh_checklist_from_rs(*, full_populate: bool) -> Dict[str, Any]:
-    """Sync checklist from RS. Locks Top-5+5 once at/after 09:25; then refreshes locked only."""
+    """Sync checklist from RS. Locks Top-5+5 once at/after 09:25; then refreshes locked set.
+
+    After morning lock, also promotes any symbol with 2 consecutive Top-5 RS scans
+    (either direction) through 14:30 into daily_snapshot so late/flip names reach
+    checklist / Fast Watch / GO Board.
+    """
     sd = today_ist()
     now = datetime.now(IST)
     db = SessionLocal()
@@ -958,6 +964,16 @@ def _refresh_checklist_from_rs(*, full_populate: bool) -> Dict[str, Any]:
             # Morning daily_snapshot is the checklist source of truth — not conviction Core board.
             # Core board can diverge (hysteresis, bench, pre-market state); using it here dropped
             # valid BULL names when board membership != 09:25 RS top-5 lock (2026-07-06).
+            try:
+                promo = promote_intraday_from_rs(db, sd, now=now)
+                if promo.get("promoted") or promo.get("flipped"):
+                    logger.info(
+                        "daily_checklist: intraday promotion applied promoted=%d flipped=%d",
+                        len(promo.get("promoted") or []),
+                        len(promo.get("flipped") or []),
+                    )
+            except Exception as exc:
+                logger.warning("daily_checklist: intraday promotion failed: %s", exc)
             locked_syms = set(get_locked_symbols(db, sd))
         else:
             logger.debug("daily_checklist: pre-09:25 lock — skip persist for %s", sd)
@@ -978,6 +994,8 @@ def _refresh_checklist_from_rs(*, full_populate: bool) -> Dict[str, Any]:
             if row is None:
                 _reevaluate_symbol(db, sd, sym)
                 continue
+            # Prefer live RS side when present so flipped promotions recompute correctly;
+            # fall back to daily_snapshot direction when symbol is off the current top-5.
             direction = lock_dirs.get(sym) or _direction_from_ranking(row.ranking_type)
             existing = _load_raw(db, sd, sym)
             auto = _auto_fields_from_rs(row, direction, live_map)
